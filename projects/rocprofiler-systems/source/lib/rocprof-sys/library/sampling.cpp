@@ -192,8 +192,8 @@ template <typename Category>
 std::string
 get_track_name(const thread_info& _thread_info)
 {
-    size_t         thread_id     = _thread_info.index_data->system_value;
-    size_t         sequent_value = _thread_info.index_data->sequent_value;
+    const size_t   thread_id     = _thread_info.index_data->system_value;
+    const size_t   sequent_value = _thread_info.index_data->sequent_value;
     constexpr auto sample_type =
         std::is_same_v<Category, category::timer_sampling> ? "Timer" : "Overflow";
     std::stringstream name_ss;
@@ -386,7 +386,7 @@ configure_sampler_allocators()
     if(_allocators.empty())
     {
         // avoid lock until necessary
-        auto_lock_t _alloc_lk{ type_mutex<decltype(_allocators)>() };
+        const auto_lock_t _alloc_lk{ type_mutex<decltype(_allocators)>() };
         if(_allocators.empty())
         {
             _allocators.resize(std::ceil(config::get_num_threads_hint() /
@@ -406,7 +406,7 @@ get_sampler_allocator()
 
     auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto_lock_t _lk{ type_mutex<sampler_allocator_t>() };
+    const auto_lock_t _lk{ type_mutex<sampler_allocator_t>() };
 
     for(auto& itr : _allocators)
     {
@@ -756,7 +756,7 @@ configure(bool _setup, std::int64_t _tid)
     auto&       _sampler      = sampling::get_sampler(_tid);
     auto&       _perf_sampler = perf::get_instance(_tid);
     auto&       _running      = get_sampler_running(_tid);
-    bool        _is_running   = (!_running) ? false : *_running;
+    const bool  _is_running   = (!_running) ? false : *_running;
     auto&       _signal_types = sampling::get_signal_types(_tid);
 
     if(get_use_causal())
@@ -1729,7 +1729,7 @@ post_process_timemory(std::int64_t                               _tid,
         using bundle_t = tim::lightweight_tuple<comp::trip_count, sampling_wall_clock,
                                                 sampling_cpu_clock, hw_counters>;
 
-        double _elapsed_wc = (itr.m_end - itr.m_beg);
+        const double _elapsed_wc = (itr.m_end - itr.m_beg);
 
         auto _data = std::vector<bundle_t>{};
         _data.reserve(itr.m_stack.size());
@@ -1766,7 +1766,7 @@ post_process_timemory(std::int64_t                               _tid,
 
                 if(_cc && _metrics && _metrics(category::thread_cpu_time{}))
                 {
-                    double _elapsed_cc = _metrics.get_cpu_timestamp();
+                    const double _elapsed_cc = _metrics.get_cpu_timestamp();
 
                     _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
                     _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());

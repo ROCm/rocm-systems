@@ -455,13 +455,13 @@ def process_ml_api_trace_output(
     """
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
-        Path(workload_dir).glob("**/ml_api_trace*_marker_api_trace.csv")
+        Path(workload_dir).glob(
+            f"**/ml_api_trace*_marker_api_trace.csv{csv_compression.GZIP_SUFFIX}"
+        )
     )
     counter_collection_csvs = [
-        csv_compression.resolve_csv(
-            markers_file.parent
-            / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
-        )
+        markers_file.parent
+        / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
         for markers_file in marker_api_trace_csvs
     ]
     existing_csv_files = [
@@ -594,8 +594,10 @@ def validate_workload(path: str) -> None:
     if pmc_perf_path.is_file():
         files_to_check = [pmc_perf_path]
     else:
-        # read_csv infers gzip from the .gz suffix, so both forms read alike.
-        files_to_check = csv_compression.find_csvs(workload_dir, "results_*.csv")
+        # read_csv infers gzip from the .gz suffix.
+        files_to_check = sorted(
+            workload_dir.glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
+        )
 
     if not files_to_check:
         console_error("analysis", "No profiling data found.")

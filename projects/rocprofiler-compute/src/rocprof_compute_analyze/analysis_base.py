@@ -377,27 +377,27 @@ class OmniAnalyze_Base:
 
     @demarcate
     def concat_result_csvs(self, result_files: list[Path], output_file: Path) -> None:
-        """Vertically concatenate rocpd ``results_*.csv`` files into one CSV.
+        """Vertically concatenate rocpd ``results_*.csv.gz`` files into one CSV.
 
         Every file shares the long-form header rocpd writes, so the header is
         taken from the first non-empty file and the remaining rows are appended.
 
         Args:
-            result_files: The results_*.csv files to concatenate
-            output_file: Destination CSV
+            result_files: The results_*.csv.gz files to concatenate
+            output_file: Destination CSV, written plain
         """
         console_warning(
-            "Reading intermediate results_*.csv files is deprecated and "
+            "Reading intermediate results_*.csv.gz files is deprecated and "
             "will be removed in a future release."
         )
 
         rows_written = 0
-        with csv_compression.open_csv_write(output_file) as outfile:
+        with open(output_file, "w", newline="", encoding="utf-8") as outfile:
             writer = None
             for file in result_files:
                 # Only the read can fail on compression; output_file is plain.
                 try:
-                    with csv_compression.open_csv_read(file) as infile:
+                    with csv_compression.open_gzip_csv_read(file) as infile:
                         reader = csv.reader(infile)
                         header = next(reader, None)
                         if header is None:
@@ -430,31 +430,32 @@ class OmniAnalyze_Base:
         if rows_written == 0:
             output_file.unlink(missing_ok=True)
             console_error(
-                f"No counter data in results_*.csv under {output_file.parent}.\n"
+                f"No counter data in results_*.csv.gz under {output_file.parent}.\n"
                 f"Please re-run 'rocprof-compute profile'."
             )
 
         console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
 
     def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Concatenate results_*.csv source files into pmc_perf.csv if needed.
+        """Concatenate results_*.csv.gz source files into pmc_perf.csv if needed.
 
         Args:
             workload_dir: Path to the workload directory
         """
         pmc_perf = workload_dir / "pmc_perf.csv"
-        result_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+        results_glob = f"results_*.csv{csv_compression.GZIP_SUFFIX}"
+        result_files = sorted(workload_dir.glob(results_glob))
 
         if pmc_perf.exists() and pmc_perf.stat().st_size > 0:
             console_debug(f"Using existing {pmc_perf}")
         elif result_files:
-            console_log(f"Joining results_*.csv for {workload_dir}...")
+            console_log(f"Joining {results_glob} for {workload_dir}...")
             self.concat_result_csvs(result_files, pmc_perf)
             console_log(f"Created {pmc_perf}")
         else:
             console_error(
                 f"No profiling data found in {workload_dir}.\n"
-                f"Expected: pmc_perf.csv or results_*.csv\n"
+                f"Expected: pmc_perf.csv or {results_glob}\n"
                 f"Please run 'rocprof-compute profile' first."
             )
 

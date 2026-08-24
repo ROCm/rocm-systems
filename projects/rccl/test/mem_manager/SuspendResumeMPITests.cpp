@@ -1879,6 +1879,69 @@ TEST_F(SuspendResumeGroup, MixedSuspendResume)
         << "After Suspend+Resume in the same group, comm must be active";
 }
 
+TEST_F(SuspendResumeGroup, CollectiveAfterResumeInSameGroup)
+{
+    // Resume and a collective in one group is legal: the comm is active by the
+    // time the kernel runs, so the guard must not reject it on the released flag
+    // that is still set when the collective is enqueued.
+    if (!ncclCuMemEnable()) {
+        GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 — nothing is tracked, so Suspend "
+                        "releases no memory and there is nothing to guard";
+    }
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    // Suspend must release live connections, so run a collective first.
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream)) << "AllReduce baseline before Suspend";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+
+    void* sendbuf = nullptr;
+    void* recvbuf = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&sendbuf, kAllReduceCount * sizeof(float)));
+    auto sendGuard = makeDeviceBufferAutoGuard(sendbuf);
+    ASSERT_EQ(hipSuccess, hipMalloc(&recvbuf, kAllReduceCount * sizeof(float)));
+    auto recvGuard = makeDeviceBufferAutoGuard(recvbuf);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllReduce(sendbuf, recvbuf, kAllReduceCount, ncclFloat32,
+                                ncclSum, comm, stream));
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended));
+}
+
+TEST_F(SuspendResumeGroup, CollectiveAfterSuspendInSameGroup)
+{
+    // Mirror image of the case above and not legal: the comm is suspended by the
+    // time the kernel runs, so the guard must reject even though the released
+    // flag is still 0 when the collective is enqueued.
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    void* sendbuf = nullptr;
+    void* recvbuf = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&sendbuf, kAllReduceCount * sizeof(float)));
+    auto sendGuard = makeDeviceBufferAutoGuard(sendbuf);
+    ASSERT_EQ(hipSuccess, hipMalloc(&recvbuf, kAllReduceCount * sizeof(float)));
+    auto recvGuard = makeDeviceBufferAutoGuard(recvbuf);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+    ASSERT_MPI_EQ(ncclInvalidUsage,
+                  ncclAllReduce(sendbuf, recvbuf, kAllReduceCount, ncclFloat32,
+                                ncclSum, comm, stream));
+    // ncclGroupEnd reports the first error raised inside the group.
+    ASSERT_MPI_EQ(ncclInvalidUsage, ncclGroupEnd());
+}
+
 // ----------------------------------------------------------------------------
 // 6. Argument validation / corner cases
 //
@@ -1960,6 +2023,41 @@ TEST_F(SuspendResumeArgValidation, DoubleResume)
     ASSERT_MPI_EQ(ncclInvalidUsage, ncclCommResume(comm));
 
     EXPECT_EQ(0u, readStat(comm, ncclStatGpuMemSuspended));
+}
+
+TEST_F(SuspendResumeArgValidation, CollectiveWhileSuspended)
+{
+    // A collective on a suspended comm must be rejected instead of faulting the
+    // GPU, and the rejection must leave the comm usable after Resume. Only cuMem
+    // unmaps the buffers, so this is the configuration the fault was reported on.
+    if (!ncclCuMemEnable()) {
+        GTEST_SKIP() << "NCCL_CUMEM_ENABLE=0 — nothing is tracked, so Suspend "
+                        "releases no memory and there is nothing to guard";
+    }
+    ASSERT_TRUE(validateTestPrerequisites(kMinRanks)) << "Need >= 2 ranks";
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    // Suspend must release live connections, so run a collective first.
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream)) << "AllReduce baseline before Suspend";
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommSuspend(comm, NCCL_SUSPEND_MEM));
+
+    void* sendbuf = nullptr;
+    void* recvbuf = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&sendbuf, kAllReduceCount * sizeof(float)));
+    auto sendGuard = makeDeviceBufferAutoGuard(sendbuf);
+    ASSERT_EQ(hipSuccess, hipMalloc(&recvbuf, kAllReduceCount * sizeof(float)));
+    auto recvGuard = makeDeviceBufferAutoGuard(recvbuf);
+
+    ASSERT_MPI_EQ(ncclInvalidUsage,
+                  ncclAllReduce(sendbuf, recvbuf, kAllReduceCount, ncclFloat32,
+                                ncclSum, comm, stream));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommResume(comm));
+    EXPECT_TRUE(runAllReduceAndVerify(comm, stream))
+        << "a rejected collective must leave the comm usable";
 }
 
 // ----- ncclCommMemStats validation --------------------------------------

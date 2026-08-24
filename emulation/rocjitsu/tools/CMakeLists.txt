@@ -33,6 +33,13 @@ add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)
 
+add_executable(rj_decode_benchmark rj_decode_benchmark.cpp)
+target_link_libraries(
+    rj_decode_benchmark
+    PRIVATE ${RJ_TOOL_OBJECT_LIBS} util flatbuffers Threads::Threads
+)
+rj_configure_target(rj_decode_benchmark TOOL)
+
 # Ahead-of-time population of the shared translation tier.
 #
 # Deliberately narrow: the fixed-profile translator, the store, and nothing else

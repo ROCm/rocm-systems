@@ -6,10 +6,10 @@ The percentages below are approximate API-name coverage against declarations par
 
 ## Snapshot
 
-- Contract tests: 591
+- Contract tests: 593
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 494
-- Declared HIP runtime APIs directly exercised by contract tests: 486
-- Approximate declared API-name coverage: 98.4%
+- Declared HIP runtime APIs directly exercised by contract tests: 487
+- Approximate declared API-name coverage: 98.6%
 - Additional public macro exercised: `hipLaunchKernelGGL`
 - Additional non-runtime-header APIs exercised: HIPRTC (`hiprtcCreateProgram`, `hiprtcCompileProgram`, `hiprtcGetCodeSize`, `hiprtcGetCode`, `hiprtcGetProgramLogSize`, `hiprtcGetProgramLog`, `hiprtcDestroyProgram`); and the OpenGL interop entry points declared in `hip/hip_gl_interop.h` (`hipGLGetDevices`, `hipGraphicsGLRegisterBuffer`, `hipGraphicsGLRegisterImage`), which are AMD-gated because the NVIDIA header pulls in `<GL/gl.h>` (a headless CUDA node need not have it). These are not declared in `hip_runtime_api.h` and are excluded from the coverage denominator and covered counts.
 
@@ -23,7 +23,7 @@ The percentages below are approximate API-name coverage against declarations par
 | `driver_memcpy_2d` | 5 |
 | `runtime` | 10 |
 | `device` | 7 |
-| `device_identity` | 7 |
+| `device_identity` | 9 |
 | `device_texture_query` | 6 |
 | `peer_query` | 5 |
 | `peer_access` | 6 |
@@ -324,6 +324,7 @@ hipDeviceGetName
 hipDeviceComputeCapability
 hipDeviceTotalMem
 hipDeviceGetUuid
+hipDeviceGetLuid
 hipDeviceGetPCIBusId
 hipDeviceGetByPCIBusId
 hipChooseDevice

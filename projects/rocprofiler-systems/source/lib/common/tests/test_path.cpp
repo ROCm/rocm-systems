@@ -87,32 +87,33 @@ TEST_F(PathTest, ParentPath_MultipleSlashes)
 
 TEST_F(PathTest, ReadSymlink_SymbolicLink)
 {
-    std::string target    = create_file("read_symlink_target.txt");
-    std::string link_path = create_symlink(target, "read_symlink_link");
+    const std::string target    = create_file("read_symlink_target.txt");
+    const std::string link_path = create_symlink(target, "read_symlink_link");
     EXPECT_EQ(read_symlink(link_path), target);
 }
 
 TEST_F(PathTest, ReadSymlink_NotALink)
 {
-    std::string file_path = create_file("not_a_link.txt");
+    const std::string file_path = create_file("not_a_link.txt");
     EXPECT_EQ(read_symlink(file_path), file_path);
 }
 
 TEST_F(PathTest, ReadSymlink_NonexistentPath)
 {
-    std::string path = "/nonexistent/path";
+    const std::string path = "/nonexistent/path";
     EXPECT_EQ(read_symlink(path), path);
 }
 
 TEST_F(PathTest, ReadSymlink_BrokenSymlink)
 {
-    std::string link_path = create_symlink("/nonexistent/target", "broken_read_symlink");
+    const std::string link_path =
+        create_symlink("/nonexistent/target", "broken_read_symlink");
     EXPECT_EQ(read_symlink(link_path), "/nonexistent/target");
 }
 
 TEST_F(PathTest, Realpath_RelativePath)
 {
-    std::string file_path = create_file("realpath_test.txt");
+    const std::string file_path = create_file("realpath_test.txt");
 
     char  cwd[PATH_MAX];
     char* cwd_result = getcwd(cwd, PATH_MAX);
@@ -120,7 +121,7 @@ TEST_F(PathTest, Realpath_RelativePath)
 
     if(chdir(m_test_dir.c_str()) == 0)
     {
-        std::string resolved = realpath("realpath_test.txt");
+        const std::string resolved = realpath("realpath_test.txt");
         EXPECT_EQ(resolved, file_path);
         ASSERT_EQ(chdir(cwd), 0);
     }
@@ -128,37 +129,37 @@ TEST_F(PathTest, Realpath_RelativePath)
 
 TEST_F(PathTest, Realpath_AbsolutePath)
 {
-    std::string file_path = create_file("absolute_test.txt");
-    std::string resolved  = realpath(file_path);
+    const std::string file_path = create_file("absolute_test.txt");
+    const std::string resolved  = realpath(file_path);
     EXPECT_EQ(resolved, file_path);
 }
 
 TEST_F(PathTest, Realpath_WithSymlink)
 {
-    std::string target    = create_file("realpath_target.txt");
-    std::string link_path = create_symlink(target, "realpath_link");
-    std::string resolved  = realpath(link_path);
+    const std::string target    = create_file("realpath_target.txt");
+    const std::string link_path = create_symlink(target, "realpath_link");
+    const std::string resolved  = realpath(link_path);
     EXPECT_EQ(resolved, target);
 }
 
 TEST_F(PathTest, Realpath_NonexistentPath)
 {
-    std::string nonexistent = "/nonexistent/path/to/file";
-    std::string resolved    = realpath(nonexistent);
+    const std::string nonexistent = "/nonexistent/path/to/file";
+    const std::string resolved    = realpath(nonexistent);
     EXPECT_EQ(resolved, nonexistent);
 }
 
 TEST_F(PathTest, IsTextFile_TextFile)
 {
-    std::string text_content = "This is a text file\nwith multiple lines\n";
-    std::string file_path    = create_file("text_file.txt", text_content);
+    const std::string text_content = "This is a text file\nwith multiple lines\n";
+    const std::string file_path    = create_file("text_file.txt", text_content);
     EXPECT_TRUE(is_text_file(file_path));
 }
 
 TEST_F(PathTest, IsTextFile_BinaryFile)
 {
-    std::string   file_path = m_test_dir + "/binary_file.bin";
-    std::ofstream ofs(file_path, std::ios::binary);
+    const std::string file_path = m_test_dir + "/binary_file.bin";
+    std::ofstream     ofs(file_path, std::ios::binary);
     char binary_data[] = { 'H', 'e', 'l', 'l', 'o', '\0', 'W', 'o', 'r', 'l', 'd' };
     ofs.write(binary_data, sizeof(binary_data));
     ofs.close();
@@ -167,35 +168,35 @@ TEST_F(PathTest, IsTextFile_BinaryFile)
 
 TEST_F(PathTest, IsTextFile_EmptyFile)
 {
-    std::string file_path = create_file("empty_file.txt", "");
+    const std::string file_path = create_file("empty_file.txt", "");
     EXPECT_TRUE(is_text_file(file_path));
 }
 
 TEST_F(PathTest, PathType_Directory)
 {
-    path_type pt(m_test_dir);
+    const path_type pt(m_test_dir);
     EXPECT_TRUE(pt.exists());
     EXPECT_TRUE(static_cast<bool>(pt));
 }
 
 TEST_F(PathTest, PathType_RegularFile)
 {
-    std::string file_path = create_file("pathtype_file.txt");
-    path_type   pt(file_path);
+    const std::string file_path = create_file("pathtype_file.txt");
+    const path_type   pt(file_path);
     EXPECT_TRUE(pt.exists());
 }
 
 TEST_F(PathTest, PathType_SymbolicLink)
 {
-    std::string target    = create_file("pathtype_target.txt");
-    std::string link_path = create_symlink(target, "pathtype_link");
-    path_type   pt(link_path);
+    const std::string target    = create_file("pathtype_target.txt");
+    const std::string link_path = create_symlink(target, "pathtype_link");
+    const path_type   pt(link_path);
     EXPECT_TRUE(pt.exists());
 }
 
 TEST_F(PathTest, PathType_Nonexistent)
 {
-    path_type pt("/nonexistent/path");
+    const path_type pt("/nonexistent/path");
     EXPECT_FALSE(pt.exists());
     EXPECT_FALSE(static_cast<bool>(pt));
 }
@@ -204,27 +205,28 @@ TEST_F(PathTest, IsDirectory_ExistingDirectory) { EXPECT_TRUE(is_directory(m_tes
 
 TEST_F(PathTest, IsDirectory_RegularFile)
 {
-    std::string file_path = create_file("isdir_file.txt");
+    const std::string file_path = create_file("isdir_file.txt");
     EXPECT_FALSE(is_directory(file_path));
 }
 
 TEST_F(PathTest, IsDirectory_SymlinkToDirectory)
 {
-    std::string subdir    = create_subdir("isdir_target_dir");
-    std::string link_path = create_symlink(subdir, "isdir_link_to_dir");
+    const std::string subdir    = create_subdir("isdir_target_dir");
+    const std::string link_path = create_symlink(subdir, "isdir_link_to_dir");
     EXPECT_TRUE(is_directory(link_path));
 }
 
 TEST_F(PathTest, IsDirectory_SymlinkToFile)
 {
-    std::string file_path = create_file("isdir_link_target.txt");
-    std::string link_path = create_symlink(file_path, "isdir_link_to_file");
+    const std::string file_path = create_file("isdir_link_target.txt");
+    const std::string link_path = create_symlink(file_path, "isdir_link_to_file");
     EXPECT_FALSE(is_directory(link_path));
 }
 
 TEST_F(PathTest, IsDirectory_BrokenSymlink)
 {
-    std::string link_path = create_symlink("/nonexistent/target", "isdir_broken_link");
+    const std::string link_path =
+        create_symlink("/nonexistent/target", "isdir_broken_link");
     EXPECT_FALSE(is_directory(link_path));
 }
 
@@ -331,47 +333,47 @@ TEST_F(PathTest, GetRocprofsysRoot_ReturnsNonEmptyAbsolute)
 
 TEST_F(PathTest, GetInternalLibdir_ContainsLib)
 {
-    std::string libdir = get_internal_libdir();
+    const std::string libdir = get_internal_libdir();
     EXPECT_NE(libdir.find("lib"), std::string::npos);
 }
 
 TEST_F(PathTest, GetInternalScriptPath_ContainsLibexec)
 {
-    std::string script_path = get_internal_script_path();
+    const std::string script_path = get_internal_script_path();
     EXPECT_NE(script_path.find("libexec"), std::string::npos);
     EXPECT_NE(script_path.find("rocprofiler-systems"), std::string::npos);
 }
 
 TEST_F(PathTest, GetInternalLibpath_ContainsLibName)
 {
-    std::string libpath = get_internal_libpath("librocprof-sys.so");
+    const std::string libpath = get_internal_libpath("librocprof-sys.so");
     EXPECT_NE(libpath.find("librocprof-sys.so"), std::string::npos);
 }
 
 TEST_F(PathTest, GetInternalLibpath_ContainsLib)
 {
-    std::string libpath = get_internal_libpath("test.so");
+    const std::string libpath = get_internal_libpath("test.so");
     EXPECT_NE(libpath.find("lib"), std::string::npos);
 }
 
 TEST_F(PathTest, FindLibrary_AbsoluteExisting)
 {
-    std::string file_path = create_file("findpath_test.txt");
-    std::string result    = find_library(file_path, 0, "");
+    const std::string file_path = create_file("findpath_test.txt");
+    const std::string result    = find_library(file_path, 0, "");
     EXPECT_EQ(result, file_path);
 }
 
 TEST_F(PathTest, FindLibrary_NonexistentReturnsOriginal)
 {
-    std::string nonexistent = "nonexistent_file_xyz.txt";
-    std::string result      = find_library(nonexistent, 0, m_test_dir);
+    const std::string nonexistent = "nonexistent_file_xyz.txt";
+    const std::string result      = find_library(nonexistent, 0, m_test_dir);
     EXPECT_EQ(result, nonexistent);
 }
 
 TEST_F(PathTest, FindLibrary_InSearchPath)
 {
-    std::string file_path = create_file("searchable.txt");
-    std::string result    = find_library("searchable.txt", 0, m_test_dir);
+    const std::string file_path = create_file("searchable.txt");
+    const std::string result    = find_library("searchable.txt", 0, m_test_dir);
     EXPECT_EQ(result, file_path);
 }
 
@@ -383,9 +385,9 @@ TEST_F(PathTest, ParentPath_ComplexPath)
 
 TEST_F(PathTest, ChainedSymlinks)
 {
-    std::string target     = create_file("chain_target.txt");
-    std::string link1      = create_symlink(target, "chain_link1");
-    std::string link2_path = m_test_dir + "/chain_link2";
+    const std::string target     = create_file("chain_target.txt");
+    const std::string link1      = create_symlink(target, "chain_link1");
+    const std::string link2_path = m_test_dir + "/chain_link2";
     EXPECT_EQ(symlink("chain_link1", link2_path.c_str()), 0);
 
     // Verify that link1 and link2_path are actual links:
@@ -393,23 +395,24 @@ TEST_F(PathTest, ChainedSymlinks)
     EXPECT_NE(read_symlink(link1), link1);
     EXPECT_NE(read_symlink(link2_path), link2_path);
 
-    std::string resolved = realpath(link2_path);
+    const std::string resolved = realpath(link2_path);
     EXPECT_EQ(resolved, target);
 }
 
 TEST_F(PathTest, ParentPath_RocprofsysTypicalPath)
 {
-    std::string path   = "/opt/rocm-6.0.0/lib/rocprofiler-systems/librocprof-sys-dl.so";
-    std::string result = parent_path(path);
+    const std::string path =
+        "/opt/rocm-6.0.0/lib/rocprofiler-systems/librocprof-sys-dl.so";
+    const std::string result = parent_path(path);
     EXPECT_EQ(result, "/opt/rocm-6.0.0/lib/rocprofiler-systems");
 }
 
 TEST_F(PathTest, NestedDirectories)
 {
-    std::string subdir1 = create_subdir("level1");
-    std::string subdir2 = subdir1 + "/level2";
+    const std::string subdir1 = create_subdir("level1");
+    const std::string subdir2 = subdir1 + "/level2";
     mkdir(subdir2.c_str(), 0755);
-    std::string subdir3 = subdir2 + "/level3";
+    const std::string subdir3 = subdir2 + "/level3";
     mkdir(subdir3.c_str(), 0755);
 
     EXPECT_TRUE(is_directory(subdir1));

@@ -73,6 +73,7 @@ set(COMP_TYPE "main")
 # version control info
 execute_process(
     COMMAND git log --pretty=format:%h -n 1
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
@@ -891,6 +892,21 @@ add_test(
 if(ENABLE_TESTS)
     add_subdirectory(src/lib/roctx_recordfn)
 endif()
+
+if(TARGET test-roctx-recordfn)
+    if(TEST_FROM_INSTALL)
+        set(_rcfn_test_cmd tests/test-roctx-recordfn)
+    else()
+        set(_rcfn_test_cmd $<TARGET_FILE:test-roctx-recordfn>)
+    endif()
+    add_test(NAME test-roctx-recordfn COMMAND ${_rcfn_test_cmd})
+    get_target_property(_rcfn_ld_path test-roctx-recordfn ROCPROF_TEST_LD_LIBRARY_PATH)
+    set(_rcfn_test_env "LD_LIBRARY_PATH=${_rcfn_ld_path}:$ENV{LD_LIBRARY_PATH}")
+    sanitizer_runtime_env(_san_env OFF)
+    list(APPEND _rcfn_test_env ${_san_env})
+    set_tests_properties(test-roctx-recordfn PROPERTIES ENVIRONMENT "${_rcfn_test_env}")
+endif()
+
 # -----------------------------------
 # Torch trace tests
 # -----------------------------------
@@ -1636,19 +1652,6 @@ message(STATUS "  Packaging Install Prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}")
 message(STATUS "  Install Tests: ${INSTALL_TESTS}")
 message(STATUS "  Package Dependencies: ${PACKAGE_REQUIRES}")
 message(STATUS "  CPack Generator: ${CPACK_GENERATOR}")
-
-# Source tarball
-set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING})
-set(CPACK_SOURCE_IGNORE_FILES
-    ".*~$"
-    \.git/
-    \.github
-    \.gitmodules
-    \.gitignore
-    /tests
-    /build
-)
 
 configure_pkg(${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 

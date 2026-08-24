@@ -76,9 +76,10 @@ If there is future strong request to return CSV support, we may implement it und
 Gzip is short-term storage-size reduction for CSV artifacts that still exist
 after CSV profile backend removal.
 
-We introduce gzip streaming for three csv artifacts, written through its own compression interface used by both python and backend:
+We introduce gzip streaming for four csv artifacts, written through its own compression interface used by both python and backend:
  - the results_*.csv(s), written by compute's Python side (utils_profile.stream_csv_to_file) at the end of a pass, and the artifact analyze reads today.
  - the per-pass out/pmc_1/*_counter_collection.csv
+ - the per-pass out/pmc_1/*_marker_api_trace.csv and its ml_api_trace_* copy in the workload dir, written alongside the counter CSV from the same rocpd databases.
  - the native tool counter output (countersData), written by the native tool / backend (rocprofiler-compute-tool.so via the counters writer) during in-process collection. This is an early per-process intermediate.
 
 Compression belongs at CSV read/write, where profile writes compressed CSV
@@ -336,10 +337,13 @@ and the `--join-type` references in the docs.
 
 Status: implemented.
 
-Gzip streaming reduces size of the two large counter CSV intermediates from AD-2.
+Gzip streaming reduces size of the counter and marker CSV intermediates from AD-2.
 Phase B does not change the profile/analyze contract shape. Python and the native
-tool each compress at CSV read/write over a shared format contract; analyze accepts
-plain `.csv` for backward compatibility.
+tool each compress at CSV read/write over a shared format contract. Compressed
+artifacts are gzip-only: `csv_compression` opens nothing plain, and analyze
+discovers them by their `.csv.gz` name rather than sniffing file contents.
+`sysinfo.csv` and the `pmc_perf.csv` analyze intermediate stay plain and are
+opened by their callers with the builtin `open`.
 
 ```mermaid
 sequenceDiagram

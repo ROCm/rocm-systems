@@ -169,6 +169,9 @@ declare -A TEST_NUMBERS=(
   ["fcollect_wave"]="152"
   ["reduce_wave"]="153"
   ["teamreducescatterwave"]="154"
+  ["tile_reduce"]="155"
+  ["tile_reduce_wave"]="156"
+  ["tile_reduce_wg"]="157"
 )
 
 # Detect which runtime to use
@@ -585,9 +588,13 @@ TestRMAPut() {
   ExecTest  "putnbi"           2       32           128       512
   unset LOCALBUFTYPE
 
-  export LOCALBUFTYPE=managed
-  ExecTest  "putnbi"           2       32           128       512
-  unset LOCALBUFTYPE
+  if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+    export LOCALBUFTYPE=managed
+    ExecTest  "putnbi"           2       32           128       512
+    unset LOCALBUFTYPE
+  else
+    echo "Skip:   putnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+  fi
 }
 
 TestRMAGet() {
@@ -663,9 +670,13 @@ TestRMAGet() {
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "getnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+    if [[ "$GPU_ARCH" != "gfx1100" ]]; then
+      export LOCALBUFTYPE=managed
+      ExecTest  "getnbi"           2       32           128       512
+      unset LOCALBUFTYPE
+    else
+      echo "Skip:   getnbi_localbuftype=managed (gfx1100: hipMallocManaged not supported)"
+    fi
   fi
 }
 
@@ -1016,6 +1027,12 @@ TestTiles() {
   ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
   ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
+  ExecTest  "tile_reduce"               2       1            1
+  ExecTest  "tile_reduce"               4       1            1
+  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE
+  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE
+  ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE
+  ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {

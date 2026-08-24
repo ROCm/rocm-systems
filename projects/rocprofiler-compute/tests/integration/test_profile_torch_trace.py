@@ -4,6 +4,7 @@
 """Integration tests for PyTorch operator tracing during profiling."""
 
 import csv
+import gzip
 import os
 import re
 import time
@@ -18,7 +19,6 @@ from tests.integration.common import (
     config,
     require_torch,
 )
-from utils import csv_compression
 
 
 @pytest.mark.torch_trace
@@ -66,12 +66,13 @@ def test_torch_trace_profile(
     integration_common.check_csv_files(workload_dir, num_devices, 1)
 
     # 3. Marker/counter CSV pairs exist and counts match
-    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
-    assert marker_api_trace_files, "No marker_api_trace.csv produced"
+    marker_api_trace_files = list(
+        Path(workload_dir).glob("**/*marker_api_trace.csv.gz")
+    )
+    assert marker_api_trace_files, "No marker_api_trace.csv.gz produced"
     for marker_file in marker_api_trace_files:
-        corresponding_counter_file = csv_compression.resolve_csv(
-            marker_file.parent
-            / marker_file.name.replace("marker_api_trace", "counter_collection")
+        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
+            "marker_api_trace", "counter_collection"
         )
         assert corresponding_counter_file.is_file(), (
             f"counter_collection CSV not found for {marker_file}"
@@ -86,7 +87,7 @@ def test_torch_trace_profile(
             "Start_Timestamp",
             "End_Timestamp",
         }
-        with open(marker_file, newline="") as f:
+        with gzip.open(marker_file, "rt", newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {marker_file}"
@@ -111,7 +112,9 @@ def test_torch_trace_profile(
             "Start_Timestamp",
             "End_Timestamp",
         }
-        with csv_compression.open_csv_read(corresponding_counter_file) as f:
+        with gzip.open(
+            corresponding_counter_file, "rt", newline="", encoding="utf-8"
+        ) as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
@@ -379,8 +382,8 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     assert returncode_baseline == 0, "Baseline profiling failed"
 
     # Read baseline timestamps
-    baseline_results_files = csv_compression.find_csvs(
-        workload_dir_baseline, "results_*.csv"
+    baseline_results_files = sorted(
+        Path(workload_dir_baseline).glob("results_*.csv.gz")
     )
     baseline_df = pd.concat(
         [pd.read_csv(f) for f in baseline_results_files], ignore_index=True
@@ -403,8 +406,8 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     with_flag_time = time.time() - start_with_flag
     assert returncode_with_flag == 0, "Profiling with torch-trace failed"
     # Read with-flag timestamps
-    with_flag_results_files = csv_compression.find_csvs(
-        workload_dir_with_flag, "results_*.csv"
+    with_flag_results_files = sorted(
+        Path(workload_dir_with_flag).glob("results_*.csv.gz")
     )
     with_flag_df = pd.concat(
         [pd.read_csv(f) for f in with_flag_results_files], ignore_index=True
@@ -627,7 +630,7 @@ def test_torch_trace_deep_tensor_wraps_overhead(
             elapsed = time.time() - start
             assert returncode == 0, "torch-trace profiling run failed"
 
-            results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+            results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
             df = pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
             kernel_duration_total = (
                 df["End_Timestamp"].max() - df["Start_Timestamp"].min()

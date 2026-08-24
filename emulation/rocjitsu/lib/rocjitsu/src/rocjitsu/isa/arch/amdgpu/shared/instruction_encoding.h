@@ -96,6 +96,18 @@ enum SdwaUnused : uint32_t {
   UNUSED_PRESERVE = 2,
 };
 
+/// @brief Floating-point representation used by SDWA source modifiers.
+///
+/// SDWA selection and sign extension apply to every source. Absolute-value and
+/// negate fields apply only to floating-point sources, and their sign bit
+/// depends on the semantic source type rather than the selector width.
+enum class SourceModifierFormat {
+  NONE,
+  F16,
+  BF16,
+  F32,
+};
+
 } // namespace sdwa
 
 /// @brief Return the VOP3 output-select field across MRISA spelling variants.

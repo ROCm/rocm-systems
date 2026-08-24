@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 604 | 604 | 0 |
-| **total** | **604** | **604** | **0** |
+| `contract` | 606 | 606 | 0 |
+| **total** | **606** | **606** | **0** |
 
 ## Tier: `contract`
 
@@ -158,7 +158,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported` | hipDeviceSetLimit | setting the heap limit back to its current value succeeds or reports unsupported |
 | `Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent` | hipGetDeviceFlags | the schedule subfield is a documented mode and greatest stream priority <= least |
 
-### `device_identity` (7 cases)
+### `device_identity` (9 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -169,6 +169,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_Default_RoundTripsWithGetPCIBusId` | hipDeviceGetByPCIBusId | the PCI bus id from hipDeviceGetPCIBusId round-trips back to the same device ordinal |
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_InvalidString_IsRejected` | hipDeviceGetByPCIBusId | empty and malformed PCI bus id strings are rejected with a non-success status |
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_NullArgs_AreRejected` | hipDeviceGetByPCIBusId | a null device out-pointer or null bus-id string is rejected with a non-success status |
+| `Contract_DeviceIdentity_HipDeviceGetLuid_Default_AcceptedOrUnsupported` | hipDeviceGetLuid | a well-formed query returns hipSuccess or the documented hipErrorNotSupported |
+| `Contract_DeviceIdentity_HipDeviceGetLuid_NullArgs_AreRejected` | hipDeviceGetLuid | a null luid or node-mask out-pointer is rejected with a non-success status |
 
 ### `device_lifecycle` (5 cases)
 

@@ -51,7 +51,7 @@ append_escaped_field(std::string& out, std::string_view field)
         return;
     }
 
-    for(char ch : field)
+    for(const char ch : field)
     {
         switch(ch)
         {
@@ -162,8 +162,9 @@ process_arguments_string(const std::string& arg_str)
             throw std::invalid_argument("Malformed argument string.");
         }
 
-        argument_info arg = { arg_number, unescape_field(*(it + 1)),
-                              unescape_field(*(it + 2)), unescape_field(*(it + 3)) };
+        const argument_info arg = { arg_number, unescape_field(*(it + 1)),
+                                    unescape_field(*(it + 2)),
+                                    unescape_field(*(it + 3)) };
         args.push_back(arg);
     }
 

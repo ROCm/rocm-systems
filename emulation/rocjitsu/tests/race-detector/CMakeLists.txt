@@ -3,7 +3,7 @@
 
 # --- Race detection HIP tests ---
 # Uses a lightweight config (race_test_config.json) with 1 XCD and 4 CUs
-# instead of the full MI350X topology (8 XCDs, 256 CUs). Each race test
+# instead of the full MI350X topology (8 XCDs, 288 physical / 256 active CUs). Each race test
 # spawns a complete simulation engine, and with ctest -j the full config
 # causes OOM kills at moderate parallelism (~15+ concurrent tests). The
 # race detector only needs a few CUs to exercise cross-wave and
@@ -120,6 +120,7 @@ rj_add_gfx950_race_test_case(sgpr_waitcnt)
 rj_add_gfx950_race_test_case(sgpr_waitcnt_race)
 rj_add_gfx950_race_test_case(lds_cross_wave)
 rj_add_gfx950_race_test_case(lds_cross_wave_race)
+rj_add_gfx950_race_test_case(lds_same_wave_order)
 rj_add_gfx950_race_test_case(global_to_lds_buffer)
 rj_add_gfx950_race_test_case(global_to_lds_buffer_race)
 rj_add_gfx950_race_test_case(partial_vmcnt_race)
