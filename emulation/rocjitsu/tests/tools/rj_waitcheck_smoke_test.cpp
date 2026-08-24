@@ -213,6 +213,33 @@ TEST(RjWaitcheck, ReportsMissingWait) {
   }
 }
 
+TEST(RjWaitcheck, IncompleteAnalysisIsAnInputErrorEvenWithNoFail) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "incomplete_gfx950.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+  ASSERT_TRUE(write_binary_file(
+      input, rocjitsu::waitcheck_test::make_gfx950_incomplete_direct_to_lds_code_object()));
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(input.string()) + " --target gfx950 --no-fail > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  EXPECT_TRUE(command_exited_with(status, 2)) << "stderr:\n"
+                                              << stderr_text << "\nstdout:\n"
+                                              << stdout_text;
+  EXPECT_TRUE(stdout_text.empty()) << stdout_text;
+  EXPECT_TRUE(contains(stderr_text, "waitcheck analysis incomplete")) << stderr_text;
+  EXPECT_TRUE(contains(stderr_text, "direct-to-LDS producer range is not statically known"))
+      << stderr_text;
+}
+
 TEST(RjWaitcheck, ListsAndScansConcatenatedCompressedGfx950Bundles) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /

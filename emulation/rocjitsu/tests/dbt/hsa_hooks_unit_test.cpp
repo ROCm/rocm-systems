@@ -3983,6 +3983,42 @@ TEST(HsaHooksUnitTest, ConSanStrictPolicyTerminatesAtRejectedCodeObjectLoad) {
               "policy=strict action=terminate exit_code=92");
 }
 
+rocjitsu::ConSanResult partial_barrier_coverage_transform_result() {
+  rocjitsu::ConSanResult result;
+  result.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  result.flavor = rocjitsu::ConSanFlavor::Moi;
+  result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.modified = true;
+  result.final_validation_passed = true;
+  result.elf_bytes = {0x7f, 'E', 'L', 'F', 'p', 'a', 'r', 't'};
+
+  for (uint64_t index = 0; index < 8; ++index) {
+    result.site_dispositions.push_back(
+        {.site_kind = rocjitsu::ConSanResourceSiteKind::Barrier,
+         .disposition = rocjitsu::ConSanSiteDisposition::Supported,
+         .reason = rocjitsu::ConSanSiteDispositionReason::None,
+         .container_name = "partial_barrier_kernel",
+         .in_kernel = true,
+         .text_offset = index * sizeof(uint32_t),
+         .mnemonic = "s_barrier",
+         .lowering_outcome = index < 7
+                                 ? rocjitsu::ConSanSiteLoweringOutcome::Patched
+                                 : rocjitsu::ConSanSiteLoweringOutcome::PlacementOrLoweringFailed,
+         .lowering_reason = index < 7
+                                ? rocjitsu::ConSanSiteLoweringReason::None
+                                : rocjitsu::ConSanSiteLoweringReason::InstrumentationPatchMissing});
+  }
+  for (uint64_t index = 0; index < 7; ++index) {
+    rocjitsu::ConSanPatchInfo patch;
+    patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+    patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiBarrierRecord;
+    patch.anchor_offset = index * sizeof(uint32_t);
+    result.patches.push_back(std::move(patch));
+  }
+  return result;
+}
+
 void expect_transform_profile(const ConSanHookProfile &profile) {
   ASSERT_EQ(g_transform_override_flavors.size(), 1u);
   ASSERT_EQ(g_transform_override_engines.size(), 1u);
@@ -4097,6 +4133,58 @@ TEST(HsaHooksUnitTest, ConSanTransformRejectionReportsStableTypedCause) {
               std::string::npos)
         << log;
   }
+}
+
+TEST(HsaHooksUnitTest, ConSanFailClosedRejectsIncompleteStaticCoverageBeforeReplacementLoad) {
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  testing::internal::CaptureStderr();
+  run_hook_load_case(kConSanHookProfiles[1], true, partial_barrier_coverage_transform_result(),
+                     HSA_STATUS_ERROR_INVALID_CODE_OBJECT, 0u);
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("barrier_discovered=8"), std::string::npos) << log;
+  EXPECT_NE(log.find("barrier_patched=7"), std::string::npos) << log;
+  EXPECT_NE(log.find("barrier_placement_or_lowering_failed=1"), std::string::npos) << log;
+  EXPECT_NE(log.find("reason=incomplete-static-coverage"), std::string::npos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanStrictRejectsIncompleteStaticCoverageBeforeReplacementLoad) {
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  ScopedEnvVar policy("RJ_CONSAN_POLICY", "strict");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", nullptr);
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", nullptr);
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  g_transform_override_result = partial_barrier_coverage_transform_result();
+
+  ASSERT_EXIT(([] {
+                FakeApiTable api;
+                InstalledDbiHook hook(api);
+                if (!hook.installed())
+                  std::_Exit(1);
+                constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+                hsa_code_object_reader_t reader{};
+                if (api.core.hsa_code_object_reader_create_from_memory_fn(
+                        original.data(), original.size(), &reader) != HSA_STATUS_SUCCESS)
+                  std::_Exit(2);
+                (void)api.core.hsa_executable_load_agent_code_object_fn(
+                    hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+                std::_Exit(3);
+              }()),
+              testing::ExitedWithCode(92),
+              "ConSan load rejection.*reason=incomplete-static-coverage.*"
+              "policy=strict action=terminate exit_code=92");
+}
+
+TEST(HsaHooksUnitTest, ConSanFailOpenLoadsIncompleteStaticCoverageReplacement) {
+  ScopedEnvVar require_patch("RJ_CONSAN_REQUIRE_PATCH", "1");
+  ScopedEnvVar require_records("RJ_CONSAN_MOI_REQUIRE_RECORDS", nullptr);
+  const rocjitsu::ConSanResult result = partial_barrier_coverage_transform_result();
+
+  run_hook_load_case(kConSanHookProfiles[1], false, result, HSA_STATUS_SUCCESS, 102u,
+                     result.elf_bytes);
 }
 
 void reset_pool_blocker(bool enabled) {
@@ -4448,6 +4536,41 @@ TEST(HsaHooksUnitTest, ConSanWaitcheckReportsAnalysisFailureBeforeTransform) {
   EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
   const size_t waitcheck_pos = log.find("ConSan preflight reported reader=101 target=gfx1201 "
                                         "reason=analysis-failed");
+  const size_t consan_pos = log.find("ConSan patch begin reader=101");
+  EXPECT_NE(waitcheck_pos, std::string::npos) << log;
+  EXPECT_NE(consan_pos, std::string::npos) << log;
+  EXPECT_LT(waitcheck_pos, consan_pos) << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanWaitcheckReportsIncompleteAnalysisBeforeTransform) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  reset_code_object_observations();
+  configure_consan_profile(kConSanHookProfiles[1], false);
+  g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+
+  const std::vector<uint8_t> original =
+      rocjitsu::waitcheck_test::make_gfx950_incomplete_direct_to_lds_code_object();
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+
+  testing::internal::CaptureStderr();
+  const hsa_status_t status = api.core.hsa_executable_load_agent_code_object_fn(
+      hsa_executable_t{7}, kHostAgent, reader, nullptr, nullptr);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+  expect_transform_profile(kConSanHookProfiles[1]);
+  EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
+  const size_t waitcheck_pos =
+      log.find("ConSan preflight reported reader=101 target=gfx950 "
+               "reason=analysis-incomplete observations=1 action=continue: "
+               "direct-to-LDS producer range is not statically known");
   const size_t consan_pos = log.find("ConSan patch begin reader=101");
   EXPECT_NE(waitcheck_pos, std::string::npos) << log;
   EXPECT_NE(consan_pos, std::string::npos) << log;
@@ -5448,11 +5571,20 @@ rocjitsu::ConSanResult auto_report_atomic_transform_result() {
   result.kernels.emplace_back();
   result.kernels.back().name = "auto_report_atomic";
   result.kernels.back().atomic_sites.emplace_back();
-  result.site_dispositions.push_back({.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic,
-                                      .disposition = rocjitsu::ConSanSiteDisposition::Supported,
-                                      .reason = rocjitsu::ConSanSiteDispositionReason::None,
-                                      .container_name = "auto_report_atomic",
-                                      .mnemonic = "global_atomic_add"});
+  result.kernels.back().atomic_sites.back().text_offset = 4u;
+  result.site_dispositions.push_back(
+      {.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic,
+       .disposition = rocjitsu::ConSanSiteDisposition::Supported,
+       .reason = rocjitsu::ConSanSiteDispositionReason::None,
+       .container_name = "auto_report_atomic",
+       .text_offset = 4u,
+       .mnemonic = "global_atomic_add",
+       .lowering_outcome = rocjitsu::ConSanSiteLoweringOutcome::Patched,
+       .lowering_reason = rocjitsu::ConSanSiteLoweringReason::None});
+  rocjitsu::ConSanPatchInfo atomic_patch;
+  atomic_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
+  atomic_patch.anchor_offset = 4u;
+  result.patches.push_back(std::move(atomic_patch));
   return result;
 }
 
@@ -5479,13 +5611,16 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
   candidate.container_name = "auto_report_access";
   candidate.mnemonic = "ds_store_b32";
   result.moi_candidates.push_back(std::move(candidate));
-  result.site_dispositions.push_back({.site_kind = rocjitsu::ConSanResourceSiteKind::Access,
-                                      .disposition = rocjitsu::ConSanSiteDisposition::Supported,
-                                      .reason = rocjitsu::ConSanSiteDispositionReason::None,
-                                      .container_name = "auto_report_access",
-                                      .in_kernel = true,
-                                      .text_offset = 0u,
-                                      .mnemonic = "ds_store_b32"});
+  result.site_dispositions.push_back(
+      {.site_kind = rocjitsu::ConSanResourceSiteKind::Access,
+       .disposition = rocjitsu::ConSanSiteDisposition::Supported,
+       .reason = rocjitsu::ConSanSiteDispositionReason::None,
+       .container_name = "auto_report_access",
+       .in_kernel = true,
+       .text_offset = 0u,
+       .mnemonic = "ds_store_b32",
+       .lowering_outcome = rocjitsu::ConSanSiteLoweringOutcome::Patched,
+       .lowering_reason = rocjitsu::ConSanSiteLoweringReason::None});
   if (owner_scope != AutoReplayOwnerScope::NoProvenance) {
     const auto append_patch = [&](uint32_t instruction_offset, uint64_t owner) {
       rocjitsu::ConSanPatchInfo patch;
@@ -5498,6 +5633,11 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
     append_patch(0xfe96cu, 0x100u);
     append_patch(0xfe974u,
                  owner_scope == AutoReplayOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
+  } else {
+    rocjitsu::ConSanPatchInfo access_patch;
+    access_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore;
+    access_patch.anchor_offset = 0u;
+    result.patches.push_back(std::move(access_patch));
   }
   return result;
 }
@@ -5513,6 +5653,12 @@ rocjitsu::ConSanResult auto_report_sampled_transform_result(
     bool malformed_mapping = false,
     AutoSampledOwnerScope owner_scope = AutoSampledOwnerScope::SinglePatch) {
   rocjitsu::ConSanResult result = auto_report_replay_transform_result();
+  result.resource_plans.clear();
+  result.kernels.front().atomic_sites.clear();
+  std::erase_if(result.site_dispositions, [](const auto &disposition) {
+    return disposition.site_kind == rocjitsu::ConSanResourceSiteKind::Atomic;
+  });
+  result.patches.clear();
   const auto append_patch = [&](uint32_t slot, uint64_t owner) {
     rocjitsu::ConSanPatchInfo patch;
     patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
@@ -8847,6 +8993,16 @@ void configure_consan_zero_record_case() {
   patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
   patch.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
   g_transform_override_result.patches.push_back(patch);
+  g_transform_override_result.site_dispositions.push_back(
+      {.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic,
+       .disposition = rocjitsu::ConSanSiteDisposition::Supported,
+       .reason = rocjitsu::ConSanSiteDispositionReason::None,
+       .container_name = kernel.name,
+       .in_kernel = true,
+       .text_offset = 0,
+       .mnemonic = "global_atomic_add",
+       .lowering_outcome = rocjitsu::ConSanSiteLoweringOutcome::Patched,
+       .lowering_reason = rocjitsu::ConSanSiteLoweringReason::None});
 }
 
 void run_consan_zero_record_case(bool iterate_symbol, bool dispatch_kernel) {

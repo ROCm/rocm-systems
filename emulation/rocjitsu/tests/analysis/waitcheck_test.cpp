@@ -735,6 +735,14 @@ void append_gfx950_s_waitcnt_vmcnt_1(std::vector<uint32_t> &program) {
   program.push_back(0xBF8C0F71u);
 }
 
+void append_gfx950_s_waitcnt_vmcnt_15(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8C0F7Fu);
+}
+
+void append_gfx950_s_waitcnt_vmcnt_16(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8C4F70u);
+}
+
 void append_gfx950_s_waitcnt_lgkmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8CC07Fu);
 }
@@ -804,8 +812,26 @@ void append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(std::vector<uint32_t> &p
   program.push_back(0x80100008u);
 }
 
+void append_gfx950_s_mov_b32_m0_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBEFC0080u);
+}
+
+void append_gfx950_v_mov_b32_v12_0(std::vector<uint32_t> &program) {
+  program.push_back(0x7E180280u);
+}
+
+void append_gfx950_vmem_age_events(std::vector<uint32_t> &program, uint32_t count) {
+  for (uint32_t i = 0; i < count; ++i)
+    append_gfx950_buffer_load_dword_v1_v8_s0_offen(program);
+}
+
 void append_gfx950_ds_read_b128_v18_v12_offset64(std::vector<uint32_t> &program) {
   program.push_back(0xD9FE0040u);
+  program.push_back(0x1200000Cu);
+}
+
+void append_gfx950_ds_read_b128_v18_v12_offset1056(std::vector<uint32_t> &program) {
+  program.push_back(0xD9FE0420u);
   program.push_back(0x1200000Cu);
 }
 
@@ -1683,6 +1709,155 @@ TEST(WaitcheckTest, Gfx950DirectToLdsBufferLoadAgesVmcnt) {
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950ExactDirectToLdsVmcnt15BoundaryIsClean) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 15);
+  append_gfx950_s_waitcnt_vmcnt_15(program);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  append_gfx950_v_mov_b32_v12_0(program);
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.analysis_complete) << report.incomplete_reason;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_TRUE(report.passed());
+}
+
+TEST(WaitcheckTest, Gfx950ExactDirectToLdsVmcnt16BoundaryReportsHazard) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 15);
+  append_gfx950_s_waitcnt_vmcnt_16(program);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  append_gfx950_v_mov_b32_v12_0(program);
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_TRUE(report.analysis_complete) << report.incomplete_reason;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::MemoryOrder);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::PC);
+  EXPECT_EQ(report.diagnostics[0].required_count, 15u);
+  EXPECT_NE(report.diagnostics[0].producer_instruction.find("buffer_load_dwordx4"),
+            std::string::npos);
+  EXPECT_NE(report.diagnostics[0].instruction.find("ds_read_b128"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx950ExactDisjointDirectToLdsRangeIsClean) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 15);
+  append_gfx950_s_waitcnt_vmcnt_16(program);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  append_gfx950_v_mov_b32_v12_0(program);
+  append_gfx950_ds_read_b128_v18_v12_offset1056(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.analysis_complete) << report.incomplete_reason;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_TRUE(report.passed());
+}
+
+TEST(WaitcheckTest, Gfx950UnknownDirectToLdsProducerRangeIsIncomplete) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 15);
+  append_gfx950_s_waitcnt_vmcnt_16(program);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  append_gfx950_v_mov_b32_v12_0(program);
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported);
+  EXPECT_FALSE(report.analysis_complete);
+  EXPECT_NE(report.incomplete_reason.find("producer range"), std::string::npos);
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_FALSE(report.passed());
+}
+
+TEST(WaitcheckTest, Gfx950UnknownDirectToLdsConsumerRangeIsIncomplete) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 15);
+  append_gfx950_s_waitcnt_vmcnt_16(program);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported);
+  EXPECT_FALSE(report.analysis_complete);
+  EXPECT_NE(report.incomplete_reason.find("consumer range"), std::string::npos);
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950WaitAfterBarrierDoesNotRetroactivelyPublishDirectToLds) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 15);
+  append_gfx950_s_waitcnt_vmcnt_16(program);
+  program.push_back(0xBF8A0000u); // s_barrier.
+  append_gfx950_s_waitcnt_vmcnt_15(program);
+  append_gfx950_v_mov_b32_v12_0(program);
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.analysis_complete) << report.incomplete_reason;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].required_count, 15u);
+}
+
+TEST(WaitcheckTest, Gfx950SecondBarrierPublishesCompletedDirectToLds) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_vmem_age_events(program, 15);
+  append_gfx950_s_waitcnt_vmcnt_16(program);
+  program.push_back(0xBF8A0000u); // First barrier is too early.
+  append_gfx950_s_waitcnt_vmcnt_15(program);
+  program.push_back(0xBF8A0000u); // Second barrier publishes the completed load.
+  append_gfx950_v_mov_b32_v12_0(program);
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+
+  const auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.analysis_complete) << report.incomplete_reason;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_TRUE(report.passed());
+}
+
+TEST(WaitcheckTest, Gfx950DirectToLdsAcrossNontrivialCfgIsIncomplete) {
+  std::vector<uint32_t> program;
+  append_gfx950_s_mov_b32_m0_0(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  program.push_back(0xBF820000u); // s_branch to the next basic block.
+  program.push_back(0xBF810000u); // s_endpgm.
+  const auto image =
+      rocjitsu::waitcheck_test::make_gfx_code_object(program, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  AmdGpuCodeObject code_object(image.data(), image.size());
+
+  const auto report = analyze_waitcnts(code_object, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_FALSE(report.analysis_complete);
+  EXPECT_NE(report.incomplete_reason.find("nontrivial control flow"), std::string::npos);
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 

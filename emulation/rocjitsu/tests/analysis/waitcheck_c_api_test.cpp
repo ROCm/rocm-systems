@@ -378,6 +378,8 @@ TEST(WaitcheckCApiTest, CleanBufferPassesWithNullOptions) {
 
   ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), nullptr, &result),
             ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(result.analysis_complete, 1u);
+  EXPECT_EQ(result.incomplete_observations, 0u);
   EXPECT_EQ(result.passed, 1u);
   EXPECT_EQ(result.diagnostics_observed, 0u);
   EXPECT_EQ(result.diagnostics_reported, 0u);
@@ -389,6 +391,8 @@ TEST(WaitcheckCApiTest, HazardsStillFailWithoutDiagnosticCallback) {
 
   ASSERT_EQ(rj_waitcheck_analyze(image.data(), image.size(), nullptr, &result),
             ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(result.analysis_complete, 1u);
+  EXPECT_EQ(result.incomplete_observations, 0u);
   EXPECT_EQ(result.passed, 0u);
   EXPECT_EQ(result.diagnostics_observed, 1u);
   EXPECT_EQ(result.diagnostics_reported, 0u);
@@ -558,6 +562,41 @@ TEST(WaitcheckCApiTest, RetainsInferredTargetWhenTargetIsUnsupported) {
   EXPECT_EQ(result.target, ROCJITSU_WAITCHECK_TARGET_GFX90A);
   EXPECT_STREQ(rj_waitcheck_target_name(result.target), "gfx90a");
   EXPECT_STREQ(rj_waitcheck_target_name(static_cast<rj_waitcheck_target_t>(1234)), "unknown");
+}
+
+TEST(WaitcheckCApiTest, ReturnsUnsupportedWithPopulatedResultWhenAnalysisIsIncomplete) {
+  const auto image = rocjitsu::waitcheck_test::make_gfx950_incomplete_direct_to_lds_code_object(
+      /*include_definite_wait_hazard=*/true);
+  CallbackState state;
+  rj_waitcheck_options_t options = callback_options(state);
+  rj_waitcheck_result_t result = initialized_result();
+
+  const rj_status_t status = rj_waitcheck_analyze(image.data(), image.size(), &options, &result);
+
+  EXPECT_EQ(status, ROCJITSU_STATUS_UNSUPPORTED);
+  EXPECT_EQ(result.target, ROCJITSU_WAITCHECK_TARGET_GFX950);
+  EXPECT_EQ(result.analysis_complete, 0u);
+  EXPECT_EQ(result.incomplete_observations, 1u);
+  EXPECT_EQ(result.passed, 0u);
+  EXPECT_EQ(result.diagnostics_observed, 1u);
+  EXPECT_EQ(result.diagnostics_reported, 1u);
+  ASSERT_EQ(state.diagnostics.size(), 1u);
+  EXPECT_EQ(state.diagnostics.front().code, ROCJITSU_WAITCHECK_DIAGNOSTIC_WAIT_COUNTER);
+  ASSERT_EQ(state.errors.size(), 1u);
+  EXPECT_NE(state.errors.front().find("direct-to-LDS producer range is not statically known"),
+            std::string::npos);
+}
+
+TEST(WaitcheckCApiTest, AcceptsLegacyResultAllocationBeforeCompletenessFields) {
+  constexpr size_t legacy_result_size = offsetof(rj_waitcheck_result_t, analysis_complete);
+  rj_waitcheck_result_t result{};
+  ASSERT_EQ(rj_waitcheck_result_init(&result, legacy_result_size), ROCJITSU_STATUS_SUCCESS);
+  const auto image = rocjitsu::waitcheck_test::make_gfx1200_correct_wait_code_object();
+
+  EXPECT_EQ(rj_waitcheck_analyze(image.data(), image.size(), nullptr, &result),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(result.target, ROCJITSU_WAITCHECK_TARGET_GFX1200);
+  EXPECT_EQ(result.passed, 1u);
 }
 
 TEST(WaitcheckCApiTest, IndependentCallsAreConcurrentAndReentrant) {

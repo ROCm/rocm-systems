@@ -175,6 +175,18 @@ void print_waitcheck_issue(uint64_t reader, const rocjitsu::AmdGpuCodeObject &co
     return;
   }
 
+  if (!report.analysis_complete) {
+    std::fprintf(stderr,
+                 "rocjitsu-waitcheck: ConSan preflight reported reader=%llu target=%s "
+                 "reason=analysis-incomplete observations=%zu action=continue",
+                 static_cast<unsigned long long>(reader),
+                 rj_code_target_name(code_object.target_id()), report.incomplete_observations);
+    if (!report.incomplete_reason.empty())
+      std::fprintf(stderr, ": %s", report.incomplete_reason.c_str());
+    std::fprintf(stderr, "\n");
+    return;
+  }
+
   std::fprintf(stderr,
                "rocjitsu-waitcheck: ConSan preflight reported reader=%llu target=%s "
                "reason=wait-hazard diagnostics=%zu action=continue\n",
@@ -238,6 +250,10 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
     options.max_diagnostics = 32;
     const rocjitsu::WaitcheckReport report = rocjitsu::analyze_waitcnts(code_object, arch, options);
     if (!report.supported) {
+      print_waitcheck_issue(reader, code_object, report);
+      return WaitcheckPreflightOutcome::AnalysisFailed;
+    }
+    if (!report.analysis_complete) {
       print_waitcheck_issue(reader, code_object, report);
       return WaitcheckPreflightOutcome::AnalysisFailed;
     }
@@ -5574,6 +5590,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   static_cast<uint32_t>(patch.sampled_access_kind));
     }
     detailed_log_batch.flush();
+    if (install_action == rocjitsu::ConSanInstallAction::LoadReplacement && config->fail_closed &&
+        !config->fault_dry_run && !static_coverage.complete) {
+      record_static_coverage(false);
+      return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
+                                     code_object_reader.handle, "incomplete-static-coverage",
+                                     fault_installation_evidence);
+    }
     if (config->require_patch && !config->fault_dry_run &&
         !has_consan_site_instrumentation_patch(patch_result)) {
       const bool required = (patch_options.flavor == rocjitsu::ConSanFlavor::SuperCollider &&

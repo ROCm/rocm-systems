@@ -425,6 +425,30 @@ TEST_F(WaitcheckHooksTest, CleanMemoryReaderChainsToRuntime) {
   EXPECT_FALSE(contains(captured.stderr_text, "rocjitsu-waitcheck:")) << captured.stderr_text;
 }
 
+TEST_F(WaitcheckHooksTest, FailClosedRejectsIncompleteAnalysis) {
+  const CapturedCall captured =
+      load_memory(rocjitsu::waitcheck_test::make_gfx950_incomplete_direct_to_lds_code_object());
+
+  EXPECT_EQ(captured.status, HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  EXPECT_EQ(g_load_calls, 0);
+  EXPECT_TRUE(contains(captured.stderr_text, "analysis incomplete")) << captured.stderr_text;
+  EXPECT_TRUE(
+      contains(captured.stderr_text, "direct-to-LDS producer range is not statically known"))
+      << captured.stderr_text;
+  EXPECT_FALSE(contains(captured.stderr_text, "waitcnt hazard")) << captured.stderr_text;
+}
+
+TEST_F(WaitcheckHooksTest, ReportOnlyModeDoesNotDescribeIncompleteAnalysisAsClean) {
+  setenv("ROCJITSU_WAITCHECK_FAIL", "0", 1);
+  const CapturedCall captured =
+      load_memory(rocjitsu::waitcheck_test::make_gfx950_incomplete_direct_to_lds_code_object());
+
+  EXPECT_EQ(captured.status, HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_load_calls, 1);
+  EXPECT_TRUE(contains(captured.stderr_text, "analysis incomplete")) << captured.stderr_text;
+  EXPECT_FALSE(contains(captured.stderr_text, "waitcnt hazard")) << captured.stderr_text;
+}
+
 TEST_F(WaitcheckHooksTest, ReportOnlyModeChainsHazardToRuntimeOncePerReader) {
   setenv("ROCJITSU_WAITCHECK_FAIL", "0", 1);
   const auto bytes = rocjitsu::waitcheck_test::make_gfx1200_missing_wait_code_object();

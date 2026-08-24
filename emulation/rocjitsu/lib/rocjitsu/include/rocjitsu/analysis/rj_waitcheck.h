@@ -238,7 +238,7 @@ typedef struct rj_waitcheck_options_s {
   rj_waitcheck_counter_parity_callback_t counter_parity_callback;
 } rj_waitcheck_options_t;
 
-/// @brief Aggregate result of one successful waitcheck analysis.
+/// @brief Aggregate result of one waitcheck analysis attempt.
 typedef struct rj_waitcheck_result_s {
   /// @brief Caller allocation size, initialized by rj_waitcheck_result_init().
   size_t struct_size;
@@ -253,7 +253,7 @@ typedef struct rj_waitcheck_result_s {
   size_t diagnostics_observed;
   /// @brief Number of times diagnostic_callback was invoked.
   size_t diagnostics_reported;
-  /// @brief Nonzero when no wait hazards were observed.
+  /// @brief Nonzero when analysis completed and no wait hazards were observed.
   uint32_t passed;
   /// @brief Nonzero when diagnostics_observed is a lower bound because
   /// callbacks were disabled or limited, or analysis stopped early.
@@ -272,6 +272,10 @@ typedef struct rj_waitcheck_result_s {
   uint32_t counter_parity_diagnostics_truncated;
   /// @brief Nonzero when the requested counter-parity model was available and ran.
   uint32_t counter_parity_evaluated;
+  /// @brief Nonzero when every encountered wait dependency was covered by the active model.
+  uint32_t analysis_complete;
+  /// @brief Number of observations that prevented complete analysis.
+  size_t incomplete_observations;
 } rj_waitcheck_result_t;
 
 /// @brief Initialize waitcheck options to their defaults.
@@ -342,6 +346,9 @@ rj_waitcheck_counter_parity_kind_name(rj_waitcheck_counter_parity_kind_t kind);
 /// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The buffer is malformed, is not a
 /// final AMDGPU HSA code object, targets an unsupported architecture, cannot be
 /// decoded completely, or exceeds a configured analysis limit.
+/// @retval ROCJITSU_STATUS_UNSUPPORTED The code object was recognized, but one
+/// or more wait dependencies could not be analyzed completely. The result and
+/// any definite diagnostic callbacks are still populated.
 /// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Analysis allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR An unexpected analysis error occurred.
 RJ_API_EXPORT rj_status_t rj_waitcheck_analyze(const void *code_object, size_t code_object_size,
@@ -367,6 +374,9 @@ RJ_API_EXPORT rj_status_t rj_waitcheck_analyze(const void *code_object, size_t c
 /// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The buffer is malformed, is not a
 /// final AMDGPU HSA code object, targets an unsupported architecture, cannot be
 /// decoded completely, or exceeds a configured analysis limit.
+/// @retval ROCJITSU_STATUS_UNSUPPORTED The code object was recognized, but one
+/// or more wait dependencies could not be analyzed completely. The result and
+/// any definite diagnostic callbacks are still populated.
 /// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Analysis allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR An unexpected analysis error occurred.
 RJ_API_EXPORT rj_status_t rj_waitcheck_analyze_kernel(const void *code_object,

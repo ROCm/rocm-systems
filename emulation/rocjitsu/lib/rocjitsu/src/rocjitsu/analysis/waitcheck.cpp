@@ -480,6 +480,38 @@ struct PendingEvent {
   bool operator==(const PendingEvent &) const = default;
 };
 
+struct LdsInterval {
+  uint64_t begin = 0;
+  uint64_t end = 0;
+
+  [[nodiscard]] bool overlaps(const LdsInterval &other) const {
+    return begin < other.end && other.begin < end;
+  }
+
+  bool operator==(const LdsInterval &) const = default;
+};
+
+struct DtlVisibilityEvent {
+  std::optional<LdsInterval> interval;
+  bool active = true;
+  uint32_t min_younger = 0;
+  std::optional<uint32_t> barrier_required_count;
+  uint64_t barrier_section_offset = 0;
+  std::string section_name;
+  uint64_t section_offset = 0;
+  uint64_t file_offset = 0;
+  std::string instruction;
+
+  bool operator==(const DtlVisibilityEvent &) const = default;
+};
+
+struct LdsConstantState {
+  std::optional<uint32_t> m0;
+  std::map<uint16_t, uint32_t> uniform_vgprs;
+
+  bool operator==(const LdsConstantState &) const = default;
+};
+
 struct SgprHazardProducer {
   std::string section_name;
   uint64_t section_offset = 0;
@@ -586,6 +618,8 @@ struct PendingState {
   std::optional<SgprHazardProducer> async_barrier_post_wait;
   std::vector<PendingDelayAlu> delay_alu;
   ExpertSchedulingState expert_scheduling;
+  std::vector<DtlVisibilityEvent> dtl_visibility;
+  LdsConstantState lds_constants;
 
   bool operator==(const PendingState &) const = default;
 };
@@ -658,6 +692,7 @@ struct Analyzer {
                       std::string section_name, uint64_t file_offset_base) {
     current_kernel_ = nullptr;
     wavefront_size_ = default_wavefront_size(arch);
+    dtl_straight_line_model_ = true;
     auto decoder = Decoder::create(arch);
     if (!decoder) {
       report_.supported = false;
@@ -708,6 +743,8 @@ struct Analyzer {
     if (blocks.empty())
       return;
     wavefront_size_ = wavefront_size;
+    dtl_straight_line_model_ = blocks.size() == 1 && blocks.front()->successors().empty() &&
+                               blocks.front()->call_edges().empty();
 
     std::unordered_map<const BasicBlock *, size_t> block_index;
     block_index.reserve(blocks.size());
@@ -986,6 +1023,10 @@ struct Analyzer {
         append("delay-alu");
       if (lhs.expert_scheduling != rhs.expert_scheduling)
         append("expert-scheduling");
+      if (lhs.dtl_visibility != rhs.dtl_visibility)
+        append("dtl-visibility");
+      if (lhs.lds_constants != rhs.lds_constants)
+        append("lds-constants");
       return result;
     };
     const size_t max_node_visits = analysis_blocks.size() * 64 + 1024;
@@ -1083,6 +1124,13 @@ struct Analyzer {
   void set_kernel_context(const WaitcheckKernelInfo *kernel) { current_kernel_ = kernel; }
 
 private:
+  void record_incomplete_analysis(std::string reason) {
+    report_.analysis_complete = false;
+    ++report_.incomplete_observations;
+    if (report_.incomplete_reason.empty())
+      report_.incomplete_reason = std::move(reason);
+  }
+
   [[nodiscard]] static size_t counter_index(WaitCounterKind counter) {
     return static_cast<size_t>(counter);
   }
@@ -2675,6 +2723,13 @@ private:
       state.uncertain_order[idx] = false;
   }
 
+  static void apply_dtl_vmcnt_wait(PendingState &state, uint32_t count) {
+    for (DtlVisibilityEvent &event : state.dtl_visibility) {
+      if (event.active && (count == 0 || event.min_younger >= count))
+        event.active = false;
+    }
+  }
+
   static void apply_kmcnt_wait(PendingState &state, uint32_t count, rj_code_arch_t arch) {
     // LLVM cannot use a partial wait to advance any part of a counter whose
     // pending event kinds may complete out of order.
@@ -2973,6 +3028,8 @@ private:
     // legacy LGKMCNT shared by SMEM and DS operations.
     if (count != 0 && counter_out_of_order(state, counter, arch))
       return;
+    if (counter == WaitCounterKind::Load)
+      apply_dtl_vmcnt_wait(state, count);
     apply_wait(state, counter, count);
     apply_implied_vm_vsrc_wait(state, counter, count);
     if (counter == WaitCounterKind::Load)
@@ -3186,6 +3243,24 @@ private:
       apply_memory_wait(state, WaitCounterKind::Store, (value >> 8) & 0x3Fu, arch);
       apply_memory_wait(state, WaitCounterKind::Ds, value & 0x3Fu, arch);
     }
+  }
+
+  [[nodiscard]] static std::optional<int64_t> parse_operand_immediate(const Operand *op) {
+    if (op == nullptr || op->to_register_ref())
+      return std::nullopt;
+
+    std::string name = op->name();
+    int base = 10;
+    std::string_view text(name);
+    if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
+      text.remove_prefix(2);
+      base = 16;
+    }
+    int64_t value = 0;
+    auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value, base);
+    if (ec != std::errc{} || ptr != text.data() + text.size())
+      return std::nullopt;
+    return value;
   }
 
   [[nodiscard]] static std::optional<int64_t> first_operand_value(const Instruction &inst) {
@@ -3458,6 +3533,72 @@ private:
     return du;
   }
 
+  [[nodiscard]] static std::optional<uint32_t> operand_u32_immediate(const Operand *operand) {
+    const auto value = parse_operand_immediate(operand);
+    if (!value || *value < std::numeric_limits<int32_t>::min() ||
+        *value > std::numeric_limits<uint32_t>::max()) {
+      return std::nullopt;
+    }
+    return static_cast<uint32_t>(*value);
+  }
+
+  [[nodiscard]] static std::optional<LdsInterval>
+  cdna4_dtl_interval(const PendingState &state, const Instruction &inst, uint32_t wavefront_size) {
+    constexpr uint64_t kBytesPerLane = 16;
+    if (inst.mnemonic() != "buffer_load_dwordx4" || wavefront_size != 64 ||
+        !state.lds_constants.m0) {
+      return std::nullopt;
+    }
+
+    const uint64_t begin = *state.lds_constants.m0;
+    const uint64_t end = begin + wavefront_size * kBytesPerLane;
+    if (end > uint64_t{1} << 32u)
+      return std::nullopt;
+    return LdsInterval{begin, end};
+  }
+
+  void update_lds_constant_state(PendingState &state, const Instruction &inst, const InstDefUse &du,
+                                 rj_code_arch_t arch) const {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4 || !dtl_straight_line_model_) {
+      state.lds_constants = {};
+      return;
+    }
+
+    du.defs.for_each([&](RegisterRef ref) {
+      if (ref.cls == RegClass::VGPR)
+        state.lds_constants.uniform_vgprs.erase(ref.index);
+    });
+
+    bool defines_m0 = false;
+    for (int index = 0; index < inst.num_dst_operands(); ++index) {
+      const Operand *operand = inst.dst_operand(index);
+      const auto ref = operand == nullptr ? std::nullopt : operand->to_register_ref();
+      defines_m0 = defines_m0 || (ref && ref->cls == RegClass::M0);
+    }
+    if (defines_m0)
+      state.lds_constants.m0.reset();
+
+    if (inst.mnemonic() == "s_mov_b32") {
+      const Operand *destination = inst.dst_operand(0);
+      const auto destination_ref =
+          destination == nullptr ? std::nullopt : destination->to_register_ref();
+      if (destination_ref && destination_ref->cls == RegClass::M0) {
+        state.lds_constants.m0 = operand_u32_immediate(inst.src_operand(0));
+      }
+    }
+
+    if (starts_with(inst.mnemonic(), "v_mov_b32")) {
+      const Operand *destination = inst.dst_operand(0);
+      const auto destination_ref =
+          destination == nullptr ? std::nullopt : destination->to_register_ref();
+      const auto value = operand_u32_immediate(inst.src_operand(0));
+      if (destination_ref && destination_ref->cls == RegClass::VGPR &&
+          destination_ref->width == 1 && value) {
+        state.lds_constants.uniform_vgprs.insert_or_assign(destination_ref->index, *value);
+      }
+    }
+  }
+
   static void clear_matching_barrier_scc_write(PendingState &state, const Instruction &inst) {
     if (inst.mnemonic() != "s_barrier_wait")
       return;
@@ -3687,6 +3828,78 @@ private:
 
   [[nodiscard]] static bool is_program_end(std::string_view mnemonic) {
     return mnemonic == "s_endpgm" || mnemonic == "s_endpgm_saved";
+  }
+
+  [[nodiscard]] static bool is_cdna4_lds_ds_access(const Instruction &inst, rj_code_arch_t arch) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4 || !starts_with(inst.mnemonic(), "ds_") ||
+        is_dsdir(inst.mnemonic()) || inst.raw_encoding() == nullptr ||
+        inst.size() < 2 * static_cast<int>(sizeof(uint32_t))) {
+      return false;
+    }
+    constexpr uint32_t kGdsBit = 1u << 16u;
+    return (inst.raw_encoding()[0] & kGdsBit) == 0;
+  }
+
+  [[nodiscard]] static std::optional<LdsInterval>
+  cdna4_ds_read_b128_interval(const PendingState &state, const Instruction &inst,
+                              rj_code_arch_t arch) {
+    if (!is_cdna4_lds_ds_access(inst, arch) || inst.mnemonic() != "ds_read_b128")
+      return std::nullopt;
+
+    const Operand *address = inst.src_operand(0);
+    const auto address_ref = address == nullptr ? std::nullopt : address->to_register_ref();
+    if (!address_ref || address_ref->cls != RegClass::VGPR || address_ref->width != 1)
+      return std::nullopt;
+    const auto value = state.lds_constants.uniform_vgprs.find(address_ref->index);
+    if (value == state.lds_constants.uniform_vgprs.end())
+      return std::nullopt;
+
+    const uint64_t offset = inst.raw_encoding()[0] & 0xffffu;
+    const uint64_t begin = static_cast<uint64_t>(value->second) + offset;
+    const uint64_t end = begin + 16;
+    if (end > uint64_t{1} << 32u)
+      return std::nullopt;
+    return LdsInterval{begin, end};
+  }
+
+  static void apply_dtl_barrier(PendingState &state, uint64_t section_offset) {
+    std::erase_if(state.dtl_visibility,
+                  [](const DtlVisibilityEvent &event) { return !event.active; });
+    for (DtlVisibilityEvent &event : state.dtl_visibility) {
+      event.barrier_required_count = event.min_younger;
+      event.barrier_section_offset = section_offset;
+    }
+  }
+
+  void check_dtl_lds_access(const PendingState &state, const Instruction &inst,
+                            const std::string &section_name, uint64_t section_offset,
+                            uint64_t file_offset, rj_code_arch_t arch) {
+    if (state.dtl_visibility.empty() || !is_cdna4_lds_ds_access(inst, arch))
+      return;
+
+    const auto consumer_interval = cdna4_ds_read_b128_interval(state, inst, arch);
+    if (!consumer_interval) {
+      record_incomplete_analysis("direct-to-LDS consumer range is not statically known");
+      return;
+    }
+
+    for (const DtlVisibilityEvent &event : state.dtl_visibility) {
+      if (!event.interval) {
+        record_incomplete_analysis("direct-to-LDS producer range is not statically known");
+        continue;
+      }
+      if (!event.interval->overlaps(*consumer_interval))
+        continue;
+      if (!event.active && !event.barrier_required_count) {
+        record_incomplete_analysis(
+            "completed direct-to-LDS access requires launch-aware cross-wave visibility analysis");
+        continue;
+      }
+
+      const uint32_t required_count = event.barrier_required_count.value_or(event.min_younger);
+      emit_dtl_diagnostic(inst, event, required_count, section_name, section_offset, file_offset,
+                          arch);
+    }
   }
 
   [[nodiscard]] static std::vector<ClassifiedEvent> classify_events(const Instruction &inst,
@@ -4159,6 +4372,34 @@ private:
     record_diagnostic(std::move(diag));
   }
 
+  void emit_dtl_diagnostic(const Instruction &inst, const DtlVisibilityEvent &event,
+                           uint32_t required_count, const std::string &section_name,
+                           uint64_t section_offset, uint64_t file_offset, rj_code_arch_t arch) {
+    WaitcheckDiagnostic diag;
+    diag.kind = WaitcheckDiagnosticKind::WaitCounter;
+    diag.counter = WaitCounterKind::Load;
+    diag.access = WaitcheckAccessKind::MemoryOrder;
+    diag.reg = RegisterRef{RegClass::PC, 0, 1};
+    diag.section_name = section_name;
+    diag.section_offset = section_offset;
+    diag.file_offset = file_offset;
+    diag.instruction = inst.disassemble();
+    diag.producer_section_offset = event.section_offset;
+    diag.producer_file_offset = event.file_offset;
+    diag.producer_instruction = event.instruction;
+    diag.required_count = required_count;
+
+    std::ostringstream message;
+    message << "missing " << wait_expression(WaitCounterKind::Load, required_count, arch);
+    if (event.barrier_required_count) {
+      message << " before workgroup barrier at " << section_name << "+0x" << std::hex
+              << event.barrier_section_offset << std::dec;
+    }
+    message << " for LDS access overlapping direct-to-LDS data";
+    diag.message = message.str();
+    record_diagnostic(std::move(diag));
+  }
+
   void emit_sgpr_hazard_diagnostic(const Instruction &inst, const SgprHazardProducer *producer,
                                    RegisterRef reg, std::string_view depctr_field,
                                    uint64_t section_offset, uint64_t file_offset,
@@ -4440,24 +4681,6 @@ private:
       return;
     }
     age = found->min_younger;
-  }
-
-  [[nodiscard]] static std::optional<int64_t> parse_operand_immediate(const Operand *op) {
-    if (op == nullptr || op->to_register_ref())
-      return std::nullopt;
-
-    std::string name = op->name();
-    int base = 10;
-    std::string_view text(name);
-    if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
-      text.remove_prefix(2);
-      base = 16;
-    }
-    int64_t value = 0;
-    auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value, base);
-    if (ec != std::errc{} || ptr != text.data() + text.size())
-      return std::nullopt;
-    return value;
   }
 
   [[nodiscard]] static std::optional<SccPredicate> scalar_scc_predicate(const Instruction &inst) {
@@ -5262,6 +5485,33 @@ private:
                  ClassifiedEvent classification, const Instruction &inst, const InstDefUse &du,
                  std::string section_name, uint64_t section_offset, uint64_t file_offset,
                  std::string instruction, rj_code_arch_t arch, bool record_stats) {
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 && classification.counter == WaitCounterKind::Load) {
+      const uint32_t max_wait = maximum_dependency_wait(arch, WaitCounterKind::Load);
+      for (DtlVisibilityEvent &visibility : state.dtl_visibility) {
+        if (visibility.active && visibility.min_younger < max_wait)
+          ++visibility.min_younger;
+      }
+      if (classification.kind == WaitEventKind::LdsDirect) {
+        if (!dtl_straight_line_model_) {
+          if (record_stats) {
+            record_incomplete_analysis("direct-to-LDS visibility crosses nontrivial control flow");
+          }
+        } else {
+          state.dtl_visibility.push_back(DtlVisibilityEvent{
+              .interval = cdna4_dtl_interval(state, inst, wavefront_size_),
+              .active = true,
+              .min_younger = 0,
+              .barrier_required_count = std::nullopt,
+              .barrier_section_offset = 0,
+              .section_name = section_name,
+              .section_offset = section_offset,
+              .file_offset = file_offset,
+              .instruction = instruction,
+          });
+        }
+      }
+    }
+
     PendingEvent event;
     event.counter = classification.counter;
     event.kind = classification.kind;
@@ -5322,6 +5572,16 @@ private:
                            bool emit_diagnostics) {
     const bool record_stats = emit_diagnostics;
     const bool emit_report_diagnostics = emit_diagnostics && diagnostics_available();
+    constexpr uint64_t kNontrivialControlFlow =
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 && (inst.flags() & kNontrivialControlFlow) != 0) {
+      if (!state.dtl_visibility.empty() && emit_diagnostics) {
+        record_incomplete_analysis("direct-to-LDS visibility crosses nontrivial control flow");
+      }
+      dtl_straight_line_model_ = false;
+      state.dtl_visibility.clear();
+      state.lds_constants = {};
+    }
     const bool immediately_after_mode_setreg = std::exchange(state.vgpr_msb_setreg_hazard, false);
     const bool previous_vm_vsrc_zero_wait = std::exchange(state.previous_vm_vsrc_zero_wait, false);
     const bool current_vm_vsrc_zero_wait = is_vm_vsrc_zero_wait(inst);
@@ -5379,6 +5639,8 @@ private:
       });
     }
     apply_implicit_xcnt_ordering(state, du, events);
+    if (emit_diagnostics)
+      check_dtl_lds_access(state, inst, section_name, section_offset, file_offset, arch);
     if (emit_report_diagnostics) {
       check_dependencies(state, inst, du, events, section_offset, file_offset, arch);
       if (expert_waits_enabled(state))
@@ -5392,6 +5654,9 @@ private:
       update_va_vdst_hazards(state.va_vdst_hazards, inst, du, section_name, section_offset,
                              file_offset);
 
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 && inst.mnemonic() == "s_barrier")
+      apply_dtl_barrier(state, section_offset);
+
     if (is_program_end(inst.mnemonic())) {
       state = {};
       return;
@@ -5404,6 +5669,7 @@ private:
       add_event(state, local_ready_regs, event, inst, du, section_name, section_offset, file_offset,
                 inst.disassemble(), arch, record_stats);
     }
+    update_lds_constant_state(state, inst, du, arch);
     if (is_async_barrier) {
       state.async_barrier_post_wait =
           SgprHazardProducer{section_name, section_offset, file_offset, inst.disassemble()};
@@ -5455,6 +5721,7 @@ private:
   WaitcheckOptions options_;
   const WaitcheckKernelInfo *current_kernel_ = nullptr;
   uint32_t wavefront_size_ = 64;
+  bool dtl_straight_line_model_ = true;
   std::set<
       std::tuple<WaitCounterKind, WaitcheckAccessKind, RegClass, uint16_t, uint16_t, std::string,
                  uint64_t, uint64_t, uint64_t, uint64_t, uint32_t, std::string, std::string>>

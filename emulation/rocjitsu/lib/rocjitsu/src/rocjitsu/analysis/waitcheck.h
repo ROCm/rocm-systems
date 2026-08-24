@@ -165,6 +165,13 @@ struct WaitcheckKernelInfo {
 /// @brief Result of one waitcheck analysis run.
 struct WaitcheckReport {
   bool supported = true;
+  /// @brief Whether every wait dependency encountered was covered by the active model.
+  ///
+  /// @details A supported decoder can still encounter a dependency class whose
+  /// inputs are not precise enough to prove a pass or emit a definite hazard.
+  /// Such a report retains any definite diagnostics but must not be treated as
+  /// clean.
+  bool analysis_complete = true;
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
   size_t instructions_analyzed = 0;
   size_t memory_events_tracked = 0;
@@ -181,10 +188,14 @@ struct WaitcheckReport {
   size_t counter_parity_indeterminate_groups = 0;
   bool counter_parity_diagnostics_truncated = false;
   std::string analysis_error;
+  size_t incomplete_observations = 0;
+  std::string incomplete_reason;
   std::vector<WaitcheckDiagnostic> diagnostics;
   std::vector<WaitcheckCounterUnderaccountingDiagnostic> counter_underaccounting_diagnostics;
 
-  [[nodiscard]] bool passed() const { return diagnostics_observed == 0; }
+  [[nodiscard]] bool passed() const {
+    return supported && analysis_complete && diagnostics_observed == 0;
+  }
 };
 
 /// @brief Human-readable split counter name, e.g. "loadcnt".

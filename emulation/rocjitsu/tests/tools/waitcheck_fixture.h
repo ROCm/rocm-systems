@@ -338,6 +338,27 @@ make_gfx1250_code_object(const std::vector<uint32_t> &text_words) {
   return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
 }
 
+[[nodiscard]] inline std::vector<uint8_t>
+make_gfx950_incomplete_direct_to_lds_code_object(bool include_definite_wait_hazard = false) {
+  std::vector<uint32_t> text_words;
+  if (include_definite_wait_hazard) {
+    text_words.insert(text_words.end(), {
+                                            0xE0501000u,
+                                            0x80000008u, // buffer_load_dword v0, v8, s[0:3] offen
+                                            0x7E020300u, // v_mov_b32 v1, v0 without a wait
+                                        });
+  }
+  text_words.insert(text_words.end(), {
+                                          0xE05D1000u,
+                                          0x80100008u, // buffer_load_dwordx4 ... lds; M0 unknown
+                                          0x7E180280u, // v_mov_b32 v12, 0
+                                          0xD9FE0040u,
+                                          0x1200000Cu, // ds_read_b128 v[18:21], v12 offset:64
+                                          0xBF810000u, // s_endpgm
+                                      });
+  return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX950);
+}
+
 [[nodiscard]] inline std::vector<uint8_t> make_gfx942_missing_wait_code_object() {
   return make_gfx942_code_object({0xE0501000u, 0x80000008u, 0x7E020300u});
 }

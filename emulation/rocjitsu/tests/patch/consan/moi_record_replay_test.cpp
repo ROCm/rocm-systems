@@ -10835,12 +10835,10 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
       words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
     }
     words.insert(words.end(), {
-                                  0xC4050018u,
-                                  0x40883804u,
+                                  0xC4050018u, 0x40883804u,
                                   0x00000005u, // buffer_load_b32 v4, v5, device
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC07Cu,
-                                  0x00080000u,
+                                  0xEE0AC07Cu, 0x00080000u,
                                   0x00000000u, // global_inv scope:device
                                   0xBFC00000u, // s_wait_loadcnt 0
                                   0xBE804EC1u, // s_barrier_signal -1
@@ -11175,6 +11173,80 @@ TEST(ConSanMoi, Cdna4PartitionedDenseHostsAvoidEveryAccessCandidate) {
           << " right=" << right.anchor_offset << "+" << right.original_size;
     }
   }
+}
+
+TEST(ConSanMoi, Cdna4CompactRecordReplayBarriersReserveEightWordEntryIslands) {
+  constexpr uint32_t kAccessCount = 9u;
+  constexpr uint32_t kBarrierCount = 8u;
+  constexpr size_t kLargeTextWords = 32'000u;
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const uint32_t filler = build_s_mov_b32(/*sdst=*/0, /*ssrc0=*/0, kArch);
+  std::vector<uint32_t> text_words(kLargeTextWords, filler);
+  std::vector<uint64_t> barrier_offsets;
+  size_t cursor = 32u;
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    const auto access = build_cdna4_ds_store_b32(
+        /*vaddr=*/2, /*vdata=*/3, index * sizeof(uint32_t), kArch);
+    ASSERT_TRUE(access);
+    std::copy(access->begin(), access->end(), text_words.begin() + cursor);
+    cursor += access->size();
+    if (index < kBarrierCount) {
+      const auto barrier = build_cdna4_s_barrier(kArch);
+      ASSERT_TRUE(barrier);
+      barrier_offsets.push_back(cursor * sizeof(uint32_t));
+      text_words[cursor++] = *barrier;
+    }
+  }
+  text_words.back() = build_s_endpgm(kArch);
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8;
+  options.moi_exec_save_sgpr = 80;
+  options.moi_owner_vgpr = 40;
+  options.moi_epoch_vgpr = 41;
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size =
+      consan_moi_report_buffer_min_bytes(2u * kAccessCount, 0, 0, 0, 2u * kBarrierCount);
+  options.moi_track_barriers = true;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount + kBarrierCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_cdna4_lds_code_object(text_words, "cdna4_compact_record_replay_barriers"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
+                               &ConSanPatchInfo::kind),
+            kBarrierCount)
+      << testing::PrintToString(result.warnings);
+  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
+                                  [](const auto &disposition) {
+                                    return disposition.site_kind ==
+                                               ConSanResourceSiteKind::Barrier &&
+                                           disposition.lowering_outcome ==
+                                               ConSanSiteLoweringOutcome::Patched;
+                                  }),
+            kBarrierCount);
+  ASSERT_EQ(barrier_offsets.size(), kBarrierCount);
+  for (uint64_t barrier_offset : barrier_offsets) {
+    EXPECT_EQ(std::ranges::count_if(
+                  result.patches,
+                  [&](const ConSanPatchInfo &patch) {
+                    return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+                           patch.anchor_offset == barrier_offset;
+                  }),
+              1u)
+        << "barrier_offset=" << barrier_offset;
+  }
+  EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
+    return warning.find("no reachable indirect entry island") != std::string::npos;
+  }));
 }
 
 TEST(ConSanMoi, Rdna4DenseRecordReplayBarriersUseRelocatedRouter) {
@@ -12073,8 +12145,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   constexpr uint8_t kGuestVgprMsbMode = 0x01u;
   constexpr uint16_t kEncodedAddressVgpr = 30u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
-      0xDBFC0000u,
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
       0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
   };
   // Even when an inline body would fit in nearby padding, capturing an

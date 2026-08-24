@@ -1250,6 +1250,9 @@ void print_summary(const std::string &input_path, rj_code_target_id_t target,
               << " unmodeled-waits=" << report.counter_unmodeled_wait_observed
               << " parity-indeterminate=" << report.counter_parity_indeterminate_groups;
   }
+  if (!report.analysis_complete)
+    std::cout << " analysis-complete=false incomplete-observations="
+              << report.incomplete_observations;
   std::cout << "\n";
 }
 
@@ -1315,6 +1318,11 @@ void record_analysis_error(const std::string &input_path, std::string_view reaso
                    "[" + std::to_string(code_object_index) + "]";
     if (!result.report.analysis_error.empty())
       result.error += ": " + result.report.analysis_error;
+  } else if (!result.report.analysis_complete) {
+    result.error = "waitcheck analysis incomplete for " + std::string(rj_code_target_name(target)) +
+                   "[" + std::to_string(code_object_index) + "]";
+    if (!result.report.incomplete_reason.empty())
+      result.error += ": " + result.report.incomplete_reason;
   }
   return result;
 }
@@ -1361,6 +1369,11 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
                    "[" + std::to_string(code_object_index) + "]";
     if (!result.report.analysis_error.empty())
       result.error += ": " + result.report.analysis_error;
+  } else if (!result.report.analysis_complete) {
+    result.error = "waitcheck analysis incomplete for " + std::string(rj_code_target_name(target)) +
+                   "[" + std::to_string(code_object_index) + "]";
+    if (!result.report.incomplete_reason.empty())
+      result.error += ": " + result.report.incomplete_reason;
   }
   return result;
 }
@@ -1384,11 +1397,15 @@ run_kernel_batch_analysis(const CliOptions &options, const std::string &input_pa
   totals.counter_underaccounting += report.counter_underaccounting_observed;
   totals.counter_unmodeled_waits += report.counter_unmodeled_wait_observed;
   totals.counter_parity_indeterminate_groups += report.counter_parity_indeterminate_groups;
-  totals.hazards = totals.hazards || !report.passed();
   if (!report.supported) {
     error = result.error;
     return false;
   }
+  if (!report.analysis_complete) {
+    error = result.error;
+    return false;
+  }
+  totals.hazards = totals.hazards || !report.passed();
 
   ++totals.code_objects;
 
@@ -1460,6 +1477,10 @@ void merge_kernel_analysis(CodeObjectAnalysis &code_object_result,
   combined.counter_parity_indeterminate_groups += kernel.counter_parity_indeterminate_groups;
   combined.counter_parity_diagnostics_truncated =
       combined.counter_parity_diagnostics_truncated || kernel.counter_parity_diagnostics_truncated;
+  combined.analysis_complete = combined.analysis_complete && kernel.analysis_complete;
+  combined.incomplete_observations += kernel.incomplete_observations;
+  if (combined.incomplete_reason.empty() && !kernel.incomplete_reason.empty())
+    combined.incomplete_reason = kernel.incomplete_reason;
 
   for (const WaitcheckDiagnostic &diagnostic : kernel.diagnostics) {
     if (combined.diagnostics.size() >= max_diagnostics) {
@@ -1481,6 +1502,8 @@ void merge_kernel_analysis(CodeObjectAnalysis &code_object_result,
     combined.analysis_error = kernel.analysis_error;
     code_object_result.error = kernel_result.error;
   }
+  if (!kernel.analysis_complete && code_object_result.error.empty())
+    code_object_result.error = kernel_result.error;
 }
 
 [[nodiscard]] bool slower_kernel_less(const ScanTotals::SlowKernel &lhs,

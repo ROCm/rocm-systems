@@ -207,6 +207,17 @@ void print_analysis_failure(const rocjitsu::AmdGpuCodeObject &code_object,
   std::fprintf(stderr, "\n");
 }
 
+void print_analysis_incomplete(const rocjitsu::AmdGpuCodeObject &code_object,
+                               const rocjitsu::WaitcheckReport &report,
+                               std::string_view kernel_name = {}) {
+  std::fprintf(stderr, "rocjitsu-waitcheck: analysis incomplete for %s code object%s%.*s",
+               rj_code_target_name(code_object.target_id()), kernel_name.empty() ? "" : " kernel ",
+               static_cast<int>(kernel_name.size()), kernel_name.empty() ? "" : kernel_name.data());
+  if (!report.incomplete_reason.empty())
+    std::fprintf(stderr, ": %s", report.incomplete_reason.c_str());
+  std::fprintf(stderr, " (observations=%zu)\n", report.incomplete_observations);
+}
+
 [[nodiscard]] AnalysisResult check_code_object(const void *code_object, size_t size) {
   if (!env_enabled("ROCJITSU_WAITCHECK", true) || code_object == nullptr || size == 0 ||
       g_in_waitcheck) {
@@ -225,6 +236,13 @@ void print_analysis_failure(const rocjitsu::AmdGpuCodeObject &code_object,
       auto report = rocjitsu::analyze_waitcnts(parsed, arch, options);
       if (!report.supported) {
         print_analysis_failure(parsed, report);
+        result.passed = false;
+        result.analysis_failed = true;
+        g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
+      } else if (!report.analysis_complete) {
+        if (report.diagnostics_observed != 0)
+          print_report(parsed, report);
+        print_analysis_incomplete(parsed, report);
         result.passed = false;
         result.analysis_failed = true;
         g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
@@ -270,6 +288,13 @@ void print_analysis_failure(const rocjitsu::AmdGpuCodeObject &code_object,
       auto report = rocjitsu::analyze_waitcnts_for_kernel(code_object, arch, kernel, options);
       if (!report.supported) {
         print_analysis_failure(code_object, report, kernel.name);
+        result.passed = false;
+        result.analysis_failed = true;
+        g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);
+      } else if (!report.analysis_complete) {
+        if (report.diagnostics_observed != 0)
+          print_report(code_object, report, kernel.name);
+        print_analysis_incomplete(code_object, report, kernel.name);
         result.passed = false;
         result.analysis_failed = true;
         g_stats.analysis_errors.fetch_add(1, std::memory_order_relaxed);

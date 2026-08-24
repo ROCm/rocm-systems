@@ -273,6 +273,8 @@ void populate_result(const WaitcheckReport &report, size_t diagnostics_reported,
   result.counter_parity_diagnostics_truncated =
       report.counter_parity_diagnostics_truncated ? 1U : 0U;
   result.counter_parity_evaluated = counter_parity_evaluated ? 1U : 0U;
+  result.analysis_complete = report.analysis_complete ? 1U : 0U;
+  result.incomplete_observations = report.incomplete_observations;
 }
 
 } // namespace
@@ -472,6 +474,13 @@ namespace {
                                           parsed.target_id() == ROCJITSU_CODE_TARGET_GFX950;
     populate_result(report, diagnostics_reported, counter_parity_diagnostics_reported,
                     counter_parity_evaluated, local_result);
+    if (!report.analysis_complete) {
+      std::string message = "waitcheck analysis incomplete";
+      if (!report.incomplete_reason.empty())
+        message += ": " + report.incomplete_reason;
+      report_error(local_options, message.c_str());
+      return finish(ROCJITSU_STATUS_UNSUPPORTED);
+    }
     return finish(ROCJITSU_STATUS_SUCCESS);
   } catch (const std::bad_alloc &) {
     report_error(local_options, "waitcheck analysis ran out of memory");
