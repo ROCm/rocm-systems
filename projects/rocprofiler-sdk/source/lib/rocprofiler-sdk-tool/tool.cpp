@@ -4519,8 +4519,21 @@ signal_finalization_worker()
         sigaddset(&mask, sig);
     pthread_sigmask(SIG_BLOCK, &mask, nullptr);
 
-    uint64_t val = 0;
-    if(read(sw.eventfd, &val, sizeof(val)) < 0) return;
+    // Retry across EINTR: the worker blocks only the handled signals, so any other signal delivered
+    // here (SIGCHLD, SIGALRM, ...) would otherwise abort the read and kill the worker, after which
+    // nothing flushes and every repeat signal is swallowed forever.
+    uint64_t val   = 0;
+    ssize_t  nread = 0;
+    do
+    {
+        nread = read(sw.eventfd, &val, sizeof(val));
+    } while(nread < 0 && errno == EINTR);
+
+    if(nread < 0)
+    {
+        ROCP_WARNING << "signal worker: eventfd read failed: " << strerror(errno);
+        return;
+    }
 
     auto this_pid  = getpid();
     auto this_ppid = getppid();
