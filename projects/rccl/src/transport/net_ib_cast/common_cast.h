@@ -87,6 +87,8 @@ extern int IbCastNMergedDevs;
 struct alignas(64) ncclIbMergedDev {
   ncclNetVDeviceProps_t vProps;
   int speed;
+  int16_t railId;
+  int16_t planeId;
   char devName[MAX_MERGED_DEV_NAME]; // Up to NCCL_IB_MAX_DEVS_PER_NIC * name size, and a character for each '+'
 };
 
@@ -124,6 +126,9 @@ struct alignas(64) ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  int16_t railId;
+  int16_t planeId;
+  int16_t planeIdx;
   enum ncclIbProvider ibProvider;
   union {
     struct {
@@ -391,6 +396,7 @@ struct ncclIbQpRtrAttr {
   union ibv_gid remoteGid;
 
   uint8_t localIbPort;
+  uint8_t localPortFlags;
   union ibv_gid localGid;
   int32_t localGidIndex;
 };
@@ -613,8 +619,8 @@ static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element
 static_assert(sizeof(struct ncclIbSendFifo) <= 64, "struct ncclIbSendFifo should fit one cache line");
 static_assert((sizeof(struct ncclIbSendFifoCtsInline) % 32) == 0,
               "ncclIbSendFifoCtsInline element size must be 32-byte aligned");
-static_assert((sizeof(struct ncclIbSendFifoCtsInline) <=32),
-               "struct ncclIbSendFifoCtsInline should fit within 32-bytes");
+static_assert((sizeof(struct ncclIbSendFifoCtsInline) <= 32),
+              "struct ncclIbSendFifoCtsInline should fit within 32-bytes");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 
@@ -755,6 +761,8 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** /*sendDevComm*/);
+ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
+                               ncclNetDeviceHandle_t** /*sendDevComm*/, int envTrafficClass);
 ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle_t** /*recvDevComm*/);
 ncclResult_t IbCastRegMr(void* comm, void* data, size_t size, int type, void** mhandle);
 ncclResult_t IbCastRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle);

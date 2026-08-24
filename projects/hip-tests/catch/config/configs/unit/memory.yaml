@@ -834,6 +834,7 @@ memory:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_D2D_LargeBatch: *level_2
   Unit_hipMemcpyBatchAsync_Swap:
     <<: *level_2
     # ROCM-29275
@@ -849,6 +850,8 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_MixedMulticastSources:
     <<: *level_2
+    # ROCM-29275
+    disabled: [gfx1250]
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_P2P_Swap:
     <<: *level_2
@@ -860,6 +863,9 @@ memory:
     tags: [transfer, multigpu]
   Unit_hipMemcpyBatchAsync_P2P_Multicast_Large:
     <<: *level_3
+    tags: [transfer, multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_IndirectCopy:
+    <<: *level_2
     tags: [transfer, multigpu]
   Unit_hipMemcpyBatchAsync_Negative:
     <<: *level_2
@@ -885,10 +891,16 @@ memory:
   Unit_hipMemcpyBatchAsync_P2P_Functional:
     <<: *level_2
     tags: [transfer, multigpu]
-  Unit_hipMemcpyBatchAsync_IndirectDst:
+  Unit_hipMemcpyBatchAsync_IndirectCopy:
     <<: *level_2
     tags: [transfer]
-  Unit_hipMemcpyBatchAsync_IndirectSrc:
+  Unit_hipMemcpyBatchAsync_IndirectCopy_StreamOrderedPointer:
+    <<: *level_2
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_ExtOp_Negative:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect:
     <<: *level_2
     tags: [transfer]
   Unit_hipMemsetD2D8_BasicFunctional:

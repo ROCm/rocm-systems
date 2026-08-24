@@ -318,20 +318,6 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
     free(task);
   }
 
-  while (!ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {
-    struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->suspendTaskQueue);
-    struct ncclComm* taskComm = task->comm;
-    free(task);
-    NCCLCHECKGOTO(ncclCommMemSuspend(taskComm), ret, fail);
-  }
-
-  while (!ncclIntruQueueEmpty(&comm->resumeTaskQueue)) {
-    struct ncclMemManagerTask* task = ncclIntruQueueDequeue(&comm->resumeTaskQueue);
-    struct ncclComm* taskComm = task->comm;
-    free(task);
-    NCCLCHECKGOTO(ncclCommMemResume(taskComm), ret, fail);
-  }
-
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* task = ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue);
     NCCLCHECKGOTO(ncclRmaCeInit(task->comm), ret, fail);

@@ -221,6 +221,10 @@ TEST_F(NetIbMPITest, DeregisterNullHandle) {
 
 // Send/Recv Tests
 
+// Parameterized by MPIEnvironment::nThreads (--net_ib_nthreads=N). Every
+// worker owns an independent connection, matching rccl-tests' -t model. The
+// harness performs MPI setup and failure handshakes on the main thread, then
+// releases the workers together so their data paths overlap deterministically.
 TEST_F(NetIbMPITest, SimpleSendRecv) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
@@ -230,55 +234,120 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    const int senderRank = 1;
+    const int nThreads = MPIEnvironment::nThreads;
 
-    const size_t bufferSize = kSmallBufferSize;
-    const int tag = 42;
+    if (nThreads == 1) {
+        ConnectionPair pair;
+        NetConnectionGuard connGuard(net_);
+        SetupConnectionWithGuard(0, pair, connGuard);
 
-    void* buffer = malloc(bufferSize);
-    ASSERT_NE(buffer, nullptr);
-    auto bufferGuard = makeHostBufferAutoGuard(buffer);
+        const size_t bufferSize = kSmallBufferSize;
+        const int tag = 42;
 
-    void* mhandle = nullptr;
-    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+        void* buffer = malloc(bufferSize);
+        ASSERT_NE(buffer, nullptr);
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
 
-    // Use NetMHandleGuard for automatic cleanup on failure (exception safety)
-    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
+        void* mhandle = nullptr;
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+        NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
 
-    void* request = nullptr;
+        void* request = nullptr;
+        if (rank == 0) {
+            PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
+        } else {
+            fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank));
+            PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+        }
 
-    if (rank == 0) {
-        // Receiver
-        PostSingleRecv(pair.recvComm, buffer, bufferSize, tag, mhandle, &request);
-    } else {
-        // Sender
-        fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(rank));
-        PostSendWithRetry(pair.sendComm, buffer, bufferSize, tag, mhandle, &request);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int sizes[1] = {0};
+        ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
+        ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+
+        if (rank == 0) {
+            EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(senderRank)))
+                << "Data validation failed";
+        }
+        return;
     }
 
+    auto runSendRecv = [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        ThreadResult result;
+        const size_t bufferSize = kSmallBufferSize;
+        const int tag = 42;
+        const int seed = senderRank + threadIdx * 97;
+
+        void* buffer = malloc(bufferSize);
+        if (!buffer) { result.ok = false; result.msg = "malloc failed"; return result; }
+        auto bufferGuard = makeHostBufferAutoGuard(buffer);
+
+        void* mhandle = nullptr;
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        if (RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle) != ncclSuccess) {
+            result.ok = false; result.msg = "RegisterMemory failed"; return result;
+        }
+        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+        void* request = nullptr;
+        if (rank == 0) {
+            void*  bufs[1]    = {buffer};
+            size_t sizes[1]   = {bufferSize};
+            int    tags[1]    = {tag};
+            void*  handles[1] = {mhandle};
+            // Unlike the send path below, a NULL request is treated as a hard
+            // failure rather than retried. That is only valid because each
+            // worker owns its own recvComm and posts exactly one receive on it,
+            // so the receive FIFO is guaranteed empty here and irecv cannot
+            // return NULL for want of a free slot — a NULL means the plugin
+            // broke its contract. If workers ever share a comm or post several
+            // receives before waiting, NULL becomes ordinary backpressure and
+            // this path needs the same retry loop the send path uses.
+            if (PostRecv(pair.recvComm, 1, bufs, sizes, tags, handles, &request) != ncclSuccess) {
+                result.ok = false; result.msg = "PostRecv failed"; return result;
+            }
+        } else {
+            fillHostBufferWithPattern<uint8_t>(buffer, bufferSize, makeBytePattern(seed));
+            int attempts = 0;
+            do {
+                if (PostSend(pair.sendComm, buffer, bufferSize, tag, mhandle, &request) != ncclSuccess) {
+                    result.ok = false; result.msg = "PostSend failed"; return result;
+                }
+                if (request != nullptr) break;
+                if (++attempts >= kMaxRetryAttempts) {
+                    result.ok = false; result.msg = "PostSend NULL request after retries"; return result;
+                }
+                usleep(kPollIntervalUs);
+            } while (request == nullptr);
+        }
+
+        int sizes[1] = {0};
+        if (request == nullptr) { result.ok = false; result.msg = "request NULL before wait"; return result; }
+        if (WaitForCompletion(request, sizes) != ncclSuccess) {
+            result.ok = false; result.msg = "WaitForCompletion failed"; return result;
+        }
+
+        if (rank == 0) {
+            if (sizes[0] != (int)bufferSize) {
+                result.ok = false; result.msg = "Received size mismatch"; return result;
+            }
+            if (!verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(seed))) {
+                result.ok = false; result.msg = "Data validation failed"; return result;
+            }
+        }
+        return result;
+    };
+
+    const RdmaResourceCounts before = CaptureRdmaResources();
+    RunMultiThreadedIndependent(0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        return runSendRecv(threadIdx, pair);
+    });
     MPI_Barrier(MPI_COMM_WORLD);
-
-    // Wait for completion
-    int sizes[1] = {0};
-    ASSERT_NE(request, nullptr) << "Request must be non-NULL before waiting";
-    ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
-
-    if (rank == 0) {
-        EXPECT_EQ(sizes[0], bufferSize) << "Received size mismatch";
-
-        // Verify received data
-        int senderRank = 1;  // Data was sent by rank 1
-        EXPECT_TRUE(verifyHostBufferData<uint8_t>(buffer, bufferSize, makeBytePattern(senderRank))) << "Data validation failed";
-    }
-
-    // NetMHandleGuard will automatically deregister memory when test scope ends
-    // Destructor order ensures MR is deregistered before connection closes:
-    //   1. mhandleGuard destructor (deregisters MR)
-    //   2. bufferGuard destructor (frees buffer)
-    //   3. connGuard destructor (closes connection)
+    AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded SimpleSendRecv");
 }
 
 TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
@@ -499,6 +568,10 @@ TEST_F(NetIbMPITest, FlushAfterRecv) {
 // NOTE: Flush (iflush) is intentionally NOT called because:
 //   1. Flush is only needed for GPU Direct RDMA to ensure data visibility
 //   2. For NCCL_PTR_HOST transfers, flush is unnecessary
+// Parameterized by MPIEnvironment::nThreads. Every worker has an independent
+// connection and buffer. N=1 retains the two per-transfer MPI barriers; the
+// threaded path leaves rank synchronization to the main-thread harness after
+// every worker has completed.
 TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                          false, kMinGpusPerNode, kNoNodeLimit))
@@ -508,74 +581,159 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     AssertInitAndGetDevices(&ndev);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
-
     const size_t bufferSize = kSmallBufferSize;
     const int numTransfers = kNumSequentialTransfers;
+    const int nThreads = MPIEnvironment::nThreads;
 
-    void* sendBuffer = nullptr;
-    void* recvBuffer = nullptr;
-    HostBufferAutoGuard sendBufferGuard(nullptr);
-    HostBufferAutoGuard recvBufferGuard(nullptr);
+    if (nThreads == 1) {
+        ConnectionPair pair;
+        NetConnectionGuard connGuard(net_);
+        SetupConnectionWithGuard(0, pair, connGuard);
 
-    if (rank == 0) {
-        recvBuffer = malloc(bufferSize);
-        ASSERT_NE(recvBuffer, nullptr);
-        recvBufferGuard = makeHostBufferAutoGuard(recvBuffer);
-    } else {
-        sendBuffer = malloc(bufferSize);
-        ASSERT_NE(sendBuffer, nullptr);
-        sendBufferGuard = makeHostBufferAutoGuard(sendBuffer);
-    }
-
-    void* mhandle = nullptr;
-    void* buffer = (rank == 0) ? recvBuffer : sendBuffer;
-    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-    ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
-    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
-
-    for (int i = 0; i < numTransfers; i++) {
-        const int tag = kTransferTagBase + i;
-        const int seed = kBaseSeedOffset + i;  // Unique seed for each transfer
-        void* request = nullptr;
+        void* sendBuffer = nullptr;
+        void* recvBuffer = nullptr;
+        HostBufferAutoGuard sendBufferGuard(nullptr);
+        HostBufferAutoGuard recvBufferGuard(nullptr);
 
         if (rank == 0) {
-            memset(recvBuffer, 0, bufferSize);
-            PostSingleRecv(pair.recvComm, recvBuffer, bufferSize, tag, mhandle, &request);
-            ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
+            recvBuffer = malloc(bufferSize);
+            ASSERT_NE(recvBuffer, nullptr);
+            recvBufferGuard = makeHostBufferAutoGuard(recvBuffer);
         } else {
-            fillHostBufferWithPattern<uint8_t>(sendBuffer, bufferSize, makeBytePattern(seed));
-            PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
+            sendBuffer = malloc(bufferSize);
+            ASSERT_NE(sendBuffer, nullptr);
+            sendBufferGuard = makeHostBufferAutoGuard(sendBuffer);
         }
 
-        // Barrier 1: Ensure both ranks have posted their operations before waiting
-        MPI_Barrier(MPI_COMM_WORLD);
+        void* mhandle = nullptr;
+        void* buffer = (rank == 0) ? recvBuffer : sendBuffer;
+        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+        ASSERT_EQ(RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+        NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
 
-        // Wait for completion
-        int sizes[1] = {0};
-        ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
+        for (int i = 0; i < numTransfers; i++) {
+            const int tag = kTransferTagBase + i;
+            const int seed = kBaseSeedOffset + i;
+            void* request = nullptr;
 
-        // Barrier 2: CRITICAL - Ensure BOTH ranks have completed before EITHER continues
-        // This prevents rank A from starting transfer N+1 while rank B is still
-        // completing transfer N, which would cause request object reuse race conditions
-        MPI_Barrier(MPI_COMM_WORLD);
+            if (rank == 0) {
+                memset(recvBuffer, 0, bufferSize);
+                PostSingleRecv(pair.recvComm, recvBuffer, bufferSize, tag, mhandle, &request);
+                ASSERT_NE(request, nullptr) << "Recv request should never be NULL";
+            } else {
+                fillHostBufferWithPattern<uint8_t>(sendBuffer, bufferSize, makeBytePattern(seed));
+                PostSendWithRetry(pair.sendComm, sendBuffer, bufferSize, tag, mhandle, &request);
+            }
 
-        if (rank == 0) {
-            EXPECT_EQ(sizes[0], bufferSize) << "Transfer " << i << " size mismatch";
+            MPI_Barrier(MPI_COMM_WORLD);
 
-            EXPECT_TRUE(verifyHostBufferData<uint8_t>(recvBuffer, bufferSize, makeBytePattern(seed))) << "Transfer " << i << " data validation failed (seed=" << seed << ")";
+            int sizes[1] = {0};
+            ASSERT_EQ(WaitForCompletion(request, sizes), ncclSuccess);
 
-            // NOTE: Flush is NOT called for host memory transfers
-            // Flush (iflush) is only needed for GPU Direct RDMA to ensure data visibility on GPU.
-            // For NCCL_PTR_HOST transfers, flush is unnecessary and calling it can cause
-            // race conditions when request objects are rapidly reused.
-            // The NET IB implementation will no-op the flush call for host memory anyway.
+            MPI_Barrier(MPI_COMM_WORLD);
+
+            if (rank == 0) {
+                EXPECT_EQ(sizes[0], bufferSize) << "Transfer " << i << " size mismatch";
+                EXPECT_TRUE(verifyHostBufferData<uint8_t>(recvBuffer, bufferSize, makeBytePattern(seed)))
+                    << "Transfer " << i << " data validation failed (seed=" << seed << ")";
+            }
         }
+        return;
     }
 
-    // NetMHandleGuard will automatically deregister at scope end
+    auto runSequentialTransfers = [&](int threadIdx, void* sendComm, void* recvComm) -> ThreadResult {
+        ThreadResult result;
+        void* sendBuffer = nullptr;
+        void* recvBuffer = nullptr;
+        HostBufferAutoGuard sendBufferGuard(nullptr);
+        HostBufferAutoGuard recvBufferGuard(nullptr);
+
+        if (rank == 0) {
+            recvBuffer = malloc(bufferSize);
+            if (!recvBuffer) {
+                result.ok = false;
+                result.msg = "malloc failed";
+            } else {
+                recvBufferGuard = makeHostBufferAutoGuard(recvBuffer);
+            }
+        } else {
+            sendBuffer = malloc(bufferSize);
+            if (!sendBuffer) {
+                result.ok = false;
+                result.msg = "malloc failed";
+            } else {
+                sendBufferGuard = makeHostBufferAutoGuard(sendBuffer);
+            }
+        }
+
+        void* buffer = (rank == 0) ? recvBuffer : sendBuffer;
+        void* comm = (rank == 0) ? recvComm : sendComm;
+        void* mhandle = nullptr;
+        if (result.ok && RegisterMemory(comm, buffer, bufferSize, NCCL_PTR_HOST, &mhandle) != ncclSuccess) {
+            result.ok = false;
+            result.msg = "RegisterMemory failed";
+        }
+
+        if (!result.ok) return result;
+
+        NetMHandleWorkerGuard mhandleGuard(mhandle, NetMHandleWorkerDeleter(net_, comm));
+
+        for (int i = 0; i < numTransfers; i++) {
+            const int tag = kTransferTagBase + i;
+            const int seed = kBaseSeedOffset + threadIdx * 10000 + i;
+            void* request = nullptr;
+            bool postOk = true;
+
+            if (rank == 0) {
+                memset(recvBuffer, 0, bufferSize);
+                void*  bufs[1]    = {recvBuffer};
+                size_t sizes_[1]  = {bufferSize};
+                int    tags[1]    = {tag};
+                void*  handles[1] = {mhandle};
+                if (PostRecv(recvComm, 1, bufs, sizes_, tags, handles, &request) != ncclSuccess ||
+                    request == nullptr) {
+                    result.ok = false; result.msg = "PostRecv failed"; postOk = false;
+                }
+            } else {
+                fillHostBufferWithPattern<uint8_t>(sendBuffer, bufferSize, makeBytePattern(seed));
+                int attempts = 0;
+                do {
+                    if (PostSend(sendComm, sendBuffer, bufferSize, tag, mhandle, &request) != ncclSuccess) {
+                        result.ok = false; result.msg = "PostSend failed"; postOk = false; break;
+                    }
+                    if (request != nullptr) break;
+                    if (++attempts >= kMaxRetryAttempts) {
+                        result.ok = false; result.msg = "PostSend NULL request after retries"; postOk = false; break;
+                    }
+                    usleep(kPollIntervalUs);
+                } while (request == nullptr);
+            }
+
+            int sizes[1] = {0};
+            if (postOk && request != nullptr && WaitForCompletion(request, sizes) != ncclSuccess) {
+                result.ok = false; result.msg = "WaitForCompletion failed";
+            }
+
+            if (!result.ok) return result;
+
+            if (rank == 0) {
+                if (sizes[0] != (int)bufferSize) {
+                    result.ok = false; result.msg = "Size mismatch"; return result;
+                }
+                if (!verifyHostBufferData<uint8_t>(recvBuffer, bufferSize, makeBytePattern(seed))) {
+                    result.ok = false; result.msg = "Data validation failed"; return result;
+                }
+            }
+        }
+        return result;
+    };
+
+    const RdmaResourceCounts before = CaptureRdmaResources();
+    RunMultiThreadedIndependent(0, nThreads, [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+        return runSequentialTransfers(threadIdx, pair.sendComm, pair.recvComm);
+    });
+    MPI_Barrier(MPI_COMM_WORLD);
+    AssertNoRdmaLeaks(before, CaptureRdmaResources(), "threaded MultipleSequentialTransfers");
 }
 
 TEST_F(NetIbMPITest, LargeTransfer) {

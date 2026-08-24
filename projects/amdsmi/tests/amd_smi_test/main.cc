@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdlib>
 
@@ -201,7 +202,8 @@ TEST(GpuFunctionalReadOnly, TestGPUBusyRead) {
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadOnly, TestPowerRead) {
-  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  // Skip on non-DXG VMs (KVM, etc.); WSL/DXG has a backend for power cap.
+  if (amd::smi::is_vm_guest() && access("/dev/dxg", F_OK) != 0) GTEST_SKIP();
   TestPowerRead tst;
   RunGenericTest(&tst);
 }
@@ -286,6 +288,9 @@ TEST(GpuFunctionalReadOnly, TestMemPageInfoRead) {
 }
 
 TEST(SystemFunctionalReadOnly, TestMutualExclusion) {
+  // Cross-process device mutex doesn't apply to the DXG backend on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: cross-process mutex not applicable to DXG backend";
   TestMutualExclusion tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
@@ -340,11 +345,16 @@ TEST(SystemFunctionalReadOnly, TestKfdAtforkRead) {
 }
 
 TEST(IfoeFunctionalReadOnly, TestFabricRead) {
+  // Fabric/UALoE sysfs is not available on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: UALoE/fabric sysfs not available on DXG backend";
   TestFabricRead tst;
   RunGenericTest(&tst);
 }
 
 TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: iFoE NIC not available on DXG backend";
   TestIfoeInfoRead tst;
   RunGenericTest(&tst);
 }
@@ -355,6 +365,9 @@ TEST(IfoeFunctionalReadOnly, TestTrayInfoRead) {
 }
 
 TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
+  // Cross-process device mutex doesn't apply to the DXG backend on WSL.
+  if (access("/dev/dxg", F_OK) == 0)
+    GTEST_SKIP() << "Skipped on WSL: cross-process mutex not applicable to DXG backend";
   TestCrossProcessSerialization tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();

@@ -574,6 +574,8 @@ discover_relocation_function_tables(const AmdGpuCodeObject &object) {
       Elf64_Rela rela{};
       if (!read_object(image, relocations.sh_offset + index * sizeof(Elf64_Rela), rela))
         continue;
+      if (!elf_relocation_place_is_allocated(ehdr, sections, relocations, rela.r_offset))
+        continue;
       const uint32_t type = elf_reloc_type(rela.r_info);
       if (type == R_AMDGPU_RELATIVE64) {
         if (rela.r_addend < 0)

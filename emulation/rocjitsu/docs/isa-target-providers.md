@@ -49,6 +49,12 @@ std::unique_ptr<rocjitsu::Decoder> create_target_decoder() {
 }
 ```
 
+`VendorIsa::Decoder` must publish a nonzero `kMaxInstructionWords`, measured in
+32-bit words, that bounds both every raw-pointer read performed while decoding
+and the size of every successfully decoded instruction. Providers that implement
+`rocjitsu::Decoder` directly must return the same bound from
+`max_instruction_words()`.
+
 Mark the ISA implementation target as a provider. The provider source is
 compiled with that existing target; CMake records only its declaration header.
 
