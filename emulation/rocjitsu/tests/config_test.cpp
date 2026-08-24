@@ -19,6 +19,7 @@
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
@@ -35,6 +36,7 @@ RJ_DIAGNOSTIC_POP
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -1405,6 +1407,7 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
     ]}})";
 
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  EXPECT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1250);
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   ASSERT_EQ(cu->vgpr_storage_lane_count(), 32u);
@@ -1419,16 +1422,15 @@ TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
 }
 
 TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
-  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1250","gpu":{
-    "device":{"gfx_target_version":120501}}}})";
-  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
-               std::runtime_error);
-}
-
-TEST(ConfigLoaderTest, RejectsGfx1251SimulationUntilExecutionIsImplemented) {
-  const char *json = R"({"vm":{"arch":"cdna5","target":"gfx1251"}})";
-  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
-               std::runtime_error);
+  constexpr std::array mismatches{
+      R"({"vm":{"arch":"cdna5","target":"gfx1250","gpu":{
+        "device":{"gfx_target_version":120501}}}})",
+      R"({"vm":{"arch":"cdna5","target":"gfx1251","gpu":{
+        "device":{"gfx_target_version":120500}}}})",
+  };
+  for (const char *json : mismatches)
+    EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
+                 std::runtime_error);
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
