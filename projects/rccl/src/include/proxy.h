@@ -388,9 +388,6 @@ struct ncclProxyState {
   struct ncclSocket* listenSock;
   struct ncclIpcSocket ipcSock;
   int stop;
-#ifdef ENABLE_FAULT_INJECTION
-  int testServiceLoopEntered;
-#endif
   ncclResult_t asyncResult;
 
   // Used by main thread
@@ -426,6 +423,12 @@ struct ncclProxyState {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;
   int ll128DataElems;
+
+#ifdef ENABLE_FAULT_INJECTION
+  // Test-only field: signals that ncclProxyService reached its main loop.
+  // Placed at end of struct to avoid ABI mismatch with non-test builds.
+  int testServiceLoopEntered;
+#endif
 };
 
 enum proxyConnectState {
