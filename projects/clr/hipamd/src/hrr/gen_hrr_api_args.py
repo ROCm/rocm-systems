@@ -422,9 +422,6 @@ ERROR_STUB_PLAYBACK_APIS: Set[str] = {
     # at here.
     "hipGraphAddExternalSemaphoresSignalNode",
     "hipGraphAddExternalSemaphoresWaitNode",
-    # hipHostNodeParams is a host function pointer plus its userData, both
-    # belonging to the capturing process.
-    "hipGraphAddHostNode",
     # hipGraphNodeParams is a union over every node kind, so reconstructing it
     # means reconstructing all of them through one 256-byte blob whose active
     # member is only known from a type tag. The typed spellings above are
@@ -433,6 +430,71 @@ ERROR_STUB_PLAYBACK_APIS: Set[str] = {
     # hipGraphInstantiateParams carries an out node pointer and an error-log
     # buffer belonging to the capturing process.
     "hipGraphInstantiateWithParams",
+}
+
+# ---------------------------------------------------------------------------
+# APIs whose effect cannot be reproduced at replay by anything HRR can do, as
+# opposed to APIs that merely have not been implemented yet.
+#
+# A host callback is a function pointer into the capturing process; a fabric or
+# IPC handle names an export only its owning process can make; a multi-device
+# launch descriptor carries a host function address for each device. Recording
+# more bytes does not help — the missing thing is not in the arguments.
+#
+# The alternative to declaring these is what HRR used to do: hand the recorded
+# value to the real API and let it fail (or crash) somewhere inside the runtime,
+# where the diagnosis is a HIP error code with no attribution. So they get a
+# handler that says exactly which API is unreplayable and why, returns
+# hipErrorNotSupported (fatal unless --continue-on-error), and is counted in the
+# replay summary's unreplayable list. The capture shim also warns once, so the
+# gap is visible when the recording is made.
+#
+# Maps API name -> the reason, which is printed verbatim at both ends.
+# ---------------------------------------------------------------------------
+_HOST_CALLBACK_REASON = (
+    "the callback is a host function pointer belonging to the capturing "
+    "process, so there is no function here to enqueue"
+)
+
+_MULTI_DEVICE_LAUNCH_REASON = (
+    "each hipLaunchParams entry names its kernel by a host function address in "
+    "the capturing process, and a cooperative multi-device launch cannot be "
+    "decomposed into per-device launches without breaking the grid-wide "
+    "barrier it exists for"
+)
+
+_SHAREABLE_IMPORT_REASON = (
+    "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) "
+    "belonging to the process that exported it, and the same number in the "
+    "replaying process names a different object or nothing at all"
+)
+
+UNREPLAYABLE_PLAYBACK_APIS: Dict[str, str] = {
+    "hipLaunchHostFunc":        _HOST_CALLBACK_REASON,
+    "hipLaunchHostFunc_spt":    _HOST_CALLBACK_REASON,
+    "hipStreamAddCallback":     _HOST_CALLBACK_REASON,
+    "hipStreamAddCallback_spt": _HOST_CALLBACK_REASON,
+    "hipLaunchCooperativeKernelMultiDevice": _MULTI_DEVICE_LAUNCH_REASON,
+    "hipExtLaunchMultiKernelMultiDevice":    _MULTI_DEVICE_LAUNCH_REASON,
+    # A host node is the graph spelling of the same thing: hipHostNodeParams
+    # is a function pointer plus a userData pointer, both into the capturing
+    # process. The graph it belongs to is marked incomplete so instantiation
+    # refuses rather than running a graph with the host work missing.
+    "hipGraphAddHostNode":            _HOST_CALLBACK_REASON,
+    "hipGraphHostNodeSetParams":      _HOST_CALLBACK_REASON,
+    "hipGraphExecHostNodeSetParams":  _HOST_CALLBACK_REASON,
+    # The two shareable-handle imports. Replay does re-run the matching export,
+    # but into a buffer of its own: the exported handle is minted fresh and the
+    # recorded number is not it. Handing the recorded number to the runtime is
+    # what made hipMemPoolImportFromShareableHandle crash inside the pool
+    # import, so replay refuses it by name instead.
+    "hipMemImportFromShareableHandle":     _SHAREABLE_IMPORT_REASON,
+    "hipMemPoolImportFromShareableHandle": _SHAREABLE_IMPORT_REASON,
+    # A user object exists to run its destructor when the last reference goes,
+    # and that destructor is a hipHostFn_t in the capturing process. Creating
+    # one at replay with no destructor would look like it worked and quietly
+    # drop the only thing the object does.
+    "hipUserObjectCreate": _HOST_CALLBACK_REASON,
 }
 
 # ---------------------------------------------------------------------------
@@ -488,18 +550,11 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipDrvGetErrorString",
     "hipGetTextureReference",
     "hipKernelGetName",
-    "hipMemImportFromShareableHandle",
-    # The export side now writes its handle into a local out-buffer instead of
-    # the stale capture-time address, so replay really does mint an fd — and
-    # the recorded number the import was handed names something else entirely
-    # in this process, which faults inside the pool import.
-    "hipMemPoolImportFromShareableHandle",
     "hipMemRetainAllocationHandle",
     # hipMemGetAllocationPropertiesFromHandle — handle is stale at playback; query not needed
     "hipMemGetAllocationPropertiesFromHandle",
     "hipModuleGetTexRef",
     "hipStreamGetDevice",
-    "hipUserObjectCreate",
     # Category 6: Misc — struct field issues, wrong return type casts, or missing types
     # hipDeviceGetByPCIBusId takes a char* PCI string (stale capture-time pointer) — noop
     "hipDeviceGetByPCIBusId",
@@ -724,8 +779,6 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphMemcpyNodeGetParams",
     "hipGraphMemsetNodeGetParams",
     "hipGraphHostNodeGetParams",
-    "hipGraphHostNodeSetParams",
-    "hipGraphExecHostNodeSetParams",
     "hipGraphExecDestroy",
     "hipGraphExecGetFlags",
     # The generic hipGraphNodeParams spelling — see hipGraphAddNode.
@@ -1344,7 +1397,8 @@ _HANDLE_TYPES = {
 # By-value structs are NOT in here: they are carried as inline bytes instead
 # (BY_VALUE_STRUCTS). What is left is genuinely unrecordable — a function
 # pointer or an opaque handle whose value means nothing outside the capturing
-# process.
+# process. Anything here that an API actually depends on belongs in
+# UNREPLAYABLE_PLAYBACK_APIS, so replay says so instead of passing a null.
 _NON_CASTABLE_TYPES = {
     "hipGraphicsResource_t",  # opaque GL interop resource
     "hipStreamCallback_t",    # function pointer
@@ -2414,6 +2468,12 @@ def generate_shim(entry: ApiEntry) -> str:
     lines.append(f"// Generated shim")
     lines.append(f"static {entry.ret_type} capture_{entry.name}({param_decl}) {{")
 
+    # An API replay cannot reproduce is worth knowing about while the recording
+    # is being made, not only when someone later tries to replay it.
+    if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
+        lines.append(f'  hrr_cap::writer::note_unreplayable("{entry.name}",')
+        lines.append(f'      "{UNREPLAYABLE_PLAYBACK_APIS[entry.name]}");')
+
     if is_non_hiperrort_ret:
         # Return type is a struct/scalar (not hipError_t) — can't capture, just forward
         lines.append(f"  return {table_name}.{fn_field}({fwd_args});")
@@ -3013,6 +3073,26 @@ def generate_playback_shim(entry: ApiEntry) -> str:
                 f"  return hipSuccess;\n"
                 f"}}\n")
 
+    # Unreplayable APIs: name the API and the reason, mark the replay as
+    # having skipped something it cannot reproduce, and return an error. Loud
+    # and attributable beats letting the real API fail somewhere inside the
+    # runtime with a bare error code, which is what these used to do.
+    if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
+        reason = UNREPLAYABLE_PLAYBACK_APIS[entry.name]
+        gparam = _graph_param(entry)
+        # A graph that was supposed to contain this node is now short one, and
+        # the place that matters is instantiation, not here.
+        mark = (f"  const auto* a = reinterpret_cast<const {sname}*>(payload);\n"
+                f"  ctx.mark_graph_incomplete(a->{gparam}, \"{entry.name}\");\n"
+                if gparam else "  (void)payload;\n")
+        return (f"static hipError_t {fname}"
+                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+                f"{mark}"
+                f"  hrr_note_unreplayable(ctx, \"{entry.name}\",\n"
+                f"                        \"{reason}\");\n"
+                f"  return hipErrorNotSupported;\n"
+                f"}}\n")
+
     # No-op playback APIs: emit a one-time warning then return hipSuccess.
     # The static bool ensures the message fires once per process, not once per event,
     # so replays with thousands of events don't spam stderr.
@@ -3375,6 +3455,7 @@ def main() -> None:
          set(SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS.keys())),
         ("EXTRA_FIELDS",         set(EXTRA_FIELDS.keys())),
         ("DEREF_FIELDS",         set(DEREF_FIELDS.keys())),
+        ("UNREPLAYABLE_PLAYBACK_APIS", set(UNREPLAYABLE_PLAYBACK_APIS.keys())),
     ]:
         bad = sorted(n for n in api_set if n not in parsed_names)
         if bad:
@@ -3434,9 +3515,28 @@ def main() -> None:
             print(f"  {p}")
         sys.exit(1)
 
+    # An unreplayable API whose capture shim is hand-written never emits the
+    # capture-time warning, so the gap would only show up at replay.
+    silent_unreplayable = sorted(
+        set(UNREPLAYABLE_PLAYBACK_APIS) & MANUAL_CAPTURE_APIS)
+    if silent_unreplayable:
+        print("\nERROR: these UNREPLAYABLE_PLAYBACK_APIS have hand-written "
+              "capture shims, so no capture-time warning is emitted. Call "
+              "hrr_cap::writer::note_unreplayable() from the shim in "
+              "hip_capture.cpp, or drop the API from MANUAL_CAPTURE_APIS:")
+        for n in silent_unreplayable:
+            print(f"  '{n}'")
+        sys.exit(1)
+
     # generate_playback_shim() applies the classes in a fixed order, so an API
     # in two of them silently gets whichever comes first.
     for a_name, a_set, b_name, b_set in [
+        ("UNREPLAYABLE_PLAYBACK_APIS", set(UNREPLAYABLE_PLAYBACK_APIS),
+         "ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
+        ("UNREPLAYABLE_PLAYBACK_APIS", set(UNREPLAYABLE_PLAYBACK_APIS),
+         "NOOP_PLAYBACK_APIS", NOOP_PLAYBACK_APIS),
+        ("UNREPLAYABLE_PLAYBACK_APIS", set(UNREPLAYABLE_PLAYBACK_APIS),
+         "MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
         ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS,
          "NOOP_PLAYBACK_APIS", NOOP_PLAYBACK_APIS),
     ]:

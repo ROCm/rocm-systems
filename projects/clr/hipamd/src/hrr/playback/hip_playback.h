@@ -229,10 +229,13 @@ struct PlaybackContext {
     // Guarded by map_mutex.
     std::unordered_map<uint64_t, void*> host_reg_bufs;
 
+    // APIs this replay refused to reproduce (UNREPLAYABLE_PLAYBACK_APIS), and
     // APIs whose recorded call had already failed at capture and failed the
-    // same way here. Printed in the summary: without it a reader would misread
-    // a faithfully reproduced failure as a replay error. Guarded by map_mutex.
-    std::map<std::string, int> reproduced_errors;  // api -> recorded hipError_t
+    // same way here. Both are printed in the summary: the first is what the
+    // replay could not do, the second is what it faithfully reproduced but a
+    // reader would otherwise misread as a replay error. Guarded by map_mutex.
+    std::map<std::string, std::string> unreplayable_apis;  // api -> reason
+    std::map<std::string, int>         reproduced_errors;  // api -> recorded hipError_t
 
     // VMM replay maps (guarded by map_mutex):
     //   vmm_handle_map: recorded hipMemGenericAllocationHandle_t (as u64) -> live handle
@@ -609,6 +612,20 @@ void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
 // Under --guard-segments an allocation is a VMM mapping rather than a hipMalloc
 // and hipFree cannot release it, so every teardown path has to go through here.
 void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
+
+// ---------------------------------------------------------------------------
+// hrr_note_unreplayable — this API cannot be reproduced, and here is why.
+//
+// Called by the UNREPLAYABLE_PLAYBACK_APIS handlers before they return
+// hipErrorNotSupported. Prints once per API:
+//
+//   [HRR] hipStreamAddCallback: NOT REPLAYABLE — the callback is a host
+//         function pointer belonging to the capturing process. ...
+//
+// and records it so the replay summary can list every such API rather than
+// leaving the reader to grep a long log for warnings.
+void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
+                           const char* reason);
 
 // ---------------------------------------------------------------------------
 // hrr_note_recorded_error — replay reproduced a call that also failed at

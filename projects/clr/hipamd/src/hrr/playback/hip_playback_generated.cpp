@@ -895,14 +895,10 @@ static hipError_t playback_hipExtLaunchKernel(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipExtLaunchMultiKernelMultiDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExtLaunchMultiKernelMultiDevice*>(payload);
-  hipLaunchParams _out_launchParamsList{};
-  hipError_t _r = (hipError_t)hipExtLaunchMultiKernelMultiDevice(&_out_launchParamsList, (int)a->numDevices, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExtLaunchMultiKernelMultiDevice", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExtLaunchMultiKernelMultiDevice",
+                        "each hipLaunchParams entry names its kernel by a host function address in the capturing process, and a cooperative multi-device launch cannot be decomposed into per-device launches without breaking the grid-wide barrier it exists for");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* payload);
@@ -1393,16 +1389,9 @@ static hipError_t playback_hipGraphAddEventWaitNode(PlaybackContext& ctx, const 
 static hipError_t playback_hipGraphAddHostNode(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipGraphAddHostNode*>(payload);
   ctx.mark_graph_incomplete(a->graph, "hipGraphAddHostNode");
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] hipGraphAddHostNode: not reconstructable at "
-            "replay, so the call is skipped and the graph it belongs "
-            "to is marked incomplete; instantiating that graph fails "
-            "loudly rather than running a graph that is missing "
-            "work.\n");
-  }
-  return hipSuccess;
+  hrr_note_unreplayable(ctx, "hipGraphAddHostNode",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipGraphAddKernelNode(PlaybackContext& ctx, const uint8_t* payload);
@@ -1811,14 +1800,10 @@ static hipError_t playback_hipGraphExecEventWaitNodeSetEvent(PlaybackContext& ct
 }
 
 static hipError_t playback_hipGraphExecHostNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphExecHostNodeSetParams — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphExecHostNodeSetParams",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipGraphExecKernelNodeSetParams(PlaybackContext& ctx, const uint8_t* payload);
@@ -1984,14 +1969,10 @@ static hipError_t playback_hipGraphHostNodeGetParams(PlaybackContext& ctx, const
 }
 
 static hipError_t playback_hipGraphHostNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphHostNodeSetParams — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphHostNodeSetParams",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx, const uint8_t* payload);
@@ -2569,24 +2550,17 @@ extern hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx, const uint8_t* p
 extern hipError_t playback_hipLaunchCooperativeKernel(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipLaunchCooperativeKernelMultiDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLaunchCooperativeKernelMultiDevice*>(payload);
-  hipLaunchParams _out_launchParamsList{};
-  hipError_t _r = (hipError_t)hipLaunchCooperativeKernelMultiDevice(&_out_launchParamsList, (int)a->numDevices, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLaunchCooperativeKernelMultiDevice", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLaunchCooperativeKernelMultiDevice",
+                        "each hipLaunchParams entry names its kernel by a host function address in the capturing process, and a cooperative multi-device launch cannot be decomposed into per-device launches without breaking the grid-wide barrier it exists for");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipLaunchHostFunc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLaunchHostFunc*>(payload);
-  hipError_t _r = (hipError_t)hipLaunchHostFunc((hipStream_t)ctx.translate_stream(a->stream), (hipHostFn_t)a->fn, (void*)a->userData);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLaunchHostFunc", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLaunchHostFunc",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipLaunchKernel(PlaybackContext& ctx, const uint8_t* payload);
@@ -2769,14 +2743,10 @@ static hipError_t playback_hipMemGetInfo(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipMemImportFromShareableHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemImportFromShareableHandle — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipMemImportFromShareableHandle",
+                        "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) belonging to the process that exported it, and the same number in the replaying process names a different object or nothing at all");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* payload);
@@ -2844,14 +2814,10 @@ static hipError_t playback_hipMemPoolGetAccess(PlaybackContext& ctx, const uint8
 extern hipError_t playback_hipMemPoolGetAttribute(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemPoolImportFromShareableHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemPoolImportFromShareableHandle — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipMemPoolImportFromShareableHandle",
+                        "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) belonging to the process that exported it, and the same number in the replaying process names a different object or nothing at all");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipMemPoolImportPointer(PlaybackContext& ctx, const uint8_t* payload) {
@@ -3545,13 +3511,10 @@ static hipError_t playback_hipSignalExternalSemaphoresAsync(PlaybackContext& ctx
 }
 
 static hipError_t playback_hipStreamAddCallback(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamAddCallback*>(payload);
-  hipError_t _r = (hipError_t)hipStreamAddCallback((hipStream_t)ctx.translate_stream(a->stream), (hipStreamCallback_t)a->callback, (void*)a->userData, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipStreamAddCallback", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipStreamAddCallback",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipStreamAttachMemAsync(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4073,14 +4036,10 @@ static hipError_t playback_hipUnbindTexture(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipUserObjectCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipUserObjectCreate — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipUserObjectCreate",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipUserObjectRelease(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4393,13 +4352,10 @@ static hipError_t playback_hipStreamGetFlags_spt(PlaybackContext& ctx, const uin
 }
 
 static hipError_t playback_hipStreamAddCallback_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamAddCallback_spt*>(payload);
-  hipError_t _r = (hipError_t)hipStreamAddCallback_spt((hipStream_t)ctx.translate_stream(a->stream), (hipStreamCallback_t)a->callback, (void*)a->userData, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipStreamAddCallback_spt", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipStreamAddCallback_spt",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipEventRecord_spt(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4492,13 +4448,10 @@ static hipError_t playback_hipStreamGetCaptureInfo_v2_spt(PlaybackContext& ctx, 
 }
 
 static hipError_t playback_hipLaunchHostFunc_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLaunchHostFunc_spt*>(payload);
-  hipError_t _r = (hipError_t)hipLaunchHostFunc_spt((hipStream_t)ctx.translate_stream(a->stream), (hipHostFn_t)a->fn, (void*)a->userData);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLaunchHostFunc_spt", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLaunchHostFunc_spt",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGetStreamDeviceId(PlaybackContext& ctx, const uint8_t* payload) {
