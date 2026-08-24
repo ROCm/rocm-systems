@@ -253,7 +253,7 @@ protected:
         ncclRmaConfig_t cfg = {};
         cfg.nContexts    = GetNumContexts();
         cfg.trafficClass = -1;
-        cfg.rankStride   = 0;
+        cfg.rankStride   = 1;
 
         r = rma_->createContext(collComm_, &cfg, &rmaCtx_);
         if(r != ncclSuccess)

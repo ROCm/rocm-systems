@@ -157,8 +157,14 @@ void MPIEnvironment::initialize_devices()
         return;
     }
 
-    // Complete HIP context reset and isolation
-    HIP_TEST_CHECK_GTEST_FAIL(hipDeviceReset());
+    // Bind this rank to its device. Deliberately no hipDeviceReset() here: this
+    // runs after MPI_Init, and a hipDeviceReset() before hipSetDevice() below
+    // resets the *current* (default) device, not assigned_device, so it gave no
+    // per-rank isolation. What it did do is destroy the primary context of GPU 0
+    // for every local rank, including the HIP resources an MPI built with ROCm
+    // support (Open MPI's accelerator/rocm component) has already lazily created
+    // there. MPI_Finalize then segfaults destroying a dangling stream in
+    // mca_accelerator_rocm_stream_destruct().
     HIP_TEST_CHECK_GTEST_FAIL(hipSetDevice(assigned_device));
 
     // Force HIP context creation and synchronization

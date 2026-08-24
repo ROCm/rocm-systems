@@ -27,7 +27,6 @@ using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
 using nccl_dda_detail::ddaFabricScratchSizing;
 using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
-using nccl_dda_detail::kDdaFabricLLArMaxBlocks;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
 
@@ -67,8 +66,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of
   // a fixed 10 GiB. RCCL_DDA_FABRIC_BUFFER_SIZE=0 disables the fabric DDA path.
-  size_t bytes = ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(),
-                                        simpleThresh, llEnabled, ll128Enabled);
+  size_t bytes =
+    ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(), simpleThresh, llEnabled, ll128Enabled);
   if (bytes == 0) {
     return ncclSuccess;
   }
@@ -160,13 +159,12 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaFabricMaxBlocks = nBlocksMax;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
-  INFO(
-    NCCL_INIT,
-    "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm, gfx1250 fabric path; derived from RCCL DDA params; "
-    "RCCL_DDA_FABRIC_BUFFER_SIZE=%lld), LL enabled=%lld threshold=%lld, "
-    "LL128 enabled=%lld threshold=%lld, Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
-    nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
-    (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
+  INFO(NCCL_INIT,
+       "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm, gfx1250 fabric path; derived from RCCL DDA params; "
+       "RCCL_DDA_FABRIC_BUFFER_SIZE=%lld), LL enabled=%lld threshold=%lld, "
+       "LL128 enabled=%lld threshold=%lld, Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
+       nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
+       (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
   return ncclSuccess;
 
 fail:
