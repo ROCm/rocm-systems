@@ -25,6 +25,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
 // NOTE: this vendored header carries the *active* (profiler ABI v6, stream ABI
 // v3) dispatch-log UAPI: AMDKFD_IOC_PROFILER at 0x28 with the single OPEN_STREAM
@@ -35,11 +36,13 @@
 
 #include <fmt/core.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -198,6 +201,14 @@ init_kfd_profiler()
                              st.abi_version,
                              st.supported_gpu_ids.size());
 
+    // a tool that starts its kernel-dispatch context in tool_init calls
+    // start_context BEFORE HSA loads, so the arm there is a guaranteed no-op and
+    // the ring is armed only lazily on the first dispatch -- losing the earliest
+    // ones. This runs at HSA-table install, gated by the feature and reached only
+    // because a kernel-dispatch context enabled interception, so arm now that
+    // probe_ok is set. Idempotent (establish_session early-outs).
+    if(signal_less_feature_enabled()) arm_dispatch_log_sessions();
+
     // Neither the reader thread nor the ring is created here: installing the HSA
     // table says nothing about whether anyone wants kernel traces, and the SDK
     // must create no internal thread when no tool consumes them. Both happen on
@@ -261,6 +272,45 @@ void
 note_kfd_reader_started()
 {
     state().available = true;
+}
+
+void
+arm_dispatch_log_sessions()
+{
+    // the fourth lock-first site (establish_session takes setup_mu with no
+    // child-stale test on the way). One choke point: gate the callee here so a
+    // forked child never arms an inherited reader.
+    if(signal_less_child_stale()) return;
+
+    // Non-constructing peek: a kernel-dispatch context can call this with the
+    // feature off (context.cpp), and flag-off must construct no state. When the
+    // feature is on, init_kfd_profiler() has already constructed this and set
+    // probe_ok, so a null state here means the feature was never initialized.
+    auto* st = state_or_null();
+    if(!st || !st->probe_ok) return;
+
+    // Arming a GPU the application never dispatches on is harmless -- its ring
+    // stays empty -- and is the only way to be ready for whichever it does use.
+    // Sessions are independent, so one GPU's failure never affects another.
+    //
+    // Arm in ascending gpu_id order, not the unordered_set's hash order: if the
+    // session cap is ever reached (many partitioned GPUs), the survivors are then a
+    // deterministic set (the lowest gpu_ids) instead of implementation-defined.
+    auto _ordered =
+        std::vector<uint32_t>(st->supported_gpu_ids.begin(), st->supported_gpu_ids.end());
+    std::sort(_ordered.begin(), _ordered.end());
+
+    size_t _armed = 0;
+    for(uint32_t _gpu_id : _ordered)
+    {
+        if(arm_reader_session_early(_gpu_id)) ++_armed;
+    }
+
+    ROCP_INFO << fmt::format(
+        "KFD dispatch-log: armed {} of {} supported GPU(s) at kernel-trace configuration, before "
+        "any dispatch",
+        _armed,
+        st->supported_gpu_ids.size());
 }
 
 bool

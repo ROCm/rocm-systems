@@ -78,6 +78,12 @@ note_kfd_reader_started();
 bool
 gpu_supports_dispatch_log(uint32_t gpu_id);
 
+// Called when a context tracing kernel dispatch starts, not at startup: arming
+// opens a KFD-owned dispatch-log stream, and installing the HSA table says
+// nothing about whether anyone wants kernel traces. Idempotent.
+void
+arm_dispatch_log_sessions();
+
 // Non-constructing: true iff the profiler_state singleton has been constructed in
 // this process. Used to verify flag-off inertness (the feature must construct no
 // state). Never constructs it.
