@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 /// @file interposer_dup_test.cpp
-/// @brief LD_PRELOAD regression tests for the interposer's KFD fd/backend
-///        bookkeeping across dup / dup2 / dup3 / fcntl(F_DUPFD).
+/// @brief LD_PRELOAD regression tests for KFD/DRM descriptor bookkeeping,
+///        GEM/PRIME mappings, and synchronous DRM timeline state.
 ///
 /// @details These run with librocjitsu.so preloaded (see the ENVIRONMENT set in
 /// tests/CMakeLists.txt) so that open("/dev/kfd") is serviced by the simulated
@@ -17,20 +17,32 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "drm/amdgpu_drm.h"
-#include "drm/drm.h"
+// Use the checked-in UAPI because older system libdrm headers do not expose the
+// GEM_VA timeline fields exercised by these tests.
+#include "linux/uapi/drm/amdgpu_drm.h"
+#include "linux/uapi/drm/drm.h"
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
+#include <barrier>
 #include <cerrno>
 #include <chrono>
+#include <csignal>
+#include <cstring>
 #include <fcntl.h>
+#include <fstream>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
 #include <thread>
+#include <time.h>
 #include <unistd.h>
 
 namespace {
@@ -45,6 +57,13 @@ bool kfd_version_ok(int fd) {
 
 int open_kfd() { return open("/dev/kfd", O_RDWR | O_CLOEXEC); }
 
+void noop_signal_handler(int) {}
+
+} // namespace
+
+namespace {
+int open_drm_render();
+int make_sized_memfd(size_t size);
 } // namespace
 
 // A plain dup() of the KFD fd must keep routing KFD ioctls to the driver, and
@@ -64,6 +83,31 @@ TEST(InterposerDupTest, DupKeepsKfdRoutingAfterPrimaryClose) {
   EXPECT_TRUE(kfd_version_ok(dup_fd));
 
   EXPECT_EQ(close(dup_fd), 0);
+}
+
+TEST(InterposerDupTest, ProcMapsNamesRemoteKfdMarker) {
+  // The marker only exists on the remote path: RemoteDriver::open() creates it,
+  // and in local mode there is no RemoteDriver at all. $ROCJITSU_INVOCATION_DIR
+  // is set for every rocjitsu-launched process regardless of backend, so gate on
+  // the daemon socket actually being there instead -- otherwise this skips
+  // nothing under a plain `rocjitsu --config ... --` run and fails for a reason
+  // that is not a defect.
+  const char *invocation_dir = getenv("ROCJITSU_INVOCATION_DIR");
+  if (invocation_dir == nullptr || *invocation_dir == '\0')
+    GTEST_SKIP() << "remote backend required";
+  if (access((std::string(invocation_dir) + "/daemon.sock").c_str(), F_OK) != 0)
+    GTEST_SKIP() << "remote backend required";
+
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+
+  std::ifstream maps("/proc/self/maps");
+  ASSERT_TRUE(maps.is_open());
+  std::string contents((std::istreambuf_iterator<char>(maps)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("/dev/kfd"), std::string::npos);
+  EXPECT_EQ(contents.find("rocjitsu_remote_kfd"), std::string::npos);
+
+  EXPECT_EQ(close(kfd), 0);
 }
 
 // fcntl(F_DUPFD_CLOEXEC) is the dup path libdrm uses; it must also preserve KFD
@@ -158,6 +202,26 @@ TEST(InterposerDupTest, Dup3RoutesKfdAndRejectsSameFd) {
 
   EXPECT_EQ(close(target), 0);
   EXPECT_EQ(close(pipefd[1]), 0);
+}
+
+TEST(InterposerDupTest, VforkChildCloseKeepsParentKfdRoutable) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  pid_t child = vfork();
+  ASSERT_NE(child, -1);
+  if (child == 0) {
+    close(kfd);
+    _exit(0);
+  }
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  ASSERT_EQ(WEXITSTATUS(status), 0);
+  EXPECT_TRUE(kfd_version_ok(kfd));
+  EXPECT_EQ(close(kfd), 0);
 }
 
 // Overwriting the primary KFD fd number via dup2 while a dup keeps the backend
@@ -292,12 +356,156 @@ TEST(InterposerDupTest, SerializedReopenUnderContentionStaysRoutable) {
   EXPECT_EQ(close(keeper), 0);
 }
 
+TEST(InterposerDupTest, FcntlDupfdReplacesStaleDrmTracking) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int first = open_drm_render();
+  if (first < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  int stale_fd = dup(first);
+  ASSERT_GE(stale_fd, 0);
+  int second = open_drm_render();
+  ASSERT_GE(second, 0);
+
+  drm_syncobj_create first_syncobj{};
+  drm_syncobj_create second_syncobj{};
+  ASSERT_EQ(ioctl(first, DRM_IOCTL_SYNCOBJ_CREATE, &first_syncobj), 0);
+  ASSERT_EQ(ioctl(second, DRM_IOCTL_SYNCOBJ_CREATE, &second_syncobj), 0);
+
+  // Deliberately bypass the interposed close() so its DRM tracking entry stays
+  // stale; the fcntl duplicate below must replace that stale entry safely.
+  ASSERT_EQ(syscall(SYS_close, stale_fd), 0);
+  int reused = fcntl(second, F_DUPFD_CLOEXEC, stale_fd);
+  ASSERT_EQ(reused, stale_fd);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = second_syncobj.handle;
+  EXPECT_EQ(ioctl(reused, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  destroy.handle = first_syncobj.handle;
+  EXPECT_EQ(ioctl(first, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+
+  EXPECT_EQ(close(reused), 0);
+  EXPECT_EQ(close(second), 0);
+  EXPECT_EQ(close(first), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDupTest, NonDrmDuplicatesClearStaleDrmTracking) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  int ordinary = make_sized_memfd(0x1000);
+  ASSERT_GE(ordinary, 0);
+  int stale_plain = dup(drm);
+  int stale_fcntl = dup(drm);
+  ASSERT_GE(stale_plain, 0);
+  ASSERT_GE(stale_fcntl, 0);
+
+  // Bypass the interposed close so both DRM entries remain stale, then force
+  // ordinary-file duplicates onto those exact numbers. Successful duplication
+  // must replace-or-clear tracking rather than preserving the old namespace.
+  ASSERT_EQ(syscall(SYS_close, stale_plain), 0);
+  ASSERT_EQ(syscall(SYS_close, stale_fcntl), 0);
+  int plain = dup(ordinary);
+  ASSERT_EQ(plain, stale_plain);
+  int fcntl_dup = fcntl(ordinary, F_DUPFD_CLOEXEC, stale_fcntl);
+  ASSERT_EQ(fcntl_dup, stale_fcntl);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(plain, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
+  EXPECT_EQ(errno, ENOTTY);
+  EXPECT_EQ(ioctl(fcntl_dup, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
+  EXPECT_EQ(errno, ENOTTY);
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+
+  EXPECT_EQ(close(fcntl_dup), 0);
+  EXPECT_EQ(close(plain), 0);
+  EXPECT_EQ(close(ordinary), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDupTest, DrmCloseReuseRaceNeverMisclassifiesDuplicate) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  constexpr int kIterations = 200;
+  for (int iteration = 0; iteration < kIterations; ++iteration) {
+    int drm = open_drm_render();
+    ASSERT_GE(drm, 0);
+    drm_syncobj_create create{};
+    ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+    struct stat drm_stat {};
+    ASSERT_EQ(syscall(SYS_fstat, drm, &drm_stat), 0);
+
+    int replacement = make_sized_memfd(0x1000);
+    ASSERT_GE(replacement, 0);
+    struct stat replacement_stat {};
+    ASSERT_EQ(syscall(SYS_fstat, replacement, &replacement_stat), 0);
+
+    std::barrier start(3);
+    std::atomic<int> duplicated{-1};
+    std::atomic<int> close_result{-1};
+    std::atomic<int> reuse_result{-1};
+    std::thread duplicator([&] {
+      start.arrive_and_wait();
+      duplicated = dup(drm);
+    });
+    std::thread closer([&] {
+      start.arrive_and_wait();
+      close_result = close(drm);
+      reuse_result = dup2(replacement, drm);
+    });
+    start.arrive_and_wait();
+    duplicator.join();
+    closer.join();
+    ASSERT_EQ(close_result.load(), 0);
+    ASSERT_EQ(reuse_result.load(), drm);
+
+    if (duplicated.load() >= 0) {
+      struct stat duplicate_stat {};
+      ASSERT_EQ(syscall(SYS_fstat, duplicated.load(), &duplicate_stat), 0);
+      drm_syncobj_destroy destroy{};
+      destroy.handle = create.handle;
+      if (duplicate_stat.st_ino == drm_stat.st_ino) {
+        EXPECT_EQ(ioctl(duplicated.load(), DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+      } else {
+        EXPECT_EQ(duplicate_stat.st_ino, replacement_stat.st_ino);
+        EXPECT_EQ(ioctl(duplicated.load(), DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
+        EXPECT_EQ(errno, ENOTTY);
+      }
+      EXPECT_EQ(close(duplicated.load()), 0);
+    }
+
+    EXPECT_EQ(close(drm), 0);
+    EXPECT_EQ(close(replacement), 0);
+  }
+  EXPECT_EQ(close(kfd), 0);
+}
+
 namespace {
 
 // Open the synthetic DRM render node the interposer exposes for the simulated GPU
 // (render minor 128 in the KMD test configs). Requires the KFD driver to be up, so
 // callers open /dev/kfd first.
 int open_drm_render() { return open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC); }
+
+bool query_drm_device_info(int drm_fd, drm_amdgpu_info_device *device) {
+  drm_amdgpu_info query{};
+  query.return_pointer = reinterpret_cast<uint64_t>(device);
+  query.return_size = sizeof(*device);
+  query.query = AMDGPU_INFO_DEV_INFO;
+  return ioctl(drm_fd, DRM_IOCTL_AMDGPU_INFO, &query) == 0;
+}
 
 // Create an mmap-able, sized stand-in for a dmabuf export fd. PRIME_FD_TO_HANDLE
 // fstats the fd for the BO size and later MAP mmaps it, so the fd must be a real
@@ -335,7 +543,968 @@ int gem_close(int drm_fd, uint32_t handle) {
   return ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &gc);
 }
 
+int64_t monotonic_deadline_after(std::chrono::nanoseconds delay) {
+  timespec now{};
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    return 0;
+  return static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec + delay.count();
+}
+
 } // namespace
+
+TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+
+  drm_amdgpu_info_device device{};
+  ASSERT_TRUE(query_drm_device_info(drm, &device));
+  EXPECT_EQ(device.device_id, 30112u);
+  EXPECT_EQ(device.cu_active_number, 256u);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, VmTimelineWaitObservesSynchronousMapAndUnmap) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  ASSERT_NE(create.handle, 0u);
+
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {1};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, EINVAL);
+  wait.flags |= DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ETIME);
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  drm_amdgpu_gem_va map{};
+  map.handle = gem_handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = kVa;
+  map.map_size = kBoSize;
+  map.vm_timeline_point = 1;
+  map.vm_timeline_syncobj_out = create.handle;
+  uint32_t input_handle = create.handle;
+  map.num_syncobj_handles = 1;
+  map.input_fence_syncobj_handles = reinterpret_cast<uintptr_t>(&input_handle);
+  EXPECT_EQ(ioctl(drm, gem_va, &map), -1);
+  EXPECT_EQ(errno, EINVAL);
+  map.num_syncobj_handles = 0;
+  // The count is authoritative. A reusable caller buffer may leave this unused
+  // pointer non-null when there are no input fences.
+  ASSERT_EQ(ioctl(drm, gem_va, &map), 0);
+
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+
+  drm_amdgpu_gem_va unmap{};
+  unmap.handle = gem_handle;
+  unmap.operation = AMDGPU_VA_OP_UNMAP;
+  unmap.va_address = kVa;
+  unmap.map_size = kBoSize;
+  unmap.vm_timeline_point = 2;
+  unmap.vm_timeline_syncobj_out = create.handle;
+  ASSERT_EQ(ioctl(drm, gem_va, &unmap), 0);
+  points[0] = unmap.vm_timeline_point;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ENOENT);
+
+  EXPECT_EQ(gem_close(drm, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, VmDelayUpdateSuppressesTimelinePublication) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
+
+  drm_amdgpu_gem_va update{};
+  update.handle = gem_handle;
+  update.operation = AMDGPU_VA_OP_MAP;
+  update.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE | AMDGPU_VM_DELAY_UPDATE;
+  update.va_address = kVa;
+  update.map_size = kBoSize;
+  update.vm_timeline_point = 1;
+  update.vm_timeline_syncobj_out = create.handle;
+  ASSERT_EQ(ioctl(drm, DRM_AMDGPU_GEM_VA_request(), &update), 0);
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {1};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ETIME);
+
+  update.operation = AMDGPU_VA_OP_UNMAP;
+  update.flags = 0;
+  ASSERT_EQ(ioctl(drm, DRM_AMDGPU_GEM_VA_request(), &update), 0);
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(gem_close(drm, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, GemVaSignalsBinarySyncobjsAtPointZero) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  std::array<drm_syncobj_create, 3> syncobjs{};
+  for (auto &syncobj : syncobjs)
+    ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &syncobj), 0);
+
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  drm_amdgpu_gem_va update{};
+  update.handle = gem_handle;
+  update.operation = AMDGPU_VA_OP_MAP;
+  update.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  update.va_address = kVa;
+  update.map_size = kBoSize;
+  update.vm_timeline_syncobj_out = syncobjs[0].handle;
+  update.vm_timeline_point = 0;
+  ASSERT_EQ(ioctl(drm, gem_va, &update), 0);
+
+  auto expect_binary_signaled = [&](uint32_t handle) {
+    uint32_t handles[] = {handle};
+    uint64_t points[] = {0};
+    drm_syncobj_timeline_wait wait{};
+    wait.handles = reinterpret_cast<uintptr_t>(handles);
+    wait.points = reinterpret_cast<uintptr_t>(points);
+    wait.count_handles = 1;
+    wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+    EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+  };
+  expect_binary_signaled(syncobjs[0].handle);
+
+  update.operation = AMDGPU_VA_OP_UNMAP;
+  update.flags = 0;
+  update.vm_timeline_syncobj_out = syncobjs[1].handle;
+  ASSERT_EQ(ioctl(drm, gem_va, &update), 0);
+  expect_binary_signaled(syncobjs[1].handle);
+
+  // A zero output handle still means no fence. Point zero alone must not change
+  // that contract, and the mapping remains available for the following CLEAR.
+  update.operation = AMDGPU_VA_OP_MAP;
+  update.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  update.vm_timeline_syncobj_out = 0;
+  ASSERT_EQ(ioctl(drm, gem_va, &update), 0);
+
+  update.handle = 0;
+  update.operation = AMDGPU_VA_OP_CLEAR;
+  update.flags = 0;
+  update.vm_timeline_syncobj_out = syncobjs[2].handle;
+  ASSERT_EQ(ioctl(drm, gem_va, &update), 0);
+  expect_binary_signaled(syncobjs[2].handle);
+
+  for (const auto &syncobj : syncobjs) {
+    drm_syncobj_destroy destroy{};
+    destroy.handle = syncobj.handle;
+    EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  }
+  EXPECT_EQ(gem_close(drm, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, PointZeroOutputReplacesTimelinePayload) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
+
+  drm_amdgpu_gem_va update{};
+  update.handle = gem_handle;
+  update.operation = AMDGPU_VA_OP_MAP;
+  update.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  update.va_address = kVa;
+  update.map_size = kBoSize;
+  update.vm_timeline_syncobj_out = create.handle;
+  update.vm_timeline_point = 2;
+  ASSERT_EQ(ioctl(drm, DRM_AMDGPU_GEM_VA_request(), &update), 0);
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {2};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+
+  update.operation = AMDGPU_VA_OP_UNMAP;
+  update.flags = 0;
+  update.vm_timeline_point = 0;
+  ASSERT_EQ(ioctl(drm, DRM_AMDGPU_GEM_VA_request(), &update), 0);
+
+  points[0] = 0;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+  points[0] = 2;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(gem_close(drm, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, DuplicateDrmFdsShareNamespaceAndLifetime) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  int drm_dup = dup(drm);
+  ASSERT_GE(drm_dup, 0);
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  ASSERT_NE(create.handle, 0u);
+  EXPECT_EQ(close(drm), 0);
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {1};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  EXPECT_EQ(ioctl(drm_dup, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm_dup, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm_dup), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, IndependentDrmOpensHaveSeparateNamespaces) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int first_drm = open_drm_render();
+  int second_drm = open_drm_render();
+  if (first_drm < 0 || second_drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(first_drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(second_drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_EQ(ioctl(first_drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+
+  EXPECT_EQ(close(second_drm), 0);
+  EXPECT_EQ(close(first_drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, CreateSignaledSeedsOnlyTheInitialPoint) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  create.flags = DRM_SYNCOBJ_CREATE_SIGNALED;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {0};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  wait.first_signaled = 17;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+  EXPECT_EQ(wait.first_signaled, UINT32_MAX);
+
+  points[0] = 1;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, EINVAL);
+  wait.flags |= DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ETIME);
+  wait.flags = 1u << 31;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  drm_syncobj_create second{};
+  second.flags = DRM_SYNCOBJ_CREATE_SIGNALED;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &second), 0);
+  uint32_t any_handles[] = {create.handle, second.handle};
+  uint64_t any_points[] = {1, 0};
+  wait.handles = reinterpret_cast<uintptr_t>(any_handles);
+  wait.points = reinterpret_cast<uintptr_t>(any_points);
+  wait.count_handles = 2;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  wait.first_signaled = UINT32_MAX;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+  EXPECT_EQ(wait.first_signaled, 1u);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  destroy.handle = second.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, WaitValidationMatchesDrm) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_timeline_wait empty{};
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &empty), 0);
+  empty.pad = UINT32_MAX;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &empty), 0);
+  empty.pad = 0;
+  empty.flags = 1u << 31;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &empty), -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {1};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ETIME);
+
+  uint32_t mixed_handles[] = {create.handle, UINT32_MAX};
+  uint64_t mixed_points[] = {1, 0};
+  wait.handles = reinterpret_cast<uintptr_t>(mixed_handles);
+  wait.points = reinterpret_cast<uintptr_t>(mixed_points);
+  wait.count_handles = 2;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  wait.first_signaled = 17;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, ENOENT);
+  EXPECT_EQ(wait.first_signaled, 17u);
+
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  wait.handles = 1;
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, EFAULT);
+
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = 1;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  EXPECT_EQ(errno, EFAULT);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, DestroyRejectsInvalidInput) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = UINT32_MAX;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  destroy.handle = create.handle;
+  destroy.pad = 1;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), -1);
+  EXPECT_EQ(errno, EINVAL);
+  destroy.pad = 0;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, TimelineWaitBlocksUntilSignalOrDeadline) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {1};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(1));
+
+  std::barrier ready(2);
+  std::atomic<int> wait_rc{-2};
+  std::atomic<int> wait_errno{0};
+  std::thread waiter([&] {
+    ready.arrive_and_wait();
+    wait_rc = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
+    wait_errno = errno;
+  });
+  ready.arrive_and_wait();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  drm_amdgpu_gem_va map{};
+  map.handle = gem_handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = kVa;
+  map.map_size = kBoSize;
+  map.vm_timeline_point = 1;
+  map.vm_timeline_syncobj_out = create.handle;
+  const int map_rc = ioctl(drm, gem_va, &map);
+  waiter.join();
+  ASSERT_EQ(map_rc, 0);
+  EXPECT_EQ(wait_rc.load(), 0) << "wait errno=" << wait_errno.load();
+
+  points[0] = 2;
+  wait.timeout_nsec = monotonic_deadline_after(std::chrono::milliseconds(100));
+  const auto timeout_start = std::chrono::steady_clock::now();
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), -1);
+  const auto timeout_elapsed = std::chrono::steady_clock::now() - timeout_start;
+  EXPECT_EQ(errno, ETIME);
+  EXPECT_GE(timeout_elapsed, std::chrono::milliseconds(50));
+
+  drm_amdgpu_gem_va unmap{};
+  unmap.handle = gem_handle;
+  unmap.operation = AMDGPU_VA_OP_UNMAP;
+  unmap.va_address = kVa;
+  unmap.map_size = kBoSize;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap), 0);
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(gem_close(drm, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {1};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(2));
+
+  struct sigaction action {};
+  struct sigaction old_action {};
+  action.sa_handler = noop_signal_handler;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = 0;
+  ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
+
+  std::atomic<bool> entered{false};
+  std::atomic<int> wait_rc{-2};
+  std::atomic<int> wait_errno{0};
+  const auto start = std::chrono::steady_clock::now();
+  std::thread waiter([&] {
+    entered.store(true, std::memory_order_release);
+    wait_rc = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
+    wait_errno = errno;
+  });
+  while (!entered.load(std::memory_order_acquire))
+    std::this_thread::yield();
+  const auto signal_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (wait_rc.load(std::memory_order_acquire) == -2 &&
+         std::chrono::steady_clock::now() < signal_deadline) {
+    EXPECT_EQ(pthread_kill(waiter.native_handle(), SIGUSR1), 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  waiter.join();
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_EQ(wait_rc.load(), -1);
+  EXPECT_EQ(wait_errno.load(), EINTR);
+  EXPECT_LT(elapsed, std::chrono::seconds(1));
+  EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, ForkedChildReinitializesTimelineFutexState) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {1};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL | DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+  wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(2));
+
+  std::barrier ready(2);
+  std::atomic<int> wait_rc{-2};
+  std::thread waiter([&] {
+    ready.arrive_and_wait();
+    wait_rc = ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
+  });
+  ready.arrive_and_wait();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  const pid_t child = fork();
+  if (child < 0) {
+    const int fork_errno = errno;
+    waiter.join();
+    EXPECT_EQ(gem_close(drm, gem_handle), 0);
+    EXPECT_EQ(close(dmabuf), 0);
+    EXPECT_EQ(close(drm), 0);
+    EXPECT_EQ(close(kfd), 0);
+    FAIL() << "fork failed: " << std::strerror(fork_errno);
+  }
+  if (child == 0) {
+    alarm(3);
+    int child_kfd = open_kfd();
+    if (child_kfd < 0 || !kfd_version_ok(child_kfd))
+      _exit(1);
+    int child_drm = open_drm_render();
+    if (child_drm < 0)
+      _exit(2);
+    drm_syncobj_create child_create{};
+    if (ioctl(child_drm, DRM_IOCTL_SYNCOBJ_CREATE, &child_create) != 0)
+      _exit(3);
+    int child_dmabuf = make_sized_memfd(kBoSize);
+    uint32_t child_gem_handle = 0;
+    if (child_dmabuf < 0 || !prime_import(child_drm, child_dmabuf, &child_gem_handle))
+      _exit(4);
+    drm_amdgpu_gem_va child_map{};
+    child_map.handle = child_gem_handle;
+    child_map.operation = AMDGPU_VA_OP_MAP;
+    child_map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+    child_map.va_address = kVa;
+    child_map.map_size = kBoSize;
+    child_map.vm_timeline_point = 1;
+    child_map.vm_timeline_syncobj_out = child_create.handle;
+    if (ioctl(child_drm, DRM_AMDGPU_GEM_VA_request(), &child_map) != 0)
+      _exit(5);
+    uint32_t child_handles[] = {child_create.handle};
+    uint64_t child_points[] = {1};
+    drm_syncobj_timeline_wait child_wait{};
+    child_wait.handles = reinterpret_cast<uintptr_t>(child_handles);
+    child_wait.points = reinterpret_cast<uintptr_t>(child_points);
+    child_wait.count_handles = 1;
+    child_wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+    child_wait.timeout_nsec = monotonic_deadline_after(std::chrono::seconds(1));
+    _exit(ioctl(child_drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &child_wait) == 0 ? 0 : 6);
+  }
+
+  drm_amdgpu_gem_va map{};
+  map.handle = gem_handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = kVa;
+  map.map_size = kBoSize;
+  map.vm_timeline_point = 1;
+  map.vm_timeline_syncobj_out = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_AMDGPU_GEM_VA_request(), &map), 0);
+  waiter.join();
+  EXPECT_EQ(wait_rc.load(), 0);
+
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
+
+  EXPECT_EQ(gem_close(drm, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, ConcurrentVmUpdatesShareTimeline) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  constexpr size_t kBoSize = 0x1000;
+  const std::array<uint64_t, 2> vas = {0x1000000000ULL, 0x1000100000ULL};
+  std::array<int, 2> dmabufs = {make_sized_memfd(kBoSize), make_sized_memfd(kBoSize)};
+  ASSERT_GE(dmabufs[0], 0);
+  ASSERT_GE(dmabufs[1], 0);
+  std::array<uint32_t, 2> gem_handles{};
+  ASSERT_TRUE(prime_import(drm, dmabufs[0], &gem_handles[0]));
+  ASSERT_TRUE(prime_import(drm, dmabufs[1], &gem_handles[1]));
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  std::atomic<uint64_t> next_point{0};
+  std::array<int, 2> results = {-1, -1};
+  std::barrier start(3);
+  auto submit = [&](size_t index) {
+    drm_amdgpu_gem_va map{};
+    map.handle = gem_handles[index];
+    map.operation = AMDGPU_VA_OP_MAP;
+    map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+    map.va_address = vas[index];
+    map.map_size = kBoSize;
+    map.vm_timeline_point = next_point.fetch_add(1) + 1;
+    map.vm_timeline_syncobj_out = create.handle;
+    start.arrive_and_wait();
+    results[index] = ioctl(drm, gem_va, &map);
+  };
+  std::thread first(submit, 0);
+  std::thread second(submit, 1);
+  start.arrive_and_wait();
+  first.join();
+  second.join();
+  EXPECT_EQ(results[0], 0);
+  EXPECT_EQ(results[1], 0);
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {2};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+
+  for (size_t i = 0; i < gem_handles.size(); ++i) {
+    drm_amdgpu_gem_va unmap{};
+    unmap.handle = gem_handles[i];
+    unmap.operation = AMDGPU_VA_OP_UNMAP;
+    unmap.va_address = vas[i];
+    unmap.map_size = kBoSize;
+    EXPECT_EQ(ioctl(drm, gem_va, &unmap), 0);
+    EXPECT_EQ(gem_close(drm, gem_handles[i]), 0);
+    EXPECT_EQ(close(dmabufs[i]), 0);
+  }
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerSyncobjTest, OutOfOrderTimelinePointPreservesWatermark) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int drm = open_drm_render();
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  drm_syncobj_create create{};
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &gem_handle));
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  drm_amdgpu_gem_va map{};
+  map.handle = gem_handle;
+  map.operation = AMDGPU_VA_OP_MAP;
+  map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  map.va_address = kVa;
+  map.map_size = kBoSize;
+  map.vm_timeline_point = 2;
+  map.vm_timeline_syncobj_out = create.handle;
+  ASSERT_EQ(ioctl(drm, gem_va, &map), 0);
+
+  drm_amdgpu_gem_va unmap{};
+  unmap.handle = gem_handle;
+  unmap.operation = AMDGPU_VA_OP_UNMAP;
+  unmap.va_address = kVa;
+  unmap.map_size = kBoSize;
+  unmap.vm_timeline_point = 1;
+  unmap.vm_timeline_syncobj_out = create.handle;
+  EXPECT_EQ(ioctl(drm, gem_va, &unmap), 0);
+
+  uint32_t handles[] = {create.handle};
+  uint64_t points[] = {2};
+  drm_syncobj_timeline_wait wait{};
+  wait.handles = reinterpret_cast<uintptr_t>(handles);
+  wait.points = reinterpret_cast<uintptr_t>(points);
+  wait.count_handles = 1;
+  wait.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait), 0);
+
+  drm_syncobj_destroy destroy{};
+  destroy.handle = create.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
+  EXPECT_EQ(gem_close(drm, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerGemTest, GemNamespaceIsPrivateButSharedByDuplicates) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int owner = open_drm_render();
+  int foreign = open_drm_render();
+  if (owner < 0 || foreign < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+  int owner_dup = dup(owner);
+  ASSERT_GE(owner_dup, 0);
+
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(dmabuf, 0);
+  uint32_t gem_handle = 0;
+  ASSERT_TRUE(prime_import(owner, dmabuf, &gem_handle));
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  drm_amdgpu_gem_va update{};
+  update.handle = gem_handle;
+  update.operation = AMDGPU_VA_OP_MAP;
+  update.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  update.va_address = kVa;
+  update.map_size = kBoSize;
+
+  EXPECT_EQ(ioctl(foreign, gem_va, &update), -1);
+  EXPECT_EQ(errno, ENOENT);
+  update.operation = AMDGPU_VA_OP_REPLACE;
+  EXPECT_EQ(ioctl(foreign, gem_va, &update), -1);
+  EXPECT_EQ(errno, ENOENT);
+
+  // A duplicate resolves to the same DRM file and can use the imported handle.
+  update.operation = AMDGPU_VA_OP_MAP;
+  ASSERT_EQ(ioctl(owner_dup, gem_va, &update), 0);
+
+  update.operation = AMDGPU_VA_OP_UNMAP;
+  EXPECT_EQ(ioctl(foreign, gem_va, &update), -1);
+  EXPECT_EQ(errno, ENOENT);
+  ASSERT_EQ(ioctl(owner, gem_va, &update), 0);
+
+  update.operation = AMDGPU_VA_OP_MAP;
+  ASSERT_EQ(ioctl(owner, gem_va, &update), 0);
+  drm_amdgpu_gem_va clear{};
+  clear.operation = AMDGPU_VA_OP_CLEAR;
+  clear.va_address = kVa;
+  clear.map_size = kBoSize;
+  EXPECT_EQ(ioctl(foreign, gem_va, &clear), -1);
+  EXPECT_EQ(errno, EINVAL);
+  update.operation = AMDGPU_VA_OP_UNMAP;
+  ASSERT_EQ(ioctl(owner, gem_va, &update), 0)
+      << "a foreign CLEAR must not remove the owner's mapping";
+
+  update.operation = AMDGPU_VA_OP_MAP;
+  ASSERT_EQ(ioctl(owner, gem_va, &update), 0);
+  EXPECT_EQ(gem_close(foreign, gem_handle), -1);
+  EXPECT_EQ(errno, ENOENT);
+  update.operation = AMDGPU_VA_OP_UNMAP;
+  ASSERT_EQ(ioctl(owner, gem_va, &update), 0)
+      << "a foreign GEM_CLOSE must not destroy the owner's handle";
+
+  EXPECT_EQ(gem_close(owner_dup, gem_handle), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  EXPECT_EQ(close(owner_dup), 0);
+  EXPECT_EQ(close(foreign), 0);
+  EXPECT_EQ(close(owner), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerGemTest, IndependentDrmFilesRejectOverlappingMappings) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  ASSERT_TRUE(kfd_version_ok(kfd));
+  int first_drm = open_drm_render();
+  int second_drm = open_drm_render();
+  if (first_drm < 0 || second_drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
+
+  constexpr size_t kBoSize = 0x1000;
+  constexpr uint64_t kVa = 0x1000000000ULL;
+  int first_dmabuf = make_sized_memfd(kBoSize);
+  int second_dmabuf = make_sized_memfd(kBoSize);
+  ASSERT_GE(first_dmabuf, 0);
+  ASSERT_GE(second_dmabuf, 0);
+  uint32_t first_handle = 0;
+  uint32_t second_handle = 0;
+  ASSERT_TRUE(prime_import(first_drm, first_dmabuf, &first_handle));
+  ASSERT_TRUE(prime_import(second_drm, second_dmabuf, &second_handle));
+
+  const unsigned long gem_va = DRM_AMDGPU_GEM_VA_request();
+  drm_amdgpu_gem_va first_map{};
+  first_map.handle = first_handle;
+  first_map.operation = AMDGPU_VA_OP_MAP;
+  first_map.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  first_map.va_address = kVa;
+  first_map.map_size = kBoSize;
+  ASSERT_EQ(ioctl(first_drm, gem_va, &first_map), 0);
+
+  drm_amdgpu_gem_va second_map = first_map;
+  second_map.handle = second_handle;
+  EXPECT_EQ(ioctl(second_drm, gem_va, &second_map), -1);
+  EXPECT_EQ(errno, EINVAL);
+  second_map.operation = AMDGPU_VA_OP_REPLACE;
+  EXPECT_EQ(ioctl(second_drm, gem_va, &second_map), -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  drm_amdgpu_gem_va first_unmap = first_map;
+  first_unmap.operation = AMDGPU_VA_OP_UNMAP;
+  first_unmap.flags = 0;
+  ASSERT_EQ(ioctl(first_drm, gem_va, &first_unmap), 0)
+      << "rejected foreign updates must leave the first mapping intact";
+
+  // Once the first file releases the shared VA, the second file may claim it.
+  second_map.operation = AMDGPU_VA_OP_MAP;
+  ASSERT_EQ(ioctl(second_drm, gem_va, &second_map), 0);
+  drm_amdgpu_gem_va second_unmap = second_map;
+  second_unmap.operation = AMDGPU_VA_OP_UNMAP;
+  second_unmap.flags = 0;
+  EXPECT_EQ(ioctl(second_drm, gem_va, &second_unmap), 0);
+
+  EXPECT_EQ(gem_close(second_drm, second_handle), 0);
+  EXPECT_EQ(gem_close(first_drm, first_handle), 0);
+  EXPECT_EQ(close(second_dmabuf), 0);
+  EXPECT_EQ(close(first_dmabuf), 0);
+  EXPECT_EQ(close(second_drm), 0);
+  EXPECT_EQ(close(first_drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
 
 // A dmabuf export fd number that is closed and then recycled by a second export
 // must resolve to a DISTINCT, stable GEM handle — never one derived from the fd

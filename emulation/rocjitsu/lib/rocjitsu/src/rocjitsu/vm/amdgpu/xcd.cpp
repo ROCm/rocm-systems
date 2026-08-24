@@ -28,6 +28,7 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
   // Create command processor for this XCD.
   auto cp = std::make_unique<CommandProcessor>(xcd_name + ".cp");
   cp_ = cp.get();
+  cp_->configure_for_arch(arch);
 
   // Create shader engines, each with its own CU array sharing the XCD's L2.
   for (uint32_t i = 0; i < config.num_shader_engines; ++i) {

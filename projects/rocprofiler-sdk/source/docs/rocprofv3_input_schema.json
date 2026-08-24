@@ -157,7 +157,7 @@
 
                      "output_format":{
                       "type": "array",
-                      "description": "For adding output format (supported formats: csv, json, pftrace)"
+                      "description": "For adding output format (supported formats: csv, json, pftrace, otf2, rocpd). Direct csv, pftrace, and otf2 output is deprecated; use rocpd and rocpd convert"
                      },
 
                      "list_metrics" : {

@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: MIT
 
 import importlib.util
+import json
 from pathlib import Path
+import tempfile
 import unittest
 
 VALIDATOR_PATH = Path(__file__).with_name("validate-gfx1250-semantic-translations.py")
@@ -35,6 +37,66 @@ def runtime_record(
         "input_bytes=64 output_bytes=96 "
         f"translation_status={translation_status} status={status}\n"
     )
+
+
+class LoadExpectationsTest(unittest.TestCase):
+    def load_expectations(self, payload: object) -> dict[str, int]:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "expectations.json"
+            path.write_text(
+                json.dumps(payload),
+                encoding="utf-8",
+            )
+            return VALIDATOR.load_expectations(path)
+
+    def load_entry(self, entry: dict[str, object]) -> dict[str, int]:
+        return self.load_expectations({"schema": 1, "tests": {"semantic_test": entry}})
+
+    def assert_invalid(self, entry: dict[str, object]) -> None:
+        with self.assertRaises(ValueError):
+            self.load_entry(entry)
+
+    def test_accepts_valid_rewrite_counts(self) -> None:
+        for value in (0, 3):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.load_entry({"instructions_requiring_rewrite": value}),
+                    {"semantic_test": value},
+                )
+
+    def test_rejects_invalid_rewrite_counts(self) -> None:
+        entries = (
+            {"instructions_requiring_rewrite": -1},
+            {"instructions_requiring_rewrite": False},
+            {},
+            {"instructions_requiring_rewrite": 0.0},
+            {"instructions_requiring_rewrite": "0"},
+            {"instructions_requiring_rewrite": None},
+        )
+        for entry in entries:
+            with self.subTest(entry=entry):
+                self.assert_invalid(entry)
+
+    def test_rejects_invalid_payloads(self) -> None:
+        payloads = (
+            {"tests": {"semantic_test": {"instructions_requiring_rewrite": 0}}},
+            {
+                "schema": 2,
+                "tests": {"semantic_test": {"instructions_requiring_rewrite": 0}},
+            },
+            {"schema": 1},
+            {"schema": 1, "tests": {}},
+            {"schema": 1, "tests": []},
+            {
+                "schema": 1,
+                "tests": {"": {"instructions_requiring_rewrite": 0}},
+            },
+            {"schema": 1, "tests": {"semantic_test": 0}},
+        )
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError):
+                    self.load_expectations(payload)
 
 
 class RuntimeEvidenceTest(unittest.TestCase):

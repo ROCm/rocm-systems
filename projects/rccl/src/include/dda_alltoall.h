@@ -37,4 +37,18 @@ bool ncclAllToAllDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* r
 ncclResult_t ncclAllToAllDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                    ncclComm* comm, cudaStream_t stream);
 
+// LL-protocol fabric path (small-chunk fast lane, 16B lines, no barrier).
+bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                     ncclDataType_t datatype);
+
+ncclResult_t ncclAllToAllDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                     ncclComm* comm, cudaStream_t stream);
+
+// LL128-protocol fabric path (mid-chunk fast lane, 128B lines, no barrier).
+bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                        ncclDataType_t datatype);
+
+ncclResult_t ncclAllToAllDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                        ncclComm* comm, cudaStream_t stream);
+
 #endif

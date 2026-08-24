@@ -117,7 +117,6 @@ jobs:
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_{TESTS,SAMPLES,DOCS}=OFF
-          -DROCPROFILER_DISABLE_ATT_QUICK_SCAN=ON
           -DROCPROFILER_BUILD_AQLPROFILE=${{ matrix.aqlprofile == 'internal' && 'ON' || 'OFF' }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="$(realpath /opt/rocm)"

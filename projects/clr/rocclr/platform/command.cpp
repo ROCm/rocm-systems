@@ -30,7 +30,7 @@ Event::Event(HostQueue& queue, bool profilingEnabled)
       device_(&queue.device()),
       profilingInfo_(profilingEnabled) {
   event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
-  notified_.clear();
+  notified_.clear(std::memory_order_relaxed);
 }
 
 // ================================================================================================
@@ -41,7 +41,7 @@ Event::Event()
       notify_event_(nullptr),
       device_(nullptr) {
   event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
-  notified_.clear();
+  notified_.clear(std::memory_order_relaxed);
 }
 
 // ================================================================================================

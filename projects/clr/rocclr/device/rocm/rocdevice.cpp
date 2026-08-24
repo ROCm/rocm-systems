@@ -81,8 +81,8 @@ extern const char* HipExtraSourceCodeNoGWS;
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
 bool roc::Device::hostVmemSupported_ = false;
-std::vector<hsa_agent_t> roc::Device::gpu_agents_;
-std::vector<AgentInfo> roc::Device::cpu_agents_;
+std::vector<hsa_agent_t> roc::Device::gpu_agents_ ROCCLR_INIT_PRIORITY(101);
+std::vector<AgentInfo> roc::Device::cpu_agents_ ROCCLR_INIT_PRIORITY(101);
 
 address Device::mg_sync_ = nullptr;
 
@@ -1077,6 +1077,28 @@ bool Device::populateOCLDeviceConstants() {
                           &localUID)) {
     info_.luidLowPart_ = localUID.low;
     info_.luidHighPart_ = localUID.high;
+    // Node mask = this agent's index within its adapter (LUID). Agents sharing a
+    // LUID form a linked adapter; a standalone adapter reports 0x1. The LUID is
+    // zero on platforms without a WDDM adapter, where the node mask stays 0.
+    if ((localUID.low != 0) || (localUID.high != 0)) {
+      uint32_t luidNodeIndex = 0;
+      for (const auto& siblingAgent : gpu_agents_) {
+        if (siblingAgent.handle == bkendDevice_.handle) {
+          break;
+        }
+        hsa_luid_t siblingUID = {0};
+        if ((HSA_STATUS_SUCCESS ==
+             Hsa::agent_get_info(siblingAgent,
+                                 static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+                                 &siblingUID)) &&
+            (siblingUID.low == localUID.low) && (siblingUID.high == localUID.high)) {
+          ++luidNodeIndex;
+        }
+      }
+      if (luidNodeIndex < 32) {
+        info_.luidDeviceNodeMask_ = 1u << luidNodeIndex;
+      }
+    }
   }
 
   if (HSA_STATUS_SUCCESS !=
@@ -1786,6 +1808,10 @@ bool Device::populateOCLDeviceConstants() {
   std::ignore = Hsa::system_get_info(
                     static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED),
                     &info_.dmabufSupported_);
+
+  // Support for host-allocated dma_buf buffer sharing (system-wide capability).
+  info_.hostAllocDmabufSupported_ = hostVmemSupported_;
+
   // devices with no cluster support; max size is 0
   info_.clusterMaxSize_ = 0;
 
@@ -3546,6 +3572,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   auto populateExtras = [&]() {
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
+    extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
     hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
                            &extras.metadataRingBuffer);
     if (DEBUG_CLR_DIRECT_DOORBELL) {
@@ -4187,43 +4214,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
                               ? device_.maxSdmaReadMask_
                               : device_.maxSdmaWriteMask_;
 
-  // Simple round-robin path if all engines have equal bandwidth
-  // Disabled by default - use preferred engine logic for current GPUs
-  constexpr bool kUseSimpleRR = false;
-
-  if (kUseSimpleRR) {
-    // Simple round-robin: just cycle through valid engines
-    // This will be enabled for future GPUs where engine selection doesn't matter
-    if (validEngineMask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No valid SDMA engines for VirtualGPU %p", vgpu);
-      return 0;
-    }
-
-    // Cycle through bit positions, find next valid engine
-    uint32_t start_bit = next_rr_engine_.fetch_add(1, std::memory_order_relaxed);
-    uint32_t selected_mask = 0;
-
-    // Try up to 32 positions to find a valid engine
-    for (uint32_t i = 0; i < 32; ++i) {
-      uint32_t bit = (start_bit + i) % 32;
-      uint32_t mask = 1u << bit;
-      if (validEngineMask & mask) {
-        selected_mask = mask;
-        break;
-      }
-    }
-
-    vgpu_to_engine_[vgpu] = selected_mask;
-
-    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
-            "Assigned SDMA engine (simple RR) to VirtualGPU %p: mask=0x%x, engine_type=%d",
-            vgpu, selected_mask, engine_type);
-
-    return selected_mask;
-  }
-
-  // Current path: Query HSA for engine status and preferences
+  // Query HSA for engine status and preferences
   uint32_t freeEngineMask = 0;
   uint32_t preferredMask = 0;
   hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -4259,26 +4250,58 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
             "candidate_mask=0x%x",
             vgpu, candidate_mask);
   } else {
-    // Regular read/write/intra: enforce exclusivity (don't share engines)
-    // Build a mask of engines already allocated to other VirtualGPUs
+    // Regular read/write/intra: prefer exclusive affinity to avoid cross-stream contention.
     for (const auto& pair : vgpu_to_engine_) {
       allocated_mask |= pair.second;
     }
 
     uint32_t available_mask = validEngineMask & ~allocated_mask;
 
-    if (available_mask == 0) {
-      ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-              "No unallocated SDMA engines available for VirtualGPU %p, engine_type=%d "
-              "(valid_mask=0x%x, allocated_mask=0x%x)",
-              vgpu, engine_type, validEngineMask, allocated_mask);
-      return 0;
-    }
+    if (available_mask != 0) {
+      // Prefer high-bandwidth (recommended) engines if available.
+      candidate_mask = available_mask & preferredMask;
+      if (candidate_mask == 0) {
+        candidate_mask = available_mask;
+      }
+    } else {
+      // If all valid engines are assigned, share one and rely on ROCr to serialize submissions.
+      // Prefer idle engines, then preferred engines, and round-robin within the selected class.
+      uint32_t idle_mask = freeEngineMask & validEngineMask;
+      uint32_t selection_mask = idle_mask & preferredMask;
+      if (selection_mask == 0) {
+        selection_mask = idle_mask;
+      }
+      if (selection_mask == 0) {
+        selection_mask = validEngineMask & preferredMask;
+      }
+      if (selection_mask == 0) {
+        selection_mask = validEngineMask;
+      }
+      if (selection_mask == 0) {
+        ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
+                "No valid SDMA engines available for oversubscribed VirtualGPU %p, "
+                "engine_type=%d",
+                vgpu, engine_type);
+        return 0;
+      }
 
-    // Prefer high-bandwidth (recommended) engines if available
-    candidate_mask = available_mask & preferredMask;
-    if (candidate_mask == 0) {
-      candidate_mask = available_mask;
+      uint32_t engine_count = 0;
+      for (uint32_t mask = selection_mask; mask != 0; mask &= mask - 1) {
+        ++engine_count;
+      }
+      uint32_t slot =
+          next_rr_engine_.fetch_add(1, std::memory_order_relaxed) % engine_count;
+      // Select the set bit at the zero-based slot index, starting from the least significant bit.
+      while (slot != 0) {
+        selection_mask &= selection_mask - 1;
+        --slot;
+      }
+      candidate_mask = selection_mask & (~selection_mask + 1);
+
+      ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+              "All valid SDMA engines are assigned; sharing an engine for VirtualGPU %p, "
+              "engine_type=%d (candidate_mask=0x%x, valid_mask=0x%x, allocated_mask=0x%x)",
+              vgpu, engine_type, candidate_mask, validEngineMask, allocated_mask);
     }
   }
 

@@ -74,8 +74,9 @@ struct DriverMemoryHandle {
   /// - allocation address / thunk buffer handle for @ref KfdDriver
   /// - XDNA BO handle for @ref XdnaDriver
   uint64_t handle{};
-  /// Virtual address mmap'd by the driver for this allocation, or nullptr if the
-  /// driver does not own a mapping. When set, FreeMemory unmaps it.
+  /// Virtual address of this allocation, or nullptr if the driver exposes none.
+  /// Whether FreeMemory unmaps it is driver-defined: an allocation may borrow a
+  /// mapping owned by something else, in which case FreeMemory leaves it intact.
   void* vaddr{};
   int dmabuf_fd{-1};
   uint64_t mmap_offset{0};

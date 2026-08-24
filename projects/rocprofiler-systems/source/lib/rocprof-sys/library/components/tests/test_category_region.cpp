@@ -353,9 +353,9 @@ TEST(category_region_serialization, serialize_return_arg)
 
 TEST(category_region_cache, entry_key_ordering)
 {
-    entry_key a{ "aaa", "cat" };
-    entry_key b{ "bbb", "cat" };  // differs by name
-    entry_key c{ "aaa", "dog" };  // same name, differs by category
+    const entry_key a{ "aaa", "cat" };
+    const entry_key b{ "bbb", "cat" };  // differs by name
+    const entry_key c{ "aaa", "dog" };  // same name, differs by category
 
     // different names are ordered by name
     EXPECT_TRUE(a < b);
@@ -366,7 +366,7 @@ TEST(category_region_cache, entry_key_ordering)
     EXPECT_FALSE(c < a);
 
     // fully equal keys: neither precedes the other
-    entry_key a_copy{ "aaa", "cat" };
+    const entry_key a_copy{ "aaa", "cat" };
     EXPECT_FALSE(a < a_copy);
     EXPECT_FALSE(a_copy < a);
 }
@@ -377,9 +377,9 @@ TEST(category_region_cache, entry_key_ordering)
 
 TEST(category_region_cache, cache_start_pushes_pending_entry)
 {
-    using category_t = rocprofsys::category::host;
-    const char* name = "start_region";
-    entry_key   key{ name, rocprofsys::trait::name<category_t>::value };
+    using category_t     = rocprofsys::category::host;
+    const char*     name = "start_region";
+    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     cache_start<category_t>(name, serialize_name_value_pairs("a", 1, "b", 2));
@@ -413,9 +413,9 @@ TEST(category_region_cache, cache_start_pushes_pending_entry)
 
 TEST(category_region_cache, append_cache_args_adopts_first_batch_without_renumbering)
 {
-    using category_t = rocprofsys::category::host;
-    const char* name = "adopt_region";
-    entry_key   key{ name, rocprofsys::trait::name<category_t>::value };
+    using category_t     = rocprofsys::category::host;
+    const char*     name = "adopt_region";
+    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     // open entry that has no args yet (e.g. created by an argless start)
@@ -438,9 +438,9 @@ TEST(category_region_cache, append_cache_args_adopts_first_batch_without_renumbe
 
 TEST(category_region_cache, append_cache_args_appends_and_renumbers)
 {
-    using category_t = rocprofsys::category::host;
-    const char* name = "append_region";
-    entry_key   key{ name, rocprofsys::trait::name<category_t>::value };
+    using category_t     = rocprofsys::category::host;
+    const char*     name = "append_region";
+    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     // seed an open entry with one already-serialized arg (numbered 0)
@@ -468,9 +468,9 @@ TEST(category_region_cache, append_cache_args_appends_and_renumbers)
 
 TEST(category_region_cache, append_cache_args_noop_without_open_entry)
 {
-    using category_t = rocprofsys::category::host;
-    const char* name = "missing_region";
-    entry_key   key{ name, rocprofsys::trait::name<category_t>::value };
+    using category_t     = rocprofsys::category::host;
+    const char*     name = "missing_region";
+    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     // no open entry -> append is a no-op and must not create one
@@ -488,9 +488,9 @@ TEST(category_region_cache, append_cache_args_noop_without_open_entry)
 
 TEST(category_region_cache, append_cache_args_drops_batch_when_existing_args_malformed)
 {
-    using category_t = rocprofsys::category::host;
-    const char* name = "malformed_region";
-    entry_key   key{ name, rocprofsys::trait::name<category_t>::value };
+    using category_t     = rocprofsys::category::host;
+    const char*     name = "malformed_region";
+    const entry_key key{ name, rocprofsys::trait::name<category_t>::value };
 
     map_name_to_args.clear();
     // open entry whose existing args have a non-numeric leading idx field: the next

@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk.hpp"
 #include "api.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "binary/analysis.hpp"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
@@ -17,13 +18,14 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/sdk-tracing-config-deps.hpp"
+#include "core/sdk-tracing-config.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/process_sampler.hpp"
-#include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include "library/rocprofiler-sdk/kfd_events.hpp"
@@ -89,6 +91,13 @@ namespace rocprofiler_sdk
 {
 namespace
 {
+// Per-name imports (not a merged alias) for the production sdk_tracing_config<Wrapper,
+// Externals> instantiation used below: keeps both template arguments visible at each call
+// site instead of collapsing them behind an opaque name.
+using rocprofiler_sdk::default_sdk_externals;
+using rocprofiler_sdk::sdk_tracing_config;
+using rocprofiler_sdk::wrapper;
+
 using tool_agent_vec_t                         = std::vector<tool_agent>;
 client_data*                    tool_data      = new client_data{};
 std::shared_ptr<roctx_client<>> g_roctx_client = {};
@@ -134,13 +143,13 @@ std::atomic<bool> tool_init_done{ false };
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
 {
-    push_thread_state(ThreadState::Internal);
+    state::thread::push(state::thread::Internal);
 }
 
 void
 thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
 {
-    pop_thread_state();
+    state::thread::pop();
 }
 
 #if(ROCPROFILER_VERSION < 700)
@@ -282,7 +291,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
                 LOG_CRITICAL("invalid device qualifier format (':device=N) "
                              "where N is the GPU id: {}",
                              itr);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 std::abort();
             }
 
@@ -707,7 +717,7 @@ tool_tracing_callback_stop(
 {
     auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
 
-    std::uint64_t begin_ts = user_data->value;
+    const std::uint64_t begin_ts = user_data->value;
 
     if(get_use_timemory())
     {
@@ -792,14 +802,14 @@ tool_tracing_callback_stop(
     rocprofiler_iterate_callback_tracing_kind_operation_args(
         record, iterate_args_callback, 2, &args);
 
-    auto          call_stack = get_backtrace(_bt_data);
-    std::uint64_t _beg_ts    = begin_ts;
-    std::uint64_t _end_ts    = ts;
+    auto                call_stack = get_backtrace(_bt_data);
+    const std::uint64_t _beg_ts    = begin_ts;
+    const std::uint64_t _end_ts    = ts;
 
     {
         cache_category<CategoryT>();
         cache_add_thread_info(record.thread_id);
-        std::string args_str = get_args_string(args);
+        const std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
                      trait::name<CategoryT>::value, _name);
     }
@@ -1180,7 +1190,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t* /*user_data*/,
                             rocprofiler_timestamp_t ts)
 {
-    std::string_view _name = ompt_get_unified_name(record);
+    const std::string_view _name = ompt_get_unified_name(record);
 
     if(get_use_timemory())
     {
@@ -1225,7 +1235,7 @@ ompt_tracing_callback_stop(
     rocprofiler_timestamp_t               ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    std::string_view _name = ompt_get_unified_name(record);
+    const std::string_view _name = ompt_get_unified_name(record);
 
     if(get_use_timemory())
     {
@@ -1338,13 +1348,14 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             case ROCPROFILER_OMPT_ID_implicit_task:
             {
-                int flag = payload_data->args.implicit_task.flags;
+                const int flag = payload_data->args.implicit_task.flags;
                 if(flag & ompt_task_initial) return;  // Skips both the start and end
                 break;
             }
             case ROCPROFILER_OMPT_ID_thread_begin:
             {
-                ompt_thread_t thread_type = payload_data->args.thread_begin.thread_type;
+                const ompt_thread_t thread_type =
+                    payload_data->args.thread_begin.thread_type;
                 if(thread_type == ompt_thread_initial) return;
                 break;
             }
@@ -1372,7 +1383,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
          << ", phase=" << record.phase << ", dt_nsec=" << std::setw(8) << ts
          << ", name=" << name;
 
-    if(rocprofsys::get_state() != rocprofsys::State::Active)
+    if(rocprofsys::state::process::get() != rocprofsys::state::process::Active)
     {
         LOG_WARNING("Callback called when tool is not active. {}", info.str().c_str());
         return;
@@ -1464,7 +1475,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 {
                     LOG_CRITICAL("Unhandled callback record: {}",
                                  static_cast<int>(record.kind));
-                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    ::rocprofsys::state::process::set(
+                        ::rocprofsys::state::process::Finalized);
                     std::abort();
                 }
                 break;
@@ -1473,7 +1485,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 {
                     LOG_CRITICAL("Unhandled callback record: {}", info.str());
-                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    ::rocprofsys::state::process::set(
+                        ::rocprofsys::state::process::Finalized);
                     std::abort();
                 }
                 break;
@@ -1571,7 +1584,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 {
                     LOG_CRITICAL("Unhandled callback record: {}",
                                  static_cast<int>(record.kind));
-                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    ::rocprofsys::state::process::set(
+                        ::rocprofsys::state::process::Finalized);
                     std::abort();
                 }
                 break;
@@ -1580,7 +1594,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 {
                     LOG_CRITICAL("Unhandled callback record: {}", info.str());
-                    ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                    ::rocprofsys::state::process::set(
+                        ::rocprofsys::state::process::Finalized);
                     std::abort();
                 }
                 break;
@@ -1690,7 +1705,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         LOG_CRITICAL("unhandled callback record phase: {}",
                      static_cast<int>(record.phase));
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         ::std::abort();
     }
 }
@@ -2074,7 +2089,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
                         header->payload);
 
-                std::uint64_t _stream_id = get_stream_id(record).handle;
+                const std::uint64_t _stream_id = get_stream_id(record).handle;
                 {
                     cache_category<category::rocm_memory_allocate>();
                     cache_add_thread_info(record->thread_id);
@@ -2264,7 +2279,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
             {
                 LOG_CRITICAL("unable to find tool agent for agent (id={})",
                              _agent_id.handle);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 ::std::abort();
             }
             if(!_info)
@@ -2272,7 +2288,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
                 LOG_CRITICAL("unable to find counter info for counter (id={}) on "
                              "agent (id={})",
                              itr.first.handle, _agent_id.handle);
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+                ::rocprofsys::state::process::set(
+                    ::rocprofsys::state::process::Finalized);
                 ::std::abort();
             }
 
@@ -2444,7 +2461,7 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
     else
     {
         LOG_CRITICAL("Unknown operation for hip_stream_callback!");
-        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
         ::std::exit(1);
     }
 }
@@ -2463,11 +2480,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _domains_ss << "- " << itr << "\n";
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
-    auto _callback_domains = rocprofiler_sdk::get_callback_domains();
-    auto _buffered_domain  = rocprofiler_sdk::get_buffered_domains();
-    auto _counter_events   = rocprofiler_sdk::get_rocm_events();
-    auto _version          = rocprofiler_sdk::get_version();
-    if(_version.formatted == 0)
+    auto _callback_domains =
+        sdk_tracing_config<wrapper, default_sdk_externals>::get_callback_domains();
+    auto _buffered_domain =
+        sdk_tracing_config<wrapper, default_sdk_externals>::get_buffered_domains();
+    auto _counter_events =
+        sdk_tracing_config<wrapper, default_sdk_externals>::get_rocm_events();
+    auto _version = sdk_tracing_config<wrapper, default_sdk_externals>::get_version();
+    if(_version.formatted() == 0)
     {
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
@@ -2531,9 +2551,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     {
         if(_callback_domains.count(itr) > 0)
         {
-            auto _ops = rocprofiler_sdk::get_operations(itr);
+            auto _ops =
+                sdk_tracing_config<wrapper, default_sdk_externals>::get_operations(itr);
             _data->backtrace_operations.emplace(
-                itr, rocprofiler_sdk::get_backtrace_operations(itr));
+                itr,
+                sdk_tracing_config<wrapper,
+                                   default_sdk_externals>::get_backtrace_operations(itr));
             ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                 _data->primary_ctx, itr, _ops.data(), _ops.size(), tool_tracing_callback,
                 _data));
@@ -2609,11 +2632,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         if(_data->memory_alloc_buffer.handle == 0UL)
         {
             LOG_CRITICAL("Failed to create memory allocation buffer");
-            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            ::rocprofsys::state::process::set(::rocprofsys::state::process::Finalized);
             ::std::abort();
         }
-        auto _ops =
-            rocprofiler_sdk::get_operations(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
+        auto _ops = sdk_tracing_config<wrapper, default_sdk_externals>::get_operations(
+            ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
 
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION, nullptr, 0,
@@ -2770,7 +2793,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     if(config::get_use_process_sampling())
     {
         LOG_DEBUG("Setting PMC sampler state to active...");
-        pmc::set_state(State::Active);
+        pmc::set_state(state::process::Active);
     }
 
     // Setup roctx client (must happen within tool_init for rocprofiler-sdk context
@@ -3027,7 +3050,7 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
             ::rocprofsys::process_sampler::setup();
         }
 
-        ::rocprofsys::set_state(::rocprofsys::State::Active);
+        ::rocprofsys::state::process::set(::rocprofsys::state::process::Active);
     }
 
     // Start all contexts provided by the SDK
@@ -3070,7 +3093,7 @@ sdk_tool_configure(std::uint32_t version, const char* runtime_version,
 
     // Ensure tooling is initialized and state is Active
     if(!rocprofsys::config::settings_are_configured() ||
-       rocprofsys::get_state() < rocprofsys::State::Active)
+       rocprofsys::state::process::get() < rocprofsys::state::process::Active)
     {
         rocprofsys_init_tooling_hidden();
     }
