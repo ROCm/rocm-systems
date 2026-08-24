@@ -166,6 +166,8 @@ TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
   for (const uint64_t input : {kOne, kInfinity, kQuietNan}) {
     (void)amdgpu::fp_mode::fma_f64(input, kOne, kOne, 1, 3);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
+    (void)amdgpu::fp_mode::binary_f64(input, kOne, amdgpu::fp_mode::BinaryF64Op::Add, 1, 3);
+    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
     (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
     EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
   }
@@ -1177,6 +1179,835 @@ void write_sgpr_packed_u64(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf, u
     write_wave_sgpr(cu, wf, first_sgpr + element * 2, static_cast<uint32_t>(values[element]));
     write_wave_sgpr(cu, wf, first_sgpr + element * 2 + 1,
                     static_cast<uint32_t>(values[element] >> 32));
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticHasExecutionCallbacks) {
+  // Exact public LLVM gfx1251_asm_vop3p.s encodings for the VGPR forms.
+  constexpr std::array<std::array<uint32_t, 2>, 4> kWords{{
+      {0xCC4B4004u, 0x1A021908u}, // v_pk_add_f64 v[4:7], v[8:11], v[12:15]
+      {0xCC3C4004u, 0x1A021908u}, // v_pk_mul_f64 v[4:7], v[8:11], v[12:15]
+      {0xCC4E4004u, 0x1A021908u}, // v_pk_max_num_f64 v[4:7], v[8:11], v[12:15]
+      {0xCC4F4004u, 0x1A021908u}, // v_pk_min_num_f64 v[4:7], v[8:11], v[12:15]
+  }};
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const auto &words : kWords) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_NE(decoded->execute, nullptr) << decoded->mnemonic();
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, LaterExecutionSlicesRemainCallbackFree) {
+  // Exact public LLVM encodings for the two instructions intentionally left
+  // model-only by this slice: gfx1251_asm_vop3p.s and
+  // gfx1251_asm_wmma_w32.s.
+  constexpr std::array<std::array<uint32_t, 2>, 2> kWords{{
+      {0xCC3B4004u, 0x1C421908u}, // v_pk_fma_f64 v[4:7], v[8:11], v[12:15], v[16:19]
+      {0xCC5B0008u, 0x1C220900u}, // v_wmma_f64_16x16x4_f64 v[8:15], v[0:1], v[2:3], v[4:7]
+  }};
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const auto &words : kWords) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(decoded->execute, nullptr) << decoded->mnemonic();
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticExecutesBothElementsAndHonorsExec) {
+  struct Operation {
+    std::string_view name;
+    std::array<uint32_t, 2> words;
+    PackedU64Pair expected;
+  };
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  constexpr std::array kOperations{
+      Operation{"add", {0xCC4B4004u, 0x1A021908u}, {bits(7.0), bits(1.0)}},
+      Operation{"mul", {0xCC3C4004u, 0x1A021908u}, {bits(10.0), bits(-12.0)}},
+      Operation{"max-num", {0xCC4E4004u, 0x1A021908u}, {bits(5.0), bits(4.0)}},
+      Operation{"min-num", {0xCC4F4004u, 0x1A021908u}, {bits(2.0), bits(-3.0)}},
+  };
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x5u);
+  constexpr PackedU64Pair kLhs{bits(2.0), bits(-3.0)};
+  constexpr PackedU64Pair kRhs{bits(5.0), bits(4.0)};
+  constexpr PackedU64Pair kInactive{0xdeadbeefcafef00dULL, 0xbaadf00d12345678ULL};
+
+  for (const auto &operation : kOperations) {
+    SCOPED_TRACE(operation.name);
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      write_vgpr_packed_u64(*cu, *wf, 8, lane, kLhs);
+      write_vgpr_packed_u64(*cu, *wf, 12, lane, kRhs);
+      write_vgpr_packed_u64(*cu, *wf, 4, lane, kInactive);
+    }
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, operation.words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), operation.expected);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 1), kInactive);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 2), operation.expected);
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, ExecutesWave32Lane31WithoutChangingVccOrInactiveLanes) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  constexpr std::array<uint32_t, 2> kAdd{0xCC4B4004u, 0x1A021908u};
+  constexpr PackedU64Pair kInactiveSeed{0x0123456789abcdefULL, 0xfedcba9876543210ULL};
+  constexpr uint64_t kVccSeed = 0x5a5aa5a5deadbeefULL;
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+  wf->set_exec_raw(uint64_t{1} << 31);
+  wf->set_vcc_raw(kVccSeed);
+  write_vgpr_packed_u64(*cu, *wf, 8, 31, {bits(2.0), bits(-3.0)});
+  write_vgpr_packed_u64(*cu, *wf, 12, 31, {bits(5.0), bits(4.0)});
+  write_vgpr_packed_u64(*cu, *wf, 4, 0, kInactiveSeed);
+
+  std::unique_ptr<Instruction> decoded(decode_valid(*decoder, kAdd.data()));
+  ASSERT_NE(decoded, nullptr);
+  ASSERT_NE(decoded->execute, nullptr);
+  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 31), (PackedU64Pair{bits(7.0), bits(1.0)}));
+  EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kInactiveSeed);
+  EXPECT_EQ(wf->vcc(), kVccSeed);
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, ExecZeroPreservesDestinationAndStatus) {
+  constexpr std::array<uint32_t, 2> kAdd{0xCC4B4004u, 0x1A021908u};
+  constexpr PackedU64Pair kDestinationSeed{0x0123456789abcdefULL, 0xfedcba9876543210ULL};
+  constexpr uint64_t kVccSeed = 0x5a5aa5a5deadbeefULL;
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec_raw(0);
+  wf->set_vcc_raw(kVccSeed);
+  wf->write_scc(true);
+  write_vgpr_packed_u64(*cu, *wf, 4, 0, kDestinationSeed);
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {0x3ff0000000000000ULL, 0x4000000000000000ULL});
+  write_vgpr_packed_u64(*cu, *wf, 12, 0, {0x4008000000000000ULL, 0x4010000000000000ULL});
+
+  std::unique_ptr<Instruction> decoded(decode_valid(*decoder, kAdd.data()));
+  ASSERT_NE(decoded, nullptr);
+  ASSERT_NE(decoded->execute, nullptr);
+  cu->execute_instruction(decoded.get(), *wf);
+  EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kDestinationSeed);
+  EXPECT_EQ(wf->vcc(), kVccSeed);
+  EXPECT_TRUE(wf->read_scc());
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, BasicArithmeticExecutesEveryPublicLlvmSourceForm) {
+  struct SourceForm {
+    std::string_view name;
+    uint32_t second_word;
+    uint32_t literal;
+    PackedU64Pair lhs;
+    PackedU64Pair rhs;
+  };
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  constexpr std::array kForms{
+      SourceForm{"vgpr-vgpr", 0x1A021908u, 0u, {bits(10.0), bits(20.0)}, {bits(3.0), bits(4.0)}},
+      SourceForm{"sgpr-sgpr", 0x1A001808u, 0u, {bits(100.0), bits(100.0)}, {bits(7.0), bits(7.0)}},
+      SourceForm{"vgpr-sgpr", 0x1A001908u, 0u, {bits(10.0), bits(20.0)}, {bits(7.0), bits(7.0)}},
+      SourceForm{"sgpr-vgpr", 0x1A021808u, 0u, {bits(100.0), bits(100.0)}, {bits(3.0), bits(4.0)}},
+      SourceForm{"vgpr-null", 0x1A00F908u, 0u, {bits(10.0), bits(20.0)}, {0u, 0u}},
+      SourceForm{
+          "vgpr-inline-one", 0x1A01E508u, 0u, {bits(10.0), bits(20.0)}, {bits(1.0), bits(1.0)}},
+      SourceForm{
+          "inline-one-vgpr", 0x1A0210F2u, 0u, {bits(1.0), bits(1.0)}, {bits(10.0), bits(20.0)}},
+      SourceForm{"literal-vgpr",
+                 0x1A0210FFu,
+                 0x40594000u,
+                 {bits(101.0), bits(101.0)},
+                 {bits(10.0), bits(20.0)}},
+      SourceForm{"vgpr-literal",
+                 0x1A01FF08u,
+                 0x40594000u,
+                 {bits(10.0), bits(20.0)},
+                 {bits(101.0), bits(101.0)}},
+      SourceForm{"shared-literal",
+                 0x1A01FEFFu,
+                 0x40594000u,
+                 {bits(101.0), bits(101.0)},
+                 {bits(101.0), bits(101.0)}},
+  };
+  struct Operation {
+    std::string_view name;
+    uint32_t first_word;
+  };
+  constexpr std::array kOperations{
+      Operation{"add", 0xCC4B4004u},
+      Operation{"mul", 0xCC3C4004u},
+      Operation{"max-num", 0xCC4E4004u},
+      Operation{"min-num", 0xCC4F4004u},
+  };
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(10.0), bits(20.0)});
+  write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(3.0), bits(4.0)});
+  // Packed-FP64 SGPR operands broadcast their low 64 bits. Keep different
+  // high words in the backing tuple so the result proves they are ignored.
+  write_sgpr_packed_u64(*cu, *wf, 8, {bits(100.0), bits(200.0)});
+  write_sgpr_packed_u64(*cu, *wf, 12, {bits(7.0), bits(8.0)});
+
+  const auto reference = [](std::string_view operation, double lhs, double rhs) {
+    if (operation == "add")
+      return lhs + rhs;
+    if (operation == "mul")
+      return lhs * rhs;
+    if (operation == "max-num")
+      return std::fmax(lhs, rhs);
+    return std::fmin(lhs, rhs);
+  };
+  for (const auto &operation : kOperations) {
+    for (const auto &form : kForms) {
+      SCOPED_TRACE(operation.name);
+      SCOPED_TRACE(form.name);
+      const std::array<uint32_t, 3> words{operation.first_word, form.second_word, form.literal};
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+      ASSERT_NE(decoded, nullptr);
+      ASSERT_NE(decoded->execute, nullptr);
+      cu->execute_instruction(decoded.get(), *wf);
+      const PackedU64Pair expected{
+          std::bit_cast<uint64_t>(reference(operation.name, std::bit_cast<double>(form.lhs[0]),
+                                            std::bit_cast<double>(form.rhs[0]))),
+          std::bit_cast<uint64_t>(reference(operation.name, std::bit_cast<double>(form.lhs[1]),
+                                            std::bit_cast<double>(form.rhs[1]))),
+      };
+      EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
+      if (form.literal != 0u) {
+        for (uint32_t source = 0; source < 2; ++source) {
+          if (form.name != "shared-literal" && source != (form.name == "literal-vgpr" ? 0u : 1u))
+            continue;
+          const Operand *literal_operand = decoded->src_operand(source);
+          ASSERT_NE(literal_operand, nullptr);
+          EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane64(*literal_operand, 0), bits(101.0));
+        }
+      }
+    }
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, ExecutesInlineScalarBoundarySources) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  struct InlineCase {
+    std::string_view name;
+    uint16_t opcode;
+    uint16_t src0;
+    uint16_t src1;
+    uint64_t expected;
+  };
+  constexpr std::array kCases{
+      InlineCase{"positive-integer-low", cdna5::kVPkAddF64Vop3p, 128, 124, 0},
+      InlineCase{"positive-integer-high", cdna5::kVPkAddF64Vop3p, 192, 124, 64},
+      InlineCase{"negative-integer-low", cdna5::kVPkMaxNumF64Vop3p, 193, 242, bits(1.0)},
+      InlineCase{"negative-integer-high", cdna5::kVPkMaxNumF64Vop3p, 208, 242, bits(1.0)},
+      InlineCase{"float-half", cdna5::kVPkAddF64Vop3p, 240, 124, bits(0.5)},
+      InlineCase{"inverse-two-pi", cdna5::kVPkAddF64Vop3p, 248, 124, 0x3FC45F306DC9C882ULL},
+  };
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  wf->set_mode_raw(3u << 6);
+  wf->write_scc(true);
+
+  for (const auto &test_case : kCases) {
+    SCOPED_TRACE(test_case.name);
+    const auto words = cdna5::build_vop3p(test_case.opcode, {.vdst = 4,
+                                                             .opsel_hi_2 = 1,
+                                                             .src0 = test_case.src0,
+                                                             .src1 = test_case.src1,
+                                                             .src2 = 128,
+                                                             .opsel_hi = 3});
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0),
+              (PackedU64Pair{test_case.expected, test_case.expected}));
+  }
+  EXPECT_TRUE(wf->read_scc());
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, ExecutesFinalRegisterTupleBoundaries) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  wf->set_mode_raw(3u << 6);
+
+  const auto execute_add = [&](cdna5::Vop3pBuilderFields fields, PackedU64Pair expected) {
+    const auto words = cdna5::build_vop3p(cdna5::kVPkAddF64Vop3p, fields);
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, fields.vdst, 0), expected);
+  };
+
+  write_sgpr_packed_u64(*cu, *wf, 100, {bits(2.0), bits(99.0)});
+  execute_add({.vdst = 4, .opsel_hi_2 = 1, .src0 = 100, .src1 = 124, .src2 = 128, .opsel_hi = 3},
+              {bits(2.0), bits(2.0)});
+
+  wf->set_ttmp(12, static_cast<uint32_t>(bits(3.0)));
+  wf->set_ttmp(13, static_cast<uint32_t>(bits(3.0) >> 32));
+  wf->set_ttmp(14, static_cast<uint32_t>(bits(99.0)));
+  wf->set_ttmp(15, static_cast<uint32_t>(bits(99.0) >> 32));
+  execute_add({.vdst = 4, .opsel_hi_2 = 1, .src0 = 120, .src1 = 124, .src2 = 128, .opsel_hi = 3},
+              {bits(3.0), bits(3.0)});
+
+  write_vgpr_packed_u64(*cu, *wf, 252, 0, {bits(4.0), bits(5.0)});
+  execute_add({.vdst = 252, .opsel_hi_2 = 1, .src0 = 508, .src1 = 100, .src2 = 128, .opsel_hi = 3},
+              {bits(6.0), bits(7.0)});
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, PublicModifiersClampAndOverlappingDestinationAreSafe) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  struct Operation {
+    std::string_view name;
+    uint32_t base_first_word;
+    PackedU64Pair neg_src0_expected;
+    PackedU64Pair neg_src1_expected;
+    PackedU64Pair clamp_expected;
+    PackedU64Pair combined_expected;
+  };
+  constexpr std::array kOperations{
+      Operation{"add",
+                0xCC4B4004u,
+                {bits(3.0), bits(7.0)},
+                {bits(-3.0), bits(-7.0)},
+                {bits(0.0), bits(1.0)},
+                {bits(1.0), bits(1.0)}},
+      Operation{"mul",
+                0xCC3C4004u,
+                {bits(-10.0), bits(12.0)},
+                {bits(-10.0), bits(12.0)},
+                {bits(0.0), bits(1.0)},
+                {bits(0.0), bits(1.0)}},
+      Operation{"max-num",
+                0xCC4E4004u,
+                {bits(5.0), bits(4.0)},
+                {bits(2.0), bits(-3.0)},
+                {bits(1.0), bits(1.0)},
+                {bits(1.0), bits(1.0)}},
+      Operation{"min-num",
+                0xCC4F4004u,
+                {bits(-2.0), bits(3.0)},
+                {bits(-5.0), bits(-4.0)},
+                {bits(0.0), bits(1.0)},
+                {bits(0.0), bits(1.0)}},
+  };
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  for (const auto &operation : kOperations) {
+    SCOPED_TRACE(operation.name);
+    const std::array modifier_cases{
+        std::pair{std::array<uint32_t, 2>{operation.base_first_word + 0x100u, 0x3A021908u},
+                  operation.neg_src0_expected},
+        std::pair{std::array<uint32_t, 2>{operation.base_first_word + 0x200u, 0x5A021908u},
+                  operation.neg_src1_expected},
+    };
+    for (const auto &[words, expected] : modifier_cases) {
+      write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(2.0), bits(-3.0)});
+      write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(5.0), bits(4.0)});
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+      ASSERT_NE(decoded, nullptr);
+      ASSERT_NE(decoded->execute, nullptr);
+      cu->execute_instruction(decoded.get(), *wf);
+      EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
+    }
+
+    const std::array<uint32_t, 2> clamp_words{operation.base_first_word + 0x8000u, 0x1A021908u};
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(-2.0), bits(2.0)});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(1.0), bits(2.0)});
+    std::unique_ptr<Instruction> clamp(decode_valid(*decoder, clamp_words.data()));
+    ASSERT_NE(clamp, nullptr);
+    ASSERT_NE(clamp->execute, nullptr);
+    cu->execute_instruction(clamp.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), operation.clamp_expected);
+
+    const auto combined_words =
+        cdna5::build_vop3p((operation.base_first_word >> 16) & 0x7fu, {.vdst = 4,
+                                                                       .neg_hi = 1,
+                                                                       .opsel_hi_2 = 1,
+                                                                       .clamp = 1,
+                                                                       .src0 = 264,
+                                                                       .src1 = 268,
+                                                                       .src2 = 128,
+                                                                       .opsel_hi = 3,
+                                                                       .neg = 1});
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(2.0), bits(-3.0)});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(5.0), bits(4.0)});
+    std::unique_ptr<Instruction> combined(decode_valid(*decoder, combined_words.data()));
+    ASSERT_NE(combined, nullptr);
+    ASSERT_NE(combined->execute, nullptr);
+    cu->execute_instruction(combined.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), operation.combined_expected);
+  }
+
+  const std::array asymmetric_cases{
+      std::pair{cdna5::Vop3pBuilderFields{.vdst = 4,
+                                          .opsel_hi_2 = 1,
+                                          .src0 = 264,
+                                          .src1 = 268,
+                                          .src2 = 128,
+                                          .opsel_hi = 3,
+                                          .neg = 1},
+                PackedU64Pair{bits(3.0), bits(1.0)}},
+      std::pair{cdna5::Vop3pBuilderFields{.vdst = 4,
+                                          .neg_hi = 2,
+                                          .opsel_hi_2 = 1,
+                                          .src0 = 264,
+                                          .src1 = 268,
+                                          .src2 = 128,
+                                          .opsel_hi = 3},
+                PackedU64Pair{bits(7.0), bits(-7.0)}},
+  };
+  for (const auto &[fields, expected] : asymmetric_cases) {
+    const auto words = cdna5::build_vop3p(cdna5::kVPkAddF64Vop3p, fields);
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(2.0), bits(-3.0)});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(5.0), bits(4.0)});
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
+  }
+
+  constexpr uint64_t kQuietNan = 0x7ff8000000001234ULL;
+  constexpr uint64_t kSignalingNan = 0x7ff0000000000001ULL;
+  for (const uint16_t opcode : {cdna5::kVPkAddF64Vop3p, cdna5::kVPkMulF64Vop3p,
+                                cdna5::kVPkMaxNumF64Vop3p, cdna5::kVPkMinNumF64Vop3p}) {
+    const auto clamp_nan_words = cdna5::build_vop3p(opcode, {.vdst = 4,
+                                                             .opsel_hi_2 = 1,
+                                                             .clamp = 1,
+                                                             .src0 = 264,
+                                                             .src1 = 124,
+                                                             .src2 = 128,
+                                                             .opsel_hi = 3});
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {kQuietNan, kSignalingNan});
+    std::unique_ptr<Instruction> clamp_nan(decode_valid(*decoder, clamp_nan_words.data()));
+    ASSERT_NE(clamp_nan, nullptr);
+    ASSERT_NE(clamp_nan->execute, nullptr);
+    cu->execute_instruction(clamp_nan.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{bits(0.0), bits(0.0)}));
+  }
+
+  struct OverlapCase {
+    std::string_view name;
+    uint8_t vdst;
+  };
+  constexpr std::array kOverlapCases{
+      OverlapCase{"exact-src0", 8},
+      OverlapCase{"exact-src1", 12},
+      OverlapCase{"partial-both", 10},
+  };
+  for (const auto &test_case : kOverlapCases) {
+    SCOPED_TRACE(test_case.name);
+    const auto overlap_words = cdna5::build_vop3p(cdna5::kVPkAddF64Vop3p, {.vdst = test_case.vdst,
+                                                                           .opsel_hi_2 = 1,
+                                                                           .src0 = 264,
+                                                                           .src1 = 268,
+                                                                           .src2 = 128,
+                                                                           .opsel_hi = 3});
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {bits(2.0), bits(-3.0)});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(5.0), bits(4.0)});
+    std::unique_ptr<Instruction> overlap(decode_valid(*decoder, overlap_words.data()));
+    ASSERT_NE(overlap, nullptr);
+    ASSERT_NE(overlap->execute, nullptr);
+    cu->execute_instruction(overlap.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, test_case.vdst, 0),
+              (PackedU64Pair{bits(7.0), bits(1.0)}));
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, AddAndMultiplyHonorRoundingAndDenormModes) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  const auto add_words = cdna5::build_vop3p(
+      cdna5::kVPkAddF64Vop3p,
+      {.vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3});
+  const auto mul_words = cdna5::build_vop3p(
+      cdna5::kVPkMulF64Vop3p,
+      {.vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3});
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> add(decode_valid(*decoder, add_words.data()));
+  std::unique_ptr<Instruction> mul(decode_valid(*decoder, mul_words.data()));
+  ASSERT_NE(add, nullptr);
+  ASSERT_NE(mul, nullptr);
+  ASSERT_NE(add->execute, nullptr);
+  ASSERT_NE(mul->execute, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint64_t kOne = bits(1.0);
+  constexpr uint64_t kNegativeOne = bits(-1.0);
+  constexpr uint64_t kHalfUlpAtOne = bits(0x1p-53);
+  constexpr uint64_t kNegativeHalfUlpAtOne = bits(-0x1p-53);
+  constexpr std::array<PackedU64Pair, 4> kAddExpected{{
+      {kOne, kNegativeOne},
+      {kOne + 1, kNegativeOne},
+      {kOne, kNegativeOne + 1},
+      {kOne, kNegativeOne},
+  }};
+  for (uint32_t round = 0; round < 4; ++round) {
+    wf->set_mode_raw((round << 2) | (3u << 6));
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {kOne, kNegativeOne});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, {kHalfUlpAtOne, kNegativeHalfUlpAtOne});
+    cu->execute_instruction(add.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), kAddExpected[round]) << round;
+  }
+
+  constexpr uint64_t kNextOne = kOne + 1;
+  constexpr uint64_t kRoundedSquare = kOne + 2;
+  constexpr std::array<uint64_t, 4> kMulExpected{kRoundedSquare, kRoundedSquare + 1, kRoundedSquare,
+                                                 kRoundedSquare};
+  for (uint32_t round = 0; round < 4; ++round) {
+    wf->set_mode_raw((round << 2) | (3u << 6));
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {kNextOne, kNextOne});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, {kNextOne, kNextOne});
+    cu->execute_instruction(mul.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0),
+              (PackedU64Pair{kMulExpected[round], kMulExpected[round]}))
+        << round;
+  }
+
+  constexpr uint64_t kMinSubnormal = 1u;
+  constexpr uint64_t kHalfMinNormal = 0x0008000000000000ULL;
+  constexpr uint64_t kMinNormal = 0x0010000000000000ULL;
+  constexpr std::array<uint64_t, 4> kAddDenormExpected{0u, 0u, 0u, kMinSubnormal};
+  constexpr std::array<uint64_t, 4> kMulDenormExpected{0u, 0u, kHalfMinNormal, kHalfMinNormal};
+  for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+    wf->set_mode_raw(denorm << 6);
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {kMinSubnormal, kMinNormal});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, {0u, bits(0.5)});
+    cu->execute_instruction(add.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0)[0], kAddDenormExpected[denorm]) << denorm;
+    cu->execute_instruction(mul.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0)[1], kMulDenormExpected[denorm]) << denorm;
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHonorEveryDenormMode) {
+  constexpr uint64_t kPositiveZero = 0;
+  constexpr uint64_t kNegativeZero = 0x8000000000000000ULL;
+  constexpr uint64_t kMinSubnormal = 1;
+  constexpr uint64_t kNegativeMinSubnormal = kNegativeZero | kMinSubnormal;
+  constexpr std::array<uint64_t, 4> kMaxExpected{kPositiveZero, kPositiveZero, kPositiveZero,
+                                                 kMinSubnormal};
+  constexpr std::array<uint64_t, 4> kMinExpected{kNegativeZero, kNegativeZero, kNegativeZero,
+                                                 kNegativeMinSubnormal};
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  const auto max_words = cdna5::build_vop3p(
+      cdna5::kVPkMaxNumF64Vop3p,
+      {.vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3});
+  const auto min_words = cdna5::build_vop3p(
+      cdna5::kVPkMinNumF64Vop3p,
+      {.vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3});
+  std::unique_ptr<Instruction> maximum(decode_valid(*decoder, max_words.data()));
+  std::unique_ptr<Instruction> minimum(decode_valid(*decoder, min_words.data()));
+  ASSERT_NE(maximum, nullptr);
+  ASSERT_NE(minimum, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+    wf->set_mode_raw(denorm << 6);
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {kMinSubnormal, kNegativeMinSubnormal});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, {kPositiveZero, kPositiveZero});
+    cu->execute_instruction(maximum.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0)[0], kMaxExpected[denorm]) << denorm;
+    cu->execute_instruction(minimum.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0)[1], kMinExpected[denorm]) << denorm;
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, AddAndMultiplyHandleNanInfinityAndSignedZero) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  constexpr uint64_t kPositiveZero = 0u;
+  constexpr uint64_t kNegativeZero = 0x8000000000000000ULL;
+  constexpr uint64_t kPositiveInfinity = bits(std::numeric_limits<double>::infinity());
+  constexpr uint64_t kNegativeInfinity = bits(-std::numeric_limits<double>::infinity());
+  constexpr std::array<std::pair<uint32_t, PackedU64Pair>, 2> kCases{{
+      {cdna5::kVPkAddF64Vop3p, {kNegativeInfinity, kNegativeZero}},
+      {cdna5::kVPkMulF64Vop3p, {kPositiveZero, bits(2.0)}},
+  }};
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  wf->set_mode_raw(3u << 6);
+
+  for (const auto &[opcode, rhs] : kCases) {
+    const auto words = cdna5::build_vop3p(
+        opcode, {.vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3});
+    write_vgpr_packed_u64(*cu, *wf, 8, 0, {kPositiveInfinity, kNegativeZero});
+    write_vgpr_packed_u64(*cu, *wf, 12, 0, rhs);
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    const PackedU64Pair result = read_vgpr_packed_u64(*cu, *wf, 4, 0);
+    EXPECT_TRUE(std::isnan(std::bit_cast<double>(result[0])));
+    EXPECT_EQ(result[1], kNegativeZero);
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, MinMaxNumberHandleNanInfinityAndSignedZero) {
+  constexpr auto bits = [](double value) { return std::bit_cast<uint64_t>(value); };
+  constexpr uint64_t kQuietNan = 0x7ff8000000001234ULL;
+  constexpr uint64_t kSignalingNan = 0x7ff0000000000001ULL;
+  constexpr uint64_t kPositiveZero = 0u;
+  constexpr uint64_t kNegativeZero = 0x8000000000000000ULL;
+  constexpr uint64_t kPositiveInfinity = bits(std::numeric_limits<double>::infinity());
+  constexpr uint64_t kNegativeInfinity = bits(-std::numeric_limits<double>::infinity());
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  wf->set_mode_raw(3u << 6);
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {kQuietNan, kNegativeZero});
+  write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(2.0), kPositiveZero});
+
+  for (const auto &[words, expected] : {std::pair{std::array<uint32_t, 2>{0xCC4E4004u, 0x1A021908u},
+                                                  PackedU64Pair{bits(2.0), kPositiveZero}},
+                                        std::pair{std::array<uint32_t, 2>{0xCC4F4004u, 0x1A021908u},
+                                                  PackedU64Pair{bits(2.0), kNegativeZero}}}) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    ASSERT_NE(decoded->execute, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
+  }
+
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {kQuietNan, bits(3.0)});
+  write_vgpr_packed_u64(*cu, *wf, 12, 0, {bits(2.0), kSignalingNan});
+  for (const auto &words : {std::array<uint32_t, 2>{0xCC4E4004u, 0x1A021908u},
+                            std::array<uint32_t, 2>{0xCC4F4004u, 0x1A021908u}}) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{bits(2.0), bits(3.0)}));
+  }
+
+  struct NanCase {
+    std::string_view name;
+    uint64_t lhs;
+    uint64_t rhs;
+    uint64_t expected;
+    bool expect_nan;
+  };
+  constexpr std::array kNanCases{
+      NanCase{"qnan-left", kQuietNan, bits(2.0), bits(2.0), false},
+      NanCase{"qnan-right", bits(2.0), kQuietNan, bits(2.0), false},
+      NanCase{"snan-left", kSignalingNan, bits(3.0), bits(3.0), false},
+      NanCase{"snan-right", bits(3.0), kSignalingNan, bits(3.0), false},
+      NanCase{"qnan-snan", kQuietNan, kSignalingNan, 0, true},
+      NanCase{"snan-qnan", kSignalingNan, kQuietNan, 0, true},
+  };
+  for (const auto &words : {std::array<uint32_t, 2>{0xCC4E4004u, 0x1A021908u},
+                            std::array<uint32_t, 2>{0xCC4F4004u, 0x1A021908u}}) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    for (const auto &test_case : kNanCases) {
+      SCOPED_TRACE(decoded->mnemonic());
+      SCOPED_TRACE(test_case.name);
+      write_vgpr_packed_u64(*cu, *wf, 8, 0, {test_case.lhs, test_case.lhs});
+      write_vgpr_packed_u64(*cu, *wf, 12, 0, {test_case.rhs, test_case.rhs});
+      cu->execute_instruction(decoded.get(), *wf);
+      const PackedU64Pair result = read_vgpr_packed_u64(*cu, *wf, 4, 0);
+      if (test_case.expect_nan) {
+        EXPECT_TRUE(std::isnan(std::bit_cast<double>(result[0])));
+        EXPECT_TRUE(std::isnan(std::bit_cast<double>(result[1])));
+      } else {
+        EXPECT_EQ(result, (PackedU64Pair{test_case.expected, test_case.expected}));
+      }
+    }
+  }
+
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {kPositiveZero, kNegativeZero});
+  write_vgpr_packed_u64(*cu, *wf, 12, 0, {kNegativeZero, kPositiveZero});
+  for (const auto &[words, expected] : {std::pair{std::array<uint32_t, 2>{0xCC4E4004u, 0x1A021908u},
+                                                  PackedU64Pair{kPositiveZero, kPositiveZero}},
+                                        std::pair{std::array<uint32_t, 2>{0xCC4F4004u, 0x1A021908u},
+                                                  PackedU64Pair{kNegativeZero, kNegativeZero}}}) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), expected);
+  }
+
+  write_vgpr_packed_u64(*cu, *wf, 8, 0, {kNegativeInfinity, kQuietNan});
+  write_vgpr_packed_u64(*cu, *wf, 12, 0, {kPositiveInfinity, kQuietNan});
+  for (const auto &words : {std::array<uint32_t, 2>{0xCC4E4004u, 0x1A021908u},
+                            std::array<uint32_t, 2>{0xCC4F4004u, 0x1A021908u}}) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    cu->execute_instruction(decoded.get(), *wf);
+    const PackedU64Pair result = read_vgpr_packed_u64(*cu, *wf, 4, 0);
+    EXPECT_EQ(result[0], decoded->mnemonic() == std::string_view("v_pk_max_num_f64")
+                             ? kPositiveInfinity
+                             : kNegativeInfinity);
+    EXPECT_TRUE(std::isnan(std::bit_cast<double>(result[1])));
+  }
+}
+
+TEST(Gfx1251PackedF64ExecutionTest, RejectsUndefinedLayoutsAndOutOfRangeRegisterTuples) {
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  constexpr std::array<uint16_t, 4> kOpcodes{
+      cdna5::kVPkAddF64Vop3p,
+      cdna5::kVPkMulF64Vop3p,
+      cdna5::kVPkMaxNumF64Vop3p,
+      cdna5::kVPkMinNumF64Vop3p,
+  };
+  constexpr std::array kInvalidFields{
+      cdna5::Vop3pBuilderFields{.vdst = 4,
+                                .opsel = 1,
+                                .opsel_hi_2 = 1,
+                                .src0 = 264,
+                                .src1 = 268,
+                                .src2 = 128,
+                                .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 4, .opsel_hi_2 = 0, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 129, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 253, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 4, .opsel_hi_2 = 1, .src0 = 509, .src1 = 268, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = 104, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 3, .opsel_hi_2 = 1, .src0 = 264, .src1 = 268, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 4, .opsel_hi_2 = 1, .src0 = 265, .src1 = 268, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 4, .opsel_hi_2 = 1, .src0 = 10, .src1 = 268, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 4, .opsel_hi_2 = 1, .src0 = 109, .src1 = 268, .src2 = 128, .opsel_hi = 3},
+  };
+  for (const uint16_t opcode : kOpcodes) {
+    SCOPED_TRACE(opcode);
+    for (const auto &fields : kInvalidFields) {
+      const auto words = cdna5::build_vop3p(opcode, fields);
+      EXPECT_EQ(decode_valid(*decoder, words.data()), nullptr);
+    }
+  }
+
+  constexpr std::array<uint16_t, 21> kInvalidV2F64Selectors{
+      106, 107, 125, 126, 127, 209, 229, 230, 231, 232, 234,
+      235, 236, 237, 238, 239, 249, 251, 252, 253, 254,
+  };
+  for (const uint16_t opcode : kOpcodes) {
+    SCOPED_TRACE(opcode);
+    for (const uint16_t selector : kInvalidV2F64Selectors) {
+      for (const bool use_src1 : {false, true}) {
+        SCOPED_TRACE(selector);
+        SCOPED_TRACE(use_src1);
+        const auto words = cdna5::build_vop3p(opcode, {.vdst = 4,
+                                                       .opsel_hi_2 = 1,
+                                                       .src0 = use_src1 ? uint16_t{264} : selector,
+                                                       .src1 = use_src1 ? selector : uint16_t{268},
+                                                       .src2 = 128,
+                                                       .opsel_hi = 3});
+        EXPECT_EQ(decode_valid(*decoder, words.data()), nullptr);
+      }
+    }
+  }
+
+  constexpr std::array<uint16_t, 6> kValidV2F64Selectors{
+      124, 128, 208, 240, 248, 255,
+  };
+  for (const uint16_t opcode : kOpcodes) {
+    SCOPED_TRACE(opcode);
+    for (const uint16_t selector : kValidV2F64Selectors) {
+      SCOPED_TRACE(selector);
+      const auto encoding = cdna5::build_vop3p(
+          opcode,
+          {.vdst = 4, .opsel_hi_2 = 1, .src0 = selector, .src1 = 268, .src2 = 128, .opsel_hi = 3});
+      const std::array<uint32_t, 3> words{encoding[0], encoding[1], 0x65u};
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+      EXPECT_NE(decoded, nullptr);
+    }
+  }
+
+  constexpr std::array kValidBoundaries{
+      cdna5::Vop3pBuilderFields{
+          .vdst = 252, .opsel_hi_2 = 1, .src0 = 508, .src1 = 100, .src2 = 128, .opsel_hi = 3},
+      cdna5::Vop3pBuilderFields{
+          .vdst = 2, .opsel_hi_2 = 1, .src0 = 258, .src1 = 262, .src2 = 128, .opsel_hi = 3},
+  };
+  for (const uint16_t opcode : kOpcodes) {
+    SCOPED_TRACE(opcode);
+    for (const auto &fields : kValidBoundaries) {
+      const auto words = cdna5::build_vop3p(opcode, fields);
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+      EXPECT_NE(decoded, nullptr);
+    }
   }
 }
 

@@ -124,6 +124,7 @@ _SIMM32_64BIT_WIDENING = {
     'FMT_NUM_PK16_U4': _Literal32Widening.ZERO_EXTEND,
     'FMT_NUM_PK2_B32': _Literal32Widening.ZERO_EXTEND,
     'FMT_NUM_PK2_F32': _Literal32Widening.REPLICATE_32,
+    'FMT_NUM_PK2_F64': _Literal32Widening.F64_HIGH_BITS,
     'FMT_NUM_PK2_U32': _Literal32Widening.REPLICATE_32,
     'FMT_NUM_PK4_BF16': _Literal32Widening.ZERO_EXTEND,
     'FMT_NUM_PK4_F16': _Literal32Widening.ZERO_EXTEND,
@@ -1231,7 +1232,10 @@ class CodeGenerator:
         inst_name: str,
         enc_name: str,
     ) -> _Literal32Widening | None:
-        if operand_type != 'OPR_SIMM32' or not opnd.is_input or opnd.size != 64:
+        is_64bit_value = opnd.size == 64 or (
+            opnd.size == 128 and opnd.data_format_name == 'FMT_NUM_PK2_F64'
+        )
+        if operand_type != 'OPR_SIMM32' or not opnd.is_input or not is_64bit_value:
             return None
         try:
             return _SIMM32_64BIT_WIDENING[opnd.data_format_name]
@@ -10325,12 +10329,12 @@ class CodeGenerator:
                             'SReg_32_XEXEC destination";'
                         )
 
-                    # LLVM's public gfx1251 profiles define the packed U64
-                    # operations without op_sel.  The profile and corresponding
-                    # MC vectors are permanently linked here:
-                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L147-L162
-                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s#L257-L403
-                    # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L887-L917
+                    # LLVM's public gfx1251 profiles define the packed U64 and
+                    # F64 binary operations without op_sel.  The profile and
+                    # corresponding MC vectors are permanently linked here:
+                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L130-L162
+                    # https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s#L1-L403
+                    # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L875-L920
                     # https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2133-L2143
                     # These references establish the operand profile and
                     # encoding, not execution ordering for combined modifiers.
@@ -10342,26 +10346,32 @@ class CodeGenerator:
                     # tuple's first selector and its width-independent source
                     # selector set.
                     if inst_sem is not None and inst_sem.semantic_class in {
+                        'pk_binop_f64',
                         'pk_binop_u64',
                         'pk_lshl_add_u64',
                     }:
                         raw_inst = (
                             f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
                         )
+                        layout_name = (
+                            'packed F64'
+                            if inst_sem.semantic_class == 'pk_binop_f64'
+                            else 'packed U64'
+                        )
                         factory_validation_parts.append(
                             f'if ({raw_inst}->opsel != 0u || '
                             f'{raw_inst}->opsel_hi != 3u || '
                             f'{raw_inst}->opsel_hi_2 != 1u) '
                             f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
-                            'packed U64 element layout";'
+                            f'{layout_name} element layout";'
                         )
-                        if inst_sem.semantic_class == 'pk_binop_u64':
+                        if inst_sem.semantic_class in {'pk_binop_f64', 'pk_binop_u64'}:
                             factory_validation_parts.append(
                                 f'if ({raw_inst}->src2 != 128u) '
                                 f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
                                 'unused src2 encoding";'
                             )
-                        else:
+                        if inst_sem.semantic_class == 'pk_lshl_add_u64':
                             factory_validation_parts.append(
                                 f'if ({raw_inst}->clamp != 0u || '
                                 f'{raw_inst}->neg != 0u || '
@@ -10440,7 +10450,7 @@ class CodeGenerator:
                                 factory_validation_parts.append(
                                     f'if (!({valid_width_specific})) '
                                     f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
-                                    f'{opnd.name} packed U64 source selector";'
+                                    f'{opnd.name} {layout_name} source selector";'
                                 )
 
                     # Flat segment-aware operands: adjust addr width and add

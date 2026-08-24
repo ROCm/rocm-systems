@@ -5040,6 +5040,63 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
     assert 'make_after_selector_validation' not in lshl_constructor
 
 
+def test_gfx1251_packed_f64_decode_rejects_undefined_layouts_and_register_tuples(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+
+    for class_name in (
+        'VPkAddF64Vop3p',
+        'VPkMulF64Vop3p',
+        'VPkMaxNumF64Vop3p',
+        'VPkMinNumF64Vop3p',
+    ):
+        body = _generated_decode_body(source, class_name)
+        assert 'has an invalid packed F64 element layout' in body
+        assert 'has an invalid unused src2 encoding' in body
+        assert 'vdst register tuple that exceeds the selector range' in body
+        assert 'src0 register tuple that exceeds the selector range' in body
+        assert 'src1 register tuple that exceeds the selector range' in body
+        assert 'invalid vdst register tuple alignment' in body
+        assert 'invalid src0 register tuple alignment' in body
+        assert 'invalid src1 register tuple alignment' in body
+        assert 'invalid src0 packed F64 source selector' in body
+        assert 'invalid src1 packed F64 source selector' in body
+        for operand_name in ('src0', 'src1'):
+            assert f'{operand_name} <= 100u' in body
+            assert f'{operand_name} >= 108u' in body
+            assert f'{operand_name} <= 120u' in body
+            assert f'{operand_name} == 124u' in body
+            assert f'{operand_name} >= 128u' in body
+            assert f'{operand_name} <= 208u' in body
+            assert f'{operand_name} >= 240u' in body
+            assert f'{operand_name} <= 248u' in body
+            assert f'{operand_name} == 255u' in body
+            assert f'{operand_name} >= 256u' in body
+            assert f'{operand_name} <= 508u' in body
+            for invalid_selector in (230, 231, 235, 236, 253):
+                assert f'{operand_name} == {invalid_selector}u' not in body
+        assert 'does not support source modifiers or clamp' not in body
+
+
+def test_gfx1251_packed_f64_literals_use_f64_high_bits_widening(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+
+    for class_name in (
+        'VPkFmaF64Vop3p',
+        'VPkMulF64Vop3p',
+        'VPkAddF64Vop3p',
+        'VPkMaxNumF64Vop3p',
+        'VPkMinNumF64Vop3p',
+    ):
+        constructor = source.split(f'{class_name}::{class_name}(', 1)[1].split(
+            '\n}', 1
+        )[0]
+        assert 'Operand::Literal32Widening::F64HighBits' in constructor
+
+
 def test_gfx1250_matrix_codegen_uses_public_opsel_hi_2_field(
     gfx1250_generated_root: Path,
 ):
@@ -5126,10 +5183,6 @@ def test_cdna5_variant_execution_callback_inventory(
 ) -> None:
     model_only_classes = (
         'VPkFmaF64Vop3p',
-        'VPkMulF64Vop3p',
-        'VPkAddF64Vop3p',
-        'VPkMaxNumF64Vop3p',
-        'VPkMinNumF64Vop3p',
         'VWmmaF6416x16x4F64Vop3p',
     )
     header = (gfx1250_generated_root / 'vop3p.h').read_text()
@@ -5150,8 +5203,12 @@ def test_cdna5_variant_execution_callback_inventory(
         assert class_name not in execution_source
 
     executable_classes = (
+        'VPkMulF64Vop3p',
+        'VPkAddF64Vop3p',
         'VPkAddNcU64Vop3p',
         'VPkSubNcU64Vop3p',
+        'VPkMaxNumF64Vop3p',
+        'VPkMinNumF64Vop3p',
         'VPkLshlAddU64Vop3p',
     )
     for executable_class in executable_classes:

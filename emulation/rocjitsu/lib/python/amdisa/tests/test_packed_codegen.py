@@ -13,6 +13,7 @@ from amdisa.codegen.execute.packed import (
     gen_mad_mix_lo_hi,
     gen_pk_binop,
     gen_pk_binop_f32,
+    gen_pk_binop_f64,
     gen_pk_fmac_vop2,
     gen_pk_fmac_vop3,
     gen_pk_binop_u64,
@@ -351,6 +352,36 @@ def test_pk_u64_binop_rejects_unknown_operation():
 
     with pytest.raises(ValueError, match='unsupported packed U64 binary operation'):
         gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'mul')
+
+
+def test_pk_f64_binops_use_mode_aware_two_element_execution():
+    expected_operations = {
+        'add': 'Add',
+        'mul': 'Multiply',
+        'max_num': 'MaximumNumber',
+        'min_num': 'MinimumNumber',
+    }
+    for operation, enum_name in expected_operations.items():
+        cpp = gen_pk_binop_f64(['vdst'], ['src0', 'src1'], operation)
+
+        assert 'const auto lhs = read_pk_u64_pair(src0, wf, lane);' in cpp
+        assert 'const auto rhs = read_pk_u64_pair(src1, wf, lane);' in cpp
+        assert f'BinaryF64Op::{enum_name}' in cpp
+        assert cpp.count('amdgpu::fp_mode::binary_f64(') == 1
+        assert 'wf.fp_round_mode_f16_f64()' in cpp
+        assert 'wf.fp_denorm_mode_f16_f64()' in cpp
+        assert 'lhs_bits ^= kSignBit' in cpp
+        assert 'rhs_bits ^= kSignBit' in cpp
+        assert 'amdgpu::fp_mode::finish_f64(' in cpp
+        assert 'inst_.clamp' in cpp
+        assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+
+
+def test_pk_f64_binop_rejects_unknown_operation():
+    import pytest
+
+    with pytest.raises(ValueError, match='unsupported packed F64 binary operation'):
+        gen_pk_binop_f64(['vdst'], ['src0', 'src1'], 'divide')
 
 
 def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
