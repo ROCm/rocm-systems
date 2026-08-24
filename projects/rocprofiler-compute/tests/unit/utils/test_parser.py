@@ -294,6 +294,76 @@ class TestBuildDfs:
         assert ac.metric_counters["Kept"] == ["COUNTER_KEPT"]
         assert ac.dfs_expressions[201] == ["AVG(COUNTER_KEPT)"]
 
+    def test_membw_gate_excludes_panel_3000_by_default(self):
+        ac = _make_arch_config([
+            (0, _raw_csv_panel(0, 1, "kernel_top.csv")),
+            (
+                3000,
+                _metric_panel(
+                    3000,
+                    3001,
+                    metrics={"BW": {"value": "AVG(COUNTER_BW)"}},
+                ),
+            ),
+        ])
+        build_dfs(ac, filter_metrics=None, sys_info=_sys_info(), profiling_config={})
+
+        assert 1 in ac.dfs
+        assert 3001 not in ac.dfs
+
+    def test_membw_gate_includes_panel_3000_when_enabled(self):
+        ac = _make_arch_config([
+            (0, _raw_csv_panel(0, 1, "kernel_top.csv")),
+            (
+                3000,
+                _metric_panel(
+                    3000,
+                    3001,
+                    metrics={"BW": {"value": "AVG(COUNTER_BW)"}},
+                ),
+            ),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=None,
+            sys_info=_sys_info(),
+            profiling_config={},
+            membw_analysis=True,
+        )
+
+        assert 3001 in ac.dfs
+        assert list(ac.dfs[3001]["Metric"]) == ["BW"]
+
+    def test_membw_gate_overrides_filter_targeting_panel_3000(self):
+        ac = _make_arch_config([
+            (0, _raw_csv_panel(0, 1, "kernel_top.csv")),
+            (
+                200,
+                _metric_panel(
+                    200,
+                    201,
+                    metrics={"M1": {"value": "AVG(COUNTER_A)"}},
+                ),
+            ),
+            (
+                3000,
+                _metric_panel(
+                    3000,
+                    3001,
+                    metrics={"BW": {"value": "AVG(COUNTER_BW)"}},
+                ),
+            ),
+        ])
+        build_dfs(
+            ac,
+            filter_metrics=["30"],
+            sys_info=_sys_info(),
+            profiling_config={},
+            membw_analysis=False,
+        )
+
+        assert 3001 not in ac.dfs
+
 
 # =============================================================================
 # expand_placeholder_ranges
