@@ -75,15 +75,13 @@ follows.
       - Should be ON to enable testing from the installation location without dependency on the source directory.
 
     * - ``BUILD_TORCH_TRACE_COLLECTOR``
-      - Controls the build of the ``torch_trace_collector`` extension, which
-        :ref:`Torch trace <torch-operator-mapping>` uses. One of ``AUTO`` (default),
-        which builds the extension when PyTorch is importable and skips it otherwise,
-        ``ON``, which stops the configure when PyTorch is unavailable, or ``OFF``, which
-        never builds it.
+      - Build ``torch_trace_collector`` for :ref:`Torch trace <torch-operator-mapping>`.
+        ``AUTO`` (default) builds when PyTorch is available, ``ON`` requires
+        PyTorch, and ``OFF`` skips the build.
 
     * - ``TORCH_TRACE_PYTHON``
-      - Specifies the Python interpreter that the ``torch_trace_collector`` extension is
-        built against. Defaults to the ``python3`` interpreter that CMake locates.
+      - Python interpreter used to build ``torch_trace_collector``. Defaults to
+        the ``python3`` interpreter that CMake locates.
 
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
