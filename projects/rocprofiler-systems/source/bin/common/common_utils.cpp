@@ -225,7 +225,7 @@ print_pre_execution_info(std::string_view tool_name, std::string_view preset_mod
     auto output_dir = get_output_directory();
 
     bool tracing_on   = false;
-    bool profiling_on = true;
+    bool profiling_on = false;
     bool rocpd_on     = true;
 
     if(!preset_mode.empty() && !tool_name.empty())

@@ -1588,6 +1588,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_CAUSAL, true);
         _set(env_vars::TRACE, false);
         _set(env_vars::PROFILE, false);
+        _set(env_vars::USE_ROCPD, false);
         _set(env_vars::USE_SAMPLING, false);
         _set(env_vars::USE_PROCESS_SAMPLING, false);
     }
