@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/code_object.h"
@@ -41,6 +42,11 @@ bool has_no_static_successor(const Instruction &inst) {
 
 bool is_unconditional_branch(const Instruction &inst) {
   return (inst.flags() & BRANCH) && !(inst.flags() & COND_BRANCH);
+}
+
+rj_code_target_id_t concrete_target(const CodeObject &co) {
+  const auto *amdgpu_object = dynamic_cast<const AmdGpuCodeObject *>(&co);
+  return amdgpu_object != nullptr ? amdgpu_object->target_id() : ROCJITSU_CODE_TARGET_INVALID;
 }
 
 uint32_t first_word(const Instruction &inst) {
@@ -172,6 +178,7 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                        std::span<const uint64_t> extra_split_points, DecodedSection *prepared,
                        std::span<const CodeRange> permitted_ranges) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
+  const rj_code_target_id_t target_id = concrete_target(co);
 
   for (const auto *sec : co.text_sections()) {
     const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
@@ -236,7 +243,7 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
       discovery_entries.push_back(decoded.front()->src_loc());
       recovered_indirect_targets =
           discover_indirect_branch_edges(decoded_span, text, arch, discovery_entries, entry_policy,
-                                         &pc_address_builders, extra_split_points);
+                                         &pc_address_builders, extra_split_points, {}, target_id);
     }
 
     std::set<uint64_t> leaders;
@@ -804,6 +811,7 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   size_t work_index = 0;
   std::vector<uint64_t> ordered_seeds(decode_seeds.begin(), decode_seeds.end());
   std::ranges::sort(ordered_seeds);
+  const rj_code_target_id_t target_id = concrete_target(co);
   size_t seed_index = 0;
   size_t round = 0;
   constexpr size_t kMaxDiscoveryRounds = 64;
@@ -878,7 +886,7 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       prepared.pc_address_builders.clear();
       prepared.indirect_targets = discover_indirect_branch_edges(
           decoded_insts, text, arch, entry_offsets, ExternalEntryPolicy::ExplicitOnly,
-          &prepared.pc_address_builders, split_points, decode_seeds);
+          &prepared.pc_address_builders, split_points, decode_seeds, target_id);
       analyzed_size = decoded.size();
       for (const IndirectCallFixup &fixup : prepared.indirect_targets) {
         if (!is_decoded_start(fixup.source_target_offset))

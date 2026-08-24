@@ -17,13 +17,17 @@ inline constexpr IsaGpuTargetDescription kGfx1250Target{
     "gfx1250",
     EF_AMDGPU_MACH_AMDGCN_GFX1250,
     120500,
-    {.instruction_features = kGfx1250IsaFeatures, .execution_implemented = true}};
+    {.instruction_features = kGfx1250IsaFeatures,
+     .setreg_vgpr_msb_fixup = true,
+     .execution_implemented = true}};
 inline constexpr IsaGpuTargetDescription kGfx1251Target{
     ROCJITSU_CODE_TARGET_GFX1251,
     "gfx1251",
     EF_AMDGPU_MACH_AMDGCN_GFX1251,
     120501,
-    {.instruction_features = kGfx1251IsaFeatures, .execution_implemented = false}};
+    {.instruction_features = kGfx1251IsaFeatures,
+     .setreg_vgpr_msb_fixup = false,
+     .execution_implemented = false}};
 inline constexpr std::array<IsaGpuTargetDescription, 2> kGpuTargets{
     {kGfx1250Target, kGfx1251Target}};
 
