@@ -1561,12 +1561,45 @@ bool Vop3p::has_lit_0_has_lit_1_has_lit_2() {
   return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 == 255;
 }
 
+bool Ds::uses_split_ds_offsets() const {
+  switch (inst_.op) {
+  case 14:
+  case 15:
+  case 55:
+  case 56:
+  case 78:
+  case 79:
+  case 119:
+  case 120:
+    return true;
+  default:
+    return false;
+  }
+}
+
 Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+}
+
+void Ds::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (uses_split_ds_offsets()) {
+    if (inst->offset0)
+      out += " offset0:" + std::to_string(inst->offset0);
+    if (inst->offset1)
+      out += " offset1:" + std::to_string(inst->offset1);
+  } else {
+    const uint32_t offset = inst->offset0 | (inst->offset1 << 8);
+    if (offset)
+      out += " offset:" + std::to_string(offset);
+  }
+  if (inst->gds)
+    out += " gds";
 }
 
 Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn)
