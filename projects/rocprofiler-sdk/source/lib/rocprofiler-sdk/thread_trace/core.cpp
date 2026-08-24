@@ -544,10 +544,11 @@ DispatchThreadTracer::start_context()
 void
 DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
-    // Stop injecting ATT packets for new dispatches. The completion callback and
-    // serializer must remain active until final teardown so ATT work submitted
-    // before the pause can finish and flush its data.
-    enabled.store(false, std::memory_order_release);
+    // Stop injecting ATT packets before transitioning serialization. Completion callbacks remain
+    // registered so packets already in the queues can drain through the serializer transition.
+    if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
+
+    if(auto* controller = hsa::get_queue_controller()) controller->disable_serialization();
 }
 
 DeviceThreadTracer::DeviceThreadTracer()
