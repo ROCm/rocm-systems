@@ -18,6 +18,9 @@
 #ifndef RCCL_TEST_HOST_INIT_FAKES_H_
 #define RCCL_TEST_HOST_INIT_FAKES_H_
 
+#include <string>
+#include <vector>
+
 #include "hip_fakes.h"
 #include "nccl_fakes.h"
 #include "os.h"  // ncclAffinity, for the initTransportsRank affinity seams below
@@ -143,12 +146,37 @@ extern int g_initChannelLastId;
 // -------------------------------------------------------------------------
 extern int g_ncclOsCpuCountValue;
 extern int g_ncclOsCpuCountCalls;
-extern int g_ncclOsSetAffinityCalls;
-extern ncclAffinity g_ncclOsSetAffinityLast;  // records the mask exit::2404 forwarded
+extern ncclResult_t g_ncclOsSetAffinityResult;
+// Every mask handed to ncclOsSetAffinity, in call order: [0] is :1610, [1] is exit::2404. A single
+// "last" slot is not enough -- the exit: write masks whatever :1610 forwarded.
+extern std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 extern ncclResult_t g_ncclMnnvlCheckResult;
 extern int g_ncclMnnvlCheckCalls;  // the oracle for the :1503-1509 enable/auto/disable logic
 extern std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char*)> g_ncclTopoGetSystem;
+
+// -------------------------------------------------------------------------
+// Topology-detection / CPU-affinity seams (init.cc:1576-1648), rung 2 of the ladder.
+// All default to success so a test can walk :1576-1648 and inject exactly one failure. ncclTopoCompute
+// is the exception -- it defaults to FAILURE because it is now the terminator, the same role
+// ncclTopoGetSystem played for rung 1. ncclTopoComputePaths gets a FailAt index rather than a result
+// because :1591 and :1596 call it twice and a single knob cannot separate them.
+// -------------------------------------------------------------------------
+extern int g_tuningIndexValue;
+extern std::string g_tuningIndexLastArch;  // :1577 forwards comm->archName; without this that is untested
+extern int g_ncclTopoComputePathsCalls;
+extern int g_ncclTopoComputePathsFailAt;   // -1 = never fail; 0 = the :1591 call, 1 = the :1596 one
+extern ncclResult_t g_ncclTopoTrimSystemResult;
+extern ncclResult_t g_ncclTopoSearchInitResult;
+extern ncclResult_t g_ncclTopoComputeCommCPUResult;
+extern ncclResult_t g_ncclTopoPrintResult;
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int, ncclAffinity*)> g_ncclTopoGetCpuAffinity;
+extern int g_ncclTopoGetCpuAffinityLastRank;
+extern std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity;
+extern ncclResult_t g_ncclNvlsInitResult;
+extern int g_ncclNvlsInitCalls;
+extern ncclResult_t g_ncclTopoComputeResult;
+extern int g_ncclTopoComputeCalls;
 
 // Enable the full commAlloc() happy path in one call: flips the HIP deep-path
 // seams (attribute/PCIBusId/event/mempool/stream) to success and resets the

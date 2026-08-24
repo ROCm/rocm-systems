@@ -2147,6 +2147,19 @@ class TransportsRankComm {
   TransportsRankComm(const TransportsRankComm&) = delete;
   TransportsRankComm& operator=(const TransportsRankComm&) = delete;
   ncclComm* get() { return comm_.get(); }
+
+  // Point ncclTopoGetSystem at a system this object owns, so the ladder can run past :1576 into the
+  // topology block. Returns it so tests can assert the fields :1577-1589 and :1622-1639 stamp on it.
+  // Nothing in :1386-1648 frees comm->topo (commFree does, and no test calls it), so ownership stays here.
+  ncclTopoSystem* installTopo() {
+    topo_ = std::make_unique<ncclTopoSystem>();
+    ncclTopoSystem* t = topo_.get();
+    g_ncclTopoGetSystem = [t](ncclComm*, ncclTopoSystem** out, const char*) {
+      if (out) *out = t;  // the :1573 dump-file call site passes NULL
+      return ncclSuccess;
+    };
+    return t;
+  }
   uint64_t* timers() { return timers_; }
   int rank() const { return comm_->rank; }
   int nRanks() const { return comm_->nRanks; }
@@ -2155,6 +2168,7 @@ class TransportsRankComm {
   std::unique_ptr<ncclComm> comm_;
   std::unique_ptr<ncclSharedResources> sr_;
   std::unique_ptr<ncclNet_t> net_;
+  std::unique_ptr<ncclTopoSystem> topo_;
   std::string archName_;
   uint64_t timers_[TIMERS_INIT_COUNT];
 };
@@ -2592,7 +2606,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoGetSystemFails_PropagatesAndRunsCle
   g_ncclTopoGetSystem = [](ncclComm*, ncclTopoSystem**, const char*) { return ncclSystemError; };
   EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));  // not the default error
   EXPECT_EQ(1, g_ncclOsCpuCountCalls);          // fail: fell through to exit:
-  EXPECT_EQ(0, g_ncclOsSetAffinityCalls);       // cpu count 0, so :2404 stayed unreached
+  EXPECT_EQ(0u, g_ncclOsSetAffinityMasks.size());  // cpu count 0, so :2404 stayed unreached
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NoTopoDumpFile_PassesNullPathToTopoGetSystem) {
@@ -2628,8 +2642,280 @@ TEST_F(InitMicrotest, InitTransportsRank_CpuAffinitySet_RestoresThatAffinityAtEx
   CPU_SET(5, &c.get()->cpuAffinity);
   g_ncclOsCpuCountValue = 1;  // non-zero, so exit::2404 restores the mask
   EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
-  EXPECT_EQ(1, g_ncclOsSetAffinityCalls);
+  // Only exit::2404 runs here -- :1607-1610 are past the rung-1 terminator.
+  ASSERT_EQ(1u, g_ncclOsSetAffinityMasks.size());
   // Assert the MASK, not just the call: forwarding any other affinity would otherwise pass.
-  EXPECT_TRUE(CPU_ISSET(5, &g_ncclOsSetAffinityLast));
-  EXPECT_EQ(1, CPU_COUNT(&g_ncclOsSetAffinityLast));
+  EXPECT_TRUE(CPU_ISSET(5, &g_ncclOsSetAffinityMasks[0]));
+  EXPECT_EQ(1, CPU_COUNT(&g_ncclOsSetAffinityMasks[0]));
+}
+
+// ===========================================================================
+// initTransportsRank rung 2: topology detection, CPU affinity, CollNet and the
+// host-index computation (src :1576-1648). Same ladder -- ncclTopoGetSystem now
+// succeeds and hands back a test-owned ncclTopoSystem, and ncclTopoCompute
+// (:1648) takes over as the terminator with its failure default.
+// ===========================================================================
+
+// --- Topology detection (init.cc:1576-1603) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_TopoDetected_StampsTopoDefaults) {
+  TransportsRankComm c(4, 0);
+  ncclTopoSystem* topo = c.installTopo();
+  g_tuningIndexValue = 7;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));  // stops at :1648
+  EXPECT_EQ(topo, c.get()->topo);
+  EXPECT_EQ(4, topo->nRanks);
+  EXPECT_EQ(7, topo->tuning);
+  EXPECT_EQ(-2, topo->netGdrLevel);
+  EXPECT_FALSE(topo->pivotA2AEnabled);
+  EXPECT_EQ(0, topo->pivotA2ANumBiRings);
+  EXPECT_FALSE(topo->ll128Enabled);
+  EXPECT_FALSE(topo->treeDefined);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TuningIndex_IsLookedUpByCommArchName) {
+  TransportsRankComm c(4, 0, /*archName=*/"gfx90a");
+  ncclTopoSystem* topo = c.installTopo();
+  g_tuningIndexValue = 3;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(3, topo->tuning);
+  EXPECT_EQ("gfx90a", g_tuningIndexLastArch);  // pins that :1577 forwards archName, not a constant
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_ComputePathsFailsBeforeTrim_StopsAtFirstCall) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclTopoComputePathsFailAt = 0;  // the :1591 call
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTopoComputePathsCalls);  // never reached the post-trim recompute
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_ComputePathsFailsAfterTrim_RunsBothCalls) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclTopoComputePathsFailAt = 1;  // the :1596 recompute; only a call index separates it from :1591
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoComputePathsCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TrimSystemFails_PropagatesBetweenThePathsCalls) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclTopoTrimSystemResult = ncclInvalidArgument;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTopoComputePathsCalls);  // trim sits between :1591 and :1596
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TopoSearchInitFails_Propagates) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclTopoSearchInitResult = ncclInvalidUsage;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoComputePathsCalls);  // both path computations already ran
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TopoComputeCommCpuFails_Propagates) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclTopoComputeCommCPUResult = ncclUnhandledCudaError;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclUnhandledCudaError, initTransportsRank(c.get(), nullptr, c.timers()));
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TopoPrintFails_Propagates) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclTopoPrintResult = ncclInvalidArgument;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(-1, g_ncclTopoGetCpuAffinityLastRank);  // :1607 is past the failure
+}
+
+// --- CPU affinity (init.cc:1607-1611) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_TopoGetCpuAffinityFails_Propagates) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclTopoGetCpuAffinity = [](ncclTopoSystem*, int, ncclAffinity*) { return ncclSystemError; };
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_CpuAffinityLookedUpForThisRank) {
+  TransportsRankComm c(4, /*rank=*/2);
+  c.installTopo();
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(2, g_ncclTopoGetCpuAffinityLastRank);  // :1607 forwards comm->rank, not a constant
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_EmptyCpuAffinity_SkipsSaveAndApply) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));  // cpu count 0 by default
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0u, g_ncclOsSetAffinityMasks.size());  // neither :1610 nor exit::2404 ran
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NonEmptyCpuAffinity_AppliesAtBothSites) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclTopoGetCpuAffinity = [](ncclTopoSystem*, int, ncclAffinity* a) {
+    CPU_ZERO(a); CPU_SET(6, a); return ncclSuccess;
+  };
+  g_ncclOsCpuCountValue = 1;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  ASSERT_EQ(2u, g_ncclOsSetAffinityMasks.size());  // :1610 on the way in, exit::2404 on the way out
+  EXPECT_TRUE(CPU_ISSET(6, &g_ncclOsSetAffinityMasks[0]));
+  EXPECT_TRUE(CPU_ISSET(6, &g_ncclOsSetAffinityMasks[1]));
+  EXPECT_TRUE(CPU_ISSET(6, &c.get()->cpuAffinity));  // :1607 wrote through to the comm
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_OsGetAffinityFails_Propagates) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclOsCpuCountValue = 1;
+  g_ncclOsGetAffinity = [](ncclAffinity*) { return ncclSystemError; };
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_OsSetAffinityFails_Propagates) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclOsCpuCountValue = 1;
+  g_ncclOsSetAffinityResult = ncclInvalidUsage;  // :1610 is NCCLCHECKGOTO'd, unlike exit::2404
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+}
+
+// affinitySave (:1395) is written at :1609 and never read: exit::2404 re-applies comm->cpuAffinity,
+// not the saved mask, so the caller's original affinity is deliberately NOT restored. Pinned here so a
+// future "restore affinitySave" change has to update a test rather than pass silently.
+TEST_F(InitMicrotest, InitTransportsRank_AffinitySaveIsCapturedButNeverRestored) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclOsCpuCountValue = 1;
+  g_ncclTopoGetCpuAffinity = [](ncclTopoSystem*, int, ncclAffinity* a) {
+    CPU_ZERO(a); CPU_SET(6, a); return ncclSuccess;   // the GPU-local mask
+  };
+  g_ncclOsGetAffinity = [](ncclAffinity* a) {
+    CPU_ZERO(a); CPU_SET(9, a); return ncclSuccess;   // the caller's original mask
+  };
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  // BOTH call sites must be checked: exit::2404 always passes comm->cpuAffinity, so asserting only
+  // the final mask cannot see :1610 handing over affinitySave instead.
+  ASSERT_EQ(2u, g_ncclOsSetAffinityMasks.size());
+  for (const ncclAffinity& m : g_ncclOsSetAffinityMasks) {
+    EXPECT_TRUE(CPU_ISSET(6, &m));   // the GPU-local mask, at :1610 and at exit::2404...
+    EXPECT_FALSE(CPU_ISSET(9, &m));  // ...and the saved mask is never re-applied anywhere
+  }
+}
+
+// --- CollNet, host index and the ring graph (init.cc:1613-1648) ---
+
+TEST_F(InitMicrotest, InitTransportsRank_NoCollNetPlugin_ClearsCollnetEnable) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  c.get()->config.collnetEnable = 1;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, c.get()->config.collnetEnable);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_CollNetPluginPresent_KeepsCollnetEnable) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  ncclCollNet_t collNet{};
+  c.get()->ncclCollNet = &collNet;
+  c.get()->config.collnetEnable = 1;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, c.get()->config.collnetEnable);  // positive anchor for the test above
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NvlsInitFails_ReturnsWithoutRunningCleanup) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclNvlsInitResult = ncclSystemError;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclNvlsInitCalls);
+  // :1618 is a bare NCCLCHECK, not NCCLCHECKGOTO -- the second cleanup bypass in this function.
+  // :1608 already called ncclOsCpuCount once; reaching exit: would make it two.
+  EXPECT_EQ(1, g_ncclOsCpuCountCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_ComputesHostCountAndHostIndex) {
+  TransportsRankComm c(4, /*rank=*/3);
+  ncclTopoSystem* topo = c.installTopo();
+  std::vector<PeerSpec> specs(4);
+  specs[0].node = 1;  // hosts, in rank order: B B C A -- self (rank 3) is on host A, seen last,
+  specs[1].node = 1;  // so nHosts and hostIdx take different values and neither is 0
+  specs[2].node = 2;
+  InstallPeerInfoAllGather(c, specs);
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(3, topo->nHosts);
+  EXPECT_EQ(2, topo->hostIdx);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_SingleHost_HostIndexIsZero) {
+  TransportsRankComm c(4, 0);
+  ncclTopoSystem* topo = c.installTopo();
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, topo->nHosts);
+  EXPECT_EQ(0, topo->hostIdx);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_UniformRanksPerHost_KeepsPresetTopoMatching) {
+  TransportsRankComm c(4, 0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::vector<PeerSpec> specs(4);
+  specs[2].node = 1;  // 2 hosts x 2 ranks
+  specs[3].node = 1;
+  InstallPeerInfoAllGather(c, specs);
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_FALSE(topo->skipPresetTopoMatching);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_NonUniformRanksPerHost_SkipsPresetTopoMatching) {
+  TransportsRankComm c(4, 0);
+  ncclTopoSystem* topo = c.installTopo();
+  std::vector<PeerSpec> specs(4);
+  specs[3].node = 1;  // 3 ranks on one host, 1 on the other
+  InstallPeerInfoAllGather(c, specs);
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_TRUE(topo->skipPresetTopoMatching);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_TopoComputeFails_PropagatesAndRunsCleanup) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  g_ncclOsCpuCountValue = 1;
+  g_ncclTopoComputeResult = ncclInvalidArgument;
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTopoComputeCalls);
+  EXPECT_EQ(2, g_ncclOsCpuCountCalls);  // :1608 and exit::2403 -- unlike the :1618 bypass above
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_RingGraphSeededBeforeTopoCompute) {
+  TransportsRankComm c(4, 0);
+  c.installTopo();
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInternalError, initTransportsRank(c.get(), nullptr, c.timers()));
+  const ncclTopoGraph& ring = c.get()->graphs[NCCL_ALGO_RING];
+  EXPECT_EQ(0, ring.id);
+  EXPECT_EQ(NCCL_TOPO_PATTERN_RING, ring.pattern);
+  EXPECT_EQ(1, ring.minChannels);
+  EXPECT_EQ(MAXCHANNELS / 2, ring.maxChannels);
 }

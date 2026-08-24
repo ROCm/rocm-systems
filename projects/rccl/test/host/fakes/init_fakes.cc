@@ -315,16 +315,37 @@ unsigned int g_rocmVersionPatch = 0;
 // ncclOsCpuCount default 0 keeps exit::2404 from calling ncclOsSetAffinity unless a test asks for it.
 int g_ncclOsCpuCountValue                = 0;
 int g_ncclOsCpuCountCalls                = 0;
-int g_ncclOsSetAffinityCalls             = 0;
-ncclAffinity g_ncclOsSetAffinityLast     = {};
+ncclResult_t g_ncclOsSetAffinityResult   = ncclSuccess;
+std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 ncclResult_t g_ncclMnnvlCheckResult      = ncclSuccess;
 int g_ncclMnnvlCheckCalls                = 0;
 // Non-zero default level: p2pLevel != 0 is what :1506 needs for the MNNVL auto scope to be reachable at all.
 std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel =
     [](int* level) { *level = 3; return ncclSuccess; };
-// Defaults to FAILURE -- it is the ladder terminator, and both call sites are on untested paths (seams.md 2).
+// Defaults to FAILURE -- it was the rung-1 terminator, and no test drives its call sites to success by default.
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char*)> g_ncclTopoGetSystem =
     [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclInternalError; };
+
+// Topology-detection and CPU-affinity seams (:1576-1618). All succeed by default so a test can walk the
+// block and inject exactly one failure; ncclTopoCompute is the exception -- it is the rung-2 terminator.
+int g_tuningIndexValue                     = 0;
+std::string g_tuningIndexLastArch;
+int g_ncclTopoComputePathsCalls            = 0;
+int g_ncclTopoComputePathsFailAt           = -1;
+ncclResult_t g_ncclTopoTrimSystemResult    = ncclSuccess;
+ncclResult_t g_ncclTopoSearchInitResult    = ncclSuccess;
+ncclResult_t g_ncclTopoComputeCommCPUResult = ncclSuccess;
+ncclResult_t g_ncclTopoPrintResult         = ncclSuccess;
+int g_ncclTopoGetCpuAffinityLastRank       = -1;
+// Writes an EMPTY mask by default, so ncclOsCpuCount's 0 default stays consistent and :1609-1610 are skipped.
+std::function<ncclResult_t(struct ncclTopoSystem*, int, ncclAffinity*)> g_ncclTopoGetCpuAffinity =
+    [](struct ncclTopoSystem*, int, ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity =
+    [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+ncclResult_t g_ncclNvlsInitResult          = ncclSuccess;
+int g_ncclNvlsInitCalls                    = 0;
+ncclResult_t g_ncclTopoComputeResult       = ncclInternalError;  // rung-2 terminator
+int g_ncclTopoComputeCalls                 = 0;
 
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
@@ -389,10 +410,25 @@ void ResetInitFakes() {
   g_rocmVersionPatch = 0;
   g_ncclOsCpuCountValue = 0;
   g_ncclOsCpuCountCalls = 0;
-  g_ncclOsSetAffinityCalls = 0;
-  g_ncclOsSetAffinityLast = ncclAffinity{};
+  g_ncclOsSetAffinityResult = ncclSuccess;
+  g_ncclOsSetAffinityMasks.clear();
   g_ncclMnnvlCheckResult = ncclSuccess;
   g_ncclMnnvlCheckCalls = 0;
   g_ncclGetUserP2pLevel = [](int* level) { *level = 3; return ncclSuccess; };
   g_ncclTopoGetSystem = [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclInternalError; };
+  g_tuningIndexValue = 0;
+  g_tuningIndexLastArch.clear();
+  g_ncclTopoComputePathsCalls = 0;
+  g_ncclTopoComputePathsFailAt = -1;
+  g_ncclTopoTrimSystemResult = ncclSuccess;
+  g_ncclTopoSearchInitResult = ncclSuccess;
+  g_ncclTopoComputeCommCPUResult = ncclSuccess;
+  g_ncclTopoPrintResult = ncclSuccess;
+  g_ncclTopoGetCpuAffinityLastRank = -1;
+  g_ncclTopoGetCpuAffinity = [](struct ncclTopoSystem*, int, ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+  g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+  g_ncclNvlsInitResult = ncclSuccess;
+  g_ncclNvlsInitCalls = 0;
+  g_ncclTopoComputeResult = ncclInternalError;
+  g_ncclTopoComputeCalls = 0;
 }

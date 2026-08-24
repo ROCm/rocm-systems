@@ -26,7 +26,14 @@ ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTop
 extern std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel;
 ncclResult_t ncclGetUserP2pLevel(int* level) { return g_ncclGetUserP2pLevel(level); }
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclNvlsInit(struct ncclComm* comm) { ::abort(); }
+// Controllable (was fail-loud). :1618 uses bare NCCLCHECK, not NCCLCHECKGOTO, so a failure here returns
+// WITHOUT running exit: -- the counter on ncclOsCpuCount is what makes that bypass observable.
+extern ncclResult_t g_ncclNvlsInitResult;
+extern int g_ncclNvlsInitCalls;
+ncclResult_t ncclNvlsInit(struct ncclComm* comm) {
+  g_ncclNvlsInitCalls++;
+  return g_ncclNvlsInitResult;
+}
 ncclResult_t ncclNvlsSetup(struct ncclComm* comm, struct ncclComm* parent) { ::abort(); }
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclNvlsTuning(struct ncclComm* comm) { ::abort(); }

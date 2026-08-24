@@ -16,7 +16,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <sched.h>
+#include <string>
+#include <vector>
 
 #include "nccl.h"
 #include "os.h"   // ncclAffinity + ncclOs* declarations
@@ -75,17 +78,20 @@ int ncclOsCpuCount(const ncclAffinity& affinity) {
   g_ncclOsCpuCountCalls++;
   return g_ncclOsCpuCountValue;
 }
-ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { ::abort(); }
+// Controllable (was fail-loud). A std::function because :1609 writes through the pointer -- though nothing
+// ever reads affinitySave back, which is what the AffinitySaveIsNeverRestored test pins.
+extern std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity;
+ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffinity(affinity); }
 // Controllable (was fail-loud). Records the affinity it was handed: without that, exit::2404 forwarding
 // comm->cpuAffinity vs any other mask is unobservable (seams.md: a fake that ignores an argument untests it).
-// No result knob yet -- exit::2404 discards the return value, and the checked site (:1610) is past
-// ncclTopoGetSystem, so nothing here could turn one. Add it with the phase-4 affinity tests.
-extern int g_ncclOsSetAffinityCalls;
-extern ncclAffinity g_ncclOsSetAffinityLast;
+// Keeps EVERY mask, not just the latest: :1610 and exit::2404 both call this, so a single "last"
+// slot lets the exit: write mask what :1610 forwarded -- which left a mutant swapping :1610 to
+// affinitySave alive. Tests index the call site they mean.
+extern ncclResult_t g_ncclOsSetAffinityResult;
+extern std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
-  g_ncclOsSetAffinityCalls++;
-  g_ncclOsSetAffinityLast = affinity;
-  return ncclSuccess;
+  g_ncclOsSetAffinityMasks.push_back(affinity);
+  return g_ncclOsSetAffinityResult;
 }
 // Early env/system read reached by ncclInit(). Return a plausible, non-empty,
 // multi-token value: ncclInit() strtok_r()s the /proc/version read and then
@@ -113,7 +119,14 @@ ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { ::abort(); }
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) { ::abort(); }
-int rcclGetTuningIndexForArch(const char* gfxarch) { ::abort(); }
+// Controllable (was fail-loud). Records gfxarch: :1577 forwards comm->archName into it and stores the
+// result in comm->topo->tuning, so without the recorder `IndexForArch(archName)` -> `IndexForArch("")` is invisible.
+extern int g_tuningIndexValue;
+extern std::string g_tuningIndexLastArch;
+int rcclGetTuningIndexForArch(const char* gfxarch) {
+  g_tuningIndexLastArch = gfxarch ? gfxarch : "<null>";
+  return g_tuningIndexValue;
+}
 bool rcclUseAinic() { ::abort(); }
 
 // Complex signatures / extern-C APIs / data + TLS.
