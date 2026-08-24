@@ -7,7 +7,6 @@ Helpers for building a normalized PC sampling dataframe from a parsed
 ``rocprofiler-sdk-tool[0]`` dict.
 """
 
-from decimal import Decimal, InvalidOperation
 from functools import partial
 from typing import Any, Mapping, NamedTuple, Optional
 
@@ -301,17 +300,23 @@ def _coerce_machine_spec_int(
     sys_info: Optional[Mapping[str, Any]],
     key: str,
 ) -> Optional[int]:
-    """Return a positive integer machine specification when usable."""
+    """Return a positive integer machine specification when usable.
+
+    sysinfo.csv is written by our own profile run, so a present spec is an
+    integer; this only has to survive the ways one can go missing.
+    """
     if sys_info is None:
         return None
 
+    value = sys_info.get(key)
+    if pd.isna(value):
+        return None
     try:
-        value = Decimal(str(sys_info.get(key)))
-    except (InvalidOperation, ValueError):
+        spec = int(value)
+    except (TypeError, ValueError):
         return None
-    if not value.is_finite() or value != value.to_integral_value() or value <= 0:
-        return None
-    return int(value)
+    # A failed spec scrape can leave 0 behind, which would divide by zero.
+    return spec if spec > 0 else None
 
 
 def _aggregate_active_thread_percent(
