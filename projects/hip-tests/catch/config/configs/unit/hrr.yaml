@@ -396,6 +396,12 @@ hrr:
   Unit_HRR_Regions_MemcpyFirstTouchMaterialization:
     <<: *level_2
     tags: [capture, playback, roundtrip, regions, memcpy]
+  Unit_HRR_KernelArgs_Direct:
+    <<: *level_2
+    tags: [direct, kernel-args]
+  Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled:
+    <<: *level_2
+    tags: [capture, playback, roundtrip, kernel-args]
   Unit_HRR_ApiMatrix_ManifestWellFormed:
     <<: *level_2
     tags: [api-matrix, cpu]
