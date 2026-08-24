@@ -12,6 +12,13 @@
 #include <stdint.h>
 #include "nccl.h"
 
+// Cap on physical segments per CAST GIN/RMA symmetric buffer. HIP dma-buf
+// export describes only the first physical segment, so registration allocates
+// one MR per segment up to this limit. Same value as net_ib/gin.h.
+#ifndef NCCL_RMA_MAX_SEGMENTS
+#define NCCL_RMA_MAX_SEGMENTS 16
+#endif
+
 struct CastIbGinCollComm {
   void* ctx;
   int rank;
