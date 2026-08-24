@@ -28,6 +28,9 @@
 typedef hsa_status_t HSA_API hsa_amd_queue_create_fn(
     hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs);
 
+typedef hsa_status_t HSA_API hsa_amd_signal_create_v2_fn(
+    hsa_amd_signal_create_desc_t* descs, uint32_t num_descs);
+
 namespace amd {
 namespace roc {
 
@@ -106,6 +109,10 @@ struct RocrEntryPoints {
   decltype(hsa_amd_ipc_signal_create)* hsa_amd_ipc_signal_create_;
   decltype(hsa_amd_ipc_signal_attach)* hsa_amd_ipc_signal_attach_;
   decltype(hsa_amd_signal_create)* hsa_amd_signal_create_;
+  //! Optional: absent on a runtime that predates the descriptor based signal create.  Loaded
+  //! with GET_ROCR_OPTIONAL_SYMBOL and reached only through amd_signal_create_v2(), which
+  //! null checks it, so an older ROCr simply keeps today's host resident dependencies.
+  hsa_amd_signal_create_v2_fn* hsa_amd_signal_create_v2_;
   decltype(hsa_amd_register_system_event_handler)* hsa_amd_register_system_event_handler_;
   decltype(hsa_amd_queue_set_priority)* hsa_amd_queue_set_priority_;
   hsa_amd_queue_create_fn* hsa_amd_queue_create_;
@@ -443,6 +450,25 @@ class Hsa : public amd::AllStatic {
     const hsa_agent_t* consumers, uint64_t attributes, hsa_signal_t* signal) {
     return ROCR_DYN(hsa_amd_signal_create)(initial_value, num_consumers, consumers, attributes,
                                            signal);
+  }
+  static bool amd_signal_create_v2_available() {
+#ifdef ROCR_DYN_DLL
+    return ROCR_DYN(hsa_amd_signal_create_v2) != nullptr;
+#else
+    return true;
+#endif
+  }
+  static hsa_status_t amd_signal_create_v2(hsa_amd_signal_create_desc_t* descs,
+                                           uint32_t num_descs) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_signal_create_v2);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(descs, num_descs);
+#else
+    return hsa_amd_signal_create_v2(descs, num_descs);
+#endif
   }
   static hsa_status_t register_system_event_handler(hsa_amd_system_event_callback_t callback,
     void* data) {

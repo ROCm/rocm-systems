@@ -215,6 +215,10 @@ release(uint, ROC_AQL_QUEUE_SIZE, 16384,                                      \
         "AQL queue size in AQL packets")                                      \
 release(uint, ROC_SIGNAL_POOL_SIZE, 64,                                       \
         "Initial size of HSA signal pool")                                    \
+release(uint, ROC_EDGE_SIGNAL_POOL_SIZE, 16384,                               \
+        "Number of device resident ordering edge signals per device")         \
+release(bool, DEBUG_CLR_DISABLE_ORDERING_EDGE, false,                         \
+        "Revert cross queue dependencies to a host resident value word")      \
 release(uint, DEBUG_CLR_LIMIT_BLIT_WG, 16,                                    \
         "Limit the number of workgroups in blit operations")                  \
 release(bool, DEBUG_CLR_BLIT_KERNARG_OPT, false,                              \
