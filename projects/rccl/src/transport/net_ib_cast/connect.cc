@@ -95,7 +95,7 @@ static int IbCastResolveRecvMatchingScheme(bool useCtsOffload) {
   return requested;
 }
 
-ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
+ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int64_t cqSize) {
   base->ibDevN = ibDevN;
   ncclIbDev* ibDev = IbCastDevs + ibDevN;
   {
@@ -107,12 +107,12 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
   }
 
   if (ibDev->maxCqe > 0 && cqSize > ibDev->maxCqe) {
-    WARN("NET/IB: %s: requested CQ size %d exceeds device %s max_cqe %d, clamping",
+    WARN("NET/IB: %s: requested CQ size %ld exceeds device %s max_cqe %d, clamping",
          __func__, cqSize, ibDev->devName, ibDev->maxCqe);
     cqSize = ibDev->maxCqe;
   }
 
-  NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, cqSize, cq_context, NULL, 0));
+  NCCLCHECK(wrap_ibv_create_cq(&base->cq, ibDev->context, (int)cqSize, cq_context, NULL, 0));
 
   return ncclSuccess;
 }
@@ -1132,7 +1132,7 @@ ib_recv_dev_list:
     if (IbCastDevs[ibDevN].maxCqe > 0) {
       cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
-    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, (cqSize * depthMult)), ret, fail);
+    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &comm->devs[i].base, &comm->base.stats, ((int64_t)cqSize * depthMult)), ret, fail);
     if (depthMult > 1) {
       // IbCastInitCommDevBase clamps the CQ to the device's max_cqe; if that clamped
       // us below what depthMult asked for, shrink depthMult to match so QP WR depth
@@ -1995,7 +1995,7 @@ ib_recv:
     if (IbCastDevs[ibDevN].maxCqe > 0) {
       cqSize = std::min(IbCastDevs[ibDevN].maxCqe, cqSize);
     }
-    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, (cqSize * recvDepthMult)), ret, fail);
+    NCCLCHECKGOTO(IbCastInitCommDevBase(ibDevN, &rCommDev->base, &rComm->base.stats, ((int64_t)cqSize * recvDepthMult)), ret, fail);
     if (recvDepthMult > 1) {
       // IbCastInitCommDevBase clamps the CQ to the device's max_cqe; if that clamped
       // us below what recvDepthMult asked for, shrink it to match so QP WR depth and
@@ -2236,8 +2236,14 @@ qp_sharing_skip_recv:
         flushKey.groupIdx = rComm->base.sharedGroupIdx;
         flushKey.qpIdx = IBCAST_FLUSH_QP_IDX;
 
-        IbCastRegisterSharedQp(&flushKey, rComm->devs[i].gpuFlush.qp.qp,
+        struct IbCastSharedQp* flushEntry = IbCastRegisterSharedQp(&flushKey, rComm->devs[i].gpuFlush.qp.qp,
             rComm->devs[i].base.cq, rComm->devs[i].base.ibDevN, i, 1);
+        if (flushEntry == NULL) {
+          WARN("NET/IB: %s: QP sharing PRIMARY recv: shared-QP pool exhausted registering flush QP "
+               "dev=%d group=%d commId=%u, secondaries will not be able to share it",
+               __func__, i, rComm->base.sharedGroupIdx, rComm->base.commId);
+          continue;
+        }
         INFO(NCCL_NET, "NET/IB: %s: PRIMARY recv registered flush QP qpn=%u dev=%d group=%d commId=%u",
              __func__, rComm->devs[i].gpuFlush.qp.qp->qp_num, i,
              rComm->base.sharedGroupIdx, rComm->base.commId);
