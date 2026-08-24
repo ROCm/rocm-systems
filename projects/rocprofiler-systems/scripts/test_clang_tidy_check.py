@@ -79,6 +79,36 @@ def test_in_line_ranges(line, ranges, expected):
 
 
 # --------------------------------------------------------------------------- #
+# classify_diagnostic
+# --------------------------------------------------------------------------- #
+def _diagnostic(file: str, line: int) -> "ctc.Diagnostic":
+    return ctc.Diagnostic(
+        file=file, line=line, col=1, severity="warning", message="msg", checks=["c"]
+    )
+
+
+def test_classify_diagnostic_in_diff():
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    diagnostic = _diagnostic("src/foo.cpp", 15)
+    assert ctc.classify_diagnostic(diagnostic, changed_file) == "in_diff"
+
+
+def test_classify_diagnostic_preexisting_same_file_outside_diff():
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    diagnostic = _diagnostic("src/foo.cpp", 999)
+    assert ctc.classify_diagnostic(diagnostic, changed_file) == "preexisting"
+
+
+def test_classify_diagnostic_ignores_included_header():
+    # clang-tidy analyzes the whole translation unit; a diagnostic located in
+    # a header the changed file includes must not be attributed to it, even
+    # when the header's line number happens to fall inside the diff range.
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    diagnostic = _diagnostic("include/foo.hpp", 15)
+    assert ctc.classify_diagnostic(diagnostic, changed_file) is None
+
+
+# --------------------------------------------------------------------------- #
 # parse_diagnostics
 # --------------------------------------------------------------------------- #
 def test_parse_diagnostics_single():
