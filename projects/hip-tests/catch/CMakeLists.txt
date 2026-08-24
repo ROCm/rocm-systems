@@ -34,6 +34,10 @@ option(ENABLE_YAML_TAGS "Enable YAML tags for test cases" ON)
 option(STANDALONE_TESTS "Generate standalone executable per source file" OFF)
 option(ENABLE_OOB_TESTS "Build OOB tests, deliberately wrong inputs" ON)
 
+# Build tests with -Wall -Werror. Defaults to OFF
+set(_hiptests_werror_default OFF)
+option(HIP_TESTS_ENABLE_WERROR "Build tests with -Wall -Werror (Linux default ON)" ${_hiptests_werror_default})
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
 endif()
@@ -253,7 +257,10 @@ if(HIP_PLATFORM STREQUAL "amd")
     # Which results in errors about missing headers etc
     set(win_cxx_standard -std=c++17)
   endif()
-  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings})
+  add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated ${win_disable_warnings})
+  if(HIP_TESTS_ENABLE_WERROR AND UNIX)
+    add_compile_options(-Werror)
+  endif()
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+

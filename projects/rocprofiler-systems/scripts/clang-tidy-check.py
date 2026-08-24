@@ -73,6 +73,27 @@ def in_line_ranges(line: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= line <= end for start, end in ranges)
 
 
+def classify_diagnostic(diagnostic: Diagnostic, changed_file: ChangedFile) -> str | None:
+    """Classify `diagnostic` as belonging to `changed_file`, or not at all.
+
+    clang-tidy analyzes the whole translation unit, so scanning one file can
+    also emit diagnostics located in headers it includes (per
+    HeaderFilterRegex in .clang-tidy). Those are a different file's concern
+    and are picked up when that file is scanned instead, so only diagnostics
+    actually located in `changed_file.path` are classified here.
+
+    Returns "in_diff", "preexisting", or None if the diagnostic is in a
+    different file.
+    """
+    if os.path.normpath(diagnostic.file) != os.path.normpath(changed_file.path):
+        return None
+    return (
+        "in_diff"
+        if in_line_ranges(diagnostic.line, changed_file.line_ranges)
+        else "preexisting"
+    )
+
+
 def _git(git_args: list[str], cwd: str | None = None) -> str:
     """Run a git command, returning stdout; exit with git's own error on failure.
 
@@ -387,9 +408,12 @@ def main() -> int:
             any_timed_out = any_timed_out or not succeeded
 
             for diagnostic in parse_diagnostics(output, repo_root):
+                classification = classify_diagnostic(diagnostic, changed_file)
+                if classification is None:
+                    continue
                 target = (
                     rule_diagnostics
-                    if in_line_ranges(diagnostic.line, changed_file.line_ranges)
+                    if classification == "in_diff"
                     else preexisting_rule_diagnostics
                 )
                 for check_name in diagnostic.checks:

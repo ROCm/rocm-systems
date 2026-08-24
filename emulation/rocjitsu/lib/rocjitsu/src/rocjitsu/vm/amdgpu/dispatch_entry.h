@@ -12,6 +12,8 @@
 /// independently. Completion signals fire when all WGs of a dispatch finish,
 /// in per-queue submission order.
 
+#include "rocjitsu/vm/amdgpu/xcd_shard.h"
+
 #include <cassert>
 #include <cstdint>
 #include <deque>
@@ -40,6 +42,20 @@ struct ClusterDispatchShape {
   uint32_t size_z = 1;
 };
 
+/// @brief What a queue entry carries, which decides how it retires.
+enum class DispatchPacketKind : uint8_t {
+  /// @brief Never a valid kind for an entry that has been queued.
+  ///
+  /// @details The default exists so that forgetting to set the kind trips the
+  /// assertion in @ref DispatchEntry::is_non_kernel rather than silently
+  /// retiring a kernel as though it were a barrier.
+  Unset = 0,
+  /// @brief An AQL kernel dispatch, even when this entry's share of it is empty.
+  Kernel,
+  /// @brief A packet that runs no shader: barrier, barrier-value, PM4 IB.
+  NonKernel,
+};
+
 /// @brief Per-dispatch tracking entry created by the AQL Packet Processor.
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
@@ -61,6 +77,9 @@ struct DispatchEntry {
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
   uint32_t num_named_barriers = 0;
+  /// Architectural wave size selected by the kernel descriptor and used by
+  /// the dispatched wavefront.
+  uint8_t kernel_wave_size = 0;
   uint16_t kernarg_preload = 0;
   uint32_t initial_mode_raw = 0;
   uint64_t dispatch_ptr = 0;
@@ -94,6 +113,12 @@ struct DispatchEntry {
   uint32_t private_segment_fixed_size = 0;
   uint32_t group_segment_fixed_size = 0;
 
+  /// This entry's share of the grid. The default owns all of it.
+  XcdShard shard{};
+
+  /// Workgroups this entry is responsible for: the whole grid for an unsharded
+  /// entry, otherwise this shard's share. dispatched_wgs and completed_wgs count
+  /// against it, so an entry retires when its own share is done.
   uint32_t total_wgs = 0;
   uint32_t dispatched_wgs = 0;
   uint32_t completed_wgs = 0;
@@ -107,16 +132,27 @@ struct DispatchEntry {
   /// timestamp on every kernel dispatch because non-profiled signals ignore the
   /// fields, and this keeps HIP/MIOpen event timing consistent for guest queues.
   uint64_t profiling_start_timestamp = 0;
+  /// What this entry carries. Every site that queues an entry must set it.
+  DispatchPacketKind kind = DispatchPacketKind::Unset;
   bool host_signal = false;
   bool barrier_bit = false;
   bool execution_begun = false;
 
   bool fully_dispatched() const { return dispatched_wgs >= total_wgs; }
   bool fully_completed() const { return completed_wgs >= total_wgs; }
-  bool is_non_kernel() const { return total_wgs == 0; }
+  /// @returns True for packets that run no shader at all (barrier, barrier-value,
+  /// PM4 IB). Deliberately a stored kind rather than `total_wgs == 0`: a kernel
+  /// dispatch split across XCDs can legitimately leave one XCD an empty share,
+  /// and inferring the kind from the count would retire that kernel as though it
+  /// were a barrier and fire its completion signal early.
+  bool is_non_kernel() const {
+    assert(kind != DispatchPacketKind::Unset && "queued entry never had its packet kind set");
+    return kind != DispatchPacketKind::Kernel;
+  }
 
   uint32_t cluster_size() const { return cluster_size_x * cluster_size_y * cluster_size_z; }
   bool has_workgroup_clusters() const { return cluster_size() > 1; }
+
   bool cluster_grid_is_complete() const {
     return static_cast<uint64_t>(cluster_count_x) * cluster_size_x == grid_wgs_x &&
            static_cast<uint64_t>(cluster_count_y) * cluster_size_y == grid_wgs_y &&
@@ -185,6 +221,58 @@ struct DispatchEntry {
     base.y = cluster_coord.y * cluster_size_y;
     base.z = cluster_coord.z * cluster_size_z;
     return flatten_local_wg_coord(base);
+  }
+
+  /// @brief Chunk the grid walk advances by: a cluster, else a single workgroup.
+  uint32_t dispatch_chunk_wgs() const { return has_workgroup_clusters() ? cluster_size() : 1u; }
+
+  /// @brief Grid-wide chunk ordinal for this entry's @p shard_chunk_index -th chunk.
+  ///
+  /// @details The input is shard-local -- an index into this entry's own share,
+  /// counted from zero on every XCD -- and the result is grid-wide. The shard
+  /// cannot check the bound itself, since it knows the stride but not this
+  /// entry's share size, so an off-by-one or a workgroup-versus-cluster unit
+  /// mix-up would otherwise return an ordinal outside the grid and place a
+  /// workgroup that does not exist. Bound it here, where the share size is known.
+  /// @param shard_chunk_index Zero-based chunk index within this entry's share.
+  /// @returns The chunk's ordinal in the whole grid.
+  uint32_t chunk_ordinal_for(uint32_t shard_chunk_index) const {
+    assert(static_cast<uint64_t>(shard_chunk_index) * dispatch_chunk_wgs() < total_wgs &&
+           "chunk index is shard-local and must lie within this entry's share");
+    return shard.nth_owned_chunk(shard_chunk_index);
+  }
+
+  /// @brief Narrow this entry to one XCD's share of the grid it currently holds.
+  ///
+  /// @details Reads the grid size from this entry's own total_wgs and rewrites it
+  /// to the share @p xcd_shard owns, so the existing dispatch and retirement
+  /// bookkeeping operates on the share. The grid size is not passed in: a caller
+  /// supplying a mismatched value would silently desynchronize total_wgs from the
+  /// coordinate extents.
+  ///
+  /// Retirement contract: once a packet is split, per-entry retirement is NOT
+  /// packet retirement. An entry retiring means only that one XCD finished its
+  /// share, so the code that splits a packet is responsible for aggregating the
+  /// shares and for leaving completion_signal on exactly one entry -- otherwise
+  /// the signal fires once per share, and fires when the first XCD finishes.
+  /// The dispatch-level callbacks are the same problem in a second place: every
+  /// share reaches drain_completions() and would emit its own execution-end,
+  /// while a share with no workgroups never emits a matching begin. One matched
+  /// begin/end pair is owed per packet, not per share.
+  /// Nothing in this commit splits a packet; the fan-out change adds both.
+  ///
+  /// @param xcd_shard The shard to apply. Applying twice is rejected: the second
+  /// call would re-shard an already narrowed entry.
+  void apply_shard(XcdShard xcd_shard) {
+    assert(dispatched_wgs == 0 && "shard must be applied before dispatching");
+    assert(shard.is_unsharded() && "entry has already been sharded");
+    const uint32_t grid_wgs = total_wgs;
+    const uint32_t chunk = dispatch_chunk_wgs();
+    assert(chunk == 1 || (cluster_grid_is_complete() && grid_wgs % chunk == 0 &&
+                          "a clustered grid must tile exactly, or the truncated tail is dropped "
+                          "from every shard and the grid can never retire"));
+    shard = xcd_shard;
+    total_wgs = xcd_shard.owned_chunks(grid_wgs / chunk) * chunk;
   }
 
   uint32_t cluster_peer_local_wg_id(uint32_t local_wg_id, uint32_t rank) const {
