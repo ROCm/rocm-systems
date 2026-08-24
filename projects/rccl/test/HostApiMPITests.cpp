@@ -1945,6 +1945,56 @@ TEST_F(HostApiTest, DestroyCommWithoutDeregister)
     TEST_INFO("W4 rank %d: DestroyCommWithoutDeregister passed.", worldRank);
 }
 
+// ============================================================================
+// W5 — WindowRegisterInvalidArgsNullWindow
+// ============================================================================
+
+/**
+ * @test HostApiTest.WindowRegisterInvalidArgsNullWindow
+ * @brief ncclCommWindowRegister must never leave the caller's window handle
+ *        pointing at an uninitialised/garbage value.
+ *
+ * Validates the entry-point contract aligned with NCCL 2.30.4: the window is
+ * initialised to NULL up front, and invalid arguments are rejected with
+ * ncclInvalidArgument while leaving the out window NULL. The caller seeds the
+ * handle with a non-NULL sentinel beforehand to prove the API overwrites it.
+ *
+ */
+TEST_F(HostApiTest, WindowRegisterInvalidArgsNullWindow)
+{
+    if(!validateTestPrerequisites(/*min=*/2))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI processes";
+    }
+
+    const int  myRank = rank();
+    ncclComm_t comm   = getActiveCommunicator();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t sentinel = reinterpret_cast<ncclWindow_t>(0x1);
+
+    // Case 1: NULL buffer -> ncclInvalidArgument, window forced to NULL.
+    {
+        ncclWindow_t win = sentinel;
+        ncclResult_t res = ncclCommWindowRegister(comm, nullptr, kOneMB, &win, winMode());
+        ASSERT_MPI_EQ(ncclInvalidArgument, res);
+        ASSERT_MPI_EQ(win, nullptr);
+    }
+
+    // Case 2: zero size -> ncclInvalidArgument, window forced to NULL.
+    {
+        ncclWindow_t win = sentinel;
+        ncclResult_t res = ncclCommWindowRegister(comm, winBuf, 0, &win, winMode());
+        ASSERT_MPI_EQ(ncclInvalidArgument, res);
+        ASSERT_MPI_EQ(win, nullptr);
+    }
+
+    TEST_INFO("W5 rank %d: WindowRegisterInvalidArgsNullWindow passed.", myRank);
+}
+
 } // namespace RcclUnitTesting
 
 #endif // MPI_TESTS_ENABLED
