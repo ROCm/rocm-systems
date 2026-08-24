@@ -81,9 +81,7 @@ def test_supported_torch_versions_lists_installed_artifacts(tmp_path, monkeypatc
 def test_supported_torch_versions_is_empty_without_artifacts(tmp_path, monkeypatch):
     package_root = tmp_path / "opt" / "rocm" / "libexec" / "rocprofiler-compute"
     package_root.mkdir(parents=True)
-    (
-        tmp_path / "opt" / "rocm" / "lib" / "rocprofiler-compute"
-    ).mkdir(parents=True)
+    (tmp_path / "opt" / "rocm" / "lib" / "rocprofiler-compute").mkdir(parents=True)
     monkeypatch.setattr(inject_roctx_loader, "_package_root", lambda: package_root)
     assert inject_roctx_loader.supported_torch_versions() == ()
 
@@ -183,9 +181,7 @@ def test_load_raises_when_torch_version_is_unsupported(monkeypatch, tmp_path):
 def test_load_raises_when_no_artifacts_are_discovered(monkeypatch, tmp_path):
     package_root = tmp_path / "opt" / "rocm" / "libexec" / "rocprofiler-compute"
     package_root.mkdir(parents=True)
-    (
-        tmp_path / "opt" / "rocm" / "lib" / "rocprofiler-compute"
-    ).mkdir(parents=True)
+    (tmp_path / "opt" / "rocm" / "lib" / "rocprofiler-compute").mkdir(parents=True)
     monkeypatch.setattr(inject_roctx_loader, "_package_root", lambda: package_root)
     monkeypatch.setattr(
         inject_roctx_loader, "torch_version", lambda: _FAKE_TORCH_VERSION
