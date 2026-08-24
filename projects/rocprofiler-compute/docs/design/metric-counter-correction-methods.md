@@ -2,7 +2,7 @@
 
 **Status:** Draft design guidance  
 **Context:** Percent and ratio metrics that violate expected bounds (e.g. > 100%, negative splits) due to multi-pass profiling variance, counter pairing semantics, or potential hardware counter issues — observed across CDNA/RDNA architectures during full-panel analyze runs.  
-**Audience:** Primary — internal designers choosing correction methods for metric YAML; secondary — source material for future public-facing explanations.  
+**Audience:** Primary — designers and maintainers choosing correction methods for metric YAML; secondary — source material for enduser-facing explanations.  
 **Related code (shipped):** `src/utils/metrics/noise_clamper.py`, `src/utils/utils_analysis.py`, `src/rocprof_compute_soc/soc_base.py`, `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml`, `src/utils/metrics/common.py` (`ValuDualIssueDetector`)
 
 **Related code (proposed):** `src/utils/metrics/aggregation.py` (`BOUND_RATIO` / `to_bound_ratio` — follow-up PR)
