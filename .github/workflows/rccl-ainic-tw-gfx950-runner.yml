@@ -95,8 +95,6 @@ permissions:
   contents: read
 
 env:
-  # Shared CI root on the AINIC cluster (configs, prebuilt libs, artifacts).
-  RCCL_CI_ROOT: /it-share/rccl-ci
   TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
   DEFAULT_WORKDIR: /it-share/rccl-ci/rocm-systems
   DEFAULT_MPI_PATH: /it-share/ompi-5.0.8

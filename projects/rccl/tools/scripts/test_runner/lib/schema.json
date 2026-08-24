@@ -366,7 +366,7 @@
         },
         "enabled": {
           "type": "boolean",
-          "description": "When false the suite is skipped unless targeted by --suite-name. Default: true."
+          "description": "When false the suite is always skipped. Default: true."
         },
         "smoke": {
           "type": "boolean",
@@ -374,6 +374,10 @@
         },
         "is_gtest":  { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
         "binary":    { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "test_binary_dir": {
+          "type": "string",
+          "description": "Suite-level override of the directory in which test binaries are looked up for this suite (takes priority over the configuration-level test_binary_dir and paths.test_binary_dir). Supports ~ and $VAR expansion."
+        },
         "num_ranks": { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
         "num_nodes": { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
         "num_gpus":  { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
