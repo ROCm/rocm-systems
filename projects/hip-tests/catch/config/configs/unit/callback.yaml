@@ -1,25 +1,25 @@
 ---
 callback:
-  Unit_hipApiName_Positive_Basic: *level_2
-  Unit_hipApiName_Negative_ReservedIds: *level_2
-  Unit_hipGetStreamDeviceId_Positive_Threaded_Basic: *level_2
+  Unit_hipApiName_Positive_Basic: *level_default
+  Unit_hipApiName_Negative_ReservedIds: *level_default
+  Unit_hipGetStreamDeviceId_Positive_Threaded_Basic: *level_default
   Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic:
-    <<: *level_2
+    <<: *level_default
     # Does not play well with ASAN
     disabled: [asan]
     tags: []
-  Unit_hipGetStreamDeviceId_Negative_Parameters: *level_2
+  Unit_hipGetStreamDeviceId_Negative_Parameters: *level_default
   Unit_hipKernelNameRef_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     # (amd_windows) Note: intermittent Seg fault failure
     # (amd_wsl) Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
   Unit_hipKernelNameRef_Negative_Parameters:
-    <<: *level_2
+    <<: *level_default
     # (amd_windows) Note: intermittent Seg fault failure
     # (amd_wsl) Note: intermittent Seg fault failure
     # (amd_wsl) Note: Linux disabled
     disabled: [amd_windows, amd_wsl]
-  Unit_hipKernelNameRefByPtr_Positive_Basic: *level_2
-  Unit_hipKernelNameRefByPtr_Positive_StreamNullptr: *level_2
-  Unit_hipKernelNameRefByPtr_Negative_KernelNullptr: *level_2
+  Unit_hipKernelNameRefByPtr_Positive_Basic: *level_default
+  Unit_hipKernelNameRefByPtr_Positive_StreamNullptr: *level_default
+  Unit_hipKernelNameRefByPtr_Negative_KernelNullptr: *level_default

@@ -17,7 +17,9 @@
 // Helper function to run __hip_atomic_fetch_max tests for WAVEFRONT scope, same address
 template <typename TestType>
 static void runHipAtomicFetchMaxWavefrontSameAddressTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
                                            __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
@@ -28,10 +30,12 @@ static void runHipAtomicFetchMaxWavefrontSameAddressTest() {
 // Helper function to run __hip_atomic_fetch_max tests for WAVEFRONT scope, adjacent addresses
 template <typename TestType>
 static void runHipAtomicFetchMaxWavefrontAdjacentAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
                                            __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
@@ -43,11 +47,13 @@ static void runHipAtomicFetchMaxWavefrontAdjacentAddressesTest() {
 // Helper function to run __hip_atomic_fetch_max tests for WAVEFRONT scope, scattered addresses
 template <typename TestType>
 static void runHipAtomicFetchMaxWavefrontScatteredAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
                                            __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
@@ -59,7 +65,9 @@ static void runHipAtomicFetchMaxWavefrontScatteredAddressesTest() {
 // Helper function to run __hip_atomic_fetch_max tests for WORKGROUP scope, same address
 template <typename TestType>
 static void runHipAtomicFetchMaxWorkgroupSameAddressTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
                                            __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
@@ -70,10 +78,12 @@ static void runHipAtomicFetchMaxWorkgroupSameAddressTest() {
 // Helper function to run __hip_atomic_fetch_max tests for WORKGROUP scope, adjacent addresses
 template <typename TestType>
 static void runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
                                            __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
@@ -85,11 +95,13 @@ static void runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest() {
 // Helper function to run __hip_atomic_fetch_max tests for WORKGROUP scope, scattered addresses
 template <typename TestType>
 static void runHipAtomicFetchMaxWorkgroupScatteredAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
                                            __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,

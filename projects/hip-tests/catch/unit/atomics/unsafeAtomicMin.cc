@@ -19,7 +19,9 @@
 // Helper function to run unsafeAtomicMin tests for same address (single kernel)
 template <typename TestType>
 static void runUnsafeAtomicMinSameAddressTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMin>(
           1, sizeof(TestType));
@@ -30,10 +32,12 @@ static void runUnsafeAtomicMinSameAddressTest() {
 // Helper function to run unsafeAtomicMin tests for adjacent addresses (single kernel)
 template <typename TestType>
 static void runUnsafeAtomicMinAdjacentAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMin>(
           warp_size, sizeof(TestType));
@@ -44,11 +48,13 @@ static void runUnsafeAtomicMinAdjacentAddressesTest() {
 // Helper function to run unsafeAtomicMin tests for scattered addresses (single kernel)
 template <typename TestType>
 static void runUnsafeAtomicMinScatteredAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMin>(
           warp_size, cache_line_size);
@@ -59,7 +65,9 @@ static void runUnsafeAtomicMinScatteredAddressesTest() {
 // Helper function to run unsafeAtomicMin tests for same address (multi kernel)
 template <typename TestType>
 static void runUnsafeAtomicMinMultiKernelSameAddressTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMin>(
           2, 1, sizeof(TestType));
@@ -70,10 +78,12 @@ static void runUnsafeAtomicMinMultiKernelSameAddressTest() {
 // Helper function to run unsafeAtomicMin tests for adjacent addresses (multi kernel)
 template <typename TestType>
 static void runUnsafeAtomicMinMultiKernelAdjacentAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMin>(
           2, warp_size, sizeof(TestType));
@@ -84,11 +94,13 @@ static void runUnsafeAtomicMinMultiKernelAdjacentAddressesTest() {
 // Helper function to run unsafeAtomicMin tests for scattered addresses (multi kernel)
 template <typename TestType>
 static void runUnsafeAtomicMinMultiKernelScatteredAddressesTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMin>(
           2, warp_size, cache_line_size);

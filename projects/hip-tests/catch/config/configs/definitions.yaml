@@ -1,22 +1,46 @@
 ---
 definitions:
   level_0: &level_0
-    level: 0
+    level: [0]
   level_1: &level_1
-    level: 1
+    level: [1]
   level_2: &level_2
-    level: 2
+    level: [2]
   level_3: &level_3
-    level: 3
+    level: [3]
   level_4: &level_4
-    level: 4
+    level: [4]
+  level_default: &level_default
+    level: [0, 1, 2]
+  level_stress: &level_stress
+    level: [3, 4]
+  level_all: &level_all
+    level: [0, 1, 2, 3, 4]
 
 # ==============================================================================
 # LEVEL PARAMETERS - Test parameters for each level
 # These are converted to C++ compile-time constants at build time
-# [TODO] Add description of each parameter and its purpose
-# [TODO] Add default values for each parameter
-# The values below are example defaults and should be replaced with the actual values.
+# 
+# memory_sizes:
+# [TODO]
+# block_sizes:
+# [TODO]
+# iterations:
+# Number of iterations used for performance, atomic and threadfence tests
+# warmups:
+# Number of warmup iterations used for performance tests
+# cg_iterations:
+# Number of iterations used for cooperative groups sync tests
+# math_accuracy_iterations:
+# Number of iterations used for math accuracy tests with randomly generated inputs
+# math_accuracy_max_memory_percentage:
+# Percentage of global device memory allowed for math accuracy tests in case the global device memory is lower than max_memory
+# math_max_memory:
+# Maximum amount of memory to use for math accuracy tests
+# math_reduction_factor:
+# Percentage of test data to be actually tested
+# 
+# [TODO] The values below are example defaults and should be replaced with the actual values.
 # ==============================================================================
 cmd_options:
   # Level 0 - Quick/Smoke Tests
@@ -27,8 +51,11 @@ cmd_options:
     block_sizes: [64, 256]
     iterations: 100
     warmups: 10
-    max_memory: 1G
-    reduction_factor: 0.1
+    cg_iterations: 1
+    math_accuracy_iterations: 4294967296
+    math_accuracy_max_memory_percentage: 80
+    math_max_memory: 1G
+    math_reduction_factor: 0.1
 
   # Level 1 - Standard Tests
   # Use case: Nightly CI, regular regression testing
@@ -38,8 +65,11 @@ cmd_options:
     block_sizes: [32, 64, 128, 256, 512, 1024]
     iterations: 1000
     warmups: 100
-    max_memory: 4G
-    reduction_factor: 0.1
+    cg_iterations: 1
+    math_accuracy_iterations: 4294967296
+    math_accuracy_max_memory_percentage: 80
+    math_max_memory: 4G
+    math_reduction_factor: 0.1
 
   # Level 2 - Comprehensive Tests
   # Use case: Release validation, full coverage
@@ -49,8 +79,11 @@ cmd_options:
     block_sizes: [32, 64, 96, 128, 192, 256, 384, 512, 768, 1024]
     iterations: 5
     warmups: 5
-    max_memory: 8G
-    reduction_factor: 0.1
+    cg_iterations: 2
+    math_accuracy_iterations: 4294967296
+    math_accuracy_max_memory_percentage: 80
+    math_max_memory: 8G
+    math_reduction_factor: 0.1
 
   # Level 3 - Performance/Stress Tests
   # Use case: Benchmarks, stress testing
@@ -60,8 +93,11 @@ cmd_options:
     block_sizes: [256, 512, 1024]
     iterations: 5
     warmups: 5
-    max_memory: 2G
-    reduction_factor: 100
+    cg_iterations: 5
+    math_accuracy_iterations: 4294967296
+    math_accuracy_max_memory_percentage: 80
+    math_max_memory: 2G
+    math_reduction_factor: 100
 
   # Level 4 - Extended Stress Tests
   # Use case: Full system stress, extended validation
@@ -71,5 +107,8 @@ cmd_options:
     block_sizes: [256, 512, 1024]
     iterations: 10
     warmups: 5
-    max_memory: 4G
-    reduction_factor: 100
+    cg_iterations: 5
+    math_accuracy_iterations: 4294967296
+    math_accuracy_max_memory_percentage: 80
+    math_max_memory: 4G
+    math_reduction_factor: 100

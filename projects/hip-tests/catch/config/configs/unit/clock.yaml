@@ -1,15 +1,15 @@
 ---
 clock:
   Unit_hipClock64_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     # SWDEV-555665
     disabled: [amd_windows, amd_wsl]
     tags: [deviceLib, timing]
   Unit_hipClock_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     # SWDEV-555665
     disabled: [amd_windows, amd_wsl]
     tags: [deviceLib, timing]
   Unit_hipWallClock64_Positive_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [deviceLib, timing]
