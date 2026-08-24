@@ -42,7 +42,7 @@ launch syntax. This feature is analogous to CUDA green contexts.
     - The snippets on this page are written to show the calling sequence. Build
       and run them on a ROCm system before using them as the basis for production
       code. A complete, buildable program is provided as the
-      `HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/execution_context>`_.
+      `HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/amd-staging/HIP-Basic/execution_context>`_.
 
 The full API listing is in :ref:`execution_context_management_reference`.
 
@@ -574,7 +574,7 @@ requests the architecture default, which matches the device's
 For a complete example that performs the full sequence -- query the device
 resource, split the CU resource, generate descriptors, create execution
 contexts, create streams, and launch kernels -- see the
-`HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/execution_context>`_.
+`HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/amd-staging/HIP-Basic/execution_context>`_.
 The example uses separate contexts for a background kernel and a
 latency-sensitive kernel, which is the same setup pattern shown here.
 
@@ -854,7 +854,7 @@ baseline, writing back the aligned CU counts the split actually produced:
 Comparing the baseline timing with the partitioned timing shows the critical
 kernel finishing sooner once it has its own CUs. Settle on the CU split by
 measuring your own workload. The
-`HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/execution_context>`_
+`HIP-Basic execution context example <https://github.com/ROCm/rocm-examples/tree/amd-staging/HIP-Basic/execution_context>`_
 contains a complete, buildable version that sweeps several partition sizes, such
 as an eighth, a quarter, and half of the device, and also provides a CUDA green
 context backend.

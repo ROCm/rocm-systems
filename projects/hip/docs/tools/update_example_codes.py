@@ -133,7 +133,7 @@ urllib.request.urlretrieve(
 # Using-HIP-Runtime-API / Execution-Context
 # TODO: switch branch from execution_context to amd-staging once the example is merged.
 urllib.request.urlretrieve(
-    "https://raw.githubusercontent.com/ROCm/rocm-examples/refs/heads/execution_context/HIP-Basic/execution_context/main.hip",
+    "https://raw.githubusercontent.com/ROCm/rocm-examples/refs/heads/amd-staging/HIP-Basic/execution_context/main.hip",
     "docs/tools/example_codes/execution_context.hip"
 )
 
