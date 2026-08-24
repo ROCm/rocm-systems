@@ -6,6 +6,8 @@
 
 #include "hrr_reader.h"
 
+#include "hrr_regions.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -15,6 +17,12 @@
 namespace fs = std::filesystem;
 
 namespace hrr {
+
+// payload_length is file-supplied. Without a ceiling, a corrupt header can ask
+// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
+// smaller (the writer buffers 256 KiB and spills larger records to a direct
+// write); 64 MiB is well above any legitimate record.
+static constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
 
 // ---------------------------------------------------------------------------
 // Event move semantics
@@ -84,6 +92,96 @@ static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
   }
   std::sort(dirs.begin(), dirs.end());
   return dirs;
+}
+
+// ---------------------------------------------------------------------------
+// Shared record framing
+//
+// Crash resilience: a record stream is an append-only log of self-delimiting
+// records, so a partial write can only ever be the LAST record. A torn header
+// or payload at the tail is therefore a recovery point — every complete record
+// already parsed is kept — rather than a reason to reject the whole file.
+// ---------------------------------------------------------------------------
+
+RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out) {
+  const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
+  out.resize(hdr_size);
+
+  size_t got = fread(out.data(), 1, hdr_size, f);
+  if (got == 0) return RecordStatus::EndOfStream;
+  if (got < hdr_size) {
+    fprintf(stderr, "[HRR] Truncated event header (%zu/%u bytes) at tail\n",
+            got, hdr_size);
+    return RecordStatus::Torn;
+  }
+
+  const uint32_t total =
+      reinterpret_cast<const hrr_event_header*>(out.data())->payload_length;
+  if (total < hdr_size) {
+    fprintf(stderr, "[HRR] Torn trailing record (payload_length %u < %u)\n",
+            total, hdr_size);
+    return RecordStatus::Torn;
+  }
+  if (total > kMaxRecordBytes) {
+    fprintf(stderr,
+            "[HRR] Implausible payload_length %u (max %u) — treating as torn\n",
+            total, kMaxRecordBytes);
+    return RecordStatus::Torn;
+  }
+  if (total > hdr_size) {
+    out.resize(total);
+    const uint32_t pl_size = total - hdr_size;
+    if (fread(out.data() + hdr_size, 1, pl_size, f) != pl_size) {
+      fprintf(stderr, "[HRR] Truncated event payload (expected %u bytes) at tail\n",
+              pl_size);
+      return RecordStatus::Torn;
+    }
+  }
+  return RecordStatus::Ok;
+}
+
+FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
+                         uint16_t expected_version, uint16_t* version) {
+  FILE* f = fopen(file_path.c_str(), "rb");
+  if (!f) {
+    fprintf(stderr, "[HRR] Cannot open %s\n", file_path.c_str());
+    return nullptr;
+  }
+  hrr_file_header fh{};
+  if (fread(&fh, sizeof(fh), 1, f) != 1) {
+    fprintf(stderr, "[HRR] %s too short (missing file header)\n", file_path.c_str());
+    fclose(f);
+    return nullptr;
+  }
+  if (fh.magic != expected_magic) {
+    fprintf(stderr, "[HRR] Bad magic 0x%08x in %s (expected 0x%08x)\n", fh.magic,
+            file_path.c_str(), expected_magic);
+    fclose(f);
+    return nullptr;
+  }
+  if (fh.version != expected_version) {
+    fprintf(stderr, "[HRR] Version mismatch in %s: file=%u reader=%u\n",
+            file_path.c_str(), fh.version, expected_version);
+    fclose(f);
+    return nullptr;
+  }
+  if (version) *version = fh.version;
+  return f;
+}
+
+std::vector<std::string> find_region_streams(const std::string& archive_dir) {
+  std::vector<std::string> out;
+  const fs::path dir = fs::path(archive_dir) / "regions";
+  std::error_code ec;
+  if (!fs::is_directory(dir, ec)) return out;
+  for (const auto& ent : fs::directory_iterator(dir, ec)) {
+    if (ec) break;
+    if (ent.is_regular_file() && ent.path().extension() == ".hrrr")
+      out.push_back(ent.path().string());
+  }
+  // Deterministic merge order; the records themselves are ordered by mono_ns.
+  std::sort(out.begin(), out.end());
+  return out;
 }
 
 static bool resolve_archive_path(const std::string& input, std::string& resolved) {
@@ -214,72 +312,31 @@ bool load_archive(const std::string& path, Archive& archive) {
   archive.path = archive_dir;
 
   std::string events_path = archive_dir + "/events.bin";
-  FILE* f = fopen(events_path.c_str(), "rb");
-  if (!f) {
-    fprintf(stderr, "[HRR] Cannot open %s\n", events_path.c_str());
-    return false;
-  }
+  uint16_t file_version = 0;
+  FILE* f = open_record_stream(events_path, HRR_MAGIC, HRR_VERSION, &file_version);
+  if (!f) return false;
+  archive.version = file_version;
 
-  // Read and validate file header
-  hrr_file_header fh{};
-  if (fread(&fh, sizeof(fh), 1, f) != 1) {
-    fprintf(stderr, "[HRR] events.bin too short (missing file header)\n");
-    fclose(f); return false;
-  }
-  if (fh.magic != HRR_MAGIC) {
-    fprintf(stderr, "[HRR] Bad magic 0x%08x (expected 0x%08x)\n", fh.magic, HRR_MAGIC);
-    fclose(f); return false;
-  }
-  if (fh.version != HRR_VERSION) {
-    fprintf(stderr, "[HRR] Version mismatch: file=%u reader=%u\n", fh.version, HRR_VERSION);
-    fclose(f); return false;
-  }
-  archive.version = fh.version;
-
-  // Read events sequentially.
-  //
-  // Crash resilience: events.bin is an append-only log of self-delimiting
-  // records, so a partial write can only ever be the LAST record. A torn header
-  // or payload at the tail is therefore treated as a recovery point — we keep
-  // every complete record already parsed and mark the archive truncated, rather
-  // than discarding the whole capture. The clean-shutdown trailer
+  // Read events sequentially. read_raw_record handles the framing and the
+  // torn-tail recovery; a torn record means the capture was interrupted, and
+  // everything parsed before it is kept. The clean-shutdown trailer
   // (hrr_eof_record) explicitly marks a whole archive.
   bool truncated = false;
   bool complete  = false;
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
     Event ev;
-    // Read the header first to get payload_length, then read the rest into
-    // raw_payload as one contiguous block: header(32) + fields.
-    ev.raw_payload.resize(hdr_size);
-    size_t got = fread(ev.raw_payload.data(), 1, hdr_size, f);
-    if (got == 0) break;  // clean EOF at a record boundary
-    if (got < hdr_size) {
-      fprintf(stderr,
-              "[HRR] Truncated event header (%zu/%u bytes) at tail — recovered %zu events\n",
-              got, hdr_size, archive.events.size());
-      truncated = true; break;
+    const RecordStatus st = read_raw_record(f, ev.raw_payload);
+    if (st == RecordStatus::EndOfStream) break;
+    if (st == RecordStatus::Torn) {
+      fprintf(stderr, "[HRR] Recovered %zu events before the torn record\n",
+              archive.events.size());
+      truncated = true;
+      break;
     }
 
     const uint16_t etype = ev.header().event_type;
     const uint32_t total = ev.header().payload_length;
-
-    if (total < hdr_size) {
-      fprintf(stderr,
-              "[HRR] Torn trailing record (payload_length %u < %u) — recovered %zu events\n",
-              total, hdr_size, archive.events.size());
-      truncated = true; break;
-    }
-    if (total > hdr_size) {
-      ev.raw_payload.resize(total);
-      uint32_t pl_size = total - hdr_size;
-      if (fread(ev.raw_payload.data() + hdr_size, 1, pl_size, f) != pl_size) {
-        fprintf(stderr,
-                "[HRR] Truncated event payload (expected %u bytes) at tail — recovered %zu events\n",
-                pl_size, archive.events.size());
-        truncated = true; break;
-      }
-    }
 
     // Clean-shutdown trailer: full hrr_eof_record with valid magic only.
     // event_type 0xFFFF alone is not enough — Unit_HRR_Format_UnknownEventType

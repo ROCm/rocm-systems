@@ -40,6 +40,7 @@
 #include <vector>
 #include <algorithm>
 #include <mutex>
+#include <set>
 #ifdef _WIN32
 #include <process.h>  // _exit
 #else
@@ -396,6 +397,91 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 // hipExtModuleLaunchKernel is declared via <hip/hip_ext.h> (included at the top
 // of this file behind a -Wattributes diagnostic guard) so the prototype always
 // tracks the library ABI instead of a hand-maintained copy.
+// ---- External region annotations at the translation sites -------------------
+//
+// Every recorded device pointer a kernel receives passes through one of the
+// translation sites in replay_kernel_launch, which makes them the one place where
+// a pointer can be compared against what an external producer said the memory
+// layout was. Two questions get answered here:
+//
+//   - Does this pointer land inside an annotated segment but in no live block?
+//     That is an intra-segment out-of-bounds or stale pointer. Replay cannot
+//     see it otherwise: the segment is a single contiguous allocation, so the
+//     access is in bounds as far as HIP is concerned.
+//   - Should the owning block be relocated behind a guard page so an overrun
+//     faults instead of hitting a neighbour? Only when block guarding is on.
+
+// One VMM-backed buffer standing in for a block, with an unmapped guard span
+// after it. Populated by hrr_block_guard_alloc.
+struct HrrBlockGuard {
+    void*  va        = nullptr;  // reserved VA base
+    size_t reserved  = 0;        // total reserved VA (mapped + guard)
+    size_t mapped    = 0;        // mapped/backed bytes
+    void*  data      = nullptr;  // where the block itself starts inside `va`
+    size_t size      = 0;        // block size in bytes
+    void*  orig_live = nullptr;  // the real block, to copy results back to
+    hipMemGenericAllocationHandle_t handle{};
+};
+
+// Per-launch guard bookkeeping, owned by replay_kernel_launch. Null on the
+// graph kernel-node path: a node's arguments outlive the call that built it, so
+// a relocation there could never be undone.
+struct RegionLaunchState {
+    std::vector<HrrBlockGuard>          guards;     // torn down after the launch
+    std::unordered_map<uint64_t, void*> relocated;  // rec block base -> buffer
+};
+
+static void* hrr_block_guard_relocate(PlaybackContext& ctx, RegionLaunchState& rls,
+                                      uint64_t rec_ptr, void* live,
+                                      uint64_t blk_base, uint64_t blk_size);
+static void  hrr_block_guard_teardown(const HrrBlockGuard& g);
+static hipError_t hrr_block_guard_resolve(PlaybackContext& ctx,
+                                          RegionLaunchState& rls,
+                                          const std::string& kernel_name,
+                                          size_t kernel_ordinal);
+
+// Returns the pointer the kernel should actually receive: `live` unchanged
+// unless block guarding relocated its owning block. Cheap no-op when no region
+// sidecar was loaded.
+static void* hrr_region_check_ptr(PlaybackContext& ctx, RegionLaunchState* rls,
+                                  const std::string& kernel_name,
+                                  unsigned arg_index, uint64_t rec_ptr,
+                                  void* live) {
+    if (!ctx.regions_enabled || rec_ptr < 0x10000ULL) return live;
+
+    uint64_t blk_base = 0, blk_size = 0;
+    const auto cls = ctx.regions.classify(rec_ptr, &blk_base, &blk_size);
+    if (cls == hrr::RegionMap::Class::None) return live;
+
+    ctx.region_ptrs_checked.fetch_add(1, std::memory_order_relaxed);
+
+    if (cls == hrr::RegionMap::Class::InSegmentNoBlock) {
+        ctx.region_oob_ptrs.fetch_add(1, std::memory_order_relaxed);
+        static std::mutex mu;
+        static std::set<std::string> warned;
+        char key[192];
+        snprintf(key, sizeof(key), "%s#%u", kernel_name.c_str(), arg_index);
+        bool first;
+        { std::lock_guard<std::mutex> lk(mu); first = warned.insert(key).second; }
+        if (first)
+            fprintf(stderr,
+                    "[HRR] region OOB: '%s' arg[%u] recorded 0x%llx is inside an "
+                    "annotated segment but in no live block — an intra-segment "
+                    "out-of-bounds or stale pointer\n",
+                    compact_kernel_name(kernel_name).c_str(), arg_index,
+                    (unsigned long long)rec_ptr);
+        return live;
+    }
+
+    // Never while a graph capture is active: the launch is being recorded into a
+    // graph rather than executed, so the relocation would still be referenced
+    // long after this call returns, and the copy-in and post-launch sync the
+    // guard needs are both illegal on a capturing stream (HIP 901).
+    if (rls && live && blk_size > 0 && ctx.guard_blocks && !ctx.in_graph_capture)
+        live = hrr_block_guard_relocate(ctx, *rls, rec_ptr, live, blk_base, blk_size);
+    return live;
+}
+
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                        bool ext_global_worksize = false) {
     // Skip the 32-byte header; kernel launch has a variable-length binary format.
@@ -523,6 +609,9 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     // Build kernelParams[] from captured args, translating GPU pointers.
     std::vector<void*>                arg_ptrs;
     std::vector<std::vector<uint8_t>> arg_storage;
+    // Guarded blocks this launch relocated, if block guarding is on. Scoped to
+    // the launch so the relocation is undone before the next event runs.
+    RegionLaunchState rls;
     // Optional recorded->live pointer dump for one target kernel (diff tooling).
     const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0);
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
@@ -556,6 +645,41 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         if (value_kind == 1 && arg_size >= 8) {  // whole-arg GPU pointer
             uint64_t rec_ptr; memcpy(&rec_ptr, data, 8);
             void* live = ctx.translate_ptr(rec_ptr);
+            // Nothing in the archive covers this address. If a producer said a
+            // segment lived there, HIP was bypassed for it — back it now and
+            // translate into it. Asked here rather than when the segment was
+            // declared, because only a translation failure at the moment of use
+            // proves no captured allocation covers the address.
+            if (!live && rec_ptr != 0 && ctx.regions_enabled)
+                live = ctx.regions.materialize_for(ctx, rec_ptr);
+
+            if (!live && rec_ptr != 0) {
+                // Counted and reported, but still handed to the kernel as null.
+                // Forwarding the recorded address instead would be worse than
+                // useless: the driver tends to reproduce a VA layout across
+                // runs, so a capture-time address is quite likely to be mapped
+                // in the replay process too, and the kernel would then scribble
+                // over an unrelated live buffer with nothing to show for it. A
+                // null dereference stops at the first kernel that uses the
+                // pointer, which is the failure worth having.
+                ctx.untranslated_ptr_args.fetch_add(1, std::memory_order_relaxed);
+                static std::mutex mu;
+                static std::set<std::string> warned;
+                char key[160];
+                snprintf(key, sizeof(key), "%s#%u", kernel_name.c_str(), i);
+                bool first;
+                { std::lock_guard<std::mutex> lk(mu); first = warned.insert(key).second; }
+                if (first)
+                    fprintf(stderr,
+                            "[HRR] '%s' arg[%u]: recorded 0x%llx is in no known "
+                            "allocation — passing null\n",
+                            compact_kernel_name(kernel_name).c_str(), i,
+                            (unsigned long long)rec_ptr);
+            } else {
+                // Region check: an intra-segment OOB/stale pointer, or a block to be
+                // relocated behind a guard page. No-op when no sidecar was loaded.
+                live = hrr_region_check_ptr(ctx, &rls, kernel_name, i, rec_ptr, live);
+            }
             if (dbg_dump_ptrs) dbg_ptrs.emplace_back(i, rec_ptr, live);
             storage.resize(sizeof(void*));
             memcpy(storage.data(), &live, sizeof(void*));
@@ -605,7 +729,18 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                 if (rec_ptr < 0x10000ULL) return false;  // null/small — never a VA
                 if (!pointer_like(rec_ptr)) return false;  // packed-int false positive
                 void* live = ctx.translate_ptr(rec_ptr);
+                // Same bypassed-segment materialisation as a whole-pointer
+                // argument: a struct field pointing into memory HIP never saw
+                // resolves in no map until the segment is backed. Only an
+                // address a producer declared materialises, so a mis-flagged
+                // scalar still resolves nowhere and is left untouched below.
+                if (!live && ctx.regions_enabled)
+                    live = ctx.regions.materialize_for(ctx, rec_ptr);
                 if (!live) return false;
+                // Same region check as a whole-pointer argument: a device
+                // address embedded in a by-value struct addresses a tensor
+                // block just as much as one passed directly.
+                live = hrr_region_check_ptr(ctx, &rls, kernel_name, i, rec_ptr, live);
                 memcpy(storage.data() + off, &live, sizeof(void*));
                 if (dbg_dump_ptrs) dbg_ptrs.emplace_back(i, rec_ptr, live);
                 if (ctx.verbose)
@@ -810,8 +945,15 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                 " grid=[%u,%u,%u] block=[%u,%u,%u]\n",
                 kernel_name.c_str(), r, hipGetErrorString(r), (void*)func,
                 grid[0], grid[1], grid[2], block[0], block[1], block[2]);
+        for (const auto& g : rls.guards) hrr_block_guard_teardown(g);
         return r;
     }
+
+    // Resolve any guarded blocks before the next event runs, so this launch is
+    // the only one whose memory was moved.
+    if (hipError_t gr = hrr_block_guard_resolve(ctx, rls, kernel_name, kernel_ordinal);
+        gr != hipSuccess)
+        return gr;
 
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventSynchronize(tl_stop)) == hipSuccess);
@@ -1167,6 +1309,389 @@ static void hrr_zero_init_alloc(PlaybackContext& ctx, void* live, size_t sz) {
     (void)hipStreamSynchronize(nullptr);
 }
 
+// ---- External region materialisation ----------------------------------------
+
+// Make `device` current and return the ordinal to restore afterwards, or -1 if
+// nothing was switched. An ordinal this system does not have is reported once
+// and ignored rather than failing the replay: a capture taken on an eight-GPU
+// node is still worth replaying on a smaller one, just not with the segment on
+// the device the producer named.
+static int hrr_set_region_device(int device) {
+    int count = 0;
+    if (device < 0 || hipGetDeviceCount(&count) != hipSuccess) return -1;
+    if (device >= count) {
+        static std::once_flag once;
+        std::call_once(once, [&] {
+            fprintf(stderr,
+                    "[HRR] regions: annotation names device %d but this system "
+                    "has %d — materialising on the current device instead\n",
+                    device, count);
+        });
+        return -1;
+    }
+    int cur = 0;
+    if (hipGetDevice(&cur) != hipSuccess || cur == device) return -1;
+    if (HRR_HIP_CHECK(hipSetDevice(device)) != hipSuccess) return -1;
+    return cur;
+}
+
+// A segment a producer declared but that HRR never observed. Everything the
+// archive knows about it is its base and size: no capture shim ran, so no
+// contents were recorded and no allocation event exists. Replay gives it a
+// buffer of the right size so pointers into it translate — a kernel then reads
+// fill bytes instead of faulting on null, which is a diagnosable wrong answer
+// rather than a crash that says only that something was missing.
+hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
+                                  size_t size, int device, void** out_live) {
+    if (out_live) *out_live = nullptr;
+    if (rec_base == 0 || size == 0) return hipErrorInvalidValue;
+
+    // Place the buffer on the device the producer said the segment was on.
+    // Leaving it on whatever device happens to be current would put it on the
+    // wrong GPU as soon as the recorded program used more than one: the segment
+    // is materialised by the first pointer that fails to translate, so the
+    // placement would be decided by whichever kernel touched it first rather
+    // than by where the memory actually lived.
+    const int prev = hrr_set_region_device(device);
+
+    void* live = nullptr;
+    hipError_t r = HRR_HIP_CHECK(hipMalloc(&live, size));
+    if (r != hipSuccess) {
+        if (prev >= 0) (void)hipSetDevice(prev);
+        fprintf(stderr,
+                "[HRR] regions: could not materialise segment 0x%llx (%zu bytes) "
+                "on device %d: %s\n",
+                static_cast<unsigned long long>(rec_base), size, device,
+                hipGetErrorString(r));
+        return r;
+    }
+    // Still on the segment's device: the fill runs on the null stream of the
+    // current device, which has to be the one owning the buffer.
+    hrr_zero_init_alloc(ctx, live, size);
+    if (prev >= 0) (void)hipSetDevice(prev);
+
+    ctx.record_alloc(rec_base, live, size);
+    if (out_live) *out_live = live;
+
+    static std::once_flag once;
+    std::call_once(once, [] {
+        fprintf(stderr,
+                "[HRR] regions: materialising segments that bypassed the HIP API "
+                "— their contents are not in the archive and are filled with the "
+                "replay fill byte (HIP_HRR_REPLAY_FILL_BYTE)\n");
+    });
+    return hipSuccess;
+}
+
+void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live) {
+    ctx.remove_alloc(rec_base);
+    if (live) (void)hipFree(live);
+}
+
+// ---- Guard pages ------------------------------------------------------------
+//
+// Replay allocates each recorded segment as one contiguous buffer, exactly as
+// the recording did, so an access that ran off the end of an object inside that
+// segment is in bounds as far as the hardware is concerned and lands in
+// whatever the allocator put next. Guard pages convert that silence into a
+// fault, at the cost of moving memory the replay would otherwise place exactly
+// where the recording had it. Two granularities, both opt-in:
+//
+//   --guard-segments  every device allocation is VMM-backed with an unmapped
+//                     span after it. Layout inside the segment is untouched, so
+//                     this only catches a run off the end of a whole segment.
+//   --guard-blocks    needs region annotations. For the duration of one launch,
+//                     each argument that resolves into a live block is handed a
+//                     copy of that block placed against an unmapped guard, so an
+//                     overrun past the object itself faults. The copy is written
+//                     back and released before the next event, which keeps the
+//                     divergence to exactly the launch being examined.
+//
+// The device ordinal comes from the calling thread rather than being pinned to
+// 0: a replay that switched device would otherwise reserve and map on the wrong
+// one, and hipMemSetAccess would grant access to a device the kernel is not on.
+static int hrr_current_device() {
+    int dev = 0;
+    (void)hipGetDevice(&dev);
+    return dev;
+}
+
+static size_t hrr_vmm_granularity(int device) {
+    hipMemAllocationProp prop{};
+    prop.type          = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+    prop.location.id   = device;
+    size_t gran = 0;
+    if (hipMemGetAllocationGranularity(&gran, &prop,
+                                       hipMemAllocationGranularityMinimum)
+            == hipSuccess && gran)
+        return gran;
+    return (2ull << 20);
+}
+
+// Reserve `mapped + gran` of VA, back only the first `mapped` bytes, and leave
+// the tail span unmapped. Any access past the mapped region traps.
+static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device,
+                                void** out_va, size_t* out_reserved,
+                                hipMemGenericAllocationHandle_t* out_handle) {
+    const size_t reserved = mapped + gran;
+    hipMemAllocationProp prop{};
+    prop.type          = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+    prop.location.id   = device;
+
+    void* va = nullptr;
+    hipError_t r = hipMemAddressReserve(&va, reserved, 0, nullptr, 0);
+    if (r != hipSuccess || !va) return r != hipSuccess ? r : hipErrorOutOfMemory;
+
+    hipMemGenericAllocationHandle_t handle{};
+    r = hipMemCreate(&handle, mapped, &prop, 0);
+    if (r != hipSuccess) { (void)hipMemAddressFree(va, reserved); return r; }
+
+    r = hipMemMap(va, mapped, 0, handle, 0);
+    if (r != hipSuccess) {
+        (void)hipMemRelease(handle);
+        (void)hipMemAddressFree(va, reserved);
+        return r;
+    }
+
+    hipMemAccessDesc desc{};
+    desc.location.type = hipMemLocationTypeDevice;
+    desc.location.id   = device;
+    desc.flags         = hipMemAccessFlagsProtReadWrite;
+    r = hipMemSetAccess(va, mapped, &desc, 1);
+    if (r != hipSuccess) {
+        (void)hipMemUnmap(va, mapped);
+        (void)hipMemRelease(handle);
+        (void)hipMemAddressFree(va, reserved);
+        return r;
+    }
+
+    *out_va       = va;
+    *out_reserved = reserved;
+    *out_handle   = handle;
+    return hipSuccess;
+}
+
+static void hrr_guard_unmap(void* va, size_t mapped, size_t reserved,
+                            hipMemGenericAllocationHandle_t handle) {
+    (void)hipMemUnmap(va, mapped);
+    (void)hipMemRelease(handle);
+    (void)hipMemAddressFree(va, reserved);
+}
+
+// ---- Segment-tail guard (--guard-segments) ----------------------------------
+
+static hipError_t hrr_guard_alloc(PlaybackContext& ctx, size_t want, void** out) {
+    const int    dev    = hrr_current_device();
+    const size_t gran   = hrr_vmm_granularity(dev);
+    const size_t mapped = ((want + gran - 1) / gran) * gran;
+
+    void* va = nullptr;
+    size_t reserved = 0;
+    hipMemGenericAllocationHandle_t handle{};
+    hipError_t r = hrr_guard_map(mapped, gran, dev, &va, &reserved, &handle);
+    if (r != hipSuccess) return r;
+
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.guard_allocs[va] = {va, reserved, mapped, handle};
+    }
+    static std::once_flag once;
+    std::call_once(once, [&] {
+        fprintf(stderr,
+                "[HRR] guard-segments active: first VMM-backed allocation "
+                "want=%zu mapped=%zu guard=%zu\n", want, mapped, reserved - mapped);
+    });
+    *out = va;
+    return hipSuccess;
+}
+
+// Returns true if `live` was a guarded allocation and was torn down.
+static bool hrr_guard_free(PlaybackContext& ctx, void* live) {
+    PlaybackContext::GuardAlloc g;
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        auto it = ctx.guard_allocs.find(live);
+        if (it == ctx.guard_allocs.end()) return false;
+        g = it->second;
+        ctx.guard_allocs.erase(it);
+    }
+    hrr_guard_unmap(g.va_base, g.mapped, g.reserved, g.handle);
+    return true;
+}
+
+void hrr_free_device_alloc(PlaybackContext& ctx, void* live) {
+    if (!live) return;
+    if (hrr_guard_free(ctx, live)) return;
+    (void)hipFree(live);
+}
+
+// ---- Block guard (--guard-blocks) -------------------------------------------
+
+// Largest power of two dividing v, capped at `cap`. This is the alignment the
+// recorded pointer actually had, and reproducing it is what keeps a kernel on
+// the same code path: hipBLASLt tile selection and vectorised loads both branch
+// on how aligned their operands are, so handing a kernel a differently-aligned
+// copy of its data can change what it executes or make it fault for a reason
+// the recording never had.
+static size_t hrr_alignment_of(uint64_t v, size_t cap) {
+    if (v == 0) return cap;
+    size_t a = static_cast<size_t>(v & (~v + 1));  // v & -v
+    return a > cap ? cap : a;
+}
+
+// Place `size` bytes of block whose recorded base is `blk_base` against an
+// unmapped guard. Fills *blind with the number of bytes between the block's end
+// and the guard — an overrun smaller than that is still not caught.
+static hipError_t hrr_block_guard_alloc(PlaybackContext& ctx, uint64_t blk_base,
+                                        size_t size, HrrBlockGuard* g,
+                                        size_t* blind) {
+    if (size == 0) return hipErrorInvalidValue;
+    const int    dev  = hrr_current_device();
+    const size_t gran = hrr_vmm_granularity(dev);
+
+    // Where inside the mapped span the block starts. Two policies, both of
+    // which keep the guard immediately after the mapped region:
+    //   default  right-align to the block's own alignment, so the guard is at
+    //            most (alignment - 1) bytes past the block's end.
+    //   exact    reproduce blk_base's offset within a granule bit for bit, at
+    //            the cost of a blind spot of up to one granule.
+    size_t pad;
+    if (ctx.guard_exact_align) {
+        pad = static_cast<size_t>(blk_base & (gran - 1));
+    } else {
+        const size_t align  = hrr_alignment_of(blk_base, gran);
+        const size_t mapped = ((size + gran - 1) / gran) * gran;
+        pad = (mapped - size) & ~(align - 1);
+    }
+    const size_t mapped = ((pad + size + gran - 1) / gran) * gran;
+    if (blind) *blind = mapped - (pad + size);
+
+    void* va = nullptr;
+    size_t reserved = 0;
+    hipMemGenericAllocationHandle_t handle{};
+    hipError_t r = hrr_guard_map(mapped, gran, dev, &va, &reserved, &handle);
+    if (r != hipSuccess) return r;
+
+    g->va        = va;
+    g->reserved  = reserved;
+    g->mapped    = mapped;
+    g->handle    = handle;
+    g->data      = static_cast<char*>(va) + pad;
+    g->size      = size;
+    g->orig_live = nullptr;
+    return hipSuccess;
+}
+
+static void hrr_block_guard_teardown(const HrrBlockGuard& g) {
+    hrr_guard_unmap(g.va, g.mapped, g.reserved, g.handle);
+}
+
+// Hand this argument a guarded copy of its owning block. One buffer per
+// distinct block per launch, so two arguments pointing into the same object
+// still see the same memory as they did at capture.
+static void* hrr_block_guard_relocate(PlaybackContext& ctx, RegionLaunchState& rls,
+                                      uint64_t rec_ptr, void* live,
+                                      uint64_t blk_base, uint64_t blk_size) {
+    if (blk_size < ctx.guard_min_bytes) return live;
+    if (ctx.guard_max_bytes && blk_size > ctx.guard_max_bytes) return live;
+
+    auto it = rls.relocated.find(blk_base);
+    if (it != rls.relocated.end())
+        return static_cast<char*>(it->second) + (rec_ptr - blk_base);
+
+    // A launch can take a hundred pointers; without a ceiling, guarding all of
+    // them at granule resolution exhausts VRAM before the kernel runs.
+    size_t outstanding = 0;
+    for (const auto& g : rls.guards) outstanding += g.mapped;
+    if (outstanding + blk_size > ctx.guard_budget_bytes) {
+        static std::once_flag once;
+        std::call_once(once, [&] {
+            fprintf(stderr,
+                    "[HRR] guard-blocks: budget of %zu MiB reached in a single "
+                    "launch — remaining blocks are left unguarded "
+                    "(--guard-budget-mb)\n",
+                    ctx.guard_budget_bytes >> 20);
+        });
+        return live;
+    }
+
+    void* live_base = ctx.translate_ptr(blk_base);
+    if (!live_base) return live;
+
+    HrrBlockGuard g{};
+    size_t blind = 0;
+    if (hrr_block_guard_alloc(ctx, blk_base, static_cast<size_t>(blk_size), &g,
+                              &blind) != hipSuccess)
+        return live;
+
+    // Seed the guarded copy so a kernel that reads or accumulates into the
+    // block still computes from the values the recording had.
+    if (hipMemcpy(g.data, live_base, blk_size, hipMemcpyDeviceToDevice)
+            != hipSuccess) {
+        hrr_block_guard_teardown(g);
+        return live;
+    }
+    g.orig_live = live_base;
+    rls.relocated[blk_base] = g.data;
+    rls.guards.push_back(g);
+    ctx.guard_blocks_relocated.fetch_add(1, std::memory_order_relaxed);
+    if (blind > ctx.guard_blind_max.load(std::memory_order_relaxed))
+        ctx.guard_blind_max.store(blind, std::memory_order_relaxed);
+
+    return static_cast<char*>(g.data) + (rec_ptr - blk_base);
+}
+
+// After the launch: did anything run off the end of a guarded block? Sync so
+// the fault is attributed to this kernel rather than to whatever event happens
+// to synchronize next. On a clean launch the results are copied back to the
+// real blocks and the guards released, leaving the rest of the replay
+// byte-identical to an unguarded run.
+static hipError_t hrr_block_guard_resolve(PlaybackContext& ctx,
+                                          RegionLaunchState& rls,
+                                          const std::string& kernel_name,
+                                          size_t kernel_ordinal) {
+    if (rls.guards.empty()) return hipSuccess;
+
+    if (ctx.in_graph_capture) {
+        // hipDeviceSynchronize and blocking D2D hipMemcpy are illegal during
+        // stream capture (HIP 901). Relocate already skips when capturing, so
+        // this is defence in depth: tear the reservations down without a device
+        // round-trip and without treating a capture abort as a guard fault.
+        for (const auto& g : rls.guards) hrr_block_guard_teardown(g);
+        rls.guards.clear();
+        rls.relocated.clear();
+        return hipSuccess;
+    }
+
+    (void)hipGetLastError();
+    hipError_t gs = hipDeviceSynchronize();
+    hipError_t ge = hipGetLastError();
+    if (gs != hipSuccess || ge != hipSuccess) {
+        fprintf(stderr,
+                "[HRR] GUARD FAULT: kernel #%zu \"%s\" ran past the end of a "
+                "guarded block (sync=%d last=%d); %zu block(s) were guarded. "
+                "This is the intra-segment out-of-bounds access the contiguous "
+                "replay segment would otherwise have absorbed.\n",
+                kernel_ordinal, compact_kernel_name(kernel_name).c_str(),
+                static_cast<int>(gs), static_cast<int>(ge), rls.guards.size());
+        // The context is gone; unmapping now would only add errors on the way
+        // out. Leave the reservations to process teardown.
+        rls.guards.clear();
+        rls.relocated.clear();
+        return gs != hipSuccess ? gs : ge;
+    }
+
+    for (const auto& g : rls.guards) {
+        (void)hipMemcpy(g.orig_live, g.data, g.size, hipMemcpyDeviceToDevice);
+        hrr_block_guard_teardown(g);
+    }
+    rls.guards.clear();
+    rls.relocated.clear();
+    return hipSuccess;
+}
+
 // ---- Divergence-abort guard -------------------------------------------------
 // Replaying a numerically-unstable workload (e.g. a model emitting degenerate
 // output) cannot reproduce bit-identical results from nondeterministic GPU
@@ -1246,10 +1771,19 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     void* live = nullptr;
     hipError_t r;
-    if (managed)
+    // --guard-segments: back the allocation with VMM and leave an unmapped span
+    // after it, so running off the end of the segment traps here instead of
+    // landing in whatever the driver placed next. Managed memory has no VMM
+    // equivalent, and a failed reservation falls back to a plain allocation
+    // rather than failing the replay.
+    if (!managed && ctx.guard_segments &&
+        hrr_guard_alloc(ctx, pad_sz, &live) == hipSuccess) {
+        r = hipSuccess;
+    } else if (managed) {
         r = hipMallocManaged(&live, pad_sz);
-    else
+    } else {
         r = hipMalloc(&live, pad_sz);
+    }
     if (r == hipSuccess) {
         // hipMalloc does NOT guarantee zeroed memory (only first-touch pages are
         // scrubbed; reused allocations carry stale bytes). Zero so replay is
@@ -1557,6 +2091,10 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
+    if (hrr_guard_free(ctx, live)) {  // --guard-segments: a VMM mapping
+        ctx.remove_alloc(a->ptr);
+        return hipSuccess;
+    }
     hipError_t r = hipFree(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;

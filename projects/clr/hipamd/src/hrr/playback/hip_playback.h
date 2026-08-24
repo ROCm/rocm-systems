@@ -17,7 +17,8 @@
 #include <shared_mutex>
 #include <chrono>
 
-#include "hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
+#include "hrr_api_args.h"     // for HRR_API_COUNT, hrr_api_id_t
+#include "hrr_region_map.h"   // external region annotations (regions/*.hrrr)
 
 // Whether a replayed H2D blob restore must be drained before subsequent
 // replay work. Draining is skipped while a stream graph capture is active,
@@ -226,6 +227,56 @@ struct PlaybackContext {
         return it != vmm_handle_map.end() ? it->second : hipMemGenericAllocationHandle_t{};
     }
 
+    // ---- External region annotations (regions/*.hrrr, see hrr_regions.h) ----
+    // What a producer outside libamdhip64 knew and the HIP dispatch table could
+    // not: the per-object block layout inside a framework allocator's segments,
+    // and segments that never crossed a HIP API at all. Replayed in lockstep
+    // with the event stream so the live set matches the captured instant.
+    hrr::RegionMap regions;
+    // Set when a sidecar was actually loaded. Kept separate from
+    // regions.empty() so --no-regions and --multi-thread can switch the whole
+    // feature off without discarding what was read.
+    bool regions_enabled = false;
+    // Count intra-segment out-of-bounds findings toward the exit code. Off by
+    // default: the finding is a diagnostic about the recorded program, not a
+    // failure of the replay to reproduce it.
+    bool regions_strict = false;
+    std::atomic<uint64_t> region_ptrs_checked{0};
+    std::atomic<uint64_t> region_oob_ptrs{0};
+
+    // Kernel-argument pointers that resolved in no map at all — neither an
+    // allocation, a VMM reservation, nor an annotated region. A non-zero count
+    // is the measurement that says a capture needs region annotations: those
+    // pointers reach the GPU as null. See --warn-untranslated-args.
+    bool warn_untranslated_args = false;
+    std::atomic<uint64_t> untranslated_ptr_args{0};
+
+    // ---- Guard pages ----
+    // Both off by default: they trade the exact memory layout the replay
+    // otherwise reproduces for the ability to make an out-of-bounds access
+    // fault. See the guard section of hip_playback.cpp.
+    bool   guard_segments = false;  // VMM-back every allocation, guard its tail
+    bool   guard_blocks   = false;  // relocate annotated blocks behind a guard
+    size_t guard_min_bytes = 0;     // skip blocks smaller than this
+    size_t guard_max_bytes = 0;     // 0 = no upper bound
+    size_t guard_budget_bytes = (4ull << 30);  // per launch
+    // Reproduce the recorded pointer's offset within a granule exactly, rather
+    // than only its alignment. Tighter fidelity, looser guard.
+    bool   guard_exact_align = false;
+    std::atomic<uint64_t> guard_blocks_relocated{0};
+    std::atomic<uint64_t> guard_blind_max{0};  // largest unguarded tail seen
+
+    // VMM-backed allocations created for --guard-segments, keyed by the mapped
+    // base that was handed out. hipFree cannot release these, so the free path
+    // has to recognise them. Guarded by map_mutex.
+    struct GuardAlloc {
+        void*  va_base  = nullptr;  // reserved VA base (== mapped base)
+        size_t reserved = 0;        // total reserved VA (mapped + guard)
+        size_t mapped   = 0;        // mapped/backed bytes
+        hipMemGenericAllocationHandle_t handle{};
+    };
+    std::unordered_map<void*, GuardAlloc> guard_allocs;
+
     // ---- Pointer translation ----
     // Translates a recorded GPU address to a live pointer.
     // Checks alloc_map (exact + range) then vmm_va_map (exact + range).
@@ -400,6 +451,28 @@ struct PlaybackContext {
 private:
     mutable std::unordered_map<std::string, std::vector<uint8_t>> blob_cache_;
 };
+
+// ---------------------------------------------------------------------------
+// Region materialisation — back an annotated segment HRR never observed.
+//
+// Called by RegionMap when a producer declares a segment whose base resolves in
+// no map, which means the allocation bypassed the HIP dispatch table (a direct
+// HSA allocation, a foreign VMM pool, memory imported from another process).
+// Allocates a live buffer of the recorded size on `device` — the ordinal the
+// producer recorded the segment on — applies the replay fill byte (nothing in
+// the archive can say what the contents were) and registers it in alloc_map so
+// ordinary pointer translation resolves into it.
+hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
+                                  size_t size, int device, void** out_live);
+
+// Release a buffer created by hrr_materialize_region and drop its alloc_map
+// entry. `live` is the pointer that call returned.
+void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live);
+
+// Release a device allocation the replay created, whichever way it was created.
+// Under --guard-segments an allocation is a VMM mapping rather than a hipMalloc
+// and hipFree cannot release it, so every teardown path has to go through here.
+void hrr_free_device_alloc(PlaybackContext& ctx, void* live);
 
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
 // Kernel-launch handlers read this to wait for their submission turn at the
