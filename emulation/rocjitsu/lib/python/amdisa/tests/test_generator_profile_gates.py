@@ -3626,6 +3626,33 @@ def test_encoding_translator_uses_selected_generated_include_tree(tmp_path, gen_
     assert '#include "custom/generated/rdna4/machine_insts.h"' in header
 
 
+def test_dbt_generation_canonicalizes_rdna35_cli_alias(tmp_path):
+    generated_tables = []
+    for output_name, alias in (
+        ('underscore', 'rdna3_5'),
+        ('documented', 'rdna3.5'),
+    ):
+        dbt_output = tmp_path / output_name
+        args = SimpleNamespace(
+            isafiles=[
+                f'{alias}:{_mrisa_dir() / "amdgpu_isa_rdna3_5.xml"}',
+                f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}',
+            ],
+            gen_isas=False,
+            gen_dbt=True,
+            isa_output=None,
+            dbt_output=str(dbt_output),
+        )
+
+        _run(args)
+
+        generated_tables.append(
+            (dbt_output / 'legalization_rdna3_5_to_rdna4.h').read_text()
+        )
+
+    assert generated_tables[0] == generated_tables[1]
+
+
 def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
     spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
     semantics = derive_all_semantics(spec)
