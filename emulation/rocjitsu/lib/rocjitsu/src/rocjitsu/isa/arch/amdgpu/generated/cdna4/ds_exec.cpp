@@ -2699,7 +2699,6 @@ void DsReadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     d->exec_mask = exec;
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
     uint32_t m0 = wf.m0();
     uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
@@ -2775,7 +2774,6 @@ void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
   d->lane_mask = exec;
   d->wg_id = wf.wg_id();
   d->wf_id = wf.wf_id();
-  d->cu_path = wf.cu().full_path();
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
   uint32_t addr = wf.lds_base() + wf.m0() + offset;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2800,7 +2798,6 @@ void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
   d->lane_mask = exec;
   d->wg_id = wf.wg_id();
   d->wf_id = wf.wf_id();
-  d->cu_path = wf.cu().full_path();
   uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);
   uint32_t addr = wf.lds_base() + wf.m0() + offset;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -2915,7 +2912,7 @@ void DsReadB64TrB16Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->transpose = 4;
+  d->transpose = 5;
   ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }

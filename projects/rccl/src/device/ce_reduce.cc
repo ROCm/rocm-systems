@@ -51,7 +51,8 @@ THE SOFTWARE.
   extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Sum(NCCL_CE_LAUNCH_PARAMS); \
   extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Prod(NCCL_CE_LAUNCH_PARAMS); \
   extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Min(NCCL_CE_LAUNCH_PARAMS); \
-  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Max(NCCL_CE_LAUNCH_PARAMS)
+  extern ncclResult_t ncclCeLocalReduceLaunch_##Type##_Max(NCCL_CE_LAUNCH_PARAMS); \
+  extern int ncclCeLocalReduceBlocks_##Type(size_t)
 
 NCCL_CE_DECLARE_TYPE(f32);
 NCCL_CE_DECLARE_TYPE(f64);
@@ -110,9 +111,43 @@ ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks,
     NCCL_CE_DISPATCH_REDOP(i8);
   case ncclUint8:
     NCCL_CE_DISPATCH_REDOP(u8);
+  // fp8 (e4m3/e5m2) not currently supported for CE AR.
   default:
     return ncclInvalidArgument;
   }
 
 #undef NCCL_CE_DISPATCH_REDOP
+}
+
+// *********************************************************************************
+// ncclCeLocalReduceBlocks -- reduce-kernel block count for host-side reporting
+// (redop-independent; mirrors the geometry the launcher above actually uses).
+// *********************************************************************************
+int ncclCeLocalReduceBlocks(ncclDataType_t datatype, size_t chunkElems) {
+  if (chunkElems == 0) return 0;
+  switch (datatype) {
+  case ncclFloat32:
+    return ncclCeLocalReduceBlocks_f32(chunkElems);
+  case ncclFloat64:
+    return ncclCeLocalReduceBlocks_f64(chunkElems);
+  case ncclFloat16:
+    return ncclCeLocalReduceBlocks_f16(chunkElems);
+  case ncclBfloat16:
+    return ncclCeLocalReduceBlocks_bf16(chunkElems);
+  case ncclInt32:
+    return ncclCeLocalReduceBlocks_i32(chunkElems);
+  case ncclUint32:
+    return ncclCeLocalReduceBlocks_u32(chunkElems);
+  case ncclInt64:
+    return ncclCeLocalReduceBlocks_i64(chunkElems);
+  case ncclUint64:
+    return ncclCeLocalReduceBlocks_u64(chunkElems);
+  case ncclInt8:
+    return ncclCeLocalReduceBlocks_i8(chunkElems);
+  case ncclUint8:
+    return ncclCeLocalReduceBlocks_u8(chunkElems);
+  // fp8 (e4m3/e5m2) not currently supported for CE AR.
+  default:
+    return 0;
+  }
 }
