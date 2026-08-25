@@ -239,6 +239,65 @@ void step_until_halted(simdojo::SimulationEngine &engine,
   }
 }
 
+TEST(LdsAllocationTest, ZeroLdsDispatchKeepsCuBackingUnmaterialized) {
+  VmFixture f("cdna5", 1, 8, /*lds_size_kb=*/64);
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  const uint64_t kernel_object = f.write_kernel(0x1000, &kCdna5Endpgm, sizeof(kCdna5Endpgm));
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
+  queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
+  ASSERT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
+}
+
+TEST(LdsAllocationTest, DescriptorFixedSizeMaterializesWorkgroupBacking) {
+  VmFixture f("cdna5", 1, 8, /*lds_size_kb=*/64);
+  constexpr uint32_t kStaticLdsBytes = 1537;
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  const uint32_t code[] = {kCdna5Endpgm};
+  const uint64_t kernel_object =
+      f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                     /*user_sgprs=*/2, kStaticLdsBytes);
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
+  queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
+  ASSERT_NO_THROW(f.engine->run());
+
+  constexpr uint32_t kAlignedStaticLdsBytes = 1792;
+  EXPECT_GE(f.cu()->lds().materialized_size_bytes(), kAlignedStaticLdsBytes);
+  EXPECT_LT(f.cu()->lds().materialized_size_bytes(), f.cu()->lds().size_bytes());
+}
+
+TEST(LdsAllocationTest, PacketGroupSizeMaterializesDynamicWorkgroupBacking) {
+  VmFixture f("cdna5", 1, 8, /*lds_size_kb=*/64);
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  const uint32_t code[] = {kCdna5Endpgm};
+  const uint64_t kernel_object = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint32_t kDynamicLdsBytes = 6145;
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  packet.setup = 1;
+  packet.workgroup_size_x = 32;
+  packet.workgroup_size_y = 1;
+  packet.workgroup_size_z = 1;
+  packet.grid_size_x = 32;
+  packet.grid_size_y = 1;
+  packet.grid_size_z = 1;
+  packet.group_segment_size = kDynamicLdsBytes;
+  packet.kernel_object = kernel_object;
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
+  queue.submit(packet);
+  ASSERT_NO_THROW(f.engine->run());
+
+  constexpr uint32_t kAlignedDynamicLdsBytes = 6400;
+  EXPECT_GE(f.cu()->lds().materialized_size_bytes(), kAlignedDynamicLdsBytes);
+  EXPECT_LT(f.cu()->lds().materialized_size_bytes(), f.cu()->lds().size_bytes());
+}
+
 TEST(RdnaDispatchTest, DescriptorSelectsCoherentWaveWidthAndVgprGranule) {
   constexpr uint32_t kRdnaEndpgm = 0xBFB00000u;
 
@@ -436,6 +495,21 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
     for (const auto &wf : snap->snapshots())
       EXPECT_EQ(wf.lds_size_bytes, kWgpLdsBytes);
   }
+}
+
+TEST(RdnaDispatchTest, ZeroLdsReservationKeepsWgpBackingUnmaterialized) {
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  amdgpu::DispatchEntry entry{};
+  entry.dispatch_id = 1;
+  entry.wgp_mode = true;
+  entry.group_segment_fixed_size = 0;
+
+  auto placement = f.se()->spi().allocate_workgroup(entry, /*global_wg_id=*/0);
+  ASSERT_TRUE(placement.has_value());
+  ASSERT_NE(placement->lds, nullptr);
+  EXPECT_NE(placement->lds, &placement->cu->lds());
+  EXPECT_EQ(placement->lds->materialized_size_bytes(), 0u);
+  EXPECT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
 }
 
 TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
