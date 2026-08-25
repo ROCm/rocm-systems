@@ -126,7 +126,8 @@ jobs:
         id: skip_stages
         run: |
           python3 .github/scripts/compute_skip_stages.py \
-            --changed-projects "${{ steps.configure.outputs.run_all_tests == 'true' && '' || steps.configure.outputs.changed_projects }}" \
+            --changed-projects "${{ steps.configure.outputs.changed_projects }}" \
+            --run-all-tests "${{ steps.configure.outputs.run_all_tests }}" \
             --therock-path "_therock"
 
   setup:

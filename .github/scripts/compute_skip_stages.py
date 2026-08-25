@@ -37,8 +37,8 @@ Usage:
         --changed-projects "projects/rdc,projects/rocdecode" \
         --therock-path _therock
 
-Output (to $GITHUB_OUTPUT):
-    skip_stages: comma-separated stage names to skip (may be empty)
+Output (to $GITHUB_OUTPUT), written as ``skip_stages=<value>``:
+    a comma-separated list of stage names to skip (empty string = skip nothing)
 """
 
 import argparse
@@ -75,11 +75,21 @@ def _parse_projects(changed_projects: str) -> List[str]:
     return projects
 
 
-def compute_skip_stages(changed_projects: str, therock_path: str) -> List[str]:
+def compute_skip_stages(
+    changed_projects: str,
+    therock_path: str,
+    run_all_tests: bool = False,
+) -> List[str]:
     """Return the list of build stages that can be fully skipped.
 
     Returns [] (skip nothing -> full build) whenever narrowing is not safe.
     """
+    # CI-infra changes (workflow/scripts/repos-config) force a full run upstream;
+    # never narrow the build in that case.
+    if run_all_tests:
+        logger.info("run_all_tests set -> skip nothing (full build)")
+        return []
+
     projects = _parse_projects(changed_projects)
     if not projects:
         logger.info("No changed projects -> skip nothing (full build)")
@@ -98,12 +108,21 @@ def compute_skip_stages(changed_projects: str, therock_path: str) -> List[str]:
 
         topology = get_topology()
         all_stages = set(topology.get_all_stage_names())
-        required = set(topology.get_stages_for_projects(projects))
     except Exception as e:  # noqa: BLE001 - never let skip analysis break CI
-        logger.warning(f"Topology analysis failed ({e}) -> skip nothing (full build)")
+        logger.warning(f"Topology load failed ({e}) -> skip nothing (full build)")
         return []
 
-    # Unknown project (no stage mapping) -> be safe and build everything.
+    # Fail safe on ANY unrecognized project. get_stages_for_projects() silently
+    # ignores names it cannot resolve, so a mixed input like "rdc,unknown" would
+    # otherwise return only rdc's stages and wrongly skip everything the unknown
+    # project needs. Require every changed project to resolve to an artifact
+    # before narrowing; otherwise build everything.
+    unknown = [p for p in projects if topology.resolve_project_to_artifact(p) is None]
+    if unknown:
+        logger.info(f"Unrecognized project(s) {sorted(unknown)} -> skip nothing")
+        return []
+
+    required = set(topology.get_stages_for_projects(projects))
     if not required:
         logger.info("No stages mapped for changed projects -> skip nothing")
         return []
@@ -137,6 +156,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default="_therock",
         help="Path to the TheRock checkout (contains BUILD_TOPOLOGY.toml)",
     )
+    parser.add_argument(
+        "--run-all-tests",
+        default="false",
+        help="When 'true', skip nothing (full build). Set from the configure "
+        "job's run_all_tests output for CI-infra changes.",
+    )
     return parser.parse_args(argv)
 
 
@@ -145,6 +170,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     skip_stages = compute_skip_stages(
         changed_projects=args.changed_projects,
         therock_path=args.therock_path,
+        run_all_tests=str(args.run_all_tests).strip().lower() == "true",
     )
     set_github_output(skip_stages)
     return 0
