@@ -640,6 +640,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_CE_REGISTERED:
       *algoName = "CE";
       break;
+    case rcclAddonAlgos_t::RCCL_CE_SCRATCH:
+      *algoName = "CE-Scratch";
+      break;
     // Fabric variants all report "DDA"; the protocol column distinguishes
     // LL / LL128 / Simple, so the name needn't repeat it.
     case rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL:
@@ -781,7 +784,7 @@ void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
   // Walk the breakpoint table; first entry with maxBytes >= msgBytes wins.
   for (int i = 0; ; ++i) {
     if (msgBytes <= map[i].maxBytes) {
-      comm->unroll = (ncclUnrollType)map[i].unrollIdx;
+      comm->unroll = map[i].unrollIdx;
       return;
     }
     if (map[i].maxBytes == SIZE_MAX) return;  // terminal entry (safety)
@@ -1274,13 +1277,15 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     if (rcclParamForceCe() && ceScratch && winRegType != ncclSymSendRegRecvReg &&
         winRegType != ncclSymSendNonregRecvReg && !hasSysmemSegment && comm->ddaScratch != nullptr &&
         totalBytes <= (size_t)comm->ddaScratchBytes) {
-      decision->algo = RCCL_CE_REGISTERED;
+      decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
     }
-    // Branch #3: CE via registered symmetric windows.
+    // Branch #3: CE via registered symmetric windows — requires CTAPolicy=ZERO,
+    // matching the taskAppend gate (line ~3916) so the decision and dispatch agree.
     const bool ceAvailable =
       !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType);
-    if (ceAvailable && !hasSysmemSegment) {
+    if (ceAvailable && !hasSysmemSegment &&
+        (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
       decision->algo = RCCL_CE_REGISTERED;
       return ncclSuccess;
     }
