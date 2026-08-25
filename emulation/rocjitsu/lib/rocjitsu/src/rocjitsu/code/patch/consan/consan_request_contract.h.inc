@@ -296,7 +296,39 @@ enum class ConSanRuntimeBackend : uint8_t {
   PhysicalHsa,
   /// Capabilities were supplied by a RocJitsu simulation configuration.
   RocJitsuSimulator,
+  /// One past the last declared value. This is an iteration bound and an
+  /// invalid runtime backend, not a backend that may supply capabilities.
+  Count,
 };
+
+/// Every declared runtime-backend value, including the construction sentinel
+/// but excluding the one-past-the-end iteration bound. Keeping this inventory
+/// beside the enum makes exhaustive tests and diagnostic rendering fail
+/// visibly when the backend vocabulary grows.
+inline constexpr std::array<ConSanRuntimeBackend, 3> kConSanRuntimeBackends = {
+    ConSanRuntimeBackend::Unknown,
+    ConSanRuntimeBackend::PhysicalHsa,
+    ConSanRuntimeBackend::RocJitsuSimulator,
+};
+
+/// Return the stable diagnostic spelling of a runtime-backend provenance.
+/// Invalid values, including `Count`, deliberately share an invalid spelling
+/// so they cannot masquerade as a queried backend in logs or test fixtures.
+[[nodiscard]] constexpr std::string_view consan_runtime_backend_name(ConSanRuntimeBackend backend) {
+  switch (backend) {
+  case ConSanRuntimeBackend::Unknown:
+    return "unknown";
+  case ConSanRuntimeBackend::PhysicalHsa:
+    return "physical-hsa";
+  case ConSanRuntimeBackend::RocJitsuSimulator:
+    return "rocjitsu-simulator";
+  case ConSanRuntimeBackend::Count:
+    break;
+  }
+  return "invalid-runtime-backend";
+}
+
+static_assert(kConSanRuntimeBackends.size() == static_cast<size_t>(ConSanRuntimeBackend::Count));
 
 /// Facts discovered from the selected execution backend and agent.
 ///
@@ -360,7 +392,41 @@ enum class ConSanRuntimeResourceScope : uint8_t {
   Executable,
   /// The resource is rebound for each dispatch generation.
   Dispatch,
+  /// One past the last declared value. This is an iteration bound and never a
+  /// valid resource lifetime.
+  Count,
 };
+
+/// Every valid resource-scope value, including the explicitly unbound state
+/// but excluding the one-past-the-end iteration bound.
+inline constexpr std::array<ConSanRuntimeResourceScope, 4> kConSanRuntimeResourceScopes = {
+    ConSanRuntimeResourceScope::Unbound,
+    ConSanRuntimeResourceScope::CodeObject,
+    ConSanRuntimeResourceScope::Executable,
+    ConSanRuntimeResourceScope::Dispatch,
+};
+
+/// Return the stable diagnostic spelling of a runtime-resource lifetime.
+/// Invalid values never acquire a plausible lifetime name.
+[[nodiscard]] constexpr std::string_view
+consan_runtime_resource_scope_name(ConSanRuntimeResourceScope scope) {
+  switch (scope) {
+  case ConSanRuntimeResourceScope::Unbound:
+    return "unbound";
+  case ConSanRuntimeResourceScope::CodeObject:
+    return "code-object";
+  case ConSanRuntimeResourceScope::Executable:
+    return "executable";
+  case ConSanRuntimeResourceScope::Dispatch:
+    return "dispatch";
+  case ConSanRuntimeResourceScope::Count:
+    break;
+  }
+  return "invalid-runtime-resource-scope";
+}
+
+static_assert(kConSanRuntimeResourceScopes.size() ==
+              static_cast<size_t>(ConSanRuntimeResourceScope::Count));
 
 /// Concrete runtime allocations and identities bound after address-free
 /// planning.
@@ -437,7 +503,41 @@ enum class ConSanContractIssue : uint8_t {
   InvalidResourceAddress,
   /// A concrete MOI address and its byte size disagree.
   InvalidResourceSize,
+  /// One past the last declared issue. This is an iteration bound and never a
+  /// validation result.
+  Count,
 };
+
+/// Every validation result that may be returned by a contract validator. The
+/// one-past-the-end bound is excluded so callers cannot mistake it for an
+/// actionable issue.
+inline constexpr std::array<ConSanContractIssue, 23> kConSanContractIssues = {
+    ConSanContractIssue::None,
+    ConSanContractIssue::MissingFlavor,
+    ConSanContractIssue::InvalidMode,
+    ConSanContractIssue::InvalidSampleStride,
+    ConSanContractIssue::InvalidSampleOffset,
+    ConSanContractIssue::InvalidPatchBudget,
+    ConSanContractIssue::InvalidDebugRegister,
+    ConSanContractIssue::InvalidMutationDependency,
+    ConSanContractIssue::InvalidMutationAddressDelta,
+    ConSanContractIssue::InvalidPerturbationBounds,
+    ConSanContractIssue::ModeConflict,
+    ConSanContractIssue::ConflictingRuntimeAssertions,
+    ConSanContractIssue::MissingRuntimeBackend,
+    ConSanContractIssue::MissingVisibleMemory,
+    ConSanContractIssue::MissingCoherentMemory,
+    ConSanContractIssue::MissingAtomicPublication,
+    ConSanContractIssue::InsufficientReportAllocation,
+    ConSanContractIssue::MissingWorkgroupLdsLimit,
+    ConSanContractIssue::MissingExecutableBinding,
+    ConSanContractIssue::MissingDispatchSegmentBinding,
+    ConSanContractIssue::InvalidResourceScope,
+    ConSanContractIssue::InvalidResourceAddress,
+    ConSanContractIssue::InvalidResourceSize,
+};
+
+static_assert(kConSanContractIssues.size() == static_cast<size_t>(ConSanContractIssue::Count));
 
 [[nodiscard]] constexpr std::string_view consan_contract_issue_name(ConSanContractIssue issue) {
   switch (issue) {
@@ -487,6 +587,8 @@ enum class ConSanContractIssue : uint8_t {
     return "invalid-resource-address";
   case ConSanContractIssue::InvalidResourceSize:
     return "invalid-resource-size";
+  case ConSanContractIssue::Count:
+    break;
   }
   return "invalid-contract-issue";
 }
@@ -611,6 +713,7 @@ validate_runtime_capabilities(const RuntimeCapabilities &capabilities,
   case ConSanRuntimeBackend::RocJitsuSimulator:
     break;
   case ConSanRuntimeBackend::Unknown:
+  case ConSanRuntimeBackend::Count:
   default:
     return ConSanContractIssue::MissingRuntimeBackend;
   }
@@ -642,6 +745,7 @@ validate_bound_runtime_resources(const BoundRuntimeResources &resources) {
   case ConSanRuntimeResourceScope::Executable:
   case ConSanRuntimeResourceScope::Dispatch:
     break;
+  case ConSanRuntimeResourceScope::Count:
   default:
     return ConSanContractIssue::InvalidResourceScope;
   }

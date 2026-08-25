@@ -279,6 +279,14 @@ for the DBI discussion.
   testable, and free of a dependency on a future global cutover. Temporary
   compatibility paths must be local, short-lived, and paired with an explicit
   deletion slice.
+- Apply the standing type-first contract policy from
+  `PRODUCTION_DESIGN.md` to every slice. Every introduced or materially changed
+  named type and enum must explain its semantic role, invariants, ownership or
+  lifetime, and sentinel states generously at the declaration. Every
+  reasonably testable behavior owned by that type must land with a focused
+  host unit test; device-only behavior must land with the narrowest applicable
+  paired correct/incorrect device contract. Indirect integration coverage does
+  not satisfy this requirement.
 - Do not migrate to the proposed DBI record stream, common hook, probe API, or
   variant model during this phase.
 - The internal design should generally move in a direction that will compose

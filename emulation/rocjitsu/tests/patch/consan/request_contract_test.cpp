@@ -441,6 +441,26 @@ TEST(RuntimeCapabilitiesContractTest, PhysicalAndSimulatorFixturesShareOneFactMo
   EXPECT_NE(requirements_copy, all);
 }
 
+TEST(ConSanRuntimeBackendTest, EnumeratesAndNamesEveryDeclaredValue) {
+  constexpr std::array expected_names{
+      std::string_view{"unknown"},
+      std::string_view{"physical-hsa"},
+      std::string_view{"rocjitsu-simulator"},
+  };
+  static_assert(kConSanRuntimeBackends.size() == expected_names.size());
+
+  std::unordered_set<std::string_view> unique_names;
+  for (size_t i = 0; i < kConSanRuntimeBackends.size(); ++i) {
+    EXPECT_EQ(static_cast<size_t>(kConSanRuntimeBackends[i]), i);
+    const std::string_view name = consan_runtime_backend_name(kConSanRuntimeBackends[i]);
+    EXPECT_EQ(name, expected_names[i]);
+    EXPECT_TRUE(unique_names.insert(name).second) << name;
+  }
+  EXPECT_EQ(consan_runtime_backend_name(ConSanRuntimeBackend::Count), "invalid-runtime-backend");
+  EXPECT_EQ(consan_runtime_backend_name(static_cast<ConSanRuntimeBackend>(255)),
+            "invalid-runtime-backend");
+}
+
 TEST(RuntimeCapabilitiesContractTest, RejectsEachMissingRequiredFact) {
   RuntimeCapabilities capabilities{
       .backend = ConSanRuntimeBackend::PhysicalHsa,
@@ -544,6 +564,29 @@ TEST(BoundRuntimeResourcesContractTest, AcceptsEveryConcreteResourceScope) {
   }
 }
 
+TEST(ConSanRuntimeResourceScopeTest, EnumeratesAndNamesEveryDeclaredValue) {
+  constexpr std::array expected_names{
+      std::string_view{"unbound"},
+      std::string_view{"code-object"},
+      std::string_view{"executable"},
+      std::string_view{"dispatch"},
+  };
+  static_assert(kConSanRuntimeResourceScopes.size() == expected_names.size());
+
+  std::unordered_set<std::string_view> unique_names;
+  for (size_t i = 0; i < kConSanRuntimeResourceScopes.size(); ++i) {
+    EXPECT_EQ(static_cast<size_t>(kConSanRuntimeResourceScopes[i]), i);
+    const std::string_view name =
+        consan_runtime_resource_scope_name(kConSanRuntimeResourceScopes[i]);
+    EXPECT_EQ(name, expected_names[i]);
+    EXPECT_TRUE(unique_names.insert(name).second) << name;
+  }
+  EXPECT_EQ(consan_runtime_resource_scope_name(ConSanRuntimeResourceScope::Count),
+            "invalid-runtime-resource-scope");
+  EXPECT_EQ(consan_runtime_resource_scope_name(static_cast<ConSanRuntimeResourceScope>(255)),
+            "invalid-runtime-resource-scope");
+}
+
 TEST(BoundRuntimeResourcesContractTest, OwnsLayoutGenerationAndDispatchValueSemantics) {
   ConSanMoiReportLayoutOverride layout;
   layout.engine = ConSanMoiEngine::Sampled;
@@ -605,38 +648,16 @@ TEST(ConSanConfigurationContractTest, ReturnsFirstOwnedFailureAndAcceptsComplete
 }
 
 TEST(ConSanContractIssueTest, EveryValueHasAStableUniqueNameAndInvalidValuesFailClosed) {
-  constexpr std::array issues{
-      ConSanContractIssue::None,
-      ConSanContractIssue::MissingFlavor,
-      ConSanContractIssue::InvalidMode,
-      ConSanContractIssue::InvalidSampleStride,
-      ConSanContractIssue::InvalidSampleOffset,
-      ConSanContractIssue::InvalidPatchBudget,
-      ConSanContractIssue::InvalidDebugRegister,
-      ConSanContractIssue::InvalidMutationDependency,
-      ConSanContractIssue::InvalidMutationAddressDelta,
-      ConSanContractIssue::InvalidPerturbationBounds,
-      ConSanContractIssue::ModeConflict,
-      ConSanContractIssue::ConflictingRuntimeAssertions,
-      ConSanContractIssue::MissingRuntimeBackend,
-      ConSanContractIssue::MissingVisibleMemory,
-      ConSanContractIssue::MissingCoherentMemory,
-      ConSanContractIssue::MissingAtomicPublication,
-      ConSanContractIssue::InsufficientReportAllocation,
-      ConSanContractIssue::MissingWorkgroupLdsLimit,
-      ConSanContractIssue::MissingExecutableBinding,
-      ConSanContractIssue::MissingDispatchSegmentBinding,
-      ConSanContractIssue::InvalidResourceScope,
-      ConSanContractIssue::InvalidResourceAddress,
-      ConSanContractIssue::InvalidResourceSize,
-  };
   std::unordered_set<std::string_view> names;
-  for (const ConSanContractIssue issue : issues) {
+  for (size_t i = 0; i < kConSanContractIssues.size(); ++i) {
+    const ConSanContractIssue issue = kConSanContractIssues[i];
+    EXPECT_EQ(static_cast<size_t>(issue), i);
     const std::string_view name = consan_contract_issue_name(issue);
     EXPECT_FALSE(name.empty());
     EXPECT_NE(name, "invalid-contract-issue");
     EXPECT_TRUE(names.insert(name).second) << name;
   }
+  EXPECT_EQ(consan_contract_issue_name(ConSanContractIssue::Count), "invalid-contract-issue");
   EXPECT_EQ(consan_contract_issue_name(static_cast<ConSanContractIssue>(255)),
             "invalid-contract-issue");
 }
