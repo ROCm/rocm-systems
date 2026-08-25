@@ -918,30 +918,5 @@ TEST(LegacyOptionsAdapterTest, ProducesFreshValuesAndHasAUniqueReviewedFieldInve
   }
 }
 
-TEST(LegacyOptionsAdapterTest, TypedProductionEntryMatchesTheInternalLegacySeam) {
-  const ConSanRequest request = valid_moi_request(ConSanMoiEngine::RecordReplay);
-  const TransformPolicy transform;
-  RuntimePolicy runtime;
-  runtime.enabled = true;
-  const ConSanDebugOverrides debug;
-  const MutationRequest mutation;
-  const RuntimeCapabilities capabilities = physical_runtime_capabilities();
-  const BoundRuntimeResources resources;
-  constexpr std::array<uint8_t, 4> invalid_code_object = {0x7f, 'E', 'L', 'F'};
-
-  const ConSanResult typed = try_patch_consan(invalid_code_object, request, transform, runtime,
-                                              debug, mutation, capabilities, resources);
-  const ConSanOptions legacy_options = LegacyOptionsAdapter::adapt(
-      request, transform, runtime, debug, mutation, capabilities, resources);
-  const ConSanResult legacy = try_patch_consan(invalid_code_object, legacy_options);
-  EXPECT_EQ(typed.visited_code_object, legacy.visited_code_object);
-  EXPECT_EQ(typed.modified, legacy.modified);
-  EXPECT_EQ(typed.flavor, legacy.flavor);
-  EXPECT_EQ(typed.moi_engine, legacy.moi_engine);
-  EXPECT_EQ(typed.outcome, legacy.outcome);
-  EXPECT_EQ(typed.errors, legacy.errors);
-  EXPECT_EQ(typed.warnings, legacy.warnings);
-}
-
 } // namespace
 } // namespace rocjitsu

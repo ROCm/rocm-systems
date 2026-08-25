@@ -13,9 +13,9 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
+#include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
-#include "rocjitsu/code/patch/consan/consan_pipeline.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -604,21 +604,6 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
     result.errors.emplace_back("ConSan transform threw a non-standard exception");
     return finalize_consan_result(std::move(result), code_object_bytes);
   }
-}
-
-ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
-                              const ConSanRequest &request, const TransformPolicy &transform_policy,
-                              const RuntimePolicy &runtime_policy,
-                              const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-                              const RuntimeCapabilities &capabilities,
-                              const BoundRuntimeResources &resources) {
-  TransformResult result =
-      mutation.has_mutation()
-          ? transform_consan_with_mutation(code_object_bytes, request, transform_policy,
-                                           runtime_policy, debug, mutation, capabilities, resources)
-          : transform_consan(code_object_bytes, request, transform_policy, runtime_policy, debug,
-                             capabilities, resources);
-  return std::move(result).take_legacy_result();
 }
 
 } // namespace rocjitsu

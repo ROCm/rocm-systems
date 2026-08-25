@@ -2368,11 +2368,12 @@ analysis completed.
   address is present, and the MOI allocation covers the exact planned byte
   count. Capacity-limited requirements remain well-formed and explicitly
   `Unsupported` at binding rather than acquiring an arbitrary address.
-- **Production cutover:** The typed public `try_patch_consan` overload and the
-  HSA production transform caller both enter this pipeline. Installation policy
-  is derivable from `TransformResult`; the old typed overload returns only an
-  rvalue compatibility projection for callers not yet migrated. Hook test
-  overrides retain their deliberately narrow legacy seam.
+- **Production cutover:** `transform_consan` and
+  `transform_consan_with_mutation` are the public typed entries, and the HSA
+  production transform caller enters this pipeline. Installation policy is
+  derivable from `TransformResult`; an rvalue compatibility projection remains
+  for the hook lifecycle code that has not yet migrated. Hook test overrides
+  retain their deliberately narrow legacy seam.
 - **Temporary seam and remaining responsibility:** `LegacyConSanLowering` is
   the sole typed-to-`ConSanOptions` entry. The prototype parser/inventory,
   lowerer, resource/placement machinery, finalizer, ABI retry, and recursive
@@ -2399,29 +2400,77 @@ analysis completed.
   SuperCollider, Sampled, and Inline Shadow passed with exact coverage;
   Record/Replay retained complete 18/18 access and 8/8 barrier static coverage
   and the already-published `metadata-full` limitation.
-- **Deferred deletion inventory for Slice 7:** Migrate ordinary test callers,
-  remove the old direct-options overload from the public surface, and delete
-  semantic duplicates and option resets only as each remaining lowerer
-  consumer moves to a typed component. The internal recursive mutation
-  implementation must not escape `LegacyConSanLowering` meanwhile.
+- **Slice-7 deletion boundary:** Remove both overloads from the public
+  `consan.h` surface, keep the mutable-options implementation in an explicitly
+  internal header for mechanism tests and fuzzing, and retain recursive
+  mutation only inside `LegacyConSanLowering`.
 - **Prerequisite:** Slices 1--5B.
 
 ### Slice 7: endpoint cleanup and design reconciliation
 
-- **Current responsibility:** Temporary comparison assertions, old overloads,
-  and migration-only renderers remain after the pipeline cutover.
-- **New boundary and contract:** The production control plane exactly matches
-  sections 5 and 9; every remaining legacy responsibility is listed by probe
-  family for later DBI/lowering work.
-- **Temporary seam and consumers:** Only `LegacyConSanLowering` remains. It is
-  forbidden from target-neutral admission, report sizing, runtime allocation,
-  or trust policy.
-- **Test gate:** Repeat Slice 0's complete gates, compare quantitative metrics,
-  run `git diff --check` (Git's whitespace-error check), capability
-  documentation verification, and a doc/code responsibility audit.
-- **Cutover and deletion:** Remove old overloads, dual-comparison paths,
-  temporary flags, obsolete fields, and stale documentation. Update this file
-  with actual deviations and the next component deletion order.
+- **Completed public boundary:** `consan.h` no longer declares any transform
+  overload. Production code includes `consan_pipeline.h` and receives
+  `TransformResult`; the historical mutable-options patcher is declared only
+  in `consan_legacy_lowering.h`. The redundant typed-to-`ConSanResult` overload
+  and its temporary comparison test are deleted. The stronger pipeline
+  projection test retains exact compatibility coverage.
+- **Completed production routing:** Every ordinary or mutated installable HSA
+  transform enters the typed pipeline. The pre-allocation MOI inventory pass
+  enters the explicitly named
+  `LegacyConSanLowering::run_pristine_moi_inventory` seam with typed inputs and
+  one documented extended-barrier preservation fact. Its focused unit test
+  proves that the fact controls only incomplete extended-barrier-pair
+  inventory. Raw mutable options remain reachable only to the lowerer
+  implementation, 17 mechanism-test translation units, one hook-test
+  translation unit, and the transform fuzzer; they are not a production API.
+- **Control-plane endpoint:** Configuration, capability validation, immutable
+  program identity, observation policy, evidence requirements, runtime-binding
+  status, static outcome, and installation policy have typed owners outside the
+  prototype. `LegacyConSanLowering` may translate those values into mechanism
+  shape, but may not originate target-neutral admission, report sizing,
+  runtime allocation, or trust policy.
+- **Honest deviations from the end-state diagrams:** The HSA adapter still
+  projects a successful `TransformResult` to `ConSanResult` because automatic
+  allocation retry, fault installation telemetry, and reader registration
+  consume prototype mechanism fields. The logical pipeline stages still wrap
+  a monolithic lowerer rather than distinct parser, resource, emitter, and
+  finalizer calls. `consan.h` still exposes prototype data structures used by
+  mechanism helpers even though it exposes no transform function. These are
+  bounded migration seams, not claims that the end state has been reached.
+
+The remaining lowerer responsibilities are explicit:
+
+| Area | Responsibility still inside the legacy boundary | Next deletion boundary |
+| --- | --- | --- |
+| Shared decode and inventory | ELF parsing, decoded events, CFG/liveness attachment, owner discovery, and compatibility telemetry in `ConSanResult` | Return `ProgramInventory` directly from a standalone inventory component, then remove its mutable duplicate |
+| SuperCollider | Check/trap probe selection, register/resource choices, relays, sticky-marker lowering, and patch telemetry | Lower typed access intents and an optional bound marker through shared resource and emitter interfaces |
+| Record/Replay | Access/synchronization probe bodies, pristine-inventory retry, replay ABI lowering, and applied-patch telemetry | Migrate first to the DBI-compatible host-processing path using typed evidence and runtime bindings |
+| Sampled | Causal-window helpers, sampling-specific device state, synchronization helpers, and ABI lowering | Reuse shared intent/resource stages; retain only the engine's sampling and evidence semantics |
+| Inline Shadow | Workgroup shadow layout, owner/epoch state, inline conflict checks, and device report lowering | Isolate the on-device state backend behind the same observation/resource boundaries while DBI support evolves |
+| Mutation and composition | Recursive dry-run/live composition, pristine mutation inventory, perturbation composition, and exact-one application telemetry | Make mutation an explicit consumer of immutable inventory and a separate transform composition layer |
+| Shared mechanism | Register allocation, spilling, wait preservation, branch reservoirs/relays, code-object growth, patch application, ABI retry, and final ELF validation | Extract resource planning, placement/emission, and transactional finalization in that order, shared by every engine and target |
+| HSA lifecycle compatibility | Automatic allocation/retry inputs, reader/executable registration metadata, and installation telemetry still consume the legacy projection | Teach the runtime coordinator to consume `TransformResult` plus a separate mechanism-telemetry value, then delete `take_legacy_result()` |
+
+- **Next component order:** First migrate the HSA runtime coordinator off the
+  result projection. Second extract shared decode/inventory. Third separate
+  shared resource planning from engine-specific evidence semantics, beginning
+  with Record/Replay because it is the near-term DBI client. Fourth isolate
+  placement/emission and transactional finalization. At each boundary, delete
+  the corresponding `ConSanOptions`/`ConSanResult` fields and extend the focused
+  type tests before proceeding.
+- **Completed final gate:** All 1,502 selected ConSan host tests ran: 1,500
+  passed and the two external-object benchmarks skipped as intended. All 98
+  hook/transform-memory tests and all 16 focused pipeline tests passed. The
+  generated capability document matched its typed manifest. The 2,908-case
+  five-target simulator command retained every registered case and semantic
+  coverage; one gfx942 Sampled case timed out under the 64-way aggregate run
+  and then passed alone in 0.46 seconds. Twenty focused physical-gfx950 pairs
+  passed. The native gfx950 `d128-block` E2E row again passed all four engines
+  at 128/128 accesses and the expected barrier counts. RocJitsu-emulated
+  gfx1250 again passed SuperCollider, Sampled, and Inline Shadow at 18/18
+  accesses and all applicable barriers; Record/Replay retained the published
+  yellow state with 18/18 accesses, 8/8 barriers, and `metadata-full` dynamic
+  incompleteness. `git diff --check` is clean.
 - **Prerequisite:** Slice 6.
 
 ### 10.1 Rules while executing the sequence

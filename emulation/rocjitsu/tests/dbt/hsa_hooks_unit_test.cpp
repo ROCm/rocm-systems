@@ -35,6 +35,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_hook_internal.h"

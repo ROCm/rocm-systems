@@ -3,6 +3,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 
+#include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
+
 #include <algorithm>
 #include <utility>
 #include <variant>
@@ -240,6 +242,24 @@ ConSanResult TransformResult::take_legacy_result() && {
   for (ConSanTransformIssue &issue : issues)
     result.errors.push_back(std::move(issue.detail));
   return result;
+}
+
+ConSanResult LegacyConSanLowering::run_pristine_moi_inventory(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources,
+    bool preserve_extended_barrier_pairs) {
+  ConSanOptions legacy_options =
+      LegacyOptionsAdapter::adapt(request, transform_policy, runtime_policy, debug,
+                                  disabled_mutation, capabilities, unbound_resources);
+  legacy_options.moi_report_buffer_address.reset();
+  legacy_options.moi_report_buffer_size = 0;
+  legacy_options.moi_report_layout.reset();
+  legacy_options.moi_report_generation = 0;
+  legacy_options.moi_report_dispatch_id = 0;
+  legacy_options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
+  return try_patch_consan(code_object_bytes, legacy_options);
 }
 
 ConSanResult

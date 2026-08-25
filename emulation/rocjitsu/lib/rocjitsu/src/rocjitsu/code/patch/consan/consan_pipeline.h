@@ -316,6 +316,22 @@ private:
 /// removable as lowerer components migrate.
 class LegacyConSanLowering {
 public:
+  /// Run the pristine MOI inventory pass used before the HSA adapter allocates
+  /// and binds an automatic report buffer.
+  ///
+  /// `preserve_extended_barrier_pairs` carries one fact computed from the live
+  /// mutation request before that request is deliberately disabled for the
+  /// pristine pass. It exists only because the prototype represents this
+  /// two-pass composition as a mutable option; the future inventory component
+  /// will receive the later mutation requirements directly. No caller may use
+  /// this entry for an installable transform.
+  [[nodiscard]] static ConSanResult run_pristine_moi_inventory(
+      std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+      const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+      const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
+      const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources,
+      bool preserve_extended_barrier_pairs);
+
   [[nodiscard]] static ConSanResult
   run(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
       const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,

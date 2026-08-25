@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 /// @file consan.h
-/// @brief Entry point for ConSan DBI code-object patching.
+/// @brief Shared ConSan contracts and prototype mechanism data.
+///
+/// Production transformation enters through `consan_pipeline.h`. The
+/// historical mutable-options patcher is intentionally declared only by the
+/// internal `consan_legacy_lowering.h` compatibility header.
 
 #pragma once
 

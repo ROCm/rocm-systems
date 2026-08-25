@@ -580,28 +580,6 @@ consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
 [[nodiscard]] std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value);
 [[nodiscard]] std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value);
 
-/// Compatibility projection of the typed production pipeline.
-///
-/// New production code should consume `TransformResult` from
-/// `consan_pipeline.h`. This overload remains while callers still require the
-/// prototype result shape; it enters the typed pipeline and moves the split
-/// artifacts back into one legacy result at the final boundary.
-[[nodiscard]] ConSanResult
-try_patch_consan(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-                 const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-                 const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-                 const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources);
-
-/// @brief Try to apply ConSan instrumentation to @p code_object_bytes.
-///
-/// @details The early DBI slices parse and inventory the code object, return
-/// `modified=false`, and leave `elf_bytes` empty so callers continue loading the
-/// original code object. This direct mutable-options overload is an internal
-/// legacy seam retained for focused host tests and existing lowerers during the
-/// incremental migration; new production callers must use the typed overload.
-[[nodiscard]] ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
-                                            const ConSanOptions &options);
-
 /// Re-run the structural final-ELF validation used before a modified result is
 /// made installable. Exposed for bounded mutation/property tests.
 [[nodiscard]] std::vector<std::string>

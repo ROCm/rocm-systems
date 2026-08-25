@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
 
 #include <cstddef>
 #include <cstdint>

@@ -465,6 +465,55 @@ TEST(ConSanPipeline, LegacyProjectionRestoresArtifactsWithoutChangingObservableR
                 : ConSanInstallAction::LoadOriginal);
 }
 
+TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrierPairs) {
+  std::array<uint32_t, 17> text_words{};
+  text_words[0] = 0xBE804EC1u; // s_barrier_signal -1
+  std::fill(text_words.begin() + 1, text_words.begin() + 15,
+            build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
+  text_words[15] = 0xBF94FFFFu; // s_barrier_wait -1
+  text_words[16] = 0xBFB00000u;
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(text_words, "typed_pristine_extended_barrier_pair");
+
+  ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
+  request.moi_track_barriers = true;
+  TransformPolicy transform_policy;
+  transform_policy.max_patches = 16;
+
+  const ConSanResult ordinary = LegacyConSanLowering::run_pristine_moi_inventory(
+      bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
+      MutationRequest{}, complete_runtime_capabilities(), BoundRuntimeResources{},
+      /*preserve_extended_barrier_pairs=*/false);
+  const ConSanResult preserved = LegacyConSanLowering::run_pristine_moi_inventory(
+      bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
+      MutationRequest{}, complete_runtime_capabilities(), BoundRuntimeResources{},
+      /*preserve_extended_barrier_pairs=*/true);
+  BoundRuntimeResources supplied_binding;
+  supplied_binding.scope = ConSanRuntimeResourceScope::Executable;
+  supplied_binding.moi_report_buffer_address = 0x123456780000ull;
+  supplied_binding.moi_report_buffer_size = 64u * 1024u * 1024u;
+  const ConSanResult cleared_binding = LegacyConSanLowering::run_pristine_moi_inventory(
+      bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
+      MutationRequest{}, complete_runtime_capabilities(), supplied_binding,
+      /*preserve_extended_barrier_pairs=*/true);
+
+  EXPECT_EQ(std::ranges::count(ordinary.sync_sequences, ConSanSyncOperation::BarrierFull,
+                               &ConSanSyncSequence::operation),
+            0u);
+  EXPECT_EQ(std::ranges::count(preserved.sync_sequences, ConSanSyncOperation::BarrierFull,
+                               &ConSanSyncSequence::operation),
+            1u);
+  EXPECT_FALSE(ordinary.modified);
+  EXPECT_FALSE(preserved.modified);
+  EXPECT_FALSE(cleared_binding.modified);
+  ASSERT_EQ(cleared_binding.sync_sequences.size(), preserved.sync_sequences.size());
+  ASSERT_FALSE(cleared_binding.sync_sequences.empty());
+  EXPECT_EQ(cleared_binding.sync_sequences.front().identity,
+            preserved.sync_sequences.front().identity);
+  EXPECT_EQ(cleared_binding.sync_sequences.front().operation,
+            preserved.sync_sequences.front().operation);
+}
+
 TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = supercollider_request();

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan.h"
+#include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"

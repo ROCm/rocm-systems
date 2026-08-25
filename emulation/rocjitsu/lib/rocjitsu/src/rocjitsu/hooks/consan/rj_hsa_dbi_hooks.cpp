@@ -89,14 +89,6 @@ using ConSanTransformOverride = rocjitsu::ConSanResult (*)(std::span<const uint8
 std::atomic<ConSanTransformOverride> g_test_consan_transform_override{nullptr};
 std::atomic<size_t> g_test_consan_moi_retry_count{0};
 
-rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
-                                            const rocjitsu::ConSanOptions &options) {
-  if (const ConSanTransformOverride override =
-          g_test_consan_transform_override.load(std::memory_order_acquire))
-    return override(bytes, options);
-  return rocjitsu::try_patch_consan(bytes, options);
-}
-
 /// Invoke the current lowering implementation through the sole Slice-2
 /// compatibility seam. Every call receives immutable typed inputs and creates
 /// a fresh legacy value immediately before entering the prototype patcher.
@@ -122,6 +114,35 @@ rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
           : rocjitsu::transform_consan(bytes, request, transform_policy, runtime_policy, debug,
                                        capabilities, resources);
   return std::move(result).take_legacy_result();
+}
+
+/// Preserve the hook tests' historical transform-override ABI around the
+/// typed pristine-inventory entry. Production never enters the mutable-options
+/// branch; it calls the named legacy lowerer with typed values.
+rocjitsu::ConSanResult run_consan_pristine_moi_inventory(
+    std::span<const uint8_t> bytes, const rocjitsu::ConSanRequest &request,
+    const rocjitsu::TransformPolicy &transform_policy,
+    const rocjitsu::RuntimePolicy &runtime_policy, const rocjitsu::ConSanDebugOverrides &debug,
+    const rocjitsu::MutationRequest &disabled_mutation,
+    const rocjitsu::RuntimeCapabilities &capabilities,
+    const rocjitsu::BoundRuntimeResources &unbound_resources,
+    bool preserve_extended_barrier_pairs) {
+  if (const ConSanTransformOverride override =
+          g_test_consan_transform_override.load(std::memory_order_acquire)) {
+    rocjitsu::ConSanOptions options =
+        rocjitsu::LegacyOptionsAdapter::adapt(request, transform_policy, runtime_policy, debug,
+                                              disabled_mutation, capabilities, unbound_resources);
+    options.moi_report_buffer_address.reset();
+    options.moi_report_buffer_size = 0;
+    options.moi_report_layout.reset();
+    options.moi_report_generation = 0;
+    options.moi_report_dispatch_id = 0;
+    options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
+    return override(bytes, options);
+  }
+  return rocjitsu::LegacyConSanLowering::run_pristine_moi_inventory(
+      bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
+      unbound_resources, preserve_extended_barrier_pairs);
 }
 
 rocjitsu::ConSanResult retry_consan_moi_transform(std::span<const uint8_t> bytes,
@@ -4099,10 +4120,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         !runtime_resources.moi_report_buffer_address && request.moi_auto_report_buffer_size != 0) {
       rocjitsu::MutationRequest inventory_mutation = mutation_request;
       rocjitsu::BoundRuntimeResources inventory_resources = runtime_resources;
-      rocjitsu::ConSanOptions inventory_options = rocjitsu::LegacyOptionsAdapter::adapt(
+      const rocjitsu::ConSanOptions live_inventory_options = rocjitsu::LegacyOptionsAdapter::adapt(
           request, transform_policy, runtime_policy, debug_overrides, inventory_mutation,
           runtime_capabilities, inventory_resources);
-      inventory_options.moi_report_buffer_size = 0;
+      const bool preserve_extended_barrier_pairs =
+          rocjitsu::consan_qualifies_extended_barrier_pairs(live_inventory_options);
       const bool live_fault_transform =
           fault_mutations_enabled(mutation_request) && !mutation_request.fault_dry_run;
       // A report-sizing pass is pristine MOI inventory, never the live
@@ -4110,22 +4132,19 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       // MOI candidate/resource planning, so disable the mutation members while
       // retaining the complete MOI inventory pass. Retry binds the selected
       // mutation and runtime layout to this pristine inventory.
-      if (live_fault_transform) {
-        inventory_options.qualify_extended_barrier_pairs =
-            rocjitsu::consan_qualifies_extended_barrier_pairs(inventory_options);
+      if (live_fault_transform)
         disable_fault_mutations(&inventory_mutation);
-        const bool qualify_extended_barrier_pairs =
-            inventory_options.qualify_extended_barrier_pairs;
-        inventory_options = rocjitsu::LegacyOptionsAdapter::adapt(
-            request, transform_policy, runtime_policy, debug_overrides, inventory_mutation,
-            runtime_capabilities, inventory_resources);
-        inventory_options.qualify_extended_barrier_pairs = qualify_extended_barrier_pairs;
-      }
+      rocjitsu::ConSanOptions inventory_options = rocjitsu::LegacyOptionsAdapter::adapt(
+          request, transform_policy, runtime_policy, debug_overrides, inventory_mutation,
+          runtime_capabilities, inventory_resources);
+      inventory_options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
       log_message(kLogInfo, "ConSan MOI inventory begin reader=%llu bytes=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle), size);
       const auto inventory_begin = std::chrono::steady_clock::now();
-      rocjitsu::ConSanResult inventory =
-          run_consan_transform(std::span<const uint8_t>(bytes, size), inventory_options);
+      rocjitsu::ConSanResult inventory = run_consan_pristine_moi_inventory(
+          std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
+          debug_overrides, inventory_mutation, runtime_capabilities, inventory_resources,
+          preserve_extended_barrier_pairs);
       log_message(kLogInfo, "ConSan MOI inventory end reader=%llu elapsed_ms=%.3f",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
