@@ -93,6 +93,7 @@ namespace RcclUnitTesting
     setenv("NCCL_MIN_NCHANNELS", "1", 1);
     setenv("NCCL_MAX_NCHANNELS", "2", 1);
   }
+
   static void UnpinNetLoopbackTransport()
   {
     unsetenv("NCCL_MAX_NCHANNELS");
