@@ -8657,13 +8657,18 @@ class CodeGenerator:
                     # XML operand position to preserve the architectural source
                     # order (e.g. s_addk_i32/s_mulk_i32 read sdst as src0).
                     _enc_upper_for_defer = enc.enc_name.upper()
-                    defer_readwrite_outputs = _enc_upper_for_defer in (
-                        'ENC_VOP1',
-                        'ENC_VOP2',
-                    ) or (
-                        _enc_upper_for_defer
-                        in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
-                        and self._supports_vop_dpp_encoding(_enc_upper_for_defer)
+                    # V_PK_FMAC_F16 is the VOP2 exception: its accumulator is
+                    # architecturally the first source, and its generated
+                    # DPP/SDWA paths operate on the named src0/vsrc1 operands.
+                    # Keep vdst first even when a snapshot models it as
+                    # output-only and read/write inference supplies the use.
+                    defer_readwrite_outputs = inst.name.upper() != 'V_PK_FMAC_F16' and (
+                        _enc_upper_for_defer in ('ENC_VOP1', 'ENC_VOP2')
+                        or (
+                            _enc_upper_for_defer
+                            in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
+                            and self._supports_vop_dpp_encoding(_enc_upper_for_defer)
+                        )
                     )
                     readwrite_output_sources = []
                     vgpr_msb_role_body = []

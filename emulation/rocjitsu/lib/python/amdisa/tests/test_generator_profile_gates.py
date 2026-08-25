@@ -2455,6 +2455,20 @@ def test_gfx1250_generated_vop2_fmac_f16_reads_packed_vdst(
     )
 
 
+def test_cdna3_generated_pk_fmac_f16_preserves_accumulator_source_order(
+    amdgpu_generated_root: Path,
+):
+    vop2_cpp = (amdgpu_generated_root / 'cdna3' / 'vop2.cpp').read_text()
+    ctor = _generated_constructor_body(vop2_cpp, 'VPkFmacF16Vop2')
+
+    assert ctor.index('src_operands_[0] = &vdst;') < ctor.index(
+        'src_operands_[1] = &src0;'
+    )
+    assert ctor.index('src_operands_[1] = &src0;') < ctor.index(
+        'src_operands_[2] = &vsrc1;'
+    )
+
+
 def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     amdgpu_generated_root: Path,
     gfx1250_generated_root: Path,
