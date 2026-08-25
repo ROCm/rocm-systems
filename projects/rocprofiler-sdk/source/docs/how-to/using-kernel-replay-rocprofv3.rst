@@ -60,8 +60,10 @@ counter group against the same inputs.
 Collecting counters with kernel replay
 ======================================
 
-``--kernel-replay-beta-enabled`` requires ``--pmc``. The number of replay passes is the number of
-``--pmc`` groups (one pass per group). There is no separate pass-count flag.
+``--kernel-replay-beta-enabled`` requires counter collection (``--pmc``, input-file ``pmc``, or
+``pmc_groups``). The number of replay passes is the number of counter groups (one pass per group).
+There is no separate pass-count flag. ``rocprofv3`` uses callback dispatch counting for counter
+records; ``replay_pass`` is emitted on that path.
 
 .. code-block:: bash
 
