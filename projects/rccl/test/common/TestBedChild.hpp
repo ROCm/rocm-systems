@@ -33,7 +33,8 @@ namespace RcclUnitTesting
       CHILD_DESTROY_COMMS    = 9,  // DestroyComms()
       CHILD_DESTROY_GRAPHS   = 10, // DestroyGraphs()
       CHILD_STOP             = 11, // Stop()
-      NUM_CHILD_COMMANDS     = 12
+      CHILD_WARMUP           = 12, // Warmup() - load the device code object (init-pipeline)
+      NUM_CHILD_COMMANDS     = 13
     };
 
     char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
@@ -49,7 +50,8 @@ namespace RcclUnitTesting
       "DEALLOCATE_MEM",
       "DESTROY_COMMS",
       "DESTROY_GRAPHS",
-      "STOP"
+      "STOP",
+      "WARMUP"
     };
 
     // These variables remain constant for life of TestBedChild
@@ -95,6 +97,12 @@ namespace RcclUnitTesting
 
     // Initialize RCCL communicators
     ErrCode InitComms();
+
+    // Init-pipeline warmup: create+destroy a throwaway 1-rank comm on EACH unique
+    // device this child owns (device list is read from the parent pipe) to force
+    // the RCCL device-code object to load in this forked execution child, without
+    // any cross-process/NIC connection. See test/common/ForkSafetyInvariant.md.
+    ErrCode Warmup();
 
     // Set CollectiveArgs
     ErrCode SetCollectiveArgs();

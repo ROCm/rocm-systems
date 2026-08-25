@@ -3,8 +3,11 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+#include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 #include "TestBed.hpp"
+#include "Rendezvous.hpp"
 #include <rccl/rccl.h>
 
 #define PIPE_WRITE(childId, val)                                        \
@@ -64,6 +67,47 @@ namespace RcclUnitTesting
                           bool                          const  useBlocking)
   {
     InteractiveWait("Starting InitComms");
+
+    // Full environment-contract validation BEFORE forking / any HIP/RCCL warmup
+    // (v11 CR-3). The runner owns these four vars; a pipeline entry must present a
+    // complete, consistent set. Any inconsistency -> configuration error (exit 42),
+    // before the fork so no children are orphaned.
+    {
+      const char* profile = getenv("RCCL_TEST_WARMUP_PROFILE");
+      const bool  readyGo = getenv("RCCL_TEST_READY_GO") != nullptr;
+      const char* rdvDir  = getenv("RCCL_TEST_RENDEZVOUS_DIR");
+      const char* goTo    = getenv("RCCL_TEST_GO_TIMEOUT_SEC");
+      const bool  anyVar  = profile || readyGo || (rdvDir && rdvDir[0]) || goTo;
+      if (anyVar)
+      {
+        const char* why = nullptr;
+        if (!profile)                              why = "READY_GO/rendezvous set without RCCL_TEST_WARMUP_PROFILE";
+        else if (strcmp(profile, "fork_coll"))     why = "wrong RCCL_TEST_WARMUP_PROFILE for this binary (expected fork_coll)";
+        else if (!readyGo)                         why = "RCCL_TEST_WARMUP_PROFILE set without RCCL_TEST_READY_GO";
+        else if (!(rdvDir && rdvDir[0]))           why = "pipeline profile without RCCL_TEST_RENDEZVOUS_DIR";
+        else if (goTo && (goTo[0] == '\0' || atof(goTo) < 0.0)) why = "invalid RCCL_TEST_GO_TIMEOUT_SEC";
+        if (why)
+        {
+          TEST_ERROR("[RCCL_TEST_CONFIG_ERROR] rccl-UnitTests: %s", why);
+          _exit(RCCL_TEST_CONFIG_ERROR);
+        }
+      }
+    }
+
+    // Defense-in-depth (init-pipeline): when RCCL_TEST_READY_GO is set, each
+    // entry must be pinned to exactly ONE child generation (Option B). A second
+    // InitComms under READY_GO means the sweep was not pinned to a single
+    // generation -- fail loudly rather than silently warming/overlapping a new
+    // generation. Routing/eligibility is decided by the runner from its config
+    // inventory before launch; this is only a backstop (see UT_RANKS_PER_GPU).
+    ++this->initCommsGenerationCount;
+    if (getenv("RCCL_TEST_READY_GO") != nullptr && this->initCommsGenerationCount > 1)
+    {
+      TEST_ERROR("RCCL_TEST_READY_GO: expected a single child generation, but InitComms was called %d times "
+                 "(sweep not pinned; see UT_RANKS_PER_GPU / eligibility inventory)",
+                 this->initCommsGenerationCount);
+      FAIL();
+    }
 
     // Count up the total number of GPUs to use and track child/deviceId per rank
     this->numActiveChildren = deviceIdsPerProcess.size();
@@ -131,6 +175,53 @@ namespace RcclUnitTesting
       TEST_INFO("============================================================");
       TEST_INFO("<Press enter to continue>");
       scanf("%*c");
+    }
+
+    // Init-pipeline device-code warmup (opt-in). No-op unless RCCL_TEST_READY_GO
+    // is set, so the default path is byte-identical. Warm the RCCL device-code
+    // object in the ACTUAL forked execution children (never the parent -- see
+    // test/common/ForkSafetyInvariant.md) BEFORE the real ncclCommInitRank, so
+    // the ~13s -O0 load overlaps across concurrently-initializing entries. Each
+    // child warms every unique device it owns. Send WARMUP + the child's device
+    // list to ALL children first, THEN collect acks, so the loads overlap
+    // instead of serializing.
+    if (getenv("RCCL_TEST_READY_GO") != nullptr)
+    {
+      int const warmCmd = TestBedChild::CHILD_WARMUP;
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        PIPE_WRITE(childId, warmCmd);
+        int const numWarmGpus = (int)deviceIdsPerProcess[childId].size();
+        PIPE_WRITE(childId, numWarmGpus);
+        for (int i = 0; i < numWarmGpus; i++)
+          PIPE_WRITE(childId, deviceIdsPerProcess[childId][i]);
+      }
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      {
+        PIPE_CHECK(childId);
+      }
+
+      // READY/GO rendezvous (Phase 2). The TestBed parent -- the process the
+      // runner launched -- publishes READY once every child is warm, then blocks
+      // until the runner writes GO before the real ncclCommInitRank below. The
+      // parent does only CPU/file I/O here (warmup ran in the forked children),
+      // so it stays fork-safe. No-op unless RCCL_TEST_RENDEZVOUS_DIR is set.
+      if (Rendezvous::Enabled())
+      {
+        if (!Rendezvous::PublishReady())
+        {
+          TEST_ERROR("Failed to publish READY token");
+          FAIL();
+        }
+        double goTimeout = 0.0;  // 0 = indefinite (rely on liveness pipe / process group)
+        if (const char* t = getenv("RCCL_TEST_GO_TIMEOUT_SEC")) { goTimeout = atof(t); }
+        ReleaseStatus rel = Rendezvous::WaitForGo(goTimeout);
+        if (rel != RELEASE_GO)
+        {
+          TEST_ERROR("GO not received (release status %d)", (int)rel);
+          FAIL();
+        }
+      }
     }
 
     // Determine number of unique GPUs being used.
@@ -720,10 +811,27 @@ namespace RcclUnitTesting
 
     bool isCorrect = true;
 
+    // UT_RANKS_PER_GPU exact selector (init-pipeline Option B). Unset (0)
+    // reproduces the original 1..UT_MAX_RANKS_PER_GPU sweep byte-for-byte. When
+    // set (>0) it PINS the ranks-per-GPU loop to exactly that value -- one
+    // generation -- so a fork entry can be run under a single READY/GO. It pins
+    // the loop; it does not raise the max, so a value above UT_MAX_RANKS_PER_GPU
+    // is a contradictory config and is rejected rather than silently honored.
+    if (ev.ranksPerGpu < 0) {
+      FAIL() << "UT_RANKS_PER_GPU must be >= 1 (0 = unset); got " << ev.ranksPerGpu;
+    }
+    if (ev.ranksPerGpu > 0 && ev.ranksPerGpu > ev.maxRanksPerGpu) {
+      FAIL() << "UT_RANKS_PER_GPU (" << ev.ranksPerGpu
+             << ") exceeds UT_MAX_RANKS_PER_GPU (" << ev.maxRanksPerGpu
+             << "); the exact selector pins the loop, it does not raise the max";
+    }
+    int const rpgLo = ev.ranksPerGpu > 0 ? ev.ranksPerGpu : 1;
+    int const rpgHi = ev.ranksPerGpu > 0 ? ev.ranksPerGpu : ev.maxRanksPerGpu;
+
     // Sweep over the number of ranks
     for (int numGpus : ev.GetNumGpusList())
     for (int isMultiProcess : ev.GetIsMultiProcessList())
-    for (int ranksPerGpu=1; ranksPerGpu <= ev.maxRanksPerGpu && isCorrect; ++ranksPerGpu)
+    for (int ranksPerGpu=rpgLo; ranksPerGpu <= rpgHi && isCorrect; ++ranksPerGpu)
     {
       // Test either single process all GPUs, or 1 process per GPU
       int const numChildren = isMultiProcess ? numGpus : 1;

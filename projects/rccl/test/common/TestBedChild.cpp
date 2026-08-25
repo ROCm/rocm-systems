@@ -6,6 +6,7 @@
 
 #include "TestBedChild.hpp"
 
+#include <set>
 #include <thread>
 #include <execinfo.h>
 #ifdef ENABLE_OPENMP
@@ -128,6 +129,7 @@ namespace RcclUnitTesting
       case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
       case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
+      case CHILD_WARMUP          : status = Warmup();               break;
       case CHILD_STOP            : goto stop;
       default: exit(0);
       }
@@ -169,6 +171,59 @@ namespace RcclUnitTesting
     memcpy(retValBuf.data(), &id, sizeof(id));
 
     if (this->verbose) TEST_INFO("Child %d finishes GetUniqueId()", this->childId);
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::Warmup()
+  {
+    // Init-pipeline warmup. Force the RCCL device-code object to load for EVERY
+    // device this child owns by creating and immediately destroying a throwaway
+    // single-rank communicator per device. This pays the ~13s -O0 code-object
+    // load up front WITHOUT any cross-process/NIC connection (no QP/transport).
+    //
+    // Warming runs in THIS forked execution child -- the same process that later
+    // runs the test on these devices -- never in the fork parent (that corrupts
+    // the children; see test/common/ForkSafetyInvariant.md). The parent sends
+    // this child's full assigned device list; a single-process layout can own
+    // several GPUs, so we warm each UNIQUE device (HIP code-object/context load
+    // may be per-device even within one architecture).
+    if (this->verbose) TEST_INFO("Child %d begins Warmup()", this->childId);
+
+    // Read the assigned device list sent by TestBed::InitComms().
+    int numGpus = 0;
+    PIPE_READ(numGpus);
+    std::vector<int> devs(numGpus);
+    for (int i = 0; i < numGpus; i++)
+      PIPE_READ(devs[i]);
+
+    std::set<int> warmed;
+    for (int i = 0; i < numGpus; i++)
+    {
+      int const dev = devs[i];
+      if (warmed.count(dev)) continue;   // warm each unique device once
+      warmed.insert(dev);
+
+      // Diagnostic for the Gate A2 same-PID / warmed-device proof. Emitted
+      // unconditionally (not behind NCCL_DEBUG) so the runner's validity gate
+      // can assert warmup PID == executing child PID and warmed devices >=
+      // assigned devices.
+      fprintf(stderr, "[RCCL_TEST_WARMUP] child %d pid %d device %d: start\n",
+              this->childId, (int)getpid(), dev);
+      fflush(stderr);
+
+      CHECK_HIP(hipSetDevice(dev));
+      ncclComm_t comm = nullptr;
+      CHILD_NCCL_CALL(ncclCommInitAll(&comm, 1, &dev), "warmup ncclCommInitAll");
+      if (comm != nullptr)
+        CHILD_NCCL_CALL(ncclCommDestroy(comm), "warmup ncclCommDestroy");
+
+      fprintf(stderr, "[RCCL_TEST_WARMUP] child %d pid %d device %d: ok\n",
+              this->childId, (int)getpid(), dev);
+      fflush(stderr);
+    }
+    (void)hipDeviceSynchronize();
+
+    if (this->verbose) TEST_INFO("Child %d finishes Warmup()", this->childId);
     return TEST_SUCCESS;
   }
 
