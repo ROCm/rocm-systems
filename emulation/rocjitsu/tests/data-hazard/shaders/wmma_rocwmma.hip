@@ -124,10 +124,12 @@ int main() {
     }
     std::cout << "]" << std::endl;
 
-    // Validate: all exp() outputs should be finite and positive.
+    // Validate: all exp() outputs must be finite and strictly positive. The
+    // output buffer starts zeroed, so accepting zero would let a kernel that
+    // stored nothing report PASS.
     bool pass = true;
     for (std::size_t i = 0; i < sizeC; ++i) {
-        if (!std::isfinite(h_C[i]) || h_C[i] < 0.0f) {
+        if (!std::isfinite(h_C[i]) || h_C[i] <= 0.0f) {
             std::cerr << "Bad value at " << i << ": " << h_C[i] << std::endl;
             pass = false;
             break;
