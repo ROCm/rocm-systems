@@ -46,6 +46,7 @@
 #include <atomic>
 
 #include "util/atomic_helpers.h"
+#include "impl/wddm/cmdbuf_frame_ring.h"
 #include "impl/wddm/queue.h"
 #include "impl/registers.h"
 
@@ -70,6 +71,15 @@ namespace thunk {
 // indirect-buffer packet (amd_aql_pm4_ib). A VENDOR_SPECIFIC slot is only fully
 // published once ven_hdr holds this; until then the body is still being written.
 static constexpr uint16_t AMD_AQL_FORMAT_PM4_IB = 0x1;
+
+// Read a queue's monitored-fence value. The KMD writes this location from
+// outside the program, but it is typed as a plain uint64_t, so a bare
+// dereference is a value the compiler may cache. Both spins below - whether a
+// frame may be reused, whether the GPU has drained - need an actual load,
+// ordered like every other read of memory the GPU publishes here.
+static inline uint64_t LoadSyncValue(const uint64_t* sync_addr) {
+  return rocr::atomic::Load(sync_addr, std::memory_order_acquire);
+}
 
 hsa_status_t WDDMQueue::SwsInit(void) {
   if (!device->CreateSyncobj(&syncobj, &sync_addr)) return HSA_STATUS_ERROR;
@@ -486,19 +496,17 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
     return false;
   }
 
-  if (scratch_size_ >= scratch_size)
-    return true;
+  if (scratch_size_ >= scratch_size) return true;
 
-  pr_debug("need realloc scratch buffer, size %" PRIx64 " -> %" PRIx64 "\n",
-           scratch_size_, scratch_size);
+  pr_debug("need realloc scratch buffer, size %" PRIx64 " -> %" PRIx64 "\n", scratch_size_,
+           scratch_size);
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = scratch_size;
   create_info.domain = Wkmi::kLocal;
-  GpuMemory *gpu_mem = nullptr;
+  GpuMemory* gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
-  if (code != ErrorCode::Success)
-    return false;
+  if (code != ErrorCode::Success) return false;
 
   if (scratch_base_) {
     auto scratch_gpu_mem = GpuMemory::Convert(scratch_mem_);
@@ -507,7 +515,7 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
 
   scratch_size_per_wave_ = scratch_size_per_wave;
   scratch_size_ = scratch_size;
-  scratch_base_ = reinterpret_cast<void *>(gpu_mem->GpuAddress());
+  scratch_base_ = reinterpret_cast<void*>(gpu_mem->GpuAddress());
   scratch_mem_ = gpu_mem->GetGpuMemoryHandle();
 
   InitScratchSRD();
@@ -632,11 +640,12 @@ hsa_status_t ComputeQueue::PreSubmit(void) {
 }
 
 hsa_status_t ComputeQueue::EndSubmit(void) {
-  // record last submitted cmdbuf_aql_frame_write_index to see if GPU is hungry
-  sync_point = cmdbuf_aql_frame_write_index;
+  // The submission just issued is this queue's next ordinal, and the fence
+  // value it signals. Point the ib at the frame the one after it will write.
+  sync_point = CmdbufFrameRing::NextFenceValue(sync_point);
 
   ib_start_addr = cmdbuf_addr +
-      (cmdbuf_aql_frame_write_index % device->GetAqlFrameNum()) * cmdbuf_aql_frame_size;
+      CmdbufFrameRing::NextFrameIndex(sync_point, device->GetAqlFrameNum()) * cmdbuf_aql_frame_size;
   ib_size = 0;
 
   return HSA_STATUS_SUCCESS;
@@ -646,8 +655,12 @@ hsa_status_t ComputeQueue::Submit(void) {
   hsa_status_t ret = PreSubmit();
   if (ret) return HSA_STATUS_ERROR;
 
-  ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, cmdbuf_aql_frame_write_index)
-                : SwsSubmit(ib_start_addr, ib_size, cmdbuf_aql_frame_write_index);
+  // The same value EndSubmit() latches into sync_point below, so the frame just
+  // written and the fence value that retires it cannot drift apart.
+  const uint64_t fence_value = CmdbufFrameRing::NextFenceValue(sync_point);
+
+  ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, fence_value)
+                : SwsSubmit(ib_start_addr, ib_size, fence_value);
   if (ret) return HSA_STATUS_ERROR;
 
   ret = EndSubmit();
@@ -890,8 +903,8 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
       reinterpret_cast<uint32_t*>((static_cast<uint64_t>(packet->ib_jump_cmd[2]) << 32) |
                                   (static_cast<uint64_t>(packet->ib_jump_cmd[1]) & ~3ull));
   uint32_t pm4_size = packet->ib_jump_cmd[3] & 0xfffff;
-  size_t required_size = platform_atomic_support_ ? sizeof(AtomicTemplate)
-                                                  : sizeof(WriteDataTemplate);
+  size_t required_size =
+      platform_atomic_support_ ? sizeof(AtomicTemplate) : sizeof(WriteDataTemplate);
   bool process_packet = dxg_runtime->vendor_packet_process;
 
   if (process_packet) {
@@ -1016,7 +1029,8 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
       // 4) The AQL queue is empty now, submit the packet right now.
       if (!(aql_packet->completion_signal.handle) &&
           (cmdbuf_aql_frame_write_index % device->GetAqlMergeLimit()) &&
-          (*sync_addr != sync_point) && (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
+          (LoadSyncValue(sync_addr) != sync_point) &&
+          (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
         return HSA_STATUS_SUCCESS;
 
       break;
@@ -1057,19 +1071,27 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
 }
 
 hsa_status_t ComputeQueue::Process(void) {
+  const uint32_t frame_num = device->GetAqlFrameNum();
+
   while (cmdbuf_aql_frame_write_index < ring_wptr->load() && !IsInvalidPacket()) {
     pr_debug("process %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", ring, ring_wptr->load(),
              ring_rptr->load());
 
     hsa_status_t ret;
 
-    // wait for next few cmdbuf slots to be free
-    // If wptr catch up the rptr in the cmdbuf, this needs wait for the rptr to free the cmdbuf.
-    // Here the wptr comes from queue->cmdbuf_aql_frame_write_index, while rptr comes from
-    // *queue->sync_addr.
-    if (*sync_addr + device->GetAqlFrameNum() <= cmdbuf_aql_frame_write_index) {
-      uint64_t value = cmdbuf_aql_frame_write_index - device->GetAqlFrameNum() + 1;
-      if (!device->CpuWait(&syncobj, &value, 1, false)) return HSA_STATUS_ERROR;
+    // Frame reuse gate. The frame SwitchAql2PM4() is about to write was last
+    // written by the submission that many ordinals back, and that submission
+    // signals its own ordinal as a fence value only once every AQL packet
+    // merged into it has retired. Waiting for exactly that value is what makes
+    // "the GPU is finished with this frame" decidable.
+    //
+    // Only sync_point is read, so this is a no-op for the remaining packets of
+    // a merge run: the run's frame was gated when its first packet claimed it,
+    // and re-evaluating here can never name a value this queue has not
+    // submitted yet.
+    uint64_t reuse_fence = CmdbufFrameRing::NextFrameReuseFence(sync_point, frame_num);
+    if (LoadSyncValue(sync_addr) < reuse_fence) {
+      if (!device->CpuWait(&syncobj, &reuse_fence, 1, false)) return HSA_STATUS_ERROR;
     }
 
     ret = SwitchAql2PM4();
@@ -1082,9 +1104,11 @@ hsa_status_t ComputeQueue::Process(void) {
 
     // CPU wait for GPU fence, and cpu update the signal.
     if (!platform_atomic_support_ && signal_addr_) {
-      // CPU wait for GPU fence
-      if (!device->CpuWait(&syncobj, &cmdbuf_aql_frame_write_index, 1, false))
-        return HSA_STATUS_ERROR;
+      // Submit() has advanced sync_point to the fence value it issued, which is
+      // the submission carrying the packet that owns signal_addr_. Copied out
+      // because the wait array belongs to the KMD for the duration of the call.
+      uint64_t fence_value = sync_point;
+      if (!device->CpuWait(&syncobj, &fence_value, 1, false)) return HSA_STATUS_ERROR;
       // CPU update completional signal
       rocr::atomic::Decrement(signal_addr_);
       signal_addr_ = NULL;
@@ -1138,7 +1162,8 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
 
         amd_signal_t* signal = (amd_signal_t*)((char*)poll_addr - offsetof(amd_signal_t, value));
         uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
-        pr_debug("poll signal %#" PRIx64 " addr %#" PRIx64 " val %" PRId64 "\n", signal_handle, poll_addr, poll_val);
+        pr_debug("poll signal %#" PRIx64 " addr %#" PRIx64 " val %" PRId64 "\n", signal_handle,
+                 poll_addr, poll_val);
         hsa_signal_t hsa_signal = {signal_handle};
         hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
             hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
