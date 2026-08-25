@@ -3481,17 +3481,20 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
 
 
 def test_single_isa_cdna1_sources_preprocess_with_source_includes(
-    tmp_path, rocjitsu_source_root: Path
+    tmp_path, monkeypatch, rocjitsu_source_root: Path
 ):
     compiler = shutil.which('c++')
     if compiler is None:
         pytest.skip('C++ preprocessor is unavailable')
 
+    monkeypatch.chdir(tmp_path)
+    isa_output = Path('generated')
+    generated_root = tmp_path / isa_output
     args = SimpleNamespace(
         isafiles=[f'cdna1:{_mrisa_dir() / "amdgpu_isa_cdna1.xml"}'],
         gen_isas=True,
         gen_dbt=False,
-        isa_output=str(tmp_path),
+        isa_output=str(isa_output),
         dbt_output=None,
     )
 
@@ -3499,7 +3502,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
 
     simd_glue_include = '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"'
     for source_name in ('vop3_exec.cpp', 'vop3p_exec.cpp'):
-        source = (tmp_path / 'cdna1' / source_name).read_text()
+        source = (generated_root / 'cdna1' / source_name).read_text()
         assert source.count(simd_glue_include) == 1
 
     include_roots = (
@@ -3514,7 +3517,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
             compiler,
             '-E',
             *(flag for root in include_roots for flag in ('-I', str(root))),
-            str(tmp_path / 'cdna1' / 'vop3p_exec.cpp'),
+            str(generated_root / 'cdna1' / 'vop3p_exec.cpp'),
             '-o',
             os.devnull,
         ],
