@@ -1534,6 +1534,51 @@ def int_auto(num_str):
         )
 
 
+def validate_kernel_replay_args(args):
+    """Reject or flag option combinations that kernel replay cannot serve.
+
+    Separate from run() so it can be unit-tested without launching an application: these rules are
+    the only thing standing between a user and output they would read as complete.
+    """
+
+    # pmc_groups arrives from an input file rather than the command line, so it is absent from a
+    # bare argparse namespace.
+    if not getattr(args, "pmc", None) and not getattr(args, "pmc_groups", None):
+        fatal_error(
+            "--kernel-replay-beta-enabled requires counter collection "
+            "(--pmc or pmc_groups)"
+        )
+
+    # Modes that replay does not merely perturb but makes uninterpretable. Each attributes its
+    # results to a dispatch, and replay runs one logical dispatch several times under a single
+    # dispatch id, so their output would contain several executions of the same kernel with no
+    # field telling them apart. Rejected here, where the message can name the option the user
+    # actually typed; tool.cpp repeats the check for runs driven by the environment variables.
+    for enabled, option in (
+        (getattr(args, "advanced_thread_trace", None), "--att"),
+        (getattr(args, "pc_sampling_method", None), "--pc-sampling-method"),
+        (getattr(args, "spm", None), "--spm"),
+    ):
+        if enabled:
+            fatal_error(
+                "--kernel-replay-beta-enabled cannot be combined with {}. Kernel replay "
+                "executes one logical dispatch several times under a single dispatch id, and "
+                "{} attributes its results per dispatch, so the results of the individual "
+                "executions would be indistinguishable. Collect them in separate "
+                "runs".format(option, option)
+            )
+
+    # Tracing still produces correct records -- there really were N executions -- but any count,
+    # total or average derived from them is multiplied by the pass count. Worth saying rather than
+    # rejecting: a trace read for structure is still useful alongside replay.
+    if getattr(args, "kernel_trace", None) or getattr(args, "stats", None):
+        warning(
+            "kernel replay: each replay pass emits its own kernel dispatch record, all sharing "
+            "the replayed dispatch's id, so kernel counts, durations and statistics reflect the "
+            "number of passes rather than the number of dispatches the application issued"
+        )
+
+
 def run(app_args, args, **kwargs):
 
     app_env = dict(os.environ)
@@ -2148,46 +2193,8 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
-    if (
-        getattr(args, "kernel_replay_beta_enabled", None)
-        and not args.pmc
-        and not args.pmc_groups
-    ):
-        fatal_error(
-            "--kernel-replay-beta-enabled requires counter collection "
-            "(--pmc or pmc_groups)"
-        )
-
     if getattr(args, "kernel_replay_beta_enabled", None):
-        # Modes that replay does not merely perturb but makes uninterpretable. Each attributes its
-        # results to a dispatch, and replay runs one logical dispatch several times under a single
-        # dispatch id, so their output would contain several executions of the same kernel with no
-        # field telling them apart. Rejected here, where the message can name the CLI option the
-        # user actually typed; tool.cpp repeats the check for runs driven by the environment.
-        for enabled, option in (
-            (args.advanced_thread_trace, "--att / advanced thread trace"),
-            (args.pc_sampling_method, "--pc-sampling-method"),
-            (getattr(args, "spm", None), "--spm"),
-        ):
-            if enabled:
-                fatal_error(
-                    "--kernel-replay-beta-enabled cannot be combined with {}. Kernel replay "
-                    "executes one logical dispatch several times under a single dispatch id, "
-                    "and {} attributes its results per dispatch, so the results of the "
-                    "individual executions would be indistinguishable. Collect them in "
-                    "separate runs".format(option, option)
-                )
-
-        # Tracing still produces correct records -- there really were N executions -- but any count,
-        # total or average derived from them is multiplied by the pass count. Worth saying rather
-        # than rejecting: a trace read for structure is still useful alongside replay.
-        if args.kernel_trace or args.stats:
-            warning(
-                "kernel replay: each replay pass emits its own kernel dispatch record, all "
-                "sharing the replayed dispatch's id, so kernel counts, durations and statistics "
-                "reflect the number of passes rather than the number of dispatches the "
-                "application issued"
-            )
+        validate_kernel_replay_args(args)
 
         # Route counter collection through the in-process kernel-replay service (config.hpp:
         # ROCPROF_KERNEL_REPLAY). The SDK derives the pass count from the number of counter groups
