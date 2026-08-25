@@ -478,23 +478,28 @@ class Parser:
             )
 
         dt_ptr = enc.primary_dt_ptrs[opcode]
-        if dt_ptr == -1:
+        patch_route = dt_ptr == -1
+        if patch_route:
             # Schema 1.1.1 omits the reserved opcode-9 identifier from
             # RDNA4 ENC_SOPP. LLVM still accepts that compatibility opcode,
             # so bind it to the same primary entry as the other SOPP slots.
-            dt_ptr = next(
-                (
-                    ptr
-                    for ptr in enc.primary_dt_ptrs
-                    if ptr != -1 and self.isa_spec.primary_decode_table[ptr].enc is enc
-                ),
-                -1,
-            )
-            if dt_ptr == -1:
+            matching_dt_ptrs = {
+                ptr
+                for ptr in enc.primary_dt_ptrs
+                if 0 <= ptr < len(self.isa_spec.primary_decode_table)
+                and self.isa_spec.primary_decode_table[ptr].enc is enc
+            }
+            if not matching_dt_ptrs:
                 raise ValueError(
                     'RDNA4 S_WAITCNT opcode 9 has no ENC_SOPP primary decode route'
                 )
-            enc.primary_dt_ptrs[opcode] = dt_ptr
+            if len(matching_dt_ptrs) != 1:
+                raise ValueError(
+                    'RDNA4 S_WAITCNT opcode 9 requires exactly one unique '
+                    'ENC_SOPP primary decode route, found '
+                    f'{sorted(matching_dt_ptrs)}'
+                )
+            dt_ptr = matching_dt_ptrs.pop()
         if dt_ptr < 0 or dt_ptr >= len(self.isa_spec.primary_decode_table):
             raise ValueError(
                 'RDNA4 S_WAITCNT opcode 9 resolves to invalid primary '
@@ -548,6 +553,8 @@ class Parser:
             len(enc.insts),
         )
         enc.insts.insert(insert_idx, inst)
+        if patch_route:
+            enc.primary_dt_ptrs[opcode] = dt_ptr
 
         # The 2026-08-06 RDNA4 and CDNA5 specifications omit the operand type
         # definition along with S_WAITCNT itself.  Keep the synthetic

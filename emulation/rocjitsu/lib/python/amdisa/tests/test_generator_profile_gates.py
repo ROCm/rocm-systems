@@ -1330,6 +1330,30 @@ def test_rdna4_s_waitcnt_rejects_missing_route_invariants(encoding_map, message)
         parser._inject_s_waitcnt_compat()
 
 
+def test_rdna4_s_waitcnt_rejects_ambiguous_primary_routes_before_mutation():
+    parser, sopp, first_dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    first_dte.enc = sopp
+    second_dte = SimpleNamespace(
+        enc=sopp,
+        sub_decode_funcs=[None] * 16,
+        decode_func=None,
+        inst_name=None,
+    )
+    parser.isa_spec.primary_decode_table.append(second_dte)
+    sopp.primary_dt_ptrs[0] = 0
+    sopp.primary_dt_ptrs[1] = 1
+    sopp.primary_dt_ptrs[9] = -1
+    before = _s_waitcnt_state(sopp, first_dte)
+
+    with pytest.raises(
+        ValueError,
+        match='requires exactly one unique ENC_SOPP primary decode route',
+    ):
+        parser._inject_s_waitcnt_compat()
+
+    assert _s_waitcnt_state(sopp, first_dte) == before
+
+
 @pytest.mark.parametrize(
     ('dt_ptr', 'message'),
     [
