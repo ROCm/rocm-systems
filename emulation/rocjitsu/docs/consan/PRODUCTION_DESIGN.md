@@ -375,7 +375,7 @@ The design was derived from the current source rather than from filenames:
    clarifications.
 
 At this revision the ConSan patch directory contains about 81,500 lines and the
-ConSan HSA-hook directory about 10,650 lines. Large responsibilities are
+ConSan HSA-hook directory about 10,750 lines. Large responsibilities are
 concentrated in 7,143 lines of MOI placement, 4,630 lines of validation, 4,382
 lines of SuperCollider LDS lowering, 3,819 lines of synchronization analysis,
 and several 2,000--3,800-line per-engine emission fragments. These measurements
@@ -383,11 +383,13 @@ are not a deletion target by themselves; they demonstrate why a one-week
 flag-day rewrite would be neither reviewable nor credible.
 
 The `consan-device` label identifies checked-in tests that execute instrumented
-device code. The configured build currently exposes 3,477 such CTest rows: 2,888
-simulator rows and 589 physical rows. The five target-labelled totals are 568
-for gfx942, 1,177 for gfx950 including physical coverage, 534 for gfx1100, 544
-for gfx1201, and 654 for gfx1250. Counts are evidence of breadth, not a coverage
-metric; the behavioral pairing and semantic oracle matter more.
+device code. The Slice 0 baseline records 3,501 such CTest rows: 2,908
+simulator rows and 593 physical rows. The five target-labelled totals are 572
+for gfx942, 1,185 for gfx950 including physical coverage, 538 for gfx1100, 548
+for gfx1201, and 658 for gfx1250. Counts are evidence of breadth, not a coverage
+metric; the behavioral pairing and semantic oracle matter more. The exact
+contract inventory, structural measurements, and qualification result are in
+[PRODUCTION_BASELINE.md](PRODUCTION_BASELINE.md).
 
 ## 3. Current implementation map
 
@@ -1838,6 +1840,9 @@ and resolves any temporary deviation instead of silently redefining the design.
 - **Cutover and deletion:** Baseline becomes the reviewed Stage 2 reference;
   delete redundant tests only when their unique assertion is named elsewhere.
 - **Prerequisite:** Reviewed Stage 1 document.
+
+The frozen Slice 0 artifact is
+[PRODUCTION_BASELINE.md](PRODUCTION_BASELINE.md).
 
 ### Slice 1: centralize `TargetProfile`
 
