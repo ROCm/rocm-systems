@@ -412,6 +412,7 @@ add_executable(
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
     cdna5_tensor_dma_test.cpp
+    lds_test.cpp
     l2_cache_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp

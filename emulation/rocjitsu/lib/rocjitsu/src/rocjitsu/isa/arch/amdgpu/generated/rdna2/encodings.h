@@ -392,6 +392,7 @@ public:
   bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
@@ -436,6 +437,9 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -472,6 +476,7 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -506,6 +511,9 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
+  bool has_dpp8();
+  bool has_dpp16();
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
@@ -541,6 +549,7 @@ public:
   bool default_encoding();
   using OpEncoding = VintrpMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Vop3 : public IsaInstruction<Isa> {
@@ -578,6 +587,8 @@ public:
 class Ds : public IsaInstruction<Isa> {
 public:
   Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
+  bool uses_split_ds_offsets() const;
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
 };
