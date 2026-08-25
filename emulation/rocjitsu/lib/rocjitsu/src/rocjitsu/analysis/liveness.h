@@ -276,7 +276,8 @@ private:
   void ensure_analyzed() const;
 
   /// @brief Collect whole-kernel register use without running backward dataflow.
-  void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text);
+  void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text,
+                                     rj_code_arch_t arch);
 
   void analyze(KernelBlockScope blocks, bool restrict_live_before_to_instructions,
                std::span<const Instruction *const> live_before_instructions,

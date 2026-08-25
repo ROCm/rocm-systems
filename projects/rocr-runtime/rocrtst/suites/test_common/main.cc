@@ -90,6 +90,7 @@
 #include "suites/functional/filter_devices.h"
 #include "suites/functional/fp_exception_shutdown.h"
 #include "suites/functional/gpu_coredump.h"
+#include "suites/functional/gpu_discovery_deprecated.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -493,7 +494,6 @@ TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
 
 // Trap Handler Tests (SWDEV-209233)
 // Tests s_trap instruction handling and queue error callbacks.
-// Working tests: NoTrap, Abort, Generic (validated on MI300X gfx942)
 
 TEST(rocrtstFunc, TrapHandler_NoTrap) {
     TrapHandlerTest th;
@@ -579,6 +579,16 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
     propTest.QueryAgentUUID();
     propTest.QueryAgentClockCounters();
     RunCustomTestEpilog(&propTest);
+}
+
+TEST(rocrtstFunc, GpuDiscoveryDeprecatedDoorbellTest) {
+  // Verifies hsa_init() succeeds when deprecated GPUs (DoorbellType != 2) are
+  // present. Regression test for: a single pre-Vega GPU (e.g. Polaris/gfx803)
+  // would abort HSA initialization for ALL devices in the system.
+  GpuDiscoveryDeprecatedTest gdt;
+  RunCustomTestProlog(&gdt);
+  gdt.Run();
+  RunCustomTestEpilog(&gdt);
 }
 
 TEST(rocrtstFunc, SvmMemory_Basic_Test) {

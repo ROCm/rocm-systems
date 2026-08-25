@@ -297,10 +297,15 @@ TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
 
   float* hout = new float[kN];
   HIP_CHECK(hipMemcpy(hout, dout, kSZ, hipMemcpyDeviceToHost));
-  // Precondition: fresh device allocations are zeroed by the driver.  This is
+  // Precondition: fresh device allocations are zeroed by the driver. This is
   // what replay zero-init reproduces; assert it so a non-zeroing platform fails
   // here (clearly) rather than flaking the roundtrip.
+  //
+  // But with ASAN enabled this won't be true, because doing so would
+  // add significant performance overhead and hide bugs related to uninitialized data
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   for (int i = 0; i < kN; ++i) REQUIRE(hout[i] == 0.0f);
+#endif
 
   HIP_CHECK(hipFree(dsrc));
   HIP_CHECK(hipFree(dout));
