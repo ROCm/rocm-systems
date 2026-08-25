@@ -139,6 +139,7 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  algorithms/gin/gin_alltoall.h
   include/alltoallv_meta.h
   include/alt_rsmi.h
   include/archinfo.h
@@ -181,7 +182,6 @@ set(SRC_FILES
   include/graph.h
   include/group.h
   include/gin.h
-  include/gin_alltoall.h
   include/gin/gin_host.h
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
@@ -521,7 +521,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
-    src/gin_alltoall_sdma.cu
+    src/algorithms/gin/sdma/gin_alltoall_sdma.cu
   )
 endif()
 

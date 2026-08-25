@@ -693,8 +693,8 @@ if(ENABLE_ROCSHMEM_GIN)
       -std=c++17
       -fPIC
       -c -o ${GIN_ALLTOALL_SDMA_FAT_OBJ}
-      ${HIPIFY_DIR}/src/gin_alltoall_sdma.cu.cpp
-    DEPENDS ${HIPIFY_DIR}/src/gin_alltoall_sdma.cu.cpp
+      ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_alltoall_sdma.cu.cpp
+    DEPENDS ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_alltoall_sdma.cu.cpp
     COMMENT "DL compile: gin_alltoall_sdma.cu.cpp (GIN-SDMA alltoall kernel)"
     VERBATIM
   )

@@ -23,7 +23,7 @@
 #include "allocator.h"
 #include "dev_runtime.h"
 #include "sym_kernels.h"
-#include "gin_alltoall.h"
+#include "algorithms/gin/gin_alltoall.h"
 #include "ce_coll.h"
 #include "rma/rma.h"
 #include "argcheck.h"

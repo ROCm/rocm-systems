@@ -10,7 +10,7 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#include "gin_alltoall.h"
+#include "algorithms/gin/gin_alltoall.h"
 
 #include "checks.h"
 #include "comm.h"
@@ -59,7 +59,8 @@ constexpr GinA2ALsaBand kGinA2ALsaBands[] = {
 inline size_t ginA2ADivUp(size_t a, size_t b) { return (a + b - 1) / b; }
 inline size_t ginA2AAlignUp(size_t a, size_t b) { return ginA2ADivUp(a, b) * b; }
 
-// Whole CTA cooperates on one chunk, 16B vectors with a scalar tail.
+// Whole CTA cooperates on one chunk, 16B vectors with a scalar tail. Eligibility
+// rejects anything that would leave these two pointers unaligned.
 __device__ __forceinline__ void ginA2ACopyCta(char* dst, const char* src, size_t bytes) {
   size_t nVec = bytes / sizeof(uint4);
   for (size_t i = threadIdx.x; i < nVec; i += blockDim.x) {
@@ -176,6 +177,14 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
   struct ncclDevrWindow* recvWin = nullptr;
   if (ncclDevrFindWindow(comm, sendbuff, &sendWin) != ncclSuccess || sendWin == nullptr) return false;
   if (ncclDevrFindWindow(comm, recvbuff, &recvWin) != ncclSuccess || recvWin == nullptr) return false;
+
+  // The LSA copy stores 16B vectors, so the window offsets and the per-peer stride
+  // have to be aligned. Below one vector the loop never runs, and SDMA is exempt.
+  if (bytesPerPeer < (size_t)ncclParamGinA2ASdmaMinBytes() && bytesPerPeer >= sizeof(uint4)) {
+    size_t sendOff = (uint8_t*)sendbuff - (uint8_t*)sendWin->userPtr;
+    size_t recvOff = (uint8_t*)recvbuff - (uint8_t*)recvWin->userPtr;
+    if (((sendOff | recvOff | bytesPerPeer) & (sizeof(uint4) - 1)) != 0) return false;
+  }
 
   return true;
 }

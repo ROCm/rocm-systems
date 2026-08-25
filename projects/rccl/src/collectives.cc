@@ -17,7 +17,7 @@
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
-#include "gin_alltoall.h"
+#include "algorithms/gin/gin_alltoall.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 #include "ce_coll.h"
