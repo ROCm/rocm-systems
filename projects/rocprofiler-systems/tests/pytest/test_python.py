@@ -6,6 +6,9 @@ Python tests.
 """
 
 from __future__ import annotations
+import os
+import subprocess
+import sys
 import pytest
 from conftest import RocprofsysTest
 from pathlib import Path
@@ -280,6 +283,86 @@ class TestPython(RocprofsysTest):
                 fail_regex=[r"(fib|inefficient)..noprofile.py."],
             )
 
+    @pytest.mark.timeout(120)
+    @pytest.mark.parametrize(
+        "use_cli_flag, use_env_var",
+        [
+            pytest.param(False, False, id="no-flag-no-env"),
+            pytest.param(False, True, id="no-flag-env-set"),
+            pytest.param(True, False, id="flag-no-env"),
+            pytest.param(True, True, id="flag-and-env"),
+        ],
+    )
+    def test_config_option(
+        self,
+        python_version,
+        create_config_file,
+        use_cli_flag,
+        use_env_var,
+        rocprof_config,
+    ):
+        """Check that a config file is honored whether it comes from -c/--config or
+        the ROCPROFSYS_CONFIG_FILE env var. We skip the base env (otherwise its env
+        vars would override the file), then have -c turn profiling on and the env var
+        turn tracing off, and confirm each shows up in the produced artifacts.
+        """
+        env: dict[str, str] = {
+            # Keep artifacts at the top of output_dir with stable names (no PID
+            # suffix, no timestamped subdir) so the file checks below can find them.
+            "ROCPROFSYS_USE_PID": "OFF",
+            "ROCPROFSYS_TIME_OUTPUT": "OFF",
+            "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
+            "PYTHONPATH": str(rocprof_config.rocprofsys_site_packages or ""),
+        }
+        profile_args = ["--label", "file"]
+
+        if use_env_var:
+            env_config = create_config_file({"ROCPROFSYS_TRACE": "OFF"}, "env_config.cfg")
+            env["ROCPROFSYS_CONFIG_FILE"] = str(env_config)
+
+        if use_cli_flag:
+            cli_config = create_config_file(
+                {"ROCPROFSYS_PROFILE": "ON"}, "cli_config.cfg"
+            )
+            profile_args = profile_args + ["-c", str(cli_config)]
+
+        result = self.run_test(
+            "python",
+            target="external.py",
+            env=env,
+            profile_args=profile_args,
+            python_version=python_version,
+            run_args=["-v", "10", "-n", "5"],
+            no_base_env=True,
+        )
+        self.assert_regex(result)
+
+        trip_count_exists = (result.output_dir / "trip_count.json").exists()
+        trace_exists = result.perfetto_file is not None
+
+        if use_cli_flag:
+            assert trip_count_exists, (
+                "trip_count.json should be present: the -c config sets "
+                "ROCPROFSYS_PROFILE=ON, so its absence means -c was ignored"
+            )
+        else:
+            assert not trip_count_exists, (
+                "trip_count.json should be absent: profiling is off by default "
+                "and no -c config enabled it"
+            )
+
+        if use_env_var:
+            assert not trace_exists, (
+                "perfetto trace should be absent: the ROCPROFSYS_CONFIG_FILE "
+                "config sets ROCPROFSYS_TRACE=OFF, so its presence means the env "
+                "var was ignored"
+            )
+        else:
+            assert trace_exists, (
+                "perfetto trace should be present: tracing is on by default and "
+                "no ROCPROFSYS_CONFIG_FILE config disabled it"
+            )
+
     @pytest.mark.rocpd("python_rocpd_env")
     def test_source(self, python_version, python_rocpd_env, python_source_rocpd_rules):
         result = self.run_test(
@@ -310,3 +393,94 @@ class TestPython(RocprofsysTest):
             result,
             rules_files=python_source_rocpd_rules,
         )
+
+
+# =============================================================================
+# Frontend regressions
+# =============================================================================
+
+
+class TestPythonFrontend:
+    """CLI-level regressions in the rocprof-sys-python wrapper and package."""
+
+    TIMEOUT_SEC = 120
+
+    def _python_executable(self, rocprof_config) -> str:
+        """Interpreter the bindings were built for.
+
+        The wrapper otherwise falls back to whatever `python3` resolves to, which
+        on some distributions is a system Python with no libpyrocprofsys module.
+        """
+        executables = rocprof_config.capabilities.supported_python_executables
+        return str(executables[0]) if executables else sys.executable
+
+    def _run_wrapper(
+        self,
+        rocprof_config,
+        args: list[str],
+        extra_env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [str(rocprof_config.rocprofsys_python), *args],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PYTHON_EXECUTABLE": self._python_executable(rocprof_config),
+                **(extra_env or {}),
+            },
+            timeout=self.TIMEOUT_SEC,
+        )
+
+    def _run_probe(
+        self, rocprof_config, source: str, extra_env: dict[str, str] | None = None
+    ) -> str:
+        result = subprocess.run(
+            [self._python_executable(rocprof_config), "-c", source],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PYTHONPATH": str(rocprof_config.rocprofsys_site_packages),
+                **(extra_env or {}),
+            },
+            timeout=self.TIMEOUT_SEC,
+        )
+        lines = result.stdout.splitlines()
+        assert lines, f"probe produced no stdout; stderr:\n{result.stderr}"
+        return lines[-1]
+
+    @pytest.mark.parametrize("log_level", ["debug", "trace"])
+    def test_help_survives_verbose_logging(self, rocprof_config, log_level: str) -> None:
+        result = self._run_wrapper(
+            rocprof_config, ["--help"], {"ROCPROFSYS_LOG_LEVEL": log_level}
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_import_does_not_load_profiling_runtime(self, rocprof_config) -> None:
+        loaded = self._run_probe(
+            rocprof_config,
+            "import rocprofsys\n"
+            "with open('/proc/self/maps') as maps:\n"
+            "    print(sum('librocprof-sys.so' in line for line in maps))\n",
+            {"ROCPROFSYS_LOG_LEVEL": "debug"},
+        )
+        assert loaded == "0", "importing rocprofsys loaded the profiling runtime"
+
+    def test_missing_script_is_reported(self, rocprof_config) -> None:
+        result = self._run_wrapper(rocprof_config, ["--"])
+        assert result.returncode != 0
+        assert "Could not determine input script" in result.stderr
+
+    def test_banner_names_the_project(self, rocprof_config) -> None:
+        result = self._run_wrapper(rocprof_config, ["--help"])
+        assert result.returncode == 0, result.stderr
+        assert "rocprofiler-systems :: executing" in result.stdout
+
+    def test_library_path_points_at_the_runtime(self, rocprof_config) -> None:
+        library_path = self._run_probe(
+            rocprof_config,
+            "import os, rocprofsys\nprint(os.environ.get('ROCPROFSYS_PATH', ''))\n",
+        )
+        assert library_path, "rocprofsys did not export ROCPROFSYS_PATH"
+        assert (Path(library_path) / "librocprof-sys-dl.so").exists()

@@ -278,7 +278,17 @@ Sampling types:
   * ``ROCPROFSYS_SAMPLING_CPUS``
   * ``ROCPROFSYS_SAMPLING_GPUS``
 
-.. note:: If sampling is enabled but no specific type is selected, CPU-time sampling is used by default.
+.. note::
+
+   * ``ROCPROFSYS_SAMPLING_GPUS`` is further restricted to the GPUs that the ROCm runtime
+     exposes, as controlled by ``ROCR_VISIBLE_DEVICES`` and ``HIP_VISIBLE_DEVICES``. A GPU
+     masked off by either variable is never sampled, even when it is selected explicitly.
+   * The indices passed to ``ROCPROFSYS_SAMPLING_GPUS`` identify GPUs by their position in
+     the system's full device list, before any masking is applied; masking does not
+     renumber them. For example, with ``HIP_VISIBLE_DEVICES=4,5``, select those two GPUs
+     with ``ROCPROFSYS_SAMPLING_GPUS=4,5``, not ``0,1``.
+   * If sampling is enabled but no specific type is selected, CPU-time sampling is used by
+     default.
 
 To enable sampling:
 

@@ -9,6 +9,7 @@
 #define _NCCL_DEVICE_GIN_GDAKI_DEVICE_HOST_COMMON_H_
 
 #include <linux/types.h>
+#include <stdint.h>
 
 // Compat with doca-gpunetio device code v2.0.0.
 #define NCCL_GIN_GDAKI_VERSION 200
@@ -29,6 +30,9 @@ struct ncclGinGdakiGPUContext {
 
   // Local buffer we don't consume but is required for some operations.
   __be32 sink_buffer_lkey;
+
+  uint64_t* last_issued_get;  // per-peer (0 = no gets)
+  uint64_t* last_visible_get; // per-peer
 };
 
 struct ncclGinGdakiMemHandle {

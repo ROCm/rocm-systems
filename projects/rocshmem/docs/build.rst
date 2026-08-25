@@ -172,7 +172,7 @@ Profiling and tracing support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 rocSHMEM can register its host-side API tables with
-`rocprofiler-register <https://rocm.docs.amd.com/projects/rocprofiler-register/en/latest/>`_
+`rocprofiler-register <https://github.com/ROCm/rocprofiler-register>`_
 so that rocprofiler-sdk tools, such as ``rocprofv3``, can trace rocSHMEM
 host-stream API calls. This is controlled by the ``USE_ROCPROFILER_REGISTER``
 build option, which is enabled (``ON``) by default.
