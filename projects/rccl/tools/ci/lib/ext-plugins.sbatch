@@ -13,16 +13,17 @@
 # On one multi-GPU node:
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. projects/rccl  install.sh              build RCCL from PR sources
-#   3. projects/rccl-tests                    build all_reduce_perf (no MPI)
-#   4. test/ext-plugins                       run pytest -m ext_mixed
+#   3. lib/build-ompi-ucx.sh                  build a UCX-enabled OpenMPI (isolated)
+#   4. projects/rccl-tests                    build the *_perf binaries (with MPI)
+#   5. plugins/tuner/example                  build + install libnccl-tuner-example.so
+#   6. test/ext-plugins                       run pytest -m "ext_mixed or ext_tuner"
 #
-# Scope: only the mixed-plugin tests (the pytest port of
-# plugins/mixed/example/test.sh plus the new runtime check). They build their
-# own libnccl-mixed.so from in-tree headers and drive all_reduce_perf in a
-# single multi-GPU process, so they need no OpenMPI and no prebuilt example
-# plugins. The tuner/profiler/inspector suites need a full OpenMPI + every
-# *_perf binary (and cuda.h for the profiler/inspector examples); wiring those
-# in is a separate, heavier follow-up.
+# Scope: the mixed-plugin tests (the pytest port of plugins/mixed/example/test.sh
+# plus the new runtime check) and the CSV tuner tests. The tuner tests launch
+# mpirun with `--mca pml ucx`, so this suite uses its OWN UCX-enabled OpenMPI via
+# build-ompi-ucx.sh, kept fully isolated from the gin/device-api OpenMPI. The
+# profiler/inspector suites additionally need cuda.h for their example .so and
+# are left as a follow-up.
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -94,7 +95,7 @@ build_rc=0
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
 # 1) RCCL from the PR sources.
-echo "==> [1/3] build RCCL (targets=${gpu_targets})"
+echo "==> [1/5] build RCCL (targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rm -rf "${rccl_prefix}"
 (
@@ -120,32 +121,68 @@ fi
 rccl_cmake_dir="$(dirname "${rccl_cfg}")"
 echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
-# 2) rccl-tests: only all_reduce_perf is needed, run as a single multi-GPU
-# process (no MPI launcher), so build without MPI to keep it light.
-echo "==> [2/3] build rccl-tests (all_reduce_perf, no MPI)"
+# 2) UCX-enabled OpenMPI, isolated from the gin/device-api OpenMPI. The tuner
+# tests launch `mpirun --mca pml ucx`, which the shared build lacks.
+echo "==> [2/5] build UCX-enabled OpenMPI (isolated)"
+"${ci_dir}/lib/build-ompi-ucx.sh"
+set -a
+# shellcheck source=/dev/null
+source "${workdir}/.ci-out/ompi-ucx.env"
+set +a
+export PATH="${MPI_HOME}/bin:${PATH}"
+if [[ ! -x "${MPI_HOME}/bin/mpirun" ]]; then
+  echo "ERROR: no mpirun under ${MPI_HOME}/bin" >&2
+  exit 1
+fi
+
+# 3) rccl-tests WITH MPI: the tuner tests drive several collectives via mpirun,
+# so build all the *_perf binaries. Use -k so one failing target does not sink
+# the rest; the required binaries are checked explicitly below.
+echo "==> [3/5] build rccl-tests (*_perf, USE_MPI=ON)"
 rccl_tests_build="${rccl_tests_src}/build"
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
   cd "${rccl_tests_build}"
-  cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=OFF \
+  cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON \
     -DRCCL_DIR="${rccl_cmake_dir}" \
-    -DCMAKE_PREFIX_PATH="${rccl_prefix}" \
+    -DCMAKE_PREFIX_PATH="${rccl_prefix};${MPI_HOME}" \
     -DGPU_TARGETS="${gpu_targets}" \
     ..
-  make -j"${build_jobs}" all_reduce_perf
+  make -j"${build_jobs}" -k || true
 )
-if [[ ! -x "${rccl_tests_build}/all_reduce_perf" ]]; then
-  echo "ERROR: all_reduce_perf not built under ${rccl_tests_build}" >&2
+missing=""
+for b in all_reduce_perf all_gather_perf broadcast_perf reduce_perf reduce_scatter_perf; do
+  [[ -x "${rccl_tests_build}/${b}" ]] || missing="${missing} ${b}"
+done
+if [[ -n "${missing}" ]]; then
+  echo "ERROR: rccl-tests missing perf binaries:${missing}" >&2
   ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
   exit 1
 fi
 
-# 3) Hand the install/test locations to the run stage. RCCL_INSTALL_DIR is used
-# by the mixed runtime test for LD_LIBRARY_PATH (librccl.so); RCCL_TESTS_DIR is
-# where it finds build/all_reduce_perf.
+# 4) CSV tuner example plugin. Installed where conftest.py expects it
+# (RCCL_INSTALL_DIR/plugins/tuner/example); its presence is also what makes
+# conftest run (not skip) the ext_tuner tests.
+echo "==> [4/5] build + install libnccl-tuner-example.so"
+tuner_src="${rccl_src}/plugins/tuner/example"
+tuner_dst="${rccl_install_dir}/plugins/tuner/example"
+make -C "${tuner_src}" -j"${build_jobs}" default
+tuner_so="$(find "${tuner_src}" -name libnccl-tuner-example.so -type f 2>/dev/null | head -n1)"
+if [[ -z "${tuner_so}" ]]; then
+  echo "ERROR: libnccl-tuner-example.so not produced under ${tuner_src}" >&2
+  exit 1
+fi
+mkdir -p "${tuner_dst}"
+cp -f "${tuner_so}" "${tuner_dst}/libnccl-tuner-example.so"
+echo "    installed -> ${tuner_dst}/libnccl-tuner-example.so"
+
+# 5) Hand the install/test locations to the run stage. RCCL_INSTALL_DIR is the
+# librccl.so dir and the plugin root; OMPI_INSTALL_DIR/UCX come from ompi-ucx.env
+# and are re-sourced there so the runtime LD_LIBRARY_PATH resolves UCX.
 {
   printf 'export RCCL_INSTALL_DIR=%q\n' "${rccl_install_dir}"
   printf 'export RCCL_TESTS_DIR=%q\n'   "${rccl_tests_src}"
+  printf 'export OMPI_INSTALL_DIR=%q\n' "${MPI_HOME}"
 } > "${workdir}/.ci-out/ext-plugins.env"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?
 echo "==> build phase logs: ${build_out} / ${build_err}"
@@ -163,13 +200,16 @@ fi
 # instead, which the workflow turns into a red (non-gating) result. ---
 test_rc=0
 {
-echo "==> [3/3] run ext-plugins pytest (-m ext_mixed)"
+echo "==> [5/5] run ext-plugins pytest (-m 'ext_mixed or ext_tuner')"
 set -a
+# shellcheck source=/dev/null
+source "${workdir}/.ci-out/ompi-ucx.env"
 # shellcheck source=/dev/null
 source "${workdir}/.ci-out/ext-plugins.env"
 set +a
 echo "    RCCL_INSTALL_DIR=${RCCL_INSTALL_DIR}"
 echo "    RCCL_TESTS_DIR=${RCCL_TESTS_DIR}"
+echo "    OMPI_INSTALL_DIR=${OMPI_INSTALL_DIR}"
 
 ext_dir="${workdir}/projects/rccl/test/ext-plugins"
 venv_dir="${workdir}/.ci-out/ext-plugins-venv"
@@ -180,7 +220,7 @@ python3 -m pip install --quiet --disable-pip-version-check -r "${ext_dir}/requir
 
 # conftest.py resolves assets/logs from the current working directory.
 cd "${ext_dir}"
-python3 -m pytest -v -rs --color=no -m ext_mixed
+python3 -m pytest -v -rs --color=no -m "ext_mixed or ext_tuner"
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"
 if [[ "${test_rc}" -ne 0 ]]; then

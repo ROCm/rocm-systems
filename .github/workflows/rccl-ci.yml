@@ -63,9 +63,10 @@ jobs:
       therock_ref: ${{ inputs.therock_ref || 'b45a06045cbb29c85e221748e653ac2521c6e1bf' }}
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
-  # ext-plugins suite on ruby: builds RCCL + rccl-tests + the example plugins,
-  # then runs test/ext-plugins pytest (mixed/tuner/profiler/...). Non-gating for
-  # now so a new suite cannot block merges while it is validated on the runner.
+  # ext-plugins suite on ruby: builds RCCL, a UCX-enabled OpenMPI, rccl-tests and
+  # the tuner example plugin, then runs test/ext-plugins pytest for the mixed and
+  # CSV-tuner suites. Non-gating for now so a new suite cannot block merges while
+  # it is validated on the runner.
   ext-plugins:
     name: ext-plugins
     uses: ./.github/workflows/rccl-suite.yml
@@ -76,7 +77,7 @@ jobs:
       suite: ext-plugins
       runs_on: '["ruby-linux-slurm-scale-runner"]'
       partition: interactive
-      timeout_minutes: 120
+      timeout_minutes: 240
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}
