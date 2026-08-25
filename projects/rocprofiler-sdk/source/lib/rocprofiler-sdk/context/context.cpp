@@ -187,6 +187,37 @@ get_active_contexts(context_filter_t filter)
     return data;
 }
 
+namespace
+{
+// Tear down the services that interpose the HSA queue write path (dispatch counter
+// collection, SPM and dispatch thread trace) plus device thread trace.
+//
+// Must be called with get_contexts_mutex() held and before the context's active slot is
+// cleared: each of these services holds a per-agent serialization reference, and
+// disable_serialization() has to run while dispatches are still being instrumented.
+// Clearing the slot first opens the opposite window, in which write_hook sees no active
+// context and a dispatch is submitted without serializer packets while the serializer is
+// still enabled.
+//
+// Every path that removes a context from the active list has to route through here.
+// Skipping it leaks the serialization reference, and because these services no longer
+// register per-queue callbacks there is nothing left to unwind it later: serialization
+// would stay enabled for those agents for the rest of the process.
+void
+stop_queue_interposed_services(const context* ctx)
+{
+    if(!ctx) return;
+
+    if(ctx->dispatch_counter_collection)
+        rocprofiler::counters::stop_context(const_cast<context*>(ctx));
+
+    if(ctx->dispatch_spm) rocprofiler::spm::stop_context(const_cast<context*>(ctx));
+
+    if(ctx->device_thread_trace) ctx->device_thread_trace->stop_context();
+    if(ctx->dispatch_thread_trace) ctx->dispatch_thread_trace->stop_context();
+}
+}  // namespace
+
 const context*
 get_active_context(rocprofiler_context_id_t id)
 {
@@ -389,21 +420,7 @@ stop_context(rocprofiler_context_id_t idx)
         const context* _expected = itr.load(std::memory_order_acquire);
         if(_expected && _expected->context_idx == idx.handle)
         {
-            // Stop queue-interposed services before clearing the active slot so
-            // disable_serialization() always runs before dispatches stop being instrumented.
-            // Clearing the slot first opens the opposite window, in which write_hook sees no
-            // active context and a dispatch is submitted without serializer packets while the
-            // serializer is still enabled.
-            if(_expected->dispatch_counter_collection)
-            {
-                rocprofiler::counters::stop_context(const_cast<context*>(_expected));
-            }
-
-            if(_expected->dispatch_spm)
-                rocprofiler::spm::stop_context(const_cast<context*>(_expected));
-
-            if(_expected->device_thread_trace) _expected->device_thread_trace->stop_context();
-            if(_expected->dispatch_thread_trace) _expected->dispatch_thread_trace->stop_context();
+            stop_queue_interposed_services(_expected);
 
             bool success = itr.compare_exchange_strong(_expected, nullptr);
 
@@ -479,8 +496,17 @@ deactivate_client_contexts(rocprofiler_client_id_t client_id)
         const context* itr_v = itr.load(std::memory_order_acquire);
         if(itr_v && itr_v->client_idx == client_id.handle)
         {
+            // Normally stop_client_contexts() has already emptied these slots, but a tool
+            // that starts a context from its finalize/detach callback lands here with the
+            // context still active. Run the same teardown stop_context() would have run
+            // instead of dropping the pointer on the floor.
+            stop_queue_interposed_services(itr_v);
+
             if(itr.compare_exchange_strong(itr_v, nullptr))
             {
+                auto nactive = get_num_active_contexts().load(std::memory_order_acquire);
+                if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
+
                 rocprofiler::hsa::queue_interposition::
                     notify_queue_interposition_consumer_context_stopped(itr_v);
             }
