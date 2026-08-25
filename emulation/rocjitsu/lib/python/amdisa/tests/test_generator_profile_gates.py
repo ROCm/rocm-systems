@@ -720,13 +720,13 @@ def test_parser_separates_logical_arch_directory_and_cpp_namespace():
         ('rdna3', Rdna3Profile),
         ('rdna3_5', Rdna3_5Profile),
         ('rdna4', Rdna4Profile),
-        ('gfx1250', Cdna5Profile),
+        ('cdna5', Cdna5Profile),
     ],
 )
 def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
     isa_xml = _mrisa_dir() / f'amdgpu_isa_{isa_name}.xml'
     if not isa_xml.is_file():
-        pytest.skip('Semantics XML not available')
+        pytest.skip('MR ISA XML not available')
 
     parser = Parser(str(isa_xml), profile_type())
     spec = parser.parse()
@@ -740,7 +740,7 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
     mismatches = []
     expected_exclusions = {
         'rdna4': {'S_ALLOC_VGPR', 'S_BARRIER_SIGNAL_ISFIRST'},
-        'gfx1250': {'S_ALLOC_VGPR'},
+        'cdna5': {'S_ALLOC_VGPR'},
     }
     checked_exclusions = set()
     checked = 0
@@ -5569,7 +5569,7 @@ def test_instruction_lookahead_bound_is_derived_from_isa(
 ) -> None:
     isa_xml = _mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'
     if not isa_xml.is_file():
-        pytest.skip(f'{arch_name} semantics XML not available')
+        pytest.skip(f'{arch_name} MR ISA XML not available')
     spec = Parser(str(isa_xml), profile_type()).parse()
     generator = CodeGenerator(spec, '', derive_all_semantics(spec))
     assert generator._max_instruction_word_count() == expected_bound
@@ -5878,6 +5878,7 @@ def _cpp_hwreg_table_values(source: str, table_name: str) -> dict[int, str]:
         ('rdna3', 'RDNA3_HWREGS'),
         ('rdna3_5', 'RDNA3_HWREGS'),
         ('rdna4', 'RDNA4_HWREGS'),
+        ('cdna5', 'GFX1250_HWREGS'),
     ],
 )
 def test_hwreg_descriptor_tables_cover_checked_in_xml(
