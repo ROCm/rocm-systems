@@ -55,8 +55,8 @@ def filtr_api_name(name):
   return name
 
 def filtr_api_decl(record):
-  record = re.sub(r"\s__dparm\([^\)]*\)", r'', record);
-  record = re.sub(r"\(void\*\)", r'', record);
+  record = re.sub(r'\s__dparm\([^\)]*\)', r'', record);
+  record = re.sub(r'\(void\*\)', r'', record);
   return record
 
 # Normalizing API arguments
@@ -75,6 +75,79 @@ def norm_api_types(type_str):
   type_str = re.sub(r'^unsigned$', r'unsigned int', type_str)
   return type_str
 
+# None until built; {} once built (even if empty).
+type_aliases = None
+
+# Building the alias map from the headers behind the preprocessed input.
+def build_type_aliases(preproc_file):
+  hdrs = []
+  seen = set()
+  define_pat = re.compile(r'^\s*#\s*define\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*$')
+  marker_pat = re.compile(r'^#\s+\d+\s+"([^"]+)"')
+  # The raw cat'd input header (the .i file's source) is the authoritative place
+  # the cat'd source #defines land; scan it first, independent of line-markers.
+  if preproc_file.endswith('.i'):
+    cat_hdr = preproc_file[:-len('.i')]
+    if os.path.isfile(cat_hdr):
+      seen.add(cat_hdr)
+      hdrs.append(cat_hdr)
+  try:
+    with open(preproc_file, 'r') as f:
+      for line in f:
+        m = marker_pat.match(line)
+        if m:
+          path = m.group(1)
+          # Restrict to hip headers; skip system headers and duplicates.
+          if path not in seen and 'hip' in os.path.basename(path).lower() and os.path.isfile(path):
+            seen.add(path)
+            hdrs.append(path)
+  except IOError:
+    return {}
+
+  parent = {}
+  def find(name):
+    root = name
+    while parent.get(root, root) != root:
+      root = parent[root]
+    while parent.get(name, name) != root:
+      parent[name], name = root, parent[name]
+    return root
+  def union(alias, target):
+    ra, rt = find(alias), find(target)
+    if ra != rt:
+      parent[ra] = rt
+
+  defined = set()
+  for path in hdrs:
+    try:
+      with open(path, 'r') as f:
+        for line in f:
+          m = define_pat.match(line)
+          if m:
+            alias, target = m.group(1), m.group(2)
+            parent.setdefault(alias, alias)
+            parent.setdefault(target, target)
+            union(alias, target)
+            defined.add(alias)
+    except IOError:
+      continue
+
+  aliases = {}
+  for alias in defined:
+    canonical = find(alias)
+    if canonical != alias:
+      aliases[alias] = canonical
+  return aliases
+
+# Rewriting alias type names in a normalized type string to their canonical form.
+def resolve_type_aliases(type_str):
+  global type_aliases
+  if type_aliases is None:
+    type_aliases = build_type_aliases(api_hfile)
+  for alias, canonical in type_aliases.items():
+    type_str = re.sub(r'\b' + re.escape(alias) + r'\b', lambda m: canonical, type_str)
+  return type_str
+
 # Creating a list of arguments [(type, name), ...]
 def list_api_args(args_str):
   args_str = filtr_api_args(args_str)
@@ -83,7 +156,7 @@ def list_api_args(args_str):
     for arg_pair in args_str.split(','):
       if arg_pair == 'void': continue
       arg_pair = re.sub(r'\s*=\s*\S+$','', arg_pair);
-      m = re.match(r"^(.*)\s(\S+)$", arg_pair);
+      m = re.match(r'^(.*)\s(\S+)$', arg_pair);
       if m:
         arg_type = norm_api_types(m.group(1))
         arg_name = m.group(2)
@@ -127,9 +200,9 @@ def parse_api(inp_file_p, out):
   global line_num
   inp_file = inp_file_p
 
-  beg_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+([^\(]+)\(");
-  api_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)");
-  end_pattern = re.compile(r"Texture");
+  beg_pattern = re.compile(r'^(hipError_t|const char\s*\*)\s+([^\(]+)\(');
+  api_pattern = re.compile(r'^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)');
+  end_pattern = re.compile(r'Texture');
   hidden_pattern = re.compile(r'__attribute__\(\(visibility\("hidden"\)\)\)')
   nms_open_pattern = re.compile(r'namespace hip_impl {')
   nms_close_pattern = re.compile(r'}')
@@ -161,7 +234,7 @@ def parse_api(inp_file_p, out):
         found = 1
 
     if found != 0:
-      record = re.sub(r"\s__dparm\([^\)]*\)", '', record);
+      record = re.sub(r'\s__dparm\([^\)]*\)', '', record);
       m = api_pattern.match(record)
       if m:
         found = 0
@@ -200,13 +273,13 @@ def parse_content(inp_file_p, api_map, out):
   inp_file = inp_file_p
 
   # API method begin pattern
-  beg_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+[^\(]+\(");
+  beg_pattern = re.compile(r'^(hipError_t|const char\s*\*)\s+[^\(]+\(');
   # API declaration pattern
-  decl_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*;");
+  decl_pattern = re.compile(r'^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*;');
   # API definition pattern
-  api_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*{");
+  api_pattern = re.compile(r'^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*{');
   # API init macro pattern
-  init_pattern = re.compile(r"(^\s*HIP_INIT_API[^\s]*\s*)\((([^,]+)(,.*|)|)(\);|,)\s*$");
+  init_pattern = re.compile(r'(^\s*HIP_INIT_API[^\s]*\s*)\((([^,]+)(,.*|)|)(\);|,)\s*$');
 
   # Open input file
   inp = open(inp_file, 'r')
@@ -274,7 +347,13 @@ def parse_content(inp_file_p, api_map, out):
           api_types = filtr_api_types(api_args)
           # Normalizing etalon arguments
           eta_types = filtr_api_types(eta_args)
-          if (api_types == eta_types) or ((types_check_mode == 0) and (not api_name in out)):
+          types_match = (api_types == eta_types)
+          # A pure spelling difference (source uses a type-alias macro that the
+          # preprocessed etalon already expanded) is a false mismatch. Resolve
+          # aliases and re-compare before treating it as an overload.
+          if not types_match:
+            types_match = (resolve_type_aliases(api_types) == resolve_type_aliases(eta_types))
+          if types_match or ((types_check_mode == 0) and (not api_name in out)):
             # API is already found and not is mismatched
             if (api_name in out):
               fatal("API redefined \"" + api_name + "\", record \"" + record + "\"")
@@ -357,7 +436,7 @@ def parse_src(api_map, src_path, src_patt, out):
           message(file)
           content = ''
           filename = os.path.basename(file)
-          if re.match("hip_table_interface.cpp", filename):
+          if re.match(r'hip_table_interface\.cpp$', filename):
             message("SKIP FILE:" + filename)
           else:
             content = parse_content(file, api_map, out);
@@ -640,7 +719,7 @@ if (len(sys.argv) < 4):
          " ./src ./include/hip/amd_detail/hip_prof_str.h ./include/hip/amd_detail/hip_prof_str.h.new");
 
 # API header file given as an argument
-src_pat = r"\.cpp$"
+src_pat = r'\.cpp$'
 api_hfile = sys.argv[1]
 if not os.path.isfile(api_hfile):
   fatal("input file '" + api_hfile + "' not found")
