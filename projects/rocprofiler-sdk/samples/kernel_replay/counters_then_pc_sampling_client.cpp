@@ -28,8 +28,7 @@ std::atomic<int>         g_counter_records{0};
 std::atomic<int>         g_pcs_samples{0};
 bool                     g_pcs_available = false;
 
-uint64_t
-pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -146,12 +145,13 @@ int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
     KR_CHECK(rocprofiler_create_context(&g_replay_ctx));
-    KR_CHECK(rocprofiler_configure_callback_tracing_service(g_replay_ctx,
-                                                            ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
-                                                            nullptr,
-                                                            0,
-                                                            kernel_replay_cb,
-                                                            nullptr));
+    KR_CHECK(
+        rocprofiler_configure_callback_tracing_service(g_replay_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                                                       nullptr,
+                                                       0,
+                                                       kernel_replay_cb,
+                                                       nullptr));
     KR_CHECK(rocprofiler_create_context(&g_counters_ctx));
     KR_CHECK(rocprofiler_configure_callback_dispatch_counting_service(
         g_counters_ctx, counter_dispatch_cb, nullptr, counter_record_cb, nullptr));

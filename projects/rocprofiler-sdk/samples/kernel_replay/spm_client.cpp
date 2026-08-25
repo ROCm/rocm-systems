@@ -18,8 +18,8 @@
 
 namespace
 {
-constexpr uint64_t kPasses   = 2;
-constexpr uint64_t kSpmPass  = kPasses - 1;
+constexpr uint64_t kPasses  = 2;
+constexpr uint64_t kSpmPass = kPasses - 1;
 
 rocprofiler_context_id_t g_replay_ctx{0};
 rocprofiler_context_id_t g_counters_ctx{0};
@@ -29,8 +29,7 @@ rocprofiler_kernel_id_t  g_target_kernel = UINT64_MAX;
 std::atomic<int> g_counter_records{0};
 std::atomic<int> g_spm_records{0};
 
-uint64_t
-pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -55,10 +54,10 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
         return;
 
     const bool counters = p->current_pass != kSpmPass;
-    KR_CHECK((counters ? p->replay_local_start_context_cb : p->replay_local_stop_context_cb)(
-        g_counters_ctx));
-    KR_CHECK((counters ? p->replay_local_stop_context_cb : p->replay_local_start_context_cb)(
-        g_spm_ctx));
+    KR_CHECK((counters ? p->replay_local_start_context_cb
+                       : p->replay_local_stop_context_cb)(g_counters_ctx));
+    KR_CHECK(
+        (counters ? p->replay_local_stop_context_cb : p->replay_local_start_context_cb)(g_spm_ctx));
 }
 
 void
@@ -122,7 +121,8 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* data,
     for(auto counter : all)
     {
         rocprofiler_counter_info_v0_t info{};
-        KR_CHECK(rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_0, &info));
+        KR_CHECK(
+            rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_0, &info));
         if(info.name && std::string{info.name} == "SQ_WAVES") want.push_back(counter);
     }
     if(want.empty() && !all.empty()) want.push_back(all.front());
@@ -136,7 +136,7 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* data,
         .size  = sizeof(rocprofiler_spm_parameters_t),
         .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
         .value = 1200};
-    rocprofiler_spm_parameters_t* parameters[] = {&parameter};
+    rocprofiler_spm_parameters_t*   parameters[] = {&parameter};
     rocprofiler_counter_config_id_t created{.handle = 0};
     KR_CHECK(rocprofiler_spm_create_counter_config(
         agent, want.data(), want.size(), parameters, 1, &created));
@@ -164,12 +164,13 @@ int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
     KR_CHECK(rocprofiler_create_context(&g_replay_ctx));
-    KR_CHECK(rocprofiler_configure_callback_tracing_service(g_replay_ctx,
-                                                            ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
-                                                            nullptr,
-                                                            0,
-                                                            kernel_replay_cb,
-                                                            nullptr));
+    KR_CHECK(
+        rocprofiler_configure_callback_tracing_service(g_replay_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                                                       nullptr,
+                                                       0,
+                                                       kernel_replay_cb,
+                                                       nullptr));
 
     KR_CHECK(rocprofiler_create_context(&g_counters_ctx));
     KR_CHECK(rocprofiler_configure_callback_dispatch_counting_service(

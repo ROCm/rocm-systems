@@ -38,11 +38,11 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <algorithm>
 #include <vector>
 
 using namespace rocprofiler;
@@ -121,7 +121,8 @@ size_t
 snapshot_footprint_bytes(const msnp::device_snapshot_t& snap)
 {
     size_t total = 0;
-    for(const auto& block : snap.blocks) total += block.host_copy.size();
+    for(const auto& block : snap.blocks)
+        total += block.host_copy.size();
     return total;
 }
 
@@ -150,9 +151,9 @@ max_wall_time_margin()
 
 struct snap_restore_timing_t
 {
-    double snap_seconds     = 0.0;
-    double restore_seconds  = 0.0;
-    size_t footprint_bytes  = 0;
+    double snap_seconds    = 0.0;
+    double restore_seconds = 0.0;
+    size_t footprint_bytes = 0;
 };
 
 snap_restore_timing_t
@@ -174,10 +175,8 @@ measure_snap_restore_once(hsa_agent_t agent, float* buffer, int n_elems)
 
     snap_restore_timing_t out{};
     out.footprint_bytes = snapshot_footprint_bytes(snapshot);
-    out.snap_seconds =
-        std::chrono::duration<double>(snap_end - snap_start).count();
-    out.restore_seconds =
-        std::chrono::duration<double>(restore_end - restore_start).count();
+    out.snap_seconds    = std::chrono::duration<double>(snap_end - snap_start).count();
+    out.restore_seconds = std::chrono::duration<double>(restore_end - restore_start).count();
     return out;
 }
 
@@ -201,13 +200,10 @@ void
 log_timing(const char* label, const snap_restore_timing_t& t)
 {
     const double restore_gbps =
-        t.restore_seconds > 0.0
-            ? static_cast<double>(t.footprint_bytes) / t.restore_seconds / 1e9
-            : 0.0;
+        t.restore_seconds > 0.0 ? static_cast<double>(t.footprint_bytes) / t.restore_seconds / 1e9
+                                : 0.0;
     const double snap_gbps =
-        t.snap_seconds > 0.0
-            ? static_cast<double>(t.footprint_bytes) / t.snap_seconds / 1e9
-            : 0.0;
+        t.snap_seconds > 0.0 ? static_cast<double>(t.footprint_bytes) / t.snap_seconds / 1e9 : 0.0;
     // Emitted for CI log collection (local/paper analysis only — not checked into PRs).
     std::printf("[kr-perf] %s footprint_mb=%.2f snap_ms=%.3f restore_ms=%.3f "
                 "restore_gbps=%.2f snap_gbps=%.2f\n",
@@ -241,8 +237,7 @@ run_bandwidth_test(size_t ballast_bytes, const char* label)
     }
 
     constexpr int kIterations = 3;
-    const auto    timing =
-        measure_snap_restore_mean(agent, buffer, n_elems, kIterations);
+    const auto    timing      = measure_snap_restore_mean(agent, buffer, n_elems, kIterations);
     ASSERT_GT(timing.footprint_bytes, 0U) << "snap/restore measurement failed";
     log_timing(label, timing);
 
@@ -258,12 +253,11 @@ run_bandwidth_test(size_t ballast_bytes, const char* label)
 
     // Absolute wall-time guards (catch blow-ups without assuming snap is pure DMA).
     const double total_seconds = timing.snap_seconds + timing.restore_seconds;
-    const double ballast_mb =
-        static_cast<double>(timing.footprint_bytes) / (1024.0 * 1024.0);
+    const double ballast_mb    = static_cast<double>(timing.footprint_bytes) / (1024.0 * 1024.0);
     const double max_total_seconds =
-        (static_cast<double>(timing.footprint_bytes) / (min_restore_gbps * 1e9))
-            * max_wall_time_margin()
-        + 0.10 + ballast_mb * 0.002;  // snap inventory/module-var discovery allowance
+        (static_cast<double>(timing.footprint_bytes) / (min_restore_gbps * 1e9)) *
+            max_wall_time_margin() +
+        0.10 + ballast_mb * 0.002;  // snap inventory/module-var discovery allowance
     EXPECT_LE(total_seconds, max_total_seconds)
         << label << ": snap+restore wall time " << total_seconds << " s exceeds ceiling "
         << max_total_seconds << " s";
@@ -336,8 +330,8 @@ TEST(kernel_replay_snapshot, snap_cost_scales_sublinearly_with_footprint)
     // 4x footprint (32->128 MB ballast) must not blow up faster than 6x wall time.
     // Fixed HIP-runtime inventory adds a constant offset, so the ratio is capped above 4.
     EXPECT_LT(large_total / small_total, 6.0)
-        << "snap+restore scaled super-linearly: small=" << small_total << " s large="
-        << large_total << " s ratio=" << (large_total / small_total);
+        << "snap+restore scaled super-linearly: small=" << small_total << " s large=" << large_total
+        << " s ratio=" << (large_total / small_total);
 
     ASSERT_EQ(hipFree(small), hipSuccess);
     ASSERT_EQ(hipFree(large), hipSuccess);
@@ -348,7 +342,7 @@ TEST(kernel_replay_snapshot, snap_restore_wall_time_stable_across_iterations)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
-    const auto   agent = gpu_agent();
+    const auto       agent    = gpu_agent();
     constexpr size_t kBallast = 32U * 1024U * 1024U;
     const int        n_elems  = static_cast<int>(kBallast / sizeof(float));
     float*           buffer   = nullptr;
@@ -362,12 +356,12 @@ TEST(kernel_replay_snapshot, snap_restore_wall_time_stable_across_iterations)
         ASSERT_GT(w.footprint_bytes, 0U);
     }
 
-    constexpr int kSamples = 5;
+    constexpr int kSamples  = 5;
     double        min_total = 1e9;
     double        max_total = 0.0;
     for(int i = 0; i < kSamples; ++i)
     {
-        const auto t     = measure_snap_restore_once(agent, buffer, n_elems);
+        const auto   t   = measure_snap_restore_once(agent, buffer, n_elems);
         const double tot = t.snap_seconds + t.restore_seconds;
         ASSERT_GT(t.footprint_bytes, 0U);
         min_total = std::min(min_total, tot);
@@ -387,7 +381,7 @@ TEST(kernel_replay_snapshot, snap_restore_repeatable_from_one_snapshot)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
 
-    const auto   agent = gpu_agent();
+    const auto       agent    = gpu_agent();
     constexpr size_t kBallast = 16U * 1024U * 1024U;
     const int        n_elems  = static_cast<int>(kBallast / sizeof(float));
     float*           buffer   = nullptr;
@@ -409,9 +403,8 @@ TEST(kernel_replay_snapshot, snap_restore_repeatable_from_one_snapshot)
         sync_ok();
         const auto restore_start = std::chrono::steady_clock::now();
         ASSERT_TRUE(msnp::restore(snapshot));
-        const auto restore_end = std::chrono::steady_clock::now();
-        const double restore_s =
-            std::chrono::duration<double>(restore_end - restore_start).count();
+        const auto   restore_end = std::chrono::steady_clock::now();
+        const double restore_s = std::chrono::duration<double>(restore_end - restore_start).count();
         const double restore_gbps =
             restore_s > 0.0
                 ? static_cast<double>(snapshot_footprint_bytes(snapshot)) / restore_s / 1e9

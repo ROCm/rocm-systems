@@ -26,7 +26,10 @@ def parse_marker(text: str) -> dict:
     for line in text.splitlines():
         m = _MARKER.search(line)
         if m:
-            return {k: float(v) if k == "wall_ms" else int(v) for k, v in m.groupdict().items()}
+            return {
+                k: float(v) if k == "wall_ms" else int(v)
+                for k, v in m.groupdict().items()
+            }
     raise AssertionError("missing [kr-perf] wall_ms marker in test output")
 
 
@@ -34,15 +37,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--log", required=True, help="ctest stdout capture")
     ap.add_argument("--passes", type=int, required=True)
-    ap.add_argument("--baseline-log", help="optional 1-pass baseline log for scaling check")
+    ap.add_argument(
+        "--baseline-log", help="optional 1-pass baseline log for scaling check"
+    )
     ap.add_argument("--max-scaling-ratio", type=float, default=8.0)
     args = ap.parse_args()
 
     log_text = open(args.log, encoding="utf-8").read()
     m = parse_marker(log_text)
-    assert m["counter"] == m["launches"], (
-        f"counter {m['counter']} != launches {m['launches']} (restore failure)"
-    )
+    assert (
+        m["counter"] == m["launches"]
+    ), f"counter {m['counter']} != launches {m['launches']} (restore failure)"
 
     max_ms = model_max_ms(int(m["ballast_mb"]), int(m["launches"]), args.passes)
     assert m["wall_ms"] <= max_ms, (
