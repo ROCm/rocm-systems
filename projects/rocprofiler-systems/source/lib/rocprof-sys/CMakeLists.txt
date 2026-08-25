@@ -71,7 +71,7 @@ target_link_libraries(
 # The PMC objects (which reference hipFileGetStatsL3) are consumed via
 # $<TARGET_OBJECTS>, so link libhipfile onto the final libraries explicitly to
 # make it a DT_NEEDED dependency.
-if(ROCPROFSYS_BUILD_HIPFILE)
+if(ROCPROFSYS_HIPFILE_SUPPORT)
     target_link_libraries(
         rocprofiler-systems-static-library
         PRIVATE rocprofiler-systems::rocprofiler-systems-hipfile-backend
@@ -117,7 +117,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-binary
 )
 
-if(ROCPROFSYS_BUILD_HIPFILE)
+if(ROCPROFSYS_HIPFILE_SUPPORT)
     target_link_libraries(
         rocprofiler-systems-shared-library
         PRIVATE rocprofiler-systems::rocprofiler-systems-hipfile-backend

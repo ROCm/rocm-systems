@@ -90,36 +90,49 @@ Build support
 There are two independent switches, one for each question:
 
 * ``ROCPROFSYS_BUILD_HIPFILE`` (CMake option) decides whether hipFile support is
-  compiled into the profiler at all.
+  compiled into the profiler at all. It is tri-state: ``AUTO`` (the default),
+  ``ON``, or ``OFF``.
 * ``ROCPROFSYS_USE_HIPFILE`` (environment variable or configuration file setting)
   decides whether a given run collects hipFile samples. See
   `Enabling collection at run time`_.
 
-``ROCPROFSYS_BUILD_HIPFILE`` defaults to ``ON``, so hipFile support is built
-automatically whenever a suitable hipFile package is present. Building it in costs
-nothing at run time unless collection is also enabled. To exclude the feature from a
-package entirely, configure with:
+``ROCPROFSYS_BUILD_HIPFILE`` defaults to ``AUTO``, so hipFile support is built
+whenever a suitable hipFile package is present and skipped (with a status
+message) when it is not. To require the feature (failing configure if hipFile
+is missing or older than ``ROCPROFSYS_HIPFILE_MIN_VERSION``, 0.5.0), pass
+``ON``. To exclude the feature from a package entirely, configure with
+``OFF``:
 
 .. code-block:: shell
 
    cmake -D ROCPROFSYS_BUILD_HIPFILE=OFF <other options> <path/to/source>
 
-The build requires hipFile 0.5.0 or later. A package older than that is treated the
-same as no package at all: the option is disabled and the rest of the profiler builds
-normally, because the per-GPU statistics API does not exist to build against. Because
-the option demotes itself rather than failing, a missing or too-old hipFile never
-breaks the build.
+The build requires hipFile 0.5.0 or later. With the default ``AUTO``, a package
+older than that is treated the same as no package at all: support is left off
+and the rest of the profiler builds normally, because the per-GPU statistics
+API does not exist to build against. ``ON`` does not demote; CMake stops and
+names the version it found (if any), the version required, and how to point it
+at a different prefix.
 
-The version is also re-checked at run time, against the ``libhipfile`` actually loaded
-into the process. When the loaded runtime is too old, the profiler logs a warning
-naming both versions and emits no hipFile tracks, leaving the rest of the profile
-unaffected.
+When the feature is compiled in, the profiler links ``libhipfile`` the same way it
+links AMD SMI: ``libhipfile.so.0`` must be present when the profiler starts, even if
+``ROCPROFSYS_USE_HIPFILE`` is off. Official ROCm 10.1 and later packages ship a
+matching hipFile with the profiler. Source builds must run against the same ROCm
+prefix they were configured with. A missing ``libhipfile``, or an older hipFile that
+still uses SONAME ``libhipfile.so.0`` but does not export the stats API (for example
+0.4), can prevent the profiler from loading at all. Build with
+``ROCPROFSYS_BUILD_HIPFILE=OFF`` if that dependency is not acceptable.
+
+If a new enough ``libhipfile`` does load, the version is re-checked at run time.
+When it is too old, the profiler logs a warning and emits no hipFile tracks.
 
 To point CMake at a specific hipFile installation, pass
 ``-Dhipfile_DIR=<prefix>/lib/cmake/hipfile`` or add the installation prefix to
 ``CMAKE_PREFIX_PATH``. The configure output reports which way it resolved, either
 ``hipFile stats support enabled`` with the version it found, or
-``hipFile stats support disabled`` with the reason.
+``hipFile stats support disabled`` with the reason. The derived result is the
+CMake variable ``ROCPROFSYS_HIPFILE_SUPPORT``; ``ROCPROFSYS_BUILD_HIPFILE`` keeps
+the value you passed (``AUTO``, ``ON``, or ``OFF``).
 
 Enabling collection at run time
 ===============================
@@ -128,9 +141,10 @@ Even in a build that includes hipFile support, collection is off until you ask f
 it: ``ROCPROFSYS_USE_HIPFILE`` defaults to ``OFF``. Enable it by setting
 ``ROCPROFSYS_USE_HIPFILE=ON``. Collection runs on the process-sampling thread, so
 process sampling must also be enabled (it is on by default). If it is off, the
-profiler logs a warning and records no hipFile telemetry. In a build made with
-``ROCPROFSYS_BUILD_HIPFILE=OFF`` the collector is not present and the settings are
-not registered. Their presence in ``rocprof-sys-avail --settings`` is a direct
+profiler logs a warning and records no hipFile telemetry. When hipFile support
+is not compiled in (``ROCPROFSYS_BUILD_HIPFILE=OFF``, or ``AUTO`` with no new
+enough package) the collector is not present and the settings are not
+registered. Their presence in ``rocprof-sys-avail --settings`` is a direct
 indicator of compile-time support:
 
 .. code-block:: shell
@@ -218,10 +232,12 @@ Troubleshooting
 ===============
 
 * **No hipFile tracks in the output**: Confirm that the profiler was built with
-  ``ROCPROFSYS_BUILD_HIPFILE=ON`` (check the configure output for
-  ``hipFile stats support enabled``), that ``ROCPROFSYS_USE_HIPFILE=ON`` is set at
-  run time, and that the target application actually performs hipFile I/O. If the
-  application never calls into hipFile, no statistics are produced.
+  hipFile support (check the configure output for ``hipFile stats support enabled``,
+  or that ``ROCPROFSYS_HIPFILE_SUPPORT`` is ON), that ``ROCPROFSYS_USE_HIPFILE=ON``
+  is set at run time, and that the target application actually performs hipFile
+  I/O. If the application never calls into hipFile, no statistics are produced.
+  ``rocprof-sys-avail --settings | grep HIPFILE`` is empty in a build that left
+  the collector out.
 * **Counters are zero**: Verify that process sampling is enabled and that the
   workload runs long enough to be sampled at least once during active I/O.
 * **A track has gaps**: Samples taken while hipFile could not be queried are
