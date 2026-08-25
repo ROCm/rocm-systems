@@ -59,6 +59,7 @@ struct library_info
     library_info(std::string_view sym_name, void* sym);
 
     std::string as_string() const;
+                operator bool() const { return (handle != nullptr || !fname.empty()); }
     friend bool operator==(const library_info& lhs, const library_info& rhs);
 
     std::string fname  = {};
@@ -97,14 +98,17 @@ library_info::as_string() const
 bool
 operator==(const library_info& lhs, const library_info& rhs)
 {
-    // if both handles are resolved, compare the handles
+    // if both handles are resolved, compare only the handles
     if(lhs.handle != nullptr && rhs.handle != nullptr) return (lhs.handle == rhs.handle);
 
-    // if both have names, compare the file names
+    // if both have names, compare the file names as a fallback
     if(!lhs.fname.empty() && !rhs.fname.empty()) return (lhs.fname == rhs.fname);
 
-    // comparison not possible, return false
-    return false;
+    // if neither are populated, this should be a warning or a failure in CI.
+    ROCP_CI_LOG_IF(WARNING, !lhs && !rhs)
+        << "Comparing two empty rocprofiler-sdk library_info objects";
+
+    return std::tie(lhs.handle, lhs.fname) == std::tie(rhs.handle, rhs.fname);
 }
 
 auto
@@ -137,14 +141,12 @@ struct lifetime
 lifetime::lifetime()
 {
     registration::init_logging();
-    local_shared_library_resolver();  // effectively a no-op but references the symbol to prevent
-                                      // unused func warnings, etc.
 
     if(common::get_env("ROCPROFILER_LIBRARY_CTOR", false))
     {
         auto _this = get_this_library_info();
         auto _glob = get_global_library_info();
-        if(_this == _glob)
+        if(_this == _glob || (_this && !_glob))
         {
             ROCP_INFO << "Initializing rocprofiler-sdk library...";
             registration::initialize();
@@ -158,6 +160,9 @@ lifetime::lifetime()
                 _this.as_string(),
                 _glob.as_string());
         }
+        // this is needed when one of the rocprofiler-sdk libraries doesn't have the _this == _glob
+        // check
+        common::set_env("ROCPROFILER_LIBRARY_CTOR", false, 1);
     }
 }
 
