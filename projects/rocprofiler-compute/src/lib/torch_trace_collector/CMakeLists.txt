@@ -28,11 +28,11 @@ else()
     set(_ttc_unavailable_severity STATUS)
 endif()
 
-# Interpreter used to locate Torch.
+# Interpreter and extension headers used to locate Torch and build the pybind module.
 if(TORCH_TRACE_PYTHON)
     set(Python3_EXECUTABLE "${TORCH_TRACE_PYTHON}")
 endif()
-find_package(Python3 COMPONENTS Interpreter QUIET)
+find_package(Python3 COMPONENTS Interpreter Development.Module QUIET)
 if(NOT Python3_FOUND)
     message(
         ${_ttc_unavailable_severity}
@@ -41,9 +41,15 @@ if(NOT Python3_FOUND)
     )
     return()
 endif()
+if(NOT Python3_Development.Module_FOUND)
+    message(
+        ${_ttc_unavailable_severity}
+        "torch_trace_collector: no Python3 development headers available for "
+        "${Python3_EXECUTABLE}; the extension is not built."
+    )
+    return()
+endif()
 set(_ttc_python "${Python3_EXECUTABLE}")
-set(_py_major "${Python3_VERSION_MAJOR}")
-set(_py_minor "${Python3_VERSION_MINOR}")
 
 set(_ttc_torch_config_dir "")
 foreach(_ttc_site_packages IN LISTS Python3_SITEARCH Python3_SITELIB)
@@ -68,12 +74,9 @@ endif()
 message(STATUS "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}")
 
 # Artifact name: torch_trace_collector-<torch-version>.so.
-# Prefer TORCH_TRACE_TORCH_VERSION when set; otherwise use Torch_VERSION.
-if(TORCH_TRACE_TORCH_VERSION)
-    set(_torch_version "${TORCH_TRACE_TORCH_VERSION}")
-else()
-    set(_torch_version "${Torch_VERSION}")
-endif()
+# Match the loader, which uses torch.__version__ without a local +... suffix.
+set(_torch_version "${Torch_VERSION}")
+string(REGEX REPLACE "\\+.*$" "" _torch_version "${_torch_version}")
 if(NOT _torch_version)
     message(
         ${_ttc_unavailable_severity}
@@ -92,48 +95,6 @@ message(
     "torch_trace_collector: building against ${_ttc_python} "
     "(torch ${_torch_version})"
 )
-
-# Pin Python3 to this interpreter for this directory only. FindPython3
-# records its result in private _Python3_* cache entries that outlive this
-# directory, so they are saved here and restored after the call below.
-set(_ttc_saved_python_vars "")
-get_cmake_property(_ttc_cache_vars CACHE_VARIABLES)
-foreach(_var IN LISTS _ttc_cache_vars)
-    if(_var MATCHES "^_Python3_")
-        get_property(_ttc_saved_${_var} CACHE ${_var} PROPERTY VALUE)
-        list(APPEND _ttc_saved_python_vars ${_var})
-    endif()
-endforeach()
-
-set(Python3_EXECUTABLE "${_ttc_python}")
-find_package(
-    Python3
-    ${_py_major}.${_py_minor}
-    REQUIRED
-    COMPONENTS Interpreter Development.Module
-)
-
-foreach(_var IN LISTS _ttc_saved_python_vars)
-    set(${_var} "${_ttc_saved_${_var}}" CACHE INTERNAL "")
-endforeach()
-get_cmake_property(_ttc_cache_vars CACHE_VARIABLES)
-foreach(_var IN LISTS _ttc_cache_vars)
-    if(_var MATCHES "^_Python3_")
-        list(FIND _ttc_saved_python_vars ${_var} _index)
-        if(_index EQUAL -1)
-            unset(${_var} CACHE)
-        endif()
-    endif()
-endforeach()
-
-get_property(_ttc_python_restored CACHE _Python3_EXECUTABLE PROPERTY VALUE)
-if(NOT "${_ttc_python_restored}" STREQUAL "${_ttc_saved__Python3_EXECUTABLE}")
-    message(
-        FATAL_ERROR
-        "torch_trace_collector: _Python3_EXECUTABLE was not restored (expected "
-        "'${_ttc_saved__Python3_EXECUTABLE}', got '${_ttc_python_restored}')."
-    )
-endif()
 
 find_library(
     ROCTX_LIB
