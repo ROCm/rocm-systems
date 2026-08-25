@@ -53,9 +53,8 @@ kernel_tracing_active()
 bool
 any_consumer_active(rocprofiler_agent_id_t agent)
 {
-    return kernel_tracing_active() || counters::is_any_active() ||
-           thread_trace::is_any_active() || spm::is_any_active() ||
-           pc_sampling::is_configured_on_agent(agent);
+    return kernel_tracing_active() || counters::is_any_active() || thread_trace::is_any_active() ||
+           spm::is_any_active() || pc_sampling::is_configured_on_agent(agent);
 }
 
 bool

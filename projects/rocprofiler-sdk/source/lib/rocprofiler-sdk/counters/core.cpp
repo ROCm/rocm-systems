@@ -160,8 +160,8 @@ start_context(const context::context* ctx)
     });
 
     // The queue-callback registration that used to follow is gone: WriteInterceptor now calls
-    // counters::write_hook directly. Starting the callback thread on the first enable is not part of
-    // that, so it stays.
+    // counters::write_hook directly. Starting the callback thread on the first enable is not part
+    // of that, so it stays.
     if(!already_enabled) callback_thread_start();
 }
 

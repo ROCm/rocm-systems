@@ -1025,13 +1025,13 @@ TEST(spm_core, write_hook_is_inert_with_no_active_context)
 
     ASSERT_FALSE(spm::is_any_active()) << "no SPM context has been started";
 
-    const auto& agent = agents.begin()->second;
+    const auto&    agent = agents.begin()->second;
     hsa::FakeQueue fq(agent, rocprofiler_queue_id_t{.handle = 0});
 
-    hsa::rocprofiler_packet                          pkt{};
+    hsa::rocprofiler_packet                           pkt{};
     hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
-    context::correlation_id                          corr_id{};
-    auto                                             user_data = rocprofiler_user_data_t{.value = 0};
+    context::correlation_id                           corr_id{};
+    auto user_data = rocprofiler_user_data_t{.value = 0};
 
     hsa::inst_pkt_t inst_pkt{};
     bool            is_serialized = false;
@@ -1069,13 +1069,13 @@ TEST(spm_core, write_hook_tags_packets_with_the_spm_client_id)
 
     auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
-    const auto& agent = agents.begin()->second;
+    const auto&    agent = agents.begin()->second;
     hsa::FakeQueue fq(agent, rocprofiler_queue_id_t{.handle = 0});
 
-    hsa::rocprofiler_packet                          pkt{};
+    hsa::rocprofiler_packet                           pkt{};
     hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
-    context::correlation_id                          corr_id{};
-    auto                                             user_data = rocprofiler_user_data_t{.value = 0};
+    context::correlation_id                           corr_id{};
+    auto user_data = rocprofiler_user_data_t{.value = 0};
 
     hsa::inst_pkt_t inst_pkt{};
     bool            is_serialized = false;
@@ -1084,8 +1084,7 @@ TEST(spm_core, write_hook_tags_packets_with_the_spm_client_id)
 
     for(const auto& entry : inst_pkt)
     {
-        EXPECT_EQ(entry.second, hsa::queue_hooks::SPM_CLIENT_ID)
-            << "SPM must tag its own packets";
+        EXPECT_EQ(entry.second, hsa::queue_hooks::SPM_CLIENT_ID) << "SPM must tag its own packets";
     }
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
