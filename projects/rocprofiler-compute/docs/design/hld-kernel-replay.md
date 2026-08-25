@@ -287,19 +287,18 @@ flowchart TD
 
 ### The pass-count decision
 
-Kernel and dispatch filters establish whether the dispatch is admitted before counter-bucket
+Kernel and dispatch filters establish whether the dispatch is profiled before counter-bucket
 availability is considered. An admitted zero-bucket request bypasses kernel replay and
-follows the existing path. For an admitted counter request, `pass_count_cb` determines the
+follows the existing path. For an admitted kernel, `pass_count_cb` determines the
 pass count exactly once before any replay pass.
 
 ```mermaid
 flowchart TD
-    Observe["Dispatch-counting service assigns<br/>per-kernel logical occurrence once"]
     Kernel{"Kernel admitted by<br/>the kernel filter?"}
-    Range{"Per-kernel occurrence admitted by<br/>the dispatch range?"}
-    Filtered["Return 1 as filtered<br/>select no counter profile"]
+    Range{"Dispatch admitted by<br/>the dispatch filter?"}
+    Filtered["Do not profile <br/> dispatched kernel"]
     Request{"Counter request has<br/>at least one bucket?"}
-    Zero["Bypass replay counter adapter<br/>use existing non-counter path"]
+    Zero["Bypass kernel replay<br/>use existing non-counter path"]
     Gate{"Dispatch reaches<br/>the replay gate?"}
     Ordinary["Execute once outside replay<br/>retain ordinary dispatch handling"]
     Start["pass_count_cb runs once"]
@@ -311,7 +310,6 @@ flowchart TD
     N["Return N<br/>one counter bucket per pass"]
     NPlus["Return N+1<br/>N counter passes, then one<br/>counter-disabled PC sampling pass"]
 
-    Observe --> Kernel
     Kernel -- no --> Filtered
     Kernel -- yes --> Range
     Range -- no --> Filtered
@@ -328,116 +326,70 @@ flowchart TD
     Size -- more than one --> N
 ```
 
-| Returns | When | What the execution selects |
+| Actual kernel dispatch | When | What the execution selects |
 | --- | --- | --- |
-| `1` — filtered | A confirmed filter miss — the kernel or its per-kernel logical occurrence is excluded. | Nothing. The SDK takes its ordinary path, deliberately paying no snapshot or restore. |
-| `1` — admitted | The dispatch is admitted and its agent's profile vector contains exactly one bucket. | The ordinary execution selects the sole profile. This is a complete one-bucket result, not a filter outcome. |
+| `1` — filtered | A confirmed filter miss — the kernel or dispatch is excluded. | Not profiled. |
+| `1` — admitted | The dispatch is admitted and its agent's profile vector contains exactly one bucket, no PC sampling. | SDK selects the sole profile and produces a complete one-bucket result. |
 | *N*, where *N* > 1 | Admitted, no PC sampling. *N* is the size of the profile vector for this dispatch's agent. | Pass *i* selects entry *i* of that vector. |
 | *N*+1 | Admitted, PC sampling selected. *N* is the non-zero size of the profile vector. | Passes 0 through *N*−1 map one-to-one onto the vector. Pass *N* selects no counter profile and runs counter-disabled. |
-| *(fatal)* | The dispatch passed both filters and requested counters, but the agent is missing or its expected profile vector is empty. | Nothing. Diagnose the agent/profile mismatch and fail the whole profile. |
 
-Three consequences worth stating plainly:
+### Output and dispatch ID
 
-- **Admission is state, not a numeric inference.** Both a filtered dispatch and an admitted
-  single-bucket dispatch return `1`, but only the admitted case selects a profile and participates in
-  completeness checking. The adapter records that distinction explicitly.
-- **Filters run before counter admission.** A kernel or dispatch-range miss returns `1` as filtered
-  before the bucket and profile-vector checks. Missing profile state is fatal only for a dispatch that
-  passed both filters and requested counters.
-- **`1` is never a fallback for a missing expected profile.** Returning it for an agent/profile
-  mismatch would execute the dispatch once, collect at most one bucket, and present incomplete data
-  as a success.
-- **The logical index remains owned by dispatch observation.** The dispatch-counting service advances
-  the 1-based index once per logical occurrence of each kernel, including submissions the replay gate
-  cannot replay. `pass_count_cb` only reads that stable index, and replay passes never consume another
-  occurrence.
+A single dispatch produces one consolidated counter result. Before it is
+written, every pass for a logical dispatch must be collapsed.
 
-Completeness checks apply only to admitted counter requests. A dispatch excluded on purpose produces
-no counter set, and that is not an incomplete replay result. After both filters admit a dispatch, a
-zero-bucket request bypasses the adapter and is likewise not a missing or incomplete replay result.
+| Step | What happens |
+| --- | --- |
+| 1. Correlate | Group the pass rows by logical-dispatch ID. |
+| 2. Normalize timestamps | Give the group one canonical start/end pair using pass 0's logical duration. |
+| 3. Hand off | The existing identity and pivot contracts see a single set per dispatch. |
 
-### Output and dispatch identity
-
-One kernel-replay counter invocation produces one consolidated counter result. Before it is
-written, every pass row for a logical dispatch must collapse to one identity.
-
-| Step | What happens | If skipped |
-| --- | --- | --- |
-| 1. Correlate | Group the pass rows by replay-stable logical-dispatch identity. | Nothing ties the passes of one dispatch together. |
-| 2. Normalize timestamps | Give the group one canonical start/end pair using pass 0's logical duration. | The timestamp-bearing identity key can hand every pass its own `Dispatch_ID`, and counter-derived duration summaries can retain replay-pass timing. |
-| 3. Hand off | The existing identity and pivot contracts see one row set per dispatch. Top Stats and the dispatch information output are generated from this consolidated counter data. | Analysis pivots each single-bucket group separately, so no row carries the complete metric inputs; counter-derived dispatch counts and durations can also be multiplied. |
-
-- Pass identity may survive transiently for normalization and diagnostics; it does not need to reach
-  the counter result output. Non-replay identity behavior is untouched.
-- Application replay achieves the same alignment differently: each workload invocation restarts
-  positional ID assignment from scratch, even though timestamps differ between runs. It never
-  literally rewrites timestamps. Kernel replay needs that alignment *inside* a single invocation.
+Pass identity survive transiently for normalization and diagnostics but it does not reach
+the counter result output. Non-replay identity behavior is untouched.
 
 ### Co-active service composition
 
 | Service or output | Under kernel replay | Mechanism |
 | --- | --- | --- |
 | Kernel dispatch tracing | One trace record per logical dispatch, from pass 0 | The native tool owns the context, so it locally stops kernel tracing for passes 1 through *N*−1. |
-| Top Stats and dispatch information | One logical counter dispatch and its pass-0 duration | These outputs consume the consolidated counter data from Output and dispatch identity, not the kernel-dispatch trace stream. |
+| Top Stats and dispatch information | One logical counter dispatch and its pass-0 duration | These outputs consume the consolidated dispatch data. |
 | Code-object tracing | Unchanged | Load-time only. Replay never multiplies it. |
 | Marker / ROCTx | Emitted once, spans all passes | Duration semantics are an open question. |
 | PC sampling | One extra pass, appended after the counter passes | Runs counter-disabled. |
-| Roofline | Unchanged | Picks up the selected mode through the ordinary counter path. |
-
-- **Why pass 0.** It is the only pass running against pristine pre-snapshot state. Every later pass
-  starts immediately after a full restore of the tracked footprint, so its timing says more about
-  replay overhead than about the dispatch.
-- **Why suppress at the source.** Nothing has to reconstruct which trace records belonged to the same
-  logical dispatch, because the extra records never exist. That makes trace suppression both cheap
-  and exact. It is independent of counter-row consolidation: Top Stats and dispatch information remain
-  correct only when the Output and dispatch identity path also collapses the counter rows.
+| Roofline | Unchanged |  |
 
 ### Mode and option compatibility
 
 `--replay-mode` accepts `application` and `kernel`. Application replay stays the default, CLI help
-flags kernel replay as experimental, and the selected mode travels down to the kernel-replay adapter.
-This does not turn `--iteration-multiplexing` into a mode selector.
+flags kernel replay as experimental.
 
-| Option or condition | With kernel replay | Reason |
-| --- | --- | --- |
-| `--iteration-multiplexing` | Rejected | Both strategies claim the same per-dispatch passes. Not a backend restriction — iteration multiplexing needs the native tool too. |
+| Option or condition | With kernel replay |
+| --- | --- |
+| `--iteration-multiplexing` | Rejected | 
 | `--attach-pid` | Rejected | Live attach cannot open a replay window over an already-running process. |
-| `--no-native-tool`, `rocprofv3` backend | Rejected | Kernel replay needs the SDK contexts only the native tool owns. |
-| `--pc-sampling` | Accepted, *N*+1 passes | Agent-wide, and it does not consume the localized context override. It takes a counter-disabled pass of its own. |
-| `--roof-only`, `--set`, `--block` | Accepted, unchanged | Ordinary counter selection. |
-| Multi-rank | Accepted, with a kernel-replay-specific diagnostic | Warn that replaying one rank's collective-bearing dispatch while peers do not may desynchronize the collective. Do not reuse the application-replay warning about multiple workload launches or recommend iteration multiplexing. Open Question 1 remains unresolved. |
-| Heterogeneous agents | Rejected | Kernel replay needs a homogeneous agent configuration. |
-
-Kernel mode needs the native tool, but the conditions that supply one do not all become
-knowable at the same moment, so rejection happens in two layers:
-
-| Layer | Decidable from | Rejected when | Workload directory left behind? |
-| --- | --- | --- | --- |
-| **Flag conflict** | The arguments alone | Kernel replay selected while the native tool is declined | No — rejected before discovery and before the directory is created |
-| **Capability failure** | Discovery, once it has resolved the ROCm version and native library | Unsupported ROCm version, or a library that cannot be resolved | Yes — rejected later, but still before the workload runs |
-
-Both are hard errors. Iteration multiplexing and live attach are likewise rejected before profiling
-starts.
+| `--no-native-tool`, `rocprofv3` backend | Rejected | 
+| `--pc-sampling` | Accepted, *N*+1 passes |
+| `--roof-only`, `--set`, `--block` | Accepted, unchanged |
+| Multi-rank | Accepted, with a kernel-replay-specific diagnostic |
 
 ### Failure behavior
 
 Every failure below rejects partial replay data. None falls back to application replay, and none
 quietly turns a multi-bucket request into a single pass.
 
-| Condition | Required behavior | Covers |
-| --- | --- | --- |
-| Native tool declined while kernel replay is selected | Hard error from the argument combination alone, before discovery. | FR-3 |
-| Native tool unavailable: unsupported ROCm version or unresolvable library | Hard error after discovery, naming which of the two failed. | FR-3 |
-| SDK below the supported version floor | Hard error stating the required version. Distinct from the ROCm version the native tool needs, so the diagnostic must say which one is unmet. The numeric floor is pending upstream merge. | FR-15 |
-| Iteration multiplexing or live attach selected with kernel replay | Hard error before profiling starts. | FR-11 |
-| Missing or unexpectedly empty per-agent profile vector when counters were requested | Diagnose the agent/profile mismatch and reject the profile. Never return `1` as a fallback. A zero-bucket request bypasses the replay adapter before this point and is not this failure. | FR-18, NFR-2 |
-| SDK declines the device-memory snapshot | Abandon the entire profile without retry, reject incomplete output, and recommend application replay. | FR-16, NFR-2 |
-| Upstream drain timeout or process abort | Abort the failed run without recovery. | FR-17 |
+| Condition | Required behavior |
+| --- | --- |
+| Native tool not selected while kernel replay is selected | Hard error from the argument combination alone, before discovery. |
+| Native tool unavailable: unsupported ROCm version or unresolvable library | Hard error after discovery, naming which of the two failed. |
+| SDK below the supported version floor | Hard error stating the required version. |
+| Iteration multiplexing or live attach selected with kernel replay | Hard error before profiling starts. |
+| Missing or unexpectedly empty per-agent profile vector when counters were requested | Hard error describing the profile mismatch. |
+| SDK declines the device-memory snapshot | Abandon the entire profile without retry, reject incomplete output, and recommend application replay. |
+| Upstream drain timeout or process abort | Abort the failed run. |
 
-One wrinkle: a declined snapshot can currently leave a successful process status behind, so the
+One wrinkle: a declined snapshot currently leave a successful process status behind, so the
 required outcome cannot lean on subprocess failure alone. Classifying an upstream warning string is
-the signal available today, and it is a fragile one. A structured detection mechanism remains an
-open question.
+the signal available today. A structured detection mechanism remains an open question.
 
 ## Implementation phases
 
