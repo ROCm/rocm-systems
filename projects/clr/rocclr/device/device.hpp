@@ -1615,9 +1615,6 @@ class Isa {
   /// @returns This Isa's stepping version.
   uint32_t versionStepping() const { return versionStepping_; }
 
-  /// @returns This Isa's number of SIMDs per CU.
-  uint32_t simdPerCU() const { return simdPerCU_; }
-
   /// @returns This Isa's
   uint32_t simdWidth() const { return simdWidth_; }
 
@@ -1626,9 +1623,6 @@ class Isa {
 
   /// @returns This Isa's memory channel bank width.
   uint32_t memChannelBankWidth() const { return memChannelBankWidth_; }
-
-  /// @returns This Isa's local memory size per CU.
-  uint32_t localMemSizePerCU() const { return localMemSizePerCU_; }
 
   /// @returns This Isa's number of banks of local memory.
   uint32_t localMemBanks() const { return localMemBanks_; }
@@ -1656,9 +1650,9 @@ class Isa {
  private:
   constexpr Isa(const char* targetId, bool runtimeRocSupported, bool runtimePalSupported,
                 uint32_t versionMajor, uint32_t versionMinor, uint32_t versionStepping,
-                Feature sramecc, Feature xnack, uint32_t simdPerCU, uint32_t simdWidth,
+                Feature sramecc, Feature xnack, uint32_t simdWidth,
                 uint32_t simdInstructionWidth, uint32_t memChannelBankWidth,
-                uint32_t localMemSizePerCU, uint32_t localMemBanks, uint32_t ldsAlignment)
+                uint32_t localMemBanks, uint32_t ldsAlignment)
       : targetId_(targetId),
         runtimeRocSupported_(runtimeRocSupported),
         runtimePalSupported_(runtimePalSupported),
@@ -1667,11 +1661,9 @@ class Isa {
         versionStepping_(versionStepping),
         sramecc_(sramecc),
         xnack_(xnack),
-        simdPerCU_(simdPerCU),
         simdWidth_(simdWidth),
         simdInstructionWidth_(simdInstructionWidth),
         memChannelBankWidth_(memChannelBankWidth),
-        localMemSizePerCU_(localMemSizePerCU),
         localMemBanks_(localMemBanks),
         ldsAlignment_(ldsAlignment) {}
 
@@ -1689,11 +1681,9 @@ class Isa {
   uint32_t versionStepping_;       //!< Isa's stepping version.
   Feature sramecc_;                //!< SRAMECC feature.
   Feature xnack_;                  //!< XNACK feature.
-  uint32_t simdPerCU_;             //!< Number of SIMDs per CU.
   uint32_t simdWidth_;             //!< Number of workitems processed per SIMD.
   uint32_t simdInstructionWidth_;  //!< Number of instructions processed per SIMD.
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
-  uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
   uint32_t ldsAlignment_;          //!< LDS alignment.
 };  // class Isa

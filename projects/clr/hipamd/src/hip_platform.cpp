@@ -68,12 +68,12 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
                             amd::alignUp(wrkGrpInfo->usedSGPRs_, 16))
       : VgprWaves;
 
-  // The table contains SIMD per CU, not per WGP, so when WGP mode is set
-  // on kernel metadata, multiply the number of SIMDs by 2, to account for
-  // 2CUs in 1 WGP.
-  const uint32_t simdPerCU = wrkGrpInfo->isWGPMode_
-      ? device.isa().simdPerCU() * 2
-      : device.isa().simdPerCU();
+  // Device info reports the driver/PAL value in the device's configured CU/WGP mode. Normalize it
+  // only when the kernel metadata requests the other mode.
+  uint32_t simdPerCU = device.info().simdPerCU_;
+  if (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_) {
+    simdPerCU = wrkGrpInfo->isWGPMode_ ? simdPerCU * 2 : simdPerCU / 2;
+  }
 
   const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
   const int alu_limited_threads = static_cast<int>(alu_occupancy * wavefrontSize);
@@ -560,7 +560,7 @@ int maxThreadsPerCU(const amd::device::Info& deviceInfo,
   }
 
   // multiply the number of SIMDs by 2, to account for 2CUs in 1 WGP.
-  uint32_t simdPerCU = isa.simdPerCU();
+  uint32_t simdPerCU = deviceInfo.simdPerCU_;
   if (wrkGrpInfo.isWGPMode_) {
     simdPerCU *= 2;
   }
