@@ -200,7 +200,7 @@ def _run(args) -> None:
         spec = Parser(xml_path, profile).parse()
         _apply_codegen_identity(spec, name)
         sem = derive_all_semantics(spec)
-        specs.append((name or spec.generated_dir_name, spec, sem))
+        specs.append((spec.arch_name, spec, sem))
 
     analyzer = CrossIsaAnalyzer()
     plan = analyzer.analyze(specs)
