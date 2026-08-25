@@ -8,6 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added IFoE fabric RAS CPER API**.
+  - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
+  - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
+
 - **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
   - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
   - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
