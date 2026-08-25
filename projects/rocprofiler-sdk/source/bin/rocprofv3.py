@@ -1554,10 +1554,24 @@ def validate_kernel_replay_args(args):
     # dispatch id, so their output would contain several executions of the same kernel with no
     # field telling them apart. Rejected here, where the message can name the option the user
     # actually typed; tool.cpp repeats the check for runs driven by the environment variables.
+    #
+    # Each mode is tested through the same condition run() uses to decide the mode is on, not
+    # through its headline flag. Both PC sampling and SPM turn on from any member of their option
+    # group -- `--spm-sample-interval` alone sets ROCPROF_SPM_COUNTER_COLLECTION -- so checking
+    # only --spm or only --pc-sampling-method would let the combination through.
+    def any_of(*names):
+        return any(getattr(args, name, None) for name in names)
+
     for enabled, option in (
-        (getattr(args, "advanced_thread_trace", None), "--att"),
-        (getattr(args, "pc_sampling_method", None), "--pc-sampling-method"),
-        (getattr(args, "spm", None), "--spm"),
+        (any_of("advanced_thread_trace", "att_no_intercept"), "--att"),
+        (
+            any_of("pc_sampling_method", "pc_sampling_unit", "pc_sampling_interval"),
+            "--pc-sampling-method",
+        ),
+        (
+            any_of("spm", "spm_sample_interval", "spm_sample_interval_unit"),
+            "--spm",
+        ),
     ):
         if enabled:
             fatal_error(
