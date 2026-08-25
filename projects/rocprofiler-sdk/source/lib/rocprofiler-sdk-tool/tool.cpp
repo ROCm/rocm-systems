@@ -91,6 +91,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -2414,10 +2415,25 @@ kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_in
 // whose passes ran, and nothing in the output says so. A user comparing two counters from two
 // groups would silently be comparing one measured value against one that was never collected.
 //
-// A replay window runs to completion on the thread that opened it, so per-thread counters are
-// enough to pair a CONFIG with the passes inside it.
-thread_local uint64_t tl_replay_passes_expected = 0;
-thread_local uint64_t tl_replay_passes_observed = 0;
+// A replay window runs to completion on the thread that opened it, so per-thread bookkeeping is
+// enough to pair a CONFIG with the passes inside it -- but not a single pair of counters. CONFIG
+// callbacks nest: a dispatch launched from inside a replay window still gets its own CONFIG
+// ENTER/EXIT, whether it is declined for reentrancy on this agent or opens a real window on
+// another. With one pair of counters the inner CONFIG would overwrite the outer's expected count
+// and zero it on exit, and the outer dispatch -- the one whose measurement the nesting actually
+// compromised -- would go untallied. So keep a frame per open CONFIG.
+struct replay_window_frame_t
+{
+    uint64_t passes_expected = 0;
+    uint64_t passes_observed = 0;
+};
+
+std::vector<replay_window_frame_t>&
+replay_window_frames()
+{
+    thread_local auto _v = std::vector<replay_window_frame_t>{};
+    return _v;
+}
 
 // Process-wide tallies, reported once at finalize rather than per dispatch: a workload that trips
 // this trips it on every dispatch, and tens of thousands of identical warnings would bury it.
@@ -2474,27 +2490,31 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
         payload->pass_count_cb = kernel_replay_pass_count_callback;
 
         // Same value the SDK is about to ask for, recorded so PHASE_EXIT can tell a complete window
-        // from a declined or truncated one.
-        tl_replay_passes_expected =
-            kernel_replay_pass_count_callback(payload->dispatch_info, rocprofiler_user_data_t{});
-        tl_replay_passes_observed = 0;
+        // from a declined or truncated one. The callback is a per-agent profile-list lookup with no
+        // side effects, so asking it here as well as letting the SDK ask costs only the lookup.
+        replay_window_frames().push_back(replay_window_frame_t{
+            kernel_replay_pass_count_callback(payload->dispatch_info, rocprofiler_user_data_t{}),
+            0});
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
             record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
+        auto& frames = replay_window_frames();
+        if(frames.empty()) return;
+
+        const auto frame = frames.back();
+        frames.pop_back();
+
         // A pass count of 1 is not a replay: the SDK runs the dispatch once and emits no PASS
         // callbacks, and that single run collects the single group. Only a dispatch that asked for
         // more than one pass can come up short.
-        if(tl_replay_passes_expected > 1)
+        if(frame.passes_expected > 1)
         {
             replay_total_dispatches().fetch_add(1, std::memory_order_relaxed);
 
-            if(tl_replay_passes_observed < tl_replay_passes_expected)
+            if(frame.passes_observed < frame.passes_expected)
                 replay_incomplete_dispatches().fetch_add(1, std::memory_order_relaxed);
         }
-
-        tl_replay_passes_expected = 0;
-        tl_replay_passes_observed = 0;
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
     {
@@ -2511,7 +2531,9 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
                 << "kernel replay: SDK published current_pass=" << payload->current_pass
                 << " out of range for total_passes=" << payload->total_passes;
             tl_current_replay_pass = payload->current_pass;
-            ++tl_replay_passes_observed;
+            // Against the innermost open CONFIG: a PASS callback always belongs to the window whose
+            // CONFIG most recently entered on this thread.
+            if(!replay_window_frames().empty()) ++replay_window_frames().back().passes_observed;
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
