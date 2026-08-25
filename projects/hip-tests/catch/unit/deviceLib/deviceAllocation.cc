@@ -1399,14 +1399,29 @@ HIP_TEST_CASE(Unit_deviceAllocationFollowedByDeviceReset) {
  * The allocation size (102400 bytes) is chosen to exceed the device-libs
  * suballocation threshold so that it is backed by a host-call block allocation.
  */
-static __global__ void kerAllocWriteFree() {
+static __global__ void kerAllocWriteFree(int* result) {
   if (threadIdx.x == 0) {
     int* mem = static_cast<int*>(malloc(102400));
-    if (mem != nullptr) {
-      *mem = 10;
-      free(mem);
+    if (mem == nullptr) {
+      printf("Device Allocation Failed \n");
+      return;
     }
+    *mem = 10;
+    free(mem);
+    *result = 1;
   }
+}
+
+static bool TestAllocWriteFree() {
+  int* result_d{nullptr};
+  int result_h = 0;
+  HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
+  HIP_CHECK(hipMemset(result_d, 0, sizeof(int)));
+  kerAllocWriteFree<<<1, 1>>>(result_d);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpy(&result_h, result_d, sizeof(int), hipMemcpyDefault));
+  HIP_CHECK(hipFree(result_d));
+  return result_h == 1;
 }
 
 /**
@@ -1420,12 +1435,9 @@ static __global__ void kerAllocWriteFree() {
 HIP_TEST_CASE(Unit_deviceAllocationAfterDeviceReset) {
   CHECK_PCIE_ATOMIC_SUPPORT;
 
-  kerAllocWriteFree<<<1, 1>>>();
-  kerAllocWriteFree<<<1, 1>>>();
-  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(true == TestAllocWriteFree());
 
   HIP_CHECK(hipDeviceReset());
 
-  kerAllocWriteFree<<<1, 1>>>();
-  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(true == TestAllocWriteFree());
 }
