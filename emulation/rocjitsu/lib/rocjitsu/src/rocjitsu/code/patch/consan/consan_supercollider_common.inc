@@ -39,78 +39,60 @@ struct ByteRange {
   result.sc_access_coverage_resolved = false;
   result.sc_access_coverage_sites.clear();
 
-  struct LdsAlias {
-    std::string_view container_name;
-    uint64_t container_entry_text_offset = 0;
-    const ConSanLdsSite *site = nullptr;
+  /// One container-attributed view of a physical access considered for the
+  /// SuperCollider coverage denominator. The pointer borrows immutable
+  /// `ProgramInventory` storage for the duration of ledger construction.
+  struct CoverageAlias {
+    const ConSanAccessInventorySite *access = nullptr;
+    ConSanScAccessCoverageKind kind = ConSanScAccessCoverageKind::NativeLds;
   };
-  struct FlatAlias {
-    std::string_view container_name;
-    uint64_t container_entry_text_offset = 0;
-    const ConSanFlatSite *site = nullptr;
-  };
-
-  std::vector<LdsAlias> lds_aliases;
-  std::vector<FlatAlias> flat_aliases;
-  if (options.probe_lds_check_trap) {
-    for (const ConSanKernelInfo &kernel : result.kernels) {
-      for (const ConSanLdsSite &site : kernel.lds_sites) {
-        if (site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Write)
-          lds_aliases.push_back({kernel.name, kernel.entry_text_offset, &site});
-      }
+  std::vector<CoverageAlias> aliases;
+  std::unordered_map<uint64_t, size_t> index_by_text_offset;
+  index_by_text_offset.reserve(result.program_inventory.access_sites().size());
+  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites()) {
+    if (access.kind != ConSanLdsAccessKind::Read && access.kind != ConSanLdsAccessKind::Write)
+      continue;
+    const bool native = access.origin == ConSanAccessOrigin::NativeLds ||
+                        access.origin == ConSanAccessOrigin::DirectToLds;
+    const bool flat = access.origin == ConSanAccessOrigin::Flat &&
+                      (access.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group ||
+                       (options.flat_provenance_mode == ConSanFlatProvenanceMode::Likely &&
+                        access.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup));
+    if ((!options.probe_lds_check_trap || !native) && (!options.probe_flat_check_trap || !flat))
+      continue;
+    const ConSanScAccessCoverageKind kind =
+        native ? ConSanScAccessCoverageKind::NativeLds : ConSanScAccessCoverageKind::FlatGroup;
+    const auto [entry, inserted] =
+        index_by_text_offset.emplace(access.physical_id.original_text_offset, aliases.size());
+    if (inserted) {
+      aliases.push_back({.access = &access, .kind = kind});
+      continue;
     }
-    for (const ConSanFunctionInfo &function : result.functions) {
-      for (const ConSanLdsSite &site : function.lds_sites) {
-        if (site.kind == ConSanLdsAccessKind::Read || site.kind == ConSanLdsAccessKind::Write)
-          lds_aliases.push_back({function.name, function.entry_text_offset, &site});
-      }
-    }
-    if (!consan_detail::canonicalize_physical_site_aliases(
-            lds_aliases, result.errors, "ConSan SuperCollider native-LDS access",
-            [](const LdsAlias &alias) { return alias.site->file_offset; },
-            [](const LdsAlias &alias) { return alias.container_name; },
-            [](const LdsAlias &lhs, const LdsAlias &rhs) {
-              return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
-                     sc_lds_site_semantics_equal(*lhs.site, *rhs.site);
-            }))
+    const CoverageAlias &retained = aliases[entry->second];
+    if (retained.kind != kind ||
+        retained.access->container.entry_text_offset != access.container.entry_text_offset ||
+        retained.access->file_offset != access.file_offset ||
+        retained.access->kind != access.kind ||
+        retained.access->instruction_size != access.instruction_size ||
+        retained.access->decoded_width_bits != access.decoded_width_bits ||
+        retained.access->mnemonic != access.mnemonic ||
+        retained.access->operands != access.operands || retained.access->ranges != access.ranges) {
+      const std::string_view access_kind =
+          kind == ConSanScAccessCoverageKind::NativeLds ? "native-LDS" : "FLAT";
+      result.errors.emplace_back(
+          "ConSan SuperCollider " + std::string(access_kind) + " access at original text offset " +
+          std::to_string(access.physical_id.original_text_offset) +
+          " was decoded inconsistently through aliases '" + retained.access->container.name +
+          "' and '" + access.container.name + "'");
       return false;
+    }
   }
 
-  if (options.probe_flat_check_trap) {
-    for (const ConSanKernelInfo &kernel : result.kernels) {
-      for (const ConSanFlatSite &site : kernel.flat_sites) {
-        if (sc_flat_site_is_applicable(site, options.flat_provenance_mode))
-          flat_aliases.push_back({kernel.name, kernel.entry_text_offset, &site});
-      }
-    }
-    for (const ConSanFunctionInfo &function : result.functions) {
-      for (const ConSanFlatSite &site : function.flat_sites) {
-        if (sc_flat_site_is_applicable(site, options.flat_provenance_mode))
-          flat_aliases.push_back({function.name, function.entry_text_offset, &site});
-      }
-    }
-    if (!consan_detail::canonicalize_physical_site_aliases(
-            flat_aliases, result.errors, "ConSan SuperCollider FLAT access",
-            [](const FlatAlias &alias) { return alias.site->file_offset; },
-            [](const FlatAlias &alias) { return alias.container_name; },
-            [](const FlatAlias &lhs, const FlatAlias &rhs) {
-              return lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
-                     sc_flat_site_semantics_equal(*lhs.site, *rhs.site);
-            }))
-      return false;
-  }
-
-  result.sc_access_coverage_sites.reserve(lds_aliases.size() + flat_aliases.size());
-  for (const LdsAlias &alias : lds_aliases) {
+  result.sc_access_coverage_sites.reserve(aliases.size());
+  for (const CoverageAlias &alias : aliases) {
     result.sc_access_coverage_sites.push_back({
-        .kind = ConSanScAccessCoverageKind::NativeLds,
-        .file_offset = alias.site->file_offset,
-    });
-  }
-  for (const FlatAlias &alias : flat_aliases) {
-    result.sc_access_coverage_sites.push_back({
-        .kind = ConSanScAccessCoverageKind::FlatGroup,
-        .file_offset = alias.site->file_offset,
+        .kind = alias.kind,
+        .file_offset = alias.access->file_offset,
     });
   }
   std::ranges::sort(result.sc_access_coverage_sites, [](const auto &lhs, const auto &rhs) {

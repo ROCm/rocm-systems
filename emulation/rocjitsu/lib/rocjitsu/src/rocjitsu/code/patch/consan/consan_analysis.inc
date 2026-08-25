@@ -2659,22 +2659,23 @@ void prune_inferred_range_sites(Container &container, const BlockOffsetIndex &bl
 // validated kernel CFG owner.
 void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Decoder &decoder,
                                        rj_code_arch_t arch, const ConSanOptions &options,
-                                       ConSanResult &result) {
+                                       std::span<ConSanKernelInfo> kernels,
+                                       std::span<ConSanFunctionInfo> functions) {
   const bool needs_pruning =
-      std::ranges::any_of(result.kernels, &ConSanKernelInfo::code_size_inferred_from_zero) ||
-      std::ranges::any_of(result.functions, &ConSanFunctionInfo::code_size_inferred_from_zero);
+      std::ranges::any_of(kernels, &ConSanKernelInfo::code_size_inferred_from_zero) ||
+      std::ranges::any_of(functions, &ConSanFunctionInfo::code_size_inferred_from_zero);
   if (!needs_pruning)
     return;
 
   std::vector<uint64_t> leaders;
   std::vector<uint64_t> kernel_entries;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : kernels) {
     if (!kernel.has_text_range)
       continue;
     leaders.push_back(kernel.entry_text_offset);
     kernel_entries.push_back(kernel.entry_text_offset);
   }
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : functions)
     leaders.push_back(function.entry_text_offset);
   for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
     leaders.push_back(range.text_offset);
@@ -2701,7 +2702,7 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
   std::unordered_set<const BasicBlock *> owned_blocks;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : kernels) {
     if (!kernel.has_text_range)
       continue;
     std::vector<uint64_t> additional_entries;
@@ -2729,9 +2730,9 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   // decoded site is dead. Preserve the previous conservative inventory.
   if (owned_blocks.empty())
     return;
-  for (ConSanKernelInfo &kernel : result.kernels)
+  for (ConSanKernelInfo &kernel : kernels)
     prune_inferred_range_sites(kernel, block_index, owned_blocks);
-  for (ConSanFunctionInfo &function : result.functions)
+  for (ConSanFunctionInfo &function : functions)
     prune_inferred_range_sites(function, block_index, owned_blocks);
 }
 

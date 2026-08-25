@@ -3616,7 +3616,8 @@ intersect_execution_owners(std::span<const ConSanExecutionOwner> lhs,
 void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &decoder,
                                rj_code_arch_t arch, const ConSanOptions &options,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
-                               ConSanResult &result) {
+                               std::span<ConSanKernelInfo> kernels,
+                               std::span<ConSanFunctionInfo> functions, ConSanResult &result) {
   std::vector<uint64_t> leaders;
   std::vector<uint64_t> kernel_entries;
   for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -3714,8 +3715,8 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
       }
     }
   };
-  annotate_memory_sites(result.kernels);
-  annotate_memory_sites(result.functions);
+  annotate_memory_sites(kernels);
+  annotate_memory_sites(functions);
 
   // A large aggregate code object can contain hundreds of thousands of sync
   // events and sequences. Looking up every sequence member with a linear scan

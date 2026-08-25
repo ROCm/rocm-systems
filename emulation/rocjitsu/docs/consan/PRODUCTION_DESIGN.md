@@ -1980,24 +1980,53 @@ engines.
 
 ### Slice 3A: stable code-object and access inventory
 
-- **Current responsibility:** Kernel/function metadata, LDS/FLAT sites,
+**Implementation status:** complete. `ProgramInventory` now owns the decoded
+text-section, kernel, function, and normalized access inventory in shared const
+storage. `ConSanResult` owns that inventory and exposes only a read-only
+`LegacyInventoryView`; the former duplicate mutable container vectors have
+been deleted. Access candidate discovery and SuperCollider's coverage
+denominator consume normalized inventory, while compatibility adapters copy
+inventory facts into the current lowerers without rediscovering semantics.
+
+`ConSanCodeObjectId` retains the existing `fnv1a64:<hex>` diagnostic spelling
+but combines it with byte size and an independently seeded reverse digest for
+identity equality. Consequently, a collision in the public fingerprint cannot
+silently merge physical or semantic site identities. `PhysicalSiteId` combines
+that content identity with original text offset. Symbol aliases therefore
+share a physical identity, while `ConSanProgramContainerRef` remains separate
+attribution evidence. Each normalized logical access range receives a
+`SemanticSiteId` with an explicit range ordinal, including the two ranges of
+two-address LDS instructions.
+
+The focused `program_inventory_test.cpp` host suite exhaustively covers every
+new enum/name contract, identity validity and collision handling, immutable
+copy/move lifetime, builder facts and legacy-view binding, native LDS,
+direct-to-LDS, subword and every supported two-address spelling, all FLAT
+provenance mappings and raw operands, every typed inventory exclusion,
+physical alias identity, and equivalence with a real decoded code object.
+Existing alias-failure tests also guard the normalized SuperCollider coverage
+path. The slice gate includes all ConSan host and hook tests, the capability
+manifest, and representative paired access device contracts on all five
+simulated targets.
+
+- **Previous responsibility:** Kernel/function metadata, LDS/FLAT sites,
   candidate ranges, pointer provenance, owner references, and patch state share
   `ConSanResult`.
-- **New boundary and contract:** Introduce `ProgramInventory` ownership for
+- **Implemented boundary and contract:** `ProgramInventory` owns
   code-object/container facts, `PhysicalSiteId`, access `SemanticSiteId`,
   normalized access ranges, provenance/confidence, and typed exclusions.
   Construction remains backed by the current decoder and provenance analysis.
-- **Temporary seam and consumers:** A read-only `LegacyInventoryView` projects
+- **Current temporary seam and consumers:** A read-only `LegacyInventoryView` projects
   these facts into the exact shapes current candidate/resource/lowering code
   expects. During producer cutover, a comparison test builds both views and
   requires semantic equality.
 - **Test gate:** Analysis/provenance/physical-alias/two-address/subword tests,
   immutable-ID tests, capability conformance, common access device pairs on all
   five targets, and target-exclusive access pairs.
-- **Cutover and deletion:** Switch access candidate discovery, SuperCollider
-  coverage, and later slices' engine policy to the new inventory. Delete the
-  duplicate access/container vectors and mutation of them from `ConSanResult`;
-  retain only the explicit legacy view.
+- **Completed cutover and deletion:** Access candidate discovery and
+  SuperCollider coverage use the new inventory. Duplicate access/container
+  vector ownership and mutation have been deleted from `ConSanResult`; only the
+  explicit legacy view remains for lowerers owned by later slices.
 - **Prerequisite:** Slices 1 and 2.
 
 ### Slice 3B: synchronization and ownership inventory

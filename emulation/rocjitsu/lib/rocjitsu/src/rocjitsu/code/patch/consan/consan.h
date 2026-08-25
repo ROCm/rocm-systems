@@ -10,10 +10,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
@@ -30,6 +33,8 @@
 #include "rocjitsu/code/patch/consan/consan_resource_types.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_fault_sync_types.h.inc"
+
+#include "rocjitsu/code/patch/consan/consan_program_inventory.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_result.h.inc"
 

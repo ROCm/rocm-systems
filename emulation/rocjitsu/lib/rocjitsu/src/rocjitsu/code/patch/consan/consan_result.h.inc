@@ -388,7 +388,7 @@ struct ConSanFlatSelectionTelemetry {
   size_t selected_anchor_relay_slot_count = 0;
 };
 
-struct ConSanResult {
+struct ConSanResult : LegacyInventoryView {
   bool visited_code_object = false;
   /// True after the input has been parsed as a structurally valid AMDGPU code
   /// object. This remains true when its machine target is not enumerated.
@@ -488,9 +488,11 @@ struct ConSanResult {
   /// semantic fields added after the transition inherit this invariant without
   /// extending a hand-maintained list of members.
   bool semantic_arch_required = false;
-  std::vector<ConSanTextSection> text_sections;
-  std::vector<ConSanKernelInfo> kernels;
-  std::vector<ConSanFunctionInfo> functions;
+  /// Immutable ownership of original code-object/container/access facts. The
+  /// inherited `LegacyInventoryView` is rebound whenever this value is
+  /// installed and remains only as a read-only compatibility projection for
+  /// lowerers not yet migrated to typed inventory.
+  ProgramInventory program_inventory;
   std::vector<ConSanFaultSite> fault_sites;
   std::vector<ConSanPatchedImageGrowthRejection> patched_image_growth_rejections;
   std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
@@ -532,6 +534,14 @@ struct ConSanResult {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
   std::vector<std::string> warnings;
+
+  /// Install one immutable program inventory and bind the inherited legacy
+  /// spans to its owned storage. Copies and moves remain valid because the
+  /// inventory shares const heap storage rather than borrowing this object.
+  void install_program_inventory(ProgramInventory inventory) {
+    program_inventory = std::move(inventory);
+    static_cast<LegacyInventoryView &>(*this) = program_inventory.legacy_view();
+  }
 };
 
 /// Whether every architecture-dependent result stage has a typed architecture.

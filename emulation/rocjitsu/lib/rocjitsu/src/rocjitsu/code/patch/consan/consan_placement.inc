@@ -903,14 +903,7 @@ void append_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) 
 }
 
 [[nodiscard]] std::string code_object_fingerprint(std::span<const uint8_t> bytes) {
-  // FNV-1a is deliberately simple and stable across hosts. This is an
-  // identity fingerprint, not a cryptographic integrity check.
-  uint64_t hash = 14695981039346656037ull;
-  for (uint8_t byte : bytes) {
-    hash ^= byte;
-    hash *= 1099511628211ull;
-  }
-  return "fnv1a64:" + fixed_hex(hash, 16);
+  return make_consan_code_object_id(bytes).fingerprint;
 }
 
 void append_decoded_operand(std::string &summary, std::string_view name,

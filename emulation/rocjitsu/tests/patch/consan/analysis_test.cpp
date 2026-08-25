@@ -4535,7 +4535,13 @@ TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
 
   ConSanResult stale_inventory = valid;
   ASSERT_FALSE(stale_inventory.kernels.empty());
-  stale_inventory.kernels.front().entry_text_offset += sizeof(uint32_t);
+  ProgramInventoryBuilder stale_builder(bytes);
+  stale_builder.text_sections().assign(valid.text_sections.begin(), valid.text_sections.end());
+  stale_builder.kernels().assign(valid.kernels.begin(), valid.kernels.end());
+  stale_builder.functions().assign(valid.functions.begin(), valid.functions.end());
+  stale_builder.kernels().front().entry_text_offset += sizeof(uint32_t);
+  stale_builder.rebuild_access_inventory(bytes);
+  stale_inventory.install_program_inventory(stale_builder.view());
   EXPECT_TRUE(validate_consan_modified_elf(bytes, stale_inventory).empty());
 
   ConSanResult corrupted = valid;

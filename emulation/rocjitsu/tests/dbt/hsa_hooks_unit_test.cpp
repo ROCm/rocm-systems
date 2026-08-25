@@ -85,6 +85,14 @@ static_assert(std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_regis
                              ExpectedQueueInterceptRegister>);
 static_assert(
     std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_create_fn), ExpectedAmdQueueCreate>);
+
+template <typename Configure>
+void install_consan_test_program_inventory(rocjitsu::ConSanResult &result, Configure configure) {
+  rocjitsu::ProgramInventoryBuilder builder;
+  configure(builder);
+  builder.rebuild_access_inventory({});
+  result.install_program_inventory(builder.view());
+}
 static_assert(std::is_base_of_v<rocjitsu::ConSanRequest, rocjitsu::consan_hook::HookConfig>);
 static_assert(std::is_base_of_v<rocjitsu::TransformPolicy, rocjitsu::consan_hook::HookConfig>);
 static_assert(std::is_base_of_v<rocjitsu::RuntimePolicy, rocjitsu::consan_hook::HookConfig>);
@@ -381,17 +389,19 @@ TEST(HsaHooksUnitTest, SuperColliderCoverageRejectsUnresolvedRawInventory) {
   rocjitsu::ConSanResult result;
   result.flavor = rocjitsu::ConSanFlavor::SuperCollider;
   result.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  result.kernels.resize(1);
-  rocjitsu::ConSanLdsSite raw;
-  raw.kind = rocjitsu::ConSanLdsAccessKind::Read;
-  raw.supported_mvp = true;
-  raw.file_offset = 0x120u;
-  raw.size = 2u * sizeof(uint32_t);
-  raw.width_bits = 32u;
-  raw.dst_vgpr = 1u;
-  raw.addr_vgpr = 2u;
-  raw.mnemonic = "ds_load_b32";
-  result.kernels.front().lds_sites.push_back(std::move(raw));
+  install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
+    builder.kernels().resize(1);
+    rocjitsu::ConSanLdsSite raw;
+    raw.kind = rocjitsu::ConSanLdsAccessKind::Read;
+    raw.supported_mvp = true;
+    raw.file_offset = 0x120u;
+    raw.size = 2u * sizeof(uint32_t);
+    raw.width_bits = 32u;
+    raw.dst_vgpr = 1u;
+    raw.addr_vgpr = 2u;
+    raw.mnemonic = "ds_load_b32";
+    builder.kernels().front().lds_sites.push_back(std::move(raw));
+  });
   rocjitsu::consan_hook::HookConfig config;
   config.probe_lds_check_trap = true;
 
@@ -5329,9 +5339,11 @@ rocjitsu::ConSanResult auto_report_atomic_transform_result() {
   rocjitsu::ConSanCandidateResourcePlan atomic_plan;
   atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
   result.resource_plans.push_back(atomic_plan);
-  result.kernels.emplace_back();
-  result.kernels.back().name = "auto_report_atomic";
-  result.kernels.back().atomic_sites.emplace_back();
+  install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
+    builder.kernels().emplace_back();
+    builder.kernels().back().name = "auto_report_atomic";
+    builder.kernels().back().atomic_sites.emplace_back();
+  });
   result.site_dispositions.push_back({.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic,
                                       .disposition = rocjitsu::ConSanSiteDisposition::Supported,
                                       .reason = rocjitsu::ConSanSiteDispositionReason::None,
@@ -8469,18 +8481,21 @@ TEST(HsaHooksUnitTest, ConSanDynamicStackDispatchAddsMaximumFrameAboveRuntimePri
   g_transform_override_result.modified = true;
   g_transform_override_result.final_validation_passed = true;
   g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};
-  g_transform_override_result.kernels.emplace_back();
-  auto &kernel = g_transform_override_result.kernels.back();
-  kernel.name = "oversized_kernel";
-  kernel.descriptor_file_offset = 64u;
-  kernel.uses_dynamic_stack = true;
+  install_consan_test_program_inventory(g_transform_override_result,
+                                        [](rocjitsu::ProgramInventoryBuilder &builder) {
+                                          builder.kernels().emplace_back();
+                                          auto &kernel = builder.kernels().back();
+                                          kernel.name = "oversized_kernel";
+                                          kernel.descriptor_file_offset = 64u;
+                                          kernel.uses_dynamic_stack = true;
+                                        });
 
   rocjitsu::ConSanPatchInfo first_patch;
   first_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
   first_patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
   first_patch.required_private_segment_size = 48u;
   first_patch.dynamic_private_segment_addend = 32u;
-  first_patch.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
+  first_patch.owner_descriptor_file_offsets = {64u};
   g_transform_override_result.patches.push_back(first_patch);
 
   rocjitsu::ConSanPatchInfo second_patch = first_patch;
@@ -8600,17 +8615,20 @@ void configure_consan_symbol_binding_case() {
   g_transform_override_result.modified = true;
   g_transform_override_result.final_validation_passed = true;
   g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 's', 'y', 'm'};
-  g_transform_override_result.kernels.emplace_back();
-  auto &kernel = g_transform_override_result.kernels.back();
-  kernel.name = "oversized_kernel";
-  kernel.descriptor_file_offset = 64u;
+  install_consan_test_program_inventory(g_transform_override_result,
+                                        [](rocjitsu::ProgramInventoryBuilder &builder) {
+                                          builder.kernels().emplace_back();
+                                          auto &kernel = builder.kernels().back();
+                                          kernel.name = "oversized_kernel";
+                                          kernel.descriptor_file_offset = 64u;
+                                        });
 
   rocjitsu::ConSanPatchInfo patch;
   patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
   patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
   patch.required_private_segment_size = 64u;
   patch.required_group_segment_size = 128u;
-  patch.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
+  patch.owner_descriptor_file_offsets = {64u};
   g_transform_override_result.patches.push_back(std::move(patch));
 }
 
@@ -8721,15 +8739,18 @@ void configure_consan_zero_record_case() {
   g_transform_override_result.modified = true;
   g_transform_override_result.final_validation_passed = true;
   g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 's', 'a', 'm', 'p'};
-  g_transform_override_result.kernels.emplace_back();
-  auto &kernel = g_transform_override_result.kernels.back();
-  kernel.name = "oversized_kernel";
-  kernel.descriptor_file_offset = 64u;
+  install_consan_test_program_inventory(g_transform_override_result,
+                                        [](rocjitsu::ProgramInventoryBuilder &builder) {
+                                          builder.kernels().emplace_back();
+                                          auto &kernel = builder.kernels().back();
+                                          kernel.name = "oversized_kernel";
+                                          kernel.descriptor_file_offset = 64u;
+                                        });
 
   rocjitsu::ConSanPatchInfo patch;
   patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
   patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord;
-  patch.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
+  patch.owner_descriptor_file_offsets = {64u};
   g_transform_override_result.patches.push_back(patch);
 }
 

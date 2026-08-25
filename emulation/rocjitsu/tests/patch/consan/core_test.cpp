@@ -462,9 +462,11 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
 TEST(ConSan, SemanticArchitectureGateTracksAnalysisStageRatherThanResultMembers) {
   ConSanResult parse_only;
   parse_only.outcome = ConSanTransformOutcome::Unsupported;
-  parse_only.text_sections.push_back({});
-  parse_only.kernels.push_back({});
-  parse_only.functions.push_back({});
+  ProgramInventoryBuilder inventory;
+  inventory.text_sections().push_back({});
+  inventory.kernels().push_back({});
+  inventory.functions().push_back({});
+  parse_only.install_program_inventory(inventory.view());
   parse_only.input_fingerprint = "parsed";
   EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
 
