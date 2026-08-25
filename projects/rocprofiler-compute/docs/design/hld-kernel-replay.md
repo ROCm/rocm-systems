@@ -395,61 +395,56 @@ the signal available today. A structured detection mechanism remains an open que
 
 | Phase | Delivers | Observable after this phase |
 | --- | --- | --- |
-| **1. Mode selection and validation** | The experimental `--replay-mode {application,kernel}` surface, the selected mode carried through the profiling path, and both rejection layers with their hard-error diagnostics. Replay execution stays disabled. | Mode selection and correct rejection. Existing application-replay output does not change. |
-| **2. Native-tool replay** | Coalesced counter groups delivered to the SDK invocation; the multi-group admission check extended to admit kernel replay independently of iteration multiplexing; `pass_count_cb` implemented from the per-agent profile-vector size and explicit admission state; both filters applied from the existing per-kernel occurrence index; and diagnosed failure on a missing or unexpectedly empty vector when counters were requested. | Replayed dispatches collect every bucket in one run, including valid one-bucket requests, while zero-bucket requests retain the existing bypass. Application replay keeps working throughout. |
-| **3. Consolidated output and dispatch identity** | One consolidated counter result using the existing naming convention, cross-pass timestamp and identity normalization for counter rows, and the independently suppressed pass-0 trace record. | Analysis consumes kernel-replay output unchanged; Top Stats and dispatch information report non-multiplied counter values; trace output contains one record per logical dispatch. |
+| **1. Mode selection and validation** | The experimental `--replay-mode {application,kernel}` surface and rejections with their error diagnostics. Replay execution stays disabled. | Mode selection and correct rejection. Existing application-replay output does not change. |
+| **2. Native-tool kernel replay** | Coalesced counter groups delivered to the SDK invocation; the multi-group admission check extended to admit kernel replay; `pass_count_cb` implemented from the per-agent profile-vector size; both filters applied; and diagnosed failure on a missing or unexpectedly empty counter profiles. | Replayed dispatches collect every bucket in one run, including valid one-bucket requests, while zero-bucket requests retain the existing bypass. Application replay keeps working throughout. |
+| **3. Consolidated output and dispatch ID** | One consolidated counter result using the existing naming convention, cross-pass timestamp and dispatch ID normalization. | Analysis consumes kernel-replay profiling output; Top Stats and dispatch information report non-multiplied values. |
 
 ## Validation, security and debuggability
 
 ### Validation
 
-Validation spans the CLI, the kernel-replay adapter, replay-profile construction, output
-normalization, and the analysis boundary that should not have moved.
-
-| # | Check | Pass criterion | Covers |
-| --- | --- | --- | --- |
-| 1 | **Counter accuracy** | Use a deterministic request producing more than one bucket. For each logical dispatch and state covered by the equivalence guarantee, every kernel-replay bucket matches its corresponding application-replay bucket. A single-bucket run or a comparison with no corresponding application-replay values is not evidence for NFR-1. Any mismatch is a failure. Evaluate cache-sensitive counters separately, as a documented limitation. | NFR-1, Replay coverage and limitations |
-| 2 | **Completeness and identity** | For each admitted dispatch, including an admitted one-bucket dispatch, the observed counter-pass count equals the application-replay count, every bucket appears exactly once, and all pass rows collapse into one complete `Dispatch_ID`. Multiple counter groups are admitted in kernel mode without iteration multiplexing, and the consolidated result uses and is discovered through the existing naming convention. Incomplete results fail before analysis; a zero-bucket request bypasses this check. | FR-2, FR-5, FR-7, FR-8 |
-| 3 | **Filtering** | The existing 1-based, per-kernel logical-occurrence index advances once for every observed dispatch of that kernel, including replay-ineligible submissions, and never once per replay pass. Kernel and dispatch exclusions take the ordinary no-snapshot path and are read as neither missing-profile failures nor incomplete replay results. The same `--dispatch` range selects the same per-kernel occurrences in both replay modes. | FR-12, FR-13 |
-| 4 | **Application-replay comparison** | Profile the same deterministic workload and multi-bucket counter request in both modes. Compare corresponding buckets for each logical dispatch; bucket membership, counter values subject to NFR-1, counter completeness, and final analysis results agree, and existing application replay is unchanged. | FR-4, FR-9, NFR-1, NFR-3 |
-| 5 | **Service composition** | Verify independently that tracing emits one pass-0 record per logical dispatch and that consolidated counter data feeds Top Stats and dispatch information one logical dispatch with one non-multiplied pass-0 duration. Trace suppression alone does not satisfy this check. | FR-8, FR-10 |
-| 6 | **PC sampling composition** | Each admitted dispatch replays *N*+1 times. Every bucket appears exactly once across passes 0 through *N*−1, and pass *N* produces PC sampling output and no counter rows. | FR-6 |
-| 7 | **Compatibility** | Every accepted option behaves — PC sampling, roofline selection, a kernel-replay-specific multi-rank diagnostic that names the collective-desynchronization risk without describing repeated workload launches or recommending iteration multiplexing, and default-off — and every rejected combination is rejected: iteration multiplexing, live attach. | FR-1, FR-11, FR-14 |
-| 8 | **Configuration rejection** | Each unmet native-tool condition on its own — declined native tool, unsupported ROCm version, unresolvable library — fails before profiling starts, with a diagnostic naming that specific condition. | FR-3 |
-| 9 | **Failure paths** | An unsupported SDK, a missing or unexpectedly empty profile vector when counters were requested, a declined snapshot, and an upstream abort each fail, and each proves no one-pass fallback happened. A zero-bucket request follows the existing bypass and is not misclassified as a missing-profile failure. | FR-2, FR-15, FR-16, FR-17, FR-18, NFR-2 |
-| 10 | **Diagnostics** | Every run identifies the replay mode and the bucket-to-pass mapping; every failure names its specific condition. | — |
+| # | Check | Pass criterion |
+| --- | --- | --- |
+| 1 | **Counter accuracy** | For a deterministic workload requesting more than one bucket; for each logical dispatch, every kernel-replay counter value matches its corresponding application-replay counter value. Evaluate cache-sensitive counters separately, as a documented limitation. |
+| 2 | **Completeness and identity** | For each admitted dispatch, including an admitted one-bucket dispatch, the observed counter-pass count equals the application-replay count, every counter appears exactly once, and all passes collapse to one `Dispatch_ID`. Incomplete results fail before analysis. |
+| 3 | **Filtering** | Kernel and dispatch excluded kernels are not profiled and no errors are thrown. The same `--dispatch` range selects the same dispatches in both replay modes. | 
+| 4 | **Application-replay comparison** | Profile the same deterministic workload and multi-bucket counter request in both modes. Compare corresponding buckets for each logical dispatch; bucket membership, counter values, and final analysis results agree, and existing application replay is unchanged. |
+| 5 | **Kernel tracing** | Verify independently that kernel tracing emits one pass-0 record per logical dispatch and that is used for kernel duration in analysis. | 
+| 6 | **PC sampling** | Each admitted dispatch replays *N*+1 times. Every bucket appears exactly once across passes 0 through *N*−1, and pass *N* produces PC sampling output and no counter rows. |
+| 7 | **Compatibility** | Every accepted option behaves as expected — PC sampling, roofline selection, a kernel-replay-specific multi-rank diagnostic that names the collective kernel risk, and default-off — and every rejected combination is rejected: iteration multiplexing, live attach. |
+| 8 | **Configuration rejection** | Each unmet condition on its own — no native tool, unsupported ROCm version, unresolvable library — fails before profiling starts, with a diagnostic naming that specific condition. | 
+| 9 | **Failure paths** | An unsupported SDK, a missing or unexpectedly empty profile vector when counters were requested, a declined snapshot, and an upstream abort each fail, and each proves no one-pass fallback happened. A zero-bucket request follows the existing bypass and is not misclassified as a missing-profile failure. |
+| 10 | **Diagnostics** | Every run identifies the replay mode and names its specific condition. |
 
 ### Security
 
 - Kernel replay adds no network interface and no new privilege boundary.
 - Its one security-sensitive operation is the SDK-managed host snapshot of application device memory.
-  That snapshot can hold application data and can consume host memory comparable to the tracked
-  footprint. It stays inside the profiled process's trust boundary, and `rocprof-compute` must never
+  That snapshot hold application data and should stay inside the profiled process's trust boundary, and `rocprof-compute` must never
   persist its contents in result artifacts or print them in diagnostics.
 - Snapshot allocation and restore failures are availability failures, and follow the same fail-closed
   rule as every other incomplete replay condition.
 
 ### Debuggability
 
-| A diagnostic must identify | Why |
-| --- | --- |
-| Selected replay mode and backend | The two modes fail differently. The user needs to know which one ran. |
-| Multi-rank detection under kernel replay | The collective-desynchronization risk remains unresolved. The diagnostic must describe that risk rather than reuse application replay's repeated-launch warning or recommend an incompatible mode. |
-| SDK capability and agent | Version floors and agent homogeneity are both rejection causes. |
-| Bucket-to-pass mapping | The only way to confirm the derived pass count matches the request. |
-| Which failure occurred: option conflict, unavailable native collection, missing profile, snapshot decline, or upstream abort | Each has a different remedy. |
-| That partial results are unusable | Otherwise a user may try to analyze what was written before the failure. |
-| A recommendation of application replay, on snapshot decline | It is the working alternative for that specific failure. |
 
-A configuration diagnostic must name the specific unmet condition rather than reporting that the
-native tool is unavailable. One message covering both an unsupported ROCm version and an
-unresolvable library leaves the user with no action to take, because the remedy differs in each case.
+A diagnostic must name the specific unmet condition.
+
+| A diagnostic must identify |
+| --- | --- |
+| Selected replay mode and backend | 
+| Multi-rank detection under kernel replay |
+| SDK capability and agent | 
+| Counter-to-pass mapping |
+| Which failure occurred: option conflict, unavailable native collection, missing profile, snapshot decline, or upstream abort |
+| That partial results are unusable |
+| A recommendation of application replay, on snapshot decline |
 
 ## Open questions
 
-| # | Question | Why it matters | Blocks |
-| --- | --- | --- | --- |
-| 1 | Should kernel replay exclude dispatches taking part in inter-process collectives? | Replaying one rank's dispatch while its peers do not desynchronizes the collective. | Multi-rank support boundary (FR-14) |
-| 2 | Marker and ROCTx durations: reject the combination, or correct the duration? | The host emits these regions once, but they span every pass, so their durations include replay overhead and are not comparable with a non-replay run. | Marker/ROCTx composition |
-| 3 | Are cache-related metrics trustworthy at all under replay? | Nothing restores cache state between passes, so cache-sensitive counters vary by pass. | Scope of NFR-1 |
-| 4 | How should `rocprof-compute` detect a declined snapshot? | Today the only signal is classifying an upstream warning string, and the process status can still report success. | FR-16 |
+| # | Question | Why it matters |
+| --- | --- | --- |
+| 1 | Should kernel replay exclude collective kernels? | This will make multi-rank profiling with kernel possible but the metrics won't reflect the statistics for all kernel invocations. |
+| 2 | Marker durations: reject the combination, or correct the duration? | The host emits these regions once, but they span every pass, so their durations subsumes multiple kernel replay durations. |
+| 3 | Are cache-related metrics trustworthy at all under kernel replay? | Nothing restores cache state between passes, so cache-related counters do not represent the true cache behavior. | 
+| 4 | How should `rocprof-compute` detect a declined snapshot? | Today the only signal is classifying an upstream warning string, and the process status can still report success. |
