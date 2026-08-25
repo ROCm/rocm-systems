@@ -23,7 +23,10 @@
 //
 // Uses the gfx1250-native __builtin_amdgcn_wmma_f32_16x16x32_f16 which
 // does not require extra target-feature flags and avoids an ICE in
-// AMD clang 23.0 that affects the older 16x16x16 variants on gfx1250.
+// AMD clang 23.0 that affects the older 16x16x16 variants on gfx1250. The
+// builtin needs the "gfx1250-insts" target feature, so the harness is told to
+// skip this kernel everywhere else:
+// requires: gfx1250
 
 using half16 = _Float16 __attribute__((__vector_size__(16 * sizeof(_Float16))));
 using float8 = float __attribute__((__vector_size__(8 * sizeof(float))));

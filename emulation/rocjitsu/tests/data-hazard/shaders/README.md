@@ -103,8 +103,11 @@ partially written data. This framework automates that process:
 The `wavegroup_*.hip` kernels use arcadia wavegroup semaphores, which only
 assemble for `gfx1260`. They declare that with a `// requires: gfx1260` comment,
 and both the CLI and the pytest suite skip a shader whose `requires:` list does
-not contain the target architecture. A shader without that comment is treated as
-portable and runs everywhere.
+not contain the target architecture. `tensor_lds.hip` and `wmma_exp.hip` declare
+`// requires: gfx1250` for the same reason: their builtins need the
+`gfx1250-insts` target feature. A shader without that comment is treated as
+portable and runs everywhere, so a kernel that names its target only in prose
+is compiled for every architecture and fails there instead of being skipped.
 
 ## Build Pipeline
 
@@ -322,7 +325,9 @@ To add a new shader:
 5. From `tests/data-hazard`, run
    `python -m mutate_and_test --hazard-detection shaders/your_shader.hip` to verify
 6. If the kernel only assembles for particular targets, add a
-   `// requires: <arch>[, <arch>...]` comment so it is skipped elsewhere
+   `// requires: <arch>[, <arch>...]` comment so it is skipped elsewhere. Only
+   that exact form is read, and everything after the colon is taken as the
+   architecture list, so keep any explanation on its own line
 
 ### Template
 

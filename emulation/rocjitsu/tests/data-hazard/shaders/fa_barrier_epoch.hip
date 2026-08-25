@@ -44,8 +44,6 @@
 //     ds_load_u16 may see stale data
 //   - Remove __syncthreads (barrier): true cross-wave race — other waves
 //     read LDS before the writer has finished
-//
-// Requires gfx1250.
 
 static constexpr int WAVE_SIZE    = 32;
 static constexpr int WAVES_PER_WG = 4;
