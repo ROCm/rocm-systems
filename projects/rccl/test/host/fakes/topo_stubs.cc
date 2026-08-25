@@ -23,9 +23,9 @@ struct ncclTopoRanks;
 struct ncclTopoSystem;
 
 ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { ::abort(); }
-// Controllable (was fail-loud). Defaults to FAILURE: this is the rung-2 ladder terminator at :1648, and
-// its four later call sites (:1673, :1690, :1692, :1702 -- the tree/CollNet/NVLS graphs) are on paths
-// no test drives yet. Records the graph pointer: without it, :1648 being handed treeGraph instead of
+// Controllable (was fail-loud). Defaults to FAILURE: this is the rung-2 ladder terminator at :1648. Its
+// four later call sites (:1673, :1690, :1692, :1702 -- the tree/CollNet/NVLS graphs) are driven by the
+// rung-3 tests. Records the graph pointer: without it, :1648 being handed treeGraph instead of
 // ringGraph is invisible, the same "a fake that drops an argument untests it" rule as nccl_stubs.cc:90.
 // A std::function rather than a result knob: rung 3 needs it to SUCCEED and write graph->nChannels,
 // which :1671-1672 then read to size the tree graph. Default still fails, so rung 2 is unchanged.
@@ -59,10 +59,16 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclComm
 // because the call site hardcodes 5 -- a count that must track the five graphs actually computed above.
 extern ncclResult_t g_ncclTopoDumpGraphsResult;
 extern int g_ncclTopoDumpGraphsCalls;
+extern int g_ncclTopoDumpGraphsNgraphs;
 extern std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
 ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, struct ncclTopoGraph** graphs) {
   g_ncclTopoDumpGraphsCalls++;
-  g_ncclTopoDumpGraphsArray.assign(graphs, graphs + ngraphs);  // :1763 orders direct BEFORE chain
+  g_ncclTopoDumpGraphsNgraphs = ngraphs;  // assert this, not the vector length, if :1764's 5 ever moves
+  // Clamp the read: the caller's array is dumpGraphs[kDumpGraphsCapacity] at :1757, so trusting a
+  // larger ngraphs would read off its stack rather than failing an assertion.
+  const int kDumpGraphsCapacity = 5;
+  const int n = ngraphs < kDumpGraphsCapacity ? ngraphs : kDumpGraphsCapacity;
+  g_ncclTopoDumpGraphsArray.assign(graphs, graphs + n);  // :1763 orders direct BEFORE chain
   return g_ncclTopoDumpGraphsResult;
 }
 void ncclTopoFree(struct ncclTopoSystem* system) { ::abort(); }

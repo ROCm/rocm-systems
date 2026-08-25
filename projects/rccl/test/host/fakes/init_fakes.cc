@@ -364,6 +364,7 @@ ncclResult_t g_ncclTopoPrintGraphResult     = ncclSuccess;
 std::vector<struct ncclTopoGraph*> g_ncclTopoPrintGraphGraphs;
 ncclResult_t g_ncclTopoDumpGraphsResult     = ncclSuccess;
 int g_ncclTopoDumpGraphsCalls               = 0;
+int g_ncclTopoDumpGraphsNgraphs             = -1;
 std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
 ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;  // rung-3 terminator
 
@@ -457,6 +458,7 @@ void ResetInitFakes() {
   g_ncclTopoPrintGraphGraphs.clear();
   g_ncclTopoDumpGraphsResult = ncclSuccess;
   g_ncclTopoDumpGraphsCalls = 0;
+  g_ncclTopoDumpGraphsNgraphs = -1;
   g_ncclTopoDumpGraphsArray.clear();
   g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;
 }

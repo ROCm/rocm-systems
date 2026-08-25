@@ -198,6 +198,9 @@ extern ncclResult_t g_ncclTopoPrintGraphResult;
 extern std::vector<struct ncclTopoGraph*> g_ncclTopoPrintGraphGraphs;  // pairs 1:1 with the computes
 extern ncclResult_t g_ncclTopoDumpGraphsResult;
 extern int g_ncclTopoDumpGraphsCalls;
+// The ngraphs :1764 passed. -1 until the dump runs; assert this rather than the vector length,
+// which the fake clamps to the caller's array capacity.
+extern int g_ncclTopoDumpGraphsNgraphs;
 extern std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
 extern ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult;
 

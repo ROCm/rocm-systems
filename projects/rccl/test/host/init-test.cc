@@ -18,6 +18,7 @@
 #include <cassert>
 #include <csignal>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -2865,6 +2866,7 @@ TEST_F(InitMicrotest, InitTransportsRank_EmptyCpuAffinity_SkipsSaveAndApply) {
   // asserting only the empty setAffinity vector would match its .clear() reset value.
   ASSERT_EQ(2u, g_ncclOsCpuCountMasks.size());  // :1608 and exit::2403
   EXPECT_EQ(0, CPU_COUNT(&g_ncclOsCpuCountMasks[0]));
+  EXPECT_EQ(0, CPU_COUNT(&g_ncclOsCpuCountMasks[1]));
   EXPECT_EQ(0u, g_ncclOsSetAffinityMasks.size());  // so neither :1610 nor exit::2404 ran
 }
 
@@ -3211,6 +3213,9 @@ TEST_F(InitMicrotest, InitTransportsRank_CollNetEnabled_ComputesChainThenDirect)
                                          &comm->graphs[NCCL_ALGO_COLLNET_CHAIN],
                                          &comm->graphs[NCCL_ALGO_COLLNET_DIRECT]}),
             g_ncclTopoComputeGraphs);  // chain before direct, the reverse of the :1763 dump order
+  // The collnet-enabled arm is the only place :1691/:1693 run, and the suite's other pairing oracle
+  // has collnet disabled -- so without this a print handed the wrong graph here is unobservable.
+  EXPECT_EQ(g_ncclTopoComputeGraphs, g_ncclTopoPrintGraphGraphs);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NvlsSupported_ComputesNvlsGraphLast) {
@@ -3271,6 +3276,9 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_OverridesRingChannelsWithParam)
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(3, c.get()->graphs[NCCL_ALGO_RING].nChannels);  // 3, not the 5 the compute stamped
+  // The override has to land BEFORE :1671-1672 size the tree from ringGraph->nChannels; without this
+  // the whole block could move below the tree setup and nothing would notice.
+  EXPECT_EQ(3, c.get()->graphs[NCCL_ALGO_TREE].minChannels);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_Gfx1151_UnsetParamFallsBackToSixChannels) {
@@ -3314,6 +3322,7 @@ TEST_F(InitMicrotest, InitTransportsRank_DumpFileRankMatches_DumpsFiveGraphsDire
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclTopoDumpGraphsCalls);
+  EXPECT_EQ(5, g_ncclTopoDumpGraphsNgraphs);  // the hardcoded count at :1764, not the clamped vector
   ncclComm* comm = c.get();
   EXPECT_EQ(std::vector<ncclTopoGraph*>({&comm->graphs[NCCL_ALGO_RING], &comm->graphs[NCCL_ALGO_TREE],
                                          &comm->graphs[NCCL_ALGO_COLLNET_DIRECT],
@@ -3329,6 +3338,10 @@ TEST_F(InitMicrotest, InitTransportsRank_DumpFileRankDiffers_SkipsTheDump) {
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclTimeout, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclTopoDumpGraphsCalls);
+  EXPECT_EQ(-1, g_ncclTopoDumpGraphsNgraphs);  // nor was it handed a count
+  // The array recorder is .assign()-replaced rather than appended, so this only holds if TearDown
+  // genuinely clears it -- which is what makes that reset line load-bearing rather than decorative.
+  EXPECT_TRUE(g_ncclTopoDumpGraphsArray.empty());
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_DumpGraphsFails_Propagates) {
@@ -3338,6 +3351,19 @@ TEST_F(InitMicrotest, InitTransportsRank_DumpGraphsFails_Propagates) {
   g_ncclTopoDumpGraphsResult = ncclSystemError;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+}
+
+// The rung-3 terminator's own error path. Every other rung-3 test rides its ncclTimeout default, so
+// without this nothing writes that knob -- and :1774 propagating whatever the seam returns, rather
+// than a fixed code, would go unnoticed. Also what makes the knob's TearDown reset load-bearing.
+TEST_F(InitMicrotest, InitTransportsRank_P2pChannelsPerPeerFails_PropagatesThatCode) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  c.installTopo();
+  InstallTopoComputeSuccess(/*nChannels=*/5);
+  g_ncclTopoComputeP2pChannelsPerPeerResult = ncclInvalidUsage;  // not the ncclTimeout sentinel
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclTopoDumpGraphsCalls);  // and it really did get as far as :1774
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_MaxP2pPeersAboveRankCount_IsCappedToNRanks) {
