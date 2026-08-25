@@ -75,19 +75,15 @@ python test_runner.py --config test_config_sample.json
 
 ### Rerun Failed Tests with Debug Environment
 
-`--rerun-failed` requires `--jobs 1`: reruns are order-dependent and would contend for
-GPUs with in-flight co-tenants, so the combination is rejected up front rather than
-silently dropping the reruns. Since `--jobs` defaults to 4, pass `--jobs 1` explicitly.
-
 ```bash
 # Run tests and automatically rerun any failures with additional debug environment variables
-python test_runner.py --config test_config_sample.json --jobs 1 --rerun-failed
+python test_runner.py --config test_config_sample.json --rerun-failed
 
 # Combine with verbose mode for detailed output
-python test_runner.py --config test_config_sample.json --jobs 1 --rerun-failed --verbose
+python test_runner.py --config test_config_sample.json --rerun-failed --verbose
 
 # Stop immediately if a rerun also fails (fail-fast mode)
-python test_runner.py --config test_config_sample.json --jobs 1 --rerun-failed --stop-on-rerun-failure
+python test_runner.py --config test_config_sample.json --rerun-failed --stop-on-rerun-failure
 ```
 
 ### Skip MPI Tests
@@ -460,9 +456,9 @@ Optional:
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
-  -j, --jobs N              Run N test entries concurrently within a suite (default: 4). Use --jobs 1 for serial.
+  -j, --jobs N              Run N test entries concurrently within a suite (default: 1 = serial)
   --max-parallel-gpus N     Aggregate per-node GPU budget shared by concurrent entries under --jobs>1 (default: detected GPUs per node)
-  --rerun-failed            Rerun failed tests with additional environment variables (requires --jobs 1)
+  --rerun-failed            Rerun failed tests with additional environment variables (not supported with --jobs>1)
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)
   --system NAME             Select system-specific MPI args profile from config (e.g. 'ainic', 'thor2')
@@ -644,13 +640,13 @@ python test_runner.py --config test_config_sample.json --build-dir /tmp/my_rccl_
 
 ```bash
 # Automatically rerun failed tests with enhanced debug environment variables
-python test_runner.py --config test_config_sample.json --jobs 1 --rerun-failed --verbose
+python test_runner.py --config test_config_sample.json --rerun-failed --verbose
 
 # Combine with coverage report
-python test_runner.py --config test_config_sample.json --jobs 1 --rerun-failed --coverage-report
+python test_runner.py --config test_config_sample.json --rerun-failed --coverage-report
 
 # Fail-fast mode: stop if rerun also fails
-python test_runner.py --config test_config_sample.json --jobs 1 --rerun-failed --stop-on-rerun-failure
+python test_runner.py --config test_config_sample.json --rerun-failed --stop-on-rerun-failure
 ```
 
 ## Environment Variable Merging
@@ -966,7 +962,7 @@ Add `rerun_env_variables` at the configuration level or individual test level:
 
 ```bash
 # Run tests and automatically rerun failures with debug environment
-python test_runner.py --config my_tests.json --jobs 1 --rerun-failed
+python test_runner.py --config my_tests.json --rerun-failed
 
 # Behavior:
 # 1. Test runs and fails
@@ -1127,7 +1123,7 @@ This is useful when:
 Example:
 ```bash
 # Stop immediately if any test fails after rerun
-python test_runner.py --config test_config.json --jobs 1 --rerun-failed --stop-on-rerun-failure
+python test_runner.py --config test_config.json --rerun-failed --stop-on-rerun-failure
 ```
 
 #### Use Cases
