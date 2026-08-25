@@ -1022,7 +1022,20 @@ void
 rocpd_processor_t::finalize_processing()
 {
     LOG_DEBUG("Finalizing rocpd processor");
-    m_writer->flush_in_memory_data_to_disk();
+    try
+    {
+        m_writer->flush_in_memory_data_to_disk();
+    } catch(const std::exception& e)
+    {
+        // This can happen in multi-process scenarios when two processes attempt
+        // to flush their in-memory databases to the same output file at the same
+        // time (SQLITE_BUSY). The underlying fix belongs in profiler-hub (retry
+        // with back-off or per-PID filenames), but crashing is never appropriate.
+        LOG_ERROR("Failed to flush rocpd database to disk ({}): {}. "
+                  "Profile data for this process may be incomplete.",
+                  m_db_output_path, e.what());
+        return;
+    }
 
     m_output_registry.register_file(m_db_output_path, output_format::rocpd);
 
