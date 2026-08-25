@@ -162,6 +162,17 @@ public:
   }
 };
 
+class TestGlobalMemPipeline : public GlobalMemPipeline {
+public:
+  using GlobalMemPipeline::GlobalMemPipeline;
+  using GlobalMemPipeline::initiate_access;
+};
+
+class TestLocalMemPipeline : public LocalMemPipeline {
+public:
+  using LocalMemPipeline::initiate_access;
+};
+
 class TestWaitcntInstruction : public Instruction {
 public:
   TestWaitcntInstruction() : Instruction("s_waitcnt", nullptr) {}
@@ -2512,6 +2523,32 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
 
   EXPECT_TRUE(vgpr_write_events(*plugin).empty());
   EXPECT_EQ(cu->read_vgpr_storage(wf->vgpr_alloc().base + kDst, 0), kLoadedValue);
+}
+
+TEST(ExecutionPluginTest, MemoryPipelinesSnapshotDispatchIdentityAtIssue) {
+  PluginFixture f(/*num_wf_slots=*/4);
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf_at(/*wf_id=*/3, /*wg_id=*/17, /*pc=*/0, /*num_sgprs=*/104,
+                                /*num_vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+
+  auto global_state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  global_state->wg_id = 101;
+  global_state->wf_id = 202;
+  TestMemoryInstruction global_inst(std::move(global_state));
+  TestGlobalMemPipeline global_pipeline(&cu->l1_vector(), cu->l2());
+  global_pipeline.initiate_access(global_inst, *wf);
+  EXPECT_EQ(global_inst.data_as<VectorMemState>()->wg_id, 17u);
+  EXPECT_EQ(global_inst.data_as<VectorMemState>()->wf_id, 3u);
+
+  auto local_state = std::make_unique<VectorMemState>(LOCAL_MEM);
+  local_state->wg_id = 101;
+  local_state->wf_id = 202;
+  TestMemoryInstruction local_inst(std::move(local_state));
+  TestLocalMemPipeline local_pipeline;
+  local_pipeline.initiate_access(local_inst, *wf);
+  EXPECT_EQ(local_inst.data_as<VectorMemState>()->wg_id, 17u);
+  EXPECT_EQ(local_inst.data_as<VectorMemState>()->wf_id, 3u);
 }
 
 TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
