@@ -1005,10 +1005,31 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   const size_t msgBytes = count * ncclTypeSize(datatype);
 
-  // (1) Symmetric-window kernel eligibility takes priority over CE / DDA, exactly
-  // as the pre-refactor collectives.cc path did.
-  const bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum,
-                                                                         datatype, count, sendbuff, recvbuff);
+  // Symmetric-window lookup hoisted ahead of symEligible: winRegType is needed
+  // for the symMaxR2 gate below, and the lookup is unconditional regardless, so
+  // pulling it up eliminates the redundant ncclDevrFindWindow inside
+  // isSymmetricKernelRequested when symEligible turns out to be true.
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  ncclDevrFindWindow(comm, sendbuff, &sendWin);
+  ncclDevrFindWindow(comm, recvbuff, &recvWin);
+  const bool hasSysmemSegment =
+    ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+
+  // (1) Symmetric-window kernel eligibility takes priority over CE / DDA.
+  // symMaxR2 from the arch table suppresses symk when recv is registered and the
+  // message exceeds the CE/symk crossover size, letting CE 2-shot or CE-registered
+  // win instead.  0 means no suppression.
+  const bool recvRegistered = (winRegType == ncclSymSendRegRecvReg ||
+                                winRegType == ncclSymSendNonregRecvReg);
+  const size_t symMaxR2 = (comm->archThresholds)
+      ? comm->archThresholds->symMaxR2[ncclFuncAllReduce] : 0;
+  const bool symSuppressedBySize = recvRegistered && symMaxR2 > 0 && msgBytes > symMaxR2;
+  const bool symEligible =
+    (op == ncclSum) && !symSuppressedBySize &&
+    isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendbuff, recvbuff);
 
   // (2) CE AllReduce graph state. CE is graph-unsafe, so capture disables it.
   //  - Live dispatch (query=false): probe the real stream and tick the graph
@@ -1031,16 +1052,6 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   if (query && ceCapturing) ceArGraphAllowed = false;
   decision->ceCapturing = ceCapturing;
   decision->ceArGraphAllowed = ceArGraphAllowed;
-
-  // Symmetric-window lookup, hoisted so CE 2-shot / DDA / CE-registered all share
-  // it. sendWin/recvWin drive winRegType and the sysmem-segment guard below.
-  struct ncclDevrWindow* sendWin = nullptr;
-  struct ncclDevrWindow* recvWin = nullptr;
-  ncclDevrFindWindow(comm, sendbuff, &sendWin);
-  ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  const bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
-  ncclSymRegType_t winRegType;
-  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
 
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
   // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the

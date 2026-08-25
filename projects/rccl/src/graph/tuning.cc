@@ -1835,6 +1835,20 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   .ceArMin     = 4ULL   * 1024 * 1024,   // 4 MiB (stored; CE AR has no lower-bound gate)
   .ceArMax     = 256ULL * 1024 * 1024,   // 256 MiB
+  // symMaxR2: suppress symk in favour of CE when recv is registered and msg > threshold.
+  // AR set to 512 KiB -- CE outperforms symk above this on gfx1250 (tune from perf data).
+  // All other collectives: 0 (no suppression).
+  .symMaxR2 = {
+    0,                    // [0] Broadcast      -- not used
+    0,                    // [1] Reduce          -- not used
+    0,                    // [2] AllGather       -- no CE path for AG symk suppression
+    0,                    // [3] ReduceScatter   -- no suppression (placeholder)
+    512ULL*1024,          // [4] AllReduce       -- CE wins above 512 KiB for R2
+    0,                    // [5] SendRecv        -- not used
+    0,                    // [6] Send            -- not used
+    0,                    // [7] Recv            -- not used
+    0,                    // [8] AlltoAll        -- not used
+  },
 
   // Per-size unroll breakpoints for gfx1250 (validate from AICOMRCCL-1756).
   .unrollMapAR  = kUnrollAR_gfx1250,
@@ -1850,6 +1864,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,
   .ceArMax     = 256ULL * 1024 * 1024,
+  .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };
 
@@ -1860,6 +1875,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ddaVmmMax   = {0, 0, 8ULL*1024*1024,    8ULL*1024*1024,    8ULL*1024*1024,    0, 0, 0, 4ULL*1024*1024},
   .ceArMin     = 4ULL   * 1024 * 1024,
   .ceArMax     = 256ULL * 1024 * 1024,
+  .symMaxR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
 
 };
 
