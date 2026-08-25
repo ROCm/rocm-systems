@@ -49,6 +49,17 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 #define NCCL_MAX_OPS 2048
 #define NCCL_STEPS 8
 
+// Global-address alignment for TDM's direct L2->LDS path.
+#define RCCL_TDM_ALIGN 256
+
+// Per-warp TDM staging. 4KB is the mover's floor; 16KB measured best. In ncclShmemData, so
+// every kernel pays the LDS: 167KB of 320KB at 16KB/warp.
+#if defined(__gfx1250__)
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 16384
+#else
+#define RCCL_TDM_STAGE_BYTES_PER_WARP 0
+#endif
+
 #ifdef __CUDA_ARCH__
 #define NCCL_CUDA_ARCH __CUDA_ARCH__
 #else
@@ -616,6 +627,8 @@ struct ncclKernelComm {
   int isAllNvlink;
   int p2pnChannelsPerPeer;
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
+  int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleMinBytes; // RCCL: smallest slice worth handing to the mover
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int* collNetDenseToUserRank;
 
