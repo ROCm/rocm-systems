@@ -933,18 +933,25 @@ target_link_libraries(
     PRIVATE rocjitsu_translate_cli GTest::gtest
 )
 rj_configure_target(rj_dbt_translate_smoke_test TEST)
-add_dependencies(rj_dbt_translate_smoke_test rj_dbt_translate)
+add_dependencies(
+    rj_dbt_translate_smoke_test
+    rj_dbt_translate
+    rj_decode_benchmark
+)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(rj_dbt_translate_smoke_test)
     rj_install_test_target(rj_dbt_translate)
+    rj_install_test_target(rj_decode_benchmark)
 endif()
 rj_add_test(
     NAME "RjDbtTranslate.Smoke"
     COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
+            $<TARGET_FILE:rj_decode_benchmark>
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     INSTALL_COMMAND
         "bin/rj_dbt_translate_smoke_test"
         "bin/rj_dbt_translate"
+        "bin/rj_decode_benchmark"
 )
 
 # --- Scaling test (standalone executable) ---

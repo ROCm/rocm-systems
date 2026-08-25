@@ -35,6 +35,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/isa/target_registry.h"
 
 #include <algorithm>
 #include <array>
@@ -494,9 +495,17 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
                                  .required_work = {}};
   };
 
+  uint32_t source_mach = EF_AMDGPU_MACH_NONE;
+  if (patcher.image_bytes().size() >= sizeof(Elf64_Ehdr)) {
+    Elf64_Ehdr header{};
+    std::memcpy(&header, patcher.image_bytes().data(), sizeof(header));
+    source_mach = header.e_flags & EF_AMDGPU_MACH;
+  }
+
   // A same-architecture gfx1250 translation is direction-specific: A0 and B0 share an ELF machine
   // ID, so both revisions must be given. Enforce this here as well as in the C API.
-  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA5 && host_arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (source_mach == EF_AMDGPU_MACH_AMDGCN_GFX1250 &&
+      (target_mach & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250) {
     if (options.input_revision == ProcessorRevision::Unspecified ||
         options.output_revision == ProcessorRevision::Unspecified) {
       return error(DiagnosticKind::Legalization,
@@ -509,6 +518,17 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
       return error(DiagnosticKind::Legalization, "gfx1250 A0-to-B0 translation is not supported");
   }
 
+  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA5 && host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      source_mach != (target_mach & EF_AMDGPU_MACH) &&
+      (source_mach == EF_AMDGPU_MACH_AMDGCN_GFX1251 ||
+       (target_mach & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1251)) {
+    // Same-architecture translation otherwise copies raw encodings. gfx1250 and gfx1251 have
+    // different instruction legality, and no concrete-target legalization contract exists, so
+    // cross-variant translation is unsupported.
+    return error(DiagnosticKind::Legalization,
+                 "cross-variant gfx1250/gfx1251 translation is unsupported");
+  }
+
   if (patcher.text_bytes().empty()) {
     const std::span<const uint8_t> image = patcher.image_bytes();
     if (image.size() < sizeof(Elf64_Ehdr))
@@ -516,7 +536,7 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
                                                   "header");
     Elf64_Ehdr header{};
     std::memcpy(&header, image.data(), sizeof(header));
-    const uint32_t source_mach = header.e_flags & EF_AMDGPU_MACH;
+    source_mach = header.e_flags & EF_AMDGPU_MACH;
     if (guest_arch == host_arch && source_mach == (target_mach & EF_AMDGPU_MACH)) {
       return TranslationDiagnostic{
           .severity = DiagnosticSeverity::Warning,
@@ -2096,6 +2116,7 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
 
 bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
   return guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+         (target_mach_ & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250 &&
          options_.input_revision == ProcessorRevision::Gfx1250B0 &&
          options_.output_revision == ProcessorRevision::Gfx1250A0;
 }
@@ -2147,7 +2168,11 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
       return;
     }
 
-    auto decoder = Decoder::create(host_arch_);
+    const IsaGpuTargetDescription *host_target =
+        default_isa_target_registry().find_gpu_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
+    auto decoder = host_target == nullptr
+                       ? Decoder::create(host_arch_)
+                       : Decoder::create(default_isa_target_registry(), host_target->public_id);
     if (!decoder) {
       append_rewrite_discharge_error(
           result.diagnostics,
@@ -2374,10 +2399,23 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     return leave_unchanged();
   }
 
-  // A same-architecture gfx1250 translation is direction-specific: A0 and B0
-  // share an ELF machine ID, so both revisions must be given. Enforce this here
-  // as well as in the C API.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
+  const auto &registry = default_isa_target_registry();
+  const IsaTargetDescriptor *object_target = registry.find(obj.target_id());
+  rj_code_target_id_t effective_guest_target = ROCJITSU_CODE_TARGET_INVALID;
+  if (object_target != nullptr && object_target->architecture_id == guest_arch_) {
+    effective_guest_target = obj.target_id();
+  } else if (const IsaTargetDescriptor *guest_descriptor = registry.find(guest_arch_)) {
+    if (const IsaGpuTargetDescription *default_target =
+            registry.find_default_gpu_target(*guest_descriptor))
+      effective_guest_target = default_target->public_id;
+  }
+
+  // A same-target gfx1250 translation is direction-specific: A0 and B0 share
+  // an ELF machine ID, so both revisions must be given. Do not apply this
+  // revision contract to other concrete CDNA5 targets.
+  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+      effective_guest_target == ROCJITSU_CODE_TARGET_GFX1250 &&
+      (target_mach_ & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250) {
     if (options_.input_revision == ProcessorRevision::Unspecified ||
         options_.output_revision == ProcessorRevision::Unspecified) {
       append_error(result.diagnostics, DiagnosticKind::Legalization,
@@ -2442,7 +2480,13 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   //    direct transfers, recovered indirect transfers, and their PC builders.
   // 5. Feed discovered register/private-memory requirements back into each
   //    descriptor and commit .text, descriptors, sidecars, metadata, and flags.
-  auto decoder = Decoder::create(guest_arch_);
+  // BinaryTranslator's explicit guest_arch remains authoritative when legacy
+  // or synthetic code-object metadata names a different ISA family. Preserve
+  // concrete identity whenever the ELF target belongs to that family; otherwise
+  // use the family's architecture default, which is fail-closed for CDNA5.
+  auto decoder = effective_guest_target == ROCJITSU_CODE_TARGET_INVALID
+                     ? Decoder::create(guest_arch_)
+                     : Decoder::create(registry, effective_guest_target);
   if (!decoder) {
     append_error(result.diagnostics, DiagnosticKind::UnsupportedGuestArch,
                  "unsupported guest_arch: no decoder available");
