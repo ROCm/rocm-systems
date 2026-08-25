@@ -321,6 +321,7 @@ def generate_device_metadata(
     bundle_key: str,
     device_package_prefix: str,
     device_requires_dist: list[str],
+    available_bundle_keys: set[str] | None = None,
 ) -> str:
     """Generate METADATA content for a device wheel.
 
@@ -329,6 +330,9 @@ def generate_device_metadata(
         bundle_key: Bundle key, e.g. "gfx942", "gfx11", "gfx12_0".
         device_package_prefix: Package name prefix, e.g. "amd-torch-device".
         device_requires_dist: Additional Requires-Dist entries (may contain @GFXARCH@).
+        available_bundle_keys: Bundle keys emitted by this split. Target wheels
+            depend on any available parent family/sub-family wheels in their
+            packaging chain.
 
     Returns:
         METADATA file content.
@@ -351,6 +355,17 @@ def generate_device_metadata(
             continue
         expanded = dep.replace("@GFXARCH@", bundle_key)
         lines.append(f"Requires-Dist: {expanded}")
+    if (
+        available_bundle_keys is not None
+        and bundle.level == rocm_bootstrap.PackagingLevel.TARGET
+    ):
+        for parent_bundle in rocm_bootstrap.packaging_chain(bundle_key)[1:]:
+            if parent_bundle.key not in available_bundle_keys:
+                continue
+            parent_name = rocm_bootstrap.device_dist_name(
+                device_package_prefix, parent_bundle
+            )
+            lines.append(f"Requires-Dist: {parent_name} == {host_identity.version}")
     return "\n".join(lines) + "\n"
 
 
@@ -803,6 +818,7 @@ class WheelSplitter:
         bundle_keys = sorted(
             set(kpacks_by_bundle.keys()) | set(db_refs_by_bundle.keys())
         )
+        available_bundle_keys = set(bundle_keys)
 
         if self.verbose and bundle_keys != architectures:
             print(f"  Bundle keys (after xnack collapse): {', '.join(bundle_keys)}")
@@ -830,7 +846,10 @@ class WheelSplitter:
 
         # Rewrite host METADATA (classic: extras only, no variant markers)
         self._rewrite_host_metadata(
-            host_staging, identity, set(bundle_keys), include_variant_markers=False
+            host_staging,
+            identity,
+            available_bundle_keys,
+            include_variant_markers=False,
         )
 
         # Regenerate RECORD for host wheel
@@ -860,7 +879,7 @@ class WheelSplitter:
             variant_output = self._create_variant_wheel(
                 host_staging if output_format == "wheel" else host_output,
                 identity,
-                set(bundle_keys),
+                available_bundle_keys,
                 output_dir,
                 output_format,
             )
@@ -878,6 +897,7 @@ class WheelSplitter:
                 group_name,
                 kpacks_by_bundle.get(bundle_key, []),
                 db_refs_by_bundle.get(bundle_key, []),
+                available_bundle_keys,
                 output_dir,
                 output_format,
             )
@@ -1568,6 +1588,7 @@ class WheelSplitter:
         group_name: str,
         kpack_entries: list[tuple[str, Path]],
         db_refs: list[DatabaseFileRef],
+        available_bundle_keys: set[str],
         output_dir: Path,
         output_format: str,
     ) -> Path:
@@ -1578,6 +1599,7 @@ class WheelSplitter:
             kpack_entries: List of (arch, kpack_path) tuples. Multiple entries
                 occur when xnack variants collapse into the same bundle key.
             db_refs: Database files to include for this bundle.
+            available_bundle_keys: All bundle keys emitted by this split.
 
         Returns:
             Path to the generated device wheel (file or directory).
@@ -1622,6 +1644,7 @@ class WheelSplitter:
             bundle_key,
             self.device_package_prefix,
             self.device_requires_dist,
+            available_bundle_keys,
         )
         (dist_info_dir / "METADATA").write_text(metadata_content, encoding="utf-8")
 

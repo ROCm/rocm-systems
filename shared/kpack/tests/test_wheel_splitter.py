@@ -221,6 +221,86 @@ class TestGenerateDeviceMetadata:
         assert "Version: 2.10.0+rocm7.1" in metadata
         assert "Requires-Dist: torch == 2.10.0+rocm7.1" in metadata
 
+    def test_target_depends_on_available_family_wheels(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        metadata = generate_device_metadata(
+            identity,
+            "gfx1100",
+            "amd-torch-device",
+            [],
+            {"gfx1100", "gfx110x", "gfx11"},
+        )
+        assert "Requires-Dist: amd-torch-device-gfx110x == 2.10.0+rocm7.1" in metadata
+        assert "Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1" in metadata
+
+    def test_target_omits_unavailable_family_wheels(self):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        metadata = generate_device_metadata(
+            identity,
+            "gfx1100",
+            "amd-torch-device",
+            [],
+            {"gfx1100"},
+        )
+        assert "amd-torch-device-gfx110x" not in metadata
+        assert "Requires-Dist: amd-torch-device-gfx11 ==" not in metadata
+
+    def test_target_wheel_contains_available_family_dependencies(
+        self, tmp_path: Path, toolchain
+    ):
+        identity = WheelIdentity(
+            name="torch",
+            version="2.10.0+rocm7.1",
+            python_tag="cp313",
+            abi_tag="cp313",
+            platform_tag="manylinux_2_28_x86_64",
+            dist_info_name="torch-2.10.0+rocm7.1.dist-info",
+        )
+        kpack_path = tmp_path / "torch_gfx1100.kpack"
+        kpack_path.write_bytes(b"test kpack")
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        splitter = WheelSplitter(
+            device_package_prefix="amd-torch-device",
+            overlay_root="torch/",
+            toolchain=toolchain,
+        )
+
+        wheel_path = splitter._create_device_wheel(
+            "gfx1100",
+            identity,
+            "torch",
+            [("gfx1100", kpack_path)],
+            [],
+            {"gfx1100", "gfx11"},
+            output_dir,
+            "wheel",
+        )
+
+        with zipfile.ZipFile(wheel_path) as wheel:
+            metadata_name = next(
+                name
+                for name in wheel.namelist()
+                if name.endswith(".dist-info/METADATA")
+            )
+            metadata = wheel.read(metadata_name).decode()
+        assert "Requires-Dist: amd-torch-device-gfx11 == 2.10.0+rocm7.1" in metadata
+        assert "amd-torch-device-gfx110x" not in metadata
+
     def test_family_level(self):
         identity = WheelIdentity(
             name="torch",
