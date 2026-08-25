@@ -87,22 +87,32 @@ struct stub_cache
 
 struct stub_settings
 {
-    inline static device_filter   gpu_filter{};
-    inline static std::size_t     visible_gpus = 0;
-    inline static enabled_metrics hipfile_metrics{};
-    inline static bool            perfetto_legacy = false;
+    inline static device_filter            gpu_filter{};
+    inline static std::vector<std::size_t> visible_type_indices{};
+    inline static enabled_metrics          hipfile_metrics{};
+    inline static bool                     perfetto_legacy = false;
+
+    static void set_visible_identity(std::size_t n)
+    {
+        visible_type_indices.resize(n);
+        for(std::size_t i = 0; i < n; ++i)
+            visible_type_indices[i] = i;
+    }
 
     static void reset()
     {
-        gpu_filter            = device_filter{};
-        gpu_filter.mode       = device_selection_mode::ALL;
-        visible_gpus          = 2;
+        gpu_filter      = device_filter{};
+        gpu_filter.mode = device_selection_mode::ALL;
+        set_visible_identity(2);
         hipfile_metrics.value = ALL_HIPFILE_METRICS;
         perfetto_legacy       = false;
     }
 
-    static device_filter   get_gpu_device_filter() { return gpu_filter; }
-    static std::size_t     get_visible_gpu_count() { return visible_gpus; }
+    static device_filter            get_gpu_device_filter() { return gpu_filter; }
+    static std::vector<std::size_t> get_visible_gpu_type_indices()
+    {
+        return visible_type_indices;
+    }
     static enabled_metrics get_hipfile_enabled_metrics() { return hipfile_metrics; }
     static bool            get_use_perfetto_legacy_metrics() { return perfetto_legacy; }
 };
@@ -163,7 +173,7 @@ protected:
 
 TEST_F(HipFileCollectorTest, setup_enumerates_visible_gpus)
 {
-    stub_settings::visible_gpus = 3;
+    stub_settings::set_visible_identity(3);
 
     m_collector->setup();
 
@@ -172,7 +182,7 @@ TEST_F(HipFileCollectorTest, setup_enumerates_visible_gpus)
 
 TEST_F(HipFileCollectorTest, config_registers_metadata_for_every_gpu)
 {
-    stub_settings::visible_gpus = 2;
+    stub_settings::set_visible_identity(2);
 
     setup_and_config();
 
@@ -184,7 +194,7 @@ TEST_F(HipFileCollectorTest, config_registers_metadata_for_every_gpu)
 
 TEST_F(HipFileCollectorTest, sample_emits_every_metric_for_every_gpu)
 {
-    stub_settings::visible_gpus = 2;
+    stub_settings::set_visible_identity(2);
     setup_and_config();
 
     m_collector->sample(static_cast<std::int64_t>(TS_1));
@@ -205,7 +215,7 @@ TEST_F(HipFileCollectorTest, shutdown_propagates_to_provider)
 
 TEST_F(HipFileCollectorTest, every_track_is_gpu_indexed)
 {
-    stub_settings::visible_gpus = 2;
+    stub_settings::set_visible_identity(2);
     setup_and_config();
 
     m_collector->sample(static_cast<std::int64_t>(TS_1));
@@ -227,7 +237,7 @@ TEST_F(HipFileCollectorTest, no_registration_tracks_are_emitted)
 
 TEST_F(HipFileCollectorTest, gpu_zero_carries_no_extra_tracks)
 {
-    stub_settings::visible_gpus = 2;
+    stub_settings::set_visible_identity(2);
     setup_and_config();
 
     m_collector->sample(static_cast<std::int64_t>(TS_1));
@@ -245,7 +255,7 @@ TEST_F(HipFileCollectorTest, gpu_zero_carries_no_extra_tracks)
 
 TEST_F(HipFileCollectorTest, disabled_metrics_are_not_emitted)
 {
-    stub_settings::visible_gpus                    = 1;
+    stub_settings::set_visible_identity(1);
     stub_settings::hipfile_metrics.value           = 0U;
     stub_settings::hipfile_metrics.bits.read_bytes = 1;
 
@@ -258,7 +268,7 @@ TEST_F(HipFileCollectorTest, disabled_metrics_are_not_emitted)
 
 TEST_F(HipFileCollectorTest, selecting_a_group_emits_both_directions)
 {
-    stub_settings::visible_gpus          = 1;
+    stub_settings::set_visible_identity(1);
     stub_settings::hipfile_metrics.value = metric_group_mask("fastpath");
 
     setup_and_config();
@@ -336,7 +346,7 @@ TEST_F(HipFileCollectorTest, no_metrics_enabled_emits_nothing)
 
 TEST_F(HipFileCollectorTest, cumulative_values_reach_the_cache)
 {
-    stub_settings::visible_gpus = 1;
+    stub_settings::set_visible_identity(1);
     setup_and_config();
 
     backend().gpu(0).read_bytes = 1000;
@@ -353,7 +363,7 @@ TEST_F(HipFileCollectorTest, cumulative_values_reach_the_cache)
 
 TEST_F(HipFileCollectorTest, bandwidth_reaches_the_cache_wall_clock_normalised)
 {
-    stub_settings::visible_gpus = 1;
+    stub_settings::set_visible_identity(1);
     setup_and_config();
 
     backend().gpu(0).read_bytes = 0;
@@ -405,7 +415,7 @@ TEST_F(HipFileCollectorTest, devices_survive_an_unavailable_interval)
 
 TEST_F(HipFileCollectorTest, enabling_perfetto_does_not_change_pmc_output)
 {
-    stub_settings::visible_gpus    = 1;
+    stub_settings::set_visible_identity(1);
     stub_settings::perfetto_legacy = true;
     setup_and_config();
 
@@ -434,7 +444,7 @@ TEST_F(HipFileCollectorTest, production_perfetto_policy_is_inert)
 
 TEST_F(HipFileCollectorTest, pause_emits_zeros_for_every_track)
 {
-    stub_settings::visible_gpus = 1;
+    stub_settings::set_visible_identity(1);
     setup_and_config();
 
     backend().gpu(0).read_bytes = 4096;

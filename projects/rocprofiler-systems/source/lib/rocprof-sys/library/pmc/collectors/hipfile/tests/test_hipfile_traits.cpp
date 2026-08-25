@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <vector>
 
 namespace rocprofsys::pmc::collectors::hipfile::testing
 {
@@ -24,20 +25,30 @@ using traits_t = hipfile_traits<mock_provider, device_t>;
  */
 struct stub_settings
 {
-    inline static device_filter   gpu_filter{};
-    inline static std::size_t     visible_gpus = 0;
-    inline static enabled_metrics hipfile_metrics{};
+    inline static device_filter            gpu_filter{};
+    inline static std::vector<std::size_t> visible_type_indices{};
+    inline static enabled_metrics          hipfile_metrics{};
+
+    static void set_visible_identity(std::size_t n)
+    {
+        visible_type_indices.resize(n);
+        for(std::size_t i = 0; i < n; ++i)
+            visible_type_indices[i] = i;
+    }
 
     static void reset()
     {
-        gpu_filter            = device_filter{};
-        gpu_filter.mode       = device_selection_mode::ALL;
-        visible_gpus          = 0;
+        gpu_filter      = device_filter{};
+        gpu_filter.mode = device_selection_mode::ALL;
+        visible_type_indices.clear();
         hipfile_metrics.value = ALL_HIPFILE_METRICS;
     }
 
-    static device_filter   get_gpu_device_filter() { return gpu_filter; }
-    static std::size_t     get_visible_gpu_count() { return visible_gpus; }
+    static device_filter            get_gpu_device_filter() { return gpu_filter; }
+    static std::vector<std::size_t> get_visible_gpu_type_indices()
+    {
+        return visible_type_indices;
+    }
     static enabled_metrics get_hipfile_enabled_metrics() { return hipfile_metrics; }
 };
 
@@ -60,18 +71,21 @@ protected:
 
 TEST_F(HipFileTraitsTest, enumerates_one_device_per_visible_gpu)
 {
-    stub_settings::visible_gpus = 4;
+    stub_settings::set_visible_identity(4);
 
     const auto entries = enumerate();
 
     ASSERT_EQ(entries.size(), 4U);
     for(std::size_t i = 0; i < entries.size(); ++i)
+    {
         EXPECT_EQ(entries[i].device->get_index(), i);
+        EXPECT_EQ(entries[i].device->get_hipfile_slot(), i);
+    }
 }
 
 TEST_F(HipFileTraitsTest, gpu_zero_is_enumerated_like_any_other)
 {
-    stub_settings::visible_gpus = 2;
+    stub_settings::set_visible_identity(2);
 
     const auto entries = enumerate();
 
@@ -85,14 +99,14 @@ TEST_F(HipFileTraitsTest, gpu_zero_is_enumerated_like_any_other)
 
 TEST_F(HipFileTraitsTest, no_visible_gpus_enumerates_nothing)
 {
-    stub_settings::visible_gpus = 0;
+    stub_settings::visible_type_indices.clear();
 
     EXPECT_TRUE(enumerate().empty());
 }
 
 TEST_F(HipFileTraitsTest, disabled_filter_enumerates_nothing)
 {
-    stub_settings::visible_gpus    = 4;
+    stub_settings::set_visible_identity(4);
     stub_settings::gpu_filter.mode = device_selection_mode::NONE;
 
     EXPECT_TRUE(enumerate().empty());
@@ -100,7 +114,7 @@ TEST_F(HipFileTraitsTest, disabled_filter_enumerates_nothing)
 
 TEST_F(HipFileTraitsTest, no_metrics_enabled_enumerates_nothing)
 {
-    stub_settings::visible_gpus          = 4;
+    stub_settings::set_visible_identity(4);
     stub_settings::hipfile_metrics.value = 0U;
 
     EXPECT_TRUE(enumerate().empty());
@@ -108,7 +122,7 @@ TEST_F(HipFileTraitsTest, no_metrics_enabled_enumerates_nothing)
 
 TEST_F(HipFileTraitsTest, specific_filter_selects_requested_ordinals)
 {
-    stub_settings::visible_gpus       = 4;
+    stub_settings::set_visible_identity(4);
     stub_settings::gpu_filter.mode    = device_selection_mode::SPECIFIC;
     stub_settings::gpu_filter.indices = { 1, 3 };
 
@@ -121,7 +135,7 @@ TEST_F(HipFileTraitsTest, specific_filter_selects_requested_ordinals)
 
 TEST_F(HipFileTraitsTest, specific_filter_ignores_out_of_range_ordinals)
 {
-    stub_settings::visible_gpus       = 2;
+    stub_settings::set_visible_identity(2);
     stub_settings::gpu_filter.mode    = device_selection_mode::SPECIFIC;
     stub_settings::gpu_filter.indices = { 0, 99 };
 
@@ -133,7 +147,7 @@ TEST_F(HipFileTraitsTest, specific_filter_ignores_out_of_range_ordinals)
 
 TEST_F(HipFileTraitsTest, visible_gpus_clamped_to_snapshot_capacity)
 {
-    stub_settings::visible_gpus = MAX_GPUS + 8;
+    stub_settings::set_visible_identity(MAX_GPUS + 8);
 
     const auto entries = enumerate();
 
@@ -155,7 +169,7 @@ TEST_F(HipFileTraitsTest, enabled_metrics_come_from_settings)
 
 TEST_F(HipFileTraitsTest, get_metrics_delegates_to_device)
 {
-    stub_settings::visible_gpus            = 1;
+    stub_settings::set_visible_identity(1);
     m_provider->backend->gpu(0).read_bytes = 2048;
 
     const auto entries = enumerate();
@@ -166,6 +180,72 @@ TEST_F(HipFileTraitsTest, get_metrics_delegates_to_device)
 
     EXPECT_EQ(traits_t::get_metrics(entries[0].device, enabled, 1'000'000'000).read_bytes,
               2048U);
+}
+
+TEST_F(HipFileTraitsTest, identity_mapping_is_unchanged_without_a_visibility_mask)
+{
+    stub_settings::set_visible_identity(2);
+    m_provider->backend->gpu(0).read_bytes = 10;
+    m_provider->backend->gpu(1).read_bytes = 20;
+
+    const auto entries = enumerate();
+
+    ASSERT_EQ(entries.size(), 2U);
+    EXPECT_EQ(entries[0].device->get_index(), 0U);
+    EXPECT_EQ(entries[0].device->get_hipfile_slot(), 0U);
+    EXPECT_EQ(entries[1].device->get_index(), 1U);
+    EXPECT_EQ(entries[1].device->get_hipfile_slot(), 1U);
+
+    enabled_metrics enabled;
+    enabled.value = ALL_HIPFILE_METRICS;
+    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes, 10U);
+    EXPECT_EQ(entries[1].device->get_metrics(enabled, 1'000'000'000).read_bytes, 20U);
+}
+
+TEST_F(HipFileTraitsTest, subset_mask_maps_hipfile_slots_onto_profiler_indices)
+{
+    // HIP_VISIBLE_DEVICES=4,5: hipFile ordinal 0 is physical GPU 4, ordinal 1 is GPU 5.
+    stub_settings::visible_type_indices    = { 4, 5 };
+    m_provider->backend->gpu(0).read_bytes = 111;
+    m_provider->backend->gpu(1).read_bytes = 222;
+
+    const auto entries = enumerate();
+
+    ASSERT_EQ(entries.size(), 2U);
+    EXPECT_EQ(entries[0].device->get_index(), 4U);
+    EXPECT_EQ(entries[0].device->get_hipfile_slot(), 0U);
+    EXPECT_EQ(entries[0].device->get_name(), "GPU 4");
+    EXPECT_EQ(track_name(entries[0].device->get_index(), "Read Bytes"),
+              "GPU [4] Storage Read Bytes (S)");
+    EXPECT_EQ(entries[1].device->get_index(), 5U);
+    EXPECT_EQ(entries[1].device->get_hipfile_slot(), 1U);
+    EXPECT_EQ(entries[1].device->get_name(), "GPU 5");
+    EXPECT_EQ(track_name(entries[1].device->get_index(), "Read Bytes"),
+              "GPU [5] Storage Read Bytes (S)");
+
+    enabled_metrics enabled;
+    enabled.value = ALL_HIPFILE_METRICS;
+    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes, 111U);
+    EXPECT_EQ(entries[1].device->get_metrics(enabled, 1'000'000'000).read_bytes, 222U);
+}
+
+TEST_F(HipFileTraitsTest, sampling_gpus_filter_uses_profiler_index_not_hipfile_slot)
+{
+    stub_settings::visible_type_indices    = { 4, 5 };
+    stub_settings::gpu_filter.mode         = device_selection_mode::SPECIFIC;
+    stub_settings::gpu_filter.indices      = { 4 };
+    m_provider->backend->gpu(0).read_bytes = 333;
+    m_provider->backend->gpu(1).read_bytes = 444;
+
+    const auto entries = enumerate();
+
+    ASSERT_EQ(entries.size(), 1U);
+    EXPECT_EQ(entries[0].device->get_index(), 4U);
+    EXPECT_EQ(entries[0].device->get_hipfile_slot(), 0U);
+
+    enabled_metrics enabled;
+    enabled.value = ALL_HIPFILE_METRICS;
+    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes, 333U);
 }
 
 }  // namespace

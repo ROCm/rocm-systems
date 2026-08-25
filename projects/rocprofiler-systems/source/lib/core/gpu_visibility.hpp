@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 // Split out of core/gpu.hpp so that callers correlating devices against runtime
 // visibility do not have to pull in <amd_smi/amdsmi.h>.
@@ -30,5 +32,22 @@ namespace gpu
  */
 std::optional<std::set<std::string>>
 get_visible_gpu_bdfs();
+
+/**
+ * @brief Profiler GPU indices of the GPUs the HIP runtime exposes, in HIP ordinal order.
+ *
+ * Element @c k is the @c device_type_index of HIP device ordinal @c k. That is the space
+ * hipFile uses to index @c per_gpu_stats (via @c hipGetDevice()). rocprofiler-sdk does
+ * not store a HIP ordinal on the agent, only @c runtime_visibility.hip, so this is the
+ * k-th GPU agent with @c hip_visible set, in agent-manager order. That matches HIP when
+ * @c HIP_VISIBLE_DEVICES / @c ROCR_VISIBLE_DEVICES is an increasing subset (e.g. "4,5").
+ * A permutation (e.g. "5,4") or UUID list is warned about; the mapping may then be wrong.
+ *
+ * @return Empty when no GPU agents were found (same "unknown vs none" situation as
+ *         @c get_visible_gpu_bdfs returning nullopt, collapsed to "no visible GPUs"
+ *         because hipFile has nothing to index).
+ */
+std::vector<std::size_t>
+get_visible_gpu_type_indices();
 }  // namespace gpu
 }  // namespace rocprofsys
