@@ -90,8 +90,9 @@ def main() -> int:
         "passes_high": args.high_passes,
         "scaling_ratio": ratio,
     }
-    out_path = Path(os.environ.get("KR_PERF_RESULTS_JSON", ""))
-    if out_path:
+    out_json = os.environ.get("KR_PERF_RESULTS_JSON", "")
+    if out_json:
+        out_path = Path(out_json)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         import json
 
