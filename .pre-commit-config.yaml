@@ -21,6 +21,9 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+        # Public MR ISA XMLs are intentionally checked-in vendor inputs; each
+        # existing architecture file already exceeds the generic size limit.
+        exclude: ^shared/machine-readable-isa/isa/
 
   # Two black hooks so that directories with skip-string-normalization
   # (listed in the first hook) are kept separate from directories where
