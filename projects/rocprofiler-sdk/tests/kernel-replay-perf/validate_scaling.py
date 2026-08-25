@@ -11,20 +11,15 @@
 #   2. P-pass wall time does not blow up relative to a 1-pass baseline (linear scaling).
 
 import argparse
-import math
 import re
 import sys
+
+from perf_cost_model import model_max_ms
 
 _MARKER = re.compile(
     r"\[kr-perf\]\s+ballast_mb=(?P<ballast_mb>\d+)\s+launches=(?P<launches>\d+)\s+"
     r"wall_ms=(?P<wall_ms>[\d.]+)\s+counter=(?P<counter>\d+)"
 )
-
-# Match Figure 5 conservative floor (override via env in the C++ unit test).
-MIN_GBPS = 8.0
-# Host-link bytes per replayed dispatch: P * footprint (snap + P-1 restores).
-# Allow profiler/counter/drain overhead on top of pure DMA.
-OVERHEAD_MARGIN = 10.0
 
 
 def parse_marker(text: str) -> dict:
@@ -33,17 +28,6 @@ def parse_marker(text: str) -> dict:
         if m:
             return {k: float(v) if k == "wall_ms" else int(v) for k, v in m.groupdict().items()}
     raise AssertionError("missing [kr-perf] wall_ms marker in test output")
-
-
-def model_max_ms(ballast_mb: int, launches: int, passes: int) -> float:
-    footprint_bytes = ballast_mb * 1024 * 1024
-    # Per dispatch: P * footprint over the host link (Figure 5).
-    per_dispatch_bytes = passes * footprint_bytes
-    dma_seconds = per_dispatch_bytes / (MIN_GBPS * 1e9)
-    # Small kernel re-execution allowance (~2 ms per pass) plus drain/counter overhead.
-    kernel_seconds = passes * 0.002
-    per_dispatch_ms = (dma_seconds + kernel_seconds) * 1000.0
-    return launches * per_dispatch_ms * OVERHEAD_MARGIN
 
 
 def main() -> int:
