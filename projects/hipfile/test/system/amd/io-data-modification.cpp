@@ -8,6 +8,7 @@
 #include "hipfile-warnings.h"
 #include "hipfile.h"
 
+#include "io-scenario.h"
 #include "io-test.h"
 #include "io-verify.h"
 #include "test-common.h"
@@ -38,67 +39,12 @@ HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 // them with poisoned memory containing sentinel values that would tell us if hipFile ever read or wrote data
 // to a location that the user did not specify.
 // ---------------------------------------------------------------------------
-struct HipFileVerify : public testing::TestWithParam<std::tuple<IoTestParam, SizeParam>> {
-
-    const IoTestBackend backend{std::get<0>(GetParam()).backend}; // backend fulfilling the I/O request
-    const size_t        io_bytes{std::get<1>(GetParam()).bytes};  // bytes transferred using the hipFile API
-    // The data modification kernel will also verify that the sentinel regions of the device buffer are
-    // unmodified. Device layout (each sentinel region is 4_KiB, data is io_bytes): [head device
-    // sentinel region][data][tail device sentinel region]
-    const size_t buffer_bytes{io_bytes + 2 * 4_KiB};           // total device buffer size
-    const size_t io_elems{io_bytes / sizeof(int32_t)};         // transferred elements
-    const size_t buffer_elems{buffer_bytes / sizeof(int32_t)}; // elements spanning the whole buffer
-
-    Tmpfile         tmpfile;
-    hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr}; // allocated by SetUp
-    int32_t        *buffer_start{nullptr};  // typed view of device_buffer
-
-    HipFileVerify() : tmpfile{test_env.ais_capable_dir}
-    {
-    }
-
+struct HipFileVerify : public DataModificationBase<IntElementPolicy> {
     void SetUp() override
     {
-        Context<Configuration>::get()->fastpath(false);
-        Context<Configuration>::get()->fallback(false);
-
-        switch (backend) {
-            case IoTestBackend::Fastpath:
-                Context<Configuration>::get()->fastpath(true);
-                break;
-            case IoTestBackend::Fallback:
-                Context<Configuration>::get()->fallback(true);
-                break;
-            default:
-                FAIL() << "Unsupported IoTestBackend";
-        }
-
         // Size the file to hold io_bytes of data plus a leading empty chunk.
         ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(io_bytes + kChunkBytes)));
-
-        hipFileDescr_t descr{};
-        descr.type      = hipFileHandleTypeOpaqueFD;
-        descr.handle.fd = tmpfile.fd;
-        ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
-
-        ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
-        buffer_start = static_cast<int32_t *>(device_buffer);
-        ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
-        // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
-        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-
-        if (backend == IoTestBackend::Fastpath) {
-            enforceFastpathGate(tmpfile_handle, device_buffer);
-        }
-    }
-
-    void TearDown() override
-    {
-        if (device_buffer) {
-            ASSERT_EQ(hipSuccess, hipFree(device_buffer));
-        }
-        hipFileHandleDeregister(tmpfile_handle);
+        DataModificationBase::SetUp();
     }
 };
 
@@ -183,20 +129,22 @@ TEST_P(HipFileVerify, RoundTripGuardsFileSlack)
     assertConstant(file.data(), bracket_n + n, total_n, kSentinel);
 }
 
-static std::string
-verifyName(const testing::TestParamInfo<HipFileVerify::ParamType> &info)
-{
-    return std::get<0>(info.param).name + "_" + std::get<1>(info.param).name;
-}
+HIPFILE_WARN_NO_EXIT_DTOR_OFF
+const std::array<Axis<size_t>, 5> kVerifySizes{{
+    {4_KiB, "sub_chunk"},
+    {kChunkBytes - 4_KiB, "near_chunk"},
+    {kChunkBytes, "exact_chunk"},
+    {kChunkBytes + 4_KiB, "cross_chunk"},
+    {2 * kChunkBytes, "multi_chunk"},
+}};
+HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 INSTANTIATE_TEST_SUITE_P(, HipFileVerify,
-                         testing::Combine(testing::ValuesIn(io_test_params),
-                                          testing::Values(SizeParam{4_KiB, "sub_chunk"},
-                                                          SizeParam{kChunkBytes - 4_KiB, "near_chunk"},
-                                                          SizeParam{kChunkBytes, "exact_chunk"},
-                                                          SizeParam{kChunkBytes + 4_KiB, "cross_chunk"},
-                                                          SizeParam{2 * kChunkBytes, "multi_chunk"})),
-                         verifyName);
+                         testing::ValuesIn(IoTestScenarioSet{IoTestScenario{}}
+                                               .over(&IoTestScenario::backend, kBackends)
+                                               .over(&IoTestScenario::io_bytes, kVerifySizes)
+                                               .build()),
+                         ioTestScenarioName);
 
 // ---------------------------------------------------------------------------
 // This test suite performs the same combined hipFileRead + hipFileWrite test that the hipFileVerify test
@@ -210,28 +158,10 @@ INSTANTIATE_TEST_SUITE_P(, HipFileVerify,
 // ---------------------------------------------------------------------------
 namespace {
 
-enum class GridMode { Default, OneWorkgroup, ManyWorkgroups };
 struct WorkgroupParam {
     GridMode    mode;
     std::string name;
 };
-
-constexpr unsigned kManyWorkgroups = 300;
-
-dim3
-gridFor(GridMode mode, size_t n)
-{
-    switch (mode) {
-        case GridMode::OneWorkgroup:
-            return dim3(1);
-        case GridMode::ManyWorkgroups:
-            return dim3(kManyWorkgroups);
-        case GridMode::Default:
-            return defaultGrid(n);
-        default:
-            return defaultGrid(n);
-    }
-}
 
 struct StrideParam {
     size_t      stride;
