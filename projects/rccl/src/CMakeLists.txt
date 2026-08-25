@@ -124,6 +124,7 @@ set(SRC_FILES
   include/algorithms/CollCommon_ll128.h
   include/algorithms/all_reduce/all_reduce_dda.h
   include/algorithms/all_reduce/all_reduce_dda_ll.h
+  include/algorithms/all_reduce/all_reduce_dda_ll_twoshot.h
   include/algorithms/all_reduce/all_reduce_dda_fabric_ll128.h
   include/algorithms/reduce_scatter/reduce_scatter_dda.h
   include/algorithms/all_gather/all_gather_dda.h
@@ -253,6 +254,7 @@ set(SRC_FILES
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
+  include/nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table_device.h

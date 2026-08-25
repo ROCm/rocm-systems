@@ -114,6 +114,7 @@ def gen_mfma(
     arch_name: str = "",
     *,
     supports_gpr_idx: bool,
+    op_sel_hi_2_expr: str = 'inst_.op_sel_hi_2',
 ) -> str:
     """Generate MFMA / SMFMAC matrix multiply-accumulate.
 
@@ -498,7 +499,10 @@ def gen_mfma(
         # uses a wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
         if arch == 'cdna5' and input_type in ('F8_F6_F4', 'F8F6F4'):
             L.append(f'  uint32_t matrix_a_fmt = inst_.opsel;')
-            L.append(f'  uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;')
+            L.append(
+                f'  uint32_t matrix_b_fmt = ({op_sel_hi_2_expr} << 2) | '
+                f'inst_.opsel_hi;'
+            )
             L.append(
                 f'  bool dispatched = amdgpu::dispatch_matrix_fmt_pair('
                 f'matrix_a_fmt, matrix_b_fmt,'
