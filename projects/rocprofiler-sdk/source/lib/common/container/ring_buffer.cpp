@@ -78,6 +78,15 @@ ring_buffer::init(size_t _size)
 
     m_init = true;
 
+    // A zero-length request would round to a zero-size mmap() below and fail with EINVAL. This
+    // is reachable from record_header_buffer::allocate(num_bytes) during rocpd/output
+    // generation when a record domain produced no entries (num_bytes == 0), which occurs under
+    // HSA/sys tracing once the correlation-id finalize race no longer aborts finalization
+    // first. Allocate a minimum of one page so the mapping is valid; the container already
+    // treats an empty buffer as valid (request() returns nullptr when m_size == 0), so no
+    // consumer behavior changes -- only the previously-invalid mmap(0) case is fixed.
+    if(_size == 0) _size = units::get_page_size();
+
     // Round up to multiple of page size.
     _size += units::get_page_size() - ((_size % units::get_page_size() > 0)
                                            ? (_size % units::get_page_size())
