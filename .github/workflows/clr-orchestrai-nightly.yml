@@ -1,0 +1,353 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# CLR language-runtime tests on OrchestrAI (opt-in, additive).
+#
+# Every night this picks up the artifacts of a recent TheRock Multi-Arch CI run
+# on this repo and runs the language-runtime (HIP / OpenCL / CLR) suites against
+# them on real AMD hardware, via the OrchestrAI pipeline and its MAAS broker,
+# instead of on a device-attached GitHub runner.
+#
+# Nothing is built here and no existing workflow is touched. The whole
+# integration is .github/workflows/clr-orchestrai-nightly.yml +
+# .github/scripts/orchestrai_*.py + .github/orchestrai-config.yml, and it no-ops
+# on a fork that lacks the secrets.
+#
+# Required repo secrets:
+#   ORCHESTRAI_PIPELINE_USER   pipeline basic-auth user (presence gates the run)
+#   ORCHESTRAI_PIPELINE_TOKEN  pipeline basic-auth token
+#   ORCHESTRAI_WINDOWS_DRIVER_SOURCE  UNC path to the AMD GPU driver share
+#     (Windows batches only; consumed inside the trigger job, never re-emitted)
+#
+# Required repo variables (these must NOT be secrets — see below):
+#   ORCHESTRAI_PIPELINE_URL    pipeline host base URL
+#   ORCHESTRAI_PIPELINE_JOB    pipeline job name/path
+#   ORCHESTRAI_DEVICE_TAGS     JSON {device: [maas tags]}, e.g.
+#                              {"navi3x":["gpuarch_rdna3"],"navi4x":["gpuarch_rdna4"]}
+#   ORCHESTRAI_LINUX_DRIVER_SOURCE (or ..._SOURCES_JSON)  amdgpu-install package
+#     for Radeon Linux hosts
+#
+# Optional repo variables:
+#   ORCHESTRAI_CONTROL_RUNNER  runner for resolve/trigger/gate (default ubuntu-latest)
+#   ORCHESTRAI_WAIT_RUNNER     runner for the wait/verdict jobs (default ubuntu-latest)
+#     -> both must be able to reach ORCHESTRAI_PIPELINE_URL.
+#
+# WHY THE PIPELINE URL MUST BE A VARIABLE: orchestrai_trigger.py turns it into
+# `build_urls`, a job output the downstream wait job reads. GitHub redacts secret
+# values from job outputs, so a secret URL arrives blank and every test job fails
+# with "No pipeline build URL for batch ...".
+#
+# Everything else lives in .github/orchestrai-config.yml.
+
+name: CLR Runtime Tests (OrchestrAI)
+
+on:
+  schedule:
+    # 09:37 UTC. The source build (TheRock Multi-Arch CI) starts around 00:22
+    # UTC; its build stages publish artifacts well before the run finishes, and
+    # recent runs completed anywhere between 08:00 and 20:00 UTC. The resolver
+    # scans back up to source_build.max_age_hours, so a late source build simply
+    # means the previous day's artifacts are tested rather than nothing at all.
+    #
+    # For a weekly cadence on a wider suite set, add a second cron here and pass
+    # the suite list via the config's `suites` map — no workflow change needed.
+    - cron: "37 9 * * *"
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "TheRock Multi-Arch CI run ID to test (empty = newest with artifacts)"
+        required: false
+        type: string
+      suites:
+        description: "Suite ID(s) to run, comma-separated (empty = all configured)"
+        required: false
+        type: string
+      device:
+        description: "Device(s), comma-separated e.g. navi3x,navi4x (empty = all)"
+        required: false
+        type: string
+      platform:
+        description: "OS to test on"
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - linux
+          - windows
+      machines_per_hw_group:
+        description: "Machines per hardware group (1 = suites on a device share one machine)"
+        required: false
+        type: string
+        default: "1"
+      dry_run:
+        description: "Plan only: print the pipeline payloads, lease no hardware"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never pile runs up on the shared hardware fleet: one run per ref per event.
+# cancel-in-progress is deliberately off — cancelling an in-flight run would
+# strand the machines it has already acquired.
+concurrency:
+  group: orchestrai-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-and-trigger:
+    name: Resolve Build & Trigger
+    runs-on: ${{ vars.ORCHESTRAI_CONTROL_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
+      has_entries: ${{ steps.build-matrix.outputs.has_entries }}
+      build_urls: ${{ steps.trigger.outputs.build_urls }}
+      build_source: ${{ steps.resolve.outputs.build_source }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --quiet pyyaml
+
+      - name: Check OrchestrAI is configured
+        id: gate
+        env:
+          PIPELINE_USER: ${{ secrets.ORCHESTRAI_PIPELINE_USER }}
+          PIPELINE_TOKEN: ${{ secrets.ORCHESTRAI_PIPELINE_TOKEN }}
+        run: |
+          if [ -n "$PIPELINE_USER" ] && [ -n "$PIPELINE_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OrchestrAI secrets (ORCHESTRAI_PIPELINE_USER/ORCHESTRAI_PIPELINE_TOKEN) not set — skipping."
+          fi
+
+      - name: Resolve TheRock build to test
+        id: resolve
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          PLATFORMS: ${{ inputs.platform }}
+          # Empty on ROCm/rocm-systems (builds come from this repo). A fork sets
+          # it to ROCm/rocm-systems so a test run reads the real build history
+          # instead of the fork's empty one.
+          ORCHESTRAI_SOURCE_REPOSITORY: ${{ vars.ORCHESTRAI_SOURCE_REPOSITORY }}
+        run: python3 .github/scripts/orchestrai_resolve_build.py
+
+      # Written before the matrix/trigger steps run, so "which build was under
+      # test" is on the summary even when a later step fails — that is exactly
+      # when it is needed.
+      - name: Build source summary
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          BUILD_SOURCE: ${{ steps.resolve.outputs.build_source }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          src = json.loads(os.environ.get("BUILD_SOURCE") or "{}")
+          print("### TheRock build under test\n")
+          if not src:
+              print("No build with usable artifacts was found.")
+          else:
+              print("| Platform | Run | Commit | Built | Families |")
+              print("|---|---|---|---|---|")
+              for platform, info in sorted(src.items()):
+                  run = f"[{info['run_id']}]({info['run_url']})" if info.get("run_url") else info["run_id"]
+                  print(
+                      f"| {platform} | {run} | `{info.get('sha', '')[:12]}` | "
+                      f"{info.get('created_at', '')} | {', '.join(info.get('families', []))} |"
+                  )
+          PY
+
+      - name: Build matrix and batches
+        id: build-matrix
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          BUILD_SOURCE: ${{ steps.resolve.outputs.build_source }}
+          ORCHESTRAI_DEVICE_TAGS: ${{ vars.ORCHESTRAI_DEVICE_TAGS }}
+          SUITES: ${{ inputs.suites }}
+          DEVICES: ${{ inputs.device }}
+          PLATFORMS: ${{ inputs.platform }}
+        run: python3 .github/scripts/orchestrai_matrix.py
+
+      - name: Trigger OrchestrAI pipeline builds
+        id: trigger
+        if: steps.gate.outputs.enabled == 'true' && steps.build-matrix.outputs.has_entries == 'true'
+        env:
+          BATCHES_JSON: ${{ steps.build-matrix.outputs.batches }}
+          GIT_REF: ${{ github.ref }}
+          GIT_SHA: ${{ github.sha }}
+          MACHINES_PER_HW_GROUP: ${{ inputs.machines_per_hw_group }}
+          ORCHESTRAI_PIPELINE_USER: ${{ secrets.ORCHESTRAI_PIPELINE_USER }}
+          ORCHESTRAI_PIPELINE_TOKEN: ${{ secrets.ORCHESTRAI_PIPELINE_TOKEN }}
+          ORCHESTRAI_PIPELINE_URL: ${{ vars.ORCHESTRAI_PIPELINE_URL }}
+          ORCHESTRAI_PIPELINE_JOB: ${{ vars.ORCHESTRAI_PIPELINE_JOB }}
+          # Handed to the test machine so TheRock's artifact installer can
+          # authenticate its bucket lookup. Unauthenticated it shares the fleet's
+          # egress IP quota and fails with HTTP 429; the lookup cannot be
+          # bypassed. Read-only public-repo scope is all it needs.
+          ORCHESTRAI_GITHUB_TOKEN: ${{ github.token }}
+          ORCHESTRAI_LINUX_DRIVER_SOURCE: ${{ vars.ORCHESTRAI_LINUX_DRIVER_SOURCE }}
+          # Optional per-release amdgpu map; overrides the single URL above on
+          # hosts whose release has an entry.
+          ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON: ${{ vars.ORCHESTRAI_LINUX_DRIVER_SOURCES_JSON }}
+          ORCHESTRAI_WINDOWS_DRIVER_SOURCE: ${{ secrets.ORCHESTRAI_WINDOWS_DRIVER_SOURCE }}
+        # dry_run plans every batch and prints the exact PLAN_JSON / BUILDS_JSON
+        # without POSTing, so the whole workflow can be exercised on a fork
+        # without occupying a machine from the shared fleet.
+        run: python3 .github/scripts/orchestrai_trigger.py ${{ inputs.dry_run && '--dry-run' || '' }}
+
+  test:
+    name: "${{ matrix.suite }} (${{ matrix.platform }}/${{ matrix.device }})${{ matrix.required && ' ✦' || '' }}"
+    needs: resolve-and-trigger
+    # No pipeline build exists on a dry run, so there is nothing to wait for.
+    if: needs.resolve-and-trigger.outputs.has_entries == 'true' && !inputs.dry_run
+    runs-on: ${{ vars.ORCHESTRAI_WAIT_RUNNER || 'ubuntu-latest' }}
+    continue-on-error: ${{ !matrix.required }}
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        include: ${{ fromJson(needs.resolve-and-trigger.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Wait for pipeline build
+        id: wait
+        env:
+          BUILD_URLS_JSON: ${{ needs.resolve-and-trigger.outputs.build_urls }}
+          BATCH_ID: ${{ matrix.batch_id }}
+          ORCHESTRAI_PIPELINE_USER: ${{ secrets.ORCHESTRAI_PIPELINE_USER }}
+          ORCHESTRAI_PIPELINE_TOKEN: ${{ secrets.ORCHESTRAI_PIPELINE_TOKEN }}
+        run: |
+          BUILD_URL=$(python3 -c "import json,os;print(json.loads(os.environ.get('BUILD_URLS_JSON','{}') or '{}').get(os.environ['BATCH_ID'],''))")
+          if [ -z "$BUILD_URL" ]; then
+            echo "::error::No pipeline build URL for batch ${BATCH_ID}"; exit 1
+          fi
+          echo "build_url=${BUILD_URL}" >> "$GITHUB_OUTPUT"
+          echo "Waiting for pipeline build ..."
+          # SECURITY: credentials go in a 0600 netrc file, never `curl -u
+          # user:token` — argv is world-readable (/proc/<pid>/cmdline, ps) for the
+          # life of each curl, which would leak the pipeline token to any other
+          # process on a shared self-hosted runner. mktemp creates the file 0600
+          # and printf is a shell builtin, so the token never hits argv.
+          NETRC="$(mktemp)"
+          trap 'rm -f "$NETRC"' EXIT
+          NETRC_HOST=$(printf '%s' "$BUILD_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#[:/].*$##')
+          printf 'machine %s login %s password %s\n' \
+            "$NETRC_HOST" "$ORCHESTRAI_PIPELINE_USER" "$ORCHESTRAI_PIPELINE_TOKEN" > "$NETRC"
+          # Bounded poll: ~5.5h (1320 * 15s) covers run_settings.max_duration (300m)
+          # plus provisioning and queue time, but never hangs to the job timeout.
+          MAX=1320
+          FAIL_MAX=20       # ~5 min of consecutive unreachable polls -> give up
+          i=0; fails=0
+          while [ "$i" -lt "$MAX" ]; do
+            if data=$(curl -sf --connect-timeout 10 --max-time 30 --netrc-file "$NETRC" "${BUILD_URL}api/json?tree=result,building" 2>/dev/null); then
+              fails=0
+              building=$(echo "$data" | python3 -c "import sys,json;print(json.load(sys.stdin).get('building',True))" 2>/dev/null || echo "True")
+              result=$(echo "$data" | python3 -c "import sys,json;print(json.load(sys.stdin).get('result') or '')" 2>/dev/null || echo "")
+              # The batch result reflects ALL its suites; this job's verdict is
+              # resolved per-suite in the next step from summary.json.
+              if [ "$building" = "False" ] && [ -n "$result" ]; then
+                echo "Batch build finished: $result (per-suite verdict resolved next)"; break
+              fi
+            else
+              fails=$((fails + 1))
+              if [ "$fails" -ge "$FAIL_MAX" ]; then
+                echo "::error::Pipeline unreachable ($FAIL_MAX consecutive failures)"; exit 1
+              fi
+            fi
+            i=$((i + 1))
+            sleep 15
+          done
+          if [ "$i" -ge "$MAX" ]; then
+            echo "::error::Timed out waiting for the pipeline build"; exit 1
+          fi
+
+      - name: Resolve per-suite verdict
+        id: results
+        if: always()
+        env:
+          BUILD_URL: ${{ steps.wait.outputs.build_url }}
+          SUITE_ID: ${{ matrix.suite }}
+          PLATFORM: ${{ matrix.platform }}
+          DEVICE: ${{ matrix.device }}
+          ORCHESTRAI_PIPELINE_USER: ${{ secrets.ORCHESTRAI_PIPELINE_USER }}
+          ORCHESTRAI_PIPELINE_TOKEN: ${{ secrets.ORCHESTRAI_PIPELINE_TOKEN }}
+        run: python3 .github/scripts/orchestrai_verdict.py
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-${{ matrix.suite }}-${{ matrix.platform }}-${{ matrix.device }}
+          path: test-results/
+          if-no-files-found: ignore
+
+      - name: Test summary
+        if: always()
+        env:
+          RP_URL: ${{ steps.results.outputs.rp_url }}
+        run: |
+          {
+            echo "### \`${{ matrix.suite }}\` (${{ matrix.platform }}/${{ matrix.device }})"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| AMDGPU family | \`${{ matrix.family }}\` |"
+            # This repo is PUBLIC, so the job summary is world-readable. Show the
+            # ReportPortal launch id rather than the full URL: it is the useful
+            # part for anyone who can reach ReportPortal, and it does not publish
+            # an internal hostname to the world. Set ORCHESTRAI_PUBLIC_LOGS=false
+            # on a private mirror to get the clickable link back.
+            if [ -n "${RP_URL}" ]; then
+              if [ "${{ vars.ORCHESTRAI_PUBLIC_LOGS }}" = "false" ]; then
+                echo "| ReportPortal | [View results](${RP_URL}) |"
+              else
+                echo "| ReportPortal launch | \`$(basename "${RP_URL}")\` |"
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  gate:
+    name: OrchestrAI Gate
+    needs: [resolve-and-trigger, test]
+    if: always()
+    runs-on: ${{ vars.ORCHESTRAI_CONTROL_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - name: Check required suites
+        run: |
+          echo "resolve-and-trigger: ${{ needs.resolve-and-trigger.result }}"
+          echo "test:                ${{ needs.test.result }}"
+          # A failure in resolve/matrix/trigger skips the test job, so gate on it
+          # too — otherwise a trigger failure would leave this check green.
+          if [ "${{ needs.resolve-and-trigger.result }}" = "failure" ]; then
+            echo "::error::Resolve/trigger failed — the pipeline did not run"; exit 1
+          fi
+          # A configured run that schedules nothing is a misconfiguration, not a
+          # pass: every device was dropped (missing ORCHESTRAI_DEVICE_TAGS entry,
+          # skip_devices, or a family the source build did not produce). Without
+          # this check the nightly would go green while testing nothing at all.
+          # The warnings in the matrix step name the exact cause.
+          if [ "${{ needs.resolve-and-trigger.outputs.enabled }}" = "true" ] \
+             && [ "${{ needs.resolve-and-trigger.outputs.has_entries }}" != "true" ]; then
+            echo "::error::A build was resolved but no suite was scheduled — see the 'Build matrix and batches' warnings"; exit 1
+          fi
+          if [ "${{ needs.test.result }}" = "failure" ]; then
+            echo "::error::One or more required suites failed"; exit 1
+          fi
+          echo "All required suites passed (or none were needed)"
