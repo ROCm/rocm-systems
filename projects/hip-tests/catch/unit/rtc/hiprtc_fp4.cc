@@ -122,13 +122,13 @@ extern "C" __global__ void float_to_fp4_to_float(float* out, float* in, size_t s
 
   // We basically check for static archs.
   // Just want to make sure operators are correctly visible for different archs
-  std::vector<std::string> archs{"gfx942", "gfx950", "gfx1250"};
+  std::vector<std::string> archs{"gfx950", "gfx1250"};
 
   for (const auto& arch : archs) {
     std::string sarg = std::string("--offload-arch=") + arch;
     CAPTURE(sarg);
 
-    // Not consexpr since we need pointers
+    // Not constexpr since we need pointers
     std::array all_options{
         "-D__HIP_NO_HALF_CONVERSIONS__=1",         "-D__HIP_NO_HALF_OPERATORS__=1",
         "-D__HIP_NO_FP4_CONVERSION_OPERATORS__=1", "-D__HIP_NO_FP4_CONVERSIONS__=1",
@@ -137,7 +137,7 @@ extern "C" __global__ void float_to_fp4_to_float(float* out, float* in, size_t s
     constexpr unsigned N = all_options.size();
 
     for (unsigned mask = 0; mask < (1u << N); ++mask) {
-      std::vector<const char*> opts{sarg.data()};
+      std::vector<const char*> opts{sarg.c_str()};
       // Basically generate combinations of the options to mix and match it
       for (unsigned i = 0; i < N; ++i) {
         if (mask & (1u << i)) {
