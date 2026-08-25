@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include "backends/amd_smi/gpu_types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <array>
 #include <concepts>
 #include <cstdint>
 #include <memory>
@@ -142,7 +144,9 @@ public:
                     for(size_t j = 0; j < src_busy.size(); ++j)
                     {
                         if(src_busy[j] != METRIC_VALUE_NOT_SUPPORTED_16)
+                        {
                             max_busy[j] = std::max(max_busy[j], src_busy[j]);
+                        }
                         dst_busy[j] = max_busy[j];
                     }
                 }
