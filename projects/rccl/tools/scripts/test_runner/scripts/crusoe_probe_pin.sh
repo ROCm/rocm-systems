@@ -30,7 +30,7 @@ PIN=""
 while true; do
   rebuild_exclude_arg
   PIN=$(probe_symmetric_pair "${SALLOC_NODES}" || true)
-  if [ -n "${PIN}" ] && [ "$(printf '%s' "${PIN}" | tr ',' '\n' | sed '/^$/d' | wc -l)" -ge "${SALLOC_NODES}" ]; then
+  if [ -n "${PIN}" ] && [ "$(printf '%s\n' "${PIN}" | tr ',' '\n' | sed '/^$/d' | wc -l)" -ge "${SALLOC_NODES}" ]; then
     break
   fi
   echo "No idle symmetric pair yet (cluster busy); waiting before another probe..."
