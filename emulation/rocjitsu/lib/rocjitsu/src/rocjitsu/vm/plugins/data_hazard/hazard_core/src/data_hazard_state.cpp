@@ -91,6 +91,10 @@ void track_instruction_context(EngineWaveState &wave, const InstructionEvent &in
   auto [it, inserted] = wave.instruction_contexts.emplace(ctx.instruction_id, ctx);
   if (!inserted)
     merge_instruction_context(it->second, ctx);
+  wave.current_instruction_id = ctx.instruction_id;
+
+  if (wave.instruction_contexts.size() > wave.contexts_at_last_prune + kInstructionContextSlack)
+    prune_retired_instructions(wave);
 }
 
 const EngineInstructionContext &get_instruction_context(const EngineWaveState &wave,
@@ -109,7 +113,7 @@ std::array<uint32_t, 4> get_pending_raw_isa(const EngineWaveState &wave, EntityI
   return it->second;
 }
 
-void prune_pending_raw_isa(EngineWaveState &wave) {
+void prune_retired_instructions(EngineWaveState &wave) {
   std::unordered_set<EntityId> active_ids;
   active_ids.reserve(wave.pending_raw_isa.size());
 
@@ -122,6 +126,19 @@ void prune_pending_raw_isa(EngineWaveState &wave) {
       ++it;
     }
   }
+
+  // The instruction issuing now stays whether or not it left anything pending:
+  // its own accesses are still to come and they look their context up by id.
+  for (auto it = wave.instruction_contexts.begin(); it != wave.instruction_contexts.end();) {
+    if (it->first != wave.current_instruction_id &&
+        active_ids.find(it->first) == active_ids.end()) {
+      it = wave.instruction_contexts.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  wave.contexts_at_last_prune = wave.instruction_contexts.size();
 }
 
 } // namespace hazard_core

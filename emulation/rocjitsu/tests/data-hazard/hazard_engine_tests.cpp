@@ -798,6 +798,211 @@ TEST(GenericDataHazardEngineTest, PartialWaitLeavesEveryDestinationOfAWideLoadPe
   EXPECT_NE(warnings[0].message.find("RAW hazard: VGPR v4"), std::string::npos);
 }
 
+TEST(GenericDataHazardEngineTest, WaitDropsTheContextsOfTheInstructionsItDrains) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  for (EntityId id = 2; id <= 4; ++id) {
+    InstructionEvent arithmetic;
+    arithmetic.instruction = make_instruction(id, 0x100 + id * 4);
+    engine.on_instruction(arithmetic);
+  }
+
+  auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->instruction_context_count, 4u);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(5, 0x120);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 0});
+  engine.on_instruction(wait);
+
+  snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->instruction_context_count, 1u)
+      << "the wait leaves nothing in flight, so only its own context is still needed";
+}
+
+TEST(GenericDataHazardEngineTest, LoadLeftPendingByAWaitKeepsTheContextItIsReportedFrom) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent drained_load;
+  drained_load.instruction = make_instruction(1, 0x100);
+  drained_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(drained_load);
+
+  ResourceAccessEvent drained_write;
+  drained_write.instruction = drained_load.instruction;
+  drained_write.resource_kind = ResourceKind::VectorRegister;
+  drained_write.register_kind = RegisterKind::Vector;
+  drained_write.resource_index = 4;
+  drained_write.size_bytes = 4;
+  drained_write.is_write = true;
+  engine.on_resource_access(drained_write);
+
+  InstructionEvent pending_load;
+  pending_load.instruction = make_instruction(2, 0x104);
+  pending_load.instruction.raw_isa[0] = 0xFEEDFACE;
+  pending_load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(pending_load);
+
+  ResourceAccessEvent pending_write;
+  pending_write.instruction = pending_load.instruction;
+  pending_write.resource_kind = ResourceKind::VectorRegister;
+  pending_write.register_kind = RegisterKind::Vector;
+  pending_write.resource_index = 8;
+  pending_write.size_bytes = 4;
+  pending_write.is_write = true;
+  engine.on_resource_access(pending_write);
+
+  InstructionEvent wait;
+  wait.instruction = make_instruction(3, 0x108);
+  wait.wait_action.is_wait_instruction = true;
+  wait.wait_action.counters.push_back({WaitCntType::VMEM, 1});
+  engine.on_instruction(wait);
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_EQ(snapshot->instruction_context_count, 2u)
+      << "the newer load is still in flight and the wait is the current instruction";
+
+  InstructionEvent read;
+  read.instruction = make_instruction(4, 0x10c);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 8;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.pc, 0x104u);
+  EXPECT_EQ(warnings[0].source_raw_isa[0], 0xFEEDFACEu);
+}
+
+TEST(GenericDataHazardEngineTest, ContextsStayBoundedThroughALongStretchWithoutWaits) {
+  // A loop body that never waits still ends up on this path, so the contexts a
+  // wave holds have to follow what is in flight rather than how far it has run.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  InstructionEvent load;
+  load.instruction = make_instruction(1, 0x100);
+  load.instruction.raw_isa[0] = 0xDEADBEEF;
+  load.hazards.vector_write_wait = WaitCntType::VMEM;
+  engine.on_instruction(load);
+
+  ResourceAccessEvent load_write;
+  load_write.instruction = load.instruction;
+  load_write.resource_kind = ResourceKind::VectorRegister;
+  load_write.register_kind = RegisterKind::Vector;
+  load_write.resource_index = 4;
+  load_write.size_bytes = 4;
+  load_write.is_write = true;
+  engine.on_resource_access(load_write);
+
+  const EntityId last_arithmetic = 4 * kInstructionContextSlack;
+  for (EntityId id = 2; id <= last_arithmetic; ++id) {
+    InstructionEvent arithmetic;
+    arithmetic.instruction = make_instruction(id, 0x100 + id * 4);
+    engine.on_instruction(arithmetic);
+  }
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_LE(snapshot->instruction_context_count, kInstructionContextSlack + 2)
+      << "contexts of instructions that left nothing pending must not accumulate";
+
+  InstructionEvent read;
+  read.instruction = make_instruction(last_arithmetic + 1, 0x100 + (last_arithmetic + 1) * 4);
+  engine.on_instruction(read);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read.instruction;
+  read_access.resource_kind = ResourceKind::VectorRegister;
+  read_access.register_kind = RegisterKind::Vector;
+  read_access.resource_index = 4;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_EQ(warnings[0].finding.source_instruction.pc, 0x100u);
+  EXPECT_EQ(warnings[0].source_raw_isa[0], 0xDEADBEEFu)
+      << "the load is still pending, so pruning must not have taken its identity";
+}
+
+TEST(GenericDataHazardEngineTest, DeepPendingQueueStillPrunesOnlyOncePerSlack) {
+  // Stores leave a pending operation behind without a raw ISA entry, so a wave
+  // deep in stores keeps far more contexts than that map knows about. Pruning
+  // has to measure growth against what the last prune left, or a wave in this
+  // shape asks for a prune per instruction and walks its whole pending queue
+  // each time.
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey wave{1, 0, 0, 0, 0};
+  engine.on_wave_begin(wave);
+
+  constexpr EntityId kStores = 2 * kInstructionContextSlack;
+  for (EntityId id = 1; id <= kStores; ++id) {
+    InstructionEvent store;
+    store.instruction = make_instruction(id, 0x100 + id * 4);
+    store.hazards.memory_op_wait = WaitCntType::STORE;
+    engine.on_instruction(store);
+  }
+
+  constexpr EntityId kArithmetic = kInstructionContextSlack / 2;
+  for (EntityId id = kStores + 1; id <= kStores + kArithmetic; ++id) {
+    InstructionEvent arithmetic;
+    arithmetic.instruction = make_instruction(id, 0x100 + id * 4);
+    engine.on_instruction(arithmetic);
+  }
+
+  const auto snapshot = engine.wave_snapshot(wave);
+  ASSERT_TRUE(snapshot.has_value());
+  EXPECT_GT(snapshot->instruction_context_count, kStores + 1)
+      << "retired contexts within a slack of the last prune must be left alone, "
+         "otherwise every instruction pays for a walk of the pending queue";
+  EXPECT_LE(snapshot->instruction_context_count, kStores + kInstructionContextSlack + 1)
+      << "the stores in flight raise the bound, they do not remove it";
+}
+
 namespace {
 
 /// The kernel shape behind the gfx9 scratch spill: a global load into v4, two
