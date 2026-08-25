@@ -14,7 +14,10 @@
 #   UCX_VERSION            UCX version (default: 1.17.0)
 #   OMPI_MAJOR_MINOR       OpenMPI major.minor (default: 5.0)
 #   OMPI_VERSION           OpenMPI patch version (default: 5.0.9)
-#   RCCL_BUILD_JOBS        Parallel build jobs (default: $(nproc))
+#   OMPI_UCX_BUILD_JOBS    Parallel build jobs for these builds. UCX and OpenMPI
+#                          are light C compiles (not memory-heavy like RCCL's C++),
+#                          so this defaults higher than the RCCL cap:
+#                          min(nproc, 64). Overridable via this env var.
 #   RCCL_DEVICE_API_WORKDIR / WORKDIR   Workspace root (for .ci-out output)
 
 set -euxo pipefail
@@ -22,7 +25,12 @@ set -euxo pipefail
 UCX_VERSION="${UCX_VERSION:-1.17.0}"
 OMPI_MAJOR_MINOR="${OMPI_MAJOR_MINOR:-5.0}"
 OMPI_VERSION="${OMPI_VERSION:-5.0.9}"
-build_jobs="${RCCL_BUILD_JOBS:-$(nproc)}"
+if [[ -n "${OMPI_UCX_BUILD_JOBS:-}" ]]; then
+  build_jobs="${OMPI_UCX_BUILD_JOBS}"
+else
+  _np="$(nproc)"
+  build_jobs=$(( _np < 64 ? _np : 64 ))
+fi
 
 WORKDIR="${RCCL_DEVICE_API_WORKDIR:-${WORKDIR:-}}"
 if [[ -z "${WORKDIR}" ]]; then

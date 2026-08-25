@@ -94,7 +94,13 @@ build_rc=0
 # shellcheck source=/dev/null
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
+# Per-phase wall-clock marks. Embedded in the build log so the CI job can report
+# exactly how long each build step took (independent of when logs are dumped).
+_bt0=$(date +%s)
+_pt(){ echo "PHASE_TS $1 epoch=$(date +%s) iso=$(date -Is) elapsed=$(( $(date +%s) - _bt0 ))s"; }
+
 # 1) RCCL from the PR sources.
+_pt "build:rccl:start"
 echo "==> [1/5] build RCCL (targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rm -rf "${rccl_prefix}"
@@ -123,6 +129,7 @@ echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
 # 2) UCX-enabled OpenMPI, isolated from the gin/device-api OpenMPI. The tuner
 # tests launch `mpirun --mca pml ucx`, which the shared build lacks.
+_pt "build:ompi-ucx:start"
 echo "==> [2/5] build UCX-enabled OpenMPI (isolated)"
 "${ci_dir}/lib/build-ompi-ucx.sh"
 set -a
@@ -138,6 +145,7 @@ fi
 # 3) rccl-tests WITH MPI: the tuner tests drive several collectives via mpirun,
 # so build all the *_perf binaries. Use -k so one failing target does not sink
 # the rest; the required binaries are checked explicitly below.
+_pt "build:rccl-tests:start"
 echo "==> [3/5] build rccl-tests (*_perf, USE_MPI=ON)"
 rccl_tests_build="${rccl_tests_src}/build"
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
@@ -163,6 +171,7 @@ fi
 # 4) CSV tuner example plugin. Installed where conftest.py expects it
 # (RCCL_INSTALL_DIR/plugins/tuner/example); its presence is also what makes
 # conftest run (not skip) the ext_tuner tests.
+_pt "build:tuner-so:start"
 echo "==> [4/5] build + install libnccl-tuner-example.so"
 tuner_src="${rccl_src}/plugins/tuner/example"
 tuner_dst="${rccl_install_dir}/plugins/tuner/example"
@@ -184,6 +193,7 @@ echo "    installed -> ${tuner_dst}/libnccl-tuner-example.so"
   printf 'export RCCL_TESTS_DIR=%q\n'   "${rccl_tests_src}"
   printf 'export OMPI_INSTALL_DIR=%q\n' "${MPI_HOME}"
 } > "${workdir}/.ci-out/ext-plugins.env"
+_pt "build:end"
 ) > "${build_out}" 2> "${build_err}" || build_rc=$?
 echo "==> build phase logs: ${build_out} / ${build_err}"
 
@@ -200,6 +210,9 @@ fi
 # instead, which the workflow turns into a red (non-gating) result. ---
 test_rc=0
 {
+_tt0=$(date +%s)
+_pt(){ echo "PHASE_TS $1 epoch=$(date +%s) iso=$(date -Is) elapsed=$(( $(date +%s) - _tt0 ))s"; }
+_pt "test:start"
 echo "==> [5/5] run ext-plugins pytest (-m 'ext_mixed or ext_tuner')"
 set -a
 # shellcheck source=/dev/null
@@ -221,6 +234,7 @@ python3 -m pip install --quiet --disable-pip-version-check -r "${ext_dir}/requir
 # conftest.py resolves assets/logs from the current working directory.
 cd "${ext_dir}"
 python3 -m pytest -v -rs --color=no -m "ext_mixed or ext_tuner"
+_pt "test:end"
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"
 if [[ "${test_rc}" -ne 0 ]]; then
