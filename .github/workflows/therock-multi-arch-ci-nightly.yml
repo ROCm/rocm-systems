@@ -51,7 +51,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7b19fce75b97c4604609daaf9ad70975563108a0 # 2026-08-25 commit
     with:
       build_variant: "release"
       # Limit GPU families for nightly CI: gfx94X, gfx950, gfx125X (Linux) and gfx1151 (Windows)
@@ -65,7 +65,7 @@ jobs:
       # Default resolves the live tip of ROCm/TheRock@main; workflow_dispatch can
       # pin an explicit ref via therock_ref_override. setup resolves this to one
       # concrete SHA (needs.setup.outputs.ref) for every downstream job.
-      ref: ${{ inputs.therock_ref_override || 'main' }}
+      ref: ${{ inputs.therock_ref_override || '7b19fce75b97c4604609daaf9ad70975563108a0' }} # 2026-08-25 commit
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       external_repo: >-
@@ -107,7 +107,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@7b19fce75b97c4604609daaf9ad70975563108a0 # 2026-08-25 commit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -133,7 +133,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@main
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@7b19fce75b97c4604609daaf9ad70975563108a0 # 2026-08-25 commit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
