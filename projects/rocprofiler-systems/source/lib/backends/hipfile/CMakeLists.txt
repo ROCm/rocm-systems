@@ -27,6 +27,12 @@ target_link_libraries(
 # The wrapper re-checks the minimum version at compile time (against hipfile.h) and at
 # run time (against the loaded libhipfile), so the number find_package() enforces is
 # pushed down here instead of being restated in the header, where the two could drift.
+if(NOT ROCPROFSYS_HIPFILE_MIN_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(
+        FATAL_ERROR
+        "ROCPROFSYS_HIPFILE_MIN_VERSION must be major.minor.patch (for example 0.5.0), got '${ROCPROFSYS_HIPFILE_MIN_VERSION}'"
+    )
+endif()
 string(REPLACE "." ";" _hipfile_min_version "${ROCPROFSYS_HIPFILE_MIN_VERSION}")
 list(GET _hipfile_min_version 0 _hipfile_min_version_major)
 list(GET _hipfile_min_version 1 _hipfile_min_version_minor)

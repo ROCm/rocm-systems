@@ -93,10 +93,10 @@ target_compile_options(hipfile-trace PRIVATE ${_FLAGS})
 
 # GPU-direct storage I/O workload for hipFile telemetry. Built alongside
 # hipfile-trace whenever hipFile is present, except when this directory is
-# added from the rocprofiler-systems tree with ROCPROFSYS_BUILD_HIPFILE=OFF:
+# added from the rocprofiler-systems tree without ROCPROFSYS_HIPFILE_SUPPORT:
 # pytest then skips on the missing binary rather than profiling a workload
 # the collector was compiled out of.
-if(NOT DEFINED ROCPROFSYS_BUILD_HIPFILE OR ROCPROFSYS_BUILD_HIPFILE)
+if(NOT DEFINED ROCPROFSYS_HIPFILE_SUPPORT OR ROCPROFSYS_HIPFILE_SUPPORT)
     add_executable(hipfile-io hipfile-io.cpp)
     target_compile_options(hipfile-io PRIVATE -W -Wall)
     target_link_libraries(hipfile-io PRIVATE hip::host ${hipfile_TARGET})

@@ -43,17 +43,37 @@ protected:
 
 // ── Identity and metric set ─────────────────────────────────────────────────
 
-TEST_F(HipFileDeviceTest, index_and_name_track_the_gpu_ordinal)
+TEST_F(HipFileDeviceTest, index_and_name_track_the_profiler_device_index)
 {
-    device_t third{ m_backend, 3 };
+    device_t remapped{ m_backend, 0, 4 };
 
-    EXPECT_EQ(third.get_index(), 3U);
-    EXPECT_EQ(third.get_name(), "GPU 3");
+    EXPECT_EQ(remapped.get_hipfile_slot(), 0U);
+    EXPECT_EQ(remapped.get_index(), 4U);
+    EXPECT_EQ(remapped.get_name(), "GPU 4");
+}
+
+TEST_F(HipFileDeviceTest, is_supported_bounds_the_hipfile_slot_not_the_profiler_index)
+{
+    device_t high_profiler_index{ m_backend, 0, MAX_GPUS + 4 };
+    EXPECT_TRUE(high_profiler_index.is_supported());
+
+    device_t slot_past_capacity{ m_backend, MAX_GPUS, 0 };
+    EXPECT_FALSE(slot_past_capacity.is_supported());
 }
 
 TEST_F(HipFileDeviceTest, all_metrics_supported_for_valid_ordinal)
 {
     EXPECT_EQ(m_device->get_supported_metrics().value, ALL_HIPFILE_METRICS);
+}
+
+TEST_F(HipFileDeviceTest, metrics_are_read_from_the_hipfile_slot_not_the_profiler_index)
+{
+    m_backend->gpu(0).read_bytes = 111;
+    m_backend->gpu(4).read_bytes = 999;
+
+    device_t remapped{ m_backend, 0, 4 };
+
+    EXPECT_EQ(remapped.get_metrics(m_enabled, TS_1).read_bytes, 111U);
 }
 
 TEST_F(HipFileDeviceTest, ordinal_beyond_snapshot_supports_nothing)
