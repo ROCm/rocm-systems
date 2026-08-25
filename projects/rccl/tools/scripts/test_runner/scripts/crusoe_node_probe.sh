@@ -10,12 +10,22 @@
 set +e
 export PATH="/opt/rocm/bin:/usr/bin:/usr/sbin:/bin:${PATH:-}"
 
+export PATH="${PATH}:/usr/sbin:/sbin"
 host=$(hostname -s)
 want="ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7"
 gid_idx="${NCCL_IB_GID_INDEX:-1}"
+# Management/OOB interface OpenMPI is pinned to (oob_tcp_if_include /
+# btl_tcp_if_include in the ainic mpi_args). A node whose mgmt NIC is missing,
+# down, or has no IPv4 cannot bootstrap mpirun daemons, so gate on it here --
+# this is the cheap per-node half of the check; crusoe_mpi_smoke.sh proves the
+# pair can actually route to each other over it before the pair is pinned.
+oob_if="${PROBE_OOB_IF:-ens3}"
 
 gpus=$(rocminfo 2>/dev/null | grep -c gfx950)
 gpus=${gpus:-0}
+
+# IPv4 on the OOB interface, only if the link is up (`ip ... up` filter).
+oob_ipv4=$(ip -o -4 addr show dev "${oob_if}" up 2>/dev/null | awk '{print $4}' | head -1)
 
 nics=$(ls -1 /sys/class/infiniband 2>/dev/null | grep -E '^ionic_[0-7]$' | sort | paste -sd, -)
 ibv=$(ibv_devices 2>/dev/null | awk 'NF && $1 ~ /^ionic_[0-7]$/ {print $1}' | sort | paste -sd, -)
@@ -57,10 +67,14 @@ if [ -n "${gid_missing}" ]; then
   ok=0
   reason="${reason:+${reason},}gid_missing=${gid_missing}"
 fi
+if [ -z "${oob_ipv4}" ]; then
+  ok=0
+  reason="${reason:+${reason},}oob_${oob_if}=down_or_no_ipv4"
+fi
 
 if [ "${ok}" -eq 1 ]; then
-  echo "OK host=${host} gpus=${gpus} nics=${nics} fp=${fp}"
+  echo "OK host=${host} gpus=${gpus} nics=${nics} oob=${oob_if}/${oob_ipv4} fp=${fp}"
 else
-  echo "BAD host=${host} gpus=${gpus} nics=${nics:-none} ibv=${ibv:-none} reason=${reason} fp=${fp}"
+  echo "BAD host=${host} gpus=${gpus} nics=${nics:-none} ibv=${ibv:-none} oob=${oob_if}/${oob_ipv4:-none} reason=${reason} fp=${fp}"
 fi
 exit 0

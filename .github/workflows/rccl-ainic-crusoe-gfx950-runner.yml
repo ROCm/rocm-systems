@@ -130,6 +130,12 @@ env:
   # SPUR (not Slurm): without this the client talks to localhost:6817.
   SPUR_CONTROLLER_ADDR: http://crs-m2m-cpu-spur-005.crusoe.amd.com:6817
   TEST_RUNNER_DIR: projects/rccl/tools/scripts/test_runner
+  # Management/OOB interface OpenMPI is pinned to (oob_tcp_if_include /
+  # btl_tcp_if_include in the ainic mpi_args). The node probe rejects nodes
+  # whose mgmt NIC is missing/down/without IPv4, and the pair MPI smoke
+  # (crusoe_mpi_smoke.sh) verifies the two pinned nodes can bootstrap mpirun
+  # over it before build+test. Keep in sync with the config's ainic mpi_args.
+  PROBE_OOB_IF: ens3
   # Empty => github.workspace. z1_coco cannot write /shared_nfs/rccl-ci/rocm-systems.
   DEFAULT_WORKDIR: ''
   DEFAULT_MPI_PATH: /opt/openmpi

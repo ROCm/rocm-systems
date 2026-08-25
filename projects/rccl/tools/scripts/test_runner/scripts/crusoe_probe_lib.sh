@@ -91,8 +91,80 @@ probe_symmetric_pair() {
   done
   echo "=== probe results ===" >&2
   grep -hE '^(OK|BAD) ' "${probe_dir}"/*.out 2>/dev/null >&2 || true
-  python3 "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_pick_symmetric.py" \
-    "${need}" "${probe_dir}"
+  local pair
+  pair=$(python3 "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_pick_symmetric.py" \
+    "${need}" "${probe_dir}") || return 1
+  [ -n "${pair}" ] || return 1
+  # A pair can be identical on paper (same GPUs/NICs/fingerprint) yet still be
+  # unable to bring up mpirun across the two nodes -- e.g. no common route on the
+  # mgmt interface, the exact failure that made every suite die at launch with
+  # "an ORTE daemon has unexpectedly failed". Prove the real OpenMPI launch path
+  # works on this pair before returning it; if it does not, blacklist the pair
+  # for this run and signal the caller to re-probe another one.
+  if ! mpi_smoke_pair "${pair}"; then
+    echo "MPI bootstrap smoke failed on ${pair}; blacklisting and re-probing" >&2
+    blacklist_nodes "${pair}"
+    return 1
+  fi
+  printf '%s\n' "${pair}"
+}
+
+# Verify OpenMPI can actually bootstrap across a candidate pair using the same
+# launch path the suites use (plm slurm via scripts/spur_srun.sh, OOB/BTL pinned
+# to PROBE_OOB_IF). Submits scripts/crusoe_mpi_smoke.sh as a short sbatch job on
+# exactly the pinned nodes and looks for its MPI_SMOKE_OK marker. Returns 0 (pair
+# usable) or 1 (pair rejected). Set PROBE_MPI_SMOKE=0 to skip (e.g. debugging).
+PROBE_MPI_SMOKE="${PROBE_MPI_SMOKE:-1}"
+mpi_smoke_pair() {
+  [ "${PROBE_MPI_SMOKE}" = "1" ] || return 0
+  local pair="$1"
+  local probe_dir="${RUNNER_TEMP}/probes"
+  local out="${probe_dir}/mpi_smoke.out"
+  local nnodes j waited st
+  mkdir -p "${probe_dir}"
+  rm -f "${out}"
+  nnodes=$(printf '%s\n' "${pair}" | tr ',' '\n' | sed '/^$/d' | wc -l)
+  j=$(spur_cmd sbatch --parsable \
+    --job-name="ainic-mpi-smoke" \
+    --output="${out}" \
+    --error="${out}" \
+    --partition="${SALLOC_PARTITION}" \
+    ${ACCOUNT_ARG} \
+    ${RESV_ARG} \
+    --nodelist="${pair}" \
+    --nodes="${nnodes}" \
+    --ntasks="${nnodes}" \
+    --ntasks-per-node=1 \
+    --cpus-per-task=8 \
+    --gpus-per-node=8 \
+    --time=00:05:00 \
+    --export=ALL,PROBE_OOB_IF="${PROBE_OOB_IF:-ens3}" \
+    --wrap "bash ${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_mpi_smoke.sh" 2>&1 \
+    | tee /dev/stderr | grep -oE '^[0-9]+$' | tail -1 || true)
+  if [ -z "${j}" ]; then
+    echo "mpi smoke sbatch failed to submit for ${pair}; treating pair as unusable" >&2
+    return 1
+  fi
+  echo "MPI smoke job ${j} on ${pair}; waiting for result" >&2
+  waited=0
+  while [ "${waited}" -lt 180 ]; do
+    sleep 10
+    waited=$((waited + 10))
+    if grep -qE '^MPI_SMOKE_(OK|FAIL)' "${out}" 2>/dev/null; then
+      break
+    fi
+    st=$(spur_cmd squeue -j "${j}" -h -o '%T' 2>/dev/null | tr -d ' ')
+    case "${st}" in
+      COMPLETED|FAILED|CANCELLED|NODE_FAIL|TIMEOUT|"")
+        sleep 3
+        break
+        ;;
+    esac
+  done
+  spur_cmd scancel "${j}" >/dev/null 2>&1 || true
+  echo "=== mpi smoke (${pair}) ===" >&2
+  { grep -E '^(MPI_SMOKE_|MPI smoke:|An ORTE daemon|route found)' "${out}" 2>/dev/null || tail -n 8 "${out}" 2>/dev/null; } >&2 || true
+  grep -qE '^MPI_SMOKE_OK' "${out}" 2>/dev/null
 }
 
 # Nodes proven bad during THIS run: a probe/allocation that never reached
