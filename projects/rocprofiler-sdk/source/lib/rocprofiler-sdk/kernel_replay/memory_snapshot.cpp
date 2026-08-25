@@ -31,9 +31,11 @@
 #include <fmt/format.h>
 #include <hsa/hsa.h>
 
+#include <atomic>
 #include <cstdint>
 #include <new>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -77,6 +79,33 @@ struct module_variable_t
     size_t size     = 0;
 };
 
+// Per-variable sanity cap on module-scope variables we are willing to snapshot. A variable above
+// this is skipped, which means a kernel's mutations to it persist into the next pass instead of
+// being rolled back. That is a correctness gap, not just a memory-budget choice, so the skip is
+// reported rather than silent.
+constexpr uint64_t module_variable_size_cap = 1ULL << 30;
+
+// Best-effort symbol name, for diagnostics only. Returns a placeholder rather than failing, since
+// every caller is already on a path where the name is a nicety and not required to proceed.
+std::string
+get_symbol_name(hsa_executable_symbol_t symbol)
+{
+    auto* core = hsa::get_core_table();
+    if(!core || !core->hsa_executable_symbol_get_info_fn) return "<unknown>";
+
+    uint32_t len = 0;
+    if(core->hsa_executable_symbol_get_info_fn(
+           symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &len) != HSA_STATUS_SUCCESS ||
+       len == 0)
+        return "<unknown>";
+
+    auto name = std::string(len, '\0');
+    if(core->hsa_executable_symbol_get_info_fn(
+           symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name.data()) != HSA_STATUS_SUCCESS)
+        return "<unknown>";
+    return name;
+}
+
 // hsa_executable_iterate_agent_symbols callback: collect HSA_SYMBOL_KIND_VARIABLE symbols
 // (device address + size) into the vector passed via `data`. The HSA callback cannot capture, so
 // state is threaded through the void* argument.
@@ -101,8 +130,25 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
            symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size) != HSA_STATUS_SUCCESS)
         return HSA_STATUS_SUCCESS;
 
-    // Skip empties; 1 GiB per-variable sanity cap.
-    if(addr == 0 || size == 0 || size > (1ULL << 30)) return HSA_STATUS_SUCCESS;
+    if(addr == 0 || size == 0) return HSA_STATUS_SUCCESS;
+
+    // Over the cap we skip the variable, so a kernel that writes it leaks that write into the next
+    // pass. Say so once per process rather than dropping it silently -- a wrong counter value with
+    // no diagnostic is far harder to explain than a warning. Reported once (matching the other
+    // replay decline warnings) so a hot dispatch loop cannot flood the log.
+    if(size > module_variable_size_cap)
+    {
+        static std::atomic<bool> _warned_oversized_variable{false};
+        if(!_warned_oversized_variable.exchange(true, std::memory_order_relaxed))
+            ROCP_WARNING << fmt::format(
+                "kernel replay: module-scope variable '{}' is {} bytes, above the {} byte snapshot "
+                "cap, so it is not saved or restored between replay passes. Kernel writes to it "
+                "will carry over into later passes and may skew their counters",
+                get_symbol_name(symbol),
+                size,
+                module_variable_size_cap);
+        return HSA_STATUS_SUCCESS;
+    }
 
     // HSA reports the variable's device address as an integer; converting to a pointer is required.
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
