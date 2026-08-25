@@ -82,8 +82,9 @@ get_active_event_context();
 
 struct event_record_info_t
 {
-    rocprofiler_queue_id_t queue_id = {.handle = 0};
-    rocprofiler_agent_id_t agent_id = {.handle = 0};
+    rocprofiler_queue_id_t queue_id        = {.handle = 0};
+    rocprofiler_agent_id_t agent_id        = {.handle = 0};
+    uint64_t               original_signal = 0;
 };
 
 void
@@ -119,6 +120,25 @@ lookup_coalesce_group(uint64_t hip_event_handle);
 
 void
 erase_event_info(uint64_t hip_event_handle);
+
+struct pending_wait_t
+{
+    tracing::tracing_data                         tracing_data     = {};
+    rocprofiler_callback_tracing_hip_event_data_t callback_record  = {};
+    rocprofiler_thread_id_t                       tid              = 0;
+    uint64_t                                      internal_corr_id = 0;
+    uint64_t                                      ancestor_corr_id = 0;
+    context::correlation_id*                      corr_id_ref      = nullptr;
+};
+
+void
+register_pending_wait(uint64_t signal_handle, pending_wait_t pw);
+
+bool
+has_pending_waits();
+
+pending_wait_t
+consume_pending_wait(uint64_t signal_handle);
 
 template <typename TableT>
 void

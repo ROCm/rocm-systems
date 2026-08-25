@@ -93,6 +93,17 @@ main(int argc, char** argv)
     HIP_ASSERT(hipEventRecordWithFlags(event0, stream0, hipEventRecordDefault));
     HIP_ASSERT(hipStreamWaitEvent(stream1, event0, 0));
 
+    // Exercise deferred wait: launch a large kernel so the event is unlikely to
+    // have completed by the time hipStreamWaitEvent checks ready(). CLR will add
+    // the event's signal as a dep_signal on the next dispatch's barrier rather
+    // than emitting a standalone wait barrier. The profiler must detect the
+    // dependency when it sees the signal in the subsequent kernel's barrier.
+    scale_kernel<<<grid_size * 256, block_size, 0, stream0>>>(d_data, n, 1.01f);
+    HIP_ASSERT(hipEventRecord(event0, stream0));
+    HIP_ASSERT(hipStreamWaitEvent(stream1, event0, 0));
+    scale_kernel<<<grid_size, block_size, 0, stream1>>>(d_data, n, 0.99f);
+    HIP_ASSERT(hipStreamSynchronize(stream1));
+
     // Exercise coalescing: record a hipEventDisableTiming event multiple times
     // on the same stream with no intervening work. CLR's ShouldCoalesceMarker
     // may skip dispatching a barrier for the 2nd and 3rd records, reusing the

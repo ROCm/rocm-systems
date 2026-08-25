@@ -73,12 +73,14 @@ struct queue_info_session_t
     using external_corr_id_map_t = user_data_map_t;
     using context_array_t        = common::container::small_vector<const context_t*>;
     using packet_data_array_t    = common::container::small_vector<packet_data_t, 8>;
+    using pending_wait_array_t   = common::container::small_vector<hip::event::pending_wait_t, 2>;
 
     Queue&                   queue;
     rocprofiler_thread_id_t  tid            = common::get_tid();
     rocprofiler_timestamp_t  enqueue_ts     = 0;
     context::correlation_id* correlation_id = nullptr;
     packet_data_array_t      packet_data    = {};
+    pending_wait_array_t     pending_waits  = {};
 };
 
 struct barrier_data_t

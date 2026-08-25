@@ -30,6 +30,11 @@ import pytest
 #   hipStreamWaitEvent(stream1, event0) -> kernel on stream1
 #   hipEventRecord(event1, stream1) -> hipStreamWaitEvent(stream0, event1)
 #
+# Followed by:
+#   hipEventRecordWithFlags exercise
+#   Deferred wait: large kernel -> record -> wait -> kernel on other stream
+#   Coalescing: 3x hipEventRecord on a hipEventDisableTiming event
+#
 # This produces at least 8 hipEventRecord and 8 hipStreamWaitEvent calls.
 # The first iteration may produce an extra barrier from initialization.
 
@@ -237,6 +242,45 @@ def test_hip_event_coalescing(json_data):
     assert len(corr_ids) >= 3, (
         f"Coalesced RECORD completions should have distinct correlation IDs, "
         f"got {len(corr_ids)} unique out of {len(coalesced_records)} records"
+    )
+
+
+def test_hip_event_deferred_wait(json_data):
+    """Verify that hipStreamWaitEvent produces WAIT completion records even when
+    CLR does not emit a standalone barrier (the deferred wait path).
+
+    The test binary launches a large kernel on stream0, records an event, then
+    immediately calls hipStreamWaitEvent on stream1 followed by a kernel launch
+    on stream1. Because the event is unlikely to have completed, CLR folds the
+    dependency into the next dispatch's barrier as a dep_signal rather than
+    emitting a standalone wait barrier. The profiler should detect this and
+    produce a WAIT completion record on the waiting stream's queue.
+
+    We verify that at least one WAIT record exists where:
+    - queue_id != source_queue_id (cross-stream)
+    - The WAIT record's queue_id matches a queue that also has kernel dispatch
+      records (proving the WAIT was resolved via a kernel dispatch barrier)
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    hip_event_records = data["buffer_records"]["hip_event"]
+    kernel_records = data["buffer_records"]["kernel_dispatch"]
+
+    wait_records = [r for r in hip_event_records if r.operation == HIP_EVENT_WAIT]
+    cross_stream_waits = [
+        r for r in wait_records if r.queue_id.handle != r.source_queue_id.handle
+    ]
+
+    assert len(cross_stream_waits) > 0, "No cross-stream WAIT completion records"
+
+    kernel_queues = set(r.dispatch_info.queue_id.handle for r in kernel_records)
+
+    waits_on_dispatch_queues = [
+        r for r in cross_stream_waits if r.queue_id.handle in kernel_queues
+    ]
+    assert len(waits_on_dispatch_queues) > 0, (
+        f"No WAIT completion records on queues that have kernel dispatches. "
+        f"WAIT queues: {set(r.queue_id.handle for r in cross_stream_waits)}, "
+        f"kernel queues: {kernel_queues}"
     )
 
 

@@ -38,6 +38,7 @@
 
 #include <hip/amd_detail/hip_api_trace.hpp>
 
+#include <atomic>
 #include <string_view>
 #include <unordered_map>
 
@@ -204,6 +205,7 @@ thread_local active_event_context_t g_active_event_ctx = {};
 
 using event_info_map_t     = std::unordered_map<uint64_t, event_record_info_t>;
 using coalesce_group_map_t = std::unordered_map<uint64_t, coalesce_group_ptr_t>;
+using pending_wait_map_t   = std::unordered_map<uint64_t, pending_wait_t>;
 
 using stream_is_capturing_fn_t = hipError_t (*)(hipStream_t, hipStreamCaptureStatus*);
 
@@ -223,6 +225,15 @@ get_coalesce_group_map()
         common::static_object<common::Synchronized<coalesce_group_map_t>>::construct();
     return _v;
 }
+
+auto*
+get_pending_wait_map()
+{
+    static auto*& _v = common::static_object<common::Synchronized<pending_wait_map_t>>::construct();
+    return _v;
+}
+
+std::atomic<uint32_t> g_pending_wait_count{0};
 
 bool
 is_stream_capturing(hipStream_t stream)
@@ -335,6 +346,49 @@ auto event_record_with_flags_wrapper(RetT (*next)(hipEvent_t, hipStream_t, unsig
     };
 }
 
+void
+check_deferred_wait(uint64_t hip_event_handle)
+{
+    if(g_active_event_ctx.barrier_captured) return;
+
+    auto event_info = lookup_event_info(hip_event_handle);
+    if(event_info.original_signal == 0) return;
+
+    auto* corr_id = context::get_latest_correlation_id();
+    if(!corr_id) return;
+
+    auto tracing_data = tracing::tracing_data{};
+    tracing::populate_contexts(
+        ROCPROFILER_CALLBACK_TRACING_HIP_EVENT, ROCPROFILER_BUFFER_TRACING_HIP_EVENT, tracing_data);
+    if(tracing_data.empty()) return;
+
+    auto thr_id = corr_id->thread_idx;
+    tracing::populate_external_correlation_ids(tracing_data.external_correlation_ids,
+                                               thr_id,
+                                               ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT,
+                                               ROCPROFILER_HIP_EVENT_WAIT,
+                                               corr_id->internal);
+
+    auto pw            = pending_wait_t{};
+    pw.tracing_data    = std::move(tracing_data);
+    pw.callback_record = rocprofiler_callback_tracing_hip_event_data_t{
+        sizeof(rocprofiler_callback_tracing_hip_event_data_t),
+        rocprofiler_timestamp_t{0},
+        rocprofiler_timestamp_t{0},
+        event_info.agent_id,
+        event_info.queue_id,
+        hip_event_handle,
+        event_info.queue_id};
+    pw.tid              = thr_id;
+    pw.internal_corr_id = corr_id->internal;
+    pw.ancestor_corr_id = corr_id->ancestor;
+    pw.corr_id_ref      = corr_id;
+    corr_id->add_ref_count();
+    corr_id->add_kern_count();
+
+    register_pending_wait(event_info.original_signal, std::move(pw));
+}
+
 template <typename ApiTag, typename RetT>
 auto stream_wait_event_wrapper(RetT (*next)(hipStream_t, hipEvent_t, unsigned int))
 {
@@ -343,6 +397,7 @@ auto stream_wait_event_wrapper(RetT (*next)(hipStream_t, hipEvent_t, unsigned in
         g_active_event_ctx = {ROCPROFILER_HIP_EVENT_WAIT, reinterpret_cast<uint64_t>(event), false};
         auto _cleanup      = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
         auto ret           = next_func(stream, event, flags);
+        if(ret == hipSuccess) check_deferred_wait(reinterpret_cast<uint64_t>(event));
         return ret;
     };
 }
@@ -380,6 +435,16 @@ store_coalesce_group(uint64_t hip_event_handle, coalesce_group_ptr_t group)
 void
 erase_event_info(uint64_t hip_event_handle)
 {
+    auto info = lookup_event_info(hip_event_handle);
+    if(info.original_signal != 0)
+    {
+        auto pw = consume_pending_wait(info.original_signal);
+        if(pw.corr_id_ref)
+        {
+            pw.corr_id_ref->sub_kern_count();
+            pw.corr_id_ref->sub_ref_count();
+        }
+    }
     get_event_info_map()->wlock([&](auto& map) { map.erase(hip_event_handle); });
     get_coalesce_group_map()->wlock([&](auto& map) { map.erase(hip_event_handle); });
 }
@@ -392,6 +457,37 @@ lookup_coalesce_group(uint64_t hip_event_handle)
         if(it != map.end()) return it->second;
         return nullptr;
     });
+}
+
+void
+register_pending_wait(uint64_t signal_handle, pending_wait_t pw)
+{
+    get_pending_wait_map()->wlock([&](auto& map) { map.emplace(signal_handle, std::move(pw)); });
+    g_pending_wait_count.fetch_add(1, std::memory_order_release);
+}
+
+bool
+has_pending_waits()
+{
+    return g_pending_wait_count.load(std::memory_order_acquire) > 0;
+}
+
+pending_wait_t
+consume_pending_wait(uint64_t signal_handle)
+{
+    auto result = pending_wait_t{};
+    bool found  = false;
+    get_pending_wait_map()->wlock([&](auto& map) {
+        auto it = map.find(signal_handle);
+        if(it != map.end())
+        {
+            result = std::move(it->second);
+            map.erase(it);
+            found = true;
+        }
+    });
+    if(found) g_pending_wait_count.fetch_sub(1, std::memory_order_release);
+    return result;
 }
 
 namespace api

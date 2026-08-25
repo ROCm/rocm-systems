@@ -344,6 +344,26 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         }
     }
 
+    for(auto& pw : queue_info_session.pending_waits)
+    {
+        auto wait_time = hip::event::profiling_time{.status = HSA_STATUS_SUCCESS,
+                                                    .start  = queue_info_session.enqueue_ts,
+                                                    .end    = common::timestamp_ns()};
+
+        hip::event::barrier_complete(pw.tracing_data,
+                                     pw.tid,
+                                     pw.internal_corr_id,
+                                     pw.ancestor_corr_id,
+                                     wait_time,
+                                     ROCPROFILER_HIP_EVENT_WAIT,
+                                     pw.callback_record);
+        if(pw.corr_id_ref)
+        {
+            pw.corr_id_ref->sub_kern_count();
+            pw.corr_id_ref->sub_ref_count();
+        }
+    }
+
     queue_info_session.queue.async_complete();
 
     return false;
@@ -729,13 +749,17 @@ WriteInterceptor(const void* packets,
                         event_ctx->operation,
                         internal_corr_id);
 
+                    const auto& barrier_pkt_pre        = _packets[i].barrier_and;
+                    const auto  original_signal_handle = barrier_pkt_pre.completion_signal.handle;
+
                     auto source_queue = queue.get_id();
                     if(event_ctx->operation == ROCPROFILER_HIP_EVENT_RECORD)
                     {
                         hip::event::record_event_info(
                             event_ctx->hip_event_handle,
-                            hip::event::event_record_info_t{
-                                queue.get_id(), queue.get_agent().get_rocp_agent()->id});
+                            hip::event::event_record_info_t{queue.get_id(),
+                                                            queue.get_agent().get_rocp_agent()->id,
+                                                            original_signal_handle});
                     }
                     else if(event_ctx->operation == ROCPROFILER_HIP_EVENT_WAIT)
                     {
@@ -849,6 +873,17 @@ WriteInterceptor(const void* packets,
                 {
                     transformed_packets.emplace_back(_packets[i]);
                 }
+
+                if(is_barrier && hip::event::has_pending_waits())
+                {
+                    for(const auto& dep : _packets[i].barrier_and.dep_signal)
+                    {
+                        if(dep.handle == 0) break;
+                        auto pw = hip::event::consume_pending_wait(dep.handle);
+                        if(pw.corr_id_ref) _info_session.pending_waits.emplace_back(std::move(pw));
+                    }
+                }
+
                 continue;
             }
 
