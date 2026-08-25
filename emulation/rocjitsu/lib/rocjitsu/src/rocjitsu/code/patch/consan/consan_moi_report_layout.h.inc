@@ -477,18 +477,22 @@ enum class ConSanEvidenceRequirementReason : uint8_t {
   UnexpectedIntentKind,
   /// An intent covers semantic-site domains incompatible with its record kind.
   InvalidIntentPayload,
+  /// A semantic intent could not be joined to the immutable program fact
+  /// needed to size or interpret its evidence.
+  MissingInventoryFact,
   /// One-past-the-end iteration bound; never a construction reason.
   Count,
 };
 
 /// Complete iterable set of evidence-requirement construction reasons.
-inline constexpr std::array<ConSanEvidenceRequirementReason, 5> kConSanEvidenceRequirementReasons =
+inline constexpr std::array<ConSanEvidenceRequirementReason, 6> kConSanEvidenceRequirementReasons =
     {
         ConSanEvidenceRequirementReason::None,
         ConSanEvidenceRequirementReason::InvalidObservationPlan,
         ConSanEvidenceRequirementReason::WrongEngine,
         ConSanEvidenceRequirementReason::UnexpectedIntentKind,
         ConSanEvidenceRequirementReason::InvalidIntentPayload,
+        ConSanEvidenceRequirementReason::MissingInventoryFact,
 };
 
 /// Return the stable diagnostic spelling of a requirement-construction reason.
@@ -505,6 +509,8 @@ consan_evidence_requirement_reason_name(ConSanEvidenceRequirementReason reason) 
     return "unexpected-intent-kind";
   case ConSanEvidenceRequirementReason::InvalidIntentPayload:
     return "invalid-intent-payload";
+  case ConSanEvidenceRequirementReason::MissingInventoryFact:
+    return "missing-inventory-fact";
   case ConSanEvidenceRequirementReason::Count:
     break;
   }
@@ -572,11 +578,193 @@ struct ConSanRecordReplayEvidenceRequirements {
 plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
                                    const ConSanRecordReplayCapacityPolicy &capacity_policy = {});
 
+/// Caller policy controlling bounded Sampled evidence capacity.
+///
+/// The optional physical-probe limit carries the explicit expert admission
+/// bound; it does not truncate logical ranges within an admitted instruction
+/// or synchronization intents. The byte ceiling affects only ABI fitting.
+/// Neither member contains a report address or mutable lowering state.
+struct ConSanSampledCapacityPolicy {
+  /// Optional caller cap, bounded internally by the engine safety ceiling.
+  uint64_t caller_ceiling_bytes = 0;
+  /// Maximum admitted physical access intents, or no limit when absent.
+  std::optional<uint64_t> maximum_access_probe_count;
+
+  bool operator==(const ConSanSampledCapacityPolicy &) const = default;
+};
+
+/// Address-free Sampled evidence contract for one code object.
+///
+/// The observation plan supplies logical access windows and ordering events;
+/// the capacity policy supplies only explicit bounds. The sizing inventory and
+/// ABI plan preserve the current report representation without making it the
+/// semantic interface. Runtime requirements describe a future executable-
+/// lifetime binding but never own that binding.
+struct ConSanSampledEvidenceRequirements {
+  /// Schema consumed by the Sampled device writer and host decoder.
+  ConSanEvidenceSchema schema = ConSanEvidenceSchema::Sampled;
+  /// Declared retention model for the finite sampled windows.
+  ConSanEvidenceBoundedness boundedness = ConSanEvidenceBoundedness::BoundedSampled;
+  /// Trust effect of dropping or saturating any required sampled evidence.
+  ConSanEvidenceLossSeverity loss_severity = ConSanEvidenceLossSeverity::InvalidatesCompleteness;
+  /// Logical lifetime required of the later concrete runtime binding.
+  ConSanRuntimeResourceScope delivery_scope = ConSanRuntimeResourceScope::Executable;
+  /// Runtime facts required before allocation or executable binding.
+  RuntimeCapabilityRequirements runtime_requirements;
+  /// Exact address-free capacities consumed by the current ABI planner.
+  ConSanMoiAutoReportInventory sizing_inventory;
+  /// Exact byte geometry or typed capacity/overflow outcome.
+  ConSanMoiAutoReportPlan abi_plan;
+  /// Construction result, distinct from `abi_plan` capacity outcomes.
+  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+
+  /// Return whether all cross-type relationships form a usable requirement.
+  [[nodiscard]] bool well_formed() const;
+  /// Return whether a well-formed requirement has an allocatable ABI layout.
+  [[nodiscard]] bool complete() const { return well_formed() && abi_plan.complete(); }
+
+  bool operator==(const ConSanSampledEvidenceRequirements &) const = default;
+};
+
+/// Caller policy controlling bounded InlineShadow evidence capacity.
+///
+/// `maximum_workgroup_lds_bytes` is the runtime- or caller-supplied aperture
+/// used when an admitted group-FLAT or dynamic-LDS access cannot be bounded by
+/// a kernel's fixed descriptor declaration. Its absence selects the immutable
+/// target profile. The policy owns neither original ELF bytes nor a report.
+struct ConSanInlineShadowCapacityPolicy {
+  /// Optional caller cap, bounded internally by the engine safety ceiling.
+  uint64_t caller_ceiling_bytes = 0;
+  /// Maximum admitted physical access intents, or no limit when absent.
+  std::optional<uint64_t> maximum_access_probe_count;
+  /// Explicit full LDS aperture used for address-free shadow sizing.
+  std::optional<uint32_t> maximum_workgroup_lds_bytes;
+
+  bool operator==(const ConSanInlineShadowCapacityPolicy &) const = default;
+};
+
+/// Address-free InlineShadow evidence contract for one code object.
+///
+/// Exact shadow geometry is derived by joining admitted intents to immutable
+/// access provenance, execution owners, and pristine kernel-descriptor LDS
+/// declarations. `required_lds_aperture_bytes` makes that semantic derivation
+/// explicit beside the current ABI plan. The type contains no ELF view,
+/// transformed descriptor, report address, or device allocation.
+struct ConSanInlineShadowEvidenceRequirements {
+  /// Schema consumed by the InlineShadow device logic and host decoder.
+  ConSanEvidenceSchema schema = ConSanEvidenceSchema::InlineShadow;
+  /// Declared exact on-device conflict-decision model.
+  ConSanEvidenceBoundedness boundedness = ConSanEvidenceBoundedness::ExactOnDevice;
+  /// Trust effect of dropping or saturating required InlineShadow evidence.
+  ConSanEvidenceLossSeverity loss_severity = ConSanEvidenceLossSeverity::InvalidatesCompleteness;
+  /// Logical lifetime required of the later concrete runtime binding.
+  ConSanRuntimeResourceScope delivery_scope = ConSanRuntimeResourceScope::Executable;
+  /// Runtime facts required before allocation or executable binding.
+  RuntimeCapabilityRequirements runtime_requirements;
+  /// Largest byte aperture that any admitted exact-shadow access can address.
+  uint64_t required_lds_aperture_bytes = 0;
+  /// Exact address-free capacities consumed by the current ABI planner.
+  ConSanMoiAutoReportInventory sizing_inventory;
+  /// Exact byte geometry or typed capacity/overflow outcome.
+  ConSanMoiAutoReportPlan abi_plan;
+  /// Construction result, distinct from `abi_plan` capacity outcomes.
+  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+
+  /// Return whether all cross-type relationships form a usable requirement.
+  [[nodiscard]] bool well_formed() const;
+  /// Return whether a well-formed requirement has an allocatable ABI layout.
+  [[nodiscard]] bool complete() const { return well_formed() && abi_plan.complete(); }
+
+  bool operator==(const ConSanInlineShadowEvidenceRequirements &) const = default;
+};
+
+/// Address-free SuperCollider sticky-marker contract for one code object.
+///
+/// SuperCollider does not share an MOI record union: redundant execution
+/// publishes a fixed sticky mismatch marker. `marker_bytes` is zero when the
+/// valid observation plan contains no admitted access and otherwise states the
+/// complete marker requirement. Runtime properties and executable lifetime
+/// remain explicit even though the current registry implements the allocation.
+struct ConSanSuperColliderEvidenceRequirements {
+  /// Schema consumed by the redundant device executions and host observer.
+  ConSanEvidenceSchema schema = ConSanEvidenceSchema::SuperCollider;
+  /// Declared fixed sticky-marker retention model.
+  ConSanEvidenceBoundedness boundedness = ConSanEvidenceBoundedness::StickyMarker;
+  /// Trust effect of losing or failing to publish a required marker.
+  ConSanEvidenceLossSeverity loss_severity = ConSanEvidenceLossSeverity::InvalidatesCompleteness;
+  /// Logical lifetime required of the later concrete runtime binding.
+  ConSanRuntimeResourceScope delivery_scope = ConSanRuntimeResourceScope::Executable;
+  /// Runtime facts required before marker allocation or executable binding.
+  RuntimeCapabilityRequirements runtime_requirements;
+  /// Required sticky-marker storage; zero means no admitted observation.
+  uint64_t marker_bytes = 0;
+  /// Construction result for the marker contract.
+  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+
+  /// Return whether all cross-type relationships form a usable requirement.
+  [[nodiscard]] bool well_formed() const;
+  /// Return whether the marker requirement is internally usable.
+  [[nodiscard]] bool complete() const { return well_formed(); }
+  /// Return whether a concrete marker allocation must be bound.
+  [[nodiscard]] bool requires_binding() const { return complete() && marker_bytes != 0u; }
+
+  bool operator==(const ConSanSuperColliderEvidenceRequirements &) const = default;
+};
+
+/// Closed set of engine-specific evidence contracts passed from semantic
+/// policy to runtime coordination.
+///
+/// Each alternative retains its own schema-specific capacities; this variant
+/// is an interface over distinct contracts, not a largest-union report layout.
+/// Visitors can ask common questions without assuming that an MOI record array
+/// and a SuperCollider marker have compatible bytes or loss semantics.
+using ConSanEvidenceRequirements =
+    std::variant<ConSanRecordReplayEvidenceRequirements, ConSanSampledEvidenceRequirements,
+                 ConSanInlineShadowEvidenceRequirements, ConSanSuperColliderEvidenceRequirements>;
+
+/// Return the schema carried by any evidence-requirement alternative.
+[[nodiscard]] ConSanEvidenceSchema
+consan_evidence_requirements_schema(const ConSanEvidenceRequirements &requirements);
+
+/// Return whether an engine-specific evidence requirement is internally
+/// consistent and can safely cross the runtime-coordination boundary.
+[[nodiscard]] bool
+consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &requirements);
+
+/// Derive Sampled evidence solely from a typed observation plan and capacity
+/// policy. The function reads no code bytes, patches, or resource assignments.
+[[nodiscard]] ConSanSampledEvidenceRequirements
+plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
+                             const ConSanSampledCapacityPolicy &capacity_policy = {});
+
+/// Derive InlineShadow evidence from typed policy plus immutable original-
+/// program facts. The function reads no code bytes, emitted patches, or
+/// mutable resource assignments.
+[[nodiscard]] ConSanInlineShadowEvidenceRequirements
+plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
+                                   const ConSanObservationPlan &observation_plan,
+                                   const ConSanInlineShadowCapacityPolicy &capacity_policy = {});
+
+/// Derive the fixed SuperCollider marker contract from a typed observation
+/// plan. No report-layout or allocation mechanism participates.
+[[nodiscard]] ConSanSuperColliderEvidenceRequirements
+plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan);
+
 /// Temporary adapter from the legacy option aggregate to the narrow capacity
 /// policy. This is the only Slice-5A boundary that knows the expert patch-limit
 /// spelling; the evidence planner itself never consumes `ConSanOptions`.
 [[nodiscard]] ConSanRecordReplayCapacityPolicy
 make_consan_record_replay_capacity_policy(const ConSanOptions &options,
+                                          uint64_t caller_ceiling_bytes = 0);
+
+/// Temporary adapters from legacy options to the narrow engine-specific
+/// capacity policies. The evidence planners themselves never consume the
+/// legacy aggregate.
+[[nodiscard]] ConSanSampledCapacityPolicy
+make_consan_sampled_capacity_policy(const ConSanOptions &options,
+                                    uint64_t caller_ceiling_bytes = 0);
+[[nodiscard]] ConSanInlineShadowCapacityPolicy
+make_consan_inline_shadow_capacity_policy(const ConSanOptions &options,
                                           uint64_t caller_ceiling_bytes = 0);
 
 /// Converts a complete planner result into the caller-carried exact layout.

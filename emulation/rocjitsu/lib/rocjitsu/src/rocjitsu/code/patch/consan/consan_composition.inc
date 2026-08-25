@@ -694,6 +694,14 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     ConSanKernelInfo info;
     info.name = kernel.name;
     info.descriptor_file_offset = kernel.descriptor_file_offset;
+    if (kernel.descriptor_file_offset <= code_object_bytes.size() &&
+        sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) <=
+            code_object_bytes.size() - kernel.descriptor_file_offset) {
+      rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
+      std::memcpy(&descriptor, code_object_bytes.data() + kernel.descriptor_file_offset,
+                  sizeof(descriptor));
+      info.declared_group_segment_bytes = descriptor.group_segment_fixed_size;
+    }
     info.entry_text_offset = kernel.entry_text_offset;
     info.text_file_offset = kernel.text_file_offset;
     info.code_size = kernel.code_size;

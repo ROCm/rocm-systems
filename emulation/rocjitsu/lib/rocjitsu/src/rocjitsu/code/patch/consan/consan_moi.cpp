@@ -1034,11 +1034,24 @@ ConSanMoiAutoReportInventory
 inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions &options,
                                  std::span<const uint8_t> code_object_bytes,
                                  uint64_t caller_ceiling_bytes) {
-  if (options.moi_engine == ConSanMoiEngine::RecordReplay && result.observation_plan.valid()) {
-    const ConSanRecordReplayEvidenceRequirements requirements = plan_consan_record_replay_evidence(
-        result.observation_plan,
-        make_consan_record_replay_capacity_policy(options, caller_ceiling_bytes));
-    return requirements.sizing_inventory;
+  if (result.observation_plan.valid()) {
+    switch (options.moi_engine) {
+    case ConSanMoiEngine::RecordReplay:
+      return plan_consan_record_replay_evidence(
+                 result.observation_plan,
+                 make_consan_record_replay_capacity_policy(options, caller_ceiling_bytes))
+          .sizing_inventory;
+    case ConSanMoiEngine::Sampled:
+      return plan_consan_sampled_evidence(
+                 result.observation_plan,
+                 make_consan_sampled_capacity_policy(options, caller_ceiling_bytes))
+          .sizing_inventory;
+    case ConSanMoiEngine::InlineShadow:
+      return plan_consan_inline_shadow_evidence(
+                 result.program_inventory, result.observation_plan,
+                 make_consan_inline_shadow_capacity_policy(options, caller_ceiling_bytes))
+          .sizing_inventory;
+    }
   }
 
   ConSanMoiAutoReportInventory inventory;
@@ -1126,8 +1139,8 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
   inventory.fence_event_count = supported_count(ConSanResourceSiteKind::Fence);
   if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
     // Compatibility for synthetic pre-plan results injected by hook unit
-    // tests. Production Record/Replay results return through the immutable
-    // observation-plan path above and never execute this rescan.
+    // tests. Production results for every MOI engine return through the
+    // immutable observation-plan path above and never execute this rescan.
     inventory.atomic_event_count = static_cast<uint64_t>(
         std::ranges::count_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
           return plan.site_kind == ConSanResourceSiteKind::Atomic;

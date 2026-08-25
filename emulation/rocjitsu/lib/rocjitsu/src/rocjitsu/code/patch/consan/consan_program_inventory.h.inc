@@ -614,6 +614,27 @@ private:
            (static_cast<uint32_t>(bytes[offset + 3]) << 24u);
   }
 
+  /// Decode the static byte displacement of a one-range native LDS access.
+  /// CDNA3/4 DS atomics use the low eight-bit offset field; other admitted
+  /// one-range DS/VDS forms use the low sixteen bits. Direct-to-LDS transfers
+  /// address their destination through M0 and therefore contribute no encoded
+  /// displacement. Returning absence preserves unreadable pristine bytes as a
+  /// typed inventory gap instead of silently treating them as offset zero.
+  [[nodiscard]] std::optional<int64_t>
+  single_range_native_static_byte_offset(const ConSanLdsSite &site,
+                                         std::span<const uint8_t> bytes) const {
+    if (site.direct_to_lds)
+      return 0;
+    const std::optional<uint32_t> word0 = read_little_endian_u32(bytes, site.file_offset);
+    if (!word0)
+      return std::nullopt;
+    const bool cdna3_or_cdna4 =
+        storage_->arch == ROCJITSU_CODE_ARCH_CDNA3 || storage_->arch == ROCJITSU_CODE_ARCH_CDNA4;
+    const uint32_t mask =
+        cdna3_or_cdna4 && site.kind == ConSanLdsAccessKind::Atomic ? 0xffu : 0xffffu;
+    return static_cast<int64_t>(*word0 & mask);
+  }
+
   [[nodiscard]] SemanticSiteId access_range_id(uint64_t text_offset, uint32_t range_ordinal) const {
     return {
         .physical = {.code_object = storage_->code_object_id, .original_text_offset = text_offset},
@@ -683,9 +704,10 @@ private:
         });
       }
     } else if (site.width_bits != 0 && site.width_bits % 8u == 0) {
-      result.ranges.push_back({.id = access_range_id(site.text_offset, 0),
-                               .static_byte_offset = std::nullopt,
-                               .byte_width = site.width_bits / 8u});
+      result.ranges.push_back(
+          {.id = access_range_id(site.text_offset, 0),
+           .static_byte_offset = single_range_native_static_byte_offset(site, bytes),
+           .byte_width = site.width_bits / 8u});
     }
     return result;
   }

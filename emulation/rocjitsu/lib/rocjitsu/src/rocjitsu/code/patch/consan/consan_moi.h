@@ -21,6 +21,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include "rocjitsu/code/patch/consan/consan_moi_core_types.h.inc"

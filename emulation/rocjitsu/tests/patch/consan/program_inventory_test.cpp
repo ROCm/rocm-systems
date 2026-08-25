@@ -5,6 +5,7 @@
 
 #include <concepts>
 #include <set>
+#include <tuple>
 #include <type_traits>
 
 namespace rocjitsu {
@@ -58,6 +59,7 @@ ConSanKernelInfo make_inventory_kernel(std::string name = "inventory_kernel") {
   ConSanKernelInfo kernel;
   kernel.name = std::move(name);
   kernel.descriptor_file_offset = 512;
+  kernel.declared_group_segment_bytes = 4096;
   kernel.entry_text_offset = 32;
   kernel.uses_gfx1250_cluster_workgroup_id = true;
   return kernel;
@@ -254,6 +256,7 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   EXPECT_FALSE(moved.program_inventory.legacy_view().empty());
   ASSERT_EQ(moved.program_inventory.access_sites().size(), 1u);
   EXPECT_EQ(moved.kernels.front().name, "inventory_kernel");
+  EXPECT_EQ(moved.kernels.front().declared_group_segment_bytes, 4096u);
   EXPECT_EQ(moved.program_inventory.access_sites().front().container.name, "inventory_kernel");
 }
 
@@ -464,7 +467,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(byte.execution_owner_descriptor_file_offsets, (std::vector<uint64_t>{512u, 768u}));
   ASSERT_EQ(byte.ranges.size(), 1u);
   EXPECT_EQ(byte.ranges[0].byte_width, 1u);
-  EXPECT_FALSE(byte.ranges[0].static_byte_offset);
+  EXPECT_EQ(byte.ranges[0].static_byte_offset, 0);
   EXPECT_EQ(byte.ranges[0].id.physical, byte.physical_id);
   EXPECT_EQ(byte.ranges[0].id.domain, ConSanSemanticSiteDomain::Access);
   EXPECT_EQ(byte.ranges[0].id.range_ordinal, 0u);
@@ -474,7 +477,50 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(sites[1].ranges[0].byte_width, 2u);
   EXPECT_EQ(sites[2].origin, ConSanAccessOrigin::DirectToLds);
   EXPECT_FALSE(sites[2].operands.address_vgpr);
+  ASSERT_EQ(sites[2].ranges.size(), 1u);
+  EXPECT_EQ(sites[2].ranges[0].static_byte_offset, 0);
   EXPECT_TRUE(sites[2].complete());
+}
+
+TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreserveArchitectureSpecificEncoding) {
+  const std::array<uint8_t, 8> bytes = {0x34, 0x12, 0, 0, 0, 0, 0, 0};
+  for (const auto [arch, kind, expected] : {
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA3, ConSanLdsAccessKind::Atomic, int64_t{0x34}},
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA3, ConSanLdsAccessKind::Read, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA4, ConSanLdsAccessKind::Atomic, int64_t{0x34}},
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA4, ConSanLdsAccessKind::Read, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA5, ConSanLdsAccessKind::Atomic, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_CDNA5, ConSanLdsAccessKind::Read, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_RDNA3, ConSanLdsAccessKind::Atomic, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_RDNA3, ConSanLdsAccessKind::Read, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_RDNA4, ConSanLdsAccessKind::Atomic, int64_t{0x1234}},
+           std::tuple{ROCJITSU_CODE_ARCH_RDNA4, ConSanLdsAccessKind::Write, int64_t{0x1234}},
+       }) {
+    ProgramInventoryBuilder builder(bytes);
+    builder.set_code_object_facts(true, 0, arch, ROCJITSU_CODE_TARGET_INVALID);
+    ConSanKernelInfo kernel = make_inventory_kernel();
+    ConSanLdsSite site = make_inventory_lds_site("ds_single", 16, 0, 32);
+    site.kind = kind;
+    kernel.lds_sites.push_back(std::move(site));
+    builder.kernels().push_back(std::move(kernel));
+    builder.rebuild_access_inventory(bytes);
+    ASSERT_EQ(builder.view().access_sites().front().ranges.size(), 1u);
+    EXPECT_EQ(builder.view().access_sites().front().ranges.front().static_byte_offset, expected);
+  }
+}
+
+TEST(ConSanProgramInventory, UnreadableSingleRangeNativeOffsetRemainsAnExplicitMissingFact) {
+  const std::array<uint8_t, 3> truncated_bytes = {0x34, 0x12, 0};
+  ProgramInventoryBuilder builder(truncated_bytes);
+  builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950);
+  ConSanKernelInfo kernel = make_inventory_kernel();
+  ConSanLdsSite site = make_inventory_lds_site("ds_truncated", 16, 0, 32);
+  kernel.lds_sites.push_back(std::move(site));
+  builder.kernels().push_back(std::move(kernel));
+  builder.rebuild_access_inventory(truncated_bytes);
+
+  ASSERT_EQ(builder.view().access_sites().front().ranges.size(), 1u);
+  EXPECT_FALSE(builder.view().access_sites().front().ranges.front().static_byte_offset);
 }
 
 TEST(ConSanProgramInventory, TwoAddressRangesDecodeElementWidthScaleAndStableOrdinals) {
@@ -656,7 +702,9 @@ TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAt
 }
 
 TEST(ConSanProgramInventory, RealCodeObjectPublishesInventoryEquivalentToLegacyDecode) {
-  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  mutate_first_kernel_descriptor(
+      bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 1234u; });
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = ConSanMoiEngine::RecordReplay;
@@ -686,6 +734,7 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesInventoryEquivalentToLegacyD
   EXPECT_EQ(result.program_inventory.access_sites().size(), legacy_access_count);
 
   ASSERT_EQ(legacy.kernels.size(), 1u);
+  EXPECT_EQ(legacy.kernels.front().declared_group_segment_bytes, 1234u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   for (const ConSanAccessInventorySite &site : result.program_inventory.access_sites()) {
     const auto legacy_site =

@@ -2290,21 +2290,51 @@ could complete.
 
 ### Slice 5B: Sampled, Inline, and SuperCollider evidence requirements
 
-- **Current responsibility:** Sampled and Inline capacity arithmetic is mixed
-  with candidate/descriptor scans; SuperCollider marker allocation is a
-  separate hook path.
-- **New boundary and contract:** Add typed schema variants under the same
-  evidence-requirement interface. Each variant states its own boundedness and
-  memory/coherence needs; there is no largest-union layout.
-- **Temporary seam and consumers:** The same binding adapter translates each
-  variant into the current ABI and marker/report registries.
-- **Test gate:** engine-specific report-plan/model tests, repeated-dispatch and
-  saturation/loss cases, all Sampled/Inline/SC device pairs, and physical
-  gfx950 marker/report tests.
-- **Cutover and deletion:** Switch one schema at a time and delete duplicate
-  hook allocation-policy branches. Keep ABI decoding and allocation mechanics
-  until their later component migrations.
+- **Completed boundary and contract:** Sampled, InlineShadow, and
+  SuperCollider now have separate address-free evidence-requirement types
+  under one closed variant. Each states its semantic schema, boundedness, loss
+  effect, executable lifetime, exact runtime capabilities, and typed
+  construction result. Sampled and InlineShadow retain their distinct ABI
+  sizing inputs and plans; SuperCollider retains only its fixed sticky-marker
+  size. No largest-union report contract exists.
+- **Completed immutable derivation:** Sampled capacities are derived only from
+  typed access, barrier, and atomic intents plus explicit capacity policy.
+  InlineShadow joins exact-shadow intents to immutable access identities,
+  original kernel-descriptor LDS declarations, and normalized native static
+  offsets. Group-FLAT, dynamic LDS, and an encoded extent beyond the fixed
+  declaration select the complete target aperture; missing required inventory
+  facts fail closed with a typed reason. SuperCollider derives its zero-or-one
+  marker requirement only from admitted redundant-access intents.
+- **Completed production cutover:** Every valid production observation plan
+  reaches the engine-specific typed planner before hook allocation. The hook
+  consumes the resulting runtime requirements and late-binds the existing
+  report or marker registry. The old result/patch rescan remains only for
+  structurally invalid synthetic pre-plan hook fixtures. ABI decoders and
+  allocation mechanics remain implementation details for later slices.
+- **Completed type and unit gate:** Focused tests cover neutral and legacy-
+  adapted capacity policies; every schema/boundedness/loss/reason enum and
+  invalid sentinel; every intent-to-capacity mapping; expert limits; missing
+  inventory relationships; descriptor/static-range/full-aperture selection;
+  capacity failure; runtime capability admission; cross-type and
+  schema-specific invariants; the closed variant; deterministic non-mutation;
+  and contradictory legacy telemetry proving typed-plan authority. The
+  normalized LDS-offset tests independently cover CDNA3, CDNA4, CDNA5, RDNA3,
+  RDNA4, direct-to-LDS, and unreadable pristine bytes.
 - **Prerequisite:** Slice 5A.
+
+The completed host gate passed 1,484 of 1,486 ConSan tests, with two
+external-object benchmarks intentionally skipped, plus all 85 selected ConSan
+hook/runtime tests. All 2,908 simulator device rows passed in 78.23 seconds of
+wall time, and a focused 20-row physical-gfx950 gate passed paired repeated-
+dispatch, marker-pressure, full-bank Stream-K, and large-LDS cases for
+Sampled, InlineShadow, and SuperCollider. Physical gfx950 `d128-block` E2E
+validation accepted all four engines with 128/128 accesses; Record/Replay and
+InlineShadow covered 119/119 barriers and Sampled covered 117/117.
+RocJitsu-emulated gfx1250 accepted SuperCollider, Sampled, and InlineShadow
+with 18/18 accesses and all applicable barriers. Record/Replay retained its
+pre-existing yellow bounded-capacity condition: static coverage was complete
+at 18/18 accesses and 8/8 barriers, but replay metadata filled before dynamic
+analysis completed.
 
 ### Slice 6: explicit pipeline and result cutover
 

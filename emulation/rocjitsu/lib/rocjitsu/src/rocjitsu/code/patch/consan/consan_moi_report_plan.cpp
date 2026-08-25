@@ -397,10 +397,141 @@ bool ConSanRecordReplayEvidenceRequirements::well_formed() const {
   if (abi_plan.outcome == ConSanMoiAutoReportPlanOutcome::Count ||
       abi_plan.reason == ConSanMoiAutoReportPlanReason::Count)
     return false;
+  if (plan_consan_moi_auto_report(sizing_inventory, abi_plan.ceiling_bytes) != abi_plan)
+    return false;
   if (abi_plan.complete())
     return abi_plan.reason == ConSanMoiAutoReportPlanReason::None && abi_plan.layout.valid &&
            abi_plan.layout.required_bytes == abi_plan.required_bytes;
   return abi_plan.reason != ConSanMoiAutoReportPlanReason::None && !abi_plan.layout.valid;
+}
+
+namespace {
+
+[[nodiscard]] bool common_moi_evidence_is_well_formed(
+    ConSanEvidenceRequirementReason reason, ConSanMoiEngine expected_engine,
+    const RuntimeCapabilityRequirements &runtime_requirements,
+    const ConSanMoiAutoReportInventory &sizing_inventory, const ConSanMoiAutoReportPlan &abi_plan) {
+  if (reason != ConSanEvidenceRequirementReason::None ||
+      sizing_inventory.engine != expected_engine || abi_plan.engine != expected_engine ||
+      !runtime_requirements.host_device_visible_memory ||
+      !runtime_requirements.host_device_coherent_memory ||
+      !runtime_requirements.device_atomic_publication || !runtime_requirements.executable_binding ||
+      runtime_requirements.max_workgroup_lds_bytes ||
+      runtime_requirements.dispatch_segment_binding ||
+      !runtime_requirements.minimum_report_allocation_bytes ||
+      *runtime_requirements.minimum_report_allocation_bytes != abi_plan.required_bytes ||
+      abi_plan.outcome == ConSanMoiAutoReportPlanOutcome::Count ||
+      abi_plan.reason == ConSanMoiAutoReportPlanReason::Count) {
+    return false;
+  }
+  if (plan_consan_moi_auto_report(sizing_inventory, abi_plan.ceiling_bytes) != abi_plan)
+    return false;
+  if (abi_plan.complete())
+    return abi_plan.reason == ConSanMoiAutoReportPlanReason::None && abi_plan.layout.valid &&
+           abi_plan.layout.required_bytes == abi_plan.required_bytes;
+  return abi_plan.reason != ConSanMoiAutoReportPlanReason::None && !abi_plan.layout.valid;
+}
+
+void add_saturating(uint64_t &count, uint64_t increment) {
+  count = increment > std::numeric_limits<uint64_t>::max() - count
+              ? std::numeric_limits<uint64_t>::max()
+              : count + increment;
+}
+
+[[nodiscard]] bool intent_covers_only(const ConSanProbeIntent &intent,
+                                      ConSanSemanticSiteDomain domain) {
+  return std::ranges::all_of(intent.covered_semantic_sites,
+                             [&](const SemanticSiteId &site) { return site.domain == domain; });
+}
+
+[[nodiscard]] const ConSanAccessInventorySite *
+find_inventory_access_range(const ProgramInventory &inventory, const SemanticSiteId &range_id) {
+  const auto site = std::ranges::find_if(inventory.access_sites(), [&](const auto &candidate) {
+    return std::ranges::find(candidate.ranges, range_id, &ConSanAccessRange::id) !=
+           candidate.ranges.end();
+  });
+  return site == inventory.access_sites().end() ? nullptr : &*site;
+}
+
+} // namespace
+
+bool ConSanSampledEvidenceRequirements::well_formed() const {
+  if (schema != ConSanEvidenceSchema::Sampled ||
+      boundedness != ConSanEvidenceBoundedness::BoundedSampled ||
+      loss_severity != ConSanEvidenceLossSeverity::InvalidatesCompleteness ||
+      delivery_scope != ConSanRuntimeResourceScope::Executable ||
+      sizing_inventory.diagnostic_count != sizing_inventory.access_range_count ||
+      sizing_inventory.sampled_bank_count_adaptive != (sizing_inventory.access_range_count != 0u)) {
+    return false;
+  }
+  if (sizing_inventory.access_range_count == 0u) {
+    if (sizing_inventory.sampled_range_bank_count != 0u ||
+        sizing_inventory.sampled_sync_slot_count != 0u ||
+        sizing_inventory.sampled_watchpoint_count != 0u) {
+      return false;
+    }
+  } else {
+    if (sizing_inventory.sampled_range_bank_count % sizing_inventory.access_range_count != 0u)
+      return false;
+    const uint64_t banks_per_range =
+        sizing_inventory.sampled_range_bank_count / sizing_inventory.access_range_count;
+    if (banks_per_range == 0u || banks_per_range > 8u ||
+        (banks_per_range & (banks_per_range - 1u)) != 0u) {
+      return false;
+    }
+    const uint64_t expected_slots = util::saturating_add(sizing_inventory.sampled_range_bank_count,
+                                                         sizing_inventory.atomic_event_count);
+    if (sizing_inventory.sampled_sync_slot_count != expected_slots ||
+        sizing_inventory.sampled_watchpoint_count != expected_slots) {
+      return false;
+    }
+  }
+  return common_moi_evidence_is_well_formed(reason, ConSanMoiEngine::Sampled, runtime_requirements,
+                                            sizing_inventory, abi_plan);
+}
+
+bool ConSanInlineShadowEvidenceRequirements::well_formed() const {
+  const uint64_t expected_ordering_capacity = std::max<uint64_t>(
+      sizing_inventory.atomic_event_count, kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
+  const uint64_t expected_acquired_epoch_capacity = std::max<uint64_t>(
+      expected_ordering_capacity, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
+  return schema == ConSanEvidenceSchema::InlineShadow &&
+         boundedness == ConSanEvidenceBoundedness::ExactOnDevice &&
+         loss_severity == ConSanEvidenceLossSeverity::InvalidatesCompleteness &&
+         delivery_scope == ConSanRuntimeResourceScope::Executable &&
+         required_lds_aperture_bytes == sizing_inventory.inline_lds_bytes &&
+         sizing_inventory.inline_atomic_release_count == expected_ordering_capacity &&
+         sizing_inventory.inline_causal_snapshot_count == expected_ordering_capacity &&
+         sizing_inventory.inline_acquired_epoch_token_count == expected_acquired_epoch_capacity &&
+         sizing_inventory.inline_compact_token_mapping_count <=
+             sizing_inventory.access_range_count &&
+         sizing_inventory.inline_diagnostic_count_adaptive &&
+         common_moi_evidence_is_well_formed(reason, ConSanMoiEngine::InlineShadow,
+                                            runtime_requirements, sizing_inventory, abi_plan);
+}
+
+bool ConSanSuperColliderEvidenceRequirements::well_formed() const {
+  return reason == ConSanEvidenceRequirementReason::None &&
+         schema == ConSanEvidenceSchema::SuperCollider &&
+         boundedness == ConSanEvidenceBoundedness::StickyMarker &&
+         loss_severity == ConSanEvidenceLossSeverity::InvalidatesCompleteness &&
+         delivery_scope == ConSanRuntimeResourceScope::Executable &&
+         (marker_bytes == 0u || marker_bytes == sizeof(uint32_t)) &&
+         runtime_requirements.host_device_visible_memory &&
+         runtime_requirements.host_device_coherent_memory &&
+         !runtime_requirements.device_atomic_publication &&
+         runtime_requirements.minimum_report_allocation_bytes == marker_bytes &&
+         !runtime_requirements.max_workgroup_lds_bytes && runtime_requirements.executable_binding &&
+         !runtime_requirements.dispatch_segment_binding;
+}
+
+ConSanEvidenceSchema
+consan_evidence_requirements_schema(const ConSanEvidenceRequirements &requirements) {
+  return std::visit([](const auto &value) { return value.schema; }, requirements);
+}
+
+bool consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &requirements) {
+  return std::visit([](const auto &value) { return value.well_formed(); }, requirements);
 }
 
 ConSanRecordReplayCapacityPolicy
@@ -408,6 +539,26 @@ make_consan_record_replay_capacity_policy(const ConSanOptions &options,
                                           uint64_t caller_ceiling_bytes) {
   ConSanRecordReplayCapacityPolicy policy;
   policy.caller_ceiling_bytes = caller_ceiling_bytes;
+  if (options.max_patches_is_expert_limit)
+    policy.maximum_access_probe_count = options.max_patches;
+  return policy;
+}
+
+ConSanSampledCapacityPolicy make_consan_sampled_capacity_policy(const ConSanOptions &options,
+                                                                uint64_t caller_ceiling_bytes) {
+  ConSanSampledCapacityPolicy policy;
+  policy.caller_ceiling_bytes = caller_ceiling_bytes;
+  if (options.max_patches_is_expert_limit)
+    policy.maximum_access_probe_count = options.max_patches;
+  return policy;
+}
+
+ConSanInlineShadowCapacityPolicy
+make_consan_inline_shadow_capacity_policy(const ConSanOptions &options,
+                                          uint64_t caller_ceiling_bytes) {
+  ConSanInlineShadowCapacityPolicy policy;
+  policy.caller_ceiling_bytes = caller_ceiling_bytes;
+  policy.maximum_workgroup_lds_bytes = options.moi_max_workgroup_lds_bytes;
   if (options.max_patches_is_expert_limit)
     policy.maximum_access_probe_count = options.max_patches;
   return policy;
@@ -429,19 +580,10 @@ plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::RecordReplay;
   uint64_t selected_access_probe_count = 0;
-  const auto add_saturating = [](uint64_t &count, uint64_t increment) {
-    count = increment > std::numeric_limits<uint64_t>::max() - count
-                ? std::numeric_limits<uint64_t>::max()
-                : count + increment;
-  };
   for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
-    const auto covers_only = [&](ConSanSemanticSiteDomain domain) {
-      return std::ranges::all_of(intent.covered_semantic_sites,
-                                 [&](const SemanticSiteId &site) { return site.domain == domain; });
-    };
     switch (intent.kind) {
     case ConSanProbeIntentKind::AccessRecord:
-      if (!covers_only(ConSanSemanticSiteDomain::Access)) {
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::Access)) {
         requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
         return requirements;
       }
@@ -453,28 +595,28 @@ plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan
       add_saturating(inventory.access_range_count, intent.covered_semantic_sites.size());
       break;
     case ConSanProbeIntentKind::BarrierRecord:
-      if (!covers_only(ConSanSemanticSiteDomain::SynchronizationEvent)) {
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
         requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
         return requirements;
       }
       add_saturating(inventory.barrier_event_count, 1u);
       break;
     case ConSanProbeIntentKind::AtomicRecord:
-      if (!covers_only(ConSanSemanticSiteDomain::SynchronizationEvent)) {
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
         requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
         return requirements;
       }
       add_saturating(inventory.atomic_event_count, 1u);
       break;
     case ConSanProbeIntentKind::FenceRecord:
-      if (!covers_only(ConSanSemanticSiteDomain::SynchronizationEvent)) {
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
         requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
         return requirements;
       }
       add_saturating(inventory.fence_event_count, 1u);
       break;
     case ConSanProbeIntentKind::AtomicAddressCapture:
-      if (!covers_only(ConSanSemanticSiteDomain::SynchronizationEvent)) {
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
         requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
         return requirements;
       }
@@ -509,6 +651,283 @@ plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan
       plan_consan_moi_auto_report(inventory, capacity_policy.caller_ceiling_bytes);
   requirements.runtime_requirements.minimum_report_allocation_bytes =
       requirements.abi_plan.required_bytes;
+  requirements.reason = ConSanEvidenceRequirementReason::None;
+  return requirements;
+}
+
+ConSanSampledEvidenceRequirements
+plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
+                             const ConSanSampledCapacityPolicy &capacity_policy) {
+  ConSanSampledEvidenceRequirements requirements;
+  if (!observation_plan.valid()) {
+    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+    return requirements;
+  }
+  if (observation_plan.engine != ConSanCapabilityEngine::Sampled) {
+    requirements.reason = ConSanEvidenceRequirementReason::WrongEngine;
+    return requirements;
+  }
+
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::Sampled;
+  uint64_t selected_access_probe_count = 0;
+  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
+    switch (intent.kind) {
+    case ConSanProbeIntentKind::SampledAccess:
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::Access)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      if (capacity_policy.maximum_access_probe_count &&
+          selected_access_probe_count >= *capacity_policy.maximum_access_probe_count) {
+        break;
+      }
+      ++selected_access_probe_count;
+      add_saturating(inventory.access_range_count, intent.covered_semantic_sites.size());
+      break;
+    case ConSanProbeIntentKind::SampledBarrierEpoch:
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      add_saturating(inventory.barrier_event_count, intent.covered_semantic_sites.size());
+      break;
+    case ConSanProbeIntentKind::AtomicAddressCapture:
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      break;
+    case ConSanProbeIntentKind::SampledAtomicOrdering:
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      add_saturating(inventory.atomic_event_count, 1u);
+      break;
+    case ConSanProbeIntentKind::RedundantAccessObservation:
+    case ConSanProbeIntentKind::AccessRecord:
+    case ConSanProbeIntentKind::ExactShadowAccess:
+    case ConSanProbeIntentKind::BarrierRecord:
+    case ConSanProbeIntentKind::ExactBarrierEpoch:
+    case ConSanProbeIntentKind::AtomicRecord:
+    case ConSanProbeIntentKind::ExactAtomicOrdering:
+    case ConSanProbeIntentKind::FenceRecord:
+    case ConSanProbeIntentKind::Count:
+      requirements.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
+      return requirements;
+    }
+  }
+
+  constexpr uint64_t kSampledBanksPerLogicalRange = 8u;
+  const uint64_t access_banks =
+      util::saturating_mul(inventory.access_range_count, kSampledBanksPerLogicalRange);
+  inventory.sampled_range_bank_count = access_banks;
+  const uint64_t sampled_slots =
+      access_banks == 0u ? 0u : util::saturating_add(access_banks, inventory.atomic_event_count);
+  inventory.sampled_sync_slot_count = sampled_slots;
+  inventory.sampled_watchpoint_count = sampled_slots;
+  inventory.sampled_bank_count_adaptive = inventory.access_range_count != 0u;
+  inventory.diagnostic_count = inventory.access_range_count == 0u
+                                   ? 0u
+                                   : std::max<uint64_t>(inventory.access_range_count, 1u);
+  inventory =
+      fit_consan_moi_sampled_auto_report_inventory(inventory, capacity_policy.caller_ceiling_bytes);
+
+  requirements.runtime_requirements.host_device_visible_memory = true;
+  requirements.runtime_requirements.host_device_coherent_memory = true;
+  requirements.runtime_requirements.device_atomic_publication = true;
+  requirements.runtime_requirements.executable_binding = true;
+  requirements.sizing_inventory = inventory;
+  requirements.abi_plan =
+      plan_consan_moi_auto_report(inventory, capacity_policy.caller_ceiling_bytes);
+  requirements.runtime_requirements.minimum_report_allocation_bytes =
+      requirements.abi_plan.required_bytes;
+  requirements.reason = ConSanEvidenceRequirementReason::None;
+  return requirements;
+}
+
+ConSanInlineShadowEvidenceRequirements
+plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
+                                   const ConSanObservationPlan &observation_plan,
+                                   const ConSanInlineShadowCapacityPolicy &capacity_policy) {
+  ConSanInlineShadowEvidenceRequirements requirements;
+  if (!observation_plan.valid()) {
+    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+    return requirements;
+  }
+  if (observation_plan.engine != ConSanCapabilityEngine::InlineShadow) {
+    requirements.reason = ConSanEvidenceRequirementReason::WrongEngine;
+    return requirements;
+  }
+
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::InlineShadow;
+  uint64_t selected_access_probe_count = 0;
+  bool requires_full_lds_aperture = false;
+  uint64_t declared_lds_extent = 0;
+  uint64_t native_static_extent = 0;
+  const LegacyInventoryView legacy = program_inventory.legacy_view();
+  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
+    switch (intent.kind) {
+    case ConSanProbeIntentKind::ExactShadowAccess: {
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::Access)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      if (capacity_policy.maximum_access_probe_count &&
+          selected_access_probe_count >= *capacity_policy.maximum_access_probe_count) {
+        break;
+      }
+      ++selected_access_probe_count;
+      add_saturating(inventory.access_range_count, intent.covered_semantic_sites.size());
+      add_saturating(inventory.inline_compact_token_mapping_count, 1u);
+      for (const SemanticSiteId &range_id : intent.covered_semantic_sites) {
+        const ConSanAccessInventorySite *site =
+            find_inventory_access_range(program_inventory, range_id);
+        if (!site) {
+          requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
+          return requirements;
+        }
+        requires_full_lds_aperture |= site->origin == ConSanAccessOrigin::Flat;
+        if (const auto range = std::ranges::find(site->ranges, range_id, &ConSanAccessRange::id);
+            range != site->ranges.end() && range->static_byte_offset &&
+            *range->static_byte_offset >= 0) {
+          native_static_extent =
+              std::max(native_static_extent,
+                       util::saturating_add(static_cast<uint64_t>(*range->static_byte_offset),
+                                            static_cast<uint64_t>(range->byte_width)));
+        }
+
+        // Group-FLAT addressing already selects the complete architectural
+        // aperture. It does not need a kernel-owner join merely to recover a
+        // smaller fixed descriptor declaration, and shared helper ownership
+        // may intentionally remain unresolved at this stage.
+        if (site->origin == ConSanAccessOrigin::Flat)
+          continue;
+
+        std::vector<uint64_t> owners = site->execution_owner_descriptor_file_offsets;
+        if (owners.empty() && site->container.kernel_descriptor_file_offset)
+          owners.push_back(*site->container.kernel_descriptor_file_offset);
+        if (owners.empty()) {
+          requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
+          return requirements;
+        }
+        for (uint64_t owner_offset : owners) {
+          const auto owner = std::ranges::find(legacy.kernels, owner_offset,
+                                               &ConSanKernelInfo::descriptor_file_offset);
+          if (owner == legacy.kernels.end() || !owner->declared_group_segment_bytes) {
+            requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
+            return requirements;
+          }
+          declared_lds_extent =
+              std::max<uint64_t>(declared_lds_extent, *owner->declared_group_segment_bytes);
+          requires_full_lds_aperture |= owner->has_dynamic_lds;
+        }
+      }
+      break;
+    }
+    case ConSanProbeIntentKind::ExactBarrierEpoch:
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      add_saturating(inventory.barrier_event_count, intent.covered_semantic_sites.size());
+      break;
+    case ConSanProbeIntentKind::AtomicAddressCapture:
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      break;
+    case ConSanProbeIntentKind::ExactAtomicOrdering:
+      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      add_saturating(inventory.atomic_event_count, 1u);
+      break;
+    case ConSanProbeIntentKind::RedundantAccessObservation:
+    case ConSanProbeIntentKind::AccessRecord:
+    case ConSanProbeIntentKind::SampledAccess:
+    case ConSanProbeIntentKind::BarrierRecord:
+    case ConSanProbeIntentKind::SampledBarrierEpoch:
+    case ConSanProbeIntentKind::AtomicRecord:
+    case ConSanProbeIntentKind::SampledAtomicOrdering:
+    case ConSanProbeIntentKind::FenceRecord:
+    case ConSanProbeIntentKind::Count:
+      requirements.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
+      return requirements;
+    }
+  }
+
+  requires_full_lds_aperture |=
+      inventory.access_range_count != 0u && declared_lds_extent < native_static_extent;
+  const uint64_t full_lds_aperture = capacity_policy.maximum_workgroup_lds_bytes.value_or(
+      consan_moi_max_workgroup_lds_bytes(program_inventory.arch()));
+  inventory.inline_lds_bytes =
+      std::max(declared_lds_extent, requires_full_lds_aperture ? full_lds_aperture : 0u);
+  const uint64_t ordering_capacity = std::max<uint64_t>(
+      inventory.atomic_event_count, kConSanMoiInlineShadowAtomicReleaseSlotCapacity);
+  inventory.inline_atomic_release_count = ordering_capacity;
+  inventory.inline_causal_snapshot_count = ordering_capacity;
+  inventory.inline_acquired_epoch_token_count =
+      std::max<uint64_t>(ordering_capacity, kConSanMoiInlineShadowAcquiredEpochTokenSlotCapacity);
+  const uint64_t inline_dispatch_banks =
+      consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
+  const uint64_t diagnostic_headroom = util::saturating_mul(
+      util::saturating_mul(inventory.access_range_count, inline_dispatch_banks),
+      static_cast<uint64_t>(kConSanMoiInlineShadowDiagnosticHeadroomPerAccess));
+  inventory.diagnostic_count =
+      std::max({inventory.access_range_count, diagnostic_headroom,
+                static_cast<uint64_t>(kConSanMoiInlineShadowDefaultDiagnosticCapacity)});
+  inventory.inline_diagnostic_count_adaptive = true;
+  inventory =
+      fit_consan_moi_inline_auto_report_inventory(inventory, capacity_policy.caller_ceiling_bytes);
+
+  requirements.runtime_requirements.host_device_visible_memory = true;
+  requirements.runtime_requirements.host_device_coherent_memory = true;
+  requirements.runtime_requirements.device_atomic_publication = true;
+  requirements.runtime_requirements.executable_binding = true;
+  requirements.required_lds_aperture_bytes = inventory.inline_lds_bytes;
+  requirements.sizing_inventory = inventory;
+  requirements.abi_plan =
+      plan_consan_moi_auto_report(inventory, capacity_policy.caller_ceiling_bytes);
+  requirements.runtime_requirements.minimum_report_allocation_bytes =
+      requirements.abi_plan.required_bytes;
+  requirements.reason = ConSanEvidenceRequirementReason::None;
+  return requirements;
+}
+
+ConSanSuperColliderEvidenceRequirements
+plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan) {
+  ConSanSuperColliderEvidenceRequirements requirements;
+  if (!observation_plan.valid()) {
+    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+    return requirements;
+  }
+  if (observation_plan.engine != ConSanCapabilityEngine::SuperCollider) {
+    requirements.reason = ConSanEvidenceRequirementReason::WrongEngine;
+    return requirements;
+  }
+
+  bool has_observation = false;
+  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
+    if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation) {
+      requirements.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
+      return requirements;
+    }
+    if (!intent_covers_only(intent, ConSanSemanticSiteDomain::Access)) {
+      requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+      return requirements;
+    }
+    has_observation = true;
+  }
+  requirements.marker_bytes = has_observation ? sizeof(uint32_t) : 0u;
+  requirements.runtime_requirements.host_device_visible_memory = true;
+  requirements.runtime_requirements.host_device_coherent_memory = true;
+  requirements.runtime_requirements.minimum_report_allocation_bytes = requirements.marker_bytes;
+  requirements.runtime_requirements.executable_binding = true;
   requirements.reason = ConSanEvidenceRequirementReason::None;
   return requirements;
 }

@@ -368,9 +368,22 @@ struct ConSanMoiCandidate {
   std::string mnemonic;
 };
 
+/// Immutable original-program facts and decoded semantic inventory for one
+/// dispatchable kernel.
+///
+/// The record belongs to `ProgramInventory`: descriptor and metadata fields
+/// describe the pristine code object, while the site vectors describe decoded
+/// guest instructions before any ConSan policy or lowering decision. It owns
+/// no report address, register assignment, patch, or transformed bytes. Later
+/// stages may therefore use it to derive policy and capacity without reopening
+/// the ELF or depending on mutable lowering telemetry.
 struct ConSanKernelInfo {
   std::string name;
   uint64_t descriptor_file_offset = 0;
+  /// Fixed group-segment bytes declared by the pristine kernel descriptor.
+  /// Absence means the descriptor bytes were not safely readable; zero is a
+  /// valid declaration and remains distinct from missing evidence.
+  std::optional<uint32_t> declared_group_segment_bytes;
   uint64_t entry_text_offset = 0;
   uint64_t text_file_offset = 0;
   uint64_t code_size = 0;
