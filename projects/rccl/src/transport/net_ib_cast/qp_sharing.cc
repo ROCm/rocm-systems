@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include "qp_sharing.h"
+#include <cassert>
 
 // QP sharing configuration parameters
 RCCL_PARAM(IbCastCommNGroups, "IB_COMM_NGROUPS", 0);
@@ -163,7 +164,7 @@ struct ncclIbNetCommBase* IbCastRouteCommFromWrId(uint64_t wr_id) {
 }
 
 struct ncclIbNetCommBase* IbCastRouteCommFromImmData(struct ncclIbNetCommBase* base, uint32_t immDataHost) {
-  if (rcclParamIbCastCommNGroups() > 0) {
+  if (IbCastQpSharingEnabled()) {
     uint16_t immCommId = (immDataHost >> WR_IMM_BYID_COMM_ID_SHIFT) & WR_IMM_BYID_COMM_ID_MASK;
     //uint8_t reqSlot = immDataHost & WR_IMM_BYID_REQ_ID_MASK;
     if (immCommId != 0 && immCommId < IBCAST_MAX_COMMS && g_IbCastCommTable[immCommId].used) {
@@ -190,6 +191,8 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry) {
 
     for (int i = 0; i < g_IbCastSharedQpPoolCount; i++) {
         if (!g_IbCastSharedQpPool[i].used) continue;
+        // Skip flush QP slots — they are torn down separately before CQ cleanup
+        if (g_IbCastSharedQpPool[i].key.qpIdx == IBCAST_FLUSH_QP_IDX) continue;
         if (g_IbCastSharedQpPool[i].key.isSend != slot0Entry->key.isSend) continue;
         if (g_IbCastSharedQpPool[i].key.groupIdx != slot0Entry->key.groupIdx) continue;
         if (g_IbCastSharedQpPool[i].key.remIbDevIdx != slot0Entry->key.remIbDevIdx) continue;
@@ -226,5 +229,42 @@ void IbCastCleanupGroupCqs(struct IbCastSharedQp* slot0Entry) {
         }
         g_IbCastSharedQpPool[i].used = false;
         g_IbCastSharedQpFreeStack[g_IbCastSharedQpFreeTop++] = i;
+    }
+}
+
+void IbCastValidateSharedQpPool(void) {
+    if (!IbCastQpSharingEnabled()) return;
+
+    std::lock_guard<std::mutex> lock(g_IbCastSharedQpMutex);
+    int leakedSlots = 0;
+    int leakedCommIds = 0;
+
+    // Check QP pool for leaked entries
+    for (int i = 0; i < g_IbCastSharedQpPoolCount; i++) {
+        struct IbCastSharedQp* slot = &g_IbCastSharedQpPool[i];
+        if (slot->used) {
+            WARN("IB CAST POOL LEAK: slot=%d qpIdx=%d group=%d isSend=%d refcount=%d cqRefcount=%d qp=%p",
+                 i, slot->key.qpIdx, slot->key.groupIdx, slot->key.isSend,
+                 slot->refcount, slot->cqRefcount, (void*)slot->qp);
+            leakedSlots++;
+        }
+    }
+
+    // Check comm table for leaked commIds
+    for (int i = 1; i < IBCAST_MAX_COMMS; i++) {
+        if (g_IbCastCommTable[i].used) {
+            WARN("IB CAST POOL LEAK: commId=%d isSend=%d comm=%p still in use",
+                 i, g_IbCastCommTable[i].isSend, g_IbCastCommTable[i].comm);
+            leakedCommIds++;
+        }
+    }
+
+    if (leakedSlots == 0 && leakedCommIds == 0) {
+        INFO(NCCL_NET, "IB CAST POOL VALIDATE: clean shutdown — pool=%d/%d slots used, freeStack=%d, nextCommId=%u",
+             0, g_IbCastSharedQpPoolCount, g_IbCastCommIdFreeTop, g_IbCastNextCommId);
+    } else {
+        WARN("IB CAST POOL VALIDATE: UNCLEAN shutdown — %d leaked QP slots, %d leaked commIds", leakedSlots, leakedCommIds);
+        assert(leakedSlots == 0 && "QP sharing pool has leaked QP slots at shutdown");
+        assert(leakedCommIds == 0 && "QP sharing pool has leaked commIds at shutdown");
     }
 }
