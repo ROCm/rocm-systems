@@ -7,6 +7,7 @@
 
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
+#include "qp_sharing.h"
 
 char IbCastIfName[MAX_IF_NAME_SIZE + 1];
 union ncclSocketAddress IbCastIfAddr;
@@ -24,7 +25,6 @@ NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS",
 NCCL_PARAM(IbCastAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
 extern int ncclParamIbCastOooRq();
 extern int ncclParamIbCastResiliencyPortFailover();
-extern int64_t rcclParamIbCastCommNGroups();
 
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
@@ -87,17 +87,6 @@ ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
     }
     recvComm->prepostReceiveWorkRequests = true;
   }
-#if 0
-  if (rcclParamIbCastCommNGroups() > 0) {
-    // WQE posted by one comm can be consumed by another comm, so the per-comm counters drift
-    // and the RQ starves. Prepost mode reposts one WQE per completion with no per-comm counter,
-    // which is correct for a shared RQ.
-    if (ncclParamIbCastPrepostReceiveWorkRequests() == 0) {
-      INFO(NCCL_NET, "NET/IB: %s: QP sharing is enabled, Overriding pre-posting to true (1).", __func__);
-    }
-    recvComm->prepostReceiveWorkRequests = true;
-  }
-#endif
 
   INFO(NCCL_NET, "NET/IB: %s: Receive work requests will be %s", __func__,
        recvComm->prepostReceiveWorkRequests ? "pre-posted" : "posted on-demand");

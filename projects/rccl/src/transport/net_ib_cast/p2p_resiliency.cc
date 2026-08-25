@@ -9,6 +9,7 @@
 #include "p2p_cast.h" // For replay (IbCastMultiSend() and IbCastPostFifo())
 #include "connect_cast.h" // For IbCastQpCreate()
 #include "p2p_resiliency_recovery_cast.h"
+#include "qp_sharing.h"
 
 NCCL_PARAM(IbCastResiliencyPortFailover, "IB_RESILIENCY_PORT_FAILOVER", 0);
 NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, "IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS", 1);
@@ -17,7 +18,6 @@ NCCL_PARAM(IbCastResiliencyPortFailoverProbeDelay, "IB_RESILIENCY_PORT_FAILOVER_
 extern int64_t ncclParamIbCastPkey();
 extern int64_t ncclParamIbCastRetryCnt();
 extern int64_t ncclParamIbCastTimeout();
-extern int64_t rcclParamIbCastCommNGroups();
 
 #define MSEC_TO_NSEC 1000000ULL
 
@@ -599,12 +599,12 @@ static ncclResult_t IbCastResiliencyProbeProgress(struct ncclIbResiliencySend* s
 ncclResult_t IbCastResiliencyInit(struct ncclIbNetCommBase* baseComm, struct ncclIbResiliency** resCtx) {
   assert(baseComm != NULL);
   assert(resCtx != NULL);
-  if (ncclParamIbCastResiliencyPortFailover() == 0 || rcclParamIbCastCommNGroups() > 0) {
+  if (ncclParamIbCastResiliencyPortFailover() == 0 || IbCastQpSharingEnabled()) {
     // Resiliency and QP sharing are kept orthogonal for now: disable resiliency
     // when QP sharing is enabled.
     INFO(NCCL_NET, "NET/IB: %s: Resiliency is disabled on the %s communicator (comm=%p)%s", __func__,
          baseComm->isSend ? "send" : "recv", baseComm,
-         (rcclParamIbCastCommNGroups() > 0) ? " (QP sharing enabled)" : "");
+         IbCastQpSharingEnabled() ? " (QP sharing enabled)" : "");
     *resCtx = NULL;
     return ncclSuccess;
   }
@@ -814,9 +814,7 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
   qpCreateAttrs.maxRecvWorkRequest = 0;
   // Every send request can initiate at most one probing request.
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
-  qpCreateAttrs.isQpSharingEnabled = false;
-  qpCreateAttrs.qpSharingGroupIdx = -1;
-  qpCreateAttrs.cqDepthMultiplier = 1;
+  IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
   for (int localQpIndex = 0; localQpIndex < resCtx->nProbingQps; localQpIndex++) {
     // Sender creates a single probing QP per local device.
     int localDevIndex = localQpIndex;
@@ -906,9 +904,7 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
   qpCreateAttrs.maxSendWorkRequest = 0;
-  qpCreateAttrs.isQpSharingEnabled = false;
-  qpCreateAttrs.qpSharingGroupIdx = -1;
-  qpCreateAttrs.cqDepthMultiplier = 1;
+  IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
   for (int localQpIndex = 0; localQpIndex < resCtx->nProbingQps; localQpIndex++) {
     // When number of QPs on the receiver is larger than the number of devices
     // it has, the probing QPs on the receiver side are created in a "striped"
