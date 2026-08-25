@@ -53,9 +53,7 @@ def _kernel_intervals(df):
     starts = df["Start_Timestamp"].astype(float)
     ends = df["End_Timestamp"].astype(float)
     return [
-        (float(start), float(end))
-        for start, end in zip(starts, ends)
-        if end > start
+        (float(start), float(end)) for start, end in zip(starts, ends) if end > start
     ]
 
 
@@ -148,10 +146,7 @@ def _print_torch_trace_overhead_report(
     ]
     print(f"\n{'=' * 72}")
     print("--torch-trace overhead")
-    print(
-        f"  {'metric':<22} {'without':>12}  {'with':>16}"
-        f"  {'overhead':>10}"
-    )
+    print(f"  {'metric':<22} {'without':>12}  {'with':>16}  {'overhead':>10}")
     print(f"  {'-' * 22} {'-' * 12}  {'-' * 16}  {'-' * 10}")
     for label, (without, with_flag, overhead_pct), as_seconds in rows:
         if as_seconds:
@@ -516,9 +511,7 @@ def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     with_flag_mean_kernel = _mean_kernel_duration_ns(with_flag_intervals)
     with_flag_max_kernel = _max_kernel_duration_ns(with_flag_intervals)
 
-    wall_clock_overhead = _percent_overhead(
-        with_flag_time, baseline_time, "wall-clock"
-    )
+    wall_clock_overhead = _percent_overhead(with_flag_time, baseline_time, "wall-clock")
     if baseline_idle > 0.0:
         idle_overhead = _percent_overhead(with_flag_idle, baseline_idle, "GPU idle")
     else:
