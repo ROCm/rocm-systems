@@ -922,9 +922,12 @@ WriteInterceptor(const void* packets,
     // tool. Non-graph single dispatches replay as usual below.
     if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1 && !graph_launch_active)
     {
-        const auto thr_id           = corr_id->thread_idx;
-        const auto internal_corr_id = corr_id->internal;
-        const auto ancestor_corr_id = corr_id->ancestor;
+        // corr_id is null for dispatches submitted outside a tracked correlation scope (direct-HSA
+        // submissions, for example). has_kernel_replay is process-global, so this block is reached
+        // for those too -- guard the same way process_packet_batch does above.
+        const auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
+        const auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
+        const auto ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
         const auto dispatch_pkt     = packets_arr[0];
 
         // Reserve the dispatch id before CONFIG so pass_count_cb and every CONFIG/PASS callback see
