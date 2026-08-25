@@ -57,6 +57,25 @@ struct AtomicRecordCandidate {
       consan_detail::invalidate_physical_site_single_owner_hint);
 }
 
+[[nodiscard]] bool plan_admits_atomic_insertion(const ConSanObservationPlan &plan,
+                                                uint64_t text_offset) {
+  const auto decision =
+      std::ranges::find_if(plan.atomic_site_decisions, [&](const ConSanAtomicSiteDecision &site) {
+        return site.semantic_site.physical.original_text_offset == text_offset;
+      });
+  return decision != plan.atomic_site_decisions.end() &&
+         decision->kind == ConSanSiteDecisionKind::Admitted;
+}
+
+/// Temporary operand-rich lowering adapter. Pure policy is authoritative for
+/// semantic admission; legacy candidate discovery may only narrow that set.
+void retain_admitted_atomic_record_candidates(const ConSanObservationPlan &plan,
+                                              std::vector<AtomicRecordCandidate> &candidates) {
+  std::erase_if(candidates, [&](const AtomicRecordCandidate &candidate) {
+    return !plan_admits_atomic_insertion(plan, candidate.site.text_offset);
+  });
+}
+
 [[nodiscard]] std::optional<consan_detail::SampledAtomicSemantics>
 sampled_atomic_semantics_for_site(const ConSanResult &result,
                                   const MoiSyncInventoryIndex &sync_index,
@@ -203,6 +222,20 @@ struct FenceRecordCandidate {
   std::optional<uint64_t> scalar_clause_text_offset;
 };
 
+/// Temporary operand-rich lowering adapter for Record/Replay fence records.
+/// It prevents legacy association helpers from widening pure policy output.
+void retain_admitted_fence_record_candidates(const ConSanObservationPlan &plan,
+                                             std::vector<FenceRecordCandidate> &candidates) {
+  std::erase_if(candidates, [&](const FenceRecordCandidate &candidate) {
+    const auto decision =
+        std::ranges::find_if(plan.fence_site_decisions, [&](const ConSanFenceSiteDecision &site) {
+          return site.semantic_site.physical.original_text_offset == candidate.fence.text_offset;
+        });
+    return decision == plan.fence_site_decisions.end() ||
+           decision->kind != ConSanSiteDecisionKind::Admitted;
+  });
+}
+
 [[nodiscard]] ConSanAtomicSite
 normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
   ConSanAtomicSite normalized;
@@ -240,7 +273,7 @@ void append_fence_record_candidates(const ConSanResult &result,
                                     const MoiSyncInventoryIndex &sync_index,
                                     std::vector<FenceRecordCandidate> &candidates) {
   for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates) {
-    if (!fence.eligible)
+    if (!fence.eligible())
       continue;
     const ConSanSyncEvent *event = sync_index.event(fence.communication_event_identity);
     if (event == nullptr ||
@@ -440,7 +473,7 @@ ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanResult &resul
                                                        const AtomicRecordCandidate &candidate) {
   return std::ranges::any_of(
       result.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
-        if (!fence.eligible)
+        if (!fence.eligible())
           return false;
         const ConSanSyncEvent *communication = sync_index.event(fence.communication_event_identity);
         return communication != nullptr &&

@@ -322,7 +322,7 @@ TEST(ConSan, AssociatesGeneratedGfx1250BufferPollLoopShape) {
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->member_event_identities.size(), 2u);
   ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
-  EXPECT_TRUE(result.moi_fence_candidates.front().eligible);
+  EXPECT_TRUE(result.moi_fence_candidates.front().eligible());
   EXPECT_EQ(result.moi_fence_candidates.front().communication_address_source,
             ConSanSyncAddressSource::BufferResource);
 }

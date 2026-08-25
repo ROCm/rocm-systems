@@ -41,6 +41,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   apply_test_container_filter(candidates, options);
   if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
     return;
+  retain_admitted_atomic_record_candidates(result.observation_plan, candidates);
   candidates.erase(
       std::remove_if(candidates.begin(), candidates.end(),
                      [&](const auto &candidate) {

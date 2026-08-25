@@ -1843,6 +1843,10 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           })) {
     return;
   }
+  std::erase_if(candidates, [&](const Candidate &candidate) {
+    return !plan_admits_atomic_insertion(result.observation_plan,
+                                         candidate.atomic.site.text_offset);
+  });
   std::sort(candidates.begin(), candidates.end(), [](const Candidate &lhs, const Candidate &rhs) {
     return lhs.atomic.site.text_offset < rhs.atomic.site.text_offset;
   });

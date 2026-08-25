@@ -946,7 +946,7 @@ TEST(ConSanMoi, UnassociatedFenceIsNotApplicableOnEverySupportedTarget) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
-    EXPECT_FALSE(result.moi_fence_candidates.front().eligible);
+    EXPECT_FALSE(result.moi_fence_candidates.front().eligible());
     EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
       return site.site_kind == ConSanResourceSiteKind::Fence &&
              site.disposition == ConSanSiteDisposition::NotApplicable &&
@@ -969,7 +969,7 @@ TEST(ConSanMoi, Cdna4UnassociatedFenceIsNotApplicable) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
-  EXPECT_FALSE(result.moi_fence_candidates.front().eligible);
+  EXPECT_FALSE(result.moi_fence_candidates.front().eligible());
   EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
     return site.site_kind == ConSanResourceSiteKind::Fence &&
            site.disposition == ConSanSiteDisposition::NotApplicable &&

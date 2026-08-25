@@ -2202,23 +2202,47 @@ not regress or conceal that limitation.
 
 ### Slice 4C: atomic and fence policy
 
-- **Current responsibility:** Ordered native atomics, ordinary cache/fence
-  associations, dynamic outcomes, scopes, and access-only versus ordering roles
-  are qualified in several engine lowerers and result scans.
-- **New boundary and contract:** Pure atomic/fence policy creates before/after
-  intents, dynamic-result requirements, association identities, and the
-  capability disposition for each engine.
-- **Temporary seam and consumers:** Current record, sampled, and inline atomic
-  lowerers receive translated candidates. RR fence lowering remains legacy but
-  cannot rediscover eligibility.
-- **Test gate:** Atomic/fence semantic and model units; compare-and-swap, atomic
-  store, FLAT atomic, Stream-K, tree reduction using atomic bitwise OR (which
-  sets every result bit set in either operand), target global-memory/cache, and
-  fence-publication pairs across applicable targets; gfx1250 ordered-LDS cases.
-- **Cutover and deletion:** Switch one operation class at a time, delete
-  duplicate support classifiers and string-based rejection mapping, and make
-  warning text a renderer of typed reasons.
+- **Completed boundary and contract:** A pure atomic/fence policy now consumes
+  immutable synchronization inventory and creates typed before/after intents,
+  dynamic-result requirements, stable association identities, and per-engine
+  capability dispositions. `ConSanAtomicPolicyReason`,
+  `ConSanFencePolicyReason`, `ConSanFenceAssociation`, and
+  `ConSanDynamicResultRequirement` retain every exclusion as machine-readable
+  evidence instead of making warning strings part of control flow.
+- **Completed cutover:** Ordered native atomics and ordinary-memory/fence
+  sequences are qualified once by policy. Candidate retention, dispositions,
+  and the coverage ledger consume the published decisions; they no longer
+  rediscover eligibility in each engine. The policy uses synchronization-
+  derived scope for ordinary sequences, admits the exact gfx1250 buffer form
+  supported by Record/Replay lowering, and distinguishes guest synchronization
+  from barriers introduced by ConSan itself.
+- **Retained compatibility seam:** Current Record/Replay, Sampled, and Inline
+  lowerers still translate admitted intents through operand-rich candidate
+  structures. Those structures continue to own register allocation,
+  instruction placement, and target words until the resource and lowering
+  slices replace them component by component.
+- **Completed test gate:** Focused type units exhaustively check enum sets and
+  stable names, association identity validity and ordering, candidate-derived
+  predicates, decision/intent invariants, append/rebase behavior, typed error
+  outcomes, target matrices, dynamic-result mappings, exact encoding and
+  operand boundaries, ambiguity, and deterministic non-mutating policy.
+  Checked-in device contracts retain compare-and-swap, atomic store, FLAT
+  atomic, Stream-K, tree-reduction atomic OR, target global-memory/cache,
+  fence-publication, and gfx1250 ordered-LDS coverage.
 - **Prerequisite:** Slices 3B and 4A.
+
+The completed host gate passed 1,449 of 1,451 ConSan tests, with the remaining
+two external-object benchmarks intentionally skipped, plus all 98 ConSan
+hook/runtime tests. All 2,908 emulator device rows passed in 70.71 seconds of
+wall time, and the relevant physical-gfx950 atomic, fence, Stream-K, and tree
+subset passed all 92 rows. Physical gfx950 `d128-block` E2E validation was
+accepted by all four engines, including complete observed barrier coverage
+(Record/Replay and Inline 119/119; Sampled 117/117). RocJitsu-emulated gfx1250
+accepted SuperCollider, Sampled, and Inline, with 18/18 access sites and the
+applicable barrier sites covered. Record/Replay retained its pre-existing
+yellow capacity condition: static coverage was complete (18/18 accesses and
+8/8 barriers), but the bounded replay metadata filled before dynamic analysis
+could complete.
 
 ### Slice 5A: Record/Replay evidence requirements
 

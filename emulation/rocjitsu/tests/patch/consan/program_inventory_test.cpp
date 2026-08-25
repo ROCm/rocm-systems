@@ -86,6 +86,17 @@ TEST(ConSanProgramInventory, EnumContractsAreExhaustiveNamedAndRejectInvalidValu
   expect_complete_enum_contract(
       kConSanInventoryExclusionReasons, ConSanInventoryExclusionReason::Count,
       consan_inventory_exclusion_reason_name, "invalid-inventory-exclusion-reason");
+  expect_complete_enum_contract(kConSanFenceAssociations, ConSanFenceAssociation::Count,
+                                consan_fence_association_name, "invalid-fence-association");
+}
+
+TEST(ConSanProgramInventory, FenceCandidateEligibilityExactlyMatchesQualifiedAssociation) {
+  ConSanMoiFenceCandidate candidate;
+  for (ConSanFenceAssociation association : kConSanFenceAssociations) {
+    SCOPED_TRACE(consan_fence_association_name(association));
+    candidate.association = association;
+    EXPECT_EQ(candidate.eligible(), association == ConSanFenceAssociation::Qualified);
+  }
 }
 
 TEST(ConSanProgramInventory, CodeObjectIdentityIsStableCompatibleAndCollisionAware) {
@@ -296,7 +307,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   ConSanMoiFenceCandidate fence;
   fence.identity = "fence";
   fence.sequence_identity = sequence.identity;
-  fence.eligible = true;
+  fence.association = ConSanFenceAssociation::Qualified;
   build.moi_fence_candidates.push_back(fence);
 
   ProgramInventory published = builder.view();
@@ -310,7 +321,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_TRUE(view.sync_events.front().semantic_id.valid());
   EXPECT_TRUE(view.sync_sequences.front().member_semantic_ids.front().valid());
   EXPECT_TRUE(view.communication_address_recipes.front().supported());
-  EXPECT_TRUE(view.moi_fence_candidates.front().eligible);
+  EXPECT_TRUE(view.moi_fence_candidates.front().eligible());
 
   ConSanResult result;
   result.install_program_inventory(published);
@@ -350,7 +361,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   revised.sync_sequences.clear();
   revised.barrier_lifecycle_groups.clear();
   revised.communication_address_recipes.clear();
-  revised.moi_fence_candidates.front().eligible = true;
+  revised.moi_fence_candidates.front().association = ConSanFenceAssociation::Qualified;
 
   const SynchronizationInventoryView unchanged = published.synchronization_view();
   EXPECT_EQ(published.legacy_view().kernels.front().name, "original");
@@ -358,7 +369,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   EXPECT_EQ(unchanged.sync_sequences.size(), 1u);
   EXPECT_EQ(unchanged.barrier_lifecycle_groups.size(), 1u);
   EXPECT_EQ(unchanged.communication_address_recipes.size(), 1u);
-  EXPECT_FALSE(unchanged.moi_fence_candidates.front().eligible);
+  EXPECT_FALSE(unchanged.moi_fence_candidates.front().eligible());
 
   const ProgramInventory revised_inventory = revision.view();
   EXPECT_EQ(revised_inventory.legacy_view().kernels.front().name, "revision");
@@ -367,7 +378,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   EXPECT_TRUE(revised_inventory.synchronization_view().sync_sequences.empty());
   EXPECT_TRUE(revised_inventory.synchronization_view().barrier_lifecycle_groups.empty());
   EXPECT_TRUE(revised_inventory.synchronization_view().communication_address_recipes.empty());
-  EXPECT_TRUE(revised_inventory.synchronization_view().moi_fence_candidates.front().eligible);
+  EXPECT_TRUE(revised_inventory.synchronization_view().moi_fence_candidates.front().eligible());
 }
 
 TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberIdentities) {

@@ -58,6 +58,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
   apply_test_container_filter(candidates, options);
   if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
     return;
+  retain_admitted_atomic_record_candidates(result.observation_plan, candidates);
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });

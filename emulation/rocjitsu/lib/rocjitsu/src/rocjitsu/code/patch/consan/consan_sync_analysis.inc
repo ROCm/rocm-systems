@@ -2107,7 +2107,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     const auto membership = sequence_by_event_identity.find(fence.identity);
     if (membership == sequence_by_event_identity.end() || !membership->second.unique ||
         membership->second.sequence == nullptr) {
-      candidate.rejection_reason = "missing-or-ambiguous-sequence-membership";
+      candidate.association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
       candidates.push_back(std::move(candidate));
       continue;
     }
@@ -2122,7 +2122,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
                                     (sequence->operation == ConSanSyncOperation::OrdinaryLoad ||
                                      sequence->operation == ConSanSyncOperation::OrdinaryStore);
     if (!addressed_atomic && !addressed_ordinary) {
-      candidate.rejection_reason = "fence-not-associated-with-addressed-communication-sequence";
+      candidate.association = ConSanFenceAssociation::NotAddressedCommunication;
       candidates.push_back(std::move(candidate));
       continue;
     }
@@ -2130,7 +2130,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
                                       ConSanSemanticConfidence::Conservative) ||
         !consan_sync_confidence_meets(sequence->memory_role_confidence,
                                       ConSanSemanticConfidence::Conservative)) {
-      candidate.rejection_reason = "communication-sequence-confidence-insufficient";
+      candidate.association = ConSanFenceAssociation::InsufficientConfidence;
       candidates.push_back(std::move(candidate));
       continue;
     }
@@ -2150,7 +2150,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
         addressed_ordinary && sequence->memory_role == ConSanSyncMemoryRole::Acquire &&
         fence.mnemonic == "buffer_gl0_inv" && sequence_has_cache_member("buffer_gl1_inv");
     if (rdna3_acquire_pair_head) {
-      candidate.rejection_reason = "paired-acquire-prefix-covered-by-tail";
+      candidate.association = ConSanFenceAssociation::AcquirePairPrefixCoveredByTail;
       candidates.push_back(std::move(candidate));
       continue;
     }
@@ -2159,7 +2159,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     else if (is_acquire_cache_event(&fence) || rdna3_acquire_pair_tail)
       candidate.memory_role = ConSanSyncMemoryRole::Acquire;
     else {
-      candidate.rejection_reason = "unsupported-cache-operation";
+      candidate.association = ConSanFenceAssociation::UnsupportedCacheOperation;
       candidates.push_back(std::move(candidate));
       continue;
     }
@@ -2168,7 +2168,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
         sequence->memory_role == ConSanSyncMemoryRole::AcquireRelease ||
         sequence->memory_role == ConSanSyncMemoryRole::SequentiallyConsistent;
     if (!role_is_carried) {
-      candidate.rejection_reason = "cache-role-not-carried-by-communication-sequence";
+      candidate.association = ConSanFenceAssociation::MemoryRoleMismatch;
       candidates.push_back(std::move(candidate));
       continue;
     }
@@ -2193,20 +2193,20 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
       communication = member;
     }
     if (malformed_member || communication == nullptr || communication->identity.empty()) {
-      candidate.rejection_reason = "missing-or-ambiguous-communication-event";
+      candidate.association = ConSanFenceAssociation::MissingOrAmbiguousCommunicationEvent;
       candidates.push_back(std::move(candidate));
       continue;
     }
     if (communication->address_source != ConSanSyncAddressSource::GlobalScalarVector &&
         communication->address_source != ConSanSyncAddressSource::BufferResource &&
         communication->address_source != ConSanSyncAddressSource::FlatVector) {
-      candidate.rejection_reason = "communication-address-source-unsupported";
+      candidate.association = ConSanFenceAssociation::UnsupportedAddressSource;
       candidates.push_back(std::move(candidate));
       continue;
     }
     if (!communication->raw_scope || *communication->raw_scope == 0u ||
         *communication->raw_scope > 3u) {
-      candidate.rejection_reason = "communication-scope-unsupported";
+      candidate.association = ConSanFenceAssociation::UnsupportedScope;
       candidates.push_back(std::move(candidate));
       continue;
     }
@@ -2215,7 +2215,7 @@ void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inven
     candidate.communication_address_source = communication->address_source;
     candidate.communication_static_byte_offset = communication->static_byte_offset;
     candidate.raw_scope = communication->raw_scope;
-    candidate.eligible = true;
+    candidate.association = ConSanFenceAssociation::Qualified;
     candidates.push_back(std::move(candidate));
   }
 }

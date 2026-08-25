@@ -31,6 +31,31 @@ namespace {
   return static_cast<uint8_t>(reason) < static_cast<uint8_t>(ConSanBarrierPolicyReason::Count);
 }
 
+[[nodiscard]] bool valid_atomic_reason(ConSanAtomicPolicyReason reason) {
+  return static_cast<uint8_t>(reason) < static_cast<uint8_t>(ConSanAtomicPolicyReason::Count);
+}
+
+[[nodiscard]] bool valid_fence_reason(ConSanFencePolicyReason reason) {
+  return static_cast<uint8_t>(reason) < static_cast<uint8_t>(ConSanFencePolicyReason::Count);
+}
+
+[[nodiscard]] bool valid_fence_association(ConSanFenceAssociation association) {
+  return static_cast<uint8_t>(association) < static_cast<uint8_t>(ConSanFenceAssociation::Count);
+}
+
+[[nodiscard]] bool valid_capability_disposition(ConSanCapabilityDisposition disposition) {
+  switch (disposition) {
+  case ConSanCapabilityDisposition::OutOfContract:
+  case ConSanCapabilityDisposition::NotApplicable:
+  case ConSanCapabilityDisposition::Supported:
+  case ConSanCapabilityDisposition::MutationOnly:
+  case ConSanCapabilityDisposition::AccessOnly:
+  case ConSanCapabilityDisposition::AssociatedOnly:
+    return true;
+  }
+  return false;
+}
+
 [[nodiscard]] bool valid_intent_kind(ConSanProbeIntentKind kind) {
   return static_cast<uint8_t>(kind) < static_cast<uint8_t>(ConSanProbeIntentKind::Count);
 }
@@ -45,6 +70,24 @@ namespace {
 
 [[nodiscard]] bool valid_requirement(ConSanProbeRequirement requirement) {
   return static_cast<uint8_t>(requirement) < static_cast<uint8_t>(ConSanProbeRequirement::Count);
+}
+
+[[nodiscard]] bool valid_dynamic_result(ConSanDynamicResultRequirement requirement) {
+  return static_cast<uint8_t>(requirement) <
+         static_cast<uint8_t>(ConSanDynamicResultRequirement::Count);
+}
+
+[[nodiscard]] bool atomic_or_fence_intent(ConSanProbeIntentKind kind) {
+  switch (kind) {
+  case ConSanProbeIntentKind::AtomicAddressCapture:
+  case ConSanProbeIntentKind::AtomicRecord:
+  case ConSanProbeIntentKind::SampledAtomicOrdering:
+  case ConSanProbeIntentKind::ExactAtomicOrdering:
+  case ConSanProbeIntentKind::FenceRecord:
+    return true;
+  default:
+    return false;
+  }
 }
 
 [[nodiscard]] bool valid_lowering_outcome(ConSanLoweringOutcomeKind outcome) {
@@ -342,9 +385,25 @@ bool ConSanObservationPlan::valid() const {
     if (probe.id.value != index || probe.engine != engine || !probe.physical_site.valid() ||
         probe.covered_semantic_sites.empty() || !valid_intent_kind(probe.kind) ||
         !valid_position(probe.position) || !valid_lane_policy(probe.lane_mask) ||
-        !valid_requirement(probe.requirement) ||
+        !valid_requirement(probe.requirement) || !valid_dynamic_result(probe.dynamic_result) ||
         std::ranges::any_of(probe.covered_semantic_sites,
                             [](const SemanticSiteId &site) { return !site.valid(); })) {
+      return false;
+    }
+    const bool synchronization_intent = atomic_or_fence_intent(probe.kind);
+    if (synchronization_intent != probe.synchronization_association.has_value() ||
+        (probe.synchronization_association && !probe.synchronization_association->valid())) {
+      return false;
+    }
+    if (probe.kind == ConSanProbeIntentKind::AtomicAddressCapture) {
+      if (probe.position != ConSanProbePosition::Before ||
+          probe.dynamic_result != ConSanDynamicResultRequirement::None) {
+        return false;
+      }
+    } else if (synchronization_intent && probe.position != ConSanProbePosition::After) {
+      return false;
+    } else if (!synchronization_intent &&
+               probe.dynamic_result != ConSanDynamicResultRequirement::None) {
       return false;
     }
   }
@@ -389,6 +448,60 @@ bool ConSanObservationPlan::valid() const {
       }
     }
   }
+  for (const ConSanAtomicSiteDecision &decision : atomic_site_decisions) {
+    if (decision.engine != engine || !decision.semantic_site.valid() ||
+        decision.semantic_site.domain != ConSanSemanticSiteDomain::SynchronizationEvent ||
+        !valid_decision_kind(decision.kind) || !valid_capability_disposition(decision.capability) ||
+        !valid_atomic_reason(decision.reason) || !valid_dynamic_result(decision.dynamic_result) ||
+        decision.source_containers.empty() ||
+        (decision.association && !decision.association->valid())) {
+      return false;
+    }
+    const bool admitted = decision.kind == ConSanSiteDecisionKind::Admitted;
+    if (admitted != (decision.reason == ConSanAtomicPolicyReason::None) ||
+        admitted != !decision.intent_ids.empty() ||
+        (admitted && (!decision.association ||
+                      (decision.capability != ConSanCapabilityDisposition::Supported &&
+                       decision.capability != ConSanCapabilityDisposition::AssociatedOnly)))) {
+      return false;
+    }
+    for (ConSanProbeIntentId id : decision.intent_ids) {
+      const ConSanProbeIntent *probe = intent(id);
+      if (probe == nullptr || probe->synchronization_association != decision.association ||
+          std::ranges::find(probe->covered_semantic_sites, decision.semantic_site) ==
+              probe->covered_semantic_sites.end()) {
+        return false;
+      }
+    }
+  }
+  for (const ConSanFenceSiteDecision &decision : fence_site_decisions) {
+    if (decision.engine != engine || !decision.semantic_site.valid() ||
+        decision.semantic_site.domain != ConSanSemanticSiteDomain::SynchronizationEvent ||
+        !valid_decision_kind(decision.kind) || !valid_capability_disposition(decision.capability) ||
+        !valid_fence_reason(decision.reason) ||
+        !valid_fence_association(decision.inventory_association) ||
+        decision.source_containers.empty() ||
+        (decision.association && !decision.association->valid())) {
+      return false;
+    }
+    const bool admitted = decision.kind == ConSanSiteDecisionKind::Admitted;
+    if (admitted != (decision.reason == ConSanFencePolicyReason::None) ||
+        admitted != !decision.intent_ids.empty() ||
+        (admitted && (decision.inventory_association != ConSanFenceAssociation::Qualified ||
+                      !decision.association ||
+                      (decision.capability != ConSanCapabilityDisposition::Supported &&
+                       decision.capability != ConSanCapabilityDisposition::AssociatedOnly)))) {
+      return false;
+    }
+    for (ConSanProbeIntentId id : decision.intent_ids) {
+      const ConSanProbeIntent *probe = intent(id);
+      if (probe == nullptr || probe->synchronization_association != decision.association ||
+          std::ranges::find(probe->covered_semantic_sites, decision.semantic_site) ==
+              probe->covered_semantic_sites.end()) {
+        return false;
+      }
+    }
+  }
   return true;
 }
 
@@ -414,6 +527,16 @@ bool ConSanObservationPlan::append(const ConSanObservationPlan &fragment) {
       id.value += intent_base;
     combined.barrier_site_decisions.push_back(std::move(decision));
   }
+  for (ConSanAtomicSiteDecision decision : fragment.atomic_site_decisions) {
+    for (ConSanProbeIntentId &id : decision.intent_ids)
+      id.value += intent_base;
+    combined.atomic_site_decisions.push_back(std::move(decision));
+  }
+  for (ConSanFenceSiteDecision decision : fragment.fence_site_decisions) {
+    for (ConSanProbeIntentId &id : decision.intent_ids)
+      id.value += intent_base;
+    combined.fence_site_decisions.push_back(std::move(decision));
+  }
   if (!combined.valid())
     return false;
   *this = std::move(combined);
@@ -421,7 +544,9 @@ bool ConSanObservationPlan::append(const ConSanObservationPlan &fragment) {
 }
 
 ConSanCoverageLedger::ConSanCoverageLedger(const ConSanObservationPlan &plan)
-    : site_decisions_(plan.site_decisions), barrier_site_decisions_(plan.barrier_site_decisions) {
+    : site_decisions_(plan.site_decisions), barrier_site_decisions_(plan.barrier_site_decisions),
+      atomic_site_decisions_(plan.atomic_site_decisions),
+      fence_site_decisions_(plan.fence_site_decisions) {
   intent_entries_.reserve(plan.probe_intents.size());
   for (const ConSanProbeIntent &intent : plan.probe_intents)
     intent_entries_.push_back({
@@ -550,6 +675,8 @@ ConSanAccessPolicyResult plan_consan_access_observation(const ProgramInventory &
           .position = ConSanProbePosition::Before,
           .lane_mask = ConSanLaneMaskPolicy::ActiveExecutionMask,
           .requirement = ConSanProbeRequirement::Required,
+          .synchronization_association = std::nullopt,
+          .dynamic_result = ConSanDynamicResultRequirement::None,
       });
     }
     for (const SemanticSiteId &id : ids) {

@@ -33,6 +33,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
              std::string::npos;
     });
   }
+  retain_admitted_fence_record_candidates(result.observation_plan, candidates);
   std::ranges::sort(candidates, {}, [](const FenceRecordCandidate &candidate) {
     return candidate.fence.text_offset;
   });
@@ -723,6 +724,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     apply_test_container_filter(candidates, options);
     if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
       return;
+    retain_admitted_atomic_record_candidates(result.observation_plan, candidates);
     for (size_t index = 0; index < candidates.size(); ++index) {
       const AtomicRecordCandidate &candidate = candidates[index];
       const uint16_t scratch_count = options.moi_engine == ConSanMoiEngine::Sampled
@@ -744,6 +746,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                std::string::npos;
       });
     }
+    retain_admitted_fence_record_candidates(result.observation_plan, candidates);
     for (size_t index = 0; index < candidates.size(); ++index) {
       const FenceRecordCandidate &candidate = candidates[index];
       ConSanCandidateResourcePlan plan = plan_moi_resource_site(
@@ -786,120 +789,77 @@ void append_moi_site_disposition(ConSanResourceSiteKind kind, std::string_view c
   result.site_dispositions.push_back(std::move(record));
 }
 
+[[nodiscard]] const ConSanAtomicSiteDecision *
+atomic_policy_decision(const ConSanObservationPlan &plan, uint64_t text_offset) {
+  const auto decision = std::ranges::find_if(
+      plan.atomic_site_decisions, [&](const ConSanAtomicSiteDecision &candidate) {
+        return candidate.semantic_site.physical.original_text_offset == text_offset;
+      });
+  return decision == plan.atomic_site_decisions.end() ? nullptr : &*decision;
+}
+
 [[nodiscard]] ConSanSiteDispositionReason
-inline_atomic_disposition_reason(ConSanMoiInlineAtomicSupport support) {
-  switch (support) {
-  case ConSanMoiInlineAtomicSupport::Supported:
+legacy_atomic_disposition_reason(ConSanAtomicPolicyReason reason) {
+  switch (reason) {
+  case ConSanAtomicPolicyReason::None:
+  case ConSanAtomicPolicyReason::TrackingDisabled:
+  case ConSanAtomicPolicyReason::EngineMutationOnly:
+  case ConSanAtomicPolicyReason::ContainerFilterExcluded:
     return ConSanSiteDispositionReason::None;
-  case ConSanMoiInlineAtomicSupport::NonFlatAddress:
+  case ConSanAtomicPolicyReason::MissingExecutionOwner:
+  case ConSanAtomicPolicyReason::MissingSampledAccessWindow:
+  case ConSanAtomicPolicyReason::UnqualifiedSyncSequence:
+  case ConSanAtomicPolicyReason::AmbiguousSequenceMembership:
+  case ConSanAtomicPolicyReason::ConflictingPhysicalAliases:
+    return ConSanSiteDispositionReason::UnqualifiedSyncSequence;
+  case ConSanAtomicPolicyReason::TargetCapabilityUnavailable:
+  case ConSanAtomicPolicyReason::UnsupportedAddressSource:
     return ConSanSiteDispositionReason::NonFlatAtomicAddress;
-  case ConSanMoiInlineAtomicSupport::NonzeroOffset:
-    return ConSanSiteDispositionReason::NonzeroFlatOffset;
-  case ConSanMoiInlineAtomicSupport::UnsupportedScope:
+  case ConSanAtomicPolicyReason::UnsupportedMemoryRole:
+    return ConSanSiteDispositionReason::UnsupportedMemoryRole;
+  case ConSanAtomicPolicyReason::MissingScope:
+    return ConSanSiteDispositionReason::MissingScope;
+  case ConSanAtomicPolicyReason::UnsupportedScope:
     return ConSanSiteDispositionReason::UnsupportedScope;
-  case ConSanMoiInlineAtomicSupport::UnsupportedWidth:
+  case ConSanAtomicPolicyReason::InvalidAccessWidth:
     return ConSanSiteDispositionReason::InvalidAccessWidth;
-  case ConSanMoiInlineAtomicSupport::CompareExchangeOutcomeUnavailable:
-    return ConSanSiteDispositionReason::CompareExchangeOutcomeUnavailable;
-  case ConSanMoiInlineAtomicSupport::UnsupportedEncoding:
-    return ConSanSiteDispositionReason::UnsupportedAtomicEncoding;
-  case ConSanMoiInlineAtomicSupport::MissingOperands:
+  case ConSanAtomicPolicyReason::MissingOperands:
     return ConSanSiteDispositionReason::MissingAtomicOperands;
-  case ConSanMoiInlineAtomicSupport::MissingOrderingMetadata:
-    return ConSanSiteDispositionReason::MissingOrderingMetadata;
+  case ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable:
+    return ConSanSiteDispositionReason::CompareExchangeOutcomeUnavailable;
+  case ConSanAtomicPolicyReason::UnsupportedDynamicOutcome:
+    return ConSanSiteDispositionReason::UnsupportedAtomicOutcome;
+  case ConSanAtomicPolicyReason::UnsupportedEncoding:
+    return ConSanSiteDispositionReason::UnsupportedAtomicEncoding;
+  case ConSanAtomicPolicyReason::Count:
+    break;
   }
   return ConSanSiteDispositionReason::UnsupportedAtomicEncoding;
 }
 
-[[nodiscard]] ConSanSiteDispositionReason
-sampled_atomic_disposition_reason(std::string_view reason) {
-  if (reason == "missing-shared-sync-event" || reason == "unqualified-shared-sync-sequence")
-    return ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-  if (reason == "unsupported-qualified-memory-role")
-    return ConSanSiteDispositionReason::UnsupportedMemoryRole;
-  if (reason == "missing-qualified-scope")
-    return ConSanSiteDispositionReason::MissingScope;
-  if (reason == "unsupported-qualified-scope")
-    return ConSanSiteDispositionReason::UnsupportedScope;
-  if (reason == "unsupported-qualified-byte-range")
-    return ConSanSiteDispositionReason::InvalidAccessWidth;
-  if (reason == "compare-exchange-dynamic-outcome-unavailable")
-    return ConSanSiteDispositionReason::CompareExchangeOutcomeUnavailable;
-  if (reason == "unsupported-qualified-rmw-outcome")
-    return ConSanSiteDispositionReason::UnsupportedAtomicOutcome;
-  return ConSanSiteDispositionReason::UnsupportedMetadataEncoding;
-}
-
-[[nodiscard]] ConSanSiteDispositionReason
-first_light_atomic_disposition_reason(const ConSanAtomicSite &site, bool allow_ordered_lds_atomic) {
-  if (!site.mnemonic.starts_with("flat_atomic") && !site.mnemonic.starts_with("global_atomic") &&
-      !(allow_ordered_lds_atomic && site.mnemonic.starts_with("ds_")))
-    return ConSanSiteDispositionReason::NonFlatAtomicAddress;
-  if (!site.addr_vgpr || !site.data_vgpr)
-    return ConSanSiteDispositionReason::MissingAtomicOperands;
-  if (*site.addr_vgpr >= 255)
-    return ConSanSiteDispositionReason::ReservedFlatAddressRegister;
-  if (!site.raw_scope)
-    return ConSanSiteDispositionReason::MissingOrderingMetadata;
-  if (*site.raw_scope < 1u || *site.raw_scope > 3u)
-    return ConSanSiteDispositionReason::UnsupportedScope;
-  const bool compare_exchange = consan_atomic_is_compare_exchange(site);
-  if (compare_exchange && !site.returns_old_value.value_or(false))
-    return ConSanSiteDispositionReason::CompareExchangeOutcomeUnavailable;
-  return ConSanSiteDispositionReason::None;
-}
-
 template <typename Container>
 void append_moi_atomic_site_dispositions(const Container &container, const ConSanOptions &options,
-                                         const ConSanResult &semantic_result,
-                                         const MoiSyncInventoryIndex &sync_index,
                                          ConSanResult &result) {
   if (!options.moi_track_atomics ||
       (!options.test_kernel_name_filter.empty() &&
        container.name.find(options.test_kernel_name_filter) == std::string::npos))
     return;
   const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
-  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
-      semantic_result.arch, ConSanCapabilityForm::OrderedLdsAtomic);
   if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
     return;
   for (const ConSanAtomicSite &site : container.atomic_sites) {
-    const ConSanSyncEvent *event =
-        sync_index.event(ConSanSyncEventKind::Atomic, container.name, in_kernel, site.text_offset);
-    const std::optional<ConSanMoiAtomicEventKind> event_kind =
-        atomic_event_kind_for_site(sync_index, container.name, in_kernel, site);
-    ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
-    if (event == nullptr || event->execution_owners.empty()) {
-      // Runtime-library helpers that no inventoried kernel can execute are
-      // decoded inventory, but not relevant workload support sites. Keep the
-      // operational candidate path stable until report sizing and persistent
-      // state selection no longer depend on it; the coverage ledger must not
-      // call an impossible MissingOwner plan supported.
-      reason = ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-    } else if (!event_kind) {
-      reason = ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-    } else if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
-      const ConSanAtomicSite normalized =
-          normalize_atomic_record_site(site, allow_ordered_lds_atomic);
-      reason = inline_atomic_disposition_reason(
-          classify_consan_moi_inline_atomic_support(normalized, *event_kind, semantic_result.arch));
-    } else {
-      const ConSanAtomicSite normalized =
-          normalize_atomic_record_site(site, allow_ordered_lds_atomic);
-      reason = first_light_atomic_disposition_reason(normalized, allow_ordered_lds_atomic);
-      if (reason == ConSanSiteDispositionReason::None &&
-          options.moi_engine == ConSanMoiEngine::Sampled) {
-        std::string sampled_reason;
-        if (!sampled_atomic_semantics_for_site(semantic_result, sync_index, container.name,
-                                               in_kernel, site, sampled_reason))
-          reason = sampled_atomic_disposition_reason(sampled_reason);
-      }
+    const ConSanAtomicSiteDecision *decision =
+        atomic_policy_decision(result.observation_plan, site.text_offset);
+    if (decision == nullptr) {
+      result.errors.emplace_back(
+          "ConSan MOI atomic policy lost its inventory site at text offset " +
+          std::to_string(site.text_offset));
+      continue;
     }
+    const ConSanSiteDispositionReason reason = legacy_atomic_disposition_reason(decision->reason);
     append_moi_site_disposition(ConSanResourceSiteKind::Atomic, container.name, in_kernel,
                                 site.text_offset, site.mnemonic, reason, result,
-                                reason == ConSanSiteDispositionReason::UnqualifiedSyncSequence ||
-                                    (reason == ConSanSiteDispositionReason::UnsupportedScope &&
-                                     site.raw_scope && *site.raw_scope == 0u));
+                                decision->kind == ConSanSiteDecisionKind::NotApplicable);
   }
 }
 
@@ -909,31 +869,35 @@ void append_moi_ordered_ordinary_site_dispositions(const ConSanOptions &options,
                                                    ConSanResult &result) {
   if (!options.moi_track_atomics)
     return;
-  std::vector<AtomicRecordCandidate> candidates;
-  append_ordered_ordinary_atomic_candidates(semantic_result, sync_index, candidates);
-  for (const AtomicRecordCandidate &candidate : candidates) {
-    if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        ordinary_atomic_candidate_is_covered_by_eligible_fence(semantic_result, sync_index,
-                                                               candidate)) {
+  (void)sync_index;
+  for (const ConSanAtomicSiteDecision &decision :
+       semantic_result.observation_plan.atomic_site_decisions) {
+    const auto event =
+        std::ranges::find_if(semantic_result.sync_events, [&](const auto &candidate) {
+          return candidate.kind == ConSanSyncEventKind::OrdinaryMemory &&
+                 candidate.semantic_id == decision.semantic_site;
+        });
+    if (event == semantic_result.sync_events.end())
       continue;
-    }
-    const bool in_kernel = candidate.container_name.starts_with("kernel:");
-    const size_t prefix_size =
-        in_kernel ? std::string_view("kernel:").size() : std::string_view("function:").size();
-    const std::string_view container_name(candidate.container_name.data() + prefix_size,
-                                          candidate.container_name.size() - prefix_size);
-    if ((!options.test_kernel_name_filter.empty() &&
-         container_name.find(options.test_kernel_name_filter) == std::string_view::npos) ||
-        (in_kernel && is_rocclr_runtime_kernel_name(container_name))) {
+    const bool covered_by_record_replay_fence =
+        options.moi_engine == ConSanMoiEngine::RecordReplay &&
+        std::ranges::any_of(decision.intent_ids, [&](ConSanProbeIntentId id) {
+          const ConSanProbeIntent *intent = semantic_result.observation_plan.intent(id);
+          return intent != nullptr && intent->kind == ConSanProbeIntentKind::FenceRecord;
+        });
+    if (covered_by_record_replay_fence)
       continue;
+    const ConSanSiteDispositionReason reason = legacy_atomic_disposition_reason(decision.reason);
+    for (const std::string &container_name : decision.source_containers) {
+      if ((!options.test_kernel_name_filter.empty() &&
+           container_name.find(options.test_kernel_name_filter) == std::string::npos) ||
+          (event->in_kernel && is_rocclr_runtime_kernel_name(container_name))) {
+        continue;
+      }
+      append_moi_site_disposition(ConSanResourceSiteKind::Atomic, container_name, event->in_kernel,
+                                  event->text_offset, event->mnemonic, reason, result,
+                                  decision.kind == ConSanSiteDecisionKind::NotApplicable);
     }
-    const ConSanMoiInlineAtomicSupport support = classify_consan_moi_inline_atomic_support(
-        candidate.site, candidate.event_kind, semantic_result.arch, candidate.is_rmw);
-    const ConSanSiteDispositionReason reason = inline_atomic_disposition_reason(support);
-    append_moi_site_disposition(ConSanResourceSiteKind::Atomic, container_name, in_kernel,
-                                candidate.site.text_offset, candidate.site.mnemonic, reason, result,
-                                reason == ConSanSiteDispositionReason::UnsupportedScope &&
-                                    candidate.site.raw_scope && *candidate.site.raw_scope == 0u);
   }
 }
 
@@ -971,6 +935,27 @@ legacy_barrier_disposition_reason(ConSanBarrierPolicyReason reason) {
     break;
   }
   return ConSanSiteDispositionReason::UnqualifiedSyncSequence;
+}
+
+[[nodiscard]] ConSanSiteDispositionReason
+legacy_fence_disposition_reason(ConSanFencePolicyReason reason) {
+  switch (reason) {
+  case ConSanFencePolicyReason::None:
+  case ConSanFencePolicyReason::TrackingDisabled:
+  case ConSanFencePolicyReason::EngineMutationOnly:
+  case ConSanFencePolicyReason::ContainerFilterExcluded:
+    return ConSanSiteDispositionReason::None;
+  case ConSanFencePolicyReason::MissingExecutionOwner:
+  case ConSanFencePolicyReason::MissingCommunicationEvent:
+    return ConSanSiteDispositionReason::MissingCommunicationEvent;
+  case ConSanFencePolicyReason::AssociationUnavailable:
+  case ConSanFencePolicyReason::TargetCapabilityUnavailable:
+  case ConSanFencePolicyReason::ConflictingPhysicalAliases:
+    return ConSanSiteDispositionReason::IneligibleFence;
+  case ConSanFencePolicyReason::Count:
+    break;
+  }
+  return ConSanSiteDispositionReason::IneligibleFence;
 }
 
 template <typename Container>
@@ -1018,50 +1003,37 @@ void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResul
   const ConSanResult &semantic_result = result;
   const MoiSyncInventoryIndex sync_index(semantic_result);
   for (const ConSanKernelInfo &kernel : result.kernels) {
-    append_moi_atomic_site_dispositions(kernel, options, semantic_result, sync_index, result);
+    append_moi_atomic_site_dispositions(kernel, options, result);
     append_moi_barrier_site_dispositions(kernel, options, sync_index, result);
   }
   for (const ConSanFunctionInfo &function : result.functions) {
-    append_moi_atomic_site_dispositions(function, options, semantic_result, sync_index, result);
+    append_moi_atomic_site_dispositions(function, options, result);
     append_moi_barrier_site_dispositions(function, options, sync_index, result);
   }
   append_moi_ordered_ordinary_site_dispositions(options, semantic_result, sync_index, result);
 
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::RecordReplay)
     return;
-  std::vector<FenceRecordCandidate> admitted;
-  append_fence_record_candidates(result, sync_index, admitted);
-  std::unordered_set<std::string_view> admitted_identities;
-  admitted_identities.reserve(admitted.size());
-  for (const FenceRecordCandidate &candidate : admitted)
-    admitted_identities.insert(candidate.fence.identity);
-  for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates) {
-    if ((!options.test_kernel_name_filter.empty() &&
-         fence.container_name.find(options.test_kernel_name_filter) == std::string::npos) ||
-        (fence.in_kernel && is_rocclr_runtime_kernel_name(fence.container_name)))
-      continue;
-    ConSanSiteDispositionReason reason = ConSanSiteDispositionReason::None;
-    const ConSanSyncEvent *communication = sync_index.event(fence.communication_event_identity);
-    const bool unowned_communication =
-        communication != nullptr && communication->execution_owners.empty();
-    const ConSanSyncEvent *fence_event = sync_index.event(fence.fence_event_identity);
-    const bool unowned_fence = fence_event != nullptr && fence_event->execution_owners.empty();
-    const bool unassociated_cache_operation =
-        fence.rejection_reason == "fence-not-associated-with-addressed-communication-sequence";
-    const bool covered_cache_pair_prefix =
-        fence.rejection_reason == "paired-acquire-prefix-covered-by-tail";
-    if (!fence.eligible) {
-      reason = ConSanSiteDispositionReason::IneligibleFence;
-    } else if (communication == nullptr || unowned_communication) {
-      reason = ConSanSiteDispositionReason::MissingCommunicationEvent;
-    } else if (!admitted_identities.contains(fence.identity)) {
-      reason = ConSanSiteDispositionReason::MissingCommunicationEvent;
+  for (const ConSanFenceSiteDecision &decision : result.observation_plan.fence_site_decisions) {
+    const ConSanSiteDispositionReason reason = legacy_fence_disposition_reason(decision.reason);
+    for (const std::string &container_name : decision.source_containers) {
+      if ((!options.test_kernel_name_filter.empty() &&
+           container_name.find(options.test_kernel_name_filter) == std::string::npos)) {
+        continue;
+      }
+      const auto fence = std::ranges::find_if(
+          result.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &candidate) {
+            return candidate.text_offset == decision.semantic_site.physical.original_text_offset &&
+                   candidate.container_name == container_name;
+          });
+      const bool in_kernel = fence == result.moi_fence_candidates.end() ? true : fence->in_kernel;
+      if (in_kernel && is_rocclr_runtime_kernel_name(container_name))
+        continue;
+      append_moi_site_disposition(ConSanResourceSiteKind::Fence, container_name, in_kernel,
+                                  decision.semantic_site.physical.original_text_offset, "fence",
+                                  reason, result,
+                                  decision.kind == ConSanSiteDecisionKind::NotApplicable);
     }
-    append_moi_site_disposition(ConSanResourceSiteKind::Fence, fence.container_name,
-                                fence.in_kernel, fence.text_offset, "fence", reason, result,
-                                unowned_communication || unowned_fence ||
-                                    unassociated_cache_operation || covered_cache_pair_prefix ||
-                                    reason == ConSanSiteDispositionReason::IneligibleFence);
   }
 }
 
@@ -1210,19 +1182,61 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
   }
 
   // Site dispositions remain the temporary adapter into current MOI resource
-  // and placement code. Publish their final access and barrier outcomes
+  // and placement code. Publish every final access/synchronization outcome
   // through stable intent IDs so production coverage no longer requires a
   // consumer to scan patch kinds or warning strings.
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
-    const bool barrier_intent = intent.kind == ConSanProbeIntentKind::BarrierRecord ||
-                                intent.kind == ConSanProbeIntentKind::SampledBarrierEpoch ||
-                                intent.kind == ConSanProbeIntentKind::ExactBarrierEpoch;
-    const ConSanResourceSiteKind site_kind =
-        barrier_intent ? ConSanResourceSiteKind::Barrier : ConSanResourceSiteKind::Access;
-    const std::string_view subject = barrier_intent ? "barrier" : "access";
+    ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
+    uint64_t disposition_offset = intent.physical_site.original_text_offset;
+    std::string_view subject = "access";
+    switch (intent.kind) {
+    case ConSanProbeIntentKind::RedundantAccessObservation:
+    case ConSanProbeIntentKind::AccessRecord:
+    case ConSanProbeIntentKind::SampledAccess:
+    case ConSanProbeIntentKind::ExactShadowAccess:
+      break;
+    case ConSanProbeIntentKind::BarrierRecord:
+    case ConSanProbeIntentKind::SampledBarrierEpoch:
+    case ConSanProbeIntentKind::ExactBarrierEpoch:
+      site_kind = ConSanResourceSiteKind::Barrier;
+      subject = "barrier";
+      break;
+    case ConSanProbeIntentKind::AtomicRecord:
+    case ConSanProbeIntentKind::SampledAtomicOrdering:
+    case ConSanProbeIntentKind::ExactAtomicOrdering:
+      site_kind = ConSanResourceSiteKind::Atomic;
+      subject = "atomic";
+      break;
+    case ConSanProbeIntentKind::FenceRecord:
+      site_kind = ConSanResourceSiteKind::Fence;
+      subject = "fence";
+      break;
+    case ConSanProbeIntentKind::AtomicAddressCapture: {
+      site_kind = ConSanResourceSiteKind::Atomic;
+      subject = "atomic";
+      const auto owning_fence = std::ranges::find_if(
+          result.observation_plan.fence_site_decisions,
+          [&](const ConSanFenceSiteDecision &decision) {
+            return decision.kind == ConSanSiteDecisionKind::Admitted &&
+                   std::ranges::find(decision.intent_ids, intent.id) != decision.intent_ids.end() &&
+                   std::ranges::any_of(decision.intent_ids, [&](ConSanProbeIntentId id) {
+                     const ConSanProbeIntent *candidate = result.observation_plan.intent(id);
+                     return candidate != nullptr &&
+                            candidate->kind == ConSanProbeIntentKind::FenceRecord;
+                   });
+          });
+      if (owning_fence != result.observation_plan.fence_site_decisions.end()) {
+        site_kind = ConSanResourceSiteKind::Fence;
+        disposition_offset = owning_fence->semantic_site.physical.original_text_offset;
+        subject = "fence";
+      }
+      break;
+    }
+    case ConSanProbeIntentKind::Count:
+      break;
+    }
     const auto site = std::ranges::find_if(result.site_dispositions, [&](const auto &candidate) {
-      return candidate.site_kind == site_kind &&
-             candidate.text_offset == intent.physical_site.original_text_offset;
+      return candidate.site_kind == site_kind && candidate.text_offset == disposition_offset;
     });
     ConSanLoweringOutcomeKind outcome = ConSanLoweringOutcomeKind::PlacementRejected;
     std::string detail = "legacy MOI lowering published no " + std::string(subject) + " outcome";

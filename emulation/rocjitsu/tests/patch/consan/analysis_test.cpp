@@ -3259,8 +3259,8 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   const std::string &communication_identity = result.sync_events[1].identity;
   const ConSanMoiFenceCandidate &release = result.moi_fence_candidates[0];
   const ConSanMoiFenceCandidate &acquire = result.moi_fence_candidates[1];
-  EXPECT_TRUE(release.eligible) << release.rejection_reason;
-  EXPECT_TRUE(acquire.eligible) << acquire.rejection_reason;
+  EXPECT_TRUE(release.eligible()) << consan_fence_association_name(release.association);
+  EXPECT_TRUE(acquire.eligible()) << consan_fence_association_name(acquire.association);
   EXPECT_EQ(release.memory_role, ConSanSyncMemoryRole::Release);
   EXPECT_EQ(acquire.memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(release.sequence_identity, result.sync_sequences.front().identity);
@@ -3348,7 +3348,7 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
   ASSERT_EQ(result.moi_fence_candidates.size(), 1u)
       << testing::PrintToString(result.moi_fence_candidates);
   const ConSanMoiFenceCandidate &candidate = result.moi_fence_candidates.front();
-  EXPECT_TRUE(candidate.eligible) << candidate.rejection_reason;
+  EXPECT_TRUE(candidate.eligible()) << consan_fence_association_name(candidate.association);
   EXPECT_EQ(candidate.memory_role, ConSanSyncMemoryRole::Release);
   EXPECT_EQ(candidate.communication_event_identity, result.sync_events.back().identity);
   EXPECT_EQ(candidate.communication_static_byte_offset, 4u);
@@ -3498,7 +3498,7 @@ TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
   const auto prefix =
       std::ranges::find(result.moi_fence_candidates, false, &ConSanMoiFenceCandidate::eligible);
   ASSERT_NE(prefix, result.moi_fence_candidates.end());
-  EXPECT_EQ(prefix->rejection_reason, "paired-acquire-prefix-covered-by-tail");
+  EXPECT_EQ(prefix->association, ConSanFenceAssociation::AcquirePairPrefixCoveredByTail);
 }
 
 TEST(ConSan, MoiFenceSelectionRejectsUnassociatedCacheOperations) {
@@ -3519,9 +3519,8 @@ TEST(ConSan, MoiFenceSelectionRejectsUnassociatedCacheOperations) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
   for (const ConSanMoiFenceCandidate &candidate : result.moi_fence_candidates) {
-    EXPECT_FALSE(candidate.eligible);
-    EXPECT_EQ(candidate.rejection_reason,
-              "fence-not-associated-with-addressed-communication-sequence");
+    EXPECT_FALSE(candidate.eligible());
+    EXPECT_EQ(candidate.association, ConSanFenceAssociation::NotAddressedCommunication);
     EXPECT_TRUE(candidate.communication_event_identity.empty());
     EXPECT_FALSE(candidate.raw_scope);
   }
@@ -3550,9 +3549,9 @@ TEST(ConSan, SyncSequencesRejectNonWaitInsideAtomicCachePattern) {
   EXPECT_EQ(result.sync_sequences[1].kind, ConSanSyncSequenceKind::Atomic);
   EXPECT_EQ(result.sync_sequences[1].memory_role, ConSanSyncMemoryRole::Unknown);
   ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
-  EXPECT_FALSE(result.moi_fence_candidates.front().eligible);
-  EXPECT_EQ(result.moi_fence_candidates.front().rejection_reason,
-            "fence-not-associated-with-addressed-communication-sequence");
+  EXPECT_FALSE(result.moi_fence_candidates.front().eligible());
+  EXPECT_EQ(result.moi_fence_candidates.front().association,
+            ConSanFenceAssociation::NotAddressedCommunication);
   EXPECT_TRUE(result.moi_fence_candidates.front().communication_event_identity.empty());
 }
 
@@ -3701,9 +3700,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   ConSanOptions options;

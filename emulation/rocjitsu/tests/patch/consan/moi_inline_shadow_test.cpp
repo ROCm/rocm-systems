@@ -2382,21 +2382,13 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirro
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
-  ASSERT_EQ(std::ranges::count(result.observation_plan.probe_intents,
+  // The owner/epoch prologue contains two instrumentation-owned barriers.
+  // They initialize the local shadow but are not guest synchronization sites,
+  // so the immutable source plan must not invent barrier obligations for them.
+  EXPECT_TRUE(result.observation_plan.barrier_site_decisions.empty());
+  EXPECT_EQ(std::ranges::count(result.observation_plan.probe_intents,
                                ConSanProbeIntentKind::ExactBarrierEpoch, &ConSanProbeIntent::kind),
-            1u);
-  const auto epoch_intent =
-      std::ranges::find(result.observation_plan.probe_intents,
-                        ConSanProbeIntentKind::ExactBarrierEpoch, &ConSanProbeIntent::kind);
-  ASSERT_NE(epoch_intent, result.observation_plan.probe_intents.end());
-  EXPECT_EQ(epoch_intent->covered_semantic_sites.size(), 2u);
-  EXPECT_EQ(epoch_intent->physical_site.original_text_offset, 3u * sizeof(uint32_t));
-  EXPECT_TRUE(std::ranges::all_of(result.observation_plan.barrier_site_decisions,
-                                  [&](const ConSanBarrierSiteDecision &decision) {
-                                    return decision.kind == ConSanSiteDecisionKind::Admitted &&
-                                           decision.intent_ids == std::vector{epoch_intent->id};
-                                  }));
+            0u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });

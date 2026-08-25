@@ -108,6 +108,11 @@ TEST(ConSanObservationPlan, EnumContractsAreExhaustiveNamedAndRejectInvalidValue
   expect_observation_enum_contract(kConSanBarrierPolicyReasons, ConSanBarrierPolicyReason::Count,
                                    consan_barrier_policy_reason_name,
                                    "invalid-barrier-policy-reason");
+  expect_observation_enum_contract(kConSanAtomicPolicyReasons, ConSanAtomicPolicyReason::Count,
+                                   consan_atomic_policy_reason_name,
+                                   "invalid-atomic-policy-reason");
+  expect_observation_enum_contract(kConSanFencePolicyReasons, ConSanFencePolicyReason::Count,
+                                   consan_fence_policy_reason_name, "invalid-fence-policy-reason");
   expect_observation_enum_contract(kConSanProbeIntentKinds, ConSanProbeIntentKind::Count,
                                    consan_probe_intent_kind_name, "invalid-probe-intent-kind");
   expect_observation_enum_contract(kConSanProbePositions, ConSanProbePosition::Count,
@@ -116,9 +121,23 @@ TEST(ConSanObservationPlan, EnumContractsAreExhaustiveNamedAndRejectInvalidValue
                                    consan_lane_mask_policy_name, "invalid-lane-mask-policy");
   expect_observation_enum_contract(kConSanProbeRequirements, ConSanProbeRequirement::Count,
                                    consan_probe_requirement_name, "invalid-probe-requirement");
+  expect_observation_enum_contract(
+      kConSanDynamicResultRequirements, ConSanDynamicResultRequirement::Count,
+      consan_dynamic_result_requirement_name, "invalid-dynamic-result-requirement");
   expect_observation_enum_contract(kConSanLoweringOutcomeKinds, ConSanLoweringOutcomeKind::Count,
                                    consan_lowering_outcome_kind_name,
                                    "invalid-lowering-outcome-kind");
+}
+
+TEST(ConSanObservationPlan, SynchronizationAssociationIdentityHasAnExplicitInvalidDefault) {
+  EXPECT_FALSE(ConSanSynchronizationAssociationId{}.valid());
+  EXPECT_TRUE(ConSanSynchronizationAssociationId{"sequence"}.valid());
+  EXPECT_EQ(ConSanSynchronizationAssociationId{"sequence"},
+            ConSanSynchronizationAssociationId{"sequence"});
+  EXPECT_NE(ConSanSynchronizationAssociationId{"sequence"},
+            ConSanSynchronizationAssociationId{"other-sequence"});
+  EXPECT_LT(ConSanSynchronizationAssociationId{"sequence-a"},
+            ConSanSynchronizationAssociationId{"sequence-b"});
 }
 
 TEST(ConSanObservationPlan, IntentIdentifiersAreExplicitlyInvalidAndPlanLocal) {
@@ -312,6 +331,8 @@ TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDec
           .intent_ids = {{0}},
           .source_containers = {"kernel"},
       }},
+      .atomic_site_decisions = {},
+      .fence_site_decisions = {},
       .probe_intents = {{
           .id = {0},
           .engine = ConSanCapabilityEngine::RecordReplay,
@@ -326,6 +347,8 @@ TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDec
           .position = ConSanProbePosition::After,
           .lane_mask = ConSanLaneMaskPolicy::ActiveExecutionMask,
           .requirement = ConSanProbeRequirement::Required,
+          .synchronization_association = std::nullopt,
+          .dynamic_result = ConSanDynamicResultRequirement::None,
       }},
   };
   ASSERT_TRUE(barrier_fragment.valid());

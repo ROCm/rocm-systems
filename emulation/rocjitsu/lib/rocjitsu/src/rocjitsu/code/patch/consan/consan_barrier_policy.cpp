@@ -280,6 +280,8 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
               .position = ConSanProbePosition::After,
               .lane_mask = ConSanLaneMaskPolicy::ActiveExecutionMask,
               .requirement = ConSanProbeRequirement::Required,
+              .synchronization_association = std::nullopt,
+              .dynamic_result = ConSanDynamicResultRequirement::None,
           });
           if (sequence_intent)
             intent_by_sequence.emplace(std::move(sequence_key), *intent_id);

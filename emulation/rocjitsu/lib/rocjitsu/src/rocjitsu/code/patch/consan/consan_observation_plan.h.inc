@@ -280,6 +280,265 @@ consan_barrier_policy_reason_name(ConSanBarrierPolicyReason reason) {
 static_assert(kConSanBarrierPolicyReasons.size() ==
               static_cast<size_t>(ConSanBarrierPolicyReason::Count));
 
+/// Machine-readable reason for an atomic-policy decision.
+///
+/// Atomic policy owns semantic sequence qualification, target/engine
+/// capability, the availability of address and dynamic-result facts, and
+/// whether an ordinary-memory sequence is represented by an associated fence.
+/// Register allocation, report capacity, instruction placement, and emitted
+/// target words remain later lowering responsibilities. `None` is valid only
+/// for an admitted atomic observation.
+enum class ConSanAtomicPolicyReason : uint8_t {
+  /// The atomic or ordered ordinary-memory operation was admitted.
+  None,
+  /// Atomic synchronization tracking was disabled by the request.
+  TrackingDisabled,
+  /// The selected engine can mutate this operation but does not observe it.
+  EngineMutationOnly,
+  /// A diagnostic-only container filter excluded the operation.
+  ContainerFilterExcluded,
+  /// No inventoried kernel can execute the operation.
+  MissingExecutionOwner,
+  /// Sampled has no admitted LDS access window that can consume ordering.
+  MissingSampledAccessWindow,
+  /// The target/engine capability contract excludes this atomic form.
+  TargetCapabilityUnavailable,
+  /// No unique qualified synchronization sequence owns this event.
+  UnqualifiedSyncSequence,
+  /// More than one incompatible sequence claims the same event.
+  AmbiguousSequenceMembership,
+  /// The qualified sequence has no supported acquire/release role.
+  UnsupportedMemoryRole,
+  /// The qualified event has no decoded semantic scope.
+  MissingScope,
+  /// The decoded scope cannot communicate between modeled owners.
+  UnsupportedScope,
+  /// The communication width is zero, non-byte-aligned, or engine-unsupported.
+  InvalidAccessWidth,
+  /// The sequence uses an address source outside the supported contract.
+  UnsupportedAddressSource,
+  /// Required address or value operands are absent from decoded inventory.
+  MissingOperands,
+  /// Compare-and-swap success cannot be determined after the guest operation.
+  CompareExchangeOutcomeUnavailable,
+  /// The RMW result form is unknown or unsupported by the evidence model.
+  UnsupportedDynamicOutcome,
+  /// The target-native instruction form cannot implement the admitted model.
+  UnsupportedEncoding,
+  /// Physical aliases expose incompatible semantics for one instruction.
+  ConflictingPhysicalAliases,
+  /// One-past-the-end iteration bound; never a policy reason.
+  Count,
+};
+
+/// Complete iterable set of atomic-policy reasons, including `None`.
+inline constexpr std::array<ConSanAtomicPolicyReason, 19> kConSanAtomicPolicyReasons = {
+    ConSanAtomicPolicyReason::None,
+    ConSanAtomicPolicyReason::TrackingDisabled,
+    ConSanAtomicPolicyReason::EngineMutationOnly,
+    ConSanAtomicPolicyReason::ContainerFilterExcluded,
+    ConSanAtomicPolicyReason::MissingExecutionOwner,
+    ConSanAtomicPolicyReason::MissingSampledAccessWindow,
+    ConSanAtomicPolicyReason::TargetCapabilityUnavailable,
+    ConSanAtomicPolicyReason::UnqualifiedSyncSequence,
+    ConSanAtomicPolicyReason::AmbiguousSequenceMembership,
+    ConSanAtomicPolicyReason::UnsupportedMemoryRole,
+    ConSanAtomicPolicyReason::MissingScope,
+    ConSanAtomicPolicyReason::UnsupportedScope,
+    ConSanAtomicPolicyReason::InvalidAccessWidth,
+    ConSanAtomicPolicyReason::UnsupportedAddressSource,
+    ConSanAtomicPolicyReason::MissingOperands,
+    ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable,
+    ConSanAtomicPolicyReason::UnsupportedDynamicOutcome,
+    ConSanAtomicPolicyReason::UnsupportedEncoding,
+    ConSanAtomicPolicyReason::ConflictingPhysicalAliases,
+};
+
+/// Return the stable diagnostic spelling of an atomic-policy reason.
+[[nodiscard]] constexpr std::string_view
+consan_atomic_policy_reason_name(ConSanAtomicPolicyReason reason) {
+  switch (reason) {
+  case ConSanAtomicPolicyReason::None:
+    return "none";
+  case ConSanAtomicPolicyReason::TrackingDisabled:
+    return "tracking-disabled";
+  case ConSanAtomicPolicyReason::EngineMutationOnly:
+    return "engine-mutation-only";
+  case ConSanAtomicPolicyReason::ContainerFilterExcluded:
+    return "container-filter-excluded";
+  case ConSanAtomicPolicyReason::MissingExecutionOwner:
+    return "missing-execution-owner";
+  case ConSanAtomicPolicyReason::MissingSampledAccessWindow:
+    return "missing-sampled-access-window";
+  case ConSanAtomicPolicyReason::TargetCapabilityUnavailable:
+    return "target-capability-unavailable";
+  case ConSanAtomicPolicyReason::UnqualifiedSyncSequence:
+    return "unqualified-sync-sequence";
+  case ConSanAtomicPolicyReason::AmbiguousSequenceMembership:
+    return "ambiguous-sequence-membership";
+  case ConSanAtomicPolicyReason::UnsupportedMemoryRole:
+    return "unsupported-memory-role";
+  case ConSanAtomicPolicyReason::MissingScope:
+    return "missing-scope";
+  case ConSanAtomicPolicyReason::UnsupportedScope:
+    return "unsupported-scope";
+  case ConSanAtomicPolicyReason::InvalidAccessWidth:
+    return "invalid-access-width";
+  case ConSanAtomicPolicyReason::UnsupportedAddressSource:
+    return "unsupported-address-source";
+  case ConSanAtomicPolicyReason::MissingOperands:
+    return "missing-operands";
+  case ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable:
+    return "compare-exchange-outcome-unavailable";
+  case ConSanAtomicPolicyReason::UnsupportedDynamicOutcome:
+    return "unsupported-dynamic-outcome";
+  case ConSanAtomicPolicyReason::UnsupportedEncoding:
+    return "unsupported-encoding";
+  case ConSanAtomicPolicyReason::ConflictingPhysicalAliases:
+    return "conflicting-physical-aliases";
+  case ConSanAtomicPolicyReason::Count:
+    break;
+  }
+  return "invalid-atomic-policy-reason";
+}
+
+static_assert(kConSanAtomicPolicyReasons.size() ==
+              static_cast<size_t>(ConSanAtomicPolicyReason::Count));
+
+/// Machine-readable reason for a fence-policy decision.
+///
+/// Shared synchronization analysis owns the detailed association outcome;
+/// this enum records how that fact participates in the selected engine's
+/// observation contract. A qualified fence can be independently recorded by
+/// Record/Replay or associated with another engine's atomic observation.
+enum class ConSanFencePolicyReason : uint8_t {
+  /// The fence was admitted or associated and needs no exclusion reason.
+  None,
+  /// Atomic/fence synchronization tracking was disabled by the request.
+  TrackingDisabled,
+  /// The selected engine can mutate fences but does not observe them.
+  EngineMutationOnly,
+  /// A diagnostic-only container filter excluded the fence.
+  ContainerFilterExcluded,
+  /// No inventoried kernel can execute the fence or communication event.
+  MissingExecutionOwner,
+  /// Shared analysis rejected the addressed communication association.
+  AssociationUnavailable,
+  /// The associated communication identity no longer names a unique event.
+  MissingCommunicationEvent,
+  /// The target/engine capability contract excludes the addressed fence.
+  TargetCapabilityUnavailable,
+  /// Physical aliases expose incompatible semantics for one fence.
+  ConflictingPhysicalAliases,
+  /// One-past-the-end iteration bound; never a policy reason.
+  Count,
+};
+
+/// Complete iterable set of fence-policy reasons, including `None`.
+inline constexpr std::array<ConSanFencePolicyReason, 9> kConSanFencePolicyReasons = {
+    ConSanFencePolicyReason::None,
+    ConSanFencePolicyReason::TrackingDisabled,
+    ConSanFencePolicyReason::EngineMutationOnly,
+    ConSanFencePolicyReason::ContainerFilterExcluded,
+    ConSanFencePolicyReason::MissingExecutionOwner,
+    ConSanFencePolicyReason::AssociationUnavailable,
+    ConSanFencePolicyReason::MissingCommunicationEvent,
+    ConSanFencePolicyReason::TargetCapabilityUnavailable,
+    ConSanFencePolicyReason::ConflictingPhysicalAliases,
+};
+
+/// Return the stable diagnostic spelling of a fence-policy reason.
+[[nodiscard]] constexpr std::string_view
+consan_fence_policy_reason_name(ConSanFencePolicyReason reason) {
+  switch (reason) {
+  case ConSanFencePolicyReason::None:
+    return "none";
+  case ConSanFencePolicyReason::TrackingDisabled:
+    return "tracking-disabled";
+  case ConSanFencePolicyReason::EngineMutationOnly:
+    return "engine-mutation-only";
+  case ConSanFencePolicyReason::ContainerFilterExcluded:
+    return "container-filter-excluded";
+  case ConSanFencePolicyReason::MissingExecutionOwner:
+    return "missing-execution-owner";
+  case ConSanFencePolicyReason::AssociationUnavailable:
+    return "association-unavailable";
+  case ConSanFencePolicyReason::MissingCommunicationEvent:
+    return "missing-communication-event";
+  case ConSanFencePolicyReason::TargetCapabilityUnavailable:
+    return "target-capability-unavailable";
+  case ConSanFencePolicyReason::ConflictingPhysicalAliases:
+    return "conflicting-physical-aliases";
+  case ConSanFencePolicyReason::Count:
+    break;
+  }
+  return "invalid-fence-policy-reason";
+}
+
+static_assert(kConSanFencePolicyReasons.size() ==
+              static_cast<size_t>(ConSanFencePolicyReason::Count));
+
+/// Stable identity of one synchronization association inside a code object.
+///
+/// The value is copied from immutable synchronization inventory and names the
+/// complete ordered sequence, not merely its anchor instruction. It lets a
+/// before-instruction address-capture intent and an after-sequence evidence
+/// intent state that they implement one logical operation. Empty values are
+/// invalid and are used only as the default construction sentinel.
+struct ConSanSynchronizationAssociationId {
+  /// Stable inventory identity of the complete synchronization sequence.
+  std::string value;
+
+  /// Return whether this value can identify a published sequence.
+  [[nodiscard]] bool valid() const { return !value.empty(); }
+
+  auto operator<=>(const ConSanSynchronizationAssociationId &) const = default;
+};
+
+/// Dynamic guest result that an atomic observation must preserve or derive.
+///
+/// Address capture is represented by a separate before-instruction intent.
+/// This value describes only information available after the guest operation:
+/// no-return operations need none, return-form RMWs preserve the old value,
+/// and compare-and-swap must derive whether the exchange succeeded. A lowerer
+/// may not silently weaken a stronger requirement.
+enum class ConSanDynamicResultRequirement : uint8_t {
+  /// No post-guest dynamic result is needed.
+  None,
+  /// Preserve the atomic value returned by the guest instruction.
+  ReturnedOldValue,
+  /// Derive compare-and-swap success versus failure from guest operands.
+  CompareExchangeSuccess,
+  /// One-past-the-end iteration bound; never an intent requirement.
+  Count,
+};
+
+/// Complete iterable set of dynamic-result requirements.
+inline constexpr std::array<ConSanDynamicResultRequirement, 3> kConSanDynamicResultRequirements = {
+    ConSanDynamicResultRequirement::None,
+    ConSanDynamicResultRequirement::ReturnedOldValue,
+    ConSanDynamicResultRequirement::CompareExchangeSuccess,
+};
+
+/// Return the stable diagnostic spelling of a dynamic-result requirement.
+[[nodiscard]] constexpr std::string_view
+consan_dynamic_result_requirement_name(ConSanDynamicResultRequirement requirement) {
+  switch (requirement) {
+  case ConSanDynamicResultRequirement::None:
+    return "none";
+  case ConSanDynamicResultRequirement::ReturnedOldValue:
+    return "returned-old-value";
+  case ConSanDynamicResultRequirement::CompareExchangeSuccess:
+    return "compare-exchange-success";
+  case ConSanDynamicResultRequirement::Count:
+    break;
+  }
+  return "invalid-dynamic-result-requirement";
+}
+
+static_assert(kConSanDynamicResultRequirements.size() ==
+              static_cast<size_t>(ConSanDynamicResultRequirement::Count));
+
 /// Target-neutral kind of evidence requested from one physical probe.
 ///
 /// The kinds deliberately name the semantic observation rather than an ISA
@@ -300,12 +559,23 @@ enum class ConSanProbeIntentKind : uint8_t {
   SampledBarrierEpoch,
   /// InlineShadow advances exact on-device epoch state at barrier completion.
   ExactBarrierEpoch,
+  /// Preserve an addressed synchronization operation's effective address
+  /// before the guest instruction can overwrite any input register.
+  AtomicAddressCapture,
+  /// Record/Replay appends one ordered atomic event after guest execution.
+  AtomicRecord,
+  /// Sampled publishes atomic ordering into the selected causal window.
+  SampledAtomicOrdering,
+  /// InlineShadow applies exact release/acquire ordering around the guest.
+  ExactAtomicOrdering,
+  /// Record/Replay records an associated addressed fence after completion.
+  FenceRecord,
   /// One-past-the-end iteration bound; never an observation intent.
   Count,
 };
 
 /// Complete iterable set of probe intent kinds.
-inline constexpr std::array<ConSanProbeIntentKind, 7> kConSanProbeIntentKinds = {
+inline constexpr std::array<ConSanProbeIntentKind, 12> kConSanProbeIntentKinds = {
     ConSanProbeIntentKind::RedundantAccessObservation,
     ConSanProbeIntentKind::AccessRecord,
     ConSanProbeIntentKind::SampledAccess,
@@ -313,6 +583,11 @@ inline constexpr std::array<ConSanProbeIntentKind, 7> kConSanProbeIntentKinds = 
     ConSanProbeIntentKind::BarrierRecord,
     ConSanProbeIntentKind::SampledBarrierEpoch,
     ConSanProbeIntentKind::ExactBarrierEpoch,
+    ConSanProbeIntentKind::AtomicAddressCapture,
+    ConSanProbeIntentKind::AtomicRecord,
+    ConSanProbeIntentKind::SampledAtomicOrdering,
+    ConSanProbeIntentKind::ExactAtomicOrdering,
+    ConSanProbeIntentKind::FenceRecord,
 };
 
 /// Return the stable diagnostic spelling of an access probe intent kind.
@@ -332,6 +607,16 @@ inline constexpr std::array<ConSanProbeIntentKind, 7> kConSanProbeIntentKinds = 
     return "sampled-barrier-epoch";
   case ConSanProbeIntentKind::ExactBarrierEpoch:
     return "exact-barrier-epoch";
+  case ConSanProbeIntentKind::AtomicAddressCapture:
+    return "atomic-address-capture";
+  case ConSanProbeIntentKind::AtomicRecord:
+    return "atomic-record";
+  case ConSanProbeIntentKind::SampledAtomicOrdering:
+    return "sampled-atomic-ordering";
+  case ConSanProbeIntentKind::ExactAtomicOrdering:
+    return "exact-atomic-ordering";
+  case ConSanProbeIntentKind::FenceRecord:
+    return "fence-record";
   case ConSanProbeIntentKind::Count:
     break;
   }
@@ -488,6 +773,67 @@ struct ConSanBarrierSiteDecision {
   bool operator==(const ConSanBarrierSiteDecision &) const = default;
 };
 
+/// One engine-policy decision for an ordered atomic communication event.
+///
+/// The event may be a target-native RMW or the address-bearing load/store in a
+/// qualified language-level atomic sequence. `capability` preserves the public
+/// target/engine contract, while `reason` records the more specific decoded
+/// decision. Admitted operations cite a before-address intent and an
+/// after-operation evidence intent, except when Record/Replay deliberately
+/// covers an ordinary sequence through its associated fence intents.
+struct ConSanAtomicSiteDecision {
+  /// Engine whose atomic contract made this decision.
+  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  /// Stable identity of the address-bearing synchronization event.
+  SemanticSiteId semantic_site;
+  /// Applicability/admission result that lowering cannot change.
+  ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
+  /// Public target/engine capability disposition for this operation form.
+  ConSanCapabilityDisposition capability = ConSanCapabilityDisposition::OutOfContract;
+  /// Typed explanation; `None` is reserved for admitted decisions.
+  ConSanAtomicPolicyReason reason = ConSanAtomicPolicyReason::TrackingDisabled;
+  /// Qualified complete sequence, when inventory established one.
+  std::optional<ConSanSynchronizationAssociationId> association;
+  /// Dynamic post-guest value required by the atomic semantics.
+  ConSanDynamicResultRequirement dynamic_result = ConSanDynamicResultRequirement::None;
+  /// Target-neutral intents that collectively observe this operation.
+  std::vector<ConSanProbeIntentId> intent_ids;
+  /// Every symbol-container name through which this physical event was decoded.
+  std::vector<std::string> source_containers;
+
+  bool operator==(const ConSanAtomicSiteDecision &) const = default;
+};
+
+/// One engine-policy decision for a decoded cache/fence event.
+///
+/// `inventory_association` is the engine-independent analysis result and is
+/// retained even when policy excludes the event. Record/Replay normally admits
+/// a fence-record intent. Sampled and Inline may instead cite the atomic
+/// intents for the same association, making `AssociatedOnly` explicit rather
+/// than pretending that they emit an independent fence probe.
+struct ConSanFenceSiteDecision {
+  /// Engine whose fence contract made this decision.
+  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  /// Stable identity of the original cache/fence instruction.
+  SemanticSiteId semantic_site;
+  /// Applicability/admission result that lowering cannot change.
+  ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
+  /// Public target/engine capability disposition for addressed fences.
+  ConSanCapabilityDisposition capability = ConSanCapabilityDisposition::OutOfContract;
+  /// Typed policy explanation; `None` is reserved for admitted decisions.
+  ConSanFencePolicyReason reason = ConSanFencePolicyReason::TrackingDisabled;
+  /// Detailed shared-analysis association outcome, never inferred from prose.
+  ConSanFenceAssociation inventory_association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
+  /// Qualified complete sequence, when inventory established one.
+  std::optional<ConSanSynchronizationAssociationId> association;
+  /// Target-neutral intents that collectively represent this fence.
+  std::vector<ConSanProbeIntentId> intent_ids;
+  /// Every symbol-container name through which this physical event was decoded.
+  std::vector<std::string> source_containers;
+
+  bool operator==(const ConSanFenceSiteDecision &) const = default;
+};
+
 /// One target-neutral observation requested at a physical instruction.
 ///
 /// `covered_semantic_sites` can contain multiple access ranges from one
@@ -512,16 +858,23 @@ struct ConSanProbeIntent {
   ConSanLaneMaskPolicy lane_mask = ConSanLaneMaskPolicy::Count;
   /// Whether losing this intent creates a contract coverage gap.
   ConSanProbeRequirement requirement = ConSanProbeRequirement::Count;
+  /// Complete synchronization sequence implemented by this probe, if any.
+  /// Access and barrier intents leave this absent; atomic/fence intents use it
+  /// to join before- and after-operation work without relying on patch order.
+  std::optional<ConSanSynchronizationAssociationId> synchronization_association;
+  /// Dynamic post-guest value the lowerer must preserve or derive.
+  ConSanDynamicResultRequirement dynamic_result = ConSanDynamicResultRequirement::None;
 
   bool operator==(const ConSanProbeIntent &) const = default;
 };
 
 /// Complete target-neutral semantic-policy output for one engine request.
 ///
-/// Separate decision sequences cover semantic access ranges and barrier events;
-/// their shared intents cover physical insertion points. The plan is a value
-/// object and contains no borrowed inventory references, so a result may safely
-/// retain it across retries and image moves.
+/// Separate decision sequences cover semantic access ranges, barriers, ordered
+/// communication events, and fences; their shared intents cover physical
+/// insertion points and complete synchronization associations. The plan is a
+/// value object and contains no borrowed inventory references, so a result may
+/// safely retain it across retries and image moves.
 struct ConSanObservationPlan {
   /// Selected engine shared by every decision and intent in this plan.
   ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
@@ -529,6 +882,10 @@ struct ConSanObservationPlan {
   std::vector<ConSanSiteDecision> site_decisions;
   /// Deterministically ordered semantic barrier-event decisions.
   std::vector<ConSanBarrierSiteDecision> barrier_site_decisions;
+  /// Deterministically ordered ordered-communication decisions.
+  std::vector<ConSanAtomicSiteDecision> atomic_site_decisions;
+  /// Deterministically ordered cache/fence decisions.
+  std::vector<ConSanFenceSiteDecision> fence_site_decisions;
   /// Deterministically ordered coalesced physical probe intents.
   std::vector<ConSanProbeIntent> probe_intents;
 
@@ -617,6 +974,46 @@ struct ConSanBarrierPolicyResult {
   [[nodiscard]] bool valid() const { return errors.empty() && plan.valid(); }
 
   bool operator==(const ConSanBarrierPolicyResult &) const = default;
+};
+
+/// Immutable request parameters consumed by pure atomic/fence policy.
+///
+/// `tracking_enabled` selects the atomic-ordering feature as a whole.
+/// `sampled_access_window_available` is a semantic dependency of Sampled: its
+/// ordering metadata has no consumer unless access policy admitted at least one
+/// selected LDS window. Other engines ignore that field. The request contains
+/// no report address, register assignment, capacity, or mutable result state.
+struct ConSanAtomicFencePolicyRequest {
+  /// Engine whose ordered-communication contract should be evaluated.
+  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  /// Whether atomic and associated-fence tracking belongs to this request.
+  bool tracking_enabled = false;
+  /// Whether Sampled has an access window able to consume ordering metadata.
+  bool sampled_access_window_available = true;
+  /// Optional diagnostic-only container substring filter.
+  std::string_view container_filter;
+};
+
+/// Pure atomic/fence-policy output plus typed construction failures.
+///
+/// The plan fragment owns all decisions, association identities, and
+/// before/after intents. Ordinary exclusions remain usable output. Only
+/// contradictions such as incompatible physical aliases enter the error
+/// vectors and make the fragment invalid.
+struct ConSanAtomicFencePolicyResult {
+  /// Atomic/fence-only observation-plan fragment, ready for append.
+  ConSanObservationPlan plan;
+  /// Typed fatal atomic-policy construction failures.
+  std::vector<ConSanAtomicPolicyReason> atomic_errors;
+  /// Typed fatal fence-policy construction failures.
+  std::vector<ConSanFencePolicyReason> fence_errors;
+
+  /// Return whether policy produced a usable, internally valid fragment.
+  [[nodiscard]] bool valid() const {
+    return atomic_errors.empty() && fence_errors.empty() && plan.valid();
+  }
+
+  bool operator==(const ConSanAtomicFencePolicyResult &) const = default;
 };
 
 /// Return whether shared synchronization analysis proved every fact required
@@ -711,6 +1108,16 @@ public:
     return barrier_site_decisions_;
   }
 
+  /// Return immutable ordered-communication decisions copied from the plan.
+  [[nodiscard]] std::span<const ConSanAtomicSiteDecision> atomic_site_decisions() const {
+    return atomic_site_decisions_;
+  }
+
+  /// Return immutable fence decisions copied from the observation plan.
+  [[nodiscard]] std::span<const ConSanFenceSiteDecision> fence_site_decisions() const {
+    return fence_site_decisions_;
+  }
+
   /// Return immutable joined intent/lowering entries.
   [[nodiscard]] std::span<const ConSanIntentCoverageEntry> intent_entries() const {
     return intent_entries_;
@@ -741,6 +1148,8 @@ public:
 private:
   std::vector<ConSanSiteDecision> site_decisions_;
   std::vector<ConSanBarrierSiteDecision> barrier_site_decisions_;
+  std::vector<ConSanAtomicSiteDecision> atomic_site_decisions_;
+  std::vector<ConSanFenceSiteDecision> fence_site_decisions_;
   std::vector<ConSanIntentCoverageEntry> intent_entries_;
 };
 
@@ -756,3 +1165,10 @@ plan_consan_access_observation(const ProgramInventory &inventory,
 [[nodiscard]] ConSanBarrierPolicyResult
 plan_consan_barrier_observation(const ProgramInventory &inventory,
                                 const ConSanBarrierPolicyRequest &request);
+
+/// Evaluate target-neutral ordered atomic and associated-fence applicability
+/// without mutating inventory, options, diagnostics, candidates, resources, or
+/// patches.
+[[nodiscard]] ConSanAtomicFencePolicyResult
+plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
+                                     const ConSanAtomicFencePolicyRequest &request);

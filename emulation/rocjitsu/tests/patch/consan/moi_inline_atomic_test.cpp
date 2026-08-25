@@ -3479,8 +3479,8 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
-    ASSERT_TRUE(result.moi_fence_candidates.front().eligible)
-        << result.moi_fence_candidates.front().rejection_reason;
+    ASSERT_TRUE(result.moi_fence_candidates.front().eligible())
+        << consan_fence_association_name(result.moi_fence_candidates.front().association);
     const auto communication = std::ranges::find(
         result.sync_events, result.moi_fence_candidates.front().communication_event_identity,
         &ConSanSyncEvent::identity);
@@ -3511,7 +3511,7 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
                                          &ConSanPatchInfo::kind);
     ASSERT_NE(fence, result.patches.end()) << testing::PrintToString(result.patches);
     const ConSanMoiFenceCandidate &semantic_fence = result.moi_fence_candidates.front();
-    ASSERT_TRUE(semantic_fence.eligible);
+    ASSERT_TRUE(semantic_fence.eligible());
     EXPECT_EQ(fence->anchor_offset, 0u);
     EXPECT_GT(semantic_fence.text_offset, fence->anchor_offset);
 

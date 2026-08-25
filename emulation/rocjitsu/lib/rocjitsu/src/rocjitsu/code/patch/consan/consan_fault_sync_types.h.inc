@@ -312,10 +312,94 @@ struct ConSanCommunicationAddressRecipe {
   }
 };
 
-/// A cache/fence instruction conservatively admitted for future MOI fence
-/// record emission. Selection never invents a numeric communication token:
-/// `communication_event_identity` names the unique address-bearing atomic
-/// event whose effective address a later emitter must capture exactly.
+/// Analysis outcome for associating one cache/fence instruction with an
+/// address-bearing synchronization sequence.
+///
+/// This is an inventory fact, not an engine decision. `Qualified` means that
+/// shared analysis proved one sequence, one communication event, a compatible
+/// memory role, address source, and scope. Every other value preserves the
+/// first failed invariant. Policy can therefore make a typed disposition
+/// without interpreting human-readable diagnostics or rerunning association.
+enum class ConSanFenceAssociation : uint8_t {
+  /// The fence has one complete addressed communication association.
+  Qualified,
+  /// The fence has no unique synchronization-sequence membership.
+  MissingOrAmbiguousSequence,
+  /// Its sequence is not an addressed atomic or ordinary-memory operation.
+  NotAddressedCommunication,
+  /// Sequence or memory-role confidence is below the supported threshold.
+  InsufficientConfidence,
+  /// An acquire-pair prefix is intentionally represented by its tail fence.
+  AcquirePairPrefixCoveredByTail,
+  /// The decoded cache operation has no supported acquire/release role.
+  UnsupportedCacheOperation,
+  /// The fence role is not carried by the associated communication sequence.
+  MemoryRoleMismatch,
+  /// The sequence has no unique address-bearing communication member.
+  MissingOrAmbiguousCommunicationEvent,
+  /// The communication event uses an unsupported address source.
+  UnsupportedAddressSource,
+  /// The communication event has no supported non-wave scope.
+  UnsupportedScope,
+  /// One-past-the-end iteration bound; never an analysis outcome.
+  Count,
+};
+
+/// Complete iterable set of fence-association outcomes.
+inline constexpr std::array<ConSanFenceAssociation, 10> kConSanFenceAssociations = {
+    ConSanFenceAssociation::Qualified,
+    ConSanFenceAssociation::MissingOrAmbiguousSequence,
+    ConSanFenceAssociation::NotAddressedCommunication,
+    ConSanFenceAssociation::InsufficientConfidence,
+    ConSanFenceAssociation::AcquirePairPrefixCoveredByTail,
+    ConSanFenceAssociation::UnsupportedCacheOperation,
+    ConSanFenceAssociation::MemoryRoleMismatch,
+    ConSanFenceAssociation::MissingOrAmbiguousCommunicationEvent,
+    ConSanFenceAssociation::UnsupportedAddressSource,
+    ConSanFenceAssociation::UnsupportedScope,
+};
+
+/// Return the stable diagnostic spelling of a fence-association outcome.
+[[nodiscard]] constexpr std::string_view
+consan_fence_association_name(ConSanFenceAssociation association) {
+  switch (association) {
+  case ConSanFenceAssociation::Qualified:
+    return "qualified";
+  case ConSanFenceAssociation::MissingOrAmbiguousSequence:
+    return "missing-or-ambiguous-sequence-membership";
+  case ConSanFenceAssociation::NotAddressedCommunication:
+    return "fence-not-associated-with-addressed-communication-sequence";
+  case ConSanFenceAssociation::InsufficientConfidence:
+    return "communication-sequence-confidence-insufficient";
+  case ConSanFenceAssociation::AcquirePairPrefixCoveredByTail:
+    return "paired-acquire-prefix-covered-by-tail";
+  case ConSanFenceAssociation::UnsupportedCacheOperation:
+    return "unsupported-cache-operation";
+  case ConSanFenceAssociation::MemoryRoleMismatch:
+    return "cache-role-not-carried-by-communication-sequence";
+  case ConSanFenceAssociation::MissingOrAmbiguousCommunicationEvent:
+    return "missing-or-ambiguous-communication-event";
+  case ConSanFenceAssociation::UnsupportedAddressSource:
+    return "communication-address-source-unsupported";
+  case ConSanFenceAssociation::UnsupportedScope:
+    return "communication-scope-unsupported";
+  case ConSanFenceAssociation::Count:
+    break;
+  }
+  return "invalid-fence-association";
+}
+
+static_assert(kConSanFenceAssociations.size() ==
+              static_cast<size_t>(ConSanFenceAssociation::Count));
+
+/// A cache/fence instruction and its immutable addressed-sequence association.
+///
+/// Selection never invents a numeric communication token:
+/// `communication_event_identity` names the unique address-bearing atomic or
+/// ordinary-memory event whose effective address a later policy may request.
+/// Non-qualified records deliberately retain empty association fields and
+/// remain in inventory so policy can explain why the event is outside the
+/// observation contract.
 struct ConSanMoiFenceCandidate {
   std::string identity;
   std::string sequence_identity;
@@ -330,8 +414,13 @@ struct ConSanMoiFenceCandidate {
   ConSanSyncAddressSource communication_address_source = ConSanSyncAddressSource::NotApplicable;
   std::optional<int64_t> communication_static_byte_offset;
   std::optional<uint32_t> raw_scope;
-  bool eligible = false;
-  std::string rejection_reason;
+  /// Typed result of shared sequence association.
+  ConSanFenceAssociation association = ConSanFenceAssociation::MissingOrAmbiguousSequence;
+
+  /// Return whether all analysis-owned association invariants were proved.
+  [[nodiscard]] constexpr bool eligible() const {
+    return association == ConSanFenceAssociation::Qualified;
+  }
 };
 
 /// A contiguous, statically associated barrier lifecycle retained in semantic
