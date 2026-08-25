@@ -197,6 +197,7 @@ static ncclResult_t shmSendConnect(struct ncclComm* comm, struct ncclConnect* co
     send->conn.buffs[NCCL_PROTO_SIMPLE] = proxyInfo.devFifo;
     send->conn.tail = &proxyInfo.ceRecvMem->tail;
     send->conn.connFifo = proxyInfo.ceRecvMem->connFifo;
+    send->conn.flags |= NCCL_TDM_ELIGIBLE;
   }
 
   // We must assign the proxyConn's proxyProgress property for proper checking at enqueue-time
@@ -231,6 +232,7 @@ static ncclResult_t shmRecvConnect(struct ncclComm* comm, struct ncclConnect* co
                                     sizeof(struct shmProxyInfo), &proxyInfo, sizeof(struct shmProxyInfo)));
     recv->conn.buffs[NCCL_PROTO_SIMPLE] = proxyInfo.devFifo;
     recv->conn.tail = &proxyInfo.ceRecvMem->tail;
+    recv->conn.flags |= NCCL_TDM_ELIGIBLE;
   }
 
   // We must assign the proxyConn's proxyProgress property for proper checking at enqueue-time

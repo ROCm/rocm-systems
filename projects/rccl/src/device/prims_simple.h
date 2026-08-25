@@ -216,26 +216,40 @@ class Primitives<T, RedOp, Fan, Direct,
 
   // Copy-shaped slice via the TDM mover. False on any failed gate; caller then runs reduceCopy.
   template <int PreOpSrcs>
-  __device__ __forceinline__ bool tryTdmCopy(int nSrcs, int nDsts, int nElts, bool postOp) {
+  __device__ __forceinline__ bool tryTdmCopy(int nSrcs, int nDsts, int nElts, bool postOp, bool recvConnSrc,
+                                             bool sendConnDst) {
 #if TDM_SUPPORTED
-    if (MultimemSrcs || MultimemDsts || PreOpSrcs || useAcc || Pipeline) return false;
+    if (MultimemSrcs || MultimemDsts || useAcc || Pipeline) return false;
+    if (PreOpSrcs && !Apply_PreOp<RedOp, 1>::IsIdentity) return false;
     if (!ncclShmem.comm.tdmSimpleEnable) return false;
-    if (nSrcs != 1 || nDsts != 1 || postOp) return false;
-
+    if (nSrcs != 1 || (nDsts != 1 && nDsts != 2) || postOp) return false;
+#if 0
+    // This block is suggested by GPT-5.6 Sol to avoid this path for host-packed ptrs
+    // But will not enable it until I understand it
+    if (recvConnSrc && !(ncclShmem.groups[group].recvConns[0]->flags & NCCL_TDM_ELIGIBLE))
+      return false;
+    if (sendConnDst && !(ncclShmem.groups[group].sendConns[0]->flags & NCCL_TDM_ELIGIBLE))
+      return false;
+#endif
     size_t bytes = (size_t)nElts * sizeof(T);
     if (bytes < (size_t)ncclShmem.comm.tdmSimpleMinBytes) return false;
 
-    void* dst = ncclShmem.groups[group].dsts[0];
     const void* src = ncclShmem.groups[group].srcs[0];
-    if (((uintptr_t)src | (uintptr_t)dst) & (RCCL_TDM_ALIGN - 1)) return false;
+    void** dsts = ncclShmem.groups[group].dsts;
+    if ((uintptr_t)src & (RCCL_TDM_ALIGN - 1)) return false;
+    for (int dst = 0; dst < nDsts; dst++) {
+      if (dsts[dst] == nullptr || ((uintptr_t)dsts[dst] & (RCCL_TDM_ALIGN - 1))) return false;
+    }
 
     // Team entry point takes block warp indices, and the tensor op needs a converged wave.
     int base = tidInBlock - tid;
     if ((base | nworkers) & (WARP_SIZE - 1)) return false;
     uint32_t w0 = base / WARP_SIZE, w1 = w0 + nworkers / WARP_SIZE;
 
-    tdm::tdmCopyByTeam<kRcclTdmPolicy>(dst, src, bytes, ncclTdmStageForWarp(w0),
-                                       (size_t)(w1 - w0) * RCCL_TDM_STAGE_BYTES_PER_WARP, w0, w1);
+    for (int dst = 0; dst < nDsts; dst++) {
+      tdm::tdmCopyByTeam<kRcclTdmPolicy>(dsts[dst], src, bytes, ncclTdmStageForWarp(w0),
+                                         (size_t)(w1 - w0) * RCCL_TDM_STAGE_BYTES_PER_WARP, w0, w1);
+    }
     return true;
 #else
     return false;
@@ -330,7 +344,8 @@ class Primitives<T, RedOp, Fan, Direct,
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0, 1, 1, PreOpSrcs,
                        Pipeline>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
                                  ncclShmem.groups[group].srcs, 1, ncclShmem.groups[group].dsts, workSize);
-          } else if (!tryTdmCopy<PreOpSrcs>(Recv * fan.nrecv() + Src, Send * fan.nsend() + Dst, workSize, postOp)) {
+          } else if (!tryTdmCopy<PreOpSrcs>(Recv * fan.nrecv() + Src, Send * fan.nsend() + Dst, workSize, postOp,
+                                            Recv * fan.nrecv() != 0, Send * fan.nsend() != 0)) {
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src, Recv * MaxRecv + Src, MultimemDsts,
                        Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline>(
               tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
