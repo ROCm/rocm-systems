@@ -4927,18 +4927,26 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
                                    (size_t)mipmapDesc->offset, buf));
 }
 
+// ================================================================================================
 hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size,
                                           hipMemRangeHandleType handleType,
                                           unsigned long long flags) {
   HIP_INIT_API(hipMemGetHandleForAddressRange, handle, dptr, size, handleType, flags);
 
-  // We do not support any flags at this time.
-  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd || flags != 0) {
+  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd ||
+      flags != 0 && flags != hipMemRangeFlagDmaBufMappingTypePcie) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  if (!device->GetHandleForAddressRange(dptr, size, handle)) {
+
+  // ensure exported handle is reachable by third party devices via pcie, hence the owning device
+  // must be xgmi or pcie with large BAR enabled.
+  if (flags == hipMemRangeFlagDmaBufMappingTypePcie && !device->isXgmi() &&
+      !device->info().largeBar_) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+  if (!device->GetHandleForAddressRange(dptr, size, handle, flags)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
