@@ -1339,12 +1339,9 @@ void DsAppendVds::execute_impl(amdgpu::Wavefront &wf) {
 
 void DsAddU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base =
-      wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.vdst, amdgpu::VgprMsbRole::Dst);
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = true;
+  d->is_load = false;
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   ds_calculate_addresses(inst_, wf, *d);

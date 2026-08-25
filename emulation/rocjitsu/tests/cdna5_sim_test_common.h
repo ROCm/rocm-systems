@@ -167,7 +167,9 @@ struct Gfx1250Sim {
                     ((vgprs / kGfx1250VgprEncodingGranule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
+    // gfx1250 USER_SGPR_COUNT occupies bits [6:1], one bit wider than the
+    // generic field in the bundled ROCr descriptor header.
+    kd.compute_pgm_rsrc2 = (kd.compute_pgm_rsrc2 & ~(0x3fu << 1)) | ((user_sgprs & 0x3fu) << 1);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
                     enable_wg_id_x);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
