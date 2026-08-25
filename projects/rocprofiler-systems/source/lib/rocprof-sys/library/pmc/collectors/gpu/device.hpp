@@ -6,8 +6,8 @@
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
 
-#include <concepts>
 #include <algorithm>
+#include <concepts>
 #include <cstdint>
 #include <memory>
 #include <optional>
