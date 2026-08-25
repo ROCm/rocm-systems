@@ -917,7 +917,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
-  raw.dpp_ctrl = 0xB1; // quad_perm:[1,0,3,2]
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SELECT_BASE; // row-select lane 0
   raw.bound_ctrl = 1;
   raw.bank_mask = 0xF;
   raw.row_mask = 0x1;
@@ -930,8 +930,7 @@ TEST(Gfx1250SimulationTest, VCvtF64DppPreservesBothMaskedHighDstDwords) {
         static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst, lane)) |
         (static_cast<uint64_t>(cu.read_vgpr(vb + kHighBank + kDst + 1, lane)) << 32);
     const uint64_t expected =
-        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase + (lane ^ 1u)))
-                  : kOldDstBase + lane;
+        lane < 16 ? std::bit_cast<uint64_t>(static_cast<double>(kSourceBase)) : kOldDstBase + lane;
     EXPECT_EQ(actual, expected) << "lane " << lane;
     EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kLowDstLoBase + lane) << "lane " << lane;
     EXPECT_EQ(cu.read_vgpr(vb + kDst + 1, lane), kLowDstHiBase + lane) << "lane " << lane;
@@ -985,7 +984,7 @@ TEST(Gfx1250SimulationTest, VAddF32Vop3DppPreservesMaskedHighDestinationLanes) {
   }
 }
 
-TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
+TEST(Gfx1250SimulationTest, ModeBit27DoesNotIndexVmovDppOperands) {
   Gfx1250Sim sim;
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
@@ -1002,10 +1001,10 @@ TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
 
   wf->set_vgpr_msb_mode(0x01); // SRC0=bank 1; DST=bank 0.
   wf->set_mode_raw(wf->mode_raw() | amdgpu::Wavefront::GPR_IDX_EN_BIT);
-  wf->set_m0((1u << 8u) | kGprIdxOffset); // Index SRC0 only.
+  wf->set_m0((1u << 12u) | kGprIdxOffset); // Index SRC0 only.
   for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    cu.write_vgpr(vb + kHighBank + kSrc, lane, 0u);
-    cu.write_vgpr(vb + kHighBank + kGprIdxOffset + kSrc, lane, kExpectedBase + lane);
+    cu.write_vgpr(vb + kHighBank + kSrc, lane, kExpectedBase + lane);
+    cu.write_vgpr(vb + kHighBank + kGprIdxOffset + kSrc, lane, 0u);
   }
 
   cdna5::Vop1VopDpp16MachineInst raw{};
@@ -1024,7 +1023,7 @@ TEST(Gfx1250SimulationTest, VMovDppComposesVgprMsbWithGprIdx) {
     EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kExpectedBase + (lane ^ 1u)) << "lane " << lane;
 }
 
-TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
+TEST(Gfx1250SimulationTest, PackedTrue16SourcesIgnoreModeBit27) {
   Gfx1250Sim sim;
   // Resident wave: this test drives Operand reads against live VGPR banks.
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
@@ -1036,17 +1035,19 @@ TEST(Gfx1250SimulationTest, PackedTrue16SourcesHonorGprIdx) {
   auto &cu = *sim.cu();
 
   wf->set_mode_raw(amdgpu::Wavefront::GPR_IDX_EN_BIT);
-  wf->set_m0((1u << 8u) | 16u);
+  wf->set_m0((1u << 12u) | 16u);
   cu.write_vgpr(vb + 2, kLane, 0xAAAA1111u);
   cu.write_vgpr(vb + 18, kLane, 0xBBBB2222u);
 
   cdna5::Operand lo(16, cdna5::OperandType::OPR_VGPR, 2, true);
   cdna5::Operand hi(16, cdna5::OperandType::OPR_VGPR, 128 + 2, true);
-  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(lo, kLane), 0x2222u);
-  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(hi, kLane), 0xBBBBu);
+  lo.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  hi.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(lo, kLane), 0x1111u);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane(hi, kLane), 0xAAAAu);
 }
 
-TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) {
+TEST(Gfx1250SimulationTest, PackedTrue16InstructionIgnoresModeBit27) {
   Gfx1250Sim sim;
   // Resident wave: these tests inject instructions directly (execute_impl) and read
   // live register state, so they need a live wavefront, not a run-to-halt snapshot.
@@ -1064,12 +1065,12 @@ TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) 
 
   wf->set_vgpr_msb_mode(0x41); // SRC0=bank 1; DST=bank 1.
   wf->set_mode_raw(wf->mode_raw() | amdgpu::Wavefront::GPR_IDX_EN_BIT);
-  wf->set_m0((0x9u << 8u) | kGprIdxOffset); // Index SRC0 and DST.
+  wf->set_m0((0x9u << 12u) | kGprIdxOffset); // Index SRC0 and DST.
   cu.write_vgpr(vb + kSrc, 0, kLowAlias);
   cu.write_vgpr(vb + kDst, 0, kLowAlias);
-  cu.write_vgpr(vb + kBankStride + kSrc, 0, kLowAlias);
-  cu.write_vgpr(vb + kBankStride + kDst, 0, kLowAlias);
-  cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kSrc, 0, 0xABCD1234u);
+  cu.write_vgpr(vb + kBankStride + kSrc, 0, 0xABCD1234u);
+  cu.write_vgpr(vb + kBankStride + kDst, 0, 0xEEEE1111u);
+  cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kSrc, 0, kLowAlias);
   cu.write_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0, 0xEEEE1111u);
 
   cdna5::Vop1MachineInst raw{};
@@ -1078,9 +1079,9 @@ TEST(Gfx1250SimulationTest, PackedTrue16InstructionComposesHighBanksWithGprIdx) 
   cdna5::VMovB16Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
-  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0), 0xEEEEABCDu);
+  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kDst, 0), 0xEEEEABCDu);
+  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kGprIdxOffset + kDst, 0), 0xEEEE1111u);
   EXPECT_EQ(cu.read_vgpr(vb + kDst, 0), kLowAlias);
-  EXPECT_EQ(cu.read_vgpr(vb + kBankStride + kDst, 0), kLowAlias);
 }
 
 TEST(Gfx1250SimulationTest, DsPermuteUsesIndependentHighOperandBanks) {
@@ -1551,6 +1552,41 @@ TEST(Gfx1250SimulationTest, AddtidStoresUseSrc1HighBank) {
   uint32_t global_value = 0;
   std::memcpy(&global_value, global_state->store_data.data(), sizeof(global_value));
   EXPECT_EQ(global_value, kExpected);
+}
+
+TEST(Gfx1250SimulationTest, DsLoadTransposeIgnoresExecForAddressesAndMasks) {
+  for (const uint64_t architectural_exec : {uint64_t{0}, uint64_t{1} << 7}) {
+    SCOPED_TRACE(architectural_exec);
+    Gfx1250Sim sim;
+    amdgpu::Wavefront *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(architectural_exec);
+
+    constexpr uint32_t kAddr = 5;
+    constexpr uint32_t kDst = 10;
+    constexpr uint32_t kOffset = 16;
+    const uint32_t vgpr_base = wf->vgpr_alloc().base;
+    auto &cu = *sim.cu();
+    wf->set_lds_base(cu.allocate_lds(512));
+    wf->set_lds_size(512);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      cu.write_vgpr(vgpr_base + kAddr, lane, lane * 8u);
+
+    cdna5::VdsMachineInst raw{};
+    raw.addr = kAddr;
+    raw.vdst = kDst;
+    raw.offset0 = kOffset;
+    cdna5::DsLoadTr8B64Vds instruction(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+    instruction.execute_impl(*wf);
+
+    auto *state = instruction.data_as<amdgpu::VectorMemState>();
+    ASSERT_NE(state, nullptr);
+    EXPECT_EQ(state->lane_mask, 0xFFFF'FFFFu);
+    EXPECT_EQ(state->exec_mask, 0xFFFF'FFFFu);
+    EXPECT_EQ(wf->exec(), architectural_exec);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      EXPECT_EQ(state->per_lane_addr[lane], wf->lds_base() + kOffset + lane * 8u);
+  }
 }
 
 TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {

@@ -50,6 +50,13 @@ std::unordered_map<std::string, uint64_t> read_properties(const std::string &pat
   return props;
 }
 
+std::string read_sysfs_file(const std::string &path) {
+  std::ifstream f(path);
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+
 Sysfs::GpuInfo make_gpu_info(uint32_t gfx_target_version) {
   Sysfs::GpuInfo gpu{};
   gpu.gpu_id = 1;
@@ -126,6 +133,23 @@ Sysfs::GpuInfo debug_gpu_info(const config::KfdDeviceConfig &dev) {
   gpu.capability2 = dev.capability2;
   gpu.debug_prop = dev.debug_prop;
   return gpu;
+}
+
+// KFD's node_show() publishes a "name" sysfs file for every topology node.
+// GPU nodes carry the marketing name; the CPU node is present but empty. Clients
+// that walk the topology tree expect the file to exist on node 0 as well.
+TEST(SysfsTopologyTest, CpuNodePublishesNameFile) {
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(make_gpu_info(90402u /* gfx942 */));
+  ASSERT_FALSE(topology_dir.empty());
+
+  const std::string cpu_name_path = topology_dir + "/nodes/0/name";
+  ASSERT_TRUE(std::filesystem::exists(cpu_name_path));
+  EXPECT_EQ(read_sysfs_file(cpu_name_path), "\n");
+
+  const std::string gpu_name_path = topology_dir + "/nodes/1/name";
+  ASSERT_TRUE(std::filesystem::exists(gpu_name_path));
+  EXPECT_EQ(read_sysfs_file(gpu_name_path), "Test GPU\n");
 }
 
 TEST(SysfsTopologyDebugCapabilityTest, PerGfxipDebugBitsMatchDriver) {
@@ -215,6 +239,24 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
     ASSERT_TRUE(props.count("debug_prop"));
     EXPECT_EQ(props["debug_prop"], e.debug_prop);
   }
+}
+
+TEST(SysfsTopologyDebugCapabilityTest, Mi455xConfigPublishesB0AsicRevision) {
+  auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json",
+                                    rocjitsu::kEmbeddedSchema);
+  ASSERT_TRUE(loaded.device.present);
+  ASSERT_EQ(loaded.device.revision_id, 1u);
+
+  Sysfs sysfs;
+  std::string topology_dir = sysfs.generate(debug_gpu_info(loaded.device));
+  ASSERT_FALSE(topology_dir.empty());
+
+  auto props = read_properties(topology_dir + "/nodes/1/properties");
+  ASSERT_TRUE(props.count("capability"));
+  const uint32_t capability = static_cast<uint32_t>(props["capability"]);
+  const uint32_t asic_revision =
+      (capability & HSA_CAP_ASIC_REVISION_MASK) >> HSA_CAP_ASIC_REVISION_SHIFT;
+  EXPECT_EQ(asic_revision, loaded.device.revision_id);
 }
 
 // The address-watch register count is the one capability field a debugger acts

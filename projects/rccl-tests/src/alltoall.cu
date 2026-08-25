@@ -266,7 +266,9 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
 
-  /* send to all peers via GIN */
+  /* send to all peers via GIN; the Anvil-SDMA backend segments large puts
+   * internally (<=128 MiB per SDMA copy) so a single gin.put() is safe at any
+   * size and needs no application-side chunking. */
   const size_t size = count * sizeof(T);
   for (int r=tid; r<devComm.nRanks; r+=nthreads) {
     gin.put(ncclTeamWorld(devComm), r,

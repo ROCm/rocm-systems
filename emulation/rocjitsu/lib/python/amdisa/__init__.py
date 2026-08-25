@@ -13,6 +13,7 @@ from amdisa.gpuisa import (
 from amdisa.isa_profile import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     EncodingModifier,
     Cdna5Profile,
@@ -42,6 +43,7 @@ from amdisa.legalization import (
 __all__ = [
     'Cdna1Profile',
     'Cdna2Profile',
+    'Cdna4Profile',
     'CdnaProfile',
     'CodegenConfig',
     'CodeGenerator',

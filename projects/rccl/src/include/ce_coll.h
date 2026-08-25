@@ -85,7 +85,7 @@ struct ncclCeColl {
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
   uint32_t* d_barrierSync;
-  cudaStream_t scatterStream; 
+  cudaStream_t scatterStream;
   cudaEvent_t synceEvent;  // join scatterStream back onto the caller's stream
   // Latched while this comm has live graph-captured plans. CE 2-shot AllReduce
   // can deadlock on eager calls that share a graph-mode comm, so we disable CE
@@ -191,4 +191,9 @@ ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* pl
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr);
+
+// Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
+// (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce
+// launches; for host-side impl-selection reporting. Returns 0 if chunkElems==0.
+int ncclCeLocalReduceBlocks(ncclDataType_t datatype, size_t chunkElems);
 #endif /* NCCL_CE_COLL_H_ */

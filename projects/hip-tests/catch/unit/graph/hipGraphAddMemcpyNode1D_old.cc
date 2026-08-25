@@ -76,10 +76,10 @@ static void validateMemcpyNode1DArray(bool peerAccess,
   hipError_t graphInstStatus = hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0);
   if (peerAccess && graphInstStatus == hipErrorNotSupported) {
     HIP_CHECK(hipSetDevice(0));
-    hipGraphDestroy(graph);
-    hipStreamDestroy(streamForGraph);
-    hipFree(devArray1);
-    hipFree(devArray2);
+    HIP_CHECK(hipGraphDestroy(graph));
+    HIP_CHECK(hipStreamDestroy(streamForGraph));
+    HIP_CHECK(hipFree(devArray1));
+    HIP_CHECK(hipFree(devArray2));
     SKIP("Multi-device graph instantiation not supported (hipErrorNotSupported)");
   }
   HIP_CHECK(graphInstStatus);
