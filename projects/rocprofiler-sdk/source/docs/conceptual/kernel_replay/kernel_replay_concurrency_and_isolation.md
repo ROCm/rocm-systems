@@ -167,9 +167,28 @@ snapshot window, so the counters for the surrounding replayed dispatch are not t
 recorded on the outcome (`reentrancy=1`) and logged once per process with an explanation. Reporting
 an untrustworthy measurement is a better outcome than a process that cannot be interrupted.
 
-The marker is thread-scoped, not global: a replay window on one thread must not cause an unrelated
-dispatch on another thread to skip the lock, which would drop exactly the isolation the lock exists
-to provide.
+A *nested replay request* is the other half of the same problem, and it cannot be handled by skipping
+a lock: a window inside a window on the same agent has no meaning, and the writer side has no
+skippable path. Such a dispatch is declined with `reentrant_dispatch` and run once, and the enclosing
+window's outcome is marked.
+
+The marker carries two scopes, and both are load-bearing.
+
+**Thread scope.** A replay window on one thread must not cause an unrelated dispatch on another
+thread to skip the lock, which would drop exactly the isolation the lock exists to provide.
+
+**Agent scope.** A callback that launches work on a *different* GPU contends for a different mutex,
+which this thread does not hold, so that dispatch keeps its reader lock. An agent-blind marker would
+skip it and silently break isolation against a concurrent replay on that second agent.
+
+Agent scope is also why the marker is a stack rather than a single value. Because a replay request on
+a second agent is *not* declined, a callback running inside agent A's window can legitimately open a
+window on agent B from the same thread. With one slot, entering B's window would overwrite the record
+of A's and leaving B's would clear it, after which the thread no longer knows it is inside A's window
+and the next dispatch on A blocks forever on the reader lock — a multi-GPU-only failure. Each window
+gets its own frame, so `in_replay_window()` stays true for every enclosing window and each frame
+carries its own `reentrancy` flag. Nesting is bounded by the agent count, since a second window on an
+agent already on the stack is declined before its lock is taken.
 
 ## Admission control
 
@@ -237,6 +256,7 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Agent-wide drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_agent_or_decline()` |
 | One drain slice | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `Queue::sync()` |
 | Reentrancy marker | `source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp` | `enter_replay_window()`, `in_replay_window()` |
+| Restore identity gate | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `region_is_restorable()` |
 | Admission control and outcome reporting | `source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp` | `check_untracked()`, `check_admission()`, `log_replay_outcome()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
 | Untracked-memory accounting | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `untracked_device_memory()` |

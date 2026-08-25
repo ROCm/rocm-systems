@@ -115,15 +115,40 @@ under the agent writer lock. The application sees a normal, un-replayed executio
 `restore()` copies each captured region back host-to-device and returns the number of regions
 successfully restored. The two categories are handled differently:
 
-- **Tracked allocations** are re-validated first. The lookup and the copy happen together under the
-  inventory read lock, so a concurrent free cannot race between the check and the write. If the
-  pointer is no longer a live allocation of at least the captured size — freed or reallocated since
-  the snapshot — the region is skipped with a warning rather than written to memory that no longer
-  belongs to it.
+- **Tracked allocations** are re-validated first, by `region_is_restorable()`. The lookup and the copy
+  happen together under the inventory read lock, so a concurrent free cannot race between the check
+  and the write. A region that fails the check is skipped with a warning rather than written to
+  memory that no longer belongs to it.
 - **Module-scope variables** live in the loaded executable and are always present, so they are
   restored directly.
 
-A failed individual copy is logged and skipped; it does not abort the replay.
+### Why an address is not an identity
+
+Re-validating on `(base, size)` is not sufficient, and the gap is not theoretical. The allocate and
+free wrappers deliberately sit outside the per-agent replay lock, so between `snap()` recording a
+region and `restore()` writing it back, another thread can free that allocation and be handed the
+same base address for a new one. With a caching or pooling allocator — which is what most frameworks
+put in front of the device allocator — same-address reuse is the *expected* outcome of a free
+followed by an allocation of similar size, not an unlikely race. Both base and size can match while
+the memory belongs to something else entirely.
+
+Every tracked allocation therefore carries a process-monotonic `generation` stamp assigned at
+allocation time. `snap()` records the generation it observed; `restore()` refuses to write unless the
+address still carries it. A mismatch means the address was reused, and the region is skipped.
+
+The asymmetry is deliberate. Skipping a region that was in fact still ours costs accuracy on later
+passes and is reported on the outcome line. Writing into an allocation that is *not* ours corrupts
+live application data and would be reported nowhere. So every ambiguous case — freed, shrunk, grown,
+or restamped — refuses.
+
+A generation of `0` means "any live allocation of at least this size" and is used only for regions the
+tracker does not own (module-scope variables). No tracked allocation is ever stamped `0`, so a tracked
+region cannot fall through to the weaker check by accident.
+
+A failed host-to-device copy on a live region is different from a skip: the snapshot is then only
+partially applied, some regions hold pre-kernel bytes and others post-kernel bytes, and nothing can
+put that back. `restore()` returns false and the replay window aborts rather than hand the
+application a mixture it cannot detect.
 
 ## HIP graphs
 
@@ -143,14 +168,18 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
 
 - **No dirty-page hashing.** Every tracked byte is copied on every restore. Host-side and/or
   device-side hashing is expected later; see [Snapshot mechanism](#snapshot-mechanism-this-version-vs-hashing).
-- **Virtual-memory mappings are not tracked.** The tracker wraps only the four allocate and free
-  entry points listed above, plus the `hsa_amd_pointer_info` query used to classify them. It does not
-  wrap `hsa_amd_vmem_map` / `hsa_amd_vmem_unmap` or any other part of the virtual-memory API. (Those
-  functions do appear in the SDK's HSA API *tracing* tables, but that is a separate mechanism and
-  does not feed the replay inventory.) Anything that becomes addressable through a `vmem` mapping
-  rather than through one of the wrapped allocations is therefore invisible to the snapshot — which
-  covers **`hipMallocAsync` and other pool-backed, stream-ordered allocations**. A kernel that writes
-  such a buffer will not have those writes reverted between passes.
+- **Virtual-memory mappings are counted, not snapshotted.** Memory that becomes addressable through
+  `hsa_amd_vmem_map` rather than through one of the wrapped allocate entry points cannot be captured:
+  the snapshot has no record of the underlying physical handle. This covers **`hipMallocAsync` and
+  other pool-backed, stream-ordered allocations**, `hipMemAddressReserve`/`hipMemMap`, and the
+  expandable-segment allocators built on them. A kernel writing such a buffer will not have those
+  writes reverted between passes.
+
+  The map and unmap entry points *are* wrapped, so those regions are counted even though they cannot
+  be restored, and the replay window declines by default when any are live rather than reporting
+  counters gathered on mutated inputs. That turns the limitation from a silent wrong answer into a
+  named decline. See
+  [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#admission-control).
 - **Async SDMA copies are not fenced by the replay window.** `hsa_amd_memory_async_copy` and its
   variants are not kernel dispatches, so they bypass both the AQL queues and the per-agent replay
   gate. The source marks serializing them as a follow-up. See
@@ -176,7 +205,11 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Snapshot capture | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `snap()` |
 | Module-variable discovery | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `discover_module_variables()`, `collect_module_variable()` |
 | Restore | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `restore()` |
+| Restore identity gate | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `region_is_restorable()` |
+| Footprint estimate | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `estimate_footprint()` |
 | Snapshot types | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp` | `device_snapshot_t`, `mem_block_t` |
+| Allocation generation stamp | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp` | `alloc_info_t::generation` |
+| Untracked-memory accounting | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `untracked_device_memory()`, `record_vmem_map()` |
 | HSA hook installation | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `memory_tracker_init()` |
 | Allocation recording | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `record_alloc()`, `record_free()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
@@ -184,4 +217,5 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Tracking activation | `source/lib/rocprofiler-sdk/callback_tracing.cpp` | `rocprofiler_configure_callback_tracing_service()` |
 | Snapshot-declined fallback | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `snapshot.ok` branch in `WriteInterceptor` |
 | HIP graph warn-once + run-once | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `_warned_graph_replay`; `graph_launch_active` excluded from the replay gate |
-| Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `snap_restore.cpp`, `snap_kernels.{hpp,cpp}` |
+| Tests (GPU) | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `snap_restore.cpp`, `snap_allocator_patterns.cpp`, `snap_region_scaling.cpp`, `snap_bandwidth.cpp`, `snap_kernels.{hpp,cpp}` |
+| Tests (no GPU) | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `replay_diagnostics.cpp` |
