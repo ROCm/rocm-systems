@@ -54,3 +54,28 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
     FIXTURES_REQUIRED rocprofv3-test-hip-event-trace)
+
+# Test hip event tracing without HIP API tracing enabled, exercising the correlation ID
+# self-construction path.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-hip-event-trace-no-hip-api
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-event-trace --kernel-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-events-no-hip-api-trace -o out --output-format
+        json --log-level env -- $<TARGET_FILE:hip-events>
+    DEPENDS hip-events
+    TIMEOUT 45
+    LABELS "integration-tests"
+    PRELOAD "${PRELOAD_ENV}"
+    FIXTURES_SETUP rocprofv3-test-hip-event-trace-no-hip-api)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-hip-event-trace-no-hip-api
+    TEST_PATHS validate_no_hip_api.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-events-no-hip-api-trace/out_results.json
+    TIMEOUT 45
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-hip-event-trace-no-hip-api)

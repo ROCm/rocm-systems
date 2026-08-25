@@ -350,13 +350,22 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                                     .start  = queue_info_session.enqueue_ts,
                                                     .end    = common::timestamp_ns()};
 
+        auto callback_record = rocprofiler_callback_tracing_hip_event_data_t{
+            sizeof(rocprofiler_callback_tracing_hip_event_data_t),
+            rocprofiler_timestamp_t{0},
+            rocprofiler_timestamp_t{0},
+            queue_info_session.queue.get_agent().get_rocp_agent()->id,
+            queue_info_session.queue.get_id(),
+            pw.hip_event_handle,
+            pw.source_info.queue_id};
+
         hip::event::barrier_complete(pw.tracing_data,
                                      pw.tid,
                                      pw.internal_corr_id,
                                      pw.ancestor_corr_id,
                                      wait_time,
                                      ROCPROFILER_HIP_EVENT_WAIT,
-                                     pw.callback_record);
+                                     callback_record);
         if(pw.corr_id_ref)
         {
             pw.corr_id_ref->sub_kern_count();
@@ -625,9 +634,12 @@ WriteInterceptor(const void* packets,
                                tracing_data_v);
 
     auto hip_event_tracing_data_v = tracing::tracing_data{};
-    tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
-                               ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
-                               hip_event_tracing_data_v);
+    if(hip::event::get_active_event_context() || hip::event::has_pending_waits())
+    {
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                   hip_event_tracing_data_v);
+    }
 
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
         tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
@@ -876,11 +888,25 @@ WriteInterceptor(const void* packets,
 
                 if(is_barrier && hip::event::has_pending_waits())
                 {
-                    for(const auto& dep : _packets[i].barrier_and.dep_signal)
-                    {
-                        if(dep.handle == 0) break;
-                        auto pw = hip::event::consume_pending_wait(dep.handle);
+                    auto consume_if_pending = [&](uint64_t handle) {
+                        if(handle == 0) return;
+                        auto pw = hip::event::consume_pending_wait(handle);
                         if(pw.corr_id_ref) _info_session.pending_waits.emplace_back(std::move(pw));
+                    };
+
+                    if(packet_type == HSA_PACKET_TYPE_BARRIER_AND)
+                    {
+                        for(const auto& dep : _packets[i].barrier_and.dep_signal)
+                        {
+                            if(dep.handle == 0) break;
+                            consume_if_pending(dep.handle);
+                        }
+                    }
+                    else
+                    {
+                        const auto& vpkt =
+                            reinterpret_cast<const hsa_amd_barrier_value_packet_t&>(_packets[i]);
+                        consume_if_pending(vpkt.signal.handle);
                     }
                 }
 
@@ -1186,6 +1212,17 @@ WriteInterceptor(const void* packets,
             queue.signal_async_handler(last_pooled_signal,
                                        last_completion_signal,
                                        new std::shared_ptr<info_session_t>(shared));
+        }
+        else
+        {
+            for(auto& pw : _info_session.pending_waits)
+            {
+                if(pw.corr_id_ref)
+                {
+                    pw.corr_id_ref->sub_kern_count();
+                    pw.corr_id_ref->sub_ref_count();
+                }
+            }
         }
 
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op

@@ -93,6 +93,10 @@ main(int argc, char** argv)
     HIP_ASSERT(hipEventRecordWithFlags(event0, stream0, hipEventRecordDefault));
     HIP_ASSERT(hipStreamWaitEvent(stream1, event0, 0));
 
+    // Exercise same-stream wait: CLR short-circuits when the event was recorded
+    // on the same stream. No barrier is dispatched, no WAIT record should appear.
+    HIP_ASSERT(hipStreamWaitEvent(stream0, event0, 0));
+
     // Exercise deferred wait: launch a large kernel so the event is unlikely to
     // have completed by the time hipStreamWaitEvent checks ready(). CLR will add
     // the event's signal as a dep_signal on the next dispatch's barrier rather
@@ -103,6 +107,51 @@ main(int argc, char** argv)
     HIP_ASSERT(hipStreamWaitEvent(stream1, event0, 0));
     scale_kernel<<<grid_size, block_size, 0, stream1>>>(d_data, n, 0.99f);
     HIP_ASSERT(hipStreamSynchronize(stream1));
+
+    // Exercise duplicate wait: two streams wait on the same event before the
+    // first wait is consumed. Both should produce WAIT completion records
+    // without leaking correlation ID ref counts (which would hang on shutdown).
+    hipStream_t stream2 = nullptr;
+    HIP_ASSERT(hipStreamCreate(&stream2));
+
+    scale_kernel<<<grid_size * 256, block_size, 0, stream0>>>(d_data, n, 1.01f);
+    HIP_ASSERT(hipEventRecord(event0, stream0));
+    HIP_ASSERT(hipStreamWaitEvent(stream1, event0, 0));
+    HIP_ASSERT(hipStreamWaitEvent(stream2, event0, 0));
+    scale_kernel<<<grid_size, block_size, 0, stream1>>>(d_data, n, 0.99f);
+    scale_kernel<<<grid_size, block_size, 0, stream2>>>(d_data, n, 0.99f);
+    HIP_ASSERT(hipStreamSynchronize(stream1));
+    HIP_ASSERT(hipStreamSynchronize(stream2));
+    HIP_ASSERT(hipStreamDestroy(stream2));
+
+    // Exercise destroy with pending wait: record an event, register a wait on
+    // another stream, then destroy the event before the wait is consumed. The
+    // profiler must clean up the pending wait and release correlation ID ref
+    // counts without leaking or crashing. No WAIT record should appear for this
+    // event since it was destroyed before consumption.
+    hipEvent_t destroy_event = nullptr;
+    HIP_ASSERT(hipEventCreate(&destroy_event));
+    scale_kernel<<<grid_size * 256, block_size, 0, stream0>>>(d_data, n, 1.01f);
+    HIP_ASSERT(hipEventRecord(destroy_event, stream0));
+    HIP_ASSERT(hipStreamWaitEvent(stream1, destroy_event, 0));
+    HIP_ASSERT(hipEventDestroy(destroy_event));
+    scale_kernel<<<grid_size, block_size, 0, stream1>>>(d_data, n, 0.99f);
+    HIP_ASSERT(hipDeviceSynchronize());
+
+    // Exercise graph capture exclusion: recording an event during graph capture
+    // should not produce a RECORD completion. The is_stream_capturing guard must
+    // prevent check_coalesced_record from fabricating a record.
+    hipStream_t capture_stream = nullptr;
+    hipEvent_t  capture_event  = nullptr;
+    HIP_ASSERT(hipStreamCreate(&capture_stream));
+    HIP_ASSERT(hipEventCreate(&capture_event));
+    HIP_ASSERT(hipStreamBeginCapture(capture_stream, hipStreamCaptureModeGlobal));
+    HIP_ASSERT(hipEventRecord(capture_event, capture_stream));
+    hipGraph_t graph = nullptr;
+    HIP_ASSERT(hipStreamEndCapture(capture_stream, &graph));
+    HIP_ASSERT(hipGraphDestroy(graph));
+    HIP_ASSERT(hipEventDestroy(capture_event));
+    HIP_ASSERT(hipStreamDestroy(capture_stream));
 
     // Exercise coalescing: record a hipEventDisableTiming event multiple times
     // on the same stream with no intervening work. CLR's ShouldCoalesceMarker

@@ -118,7 +118,7 @@ def warn_deprecated_output_formats(output_formats):
         warning(
             "The following direct rocprofv3 output format(s) are deprecated: "
             f"{', '.join(display_names[itr] for itr in deprecated_formats)}. "
-            "Some tracing features, including hipFILE and rocSHMEM tracing, might not "
+            "Some tracing features, including hipFILE, rocSHMEM, and HIP event tracing, might not "
             "produce output in these formats. Use `--output-format rocpd` (the default), "
             "then run `rocpd convert -i <database>.db --output-format csv` when CSV "
             "output is needed."
@@ -582,13 +582,13 @@ For attachment profiling of running processes:
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, HIP event barriers, Memory operations (copies, scratch, and allocation), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, rocDecode API, rocJPEG API, rocSHMEM API, hipFILE API, HIP event barriers, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -617,7 +617,7 @@ For attachment profiling of running processes:
     add_parser_bool_argument(
         basic_tracing_options,
         "--hip-event-trace",
-        help="Trace HIP event record and stream wait barriers on the GPU",
+        help="Trace GPU-side HIP event barriers produced by hipEventRecord and hipStreamWaitEvent. Emits hip_event records to JSON and rocpd with the operation, event handle, queue, and source queue for cross-stream dependencies. Independent of --kernel-trace. Automatically enabled by --hip-trace and --hip-runtime-trace. Use rocpd convert for CSV or Perfetto output.",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -1861,8 +1861,9 @@ def run(app_args, args, **kwargs):
             setattrifnone(args, f"hip_{itr}_trace", True)
 
     if args.hip_runtime_trace:
-        # HIP graphs are part of the HIP runtime
+        # HIP graphs and HIP events are part of the HIP runtime
         setattrifnone(args, "hip_graph_trace", True)
+        setattrifnone(args, "hip_event_trace", True)
 
     if args.hsa_trace:
         for itr in ("core", "amd", "image", "finalizer"):

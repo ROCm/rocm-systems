@@ -73,14 +73,18 @@ WAIT_API_NAMES = {"hipStreamWaitEvent", "hipStreamWaitEvent_spt"}
 
 
 def test_hip_event_record_count(json_data):
-    """Verify expected number of RECORD and WAIT completions.
+    """Verify RECORD and WAIT completion counts are plausible relative to API calls.
 
-    hipStreamWaitEvent has early-return paths (same-stream, already-complete)
-    that produce no barrier. The number of WAIT completions depends on GPU
-    timing and cannot be predicted exactly. We verify:
-    - RECORD completions >= the number of hipEventRecord API calls (each
-      record call always dispatches a barrier)
-    - WAIT completions > 0 and <= the number of hipStreamWaitEvent API calls
+    Not all API calls produce completions:
+    - hipEventRecord during graph capture produces no barrier (no completion)
+    - hipStreamWaitEvent on the same stream, already-complete event, or during
+      graph capture produces no barrier (no completion)
+
+    We verify:
+    - RECORD completions > 0
+    - RECORD completions <= hipEventRecord API call count (never more than calls)
+    - WAIT completions > 0
+    - WAIT completions <= hipStreamWaitEvent API call count
     """
     data = json_data["rocprofiler-sdk-tool"]
     records = data["buffer_records"]["hip_event"]
@@ -100,8 +104,9 @@ def test_hip_event_record_count(json_data):
         1 for r in hip_api if get_operation_name(r.kind, r.operation) in WAIT_API_NAMES
     )
 
-    assert record_count >= api_record_count, (
-        f"RECORD completions ({record_count}) < hipEventRecord API calls "
+    assert record_count > 0, "No RECORD completions found"
+    assert record_count <= api_record_count, (
+        f"RECORD completions ({record_count}) > hipEventRecord API calls "
         f"({api_record_count})"
     )
     assert wait_count > 0, "No WAIT completions found"
@@ -281,6 +286,149 @@ def test_hip_event_deferred_wait(json_data):
         f"No WAIT completion records on queues that have kernel dispatches. "
         f"WAIT queues: {set(r.queue_id.handle for r in cross_stream_waits)}, "
         f"kernel queues: {kernel_queues}"
+    )
+
+
+def test_hip_event_wait_queue_identity(json_data):
+    """Verify WAIT records report the waiting queue, not the recording queue.
+
+    For a cross-stream wait where event was recorded on stream0 and
+    hipStreamWaitEvent was called on stream1, the WAIT record must have:
+    - queue_id = stream1's queue (the waiting queue)
+    - source_queue_id = stream0's queue (the recording queue)
+
+    We verify:
+    - WAIT queue_id is a queue with kernel dispatches (the waiting stream)
+    - WAIT source_queue_id is a queue with RECORD records (the recording stream)
+    - The two are different
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    kernel_records = data["buffer_records"]["kernel_dispatch"]
+
+    record_queues = set(
+        r.queue_id.handle for r in records if r.operation == HIP_EVENT_RECORD
+    )
+    kernel_queues = set(r.dispatch_info.queue_id.handle for r in kernel_records)
+
+    wait_records = [
+        r
+        for r in records
+        if r.operation == HIP_EVENT_WAIT and r.queue_id.handle != r.source_queue_id.handle
+    ]
+
+    for w in wait_records:
+        assert w.queue_id.handle in kernel_queues, (
+            f"WAIT record queue_id {w.queue_id.handle} is not a kernel dispatch "
+            f"queue. This suggests the WAIT is reporting the recording queue "
+            f"instead of the waiting queue. Kernel queues: {kernel_queues}"
+        )
+        assert w.source_queue_id.handle in record_queues, (
+            f"WAIT record source_queue_id {w.source_queue_id.handle} is not a "
+            f"known recording queue. Record queues: {record_queues}"
+        )
+        assert w.queue_id.handle != w.source_queue_id.handle, (
+            f"WAIT record queue_id == source_queue_id ({w.queue_id.handle}), "
+            f"expected different queues for cross-stream wait"
+        )
+
+
+def test_hip_event_duplicate_wait(json_data):
+    """Verify that two streams waiting on the same event both produce WAIT
+    records.
+
+    The test binary records event0 on stream0, then calls
+    hipStreamWaitEvent on both stream1 and stream2. Both waits should
+    produce completion records with different queue_ids.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+
+    wait_records = [r for r in records if r.operation == HIP_EVENT_WAIT]
+
+    handle_queues = {}
+    for w in wait_records:
+        h = w.hip_event_handle
+        if h not in handle_queues:
+            handle_queues[h] = set()
+        handle_queues[h].add(w.queue_id.handle)
+
+    multi_queue_handles = [h for h, qs in handle_queues.items() if len(qs) >= 2]
+    assert len(multi_queue_handles) > 0, (
+        f"Expected at least one event handle with WAIT records on 2+ different "
+        f"queues (duplicate wait scenario). Per-handle queue sets: {handle_queues}"
+    )
+
+
+def test_hip_event_no_same_stream_wait(json_data):
+    """Verify same-stream waits do not produce WAIT completion records.
+
+    The test binary calls hipStreamWaitEvent(stream0, event0, 0) where event0
+    was recorded on stream0. CLR short-circuits this (same queue), so no
+    barrier is dispatched and no WAIT record should appear with
+    queue_id == source_queue_id.
+    """
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+    wait_records = [r for r in records if r.operation == HIP_EVENT_WAIT]
+
+    same_stream_waits = [
+        r for r in wait_records if r.queue_id.handle == r.source_queue_id.handle
+    ]
+    assert len(same_stream_waits) == 0, (
+        f"Found {len(same_stream_waits)} WAIT records with queue_id == source_queue_id "
+        f"(same-stream waits should not produce completion records)"
+    )
+
+
+def test_hip_event_destroy_cleanup(json_data):
+    """Verify that destroying an event with a pending wait does not leak.
+
+    The test binary records destroy_event on stream0, calls
+    hipStreamWaitEvent(stream1, destroy_event) to register a pending wait,
+    then destroys the event before any kernel on stream1 consumes it. The
+    pending wait should be cleaned up by erase_event_info. We verify:
+    - At least one event handle has RECORD completions but zero WAIT completions
+      (the destroyed event's wait was cleaned up, not consumed)
+    - The process exits cleanly (implicit: no hang from leaked ref counts)
+    """
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    record_handles = set(
+        r.hip_event_handle for r in records if r.operation == HIP_EVENT_RECORD
+    )
+    wait_handles = set(
+        r.hip_event_handle for r in records if r.operation == HIP_EVENT_WAIT
+    )
+
+    record_only = record_handles - wait_handles
+    assert len(record_only) >= 1, (
+        f"Expected at least one event handle with RECORD but no WAIT completions "
+        f"(destroy_event scenario). record_handles={record_handles}, "
+        f"wait_handles={wait_handles}"
+    )
+
+
+def test_hip_event_graph_capture_exclusion(json_data):
+    """Verify that hipEventRecord during graph capture does not produce records.
+
+    The test binary records capture_event on a stream that is in graph capture
+    mode. No barrier is dispatched during capture, and the is_stream_capturing
+    guard should prevent check_coalesced_record from fabricating a record.
+    We verify that capture_event's handle does not appear in any hip_event
+    records by checking that the number of unique RECORD handles matches the
+    expected count (event0, event1, coalesce_event, destroy_event = 4).
+    """
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    record_handles = set(
+        r.hip_event_handle for r in records if r.operation == HIP_EVENT_RECORD
+    )
+
+    assert len(record_handles) == 4, (
+        f"Expected exactly 4 unique RECORD event handles "
+        f"(event0, event1, coalesce_event, destroy_event). "
+        f"Found {len(record_handles)}: {record_handles}. "
+        f"If 5, graph capture exclusion may have failed."
     )
 
 
