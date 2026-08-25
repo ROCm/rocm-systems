@@ -134,14 +134,28 @@ struct EngineWorkgroupState {
 struct EngineWaveState {
   SpinLock mutex;
   WaveState core;
+  /// Only two kinds of instruction are still worth a context: the one whose
+  /// accesses are arriving now, and those a pending operation can still be
+  /// reported against. Everything else is pruned, so a loop that issues
+  /// millions of instructions costs a map sized by what is in flight rather
+  /// than by how long the wave has run.
   std::unordered_map<EntityId, EngineInstructionContext> instruction_contexts;
   std::unordered_map<EntityId, std::array<uint32_t, 4>> pending_raw_isa;
+  EntityId current_instruction_id = 0;
+  /// Contexts left by the last prune. Pruning waits for the map to grow a whole
+  /// slack past it, so a wave holding many instructions in flight prunes just as
+  /// rarely as one holding none: measuring the growth against anything else
+  /// risks a map that is already at its bound asking for a prune per
+  /// instruction, each one walking every pending queue.
+  size_t contexts_at_last_prune = 0;
   std::shared_ptr<EngineWorkgroupState> workgroup;
 };
 
 struct EngineWaveSnapshot {
   ExecutionKey key;
   WaveState core;
+  /// Contexts the wave is still holding, not instructions it has run: retired
+  /// ones are pruned, so this tracks what is in flight.
   size_t instruction_context_count = 0;
 };
 
@@ -295,6 +309,15 @@ const EngineInstructionContext &get_instruction_context(const EngineWaveState &w
                                                         EntityId instruction_id);
 
 std::array<uint32_t, 4> get_pending_raw_isa(const EngineWaveState &wave, EntityId instruction_id);
-void prune_pending_raw_isa(EngineWaveState &wave);
+
+/// Waits are the natural moment to prune, but a wave can run a long stretch
+/// without one, so tracking also prunes once the contexts it has kept outgrow
+/// what is in flight by this much. Walking the pending queues is the cost of a
+/// prune, and this slack keeps that off the per-instruction path.
+inline constexpr size_t kInstructionContextSlack = 256;
+
+/// Drops the context and raw ISA of every instruction that has left the pending
+/// queues, keeping the instruction now issuing so its accesses still find it.
+void prune_retired_instructions(EngineWaveState &wave);
 
 } // namespace hazard_core

@@ -459,6 +459,8 @@ void DataHazardEngine::on_wave_begin(const ExecutionKey &wave_key) {
   wave->core.reset();
   wave->instruction_contexts.clear();
   wave->pending_raw_isa.clear();
+  wave->current_instruction_id = 0;
+  wave->contexts_at_last_prune = 0;
 }
 
 void DataHazardEngine::on_wave_end(const ExecutionKey &wave_key) {
@@ -504,7 +506,7 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
       if (!hazard_core::clear_pending_ops(&wave->core, counter))
         reject_event("on_instruction: wait counter has no pending queue to drain");
     }
-    prune_pending_raw_isa(*wave);
+    prune_retired_instructions(*wave);
 
     if (action.is_workgroup_barrier && wave->workgroup) {
       std::lock_guard<SpinLock> wg_lock(wave->workgroup->mutex);
@@ -592,7 +594,7 @@ void DataHazardEngine::on_barrier(const BarrierEvent &barrier) {
     for (const auto &wave : waves_for_barrier(barrier)) {
       std::lock_guard<SpinLock> lock(wave->mutex);
       hazard_core::clear_pending_ops(&wave->core, WaitCntType::LDS, 0);
-      prune_pending_raw_isa(*wave);
+      prune_retired_instructions(*wave);
     }
   }
 
