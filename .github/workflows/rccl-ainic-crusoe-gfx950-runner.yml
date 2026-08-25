@@ -186,10 +186,33 @@ jobs:
           sparse-checkout-cone-mode: true
           fetch-depth: 1
 
-      - name: Allocate GPU nodes and run AINIC suite
+      - name: Probe & pin GPU nodes
+        id: probe
+        # Its own step so node selection is a distinct pass/fail in the checklist
+        # instead of being buried in the run step's log. A busy cluster is not a
+        # failure: crusoe_probe_pin.sh waits patiently (re-probing) until a healthy
+        # symmetric pair frees up, so this only goes red on a genuine probe error
+        # or the overall job timeout. The pinned pair is handed to the run step
+        # via the `pin` output (and RUNNER_TEMP/crusoe_pin.txt).
+        env:
+          SALLOC_PARTITION: ${{ github.event.inputs.salloc_partition || env.DEFAULT_SALLOC_PARTITION }}
+          SALLOC_RESERVATION: ${{ github.event.inputs.salloc_reservation || env.DEFAULT_SALLOC_RESERVATION }}
+          SALLOC_NODES: ${{ github.event.inputs.salloc_nodes || env.DEFAULT_SALLOC_NODES }}
+          SALLOC_EXCLUDE: ${{ github.event.inputs.salloc_exclude || env.DEFAULT_SALLOC_EXCLUDE }}
+          SALLOC_ACCOUNT: ${{ github.event.inputs.salloc_account || env.DEFAULT_SALLOC_ACCOUNT }}
+        run: |
+          bash "${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_probe_pin.sh"
+
+      - name: Submit & run AINIC suite (build+test)
         id: run_tests
+        # continue-on-error so the report/summary steps and the per-phase Build /
+        # Test result steps below always run; the real pass/fail is enforced by
+        # those phase steps (and the no-allocation guard), not here.
         continue-on-error: true
         env:
+          # The symmetric pair pinned by the probe step; the launch script re-probes
+          # if it is taken/faults before the allocation starts (self-healing).
+          INITIAL_PIN: ${{ steps.probe.outputs.pin }}
           WORKDIR: ${{ github.event.inputs.workdir || github.workspace }}
           MPI_PATH: ${{ github.event.inputs.mpi_path || env.DEFAULT_MPI_PATH }}
           ROCM_PATH: ${{ github.event.inputs.rocm_path || env.DEFAULT_ROCM_PATH }}
@@ -286,6 +309,44 @@ jobs:
             done
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Fail job if tests failed
-        if: steps.run_tests.outcome == 'failure'
-        run: exit 1
+      - name: Parse workload result
+        id: result
+        if: always()
+        # crusoe_run_batch.sh records build_rc (always) and test_rc (once the test
+        # phase runs) in crusoe_result.txt. Expose them as outputs so the Build /
+        # Test phase steps below turn into distinct checklist entries.
+        run: |
+          f="${RUNNER_TEMP}/crusoe_result.txt"
+          if [ -f "${f}" ]; then
+            echo "have_result=true" >> "${GITHUB_OUTPUT}"
+            echo "build_rc=$(sed -n 's/^build_rc=//p' "${f}")" >> "${GITHUB_OUTPUT}"
+            echo "test_rc=$(sed -n 's/^test_rc=//p' "${f}")" >> "${GITHUB_OUTPUT}"
+          else
+            echo "have_result=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Build phase
+        if: always() && steps.result.outputs.have_result == 'true'
+        run: |
+          rc="${{ steps.result.outputs.build_rc }}"
+          if [ -z "${rc}" ]; then echo "::error::RCCL build did not run"; exit 1; fi
+          if [ "${rc}" != "0" ]; then echo "::error::RCCL build failed (rc=${rc})"; exit 1; fi
+          echo "RCCL build passed"
+
+      - name: Test phase
+        # Only meaningful once the build passed; if the build failed the Build
+        # phase step above already reds the job and tests never ran.
+        if: always() && steps.result.outputs.have_result == 'true' && steps.result.outputs.build_rc == '0'
+        run: |
+          rc="${{ steps.result.outputs.test_rc }}"
+          if [ -z "${rc}" ]; then echo "::error::AINIC tests did not run"; exit 1; fi
+          if [ "${rc}" != "0" ]; then echo "::error::AINIC tests failed (rc=${rc})"; exit 1; fi
+          echo "AINIC tests passed"
+
+      - name: Fail job if no allocation completed
+        # No result file => no allocation ever survived to a workload exit (usually
+        # preemption or no free capacity). That is an infra failure, not build/test.
+        if: always() && steps.result.outputs.have_result != 'true'
+        run: |
+          echo "::error::No workload result recorded -- no allocation survived to a workload exit (preemption or no capacity; see run log)"
+          exit 1

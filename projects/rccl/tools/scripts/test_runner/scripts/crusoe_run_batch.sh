@@ -19,9 +19,25 @@ set -o pipefail
 ulimit -l unlimited 2>/dev/null || true
 
 RESULT_FILE="${RUNNER_TEMP}/crusoe_result.txt"
+# Record per-phase exit codes so the workflow can surface a Build vs Test result
+# as separate checklist steps: build_rc is always written; test_rc only once the
+# test phase runs (i.e. build passed). phase=/rc= are kept for the legacy summary
+# step: they point at the phase that determined the outcome (build if it failed,
+# otherwise test).
 record_result() {
-  # $1 = phase (build|test), $2 = rc
-  printf 'phase=%s\nrc=%s\n' "$1" "$2" > "${RESULT_FILE}" 2>/dev/null || true
+  # $1 = build_rc, $2 = test_rc (empty if the test phase did not run)
+  local build_rc="$1" test_rc="${2:-}"
+  {
+    printf 'build_rc=%s\n' "${build_rc}"
+    if [ -n "${test_rc}" ]; then
+      printf 'test_rc=%s\n' "${test_rc}"
+    fi
+    if [ "${build_rc}" != 0 ] || [ -z "${test_rc}" ]; then
+      printf 'phase=build\nrc=%s\n' "${build_rc}"
+    else
+      printf 'phase=test\nrc=%s\n' "${test_rc}"
+    fi
+  } > "${RESULT_FILE}" 2>/dev/null || true
 }
 
 # SPUR runs the batch script on every allocated node. Elect one launcher; extra
@@ -90,7 +106,7 @@ python3 test_runner.py \
 build_rc=$?
 if [ "${build_rc}" -ne 0 ]; then
   echo "ERROR: RCCL build failed (rc=${build_rc}); aborting batch job."
-  record_result build "${build_rc}"
+  record_result "${build_rc}"
   exit "${build_rc}"
 fi
 echo "== rccl-UnitTestsMPI =="
@@ -115,5 +131,5 @@ python3 test_runner.py \
   --report-suffix ainic \
   2>&1 | tee "${RUNNER_TEMP}/crusoe_run.log"
 test_rc=$?
-record_result test "${test_rc}"
+record_result "${build_rc}" "${test_rc}"
 exit "${test_rc}"
