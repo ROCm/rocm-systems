@@ -17,7 +17,9 @@ from pathlib import Path
 from perf_cost_model import max_pass_scaling_ratio, model_max_ms
 
 
-def run_case(testapp: Path, client: Path, passes: int, ballast_mb: int, launches: int) -> float:
+def run_case(
+    testapp: Path, client: Path, passes: int, ballast_mb: int, launches: int
+) -> float:
     env = os.environ.copy()
     env["KR_PERF_PASSES"] = str(passes)
     preload = client.resolve()
@@ -53,17 +55,21 @@ def main() -> int:
     ap.add_argument("--ballast-mb", type=int, default=32)
     ap.add_argument("--launches", type=int, default=4)
     ap.add_argument("--passes", type=int, nargs="+", default=[1, 3, 5, 8])
-    ap.add_argument("--slack", type=float, default=2.0,
-                    help="multiplier over ideal linear pass scaling")
+    ap.add_argument(
+        "--slack",
+        type=float,
+        default=2.0,
+        help="multiplier over ideal linear pass scaling",
+    )
     args = ap.parse_args()
 
     wall: dict[int, float] = {}
     for p in args.passes:
         wall[p] = run_case(args.testapp, args.client, p, args.ballast_mb, args.launches)
         ceiling = model_max_ms(args.ballast_mb, args.launches, p)
-        assert wall[p] <= ceiling, (
-            f"P={p} wall_ms={wall[p]:.1f} > ceiling {ceiling:.1f} ms"
-        )
+        assert (
+            wall[p] <= ceiling
+        ), f"P={p} wall_ms={wall[p]:.1f} > ceiling {ceiling:.1f} ms"
         print(f"[kr-perf-sweep] P={p} wall_ms={wall[p]:.1f} <= {ceiling:.1f} ms")
 
     ordered = sorted(args.passes)
@@ -71,9 +77,9 @@ def main() -> int:
         p_lo, p_hi = ordered[i - 1], ordered[i]
         ratio = wall[p_hi] / max(wall[p_lo], 0.001)
         cap = max_pass_scaling_ratio(p_lo, p_hi, args.slack)
-        assert ratio <= cap, (
-            f"pass sweep super-linear: P={p_lo}->{p_hi} ratio={ratio:.2f} > {cap:.2f}"
-        )
+        assert (
+            ratio <= cap
+        ), f"pass sweep super-linear: P={p_lo}->{p_hi} ratio={ratio:.2f} > {cap:.2f}"
         print(f"[kr-perf-sweep] PASS P={p_lo}->{p_hi} ratio={ratio:.2f} <= {cap:.2f}")
 
     overall = wall[ordered[-1]] / max(wall[ordered[0]], 0.001)
@@ -88,8 +94,15 @@ def main() -> int:
     if out_path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(
-            json.dumps({"ballast_mb": args.ballast_mb, "launches": args.launches,
-                        "wall_ms": wall}, indent=2) + "\n",
+            json.dumps(
+                {
+                    "ballast_mb": args.ballast_mb,
+                    "launches": args.launches,
+                    "wall_ms": wall,
+                },
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
     return 0
