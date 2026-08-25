@@ -6340,6 +6340,9 @@ class CodeGenerator:
                 '    l2->flush_all(wf.process_id());'
             )
 
+        if cls == 'icache_inv':
+            return '  wf.cu().instruction_cache().invalidate_all();'
+
         if cls == 'gl2_wb':
             return (
                 '  if (auto *l2 = wf.cu().l2())\n' '    l2->flush_all(wf.process_id());'
@@ -7063,7 +7066,6 @@ class CodeGenerator:
         L.append('    d->lane_mask = exec; d->exec_mask = exec;')
         L.append('    d->wf_size = wf.wf_size();')
         L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
-        L.append('    d->cu_path = wf.cu().full_path();')
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
         offset_expr = (
             'signed_ioffset(inst_.ioffset)'
@@ -7450,7 +7452,6 @@ class CodeGenerator:
         L.append('  d->lane_mask = exec;')
         L.append('  d->wg_id = wf.wg_id();')
         L.append('  d->wf_id = wf.wf_id();')
-        L.append('  d->cu_path = wf.cu().full_path();')
         L.append('  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
         L.append('  uint32_t addr = wf.lds_base() + wf.m0() + offset;')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -7660,7 +7661,6 @@ class CodeGenerator:
         lines.append('    uint64_t exec = wf.exec();')
         lines.append('    d->lane_mask = exec; d->exec_mask = exec;')
         lines.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
-        lines.append('    d->cu_path = wf.cu().full_path();')
         lines.append(
             '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
         )

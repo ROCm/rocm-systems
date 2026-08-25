@@ -54,7 +54,6 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  d.cu_path = wf.cu().full_path();
   const uint32_t sb_sel = inst.srsrc * 4;
   uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
   uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
@@ -164,7 +163,6 @@ void mtbuf_calculate_addresses(const MtbufInst &inst, amdgpu::Wavefront &wf, Vec
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  d.cu_path = wf.cu().full_path();
   const uint32_t sb_sel = inst.srsrc * 4;
   uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
   uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);

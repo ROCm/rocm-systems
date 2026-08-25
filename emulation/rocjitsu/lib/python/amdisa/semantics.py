@@ -364,9 +364,13 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'gpr_idx', operation='off')
     if name == 'S_SET_GPR_IDX_MODE':
         return InstructionSemantics(name, 'gpr_idx', operation='mode')
-    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_ICACHE_INV,
-    # S_INCPERFLEVEL, S_DECPERFLEVEL — all are either no-ops or system/debug
-    # instructions that don't affect compute simulation correctness.
+    # The instruction cache is not coherent with data writes, so self-modifying
+    # code is only visible to the fetcher once this instruction retires.
+    if name == 'S_ICACHE_INV':
+        return InstructionSemantics(name, 'icache_inv')
+    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_INCPERFLEVEL,
+    # S_DECPERFLEVEL — all are either no-ops or system/debug instructions that
+    # don't affect compute simulation correctness.
     return InstructionSemantics(name, 'true_nop')
 
 

@@ -119,6 +119,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | Document | Description |
 |---|---|
 | [Building](docs/building.md) | Build options, sanitizers, container setup |
+| [Benchmarking](docs/benchmarking.md) | Reproducible performance and memory measurement protocol |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |
