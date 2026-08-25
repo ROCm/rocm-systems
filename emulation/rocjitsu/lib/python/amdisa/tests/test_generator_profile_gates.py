@@ -3532,6 +3532,57 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
     )
 
 
+def test_custom_identity_preprocesses_with_profile_handwritten_includes(
+    tmp_path, rocjitsu_source_root: Path
+):
+    compiler = shutil.which('c++')
+    if compiler is None:
+        pytest.skip('C++ preprocessor is unavailable')
+
+    args = SimpleNamespace(
+        isafiles=[f'gfx1250:{_mrisa_dir() / "amdgpu_isa_cdna5.xml"}'],
+        gen_isas=True,
+        gen_dbt=False,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run(args)
+
+    generated_root = tmp_path / 'gfx1250'
+    vop3p_header = (generated_root / 'vop3p.h').read_text()
+    vop3p_source = (generated_root / 'vop3p_exec.cpp').read_text()
+    vglobal_source = (generated_root / 'vglobal_exec.cpp').read_text()
+    assert '#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"' in vop3p_header
+    assert '#include "rocjitsu/isa/arch/amdgpu/cdna5/mma_exec.h"' in vop3p_source
+    assert '#include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"' in vglobal_source
+
+    include_roots = (
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        rocjitsu_source_root / 'lib' / 'util' / 'include',
+        rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
+    )
+    for source_path in (
+        generated_root / 'vop3p_exec.cpp',
+        generated_root / 'vglobal_exec.cpp',
+    ):
+        subprocess.run(
+            [
+                compiler,
+                '-E',
+                *(flag for root in include_roots for flag in ('-I', str(root))),
+                str(source_path),
+                '-o',
+                os.devnull,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+
 def test_single_isa_skips_dbt_generation(tmp_path, capsys):
     args = SimpleNamespace(
         isafiles=[f'cdna1:{_mrisa_dir() / "amdgpu_isa_cdna1.xml"}'],
