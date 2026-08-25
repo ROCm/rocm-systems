@@ -36,6 +36,8 @@
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 
+#include <memory>
+
 using namespace rocprofiler::counters::test_constants;
 using namespace rocprofiler;
 
@@ -121,6 +123,20 @@ noop_dispatch_cb(rocprofiler_agent_id_t,
 
 void noop_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {}
 
+// noop_dispatch_cb declines every dispatch, which is enough to exercise the agent filter but
+// never produces a control packet. Tests that need a real packet ask for one here.
+rocprofiler_thread_trace_control_flags_t
+start_stop_dispatch_cb(rocprofiler_agent_id_t,
+                       rocprofiler_queue_id_t,
+                       rocprofiler_async_correlation_id_t,
+                       rocprofiler_kernel_id_t,
+                       rocprofiler_dispatch_id_t,
+                       void*,
+                       rocprofiler_user_data_t*)
+{
+    return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
+}
+
 rocprofiler_context_id_t
 make_att_context(rocprofiler_agent_id_t agent_id)
 {
@@ -128,6 +144,17 @@ make_att_context(rocprofiler_agent_id_t agent_id)
     EXPECT_EQ(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
                   ctx, agent_id, nullptr, 0, noop_dispatch_cb, noop_shader_cb, nullptr),
+              ROCPROFILER_STATUS_SUCCESS);
+    return ctx;
+}
+
+rocprofiler_context_id_t
+make_tracing_att_context(rocprofiler_agent_id_t agent_id)
+{
+    auto ctx = rocprofiler_context_id_t{0};
+    EXPECT_EQ(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_configure_dispatch_thread_trace_service(
+                  ctx, agent_id, nullptr, 0, start_stop_dispatch_cb, noop_shader_cb, nullptr),
               ROCPROFILER_STATUS_SUCCESS);
     return ctx;
 }
@@ -253,5 +280,68 @@ TEST(thread_trace_per_agent, write_hook_ignores_dispatches_on_other_agents)
     }
 
     ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
+}
+
+// Two ATT contexts on disjoint agents are allowed to run at once, and the completion hook
+// hands every registered tracer the same instrumentation packets. Each tracer therefore has to
+// recognize its own: matching on packet type alone would let the context that did not
+// instrument the dispatch decrement its own outstanding count, after which it starts skipping
+// the completions it does own, because post_kernel_call bails out once that count reaches zero.
+TEST(thread_trace_per_agent, completion_on_one_agent_leaves_other_tracers_untouched)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = get_two_agents();
+    if(!agents.second) GTEST_SKIP() << "fewer than two GPU agents available";
+
+    auto ctx_a = make_tracing_att_context(agents.first->get_rocp_agent()->id);
+    auto ctx_b = make_tracing_att_context(agents.second->get_rocp_agent()->id);
+    ASSERT_EQ(rocprofiler_start_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_start_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
+
+    auto* ctx_a_p = context::get_mutable_registered_context(ctx_a);
+    auto* ctx_b_p = context::get_mutable_registered_context(ctx_b);
+    ASSERT_TRUE(ctx_a_p != nullptr && ctx_a_p->dispatch_thread_trace);
+    ASSERT_TRUE(ctx_b_p != nullptr && ctx_b_p->dispatch_thread_trace);
+
+    auto& tracer_a = *ctx_a_p->dispatch_thread_trace;
+    auto& tracer_b = *ctx_b_p->dispatch_thread_trace;
+
+    auto queue_a     = hsa::PerAgentFakeQueue{*agents.first, {.handle = 701}};
+    auto packet      = hsa::rocprofiler_packet{};
+    auto corr_id     = context::correlation_id{};
+    corr_id.internal = 7007;
+    auto user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
+
+    auto inst_pkt      = hsa::inst_pkt_t{};
+    bool is_serialized = false;
+    thread_trace::write_hook(
+        queue_a, packet, 42, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
+
+    if(inst_pkt.empty())
+    {
+        ASSERT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+        ASSERT_EQ(rocprofiler_stop_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
+        GTEST_SKIP() << "no ATT control packet available on this agent";
+    }
+
+    EXPECT_EQ(tracer_a.post_move_data.load(), 1);
+    const auto outstanding_b = tracer_b.post_move_data.load();
+
+    auto sess =
+        std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = queue_a});
+    auto packet_data      = hsa::packet_data_t{};
+    packet_data.user_data = user_data;
+
+    thread_trace::signal_completion_hook(queue_a, packet, sess, packet_data, inst_pkt, {});
+
+    EXPECT_EQ(tracer_a.post_move_data.load(), 0)
+        << "the context that instrumented the dispatch must drain it";
+    EXPECT_EQ(tracer_b.post_move_data.load(), outstanding_b)
+        << "a completion on an agent outside the context must not change its accounting";
+
+    ASSERT_EQ(rocprofiler_stop_context(ctx_a), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_stop_context(ctx_b), ROCPROFILER_STATUS_SUCCESS);
 }
 }  // namespace
