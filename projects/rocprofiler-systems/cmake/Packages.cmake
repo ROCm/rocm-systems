@@ -362,6 +362,18 @@ if(ROCPROFSYS_BUILD_HIPFILE)
     endif()
 endif()
 
+# Expose ROCPROFSYS_BUILD_HIPFILE as a global compile definition so core (and
+# rocprof-sys-avail) can guard setting registration, matching AINIC. The hipFile
+# backend already defines this on its INTERFACE target, but core does not link
+# that target, so without this the settings would still be advertised in builds
+# that cannot collect them.
+if(ROCPROFSYS_BUILD_HIPFILE)
+    target_compile_definitions(
+        rocprofiler-systems-compile-definitions
+        INTERFACE ROCPROFSYS_BUILD_HIPFILE=1
+    )
+endif()
+
 # ----------------------------------------------------------------------------------------#
 #
 # Profiler Hub

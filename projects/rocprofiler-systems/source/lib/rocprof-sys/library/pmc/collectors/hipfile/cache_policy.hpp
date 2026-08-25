@@ -67,10 +67,11 @@ struct cache_policy
             // ABSOLUTE is accurate for both shapes here: the counters are cumulative
             // totals and the bandwidths are instantaneous rates. Neither is a delta.
             trace_cache::get_metadata_registry().add_pmc_info(
-                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, name,
-                  metric.suffix, trait::name<category::hipfile>::description,
-                  LONG_DESCRIPTION, COMPONENT, metric.unit,
-                  rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+                { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+                  pmc_name(metric.suffix), metric.suffix,
+                  trait::name<category::hipfile>::description, LONG_DESCRIPTION,
+                  COMPONENT, metric.unit, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+                  EXPRESSION, 0, 0, "{}" });
         }
     }
 
@@ -100,13 +101,16 @@ struct cache_policy
         {
             if((active & (1U << metric.bit)) == 0U) continue;
 
+            // Display label for the counter track, and the device-independent identifier
+            // RocPD joins on. Perfetto shows the former; rocpd_info_pmc stores the
+            // latter.
             const auto name = track_name(device_id, metric.suffix);
 
             trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
                 static_cast<std::size_t>(category_enum_id<category::hipfile>::value),
                 name, timestamp, "{}", 0, 0, 0, "{}", "{}",
                 static_cast<std::uint32_t>(device_id),
-                static_cast<std::uint8_t>(agent_type::GPU), name,
+                static_cast<std::uint8_t>(agent_type::GPU), pmc_name(metric.suffix),
                 metric.value(metric_values), std::nullopt });
         }
     }

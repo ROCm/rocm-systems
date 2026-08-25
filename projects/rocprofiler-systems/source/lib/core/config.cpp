@@ -636,11 +636,13 @@ configure_settings(bool _init)
                               "vcn_activity, jpeg_activity and memory usage",
                               true, "backend", "amd_smi", "rocm", "process_sampling");
 
+#if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
     ROCPROFSYS_CONFIG_SETTING(
         bool, env_vars::USE_HIPFILE,
         "Enable periodic sampling of hipFile GPU-direct storage I/O statistics "
         "(bytes, bandwidth, op counts, errors). Requires the target application to "
-        "use hipFile; sets HIPFILE_STATS_LEVEL=1 automatically.",
+        "use hipFile. Collection needs hipFile's statistics server "
+        "(HIPFILE_STATS_LEVEL, default 1); 0 disables it and yields no telemetry.",
         false, "backend", "hipfile", "rocm", "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
@@ -648,8 +650,9 @@ configure_settings(bool _init)
         "hipFile metrics to collect: bytes, ops, fastpath, fallback, unaligned, errors, "
         "bandwidth. Each name selects both the read and the write track. An empty value "
         "implies 'all' and 'none' suppresses all.",
-        "fastpath, fallback, bandwidth", "backend", "hipfile", "rocm",
+        "fastpath, fallback, bandwidth, bytes, errors", "backend", "hipfile", "rocm",
         "process_sampling");
+#endif
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SAMPLING,
                               "Enable statistical sampling of call-stack", false,
@@ -1629,14 +1632,29 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set(env_vars::USE_AMD_SMI, false);
     }
 
+#if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
     if(_config->get<bool>(std::string{ env_vars::USE_HIPFILE }))
     {
-        // Ask libhipfile to enable its stats server. hipFile reads this once, the first
-        // time it initializes, so it has to be set during configuration rather than when
-        // the PMC sampler starts - by then the target may already have initialized
-        // hipFile and the setting would be ignored. Never overrides an explicit level.
-        rocprofsys::set_env(env_vars::HIPFILE_STATS_LEVEL, "1", 0);
+        // hipFile already defaults HIPFILE_STATS_LEVEL to 1, so injecting "1" here is a
+        // no-op. Do not override an explicit 0 either: that is the user's choice to turn
+        // hipFile's stats server off. Warn, because the combination produces empty
+        // telemetry despite ROCPROFSYS_USE_HIPFILE=ON.
+        if(rocprofsys::get_env<int>(env_vars::HIPFILE_STATS_LEVEL, 1) == 0)
+        {
+            LOG_WARNING("ROCPROFSYS_USE_HIPFILE=ON but HIPFILE_STATS_LEVEL=0; hipFile's "
+                        "statistics server is disabled, so no hipFile telemetry will be "
+                        "recorded. Unset HIPFILE_STATS_LEVEL or set it to 1 or higher");
+        }
+        if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
+        {
+            LOG_WARNING(
+                "ROCPROFSYS_USE_HIPFILE=ON but ROCPROFSYS_USE_PROCESS_SAMPLING=OFF; "
+                "the hipFile collector runs on the process-sampling thread, so no "
+                "hipFile telemetry will be recorded. Set "
+                "ROCPROFSYS_USE_PROCESS_SAMPLING=ON");
+        }
     }
+#endif
 
     if(_config->get<bool>(std::string{ env_vars::USE_KOKKOSP }))
     {
@@ -2327,8 +2345,12 @@ get_use_amd_smi()
 bool
 get_use_hipfile()
 {
+#if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
     static auto _v = get_config()->find(std::string{ env_vars::USE_HIPFILE });
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+#else
+    return false;
+#endif
 }
 
 bool&

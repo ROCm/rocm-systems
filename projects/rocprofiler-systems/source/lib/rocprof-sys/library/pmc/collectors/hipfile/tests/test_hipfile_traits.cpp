@@ -98,6 +98,14 @@ TEST_F(HipFileTraitsTest, disabled_filter_enumerates_nothing)
     EXPECT_TRUE(enumerate().empty());
 }
 
+TEST_F(HipFileTraitsTest, no_metrics_enabled_enumerates_nothing)
+{
+    stub_settings::visible_gpus          = 4;
+    stub_settings::hipfile_metrics.value = 0U;
+
+    EXPECT_TRUE(enumerate().empty());
+}
+
 TEST_F(HipFileTraitsTest, specific_filter_selects_requested_ordinals)
 {
     stub_settings::visible_gpus       = 4;

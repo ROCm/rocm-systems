@@ -15,7 +15,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   cumulative and the bandwidths are normalized to wall-clock time over the
   sampling interval, matching the conventions of the existing AMD SMI PCIe, XGMI,
   and AI NIC metrics. Select metrics with `ROCPROFSYS_HIPFILE_METRICS`, which
-  defaults to `fastpath, fallback, bandwidth` and accepts `all`, `none`, or any of
+  defaults to `fastpath, fallback, bandwidth, bytes, errors` and accepts `all`, `none`, or any of
   `bytes`, `ops`, `fastpath`, `fallback`, `unaligned`, `errors`, and `bandwidth`;
   select GPUs with `ROCPROFSYS_SAMPLING_GPUS`. Requires hipFile 0.5.0 or later, which
   is where the per-GPU statistics API first appears; the build is disabled

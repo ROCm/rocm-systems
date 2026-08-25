@@ -45,8 +45,7 @@ TEST_F(HipFileBackendTest, field_mapping_is_exhaustive)
     mock_backend backend{};
     const auto&  out = backend.get_stats(TS_1).per_gpu[0];
 
-    // Every field distinct so a transposed or duplicated mapping cannot pass. This is
-    // the guard for the writes_bytes/write_bytes class of bug.
+    // Every field distinct so a transposed or duplicated mapping cannot pass.
     EXPECT_EQ(out.read_bytes, 4096U);
     EXPECT_EQ(out.write_bytes, 8192U);
     EXPECT_EQ(out.read_ops, 10U);

@@ -139,10 +139,10 @@ struct settings_policy
      * @brief hipFile metrics selected by ROCPROFSYS_HIPFILE_METRICS.
      *
      * Accepts "all"/"on", "none"/"off", or a comma or semicolon separated list of group
-     * keys (e.g. "fastpath,fallback,bandwidth"), case-insensitively. Each key selects a
-     * read/write pair. The setting's own default ("fastpath, fallback, bandwidth") is
-     * registered in config.cpp; the "all" below applies only when the setting is absent
-     * entirely, as it is in unit tests.
+     * keys (e.g. "fastpath,fallback,bandwidth,bytes,errors"), case-insensitively. Each
+     * key selects a read/write pair. The setting's own default ("fastpath, fallback,
+     * bandwidth, bytes, errors") is registered in config.cpp; the "all" below applies
+     * only when the setting is absent entirely, as it is in unit tests.
      */
     static hipfile::enabled_metrics get_hipfile_enabled_metrics()
     {
