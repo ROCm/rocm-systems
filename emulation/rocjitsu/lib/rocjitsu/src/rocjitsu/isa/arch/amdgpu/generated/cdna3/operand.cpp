@@ -40,6 +40,10 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value)
     if (!((encoding_value >= 0 && encoding_value <= 0)))
       defer_encoding_error(EncodingError::InvalidSelector);
     break;
+  case OperandType::OPR_GPUMEM:
+    if (!((encoding_value >= 0 && encoding_value <= 0)))
+      defer_encoding_error(EncodingError::InvalidSelector);
+    break;
   case OperandType::OPR_PC:
     if (!((encoding_value >= 0 && encoding_value <= 0)))
       defer_encoding_error(EncodingError::InvalidSelector);
@@ -219,6 +223,11 @@ std::string Operand::name() const {
   case OperandType::OPR_FLAT_SCRATCH: {
     if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH_ALL)
       return "flat_scratch_all";
+    break;
+  }
+  case OperandType::OPR_GPUMEM: {
+    if (encoding_value_ == OpSelGpumem::OPR_GPUMEM_GPUMEM)
+      return "gpumem";
     break;
   }
   case OperandType::OPR_PC: {
@@ -944,6 +953,9 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   case OperandType::OPR_FLAT_SCRATCH: {
+    break;
+  }
+  case OperandType::OPR_GPUMEM: {
     break;
   }
   case OperandType::OPR_PC: {

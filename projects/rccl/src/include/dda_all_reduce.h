@@ -29,8 +29,23 @@ ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t
                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 // LL-protocol fabric path (small-message fast lane, flag-based sync, no barrier).
+//
+// The tier has two variants -- one-shot, and a two-shot that transports only the
+// shard each rank owns (count/nRanks per peer instead of count). Picking between
+// them, including the DDA_LL / DDA_LL_TWOSHOT enables and thresholds, is internal
+// to dda_all_reduce_fabric_ll.cu: Eligible reports whether either variant claims
+// the message, and the entry point launches whichever one did.
 bool ncclAllReduceDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                       ncclDataType_t datatype, ncclRedOp_t op);
+
+// The per-variant predicates the gate above is the disjunction of. Declared here
+// so unit tests can exercise one tier without the other masking it; hidden in
+// Release by -fvisibility=hidden, as the rest of the internal surface is.
+bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                            ncclDataType_t datatype, ncclRedOp_t op);
+
+bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                            ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                       ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);

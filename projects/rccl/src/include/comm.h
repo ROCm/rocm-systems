@@ -706,6 +706,9 @@ struct ncclComm {
   // Force PAT algorithm for this communicator
   bool forcePatEnable;
 
+  // PAT ReduceScatter and AllGather share one connection set; must match on every rank
+  bool patSharedQps;
+
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available
   struct cliqueInfo clique; // Our MNNVL clique information
