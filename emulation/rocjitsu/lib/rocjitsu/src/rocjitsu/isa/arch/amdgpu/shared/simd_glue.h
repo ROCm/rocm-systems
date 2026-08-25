@@ -630,10 +630,9 @@ inline util::native<double> finish_f64_mode_simd(util::native<double> value, uin
 /// Per-half f32 reader for the packed-f32 VOP3P family (v_pk_add/mul/fma_f32).
 /// In a VGPR pair {N, N+1}, register N holds the LO f32 of every lane and N+1
 /// the HI f32, so each half is a native-width native<float> read of one
-/// register (no 64-bit-lane / narrow32 detour). For a non-VGPR source the
-/// pk_f32 scalar bodies splat the single 32-bit operand into BOTH halves, so
-/// lo == hi == broadcast(read_scalar). The `p.lo != nullptr` gate is bit-exact
-/// to the scalar's `encoding_value_ in [256,511]` VGPR-range test.
+/// register (no 64-bit-lane / narrow32 detour). Scalar-backed pair views follow
+/// read_lane_pair32: 64-bit register pairs and literal64 operands preserve
+/// distinct words, while inline, literal32, and other single-word sources splat.
 struct PkF32Halves {
   util::native<float> lo;
   util::native<float> hi;
@@ -3835,7 +3834,8 @@ template <typename Inst, typename Op>
 /// (op_sel == 0, op_sel_hi == 3) bails to scalar otherwise — under default
 /// packing the lo result comes from the lo halves and hi from the hi halves.
 /// neg/neg_hi bits 0/1 sign-flip the respective half. No clamp on any pk_f32
-/// scalar body. Non-VGPR sources splat the 32-bit operand into both halves.
+/// scalar body. Scalar-backed sources use the same pair-or-splat contract as
+/// read_lane_pair32.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &inst, Wavefront &wf,

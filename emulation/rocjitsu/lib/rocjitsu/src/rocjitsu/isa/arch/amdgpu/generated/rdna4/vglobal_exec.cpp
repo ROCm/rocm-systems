@@ -422,7 +422,6 @@ void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_size = wf.wf_size();
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
     int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -450,7 +449,6 @@ void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_size = wf.wf_size();
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
     int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

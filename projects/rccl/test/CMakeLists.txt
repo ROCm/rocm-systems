@@ -42,6 +42,20 @@ if(BUILD_TESTS)
   # pipeline instead -- see test/host/run_host_tests.sh (the `guards` phase,
   # folded into `run`).
 
+  # CPU-only net_telemetry unit test: net_telemetry.cc depends only on libc and
+  # pthread, so this compiles it directly with its own harness (no GPU, no gtest,
+  # no librccl) and runs under CTest, returning non-zero on any failed CHECK.
+  find_package(Threads REQUIRED)
+  add_executable(rccl-UnitTestsNetTelemetry
+    ${PROJECT_SOURCE_DIR}/test/net_telemetry_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/transport/net_telemetry.cc
+  )
+  target_include_directories(rccl-UnitTestsNetTelemetry PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_link_libraries(rccl-UnitTestsNetTelemetry PRIVATE Threads::Threads)
+  add_test(NAME rccl-UnitTestsNetTelemetry COMMAND rccl-UnitTestsNetTelemetry)
+  rocm_install(TARGETS rccl-UnitTestsNetTelemetry COMPONENT tests)
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
@@ -445,6 +459,22 @@ if(BUILD_TESTS)
       net_ib_header_symlinks rma_header_symlinks)
   endif()
 
+  # GIN Anvil-SDMA put-segmentation host unit test (no GPU). Pure host C++: the
+  # segment-math header (nccl_device/gin/anvil_sdma/gin_anvil_sdma_put_policy.h) is
+  # compiled with GIN_SDMA_HOST_ONLY so it needs neither a built librccl nor device
+  # codegen. It exercises the exact ginPutSegmentCount/ginPutSegmentAt the SDMA
+  # backend Put drives on device. Runs under `ctest -L unit`.
+  add_executable(rccl-UnitTestsGinSdmaPolicy gin/gin_sdma_policy_test.cpp)
+  set_source_files_properties(gin/gin_sdma_policy_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinSdmaPolicy PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_compile_definitions(rccl-UnitTestsGinSdmaPolicy PRIVATE GIN_SDMA_HOST_ONLY)
+  target_link_libraries(rccl-UnitTestsGinSdmaPolicy PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
+  set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
   # librccl.so which are only visible in Debug builds (hidden visibility in Release).
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400" AND CMAKE_BUILD_TYPE MATCHES "Debug")
@@ -472,6 +502,7 @@ if(BUILD_TESTS)
       PluginCompatV10_test.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp
+      PatAlgorithmTests.cpp
       RcclWrapTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
@@ -682,6 +713,7 @@ if(BUILD_TESTS)
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
+      SymmetricAbortCheckModeMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
