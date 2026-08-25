@@ -248,7 +248,7 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
 | Trackability classifier | `source/lib/rocprofiler-sdk/kernel_replay/utils.cpp` | `query_alloc()` |
 | Tracking activation | `source/lib/rocprofiler-sdk/callback_tracing.cpp` | `rocprofiler_configure_callback_tracing_service()` |
-| Snapshot-declined fallback | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `snapshot.ok` branch in `WriteInterceptor` |
+| Snapshot-declined fallback | `source/lib/rocprofiler-sdk/kernel_replay/queue_hooks.cpp` | `snapshot.ok` branch in `run_replay_window()` |
 | HIP graph warn-once + run-once | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `_warned_graph_replay`; `graph_launch_active` excluded from the replay gate |
 | Tests (GPU) | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `snap_restore.cpp`, `snap_allocator_patterns.cpp`, `snap_region_scaling.cpp`, `snap_bandwidth.cpp`, `snap_kernels.{hpp,cpp}` |
 | Tests (no GPU) | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `replay_diagnostics.cpp` |

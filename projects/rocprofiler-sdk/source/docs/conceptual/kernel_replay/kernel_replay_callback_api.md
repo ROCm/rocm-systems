@@ -268,5 +268,5 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Dispatch info population | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `make_dispatch_info()` |
 | Operation name/id queries | `source/lib/rocprofiler-sdk/kernel_replay/kernel_replay.cpp` | `name_by_id()`, `id_by_name()` |
 | Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_start_context()`, `replay_local_stop_context()` |
-| Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
+| Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/kernel_replay/queue_hooks.cpp` | `run_replay_window()` |
 | Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context.cpp` |

@@ -49,9 +49,10 @@ experimental/kernel_replay.h            public payload struct (callback tracing 
         |     memory_tracker.cpp        HSA allocate/free hooks, per-agent allocation inventory
         |     memory_snapshot.cpp       snap()/restore(), module-scope variable capture
         |     replay_diagnostics.cpp    admission control, decline reasons, per-dispatch reporting
+        |     queue_hooks.cpp           the replay window: per-agent lock, drains, pass loop
         |     utils.cpp                 trackable-allocation classifier
         |
-        +-- hsa/queue.cpp               the replay window: per-agent lock, drains, pass loop
+        +-- hsa/queue.cpp               dispatch eligibility gate; calls run_replay_window()
 ```
 
 Because replay is a callback tracing service rather than a counter-collection mode, it is not tied to
