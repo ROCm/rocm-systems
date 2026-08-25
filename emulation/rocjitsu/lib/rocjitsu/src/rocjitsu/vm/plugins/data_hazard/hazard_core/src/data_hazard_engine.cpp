@@ -149,7 +149,8 @@ void track_pending_raw_isa(EngineWaveState &wave, const EngineInstructionContext
   wave.pending_raw_isa[ctx.instruction_id] = raw_isa_from_context(ctx);
 }
 
-EngineGlobalAccessInfo make_global_access_info(const EngineInstructionContext &ctx) {
+EngineGlobalAccessInfo make_global_access_info(const EngineInstructionContext &ctx,
+                                               const ResourceAccessEvent &event) {
   EngineGlobalAccessInfo info;
   info.dispatch_id = ctx.dispatch_id;
   info.cluster_id = ctx.cluster_id;
@@ -158,6 +159,7 @@ EngineGlobalAccessInfo make_global_access_info(const EngineInstructionContext &c
   info.instruction_id = ctx.instruction_id;
   info.pc = ctx.pc;
   info.raw_isa = ctx.raw_isa;
+  info.is_write = event.is_write;
   info.valid = true;
   return info;
 }
@@ -237,12 +239,15 @@ uint8_t entry_byte_mask(uint64_t entry_address, uint64_t start, uint64_t end) {
 }
 
 /// A retained access that @p ctx would race with over @p byte_mask, or null when
-/// every overlapping access belongs to the accessing workgroup.
+/// every overlapping access belongs to the accessing workgroup. @p writers_only
+/// narrows the search to accesses that wrote, which is all a read conflicts
+/// with; slots holding a single kind of access pass it as false.
 const EngineGlobalAccessInfo *find_conflicting_access(const EngineGlobalAccessSlots &slots,
                                                       const EngineInstructionContext &ctx,
-                                                      uint8_t byte_mask) {
+                                                      uint8_t byte_mask, bool writers_only) {
   for (const auto &slot : slots) {
-    if (slot.valid && (slot.byte_mask & byte_mask) != 0 && !same_workgroup(slot, ctx))
+    if (slot.valid && (slot.byte_mask & byte_mask) != 0 && !same_workgroup(slot, ctx) &&
+        (!writers_only || slot.is_write))
       return &slot;
   }
   return nullptr;
@@ -1298,7 +1303,7 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
   const uint64_t end = event.address > max_address - event.size_bytes
                            ? max_address
                            : event.address + event.size_bytes;
-  auto current = make_global_access_info(ctx);
+  auto current = make_global_access_info(ctx, event);
 
   std::vector<EngineWarning> warnings_to_emit;
   {
@@ -1311,24 +1316,32 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
       if (!entry.race_reported) {
         const EngineGlobalAccessInfo *conflicting_access = nullptr;
         const char *conflict_type = nullptr;
-        const auto *conflicting_writer = find_conflicting_access(entry.writers, ctx, byte_mask);
+        // The first conflict found is the one reported, so a write conflict is
+        // looked for before a read conflict rather than replacing it later.
+        auto take = [&](const EngineGlobalAccessInfo *candidate, const char *type) {
+          if (conflicting_access != nullptr || candidate == nullptr)
+            return;
+          conflicting_access = candidate;
+          conflict_type = type;
+        };
 
-        if (event.is_write && !event.is_atomic) {
-          if (conflicting_writer) {
-            conflicting_access = conflicting_writer;
-            conflict_type = "WAW";
-          } else if (const auto *reader = find_conflicting_access(entry.readers, ctx, byte_mask)) {
-            conflicting_access = reader;
-            conflict_type = "WAR";
-          }
-        } else if (event.is_read && !event.is_atomic) {
-          if (conflicting_writer) {
-            conflicting_access = conflicting_writer;
-            conflict_type = "RAW";
-          }
-        } else if (event.is_atomic && conflicting_writer) {
-          conflicting_access = conflicting_writer;
-          conflict_type = event.is_write ? "WAW" : "RAW";
+        // Named for what this access does to what it found: reaching an earlier
+        // writer is WAW or RAW, and only a write conflicts with an earlier
+        // reader, which makes that one WAR.
+        const char *const against_writer = event.is_write ? "WAW" : "RAW";
+        take(find_conflicting_access(entry.writers, ctx, byte_mask, /*writers_only=*/false),
+             against_writer);
+        // Atomics order themselves against each other, so an atomic weighs only
+        // the ordinary history while an ordinary access also weighs the atomics.
+        if (!event.is_atomic)
+          take(find_conflicting_access(entry.atomics, ctx, byte_mask, /*writers_only=*/true),
+               against_writer);
+        if (event.is_write) {
+          take(find_conflicting_access(entry.readers, ctx, byte_mask, /*writers_only=*/false),
+               "WAR");
+          if (!event.is_atomic)
+            take(find_conflicting_access(entry.atomics, ctx, byte_mask, /*writers_only=*/false),
+                 "WAR");
         }
 
         if (conflicting_access) {
@@ -1340,11 +1353,14 @@ void DataHazardEngine::check_global_access_for_races(const EngineInstructionCont
         }
       }
 
-      if (event.is_write && !event.is_atomic)
-        record_access(entry.writers, ctx, current);
-      if (event.is_read && !event.is_atomic &&
-          !covered_by_same_workgroup(entry.writers, ctx, byte_mask))
-        record_access(entry.readers, ctx, current);
+      if (event.is_atomic) {
+        record_access(entry.atomics, ctx, current);
+      } else {
+        if (event.is_write)
+          record_access(entry.writers, ctx, current);
+        if (event.is_read && !covered_by_same_workgroup(entry.writers, ctx, byte_mask))
+          record_access(entry.readers, ctx, current);
+      }
 
       if (addr > max_address - kGlobalShadowAlignment)
         break;

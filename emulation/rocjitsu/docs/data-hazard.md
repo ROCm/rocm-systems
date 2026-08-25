@@ -123,7 +123,9 @@ process exit. While a run is still going the sink is the only output.
   within one barrier epoch and at least one of them writes.
 - **Cross-workgroup global races**: two workgroups touch overlapping global
   bytes and at least one writes. Sub-dword accesses that fall in the same
-  four-byte shadow entry without sharing a byte do not race.
+  four-byte shadow entry without sharing a byte do not race. Two atomics to one
+  address are ordered by the hardware and do not race, but an ordinary access
+  racing an atomic is reported whichever of the two ran first.
 
 Every report names the wait that would have prevented it, and the suggestion
 names the same resource the message names — a register hazard suggests waiting
@@ -214,10 +216,10 @@ python -m mutate_and_test --hazard-detection --arch gfx950 shaders/*.hip
   mutation harness excludes it by default.
 
 - **Two workgroups retained per global address**: a four-byte shadow entry keeps
-  two writers and two readers, each pair on distinct workgroups, which is enough
-  for any pair that overlaps to be reported. Three or more workgroups writing
-  mutually disjoint bytes of one dword exhaust the slots, and the displaced
-  workgroup is no longer available as a conflict partner.
+  two writers, two readers and two atomics, each pair on distinct workgroups,
+  which is enough for any pair that overlaps to be reported. Three or more
+  workgroups writing mutually disjoint bytes of one dword exhaust the slots, and
+  the displaced workgroup is no longer available as a conflict partner.
 
 - **Kernel name resolution**: names come from the code object; unresolved
   symbols appear as `?`.

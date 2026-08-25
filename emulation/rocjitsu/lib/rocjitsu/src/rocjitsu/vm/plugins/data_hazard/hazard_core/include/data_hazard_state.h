@@ -233,6 +233,10 @@ struct EngineGlobalAccessInfo {
   /// spans four bytes, so accesses narrower than a dword share one without
   /// addressing the same memory; they conflict only where their masks meet.
   uint8_t byte_mask = 0;
+  /// Whether the access wrote the bytes it covers, which is what decides
+  /// whether a later read conflicts with it. An atomic read-modify-write
+  /// counts as a write.
+  bool is_write = false;
   bool valid = false;
 };
 
@@ -247,6 +251,12 @@ using EngineGlobalAccessSlots = std::array<EngineGlobalAccessInfo, 2>;
 struct EngineGlobalShadowEntry {
   EngineGlobalAccessSlots writers;
   EngineGlobalAccessSlots readers;
+  /// Atomic accesses, kept in slots of their own. They have to be retained or
+  /// an ordinary access arriving after one has nothing to conflict with, and
+  /// they have to stay apart from the ordinary history or an atomic would
+  /// displace the ordinary access of its own workgroup and excuse a later
+  /// atomic that the ordinary access still races.
+  EngineGlobalAccessSlots atomics;
   bool race_reported = false;
 };
 
