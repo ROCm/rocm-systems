@@ -5,6 +5,7 @@
 
 #include "rocjitsu/analysis/control_flow.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -2499,7 +2500,9 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, const Instruction &inst,
 }
 
 void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &inst,
-                            std::span<const uint8_t> text) {
+                            std::span<const uint8_t> text, rj_code_arch_t arch) {
+  if (!isa_properties(arch).mode_has_gpr_idx_en)
+    return;
   constexpr uint16_t kGprIdxEnableBit = 27;
   const std::string_view mnemonic = inst.mnemonic();
   if (mnemonic == "s_set_gpr_idx_on") {
@@ -2768,7 +2771,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
             }
           }
           update_vgpr_mode(mode, inst, ctx.text);
-          update_gpr_idx_enabled(gpr_idx_enabled, inst, ctx.text);
+          update_gpr_idx_enabled(gpr_idx_enabled, inst, ctx.text, ctx.arch);
         }
         if (unsupported)
           break;
@@ -3148,7 +3151,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       }
 
       update_vgpr_mode(state.vgpr_msb_imm, inst, ctx.text);
-      update_gpr_idx_enabled(state.gpr_idx_enabled, inst, ctx.text);
+      update_gpr_idx_enabled(state.gpr_idx_enabled, inst, ctx.text, ctx.arch);
     }
     publish_builders();
     return state;

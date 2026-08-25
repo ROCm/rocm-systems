@@ -604,6 +604,19 @@ static amdsmi_status_t convert_errno_to_amdsmi_status(int errno_val) {
   }
 }
 
+// The reinterpret_cast in amdsmi_alloc_fabric_telemetry() below aliases the UALoE
+// telemetry allocation onto the amdsmi structs. These guards fail the build if a
+// UALoE re-sync diverges the element layouts or drops below amd-smi's category count.
+static_assert(static_cast<int>(AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX) <=
+                  static_cast<int>(UALOE_TELEMETRY_CATEGORY_MAX),
+              "amdsmi fabric telemetry categories must not exceed UALoE categories");
+static_assert(sizeof(amdsmi_fabric_telemetry_item_t) == sizeof(ualoe_telemetry_item_t),
+              "amdsmi/UALoE telemetry item layout diverged");
+static_assert(sizeof(amdsmi_fabric_telemetry_instance_t) == sizeof(ualoe_telemetry_instance_t),
+              "amdsmi/UALoE telemetry instance layout diverged");
+static_assert(sizeof(amdsmi_fabric_telemetry_dataset_t) == sizeof(ualoe_telemetry_dataset_t),
+              "amdsmi/UALoE telemetry dataset layout diverged");
+
 amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_handle,
                                               uint32_t category_mask,
                                               amdsmi_fabric_telemetry_t** telemetry) {
@@ -641,7 +654,9 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
     return convert_errno_to_amdsmi_status(ret);
   }
 
-  // Cast UALoE telemetry directly to AMDSMI telemetry since structures are now binary compatible
+  // Element layouts match (see the static_asserts above) and UALoE owns the
+  // allocation; amd-smi reads only categories [0, AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX),
+  // so aliasing the larger UALoE struct onto the amdsmi struct is safe.
   *telemetry = reinterpret_cast<amdsmi_fabric_telemetry_t*>(ualoe_tel);
 
   return AMDSMI_STATUS_SUCCESS;

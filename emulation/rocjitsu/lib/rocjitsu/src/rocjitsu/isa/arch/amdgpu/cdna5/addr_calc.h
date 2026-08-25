@@ -61,6 +61,10 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
 void ds_calculate_addresses(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
                             amdgpu::VectorMemState &d);
 
+/// @brief Compute CDNA5 DS transpose addresses with EXEC treated as all ones.
+void ds_calculate_addresses_all_lanes(const VdsMachineInst &inst, amdgpu::Wavefront &wf,
+                                      amdgpu::VectorMemState &d);
+
 inline amdgpu::Mtype mtype_from_bits(bool sc0, bool sc1) {
   if (sc1)
     return amdgpu::Mtype::UC;
