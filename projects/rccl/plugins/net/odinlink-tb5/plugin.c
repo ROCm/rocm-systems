@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 /*
+ * Copyright (c) OdinLink-Five contributors
+ * https://github.com/Geramy/OdinLink-Five
+ *
  * OdinLink Thunderbolt 5 - NCCL/RCCL Net Plugin
  *
  * Implements the NCCL net plugin ABI (versions v6 through v12) backed by the

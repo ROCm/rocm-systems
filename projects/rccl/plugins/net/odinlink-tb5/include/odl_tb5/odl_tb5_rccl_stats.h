@@ -1,4 +1,8 @@
+/* SPDX-License-Identifier: MIT */
 /*
+ * Copyright (c) OdinLink-Five contributors
+ * https://github.com/Geramy/OdinLink-Five
+ *
  * OdinLink Thunderbolt 5 - RCCL Shared-Memory Stats Definition
  */
 #ifndef ODL_TB5_RCCL_STATS_H

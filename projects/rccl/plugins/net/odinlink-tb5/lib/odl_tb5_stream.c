@@ -1,5 +1,8 @@
-// SPDX-License-Identifier: MIT
+/* SPDX-License-Identifier: MIT */
 /*
+ * Copyright (c) OdinLink-Five contributors
+ * https://github.com/Geramy/OdinLink-Five
+ *
  * OdinLink Thunderbolt 5 - Stream-Based Multiplexed I/O
  */
 #include <odl_tb5/odl_tb5.h>

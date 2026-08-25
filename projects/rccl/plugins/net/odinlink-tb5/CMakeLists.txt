@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: MIT
+#
+# Copyright (c) OdinLink-Five contributors
+# https://github.com/Geramy/OdinLink-Five
+#
 # OdinLink Thunderbolt 5 / USB4 RCCL net plugin (librccl-net-odl_tb5.so)
 #
 # Can be built two ways:

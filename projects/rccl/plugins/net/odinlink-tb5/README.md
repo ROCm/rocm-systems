@@ -45,7 +45,15 @@ In-tree (optional): configure RCCL with `BUILD_PLUGIN_EXAMPLES=ON`.
 
 ## Use
 
+Disable PCIe ASPM on every node before running. ASPM power-saving states add
+microseconds of exit latency on the Thunderbolt / USB4 tunnel; `performance`
+keeps the link fully active.
+
 ```bash
+echo performance | sudo tee /sys/module/pcie_aspm/parameters/policy
+cat /sys/module/pcie_aspm/parameters/policy
+# expect: [performance] ...
+
 # Kernel module from OdinLink-Five
 sudo insmod /path/to/odl_tb5.ko
 
@@ -70,5 +78,11 @@ Shared-memory stats are published at `/run/odl_tb5/rccl_stats` for the OdinLink 
 
 ## License
 
-Userspace plugin and library: MIT, from OdinLink-Five.
-NCCL ABI headers under `nccl/` keep their upstream NVIDIA copyright.
+Userspace plugin and library (`plugin.c`, `lib/`, `include/odl_tb5/`): **MIT**,
+from [OdinLink-Five](https://github.com/Geramy/OdinLink-Five). See [`LICENSE`](LICENSE).
+
+NCCL ABI headers under `nccl/` keep their upstream NVIDIA copyright
+(BSD / Apache-2.0 as marked in each file).
+
+The kernel driver `odl_tb5.ko` is **GPL-2.0** and is **not** vendored in this
+tree. Obtain it from OdinLink-Five.

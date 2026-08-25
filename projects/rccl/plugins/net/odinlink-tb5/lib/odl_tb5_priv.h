@@ -1,4 +1,8 @@
+/* SPDX-License-Identifier: MIT */
 /*
+ * Copyright (c) OdinLink-Five contributors
+ * https://github.com/Geramy/OdinLink-Five
+ *
  * OdinLink Thunderbolt 5 - Private Library Header
  *
  * Internal handle definition shared across library source files.

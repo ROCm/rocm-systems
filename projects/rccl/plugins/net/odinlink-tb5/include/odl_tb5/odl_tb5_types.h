@@ -1,4 +1,8 @@
+/* SPDX-License-Identifier: MIT */
 /*
+ * Copyright (c) OdinLink-Five contributors
+ * https://github.com/Geramy/OdinLink-Five
+ *
  * OdinLink Thunderbolt 5 - Shared Type Definitions
  */
 #ifndef ODL_TB5_TYPES_H

@@ -1,4 +1,8 @@
+/* SPDX-License-Identifier: MIT */
 /*
+ * Copyright (c) OdinLink-Five contributors
+ * https://github.com/Geramy/OdinLink-Five
+ *
  * OdinLink Thunderbolt 5 - Completion Polling and Waiting
  */
 #include "odl_tb5_priv.h"

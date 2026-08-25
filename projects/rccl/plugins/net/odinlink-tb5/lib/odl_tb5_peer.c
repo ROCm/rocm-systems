@@ -1,4 +1,8 @@
+/* SPDX-License-Identifier: MIT */
 /*
+ * Copyright (c) OdinLink-Five contributors
+ * https://github.com/Geramy/OdinLink-Five
+ *
  * OdinLink Thunderbolt 5 - Peer Discovery
  */
 #include "odl_tb5_priv.h"
