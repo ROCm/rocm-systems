@@ -115,6 +115,13 @@ struct ncclIbConnectionMetadata {
   int      senderIbDevIdx;      // sender's IB device index
 };
 
+// Initialize QP sharing fields to defaults (sharing disabled)
+static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr) {
+  attr->isQpSharingEnabled = false;
+  attr->qpSharingGroupIdx = -1;
+  attr->cqDepthMultiplier = 1;
+}
+
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp);

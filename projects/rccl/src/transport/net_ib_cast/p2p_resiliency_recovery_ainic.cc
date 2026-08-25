@@ -50,9 +50,7 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
     //        as of now QP sharing disabled during recovery restore.
     //        to analyze and set sharing accordingly for this QP during recovery restore.
     //        identify if it is primary or secondary comm and set sharing attributes accordingly.
-    createAttr.isQpSharingEnabled = false;
-    createAttr.qpSharingGroupIdx = -1;
-    createAttr.cqDepthMultiplier = 1;
+    IbCastQpCreateAttrInitSharing(&createAttr);
     NCCLCHECK(IbCastQpCreate(localQp, &createAttr));
     localQp->telQpStats = telQpStats;
 
@@ -87,9 +85,7 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
         flushCreateAttr.isDataQp = flushQp->isDataQp;
         // TODO - QP sharing:
         //        disabled for flush QP
-        flushCreateAttr.isQpSharingEnabled = false;
-        flushCreateAttr.qpSharingGroupIdx = -1;
-        flushCreateAttr.cqDepthMultiplier = 1;
+        IbCastQpCreateAttrInitSharing(&flushCreateAttr);
         NCCLCHECK(IbCastQpCreate(flushQp, &flushCreateAttr));
         INFO(NCCL_NET, "NET/IB: %s: Recreated Flush QP on device %d (comm=%p, new_qp_num=%u)", __func__, i,
              recoveryContext->resCtx->baseComm, flushQp->qp->qp_num);
