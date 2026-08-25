@@ -322,6 +322,8 @@ To add a new shader:
    - Print results as JSON array to **stdout**: `[val1,val2,...]`
    - Print `PASS` or `FAIL` to **stderr**
    - Return `EXIT_SUCCESS` on pass, `EXIT_FAILURE` on fail
+   - Make the check reject the zero-initialized output buffer, so a kernel that
+     stores nothing reports `FAIL` rather than `PASS`
 5. From `tests/data-hazard`, run
    `python -m mutate_and_test --hazard-detection shaders/your_shader.hip` to verify
 6. If the kernel only assembles for particular targets, add a
