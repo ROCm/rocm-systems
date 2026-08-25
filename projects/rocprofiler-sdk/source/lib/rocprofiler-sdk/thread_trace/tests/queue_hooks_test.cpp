@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -28,7 +29,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 
 #include <rocprofiler-sdk/experimental/thread_trace.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -108,7 +108,7 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
 
-    auto& agents = hsa::get_queue_controller()->get_supported_agents();
+    auto&                  agents    = hsa::get_queue_controller()->get_supported_agents();
     const hsa::AgentCache* att_agent = nullptr;
     for(const auto& [_, agent] : agents)
     {
@@ -136,23 +136,15 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     ASSERT_TRUE(ctx_p && ctx_p->dispatch_thread_trace);
     auto& tracer = *ctx_p->dispatch_thread_trace;
 
-    hsa::HookTestFakeQueue fq(*att_agent, {.handle = 901});
+    hsa::HookTestFakeQueue  fq(*att_agent, {.handle = 901});
     hsa::rocprofiler_packet pkt{};
     context::correlation_id corr_id{};
     corr_id.internal = 42;
-    auto user_data = rocprofiler_user_data_t{.value = corr_id.internal};
+    auto user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
 
     hsa::inst_pkt_t inst_pkt;
     bool            is_serialized = false;
-    thread_trace::write_hook(fq,
-                             pkt,
-                             1,
-                             1,
-                             &user_data,
-                             {},
-                             &corr_id,
-                             inst_pkt,
-                             is_serialized);
+    thread_trace::write_hook(fq, pkt, 1, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
 
     ASSERT_FALSE(inst_pkt.empty()) << "write_hook must inject ATT control packet";
     EXPECT_GE(tracer.post_move_data.load(), 1);
@@ -161,7 +153,7 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     EXPECT_FALSE(thread_trace::is_any_active());
 
     auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
-    auto packet_data = hsa::packet_data_t{};
+    auto packet_data      = hsa::packet_data_t{};
     packet_data.user_data = user_data;
 
     thread_trace::signal_completion_hook(fq, pkt, sess, packet_data, inst_pkt, {});

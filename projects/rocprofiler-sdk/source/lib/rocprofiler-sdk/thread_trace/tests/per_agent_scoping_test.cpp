@@ -119,9 +119,7 @@ noop_dispatch_cb(rocprofiler_agent_id_t,
     return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
-void
-noop_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
-{}
+void noop_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {}
 
 rocprofiler_context_id_t
 make_att_context(rocprofiler_agent_id_t agent_id)
