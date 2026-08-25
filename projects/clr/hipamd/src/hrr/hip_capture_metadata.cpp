@@ -18,6 +18,7 @@
 namespace hip {
 class Device;
 extern std::vector<hip::Device*> g_devices;
+// ihip is internal/unstable API
 extern hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, hipDevice_t device);
 }  // namespace hip
 
