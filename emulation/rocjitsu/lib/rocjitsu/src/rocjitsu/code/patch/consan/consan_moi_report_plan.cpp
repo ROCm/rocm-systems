@@ -377,6 +377,142 @@ make_layout_override(ConSanMoiEngine engine, const ConSanMoiReportBufferLayout &
 
 } // namespace
 
+bool ConSanRecordReplayEvidenceRequirements::well_formed() const {
+  if (reason != ConSanEvidenceRequirementReason::None ||
+      schema != ConSanEvidenceSchema::RecordReplay ||
+      boundedness != ConSanEvidenceBoundedness::BoundedFirstLight ||
+      loss_severity != ConSanEvidenceLossSeverity::InvalidatesCompleteness ||
+      delivery_scope != ConSanRuntimeResourceScope::Executable ||
+      sizing_inventory.engine != ConSanMoiEngine::RecordReplay ||
+      abi_plan.engine != ConSanMoiEngine::RecordReplay ||
+      !runtime_requirements.host_device_visible_memory ||
+      !runtime_requirements.host_device_coherent_memory ||
+      !runtime_requirements.device_atomic_publication || !runtime_requirements.executable_binding ||
+      runtime_requirements.max_workgroup_lds_bytes ||
+      runtime_requirements.dispatch_segment_binding ||
+      !runtime_requirements.minimum_report_allocation_bytes ||
+      *runtime_requirements.minimum_report_allocation_bytes != abi_plan.required_bytes) {
+    return false;
+  }
+  if (abi_plan.outcome == ConSanMoiAutoReportPlanOutcome::Count ||
+      abi_plan.reason == ConSanMoiAutoReportPlanReason::Count)
+    return false;
+  if (abi_plan.complete())
+    return abi_plan.reason == ConSanMoiAutoReportPlanReason::None && abi_plan.layout.valid &&
+           abi_plan.layout.required_bytes == abi_plan.required_bytes;
+  return abi_plan.reason != ConSanMoiAutoReportPlanReason::None && !abi_plan.layout.valid;
+}
+
+ConSanRecordReplayCapacityPolicy
+make_consan_record_replay_capacity_policy(const ConSanOptions &options,
+                                          uint64_t caller_ceiling_bytes) {
+  ConSanRecordReplayCapacityPolicy policy;
+  policy.caller_ceiling_bytes = caller_ceiling_bytes;
+  if (options.max_patches_is_expert_limit)
+    policy.maximum_access_probe_count = options.max_patches;
+  return policy;
+}
+
+ConSanRecordReplayEvidenceRequirements
+plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
+                                   const ConSanRecordReplayCapacityPolicy &capacity_policy) {
+  ConSanRecordReplayEvidenceRequirements requirements;
+  if (!observation_plan.valid()) {
+    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+    return requirements;
+  }
+  if (observation_plan.engine != ConSanCapabilityEngine::RecordReplay) {
+    requirements.reason = ConSanEvidenceRequirementReason::WrongEngine;
+    return requirements;
+  }
+
+  ConSanMoiAutoReportInventory inventory;
+  inventory.engine = ConSanMoiEngine::RecordReplay;
+  uint64_t selected_access_probe_count = 0;
+  const auto add_saturating = [](uint64_t &count, uint64_t increment) {
+    count = increment > std::numeric_limits<uint64_t>::max() - count
+                ? std::numeric_limits<uint64_t>::max()
+                : count + increment;
+  };
+  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
+    const auto covers_only = [&](ConSanSemanticSiteDomain domain) {
+      return std::ranges::all_of(intent.covered_semantic_sites,
+                                 [&](const SemanticSiteId &site) { return site.domain == domain; });
+    };
+    switch (intent.kind) {
+    case ConSanProbeIntentKind::AccessRecord:
+      if (!covers_only(ConSanSemanticSiteDomain::Access)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      if (capacity_policy.maximum_access_probe_count &&
+          selected_access_probe_count >= *capacity_policy.maximum_access_probe_count) {
+        break;
+      }
+      ++selected_access_probe_count;
+      add_saturating(inventory.access_range_count, intent.covered_semantic_sites.size());
+      break;
+    case ConSanProbeIntentKind::BarrierRecord:
+      if (!covers_only(ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      add_saturating(inventory.barrier_event_count, 1u);
+      break;
+    case ConSanProbeIntentKind::AtomicRecord:
+      if (!covers_only(ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      add_saturating(inventory.atomic_event_count, 1u);
+      break;
+    case ConSanProbeIntentKind::FenceRecord:
+      if (!covers_only(ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      add_saturating(inventory.fence_event_count, 1u);
+      break;
+    case ConSanProbeIntentKind::AtomicAddressCapture:
+      if (!covers_only(ConSanSemanticSiteDomain::SynchronizationEvent)) {
+        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+        return requirements;
+      }
+      break;
+    case ConSanProbeIntentKind::RedundantAccessObservation:
+    case ConSanProbeIntentKind::SampledAccess:
+    case ConSanProbeIntentKind::ExactShadowAccess:
+    case ConSanProbeIntentKind::SampledBarrierEpoch:
+    case ConSanProbeIntentKind::ExactBarrierEpoch:
+    case ConSanProbeIntentKind::SampledAtomicOrdering:
+    case ConSanProbeIntentKind::ExactAtomicOrdering:
+    case ConSanProbeIntentKind::Count:
+      requirements.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
+      return requirements;
+    }
+  }
+  const bool has_evidence = inventory.access_range_count != 0u ||
+                            inventory.barrier_event_count != 0u ||
+                            inventory.atomic_event_count != 0u || inventory.fence_event_count != 0u;
+  inventory.diagnostic_count =
+      has_evidence ? std::max<uint64_t>(inventory.access_range_count, 1u) : 0u;
+  inventory.record_replay_bank_count_adaptive = inventory.access_range_count != 0u;
+  inventory = fit_consan_moi_record_replay_auto_report_inventory(
+      inventory, capacity_policy.caller_ceiling_bytes);
+
+  requirements.runtime_requirements.host_device_visible_memory = true;
+  requirements.runtime_requirements.host_device_coherent_memory = true;
+  requirements.runtime_requirements.device_atomic_publication = true;
+  requirements.runtime_requirements.executable_binding = true;
+  requirements.sizing_inventory = inventory;
+  requirements.abi_plan =
+      plan_consan_moi_auto_report(inventory, capacity_policy.caller_ceiling_bytes);
+  requirements.runtime_requirements.minimum_report_allocation_bytes =
+      requirements.abi_plan.required_bytes;
+  requirements.reason = ConSanEvidenceRequirementReason::None;
+  return requirements;
+}
+
 ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory,
                                                     uint64_t caller_ceiling_bytes) {
   ConSanMoiAutoReportPlan plan;

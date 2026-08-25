@@ -2246,25 +2246,47 @@ could complete.
 
 ### Slice 5A: Record/Replay evidence requirements
 
-- **Current responsibility:** Candidate/resource/patch counts are rescanned to
-  construct an automatic report inventory; the hook allocates a buffer and
-  retries lowering with concrete option fields.
-- **New boundary and contract:** A pure RR evidence planner consumes the
-  observation plan and capacity policy and returns address-free requirements,
-  schema, loss severity, and exact sizing inputs. The current layout planner
-  becomes its implementation detail. The runtime coordinator checks those
-  requirements against `RuntimeCapabilities` before allocation.
-- **Temporary seam and consumers:** The hook allocates from requirements and
-  creates `BoundRuntimeResources`; the legacy adapter supplies the current
-  report layout/address on the late-bound lowering call. Inventory fingerprint
-  checks remain until the new immutable stage types make them redundant.
-- **Test gate:** report-plan boundaries/overflow, inventory-versus-plan
-  consistency, hook fine-grained allocation and retry tests, RR paired device
-  suite, and multi-code-object/concurrent-object lifecycle.
-- **Cutover and deletion:** Production auto-allocation consumes only
-  requirements. Delete RR report sizing based on resource-plan or patch
-  rescanning and direct hook writes to derived option fields.
+- **Completed boundary and contract:** The pure Record/Replay evidence planner
+  consumes only `ConSanObservationPlan` and
+  `ConSanRecordReplayCapacityPolicy`. It returns the schema, bounded-first-
+  light retention model, loss effect, executable delivery lifetime, runtime
+  requirements, and exact address-free ABI sizing input and result. The
+  current heterogeneous report-layout planner is an implementation detail of
+  that value; neither type owns an address or allocation.
+- **Completed production cutover:** Automatic Record/Replay sizing counts
+  access ranges, barriers, atomics, and fences from admitted typed intents.
+  The HSA hook validates the requirements' coherent host/device memory, atomic
+  publication, allocation-size, and executable-binding facts before
+  allocation, then passes the existing layout/address through the late-bound
+  compatibility adapter. Production sizing no longer rescans resource plans,
+  site dispositions, or emitted patches.
+- **Retained compatibility seam:** Hook unit tests can inject historical
+  synthetic `ConSanResult` values that predate `ObservationPlan`. Only those
+  structurally invalid pre-plan fixtures use the old inventory projection;
+  every valid production plan takes the new path. The seam remains explicit
+  until those external test overrides migrate or Slice 7 deletes them.
+- **Completed test gate:** Focused type tests exhaustively cover schema,
+  boundedness, loss, construction-reason, layout-outcome, and layout-reason
+  enums; capacity-policy adaptation; empty and mixed intent plans; multi-range
+  physical-intent limits; target-neutral record-dimension mapping; invalid and
+  foreign plans; malformed intent payloads; capacity failure; every runtime
+  fact; cross-type invariants; value semantics; deterministic non-mutation;
+  and a deliberately contradictory legacy result proving that valid plans are
+  authoritative. Existing report-boundary/overflow, hook allocation/retry,
+  multi-object, lifecycle, and paired device tests remain the integration
+  gate.
 - **Prerequisite:** Slices 2 and 4A--4C.
+
+The completed host gate passed 1,461 of 1,463 ConSan tests, with two
+external-object benchmarks intentionally skipped, plus all 98 ConSan
+hook/runtime tests. All 2,908 emulator device rows passed in 75.94 seconds of
+wall time. Twelve representative physical-gfx950 Record/Replay access,
+publication, atomic, fence, Stream-K, and tree-reduction rows passed. The
+physical gfx950 `d128-block` Record/Replay E2E row remained fully accepted with
+128/128 accesses and 119/119 barriers. RocJitsu-emulated gfx1250 retained its
+known yellow result: static coverage remained complete at 18/18 accesses and
+8/8 barriers, while bounded replay metadata filled before dynamic analysis
+could complete.
 
 ### Slice 5B: Sampled, Inline, and SuperCollider evidence requirements
 

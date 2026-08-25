@@ -42,6 +42,14 @@ struct alignas(8) ConSanMoiCompactDiagnosticTokenMapping {
 };
 static_assert(sizeof(ConSanMoiCompactDiagnosticTokenMapping) == 16);
 
+/// Concrete byte geometry of one legacy MOI report allocation.
+///
+/// Capacities state how many ABI records each region can hold; offsets name
+/// their aligned locations relative to the beginning of the allocation.
+/// Unused regions alias the end of the allocation and have zero capacity.
+/// This value contains no device address, allocation handle, generation, or
+/// lifetime. It is the current ABI-layout implementation detail of typed
+/// evidence requirements and remains independently revalidated at late bind.
 struct ConSanMoiReportBufferLayout {
   uint32_t access_record_capacity = 0;
   uint32_t record_replay_logical_access_range_count = 0;
@@ -80,6 +88,8 @@ struct ConSanMoiReportBufferLayout {
   size_t sampled_pending_acquires_offset = sizeof(ConSanMoiReportHeader);
   size_t required_bytes = sizeof(ConSanMoiReportHeader);
   bool valid = false;
+
+  bool operator==(const ConSanMoiReportBufferLayout &) const = default;
 };
 
 /// Creates a header from the exact heterogeneous layout. The legacy
@@ -221,6 +231,8 @@ struct ConSanMoiAutoReportInventory {
   /// reduce only that headroom to the largest capacity fitting the frozen
   /// report ceiling. Runtime saturation remains visible and fail-closed.
   bool inline_diagnostic_count_adaptive = false;
+
+  bool operator==(const ConSanMoiAutoReportInventory &) const = default;
 };
 
 using ConSanMoiAutoReportCapacityMember = uint64_t ConSanMoiAutoReportInventory::*;
@@ -261,20 +273,48 @@ consan_moi_auto_report_inventory_covers(const ConSanMoiAutoReportInventory &capa
                              });
 }
 
+/// High-level outcome of converting address-free capacities into ABI bytes.
+///
+/// The outcome separates a representable request that exceeds a configured
+/// ceiling from arithmetic or ABI-width overflow. Only `Complete` permits a
+/// runtime coordinator to allocate and bind the associated layout.
 enum class ConSanMoiAutoReportPlanOutcome : uint8_t {
+  /// Every required region is representable and fits the active ceiling.
   Complete,
+  /// The geometry is representable but needs more bytes than the ceiling.
   InsufficientReportCapacity,
+  /// A count, multiplication, alignment, or ABI field cannot be represented.
   Overflow,
+  /// One-past-the-end iteration bound; never a planner outcome.
+  Count,
 };
 
+/// Machine-readable explanation for an automatic report-plan outcome.
+///
+/// `None` accompanies only a complete plan. The remaining values distinguish
+/// policy ceilings from fixed ABI field widths, Record/Replay hash-table
+/// geometry, and host byte-address arithmetic so callers never parse log text.
 enum class ConSanMoiAutoReportPlanReason : uint8_t {
+  /// Planning completed without a limitation.
   None,
+  /// The representable allocation exceeds the selected per-buffer ceiling.
   PerBufferCeiling,
+  /// A logical capacity cannot fit its fixed-width ABI field.
   AbiCapacityOverflow,
+  /// Record/Replay identity-table geometry exceeds its supported ABI domain.
   AbiGeometryCapacityOverflow,
+  /// Byte multiplication, alignment, or the host size type overflowed.
   ByteSizeOverflow,
+  /// One-past-the-end iteration bound; never a planner reason.
+  Count,
 };
 
+/// Address-free result of laying out one legacy MOI evidence buffer.
+///
+/// A complete value owns exact region capacities, offsets, and total bytes.
+/// Incomplete values retain the typed outcome and, where representable, the
+/// byte requirement that exceeded policy. The value never owns an allocation
+/// and may therefore be computed before runtime capability discovery.
 struct ConSanMoiAutoReportPlan {
   ConSanMoiAutoReportPlanOutcome outcome = ConSanMoiAutoReportPlanOutcome::Overflow;
   ConSanMoiAutoReportPlanReason reason = ConSanMoiAutoReportPlanReason::ByteSizeOverflow;
@@ -286,7 +326,258 @@ struct ConSanMoiAutoReportPlan {
   [[nodiscard]] constexpr bool complete() const {
     return outcome == ConSanMoiAutoReportPlanOutcome::Complete;
   }
+
+  bool operator==(const ConSanMoiAutoReportPlan &) const = default;
 };
+
+/// Evidence-record schema selected by an engine observation plan.
+///
+/// A schema names the meaning and publication protocol of retained bytes, not
+/// merely their current C++ layout. Later evidence decoders dispatch on this
+/// type. Adding a schema requires its own requirement variant; values must not
+/// be treated as layout-compatible just because some record fields coincide.
+enum class ConSanEvidenceSchema : uint8_t {
+  /// Exact bounded access and synchronization events replayed on the host.
+  RecordReplay,
+  /// Selected access windows and causal synchronization metadata.
+  Sampled,
+  /// Exact on-device shadow and ordering state plus bounded diagnostics.
+  InlineShadow,
+  /// Sticky mismatch evidence produced by redundant device execution.
+  SuperCollider,
+  /// One-past-the-end iteration bound; never an evidence schema.
+  Count,
+};
+
+/// Complete iterable set of evidence schemas.
+inline constexpr std::array<ConSanEvidenceSchema, 4> kConSanEvidenceSchemas = {
+    ConSanEvidenceSchema::RecordReplay,
+    ConSanEvidenceSchema::Sampled,
+    ConSanEvidenceSchema::InlineShadow,
+    ConSanEvidenceSchema::SuperCollider,
+};
+
+/// Return the stable diagnostic spelling of an evidence schema.
+[[nodiscard]] constexpr std::string_view consan_evidence_schema_name(ConSanEvidenceSchema schema) {
+  switch (schema) {
+  case ConSanEvidenceSchema::RecordReplay:
+    return "record-replay";
+  case ConSanEvidenceSchema::Sampled:
+    return "sampled";
+  case ConSanEvidenceSchema::InlineShadow:
+    return "inline-shadow";
+  case ConSanEvidenceSchema::SuperCollider:
+    return "supercollider";
+  case ConSanEvidenceSchema::Count:
+    break;
+  }
+  return "invalid-evidence-schema";
+}
+
+static_assert(kConSanEvidenceSchemas.size() == static_cast<size_t>(ConSanEvidenceSchema::Count));
+
+/// How an evidence schema bounds the observations it can retain.
+///
+/// This classification is part of the sanitizer contract: a clean result from
+/// bounded first-light or sampled evidence does not mean the same thing as an
+/// exact on-device decision. Capacity reduction may change quantities inside
+/// one class, but may not silently change the class itself.
+enum class ConSanEvidenceBoundedness : uint8_t {
+  /// Retain a finite first observation for each modeled dynamic identity.
+  BoundedFirstLight,
+  /// Retain only accesses selected into finite causal sampling windows.
+  BoundedSampled,
+  /// Make the conflict decision against exact bounded-address device state.
+  ExactOnDevice,
+  /// Retain a sticky indication that any redundant execution mismatched.
+  StickyMarker,
+  /// One-past-the-end iteration bound; never a boundedness contract.
+  Count,
+};
+
+/// Complete iterable set of evidence-boundedness contracts.
+inline constexpr std::array<ConSanEvidenceBoundedness, 4> kConSanEvidenceBoundednessValues = {
+    ConSanEvidenceBoundedness::BoundedFirstLight,
+    ConSanEvidenceBoundedness::BoundedSampled,
+    ConSanEvidenceBoundedness::ExactOnDevice,
+    ConSanEvidenceBoundedness::StickyMarker,
+};
+
+/// Return the stable diagnostic spelling of an evidence-boundedness contract.
+[[nodiscard]] constexpr std::string_view
+consan_evidence_boundedness_name(ConSanEvidenceBoundedness boundedness) {
+  switch (boundedness) {
+  case ConSanEvidenceBoundedness::BoundedFirstLight:
+    return "bounded-first-light";
+  case ConSanEvidenceBoundedness::BoundedSampled:
+    return "bounded-sampled";
+  case ConSanEvidenceBoundedness::ExactOnDevice:
+    return "exact-on-device";
+  case ConSanEvidenceBoundedness::StickyMarker:
+    return "sticky-marker";
+  case ConSanEvidenceBoundedness::Count:
+    break;
+  }
+  return "invalid-evidence-boundedness";
+}
+
+static_assert(kConSanEvidenceBoundednessValues.size() ==
+              static_cast<size_t>(ConSanEvidenceBoundedness::Count));
+
+/// Effect of losing evidence on ConSan's ability to claim a clean run.
+///
+/// This is not a diagnostic severity. It tells the eventual trust evaluator
+/// whether saturation, dropping, or malformed publication merely loses
+/// optional telemetry or invalidates the completeness of a no-race verdict.
+enum class ConSanEvidenceLossSeverity : uint8_t {
+  /// Loss affects optional telemetry but not the engine's minimum contract.
+  Optional,
+  /// Any loss makes the run incomplete even when no conflict was retained.
+  InvalidatesCompleteness,
+  /// One-past-the-end iteration bound; never a loss rule.
+  Count,
+};
+
+/// Complete iterable set of evidence-loss rules.
+inline constexpr std::array<ConSanEvidenceLossSeverity, 2> kConSanEvidenceLossSeverities = {
+    ConSanEvidenceLossSeverity::Optional,
+    ConSanEvidenceLossSeverity::InvalidatesCompleteness,
+};
+
+/// Return the stable diagnostic spelling of an evidence-loss rule.
+[[nodiscard]] constexpr std::string_view
+consan_evidence_loss_severity_name(ConSanEvidenceLossSeverity severity) {
+  switch (severity) {
+  case ConSanEvidenceLossSeverity::Optional:
+    return "optional";
+  case ConSanEvidenceLossSeverity::InvalidatesCompleteness:
+    return "invalidates-completeness";
+  case ConSanEvidenceLossSeverity::Count:
+    break;
+  }
+  return "invalid-evidence-loss-severity";
+}
+
+static_assert(kConSanEvidenceLossSeverities.size() ==
+              static_cast<size_t>(ConSanEvidenceLossSeverity::Count));
+
+/// Typed failure to derive evidence requirements from semantic policy.
+///
+/// Capacity insufficiency is deliberately not a construction failure: it is a
+/// valid ABI-plan outcome retained inside the requirements. These reasons are
+/// reserved for an invalid input contract or an incompatible engine.
+enum class ConSanEvidenceRequirementReason : uint8_t {
+  /// Requirements were derived from a valid matching observation plan.
+  None,
+  /// The observation plan violates its own identity or relationship rules.
+  InvalidObservationPlan,
+  /// The planner was invoked for a different engine's observation plan.
+  WrongEngine,
+  /// A valid plan contains an intent belonging to another evidence schema.
+  UnexpectedIntentKind,
+  /// An intent covers semantic-site domains incompatible with its record kind.
+  InvalidIntentPayload,
+  /// One-past-the-end iteration bound; never a construction reason.
+  Count,
+};
+
+/// Complete iterable set of evidence-requirement construction reasons.
+inline constexpr std::array<ConSanEvidenceRequirementReason, 5> kConSanEvidenceRequirementReasons =
+    {
+        ConSanEvidenceRequirementReason::None,
+        ConSanEvidenceRequirementReason::InvalidObservationPlan,
+        ConSanEvidenceRequirementReason::WrongEngine,
+        ConSanEvidenceRequirementReason::UnexpectedIntentKind,
+        ConSanEvidenceRequirementReason::InvalidIntentPayload,
+};
+
+/// Return the stable diagnostic spelling of a requirement-construction reason.
+[[nodiscard]] constexpr std::string_view
+consan_evidence_requirement_reason_name(ConSanEvidenceRequirementReason reason) {
+  switch (reason) {
+  case ConSanEvidenceRequirementReason::None:
+    return "none";
+  case ConSanEvidenceRequirementReason::InvalidObservationPlan:
+    return "invalid-observation-plan";
+  case ConSanEvidenceRequirementReason::WrongEngine:
+    return "wrong-engine";
+  case ConSanEvidenceRequirementReason::UnexpectedIntentKind:
+    return "unexpected-intent-kind";
+  case ConSanEvidenceRequirementReason::InvalidIntentPayload:
+    return "invalid-intent-payload";
+  case ConSanEvidenceRequirementReason::Count:
+    break;
+  }
+  return "invalid-evidence-requirement-reason";
+}
+
+static_assert(kConSanEvidenceRequirementReasons.size() ==
+              static_cast<size_t>(ConSanEvidenceRequirementReason::Count));
+
+/// Caller policy controlling bounded Record/Replay evidence capacity.
+///
+/// A zero byte ceiling means the engine safety ceiling. The optional physical
+/// access-probe limit models only the explicit expert patch limit; absence
+/// means that every admitted access intent contributes requirements. It does
+/// not cap barrier, atomic, or fence intents and contains no report address.
+struct ConSanRecordReplayCapacityPolicy {
+  /// Optional caller cap, bounded internally by the engine safety ceiling.
+  uint64_t caller_ceiling_bytes = 0;
+  /// Maximum admitted physical access intents, or no limit when absent.
+  std::optional<uint64_t> maximum_access_probe_count;
+
+  bool operator==(const ConSanRecordReplayCapacityPolicy &) const = default;
+};
+
+/// Address-free Record/Replay evidence contract for one code object.
+///
+/// The immutable observation plan determines logical record counts; capacity
+/// policy supplies only boundedness choices. `sizing_inventory` is the exact
+/// input to the current ABI layout implementation and `abi_plan` is its output.
+/// Runtime requirements state allocation properties without an address or
+/// handle. `delivery_scope` identifies the lifetime that a later binding must
+/// provide. A capacity-limited or overflowing ABI plan remains a well-formed
+/// requirement and can be reported without attempting allocation.
+struct ConSanRecordReplayEvidenceRequirements {
+  /// Schema consumed by the device writer and host decoder.
+  ConSanEvidenceSchema schema = ConSanEvidenceSchema::RecordReplay;
+  /// Declared retention model for a clean-run interpretation.
+  ConSanEvidenceBoundedness boundedness = ConSanEvidenceBoundedness::BoundedFirstLight;
+  /// Trust effect of any dropped, saturated, or malformed required evidence.
+  ConSanEvidenceLossSeverity loss_severity = ConSanEvidenceLossSeverity::InvalidatesCompleteness;
+  /// Logical lifetime required of a later concrete runtime binding.
+  ConSanRuntimeResourceScope delivery_scope = ConSanRuntimeResourceScope::Executable;
+  /// Runtime facts required before allocation or executable binding.
+  RuntimeCapabilityRequirements runtime_requirements;
+  /// Exact address-free capacities consumed by the current ABI layout planner.
+  ConSanMoiAutoReportInventory sizing_inventory;
+  /// Exact byte geometry or typed capacity/overflow outcome.
+  ConSanMoiAutoReportPlan abi_plan;
+  /// Construction result, distinct from `abi_plan` capacity outcomes.
+  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+
+  /// Return whether all cross-type relationships form a usable requirement.
+  [[nodiscard]] bool well_formed() const;
+
+  /// Return whether a well-formed requirement has an allocatable ABI layout.
+  [[nodiscard]] bool complete() const { return well_formed() && abi_plan.complete(); }
+
+  bool operator==(const ConSanRecordReplayEvidenceRequirements &) const = default;
+};
+
+/// Derive the complete address-free Record/Replay evidence contract from an
+/// immutable semantic plan. The function performs no allocation, reads no
+/// code-object bytes, and does not inspect patches or resource assignments.
+[[nodiscard]] ConSanRecordReplayEvidenceRequirements
+plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
+                                   const ConSanRecordReplayCapacityPolicy &capacity_policy = {});
+
+/// Temporary adapter from the legacy option aggregate to the narrow capacity
+/// policy. This is the only Slice-5A boundary that knows the expert patch-limit
+/// spelling; the evidence planner itself never consumes `ConSanOptions`.
+[[nodiscard]] ConSanRecordReplayCapacityPolicy
+make_consan_record_replay_capacity_policy(const ConSanOptions &options,
+                                          uint64_t caller_ceiling_bytes = 0);
 
 /// Converts a complete planner result into the caller-carried exact layout.
 /// An incomplete plan produces std::nullopt.
@@ -309,8 +600,10 @@ consan_moi_auto_report_plan_outcome_name(ConSanMoiAutoReportPlanOutcome outcome)
     return "insufficient_report_capacity";
   case ConSanMoiAutoReportPlanOutcome::Overflow:
     return "overflow";
+  case ConSanMoiAutoReportPlanOutcome::Count:
+    break;
   }
-  return "overflow";
+  return "invalid_auto_report_plan_outcome";
 }
 
 [[nodiscard]] constexpr std::string_view
@@ -326,8 +619,10 @@ consan_moi_auto_report_plan_reason_name(ConSanMoiAutoReportPlanReason reason) {
     return "abi_geometry_capacity_overflow";
   case ConSanMoiAutoReportPlanReason::ByteSizeOverflow:
     return "byte_size_overflow";
+  case ConSanMoiAutoReportPlanReason::Count:
+    break;
   }
-  return "byte_size_overflow";
+  return "invalid_auto_report_plan_reason";
 }
 
 /// Computes an exact ABI layout from explicit inventory without allocating,

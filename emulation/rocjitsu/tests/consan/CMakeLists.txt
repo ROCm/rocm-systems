@@ -61,6 +61,7 @@ function(rj_add_consan_unit_sources target)
             patch/consan/capability_contract_test.cpp
             patch/consan/composition_test.cpp
             patch/consan/core_test.cpp
+            patch/consan/evidence_requirements_test.cpp
             patch/consan/fault_atomic_test.cpp
             patch/consan/fault_barrier_test.cpp
             patch/consan/fault_composition_test.cpp
