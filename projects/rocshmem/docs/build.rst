@@ -344,8 +344,7 @@ and looking for the ``Name:`` field under each agent, for example
   variants into the main library. However, the installed device bitcode
   (``librocshmem_device_gfx90a.bc``) is a single file and can only embed one variant's
   feature metadata. The chosen variant is reported at configure time, for example:
-  ``Multiple feature variants requested for gfx90a (...); device bitcode will embed
-  gfx90a:xnack+``.
+  ``Multiple feature variants requested for gfx90a (...); device bitcode will embed gfx90a:xnack+``.
 
 Installation prefix
 ^^^^^^^^^^^^^^^^^^^

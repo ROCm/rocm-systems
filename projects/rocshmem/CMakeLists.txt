@@ -307,7 +307,7 @@ if (NOT BUILD_TESTS_ONLY)
   endif()
 
   if (ASAN)
-    message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
+    message(STATUS "Removing xnack- entries from GPU_TARGETS because they are invalid with AddressSanitizer (ASAN)")
     list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
     if(GPU_TARGETS_FULL)
       list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX ".*:xnack-$")
