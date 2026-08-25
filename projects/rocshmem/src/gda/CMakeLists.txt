@@ -35,6 +35,7 @@ target_sources(
     ibv_wrapper.cpp
     gda_team.cpp
     queue_pair.cpp
+    qp_introspect.cpp
     topology.cpp
 )
 
