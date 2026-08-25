@@ -14,7 +14,8 @@ import tempfile
 from pathlib import Path
 
 # Re-use marker parsing and cost-model checks from validate_scaling.py in this directory.
-from validate_scaling import model_max_ms, parse_marker
+from perf_cost_model import max_pass_scaling_ratio, model_max_ms
+from validate_scaling import parse_marker
 
 
 def run_case(testapp: Path, client: Path, passes: int, ballast_mb: int, launches: int) -> str:
@@ -66,8 +67,9 @@ def main() -> int:
         print(f"[kr-perf-run] {label} wall_ms={m['wall_ms']:.1f} <= {ceiling:.1f} ms")
 
     ratio = high_m["wall_ms"] / max(base_m["wall_ms"], 0.001)
-    assert ratio <= args.max_scaling_ratio, (
-        f"scaling ratio {ratio:.2f} > {args.max_scaling_ratio} "
+    cap = min(args.max_scaling_ratio, max_pass_scaling_ratio(1, args.high_passes, 2.0))
+    assert ratio <= cap, (
+        f"scaling ratio {ratio:.2f} > {cap:.2f} "
         f"(P=1 {base_m['wall_ms']:.1f} ms vs P={args.high_passes} {high_m['wall_ms']:.1f} ms)"
     )
     print(

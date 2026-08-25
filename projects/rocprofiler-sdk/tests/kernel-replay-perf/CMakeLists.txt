@@ -62,3 +62,77 @@ set_tests_properties(
                "\\[kr-perf-run\\] PASS"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Pass-count sweep {1,3,5,8} at smaller footprint — catches per-pass overhead regressions.
+add_test(
+    NAME test-kernel-replay-perf-pass-sweep
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_pass_sweep.py --testapp
+        $<TARGET_FILE:kernel-replay-perf-testapp> --client
+        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 32 --launches 4 --passes 1 3 5 8
+        --slack 2.5)
+
+set_tests_properties(
+    test-kernel-replay-perf-pass-sweep
+    PROPERTIES TIMEOUT
+               300
+               LABELS
+               "integration-tests;kernel-replay;kernel-replay-perf"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               DEPENDS
+               "kernel-replay-perf-client;kernel-replay-perf-testapp"
+               ENVIRONMENT
+               "KR_PERF_SWEEP_JSON=${CMAKE_CURRENT_BINARY_DIR}/kr_perf_pass_sweep.json"
+               PASS_REGULAR_EXPRESSION
+               "\\[kr-perf-sweep\\] PASS overall"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Small-footprint P=1 vs P=3 — exercises older-GPU-friendly memory pressure.
+add_test(
+    NAME test-kernel-replay-perf-small-footprint
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_and_validate.py --testapp
+        $<TARGET_FILE:kernel-replay-perf-testapp> --client
+        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 16 --launches 6 --high-passes 3
+        --max-scaling-ratio 6.0)
+
+set_tests_properties(
+    test-kernel-replay-perf-small-footprint
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay;kernel-replay-perf"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               DEPENDS
+               "kernel-replay-perf-client;kernel-replay-perf-testapp"
+               PASS_REGULAR_EXPRESSION
+               "\\[kr-perf-run\\] PASS"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Higher launch count at moderate footprint — amortization / drain overhead guard.
+add_test(
+    NAME test-kernel-replay-perf-many-launches
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_and_validate.py --testapp
+        $<TARGET_FILE:kernel-replay-perf-testapp> --client
+        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 32 --launches 16 --high-passes 3
+        --max-scaling-ratio 6.0)
+
+set_tests_properties(
+    test-kernel-replay-perf-many-launches
+    PROPERTIES TIMEOUT
+               240
+               LABELS
+               "integration-tests;kernel-replay;kernel-replay-perf"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               DEPENDS
+               "kernel-replay-perf-client;kernel-replay-perf-testapp"
+               PASS_REGULAR_EXPRESSION
+               "\\[kr-perf-run\\] PASS"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
