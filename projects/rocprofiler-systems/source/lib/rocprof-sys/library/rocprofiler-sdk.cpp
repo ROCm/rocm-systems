@@ -2481,8 +2481,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         _domains_ss << "- " << itr << "\n";
     LOG_DEBUG("Available ROCm Domains: \n {}", _domains_ss.str());
 
-    using tracing_config_t =
-        tracing_config<backends::rocprofiler_sdk::backend<wrapper>, default_externals>;
+    using sdk_backend_t    = backends::rocprofiler_sdk::backend<wrapper>;
+    using tracing_config_t = tracing_config<sdk_backend_t, default_externals>;
+
+    sdk_backend_t::check_version_compatibility();
 
     auto _callback_domains = tracing_config_t::get_callback_domains();
     auto _buffered_domain  = tracing_config_t::get_buffered_domains();

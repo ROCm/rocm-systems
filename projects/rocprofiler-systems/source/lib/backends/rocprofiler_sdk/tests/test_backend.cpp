@@ -667,6 +667,8 @@ struct tagged_mock_sdk : mock_sdk
 using version_cache_tag        = tagged_mock_sdk<1>;
 using callback_names_cache_tag = tagged_mock_sdk<2>;
 using buffer_names_cache_tag   = tagged_mock_sdk<3>;
+using version_match_tag        = tagged_mock_sdk<4>;
+using version_mismatch_tag     = tagged_mock_sdk<5>;
 
 TEST_F(backend_test, get_version_caches_after_first_call)
 {
@@ -728,6 +730,30 @@ TEST_F(backend_test, get_buffer_tracing_names_caches_after_first_call)
 
     EXPECT_EQ(&first, &second);
     EXPECT_EQ(first[2].name, "MEMORY_COPY");
+}
+
+TEST_F(backend_test, check_version_compatibility_accepts_matching_runtime_version)
+{
+    // mock_sdk::compile_time_version == 10100u -> 1.1.0
+    EXPECT_CALL(*g_mock_sdk, get_version(gm::_, gm::_, gm::_))
+        .WillOnce(gm::DoAll(gm::SetArgPointee<0>(1), gm::SetArgPointee<1>(1),
+                            gm::SetArgPointee<2>(0),
+                            gm::Return(mock_sdk::STATUS_SUCCESS)));
+
+    using sut_v = backend<version_match_tag>;
+    EXPECT_NO_THROW(sut_v::check_version_compatibility());
+}
+
+TEST_F(backend_test, check_version_compatibility_throws_on_runtime_version_mismatch)
+{
+    // mock_sdk::compile_time_version == 10100u -> 1.1.0, runtime reports 1.2.0
+    EXPECT_CALL(*g_mock_sdk, get_version(gm::_, gm::_, gm::_))
+        .WillOnce(gm::DoAll(gm::SetArgPointee<0>(1), gm::SetArgPointee<1>(2),
+                            gm::SetArgPointee<2>(0),
+                            gm::Return(mock_sdk::STATUS_SUCCESS)));
+
+    using sut_v = backend<version_mismatch_tag>;
+    EXPECT_THROW(sut_v::check_version_compatibility(), std::runtime_error);
 }
 
 }  // namespace rocprofsys::backends::rocprofiler_sdk::testing
