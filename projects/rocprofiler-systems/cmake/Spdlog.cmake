@@ -8,6 +8,10 @@ if(ROCPROFSYS_BUILD_SPDLOG)
 
     include(FetchContent)
 
+    # spdlog's CMakeLists only calls find_package(fmt) when no "fmt::fmt" target
+    # already exists, so fmt must be made available before spdlog.
+    include(FmtLib)
+
     rocprofiler_systems_checkout_git_submodule(
         RELATIVE_PATH external/spdlog
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -22,7 +26,7 @@ if(ROCPROFSYS_BUILD_SPDLOG)
     set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
     set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
-    set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+    set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
 
     # Spdlog workaround for building static library
     set(_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
@@ -33,9 +37,10 @@ if(ROCPROFSYS_BUILD_SPDLOG)
     set(BUILD_SHARED_LIBS ${_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP})
     unset(_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP)
 
-    # Mark spdlog (and its bundled fmt) include directories as SYSTEM so
-    # bundled-third-party warnings (e.g. GCC 10 -Wstringop-overflow false
-    # positive in fmt::v12::detail::write) do not break our -Werror builds.
+    # Mark spdlog include directories as SYSTEM so bundled-third-party warnings
+    # (e.g. GCC 10 -Wstringop-overflow false positive in fmt::v12::detail::write)
+    # do not break our -Werror builds. fmt's own include directories are marked
+    # SYSTEM in FmtLib.cmake.
     get_target_property(_spdlog_include_dirs spdlog INTERFACE_INCLUDE_DIRECTORIES)
     if(_spdlog_include_dirs)
         set_target_properties(
@@ -48,10 +53,24 @@ if(ROCPROFSYS_BUILD_SPDLOG)
 else()
     message(STATUS "Using system spdlog library")
     find_package(spdlog REQUIRED)
-    get_target_property(_spdlog_include_dirs spdlog::spdlog INTERFACE_INCLUDE_DIRECTORIES)
+
+    # spdlog::spdlog may be an ALIAS to the real imported target (e.g. Debian's
+    # spdlogConfig.cmake), and set_target_properties() rejects ALIAS targets.
+    get_target_property(_spdlog_aliased_target spdlog::spdlog ALIASED_TARGET)
+    if(_spdlog_aliased_target)
+        set(_spdlog_target ${_spdlog_aliased_target})
+    else()
+        set(_spdlog_target spdlog::spdlog)
+    endif()
+
+    get_target_property(
+        _spdlog_include_dirs
+        ${_spdlog_target}
+        INTERFACE_INCLUDE_DIRECTORIES
+    )
     if(_spdlog_include_dirs)
         set_target_properties(
-            spdlog::spdlog
+            ${_spdlog_target}
             PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_spdlog_include_dirs}"
         )
     endif()
