@@ -36,10 +36,15 @@
 
 #include <gtest/gtest.h>
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace rocprofiler;
@@ -264,6 +269,141 @@ TEST(kernel_replay_diagnostics, resolved_policy_is_usable)
     // The same reference every time: a per-dispatch re-read would put a /proc/meminfo open inside
     // the replay gate.
     EXPECT_EQ(&policy, &resolve_policy());
+}
+
+// ------------------------- environment-driven policy -------------------------
+//
+// resolve_policy() reads the environment once per process. That is the right behavior -- a getenv
+// and a /proc/meminfo open per dispatch would sit inside the replay gate for no benefit -- but it
+// makes the variable-to-field mapping untestable in-process, because the first caller fixes the
+// answer for every later one. So each case runs in a child process with the variable set.
+//
+// This is worth the machinery. These knobs are the only way a user can override a decline, and a
+// typo in a variable name here is invisible: setting it appears to work and simply does nothing.
+
+namespace
+{
+using env_pair_t = std::pair<const char*, const char*>;
+
+// Re-run this executable with `env` applied, executing only the named DISABLED_ check. Returns the
+// child's exit code, so a failed assertion inside the child fails the parent's test.
+int
+run_policy_check_in_child(const char* test_name, const std::vector<env_pair_t>& env)
+{
+    const auto filter = std::string{"--gtest_filter="} + test_name;
+
+    auto pid = fork();
+    if(pid == 0)
+    {
+        for(const auto& [name, value] : env)
+            setenv(name, value, /*overwrite=*/1);
+
+        const char* argv[] = {
+            "/proc/self/exe", filter.c_str(), "--gtest_also_run_disabled_tests", nullptr};
+        execv("/proc/self/exe", const_cast<char**>(argv));
+        _exit(127);  // execv only returns on failure
+    }
+
+    int status = 0;
+    if(pid < 0 || waitpid(pid, &status, 0) != pid) return -1;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+}  // namespace
+
+// The checks themselves. DISABLED_ so a default run skips them: they assert on an environment only
+// their parent test establishes, and would fail if run bare.
+TEST(kernel_replay_policy_env, DISABLED_check_vmem_override)
+{
+    EXPECT_FALSE(resolve_policy().decline_on_vmem);
+}
+
+TEST(kernel_replay_policy_env, DISABLED_check_untracked_pool_override)
+{
+    EXPECT_TRUE(resolve_policy().decline_on_untracked_pool);
+}
+
+TEST(kernel_replay_policy_env, DISABLED_check_budget_override)
+{
+    EXPECT_EQ(resolve_policy().max_snapshot_bytes, 12345678U);
+}
+
+TEST(kernel_replay_policy_env, DISABLED_check_numeric_overrides)
+{
+    EXPECT_DOUBLE_EQ(resolve_policy().warn_seconds, 42.5);
+    EXPECT_DOUBLE_EQ(resolve_policy().assumed_gbps, 7.25);
+}
+
+// A bandwidth of zero would make the projected-copy-time division produce infinity, and a negative
+// one would produce a negative duration. Either would turn a diagnostic into nonsense, so the
+// resolver falls back to the default rather than propagating the value.
+TEST(kernel_replay_policy_env, DISABLED_check_nonpositive_bandwidth_falls_back)
+{
+    EXPECT_DOUBLE_EQ(resolve_policy().assumed_gbps, replay_policy_t{}.assumed_gbps);
+}
+
+// A default run derives the budget from MemAvailable, which must leave headroom rather than
+// promising the whole of it: the snapshot is one full copy held for the entire window, and Linux
+// overcommits, so guessing high is answered by the OOM killer instead of by snap()'s error path.
+TEST(kernel_replay_policy_env, DISABLED_check_default_budget_is_bounded)
+{
+    const auto budget = resolve_policy().max_snapshot_bytes;
+
+    // 0 is legitimate here: it means /proc/meminfo could not be read, which degrades to "no
+    // budget" rather than to a wrong answer.
+    if(budget == 0) GTEST_SKIP() << "MemAvailable unreadable; no default budget to check";
+
+    EXPECT_LT(budget, size_t{1} << 50) << "an implausible budget suggests a unit error";
+}
+
+TEST(kernel_replay_policy_env, decline_on_vmem_can_be_turned_off)
+{
+    EXPECT_EQ(run_policy_check_in_child("kernel_replay_policy_env.DISABLED_check_vmem_override",
+                                        {{"ROCPROFILER_KERNEL_REPLAY_DECLINE_ON_VMEM", "0"}}),
+              0);
+}
+
+TEST(kernel_replay_policy_env, decline_on_untracked_pool_can_be_turned_on)
+{
+    EXPECT_EQ(
+        run_policy_check_in_child("kernel_replay_policy_env.DISABLED_check_untracked_pool_override",
+                                  {{"ROCPROFILER_KERNEL_REPLAY_DECLINE_ON_UNTRACKED_POOL", "1"}}),
+        0);
+}
+
+TEST(kernel_replay_policy_env, snapshot_budget_can_be_set_explicitly)
+{
+    EXPECT_EQ(
+        run_policy_check_in_child("kernel_replay_policy_env.DISABLED_check_budget_override",
+                                  {{"ROCPROFILER_KERNEL_REPLAY_MAX_SNAPSHOT_BYTES", "12345678"}}),
+        0);
+}
+
+TEST(kernel_replay_policy_env, warn_threshold_and_bandwidth_can_be_set)
+{
+    EXPECT_EQ(run_policy_check_in_child("kernel_replay_policy_env.DISABLED_check_numeric_overrides",
+                                        {{"ROCPROFILER_KERNEL_REPLAY_WARN_SECONDS", "42.5"},
+                                         {"ROCPROFILER_KERNEL_REPLAY_ASSUMED_GBPS", "7.25"}}),
+              0);
+}
+
+TEST(kernel_replay_policy_env, a_nonpositive_bandwidth_is_rejected)
+{
+    EXPECT_EQ(run_policy_check_in_child(
+                  "kernel_replay_policy_env.DISABLED_check_nonpositive_bandwidth_falls_back",
+                  {{"ROCPROFILER_KERNEL_REPLAY_ASSUMED_GBPS", "0"}}),
+              0);
+
+    EXPECT_EQ(run_policy_check_in_child(
+                  "kernel_replay_policy_env.DISABLED_check_nonpositive_bandwidth_falls_back",
+                  {{"ROCPROFILER_KERNEL_REPLAY_ASSUMED_GBPS", "-1"}}),
+              0);
+}
+
+TEST(kernel_replay_policy_env, the_default_budget_leaves_host_headroom)
+{
+    EXPECT_EQ(run_policy_check_in_child(
+                  "kernel_replay_policy_env.DISABLED_check_default_budget_is_bounded", {}),
+              0);
 }
 
 // ------------------------- outcome reporting -------------------------
