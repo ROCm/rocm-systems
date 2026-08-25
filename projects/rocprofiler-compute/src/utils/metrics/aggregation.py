@@ -24,26 +24,38 @@ def calc_pct_of_peak(
         return None
 
 
-def to_min(*args: Any) -> float | np.ndarray:
+def to_min(*args: Any) -> float | pd.Series:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].min()
     elif len(args) == 2 and (
         isinstance(args[0], pd.Series) or isinstance(args[1], pd.Series)
     ):
-        return np.minimum(args[0], args[1])
+        left, right = args[0], args[1]
+        index = left.index if isinstance(left, pd.Series) else right.index
+        if not isinstance(left, pd.Series):
+            left = pd.Series(left, index=index)
+        if not isinstance(right, pd.Series):
+            right = pd.Series(right, index=index)
+        return pd.Series(np.minimum(left, right), index=index)
     elif min(args) is None:
         return np.nan
     else:
         return min(args)
 
 
-def to_max(*args: Any) -> float | np.ndarray:
+def to_max(*args: Any) -> float | pd.Series:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].max()
     elif len(args) == 2 and (
         isinstance(args[0], pd.Series) or isinstance(args[1], pd.Series)
     ):
-        return np.maximum(args[0], args[1])
+        left, right = args[0], args[1]
+        index = left.index if isinstance(left, pd.Series) else right.index
+        if not isinstance(left, pd.Series):
+            left = pd.Series(left, index=index)
+        if not isinstance(right, pd.Series):
+            right = pd.Series(right, index=index)
+        return pd.Series(np.maximum(left, right), index=index)
     elif max(args) is None:
         return np.nan
     else:
@@ -173,8 +185,8 @@ def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
 
 
 def to_bound_ratio(
-    numerator: pd.Series | float | np.ndarray,
-    denominator: pd.Series | float | np.ndarray,
+    numerator: pd.Series | float,
+    denominator: pd.Series | float,
     scale: float = 100.0,
     cap: float = 100.0,
 ) -> pd.Series | float:

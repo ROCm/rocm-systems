@@ -19,6 +19,7 @@ from utils.metrics.aggregation import (
     to_quantile,
     to_round,
     to_std,
+    to_sum,
 )
 
 # =============================================================================
@@ -56,6 +57,17 @@ class TestAggregation:
     def test_to_max_returns_maximum_value(self):
         """to_max returns the largest value among its scalar arguments."""
         assert to_max(7, 3, 9, 1) == 9, "to_max should return the largest value"
+
+    def test_to_min_elementwise_between_series(self):
+        """to_min returns element-wise minimum as a Series for two Series."""
+        left = pd.Series([150.0, 80.0, 100.0])
+        right = pd.Series([136.0, 100.0, 90.0])
+        result = to_min(left, right)
+        pd.testing.assert_series_equal(
+            result,
+            pd.Series([136.0, 80.0, 90.0]),
+        )
+        assert to_sum(result) == 306.0
 
     def test_to_bound_ratio_caps_per_row_percent(self):
         """to_bound_ratio caps inflated counter ratios at 100%."""
