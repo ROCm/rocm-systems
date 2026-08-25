@@ -44,7 +44,7 @@ void
 resume();
 
 void
-bind_session(std::shared_ptr<control::session> sess);
+set_session(std::shared_ptr<control::session> sess);
 
 void
 create_roctx_client();
