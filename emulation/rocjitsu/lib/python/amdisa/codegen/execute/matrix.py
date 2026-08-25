@@ -123,6 +123,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     inst, dst, src = ctx.inst, ctx.dst_ops, ctx.src_ops
     arch_name = ctx.arch_name
     supports_gpr_idx = ctx.profile.supports_gpr_idx
+    op_sel_hi_2_expr = ctx.op_sel_hi_2_expr
     name = inst.name
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
 
@@ -544,7 +545,10 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             'F8F6F4',
         ):
             L.append(f'  uint32_t matrix_a_fmt = inst_.opsel;')
-            L.append(f'  uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;')
+            L.append(
+                f'  uint32_t matrix_b_fmt = ({op_sel_hi_2_expr} << 2) | '
+                f'inst_.opsel_hi;'
+            )
             L.append(
                 f'  bool dispatched = amdgpu::dispatch_matrix_fmt_pair('
                 f'matrix_a_fmt, matrix_b_fmt,'
