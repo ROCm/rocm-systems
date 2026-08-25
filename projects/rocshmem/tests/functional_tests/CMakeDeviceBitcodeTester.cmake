@@ -44,9 +44,11 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   set(OBJ_FILE   ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.o)
   set(HSACO_FILE ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}.hsaco)
 
-  # Find the full arch string (with feature suffixes) for this base arch so we can
-  # pass target-feature flags. Without features the amdhsa.target metadata in the
-  # HSACO omits the suffix, causing hipModuleLoadData error 209 on devices that
+  # Find the full arch string (with feature suffixes) for this base arch and
+  # pass it directly via --offload-arch= to the kernel/device-source compile
+  # steps below, so the frontend embeds the correct amdhsa.target metadata
+  # from the start. Without features the amdhsa.target metadata in the HSACO
+  # omits the suffix, causing hipModuleLoadData error 209 on devices that
   # report e.g. gfx950:sramecc+:xnack-.
   set(_FULL_ARCH "${GPU_ARCH}")
   foreach(_candidate ${BITCODE_GPU_ARCHS_FULL})
@@ -56,25 +58,18 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
       break()
     endif()
   endforeach()
-  arch_features_to_target_feature_flags("${_FULL_ARCH}" _CLANG_MATTR_FLAGS)
 
   # The device API functions (rocshmem_my_pe, rocshmem_putmem, etc.) are plain
-  # __device__ functions. When compiled at -O3 independently, LLVM DCEs them
-  # because no amdgpu_kernel in the same TU calls them. Compiling at -O0
-  # avoids DCE but produces unoptimized IR patterns that trigger an AMDGPU
-  # backend register-class bug (V_CMP_NE_U32 on $src_private_base).
-  #
-  # Solution: compile with -Xclang -disable-llvm-passes, which runs the
-  # frontend at -O3 (generating valid, structured IR) but skips the LLVM
-  # optimization and DCE passes. The resulting BC retains all device function
-  # bodies. After linking with the kernel (which provides callers), a final
-  # opt -O3 pass over the merged BC optimizes everything together.
-
-  # Device sources: suppress LLVM passes so DCE doesn't eliminate __device__
-  # functions that have no callers within the same TU. The kernel BC is compiled
-  # at plain -O3 (it has an amdgpu_kernel entry point, so nothing gets DCE'd).
+  # __device__ functions with no caller in their own TU.
+  # BITCODE_COMPILE_FLAGS_BASE (shared with DeviceBitcode.cmake) carries
+  # -fgpu-rdc, so real per-TU -O3 never DCEs genuinely external-linkage device
+  # functions -- no need to defer optimization via -Xclang
+  # -disable-llvm-passes (which also sidesteps the earlier -O0 AMDGPU backend
+  # register-class bug, since we stay at real -O3 throughout). The kernel BC
+  # and each device-source BC are compiled at real -O3, linked with
+  # llvm-link, then a final opt -O3 pass over the merged BC optimizes
+  # everything together (mirrors DeviceBitcode.cmake).
   set(_TESTER_DEVICE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE})
-  list(APPEND _TESTER_DEVICE_FLAGS -Xclang -disable-llvm-passes)
 
   # Compile the kernel and each device source into tester-private BCs.
   set(_TESTER_BCS "")
@@ -83,7 +78,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
     OUTPUT ${KERNEL_BC}
     COMMAND ${LLVM_CLANG}
       ${BITCODE_COMPILE_FLAGS_BASE}
-      --offload-arch=${GPU_ARCH}
+      --offload-arch=${_FULL_ARCH}
       -c ${CMAKE_CURRENT_SOURCE_DIR}/device_bitcode_tester_kernel.hip
       -o ${KERNEL_BC}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/device_bitcode_tester_kernel.hip
@@ -99,7 +94,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
       OUTPUT ${_src_bc}
       COMMAND ${LLVM_CLANG}
         ${_TESTER_DEVICE_FLAGS}
-        --offload-arch=${GPU_ARCH}
+        --offload-arch=${_FULL_ARCH}
         -c ${_src}
         -o ${_src_bc}
       DEPENDS ${_src}
@@ -140,7 +135,6 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
     COMMAND ${LLVM_CLANG}
       -target amdgcn-amd-amdhsa
       -mcpu=${GPU_ARCH}
-      ${_CLANG_MATTR_FLAGS}
       -mllvm -amdgpu-internalize-symbols=false
       -x ir
       -c ${LINKED_BC}

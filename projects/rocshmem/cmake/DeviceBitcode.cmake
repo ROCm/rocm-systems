@@ -39,27 +39,6 @@ function(strip_arch_features targets_list out_var)
   set(${out_var} "${_result}" PARENT_SCOPE)
 endfunction()
 
-# Convert arch feature suffix to clang -Xclang -target-feature flags.
-# gfx950:sramecc+:xnack-  ->  "-Xclang;-target-feature;-Xclang;+sramecc;-Xclang;-target-feature;-Xclang;-xnack"
-# Caller passes the list directly to add_custom_command COMMAND.
-function(arch_features_to_target_feature_flags full_arch out_var)
-  string(REPLACE ":" ";" _all_tokens "${full_arch}")
-  list(LENGTH _all_tokens _ntokens)
-  set(_flags "")
-  if(_ntokens GREATER 1)
-    list(SUBLIST _all_tokens 1 -1 _feat_tokens)
-    foreach(_tok ${_feat_tokens})
-      if(_tok STREQUAL "")
-        continue()
-      endif()
-      # "sramecc+" -> "+sramecc", "xnack-" -> "-xnack"
-      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _feat "${_tok}")
-      list(APPEND _flags -Xclang -target-feature -Xclang ${_feat})
-    endforeach()
-  endif()
-  set(${out_var} "${_flags}" PARENT_SCOPE)
-endfunction()
-
 # Resolve the target arch list: GPU_TARGETS CMake var -> auto-detect local GPUs.
 # Both accept comma- or semicolon-separated lists.
 if(GPU_TARGETS)
@@ -101,6 +80,10 @@ set(BITCODE_GPU_ARCHS_FULL "${_BITCODE_FULL_LIST}" CACHE STRING
 
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and clang backend compilation.
+# -fgpu-rdc marks each TU as part of a larger relocatable-device-code program,
+# so real per-TU -O3 never DCEs genuinely external-linkage device functions
+# even with zero in-TU callers (mirrors the flag already used to build
+# librocshmem.a itself in src/CMakeLists.txt).
 set(BITCODE_COMPILE_FLAGS_BASE
     -Wall
     -Wextra
@@ -110,6 +93,7 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -emit-llvm
     -fvisibility=default
     -O3
+    -fgpu-rdc
     -Xclang -mcode-object-version=none
     -I${CMAKE_CURRENT_SOURCE_DIR}/include/rocshmem
     -I${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -200,12 +184,14 @@ endif()
 
 # Build bitcode for each GPU architecture
 #
-# __device__ API functions (rocshmem_quiet, rocshmem_barrier_wg, etc.) are DCE'd
-# by LLVM's -O3 passes when compiled per-TU: no amdgpu_kernel in the same TU
-# calls them, so the optimizer treats them as dead.  Fix: compile each source
-# with -Xclang -disable-llvm-passes (frontend runs at -O3, LLVM DCE is skipped,
-# all __device__ bodies are retained), then run opt -O3 over the merged BC where
-# all callers exist.  This mirrors the approach in CMakeDeviceBitcodeTester.cmake.
+# __device__ API functions (rocshmem_quiet, rocshmem_barrier_wg, etc.) have no
+# caller within their own TU -- they are public API for code that doesn't
+# exist yet at build time. BITCODE_COMPILE_FLAGS_BASE carries -fgpu-rdc, which
+# tells clang/LLVM this TU is part of a larger program, so real per-TU -O3
+# never strips genuinely external-linkage device functions. Each source is
+# compiled at real -O3, then all per-arch .bc files are merged with llvm-link
+# and reoptimized with opt -O3 once real cross-TU callers exist in the merged
+# module. This mirrors the approach in CMakeDeviceBitcodeTester.cmake.
 set(ALL_BITCODE_OUTPUTS)
 foreach(gpu_arch ${BITCODE_GPU_ARCHS})
   # Resolve the full arch string (with feature suffixes) for this base arch, so
@@ -228,9 +214,7 @@ foreach(gpu_arch ${BITCODE_GPU_ARCHS})
     endif()
   endif()
 
-  # Per-source flags: -Xclang -disable-llvm-passes suppresses DCE.
-  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${_FULL_ARCH}
-                     -Xclang -disable-llvm-passes)
+  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${_FULL_ARCH})
   set(BITCODE_OBJECTS_${gpu_arch})
   foreach(src_file ${BITCODE_SOURCES})
     get_filename_component(src_name ${src_file} NAME_WE)
