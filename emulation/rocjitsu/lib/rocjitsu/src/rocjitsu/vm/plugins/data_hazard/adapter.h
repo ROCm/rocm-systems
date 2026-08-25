@@ -50,9 +50,19 @@ enum class WaitKind {
   AddressTranslation,
 };
 
+/// The depths a wait instruction drains its counters to, carried as the
+/// frontend read them rather than repacked into an immediate: the field widths
+/// of s_waitcnt differ across GFX generations, so any single layout truncates
+/// the counts of the families it was not written for.
 struct WaitInfo {
   WaitKind kind = WaitKind::None;
-  uint32_t immediate = 0;
+  /// Depth for the counter the mnemonic names, and for the two waits naming a
+  /// pair, the memory one: vmcnt for s_waitcnt, loadcnt or storecnt for the
+  /// split waits.
+  uint32_t count = 0;
+  /// Depth for the second counter of those pairs — lgkmcnt for s_waitcnt,
+  /// dscnt for the split waits. The single-counter kinds leave it alone.
+  uint32_t paired_count = 0;
 };
 
 struct InstructionView {
@@ -148,6 +158,10 @@ private:
 
 hazard_core::WaitAction make_wait_action(const WaitInfo &wait);
 WaitKind make_wait_kind(std::string_view mnemonic);
+/// Reads the counts a wait of @p kind states in @p operand_text, the operand as
+/// the disassembler printed it — `vmcnt(1) expcnt(0) lgkmcnt(3)` for s_waitcnt,
+/// a bare count for the waits naming one counter.
+WaitInfo make_wait_info(WaitKind kind, std::string_view operand_text);
 hazard_core::RegisterKind make_register_kind(RegisterClass reg_class);
 hazard_core::InstructionDescriptor make_instruction_descriptor(const InstructionView &instruction,
                                                                hazard_core::EntityId fallback_id);

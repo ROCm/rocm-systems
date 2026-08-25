@@ -153,8 +153,13 @@ spans of consecutive registers, LDS and global memory as byte ranges. A
 multi-register load is one pending entry spanning every register it writes, so a
 read of any register in the span is caught.
 
-The wait immediate is decoded from the hardware field layout, shared by both the
-plugin's encoder and the adapter's decoder so the two cannot drift
+Wait counts are read from the disassembled operand — `vmcnt(1) expcnt(0)
+lgkmcnt(3)` — and carried to the adapter as the counts themselves rather than
+repacked into an immediate. The s_waitcnt field widths differ by family, four
+bits of lgkmcnt on CDNA against six on the RDNA families, so a single layout
+would truncate the counts of the families it was not written for and drain more
+operations than the wait named. A frontend handed a real hardware immediate
+instead decodes it with the field layout of the ISA it is executing
 (`hazard_core/include/detail/waitcnt_decode.h`).
 
 ## Directory layout
