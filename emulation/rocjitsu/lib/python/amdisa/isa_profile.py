@@ -638,6 +638,22 @@ class IsaProfile(ABC):
         del enc_name, inst_name, src0_size_bits
         return DppOpcodeRule.ALLOW
 
+    def supports_sdwa_opcode(
+        self,
+        enc_name: str,
+        inst_name: str,
+        *,
+        has_modifier_encoding: bool,
+    ) -> bool:
+        """Return whether an opcode supports the architecture's SDWA form.
+
+        Most profiles can use the alternate encodings listed in the MR ISA
+        directly. Profiles may override this when the architecture manual has
+        a more complete opcode rule than the available XML.
+        """
+        del enc_name, inst_name
+        return has_modifier_encoding
+
     @property
     def vop3_cmp_sdst_size_bits(self) -> int | None:
         """Explicit VOP3 compare destination width, if target-specific."""
@@ -767,6 +783,21 @@ class IsaProfile(ABC):
         """
         return {}
 
+    def normalize_operand_field_name(self, enc_name: str, field_name: str) -> str:
+        """Return the normalized field name used by an instruction operand."""
+        return self.field_renames(enc_name).get(field_name, field_name)
+
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        """Return the normalized type used by an instruction operand."""
+        return operand_type
+
+    @property
+    def lowercase_operand_selector_names(self) -> bool:
+        """Whether predefined symbolic operand names normalize to lowercase."""
+        return False
+
     def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
         """Return the logical condition name to use in generated code.
 
@@ -864,8 +895,9 @@ _FLAT_MODIFIERS = [
         'flat_offset',
         is_offset=True,
         preamble=(
-            'int flat_offset = (inst->seg != 0) ?'
-            ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
+            'int flat_offset = inst->offset | (inst->pad_12 << 12);'
+            'if (inst->seg == 0) flat_offset = inst->offset;'
+            'else if (flat_offset & 0x1000) flat_offset -= 0x2000;'
         ),
     ),
     EncodingModifier('sc0'),
@@ -895,8 +927,9 @@ _FLAT_MODIFIERS_GLC = [
         'flat_offset',
         is_offset=True,
         preamble=(
-            'int flat_offset = (inst->seg != 0) ?'
-            ' (inst->offset | (inst->pad_12 << 12)) : inst->offset;'
+            'int flat_offset = inst->offset | (inst->pad_12 << 12);'
+            'if (inst->seg == 0) flat_offset = inst->offset;'
+            'else if (flat_offset & 0x1000) flat_offset -= 0x2000;'
         ),
     ),
     EncodingModifier('glc'),
@@ -978,6 +1011,34 @@ class _AmdgpuProfileBase(IsaProfile):
         non-split fallback, which remains covered independently.
         """
         return True
+
+    def field_renames(self, enc_name: str) -> dict[str, str]:
+        # The public 1.1.1 snapshot gives literal extension DWORDs an
+        # explicit LITERAL field.  Preserve the established generated member
+        # name used by the earlier AMDGPU specifications.
+        return {'literal': 'simm32'}
+
+    @property
+    def lowercase_operand_selector_names(self) -> bool:
+        # The 1.1.1 XML snapshot uppercases symbolic selector names, unlike
+        # the preceding AMDGPU specs and their established disassembly.
+        return True
+
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        # Before schema 1.1.1, the 16-bit K operand in VOP2 MADMK/FMAMK
+        # instructions was represented by the 32-bit literal extension
+        # operand.  The newer XML calls the same encoded value OPR_SIMM16.
+        # Preserve the established literal identity (and hexadecimal
+        # disassembly) when the field rename identifies that extension.
+        if (
+            field_name == 'literal'
+            and operand_type == 'OPR_SIMM16'
+            and self.normalize_operand_field_name(enc_name, field_name) == 'simm32'
+        ):
+            return 'OPR_SIMM32'
+        return operand_type
 
     @property
     def flt_name_map(self) -> dict[float, str]:
@@ -1344,11 +1405,12 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     def field_renames(self, enc_name: str) -> dict[str, str]:
         upper = enc_name.upper()
+        renames = dict(super().field_renames(enc_name))
         if upper == 'ENC_FLAT':
-            return self._FLAT_FIELD_RENAMES
+            renames.update(self._FLAT_FIELD_RENAMES)
         if upper == 'ENC_VOP3P':
-            return self._VOP3P_FIELD_RENAMES
-        return {}
+            renames.update(self._VOP3P_FIELD_RENAMES)
+        return renames
 
     @property
     def cmpx_writes_vcc(self) -> bool:
@@ -1451,6 +1513,19 @@ class CdnaProfile(_AmdgpuProfileBase):
         if self.dpp_64bit_input_row_select_only and src0_size_bits == 64:
             return DppOpcodeRule.ROW_SELECT_ONLY
         return base_rule
+
+    def supports_sdwa_opcode(
+        self,
+        enc_name: str,
+        inst_name: str,
+        *,
+        has_modifier_encoding: bool,
+    ) -> bool:
+        # CDNA's SDWA limitation table permits V_PK_FMAC_F16, and the hardware
+        # encoding is exercised by LLVM, but the MR ISA omits its SDWA alternate.
+        if enc_name.upper() == 'ENC_VOP2' and inst_name == 'V_PK_FMAC_F16':
+            return True
+        return has_modifier_encoding
 
 
 class Cdna4Profile(CdnaProfile):
@@ -1658,7 +1733,7 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.0.0']
+        return ['1.0.0', '1.1.1']
 
     @property
     def max_enc_bits(self) -> int:
@@ -1765,6 +1840,17 @@ class Rdna3Profile(_AmdgpuProfileBase):
     _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
+    _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
+        if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
+            return 'default'
+        return super().normalize_encoding_condition(enc_name, cond_name)
+
+    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+        if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
+            return False
+        return super().skip_inst_encoding(enc_name, enc_cond)
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -1824,7 +1910,7 @@ class Rdna3Profile(_AmdgpuProfileBase):
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.0.0', '1.1.0']
+        return ['1.0.0', '1.1.0', '1.1.1']
 
     @property
     def max_enc_bits(self) -> int:
@@ -1958,6 +2044,17 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
+    _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
+        if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
+            return 'default'
+        return super().normalize_encoding_condition(enc_name, cond_name)
+
+    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+        if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
+            return False
+        return super().skip_inst_encoding(enc_name, enc_cond)
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -2021,7 +2118,7 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.1.0']
+        return ['1.1.0', '1.1.1']
 
     @property
     def max_enc_bits(self) -> int:
@@ -2327,6 +2424,18 @@ class Cdna5Profile(Rdna4Profile):
         renames = dict(super().field_renames(enc_name))
         renames['literal'] = 'simm32'
         return renames
+
+    def normalize_operand_field_name(self, enc_name: str, field_name: str) -> str:
+        # Keep the concrete gfx1250 operand identity distinct from earlier
+        # CDNA/RDNA specs; its local generator path maps it to the renamed
+        # microcode member and must not join simm32-specific shared bodies.
+        return field_name
+
+    @property
+    def lowercase_operand_selector_names(self) -> bool:
+        # CDNA5 schema 1.2.0 intentionally uses uppercase symbolic names and
+        # the existing gfx1250 disassembly contract follows those spellings.
+        return False
 
     @property
     def supported_versions(self) -> list[str]:

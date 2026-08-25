@@ -3661,10 +3661,10 @@ VPkFmacF16Vop2::VPkFmacF16Vop2(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &vsrc1;
-  src_operands_[2] = &vdst;
+  src_operands_[1] = &src0;
+  src_operands_[2] = &vsrc1;
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
