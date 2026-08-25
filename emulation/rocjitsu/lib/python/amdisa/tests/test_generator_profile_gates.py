@@ -2028,6 +2028,53 @@ def test_fixed_wave32_split_k_dense_dispatch_does_not_depend_on_arch_name(
     assert f'amdgpu::{callee}(' in body
 
 
+def test_replicated_halfwave_dense_layout_does_not_depend_on_arch_name():
+    body = _gen_mfma(
+        Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, []),
+        'renamed_replicated_halfwave_arch',
+        _matrix_profile(
+            matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
+            wave_size=32,
+            wave_size_max=64,
+        ),
+    )
+
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'amdgpu::exec_gfx11_wmma_f32(' in body
+
+
+def test_runtime_wave_split_k_dense_layout_does_not_depend_on_arch_name():
+    body = _gen_mfma(
+        Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, []),
+        'renamed_runtime_wave_split_k_arch',
+        _matrix_profile(
+            matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+            wave_size=32,
+            wave_size_max=64,
+        ),
+    )
+
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'amdgpu::exec_wmma_f32(' in body
+    assert 'wf.wf_size()' in _generated_matrix_call(body, 'exec_wmma_f32')
+
+
+def test_runtime_wave_swmmac_destination_does_not_depend_on_arch_name():
+    body = _gen_mfma(
+        Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, []),
+        'renamed_runtime_wave_split_k_arch',
+        _matrix_profile(
+            swmmac_layout=SwmmacLayout.RUNTIME_WAVE,
+            matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+            wave_size=32,
+            wave_size_max=64,
+        ),
+    )
+
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'amdgpu::exec_swmmac_f32(' in body
+
+
 def test_matrix_i32_final_call_sources_follow_profile_gate():
     inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P', 0, [])
 

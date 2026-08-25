@@ -302,21 +302,28 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
     arch = arch_name
     is_dense_wmma = name.startswith('V_WMMA_')
+    matrix_layout = ctx.profile.matrix_layout
     swmmac_layout = ctx.profile.swmmac_layout if is_swmmac else SwmmacLayout.NONE
     uses_supported_swmmac_layout = swmmac_layout is not SwmmacLayout.NONE
     uses_fixed_wave_swmmac_layout = swmmac_layout is SwmmacLayout.FIXED_WAVE
     uses_runtime_wave_swmmac_layout = swmmac_layout is SwmmacLayout.RUNTIME_WAVE
     uses_fixed_wave32_split_k_dense_layout = (
-        ctx.profile.matrix_layout is MatrixLayout.WMMA_SPLIT_K
+        matrix_layout is MatrixLayout.WMMA_SPLIT_K
         and ctx.profile.wave_size == 32
         and ctx.profile.wave_size_max == 32
         and is_dense_wmma
     )
-    uses_plain_vgpr_dst = arch in ('rdna3', 'rdna3_5', 'rdna4') and (
-        is_dense_wmma or uses_runtime_wave_swmmac_layout
+    uses_plain_vgpr_dst = matrix_layout is not MatrixLayout.MFMA_ACCUMULATOR and (
+        is_dense_wmma or uses_supported_swmmac_layout
     )
-    uses_gfx11_wmma_layout = arch in ('rdna3', 'rdna3_5') and is_dense_wmma
-    uses_gfx12_wmma_layout = arch == 'rdna4' and is_dense_wmma
+    uses_gfx11_wmma_layout = (
+        matrix_layout is MatrixLayout.WMMA_REPLICATED_HALFWAVE and is_dense_wmma
+    )
+    uses_gfx12_wmma_layout = (
+        matrix_layout is MatrixLayout.WMMA_SPLIT_K
+        and ctx.profile.wave_size < ctx.profile.wave_size_max
+        and is_dense_wmma
+    )
     swmmac_index_entries = 32 if is_swmmac and K >= 128 and in_bits <= 8 else 16
     if ctx.profile.uses_vgpr_msb_indexing:
         L.append(
