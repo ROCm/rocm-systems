@@ -40,8 +40,10 @@
 // ---------------------------------------------------------------------------
 
 /* Read every texel of a surface and copy it to a flat device buffer. */
-__global__ void kernel_read_surface(hipSurfaceObject_t surf, uint32_t* out,
-                                    unsigned int width, unsigned int height) {
+__global__ void kernel_read_surface([[maybe_unused]] hipSurfaceObject_t surf,
+                                    [[maybe_unused]] uint32_t* out,
+                                    [[maybe_unused]] unsigned int width,
+                                    [[maybe_unused]] unsigned int height) {
 #if !__HIP_NO_IMAGE_SUPPORT
   unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -58,9 +60,13 @@ __global__ void kernel_read_surface(hipSurfaceObject_t surf, uint32_t* out,
 }
 
 /* Write a solid color to every texel. */
-__global__ void kernel_fill_surface(hipSurfaceObject_t surf, uint8_t r,
-                                    uint8_t g, uint8_t b, uint8_t a,
-                                    unsigned int width, unsigned int height) {
+__global__ void kernel_fill_surface([[maybe_unused]] hipSurfaceObject_t surf,
+                                    [[maybe_unused]] uint8_t r,
+                                    [[maybe_unused]] uint8_t g,
+                                    [[maybe_unused]] uint8_t b,
+                                    [[maybe_unused]] uint8_t a,
+                                    [[maybe_unused]] unsigned int width,
+                                    [[maybe_unused]] unsigned int height) {
 #if !__HIP_NO_IMAGE_SUPPORT
   unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -71,8 +77,9 @@ __global__ void kernel_fill_surface(hipSurfaceObject_t surf, uint8_t r,
 }
 
 /* Invert all four channels (255 - value) of every texel. */
-__global__ void kernel_invert_surface(hipSurfaceObject_t surf,
-                                      unsigned int width, unsigned int height) {
+__global__ void kernel_invert_surface([[maybe_unused]] hipSurfaceObject_t surf,
+                                      [[maybe_unused]] unsigned int width,
+                                      [[maybe_unused]] unsigned int height) {
 #if !__HIP_NO_IMAGE_SUPPORT
   unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -89,9 +96,9 @@ __global__ void kernel_invert_surface(hipSurfaceObject_t surf,
 }
 
 /* Write R=x, G=y, B=x^y, A=0xFF unique-per-pixel to every texel. */
-__global__ void kernel_write_unique_surface(hipSurfaceObject_t surf,
-                                            unsigned int width,
-                                            unsigned int height) {
+__global__ void kernel_write_unique_surface([[maybe_unused]] hipSurfaceObject_t surf,
+                                            [[maybe_unused]] unsigned int width,
+                                            [[maybe_unused]] unsigned int height) {
 #if !__HIP_NO_IMAGE_SUPPORT
   unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -104,9 +111,9 @@ __global__ void kernel_write_unique_surface(hipSurfaceObject_t surf,
 }
 
 /* Add (x+y) mod 256 to the R, G, B channels; leave alpha unchanged. */
-__global__ void kernel_transform_surface(hipSurfaceObject_t surf,
-                                         unsigned int width,
-                                         unsigned int height) {
+__global__ void kernel_transform_surface([[maybe_unused]] hipSurfaceObject_t surf,
+                                         [[maybe_unused]] unsigned int width,
+                                         [[maybe_unused]] unsigned int height) {
 #if !__HIP_NO_IMAGE_SUPPORT
   unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -236,7 +243,7 @@ static void dispatch2d(dim3& grid, dim3& block,
 HIP_TEST_CASE(Unit_GLHIPImageData_Positive_GLWrite_HIPRead_SolidColor) {
   CHECK_IMAGE_SUPPORT;
   GLContextScopeGuard gl_context;
-  hipGetLastError(); // reset previous err
+  (void)hipGetLastError(); // reset previous err
   const uint8_t R = 0xDE, G = 0xAD, B = 0xBE, A = 0xEF;
   const uint32_t expected_pixel = pack_rgba(R, G, B, A);
 

@@ -352,6 +352,10 @@ add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
+target_sources(
+    rocjitsu_shared
+    PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>
+)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 target_link_libraries(
     rocjitsu_shared
