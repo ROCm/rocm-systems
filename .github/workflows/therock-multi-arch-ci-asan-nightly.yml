@@ -70,7 +70,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: 7b19fce75b97c4604609daaf9ad70975563108a0 # 2026-08-25 commit
     permissions:
       contents: read
       id-token: write
@@ -87,7 +87,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ${{ needs.setup.outputs.ref }}
+          ref: 7b19fce75b97c4604609daaf9ad70975563108a0 # 2026-08-25 commit
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

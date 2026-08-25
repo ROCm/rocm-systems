@@ -120,7 +120,7 @@ jobs:
       changed_projects: ''
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: 7b19fce75b97c4604609daaf9ad70975563108a0 # 2026-08-25 commit
     permissions:
       contents: read
       id-token: write
@@ -144,7 +144,7 @@ jobs:
       changed_projects: ''
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: ${{ needs.setup.outputs.ref }}
+      ref: 7b19fce75b97c4604609daaf9ad70975563108a0 # 2026-08-25 commit
     permissions:
       contents: read
       id-token: write
@@ -163,7 +163,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: ${{ needs.setup.outputs.ref }}
+          ref: 7b19fce75b97c4604609daaf9ad70975563108a0 # 2026-08-25 commit
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
