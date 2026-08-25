@@ -50,8 +50,8 @@ A **concurrency sanitizer** to detect data races in GPU kernels. It is the
 milestone that justifies the work and it sets the priority: collect a memory
 address stream at runtime, move it to the host, analyse it there.
 
-The framework must be more general than its first client. Function and basic
-block counters, branch analysis, and timing tools are all in the intended range.
+The framework must be more general than its first client; the shapes it is
+expected to serve are set out below.
 
 **Two race detectors already exist in this project, and neither is what is
 described here.** One is a simulator plugin: it does not use binary
@@ -60,16 +60,56 @@ written for that environment. The other is a prototype, usable but not
 production code and not a design to reproduce. Neither is the intended
 architecture; neither is superseded by this document.
 
+
+### The range of tools
+
+The framework is not designed around a list of tools but around a few shapes,
+each defined by what it demands. A proposed tool is in scope if it falls into
+one of these, and the capabilities in §5 and §6 exist to serve them.
+
+- **Site identity only.** The probe reports that it fired, under which mask, in
+  which wave. Instruction-mix analysis, block and function counters, coverage,
+  divergence logging. Needs site selection, wave and mask context, and host-side
+  aggregation of per-execution records.
+- **Operand observing.** Reads the guest's inputs at the site: an address, a
+  branch target. Memory logging and everything downstream of it, including
+  coalescing analysis, bank-conflict detection, and cache modelling. Needs
+  before-placement, per-lane data, and dense record kinds.
+- **Result observing.** Reads what the instruction produced. Numerical
+  correctness checks, overflow detection, capturing an atomic's outcome. Needs
+  after-placement.
+- **Both at one site.** Operands and result for the same execution, as one event.
+  A race detector needs this at an atomic. Needs pre and post placement in a
+  single window (§6.3).
+- **Region bracketing.** Two firings whose meaning lies in their pairing: loop
+  and function coverage, before-and-after value comparison. Needs block exits as
+  first-class sites, stateless probes emitting at each end, and per-wave
+  ordering for the host to pair them.
+- **Several instrumentations at one site.** Coverage alongside an address
+  stream; a required initialisation probe sharing an anchor with a logging
+  probe. Needs composed trampolines with defined ordering (§6.3).
+- **Behavior-changing transforms.** Instruction substitution, emulating a
+  missing instruction, auto-correcting a detected fault. Must remain possible
+  rather than committed, and gated behind explicit opt-in (§2.3).
+
+Two shapes are deliberately not served, for different reasons:
+
+- **Tools that aggregate on the device.** Out of scope now because of the
+  complexity it adds (§4), not because it conflicts with anything. The door is
+  open and the mechanism is a generalisation of what already exists; it could be
+  built if a client needs it enough.
+- **Tools whose conclusions depend on precise timing.** A clock in a record is
+  supportable, and ordinary timing tools are in range. But instrumentation
+  perturbs timing by construction, so anything resting on cycle-level fidelity
+  is better served by the simulator this project already provides. That is a
+  recommendation about which instrument to reach for, not a limit on what the
+  framework can record.
+
 ### Where this sits
 
 - **Versus hardware counters.** Complementary. Counters are cheap, aggregate,
   unattributed. DBI is expensive, precise, attributed. A user reaches for DBI
   once a counter has told them a problem exists.
-- **Versus Luthier and Dyninst.** Those are general-purpose GPU instrumentation
-  frameworks with far more device-side capability. This is deliberately the
-  constrained option: no external dependencies, a fixed catalogue of probes,
-  streaming with host-side analysis. If a user needs arbitrary device-side
-  logic, those are the right tools. Not a gap to be closed.
 - **Versus rocjitsu's DBT.** Same substrate, opposite failure semantics (§2.4).
 
 ### Users
@@ -384,13 +424,26 @@ corruption if missed:
   reproduces both and appends after them; writing over the implicit region
   corrupts a kernel that never declared those arguments and cannot be blamed for
   reading them.
-- **How long it must live.** Until the dispatch completes, which the framework
-  has no direct way to observe. A dispatch packet carries at most one completion
-  signal, and applications frequently leave it unset, so the framework cannot
-  simply attach one to learn when reclaiming is safe. It must either introduce
-  its own synchronisation into the submission stream or infer completion from
-  the queue's own progress. Both work; the choice should be deliberate, because
-  reclaiming early corrupts a dispatch still reading the buffer.
+- **How long it must live.** Until the dispatch has **completed**, and no
+  earlier. Arguments are ordinary memory that a kernel may read at any point
+  during its execution, not only at wave launch, so nothing short of completion
+  bounds the last read.
+
+  The trap here is that several earlier events look like completion and are not.
+  The packet being written, the command processor consuming it, and the queue's
+  read index advancing past it all mean the dispatch was *launched*. A framework
+  that reclaims on any of them corrupts a kernel still reading its arguments,
+  and does so intermittently, under load, in a way that will be blamed on the
+  application.
+
+  Completion is observable only through a signal. A dispatch packet carries at
+  most one, and applications frequently leave it unset, so the framework cannot
+  assume there is one to watch and cannot add a second. The dependable
+  construction is for the framework to introduce **its own** synchronisation
+  after the dispatch, carrying a signal it owns, and to reclaim when that fires.
+  Note that this is the same mechanism §7 needs in order to count dispatches in
+  flight, so it is one facility serving two requirements rather than a cost
+  incurred here alone.
 
 **Read from the dispatch packet.** A wave can be given a pointer to its own
 dispatch packet in a preloaded scalar pair. This does not carry the buffer
@@ -414,12 +467,14 @@ The kernel descriptor is not a candidate: it is hardware-consumed dispatch
 configuration, every field architecturally defined, and a wavefront cannot read it
 as data.
 
-**The lean is toward the kernel argument segment**, because per-dispatch binding
-is what the rest of the design wants. A pool of buffers allocated up front and
-bound per dispatch satisfies the memory model while still allowing concurrent
-instrumented kernels (invariant 5). A per-code-object buffer with a baked
-immediate remains a legitimate first implementation, and the choice is
-recoverable: it changes where the value comes from, not what probes receive.
+**Committed: delivery through the kernel argument segment, with buffers bound
+per dispatch.** Per-dispatch binding is what the rest of the design wants: a pool
+allocated up front and bound at submission satisfies the memory model while still
+allowing concurrent instrumented kernels, which a per-code-object buffer cannot,
+since concurrent dispatches of one kernel would have to share (invariant 5). A
+per-code-object buffer with a baked immediate remains a legitimate first
+implementation, and moving between them is cheap: it changes where the value
+comes from, not what probes receive.
 
 Two optimisations, neither required:
 
@@ -605,18 +660,20 @@ sizes and alignment, relocations, and the metadata note. A mismatch is a rejecte
 load, not a degraded one.
 
 The metadata note deserves particular attention, because it is not merely
-descriptive. **It, rather than the kernel descriptor, is where the runtime
-answers questions about a kernel's resource requirements**, and those answers
-are what the application's runtime uses to populate dispatch packets. An
-instrumented image whose note still describes the original therefore does not
-merely misreport; it causes packets to be built for the wrong kernel. This is the
-same hazard as §6.5's, seen from the other end.
+descriptive. The kernel descriptor remains the hardware-consumed configuration,
+but the note is what the runtime reads when a host asks a kernel about its
+resource requirements, and those answers are what the application uses to
+populate dispatch packets. The two must therefore agree: an instrumented image
+whose note still describes the original does not merely misreport, it causes
+packets to be built for the wrong kernel. This is the same hazard as §6.5's,
+seen from the other end.
 
-#### Relocation strategy (OPEN)
+#### Relocation strategy
 
-How instrumented code is laid out is **not decided**. It is recorded rather than
-deferred silently, because the choice determines what the emitter must be capable
-of and is expensive to revisit.
+**Committed: rewrite the existing code section in place**, accepting that code
+moves and that everything referring to moved code must be fixed up. Appending
+instrumented copies of whole functions is the fallback, to be taken if the
+in-place rewrite proves intractable rather than merely difficult.
 
 The forcing constraint: relative control flow reaches roughly ±128 KB, and that
 bound applies symmetrically to the branch out to a trampoline and the branch
@@ -628,39 +685,65 @@ a single instruction.
 heavily unrolled, heavily fused kernels, many per application. Anchors beyond
 reach are the normal condition.
 
-1. **A single cave appended after the existing code.** Exactly one instruction is
+The three layouts:
+
+1. **A single cave appended after the existing code.** One instruction is
    substituted in place and everything else appended, so no instruction moves
    and every original branch keeps its distance. The single-slot substitution is
    a hard constraint, not an incidental one: overwriting a longer span risks
    clobbering an instruction that is itself a branch target. Only site-to-cave
-   reach binds, and that is where it eventually fails. Note that "nothing moves"
-   is true of code and not of the container: growing the code section displaces
-   what follows it in the image, including the kernel descriptors, unless the
-   added space is given its own loadable segment. **The current short-term
-   answer.**
-2. **Islands interleaved during a rewrite of the existing code section.** Reach is
-   solved by layout, at the cost of moving everything.
-3. **A second code section** holding relocated, instrumented copies of whole
-   functions, with the original section's entries redirected across. Trampolines
-   become unconstrained: there is room to spend instructions on reaching, and
-   probe bodies could be inlined into the relocated function, reversing the
-   not-specialised-per-call-site consequence of §6.7.
+   reach binds, and that is where it fails. Note that "nothing moves" is true of
+   code and not of the container: growing the section displaces what follows it,
+   including the kernel descriptors, unless the added space is given its own
+   loadable segment. **Where the implementation is today, and adequate until
+   reach runs out.**
+2. **Rewrite the section in place**, moving and growing code as needed and
+   inserting reach-restoring islands during layout. **The direction.**
+3. **Relocated, instrumented copies of whole functions appended to the existing
+   section**, leaving the original bytes in place and redirecting execution into
+   the copies. Two copies of a function in one section, not a second section:
+   appending is the same container operation the cave already performs, so it
+   needs no new segment plumbing. **The fallback.**
 
 A two-hop scheme through a minimal nearby stub is **rejected**: prior binary
 translation work established it as insufficient.
 
-Strategies 2 and 3 both relocate whole functions, meaning branch targets and
-inlined data, and both, by moving and growing code, can push a function's own
-internal branches out of reach. Both therefore require the emitter to relax an
-out-of-range relative branch into a longer reaching sequence. That is a genuine
-cost of choosing either, and it does not apply to strategy 1.
+**Why the in-place direction is credible.** Binary translation in this project
+already rewrites the code section in place and already solves the hard parts:
+relaxing an out-of-range relative branch into a longer sequence, island pools
+inserted during emission, inverting conditional branches to reach past their
+range, and fixup windows that grow to a fixed point. That machinery is not
+hypothetical and is partly shared already. The cost previously attributed to
+this direction was largely the cost of building it (completely and correctly)
+and most of that bill has been paid.
 
-Distinguishing 2 from 3: strategy 3 leaves the original section byte-identical to
+**Where instrumentation cannot follow translation, and this is the real work.**
+Translation re-emits only the code it can prove reachable and discards the rest;
+it refuses an entire image if any single program-counter materialisation within
+it cannot be proven safe. Both are affordable only because translation replaces
+the program wholesale. Instrumentation cannot do either. The application still
+expects all of its code to exist, including code the analysis could not reach or
+could not decode, so an in-place rewrite must **preserve bytes it does not
+understand while relocating everything that moves**. That is a different problem
+from re-emitting a control-flow graph, and it is where the design effort will
+actually land.
+
+**The fallback is not merely an escape hatch from complexity.** Appended copies
+degrade gracefully per function: instrument the functions that can be analysed,
+leave the others untouched in the original section, and lose coverage rather
+than correctness. An in-place rewrite has no equivalent, since displacing a
+region obliges you to fix every reference into it, including from code that
+could not be decoded.
+
+The fallback's other advantage is that it leaves the original bytes identical to
 compiler output, so original offsets stay valid for anything else reading the
-image, such as a debugger or another tool's samples (§8.1). Strategy 2 moves
-everything. Against strategy 3: code size, and instruction-cache pressure from a
+image (§8.1). Against it: code size, and instruction-cache pressure from a
 second copy larger than the original, which is precisely the pressure large and
-numerous kernels already create.
+numerous kernels already create. One residue to note: redirecting into a copy is
+free for kernels, since the descriptor can name the copy's entry, and free for
+functions reached by direct call, since the copy's call sites are re-encoded. A
+function reached by address needs a jump at its original entry, which may be out
+of range and cannot be written in one instruction slot.
 
 One argument is **not** available to either side: preserving an uninstrumented
 variant. The original code object's bytes exist on the host under any strategy
@@ -669,13 +752,37 @@ uninstrumented (§2.1).
 
 ### 6.3 Probe placement
 
-A probe runs **before** or **after** the instruction it is attached to, per
-probe:
+Instrumentation at a site runs **before** the instruction, **after** it, or
+**both**:
 
 - **Before**: reads the instruction's source operands. Address capture works
   this way.
 - **After**: reads the instruction's results. Capturing an atomic's return value
   or success mask requires it.
+- **Both**: reads operands and results for the same execution. A race detector
+  needs this at an atomic, where the address is only available beforehand and
+  the outcome only afterwards, and both belong to one event.
+
+Several independent instrumentations may also share one anchor, which the
+framework composes into a single sequence with a defined order rather than
+treating as competing claims on the site. For example, §8.3's required
+initialisation instrumentation will land on anchors that also carry ordinary
+probes. A first implementation may support only one instrumentation per site,
+but that is a simplification to be removed, not a property of the design.
+
+The instrumented sequence is therefore a pre-probe, the original instruction,
+and a post-probe, in one save-and-restore window rather than two. That has three
+consequences worth stating, because "both" is not simply "before and after
+independently":
+
+- **State is preserved once**, not twice. The window spans the whole sequence.
+- **The original instruction still executes under the guest's own mask**, inside
+  that window. Invariant 1 and §6.4's third regime apply unchanged.
+- **A value captured before can reach the probe that runs after.** The framework
+  holds it across the intervening instruction. This is not a probe holding state
+  across its own invocations, which §6.7 forbids: the probes remain stateless
+  and the framework owns the value, which is what makes a single record
+  describing one execution possible rather than two records the host must pair.
 
 ### 6.4 Execution mask policy
 
@@ -735,10 +842,13 @@ instrumentation time than the next:
    does not exist until the framework creates it, establishing scratch state the
    kernel never had rather than merely enlarging a reservation.
 
-**Growing a memory resource is a dispatch-packet edit, not a descriptor edit.**
-The segment sizes the hardware honors come from the dispatch packet; the sizes
-recorded in the code object are what the application's runtime reads in order
-to fill that packet. Raising a reservation therefore means editing the packet at
+**Growing an existing memory reservation is a dispatch-packet edit, not a
+descriptor edit.** The segment sizes the hardware honors come from the dispatch
+packet; the sizes recorded in the code object are what the application's runtime
+reads in order to fill that packet. Note the qualifier: this covers enlarging a
+reservation the kernel already has. Creating one where the kernel had none, which
+is the common case rather than the exception, is the larger operation described
+in tier 4 above and is not a packet edit alone. Raising a reservation therefore means editing the packet at
 submission, and if the recorded sizes are left stale the two disagree. The
 failure is not a fault: accesses beyond the provisioned region are silently
 discarded or read as zero. This is the single easiest way to corrupt a guest
@@ -829,11 +939,17 @@ access it is plausibly a larger contribution to overhead than the record traffic
 Probes are standalone compiled objects, built as part of rocjitsu, made resident
 in the instrumented image, and called.
 
-**What a probe may not do.** Committed constraints, which the framework verifies
-rather than trusts:
+**What a probe may not do.** Committed constraints. The framework should verify
+these rather than trust them, and where it cannot, the gap should be named
+rather than assumed away:
 
 - **No scratch.** A function that spills requires valid private-segment state,
-  and the guest's scratch belongs to the guest.
+  and the guest's scratch belongs to the guest. Note this is only partly
+  checkable: instructions that name the private segment are recognisable, but
+  private memory reached through flat addressing is not distinguishable
+  statically. The rule therefore rests on how probes are built as much as on
+  what the framework can prove, which is defensible only while probes come from
+  the framework's own build.
 - **No local data share.** It is allocated per workgroup at dispatch and the
   guest owns all of it.
 - **No nesting or recursion.**
@@ -873,6 +989,16 @@ rather than trusts:
   address live is fixed by the calling convention of the toolchain that built
   it, not by one this framework invents, so calls must conform to that
   convention.
+- **LLVM's non-kernel calling convention is not adopted, but is the
+  obvious fallback if probes ever stop being analyzable.** For probes the
+  framework builds and can decode, inference yields a tighter clobber set than
+  any fixed convention, and the convention's frame and stack setup exists to
+  support spilling that a leaf, non-spilling probe never does. A probe whose
+  body cannot be analyzed, or one permitted to spill or to manage memory of its
+  own, needs a contract rather than an analysis, and that convention is where to
+  start. It is not free: it assumes state the current probe rules forbid, its
+  specification is explicitly a work in progress, and parts of it do not apply
+  on newer targets.
 - **Must remain possible: user-authored probes.** The blocker is that the
   call-site sequence must match the probe's calling convention, which is only a
   blocker if that sequence is hand-written per probe. The requirement is
@@ -1025,15 +1151,11 @@ code objects and queues rather than driver calls. Note that runtime
 initialisation is triggered by the application, so a tool library is loaded
 before the application does any GPU work, not before it starts running.
 
-**Open: which registration path.** The runtime offers two, an older one keyed
-off an environment variable and a newer one in which the runtime hands its table
-to a separately registered tool library. They are not complementary: the runtime
-attempts the newer path first and, when it succeeds, does not consult the older
-one at all. A tool using the older mechanism therefore only runs when the newer
-is disabled, and disabling it is what removes every other profiling tool's
-access to the runtime, which is why the two cannot currently coexist. This is
-structural, not a bug in any one tool's setup. The framework must choose the
-newer path to be a well-behaved co-resident, and that choice has not been made.
+Which of the runtime's registration mechanisms the framework uses is an
+implementation choice, not an architectural one: it changes how the hook installs
+itself and nothing about the transforms, the record format, or the buffers. What
+must not happen is for that choice to harden into an assumption of exclusivity,
+because the obligations below are what keep coexistence possible.
 
 Interception is installed by modifying entries in the runtime's dispatch table.
 Two interception points matter:
@@ -1051,61 +1173,52 @@ including for the runtime's own internal calls, before the tool has finished
 setting itself up. Deferring agent-scoped work to a later interception is
 defensible, but as a sequencing choice rather than because agents are unavailable.
 
-**Multiple hooks must compose.** A user instrumenting a workload that also
-requires translation needs both at once, and a mechanism in which tools displace
-one another silently is not acceptable. This applies equally to tools this project
-does not own: an existing profiler in the same process wants the same dispatch
-table, the same queue interception, and the same code-object-load notification.
+**Coexisting with other tools.** A user instrumenting a workload that also
+requires translation needs both at once, and an existing profiler in the same
+process wants the same table, the same queue interception, and the same
+code-object-load notification. Four obligations follow, and they are what keep
+that possible:
 
-**Chaining is mandatory.** A tool receiving a dispatch table must retain the
-previous entries, call them, and propagate their results. The table is the live
-one and tools mutate it in place, so capturing it and dropping what was there is
-a defect, not a strategy: it silently disables whatever was installed first. The
-framework must also tolerate being handed a table more than once; refusing a
-second registration is as wrong as capturing.
+- **Chain, never capture.** Retain the previous entries, call them, propagate
+  their results, and tolerate being handed the table more than once. Overwriting
+  without saving what was there silently disables whatever was installed first.
+- **Do not disable facilities other tools depend on.** Turning off a runtime
+  mechanism to simplify one's own path can remove another tool's entire
+  capability. Any such measure must be conditional on the user not wanting that
+  tool, and must be visible.
+- **Expect single-registrant hooks.** Some runtime facilities accept exactly one
+  registrant and reject the second. Composition is unavailable for those and
+  first writer wins, so the framework must decide whether to claim them at all
+  and fail visibly rather than silently when it cannot.
+- **Do not rely on composition for transforms.** Several tools can overlay the
+  same table, but the runtime builds no chain: the link to the previous function
+  is a value each tool happened to save, calling it is each tool's choice, and
+  the resulting call order is the **reverse** of installation order. That suffices
+  for observing and forwarding. It does not suffice for rewriting, where two
+  tools compose only if both forward their transformed result and nothing
+  enforces that. Where this project needs more than one transform, the answer is
+  a single hook running a pipeline (§6.8).
 
-**Not every hook is chainable, and those that are not must be named.** Some
-runtime facilities accept exactly one registrant and reject the second, such as a
-system-event handler or a queue-creation notifier. For those, composition is
-unavailable and first writer wins, so the framework must decide whether to claim
-them at all, and fail visibly rather than silently when it cannot. "Hooks
-compose" is a rule about the dispatch table, not a property of every extension
-point the runtime offers.
+**What is owed to tools that observe our output.** Instrumentation rewrites the
+code object before it is loaded, so what other tools see is the instrumented
+image: every offset they report refers to instrumented code, and resource figures
+read from the loaded image are the instrumented footprints, so any occupancy
+figure derived from them is wrong. Without the first two of the following,
+enabling instrumentation silently corrupts another tool's output.
 
-**The framework must not disable facilities other tools depend on.** Turning off a
-runtime mechanism to simplify one's own path is expedient, and where another tool
-relies on that mechanism to function at all, it silently removes that tool's
-entire capability. Any such measure must be conditional on the user not wanting
-the other tool, and must be visible.
-
-**An obligation to external tools.** Instrumentation rewrites the code object
-before it is loaded, so what other tools observe is the instrumented image. Every
-offset they report, whether a sampled program counter or a trace address, refers
-to instrumented code rather than the image the user built. Worse, resource figures
-read from the loaded image are the instrumented register and memory footprints,
-so any occupancy figure derived from them is wrong.
-
-Two requirements follow. They are requirements rather than courtesies, because
-without them enabling instrumentation silently corrupts another tool's output:
-
-- **The instrumented-to-original mapping must be published**, in a form usable by
-  a tool that observes the instrumented image but never consumes this framework's
-  records. The bookkeeping already exists (§6.2); the delivery mechanism is open.
-- **The original resource footprint must remain available** alongside the
-  instrumented one, so consumers can report what the application would have used.
-
-**On joining data with another tool.** Identifiers another tool mints, being its
-dispatch, queue, agent, and code-object identities, cannot be reconstructed from
-outside it and must be received from it. The only identifier an outside component
-can reliably contribute is one it supplies to that tool in advance. A framework
-wanting its output correlated must therefore participate in that tool's
-correlation scheme rather than inventing a parallel one.
-
-**Live integration into another tool's data model may be out of reach.** Feeding
-records directly into another tool's buffers requires that tool to expose an
-ingestion path and an extensible record taxonomy. Where it does not, the route is
-to emit alongside and join afterwards, a limitation to state plainly rather than
-design around, and lifting it is a request to the other project.
+- **Publish the instrumented-to-original mapping**, in a form usable by a tool
+  that observes the image but never consumes this framework's records. The
+  bookkeeping already exists (§6.2); the delivery mechanism is open.
+- **Keep the original resource footprint available** alongside the instrumented
+  one, so consumers can report what the application would have used.
+- **Join through the other tool's correlation scheme.** Identifiers it mints
+  cannot be reconstructed from outside it and must be received from it. The only
+  identifier an outside component can reliably contribute is one it supplies in
+  advance.
+- **Expect live integration to be out of reach.** Feeding records directly into
+  another tool's buffers requires it to expose an ingestion path and an
+  extensible record taxonomy. Where it does not, emit alongside and join
+  afterwards. Lifting that is a request to the other project.
 
 #### Publishing the mapping (OPEN)
 
@@ -1144,11 +1257,13 @@ path that makes the dormant-hook form workable.
 What attach reaches is asymmetric, and the asymmetry is accepted rather than
 solved:
 
-- **Code objects are reachable retroactively.** Instrumentation happens at load,
-  so by the time a tool attaches the interesting code objects are loaded, but
-  nothing must be modified in place. An instrumented variant of an already-loaded
-  code object can be built and then named in subsequent dispatches. This is §2.1
-  doing work it was not specifically designed for.
+- **Code objects are reachable retroactively**, but not by mutation. Loaded
+  executables are frozen, so an already-loaded code object cannot be rewritten
+  in place and cannot have anything added to it. What is possible is to build an
+  instrumented code object and load it as a new executable, freeze that, and
+  name its kernel in subsequent dispatches. The original stays loaded and
+  untouched. This is §2.1 doing work it was not specifically designed for, and
+  the cost is a second resident copy of any kernel instrumented this way.
 - **Queues are reachable only prospectively.** Submission interception is
   established when a queue is created. The obstacle is not merely that an
   existing queue was missed: there is no way to enumerate the queues a process
@@ -1258,8 +1373,9 @@ Deliberate scope decisions, not missing features.
 - **No arbitrary user-authored probe logic.** No compiler, no code generation from
   source. Probes ship with rocjitsu. Hand-written assembly probes are a
   possibility, not a commitment.
-- **No general-purpose instrumentation framework.** Luthier and Dyninst are
-  building those. This is the constrained, streaming option.
+- **No general-purpose instrumentation framework.** This is deliberately the
+  constrained option: a fixed catalogue of probes, streaming, host-side
+  analysis. Arbitrary device-side logic is not a gap to be closed here.
 - **No dependencies outside ROCm**, and no third-party instrumentation library.
   The one prerequisite worth naming is the device compiler needed to build
   probes (§6.7). It is part of ROCm rather than external, but it is packaged
@@ -1298,25 +1414,15 @@ should produce consistent results, and divergence is a bug in one of them.
 ### Open questions
 
 Each is discussed in context above. Everything else in this document is either
-committed or explicitly deferred; these five are the decisions still to make.
+committed or explicitly deferred; these two are the decisions still to make, and
+neither can be settled inside the project alone.
 
-1. **Buffer scope** (§5.4): per code object, per queue, or per dispatch. The
-   delivery mechanism leans to the kernel argument segment; what remains open is
-   the scope it is asked to express. Decidable within the project.
-2. **Relocation strategy for large kernels** (§6.2): how sites beyond
-   relative-branch reach are handled. Expected to be the common case, not a tail
-   case, for the workloads this framework targets. The candidates and their
-   trade-offs are written up; what is wanted is a choice among them.
-3. **How the instrumented-to-original mapping is published** (§8.1): the
+1. **How the instrumented-to-original mapping is published** (§8.1): the
    requirement is settled, the delivery mechanism is not. Consumer-driven, so it
    wants the tools that must read the mapping represented in the decision.
-4. **Advanced-user API status** (§1): supported product surface, or internal API
+2. **Advanced-user API status** (§1): supported product surface, or internal API
    that happens to be usable. This is a question about who the framework is for,
    and answering it may need someone who owns that relationship.
-5. **Which runtime registration path the framework uses** (§8.1): the older
-   environment-keyed mechanism it uses today, or the newer one. The two are
-   mutually exclusive in practice, and only the newer permits coexistence with
-   other profiling tools.
 
 ### Known gaps
 
