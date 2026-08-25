@@ -202,12 +202,17 @@ struct settings_policy
 
     static gpu::enabled_metrics get_enabled_metrics() noexcept
     {
-        static auto _enabled_metrics = []() {
-            auto setting =
-                get_setting_value<std::string>(std::string{ env_vars::AMD_SMI_METRICS });
-            auto value_str = setting.has_value() ? setting.value() : "all";
-            auto result    = parse_enabled_metrics(value_str);
-            return result;
+        static auto _enabled_metrics = []() noexcept {
+            try
+            {
+                auto setting = get_setting_value<std::string>(
+                    std::string{ env_vars::AMD_SMI_METRICS });
+                auto value_str = setting.has_value() ? setting.value() : "all";
+                return parse_enabled_metrics(value_str);
+            } catch(...)
+            {
+                return gpu::enabled_metrics{};
+            }
         }();
         return _enabled_metrics;
     }
@@ -222,36 +227,44 @@ struct settings_policy
      */
     static nic::nic_device_filter get_nic_device_filter() noexcept
     {
-        auto filter =
-            get_setting_value<std::string>(std::string{ env_vars::SAMPLING_AINICS });
-        if(!filter.has_value())
+        try
         {
-            // NIC sampling disabled by default
+            auto filter =
+                get_setting_value<std::string>(std::string{ env_vars::SAMPLING_AINICS });
+            if(!filter.has_value())
+            {
+                // NIC sampling disabled by default
+                nic::nic_device_filter result;
+                result.mode = nic::device_selection_mode::NONE;
+                return result;
+            }
+
+            const auto& filter_str = filter.value();
+            if(filter_str == "all" || filter_str == "on")
+            {
+                nic::nic_device_filter result;
+                result.mode = nic::device_selection_mode::ALL;
+                return result;
+            }
+
+            if(filter_str == "none" || filter_str == "off" || filter_str.empty())
+            {
+                nic::nic_device_filter result;
+                result.mode = nic::device_selection_mode::NONE;
+                return result;
+            }
+
+            // Parse comma-separated names
+            nic::nic_device_filter result;
+            result.mode  = nic::device_selection_mode::SPECIFIC;
+            result.names = parse_name_list(filter_str);
+            return result;
+        } catch(...)
+        {
             nic::nic_device_filter result;
             result.mode = nic::device_selection_mode::NONE;
             return result;
         }
-
-        const auto& filter_str = filter.value();
-        if(filter_str == "all" || filter_str == "on")
-        {
-            nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::ALL;
-            return result;
-        }
-
-        if(filter_str == "none" || filter_str == "off" || filter_str.empty())
-        {
-            nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::NONE;
-            return result;
-        }
-
-        // Parse comma-separated names
-        nic::nic_device_filter result;
-        result.mode  = nic::device_selection_mode::SPECIFIC;
-        result.names = parse_name_list(filter_str);
-        return result;
     }
 
     /**

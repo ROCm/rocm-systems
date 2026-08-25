@@ -609,13 +609,14 @@ perfetto_processor_t::handle(const kernel_dispatch_sample& _kds)
 void
 perfetto_processor_t::handle(const scratch_memory_sample& _sms)
 {
-    auto        _corr_id           = _sms.correlation_id_internal;
-    auto        _stream_id         = _sms.stream_handle;
-    auto        _queue_id_handle   = _sms.queue_id_handle;
-    const auto& _t_info            = thread_info::get(_sms.thread_id, SystemTID);
-    const auto  _thread_id_sequent = _t_info->index_data->sequent_value;
-    auto        _beg_ts            = _sms.start_timestamp;
-    auto        _end_ts            = _sms.end_timestamp;
+    auto        _corr_id         = _sms.correlation_id_internal;
+    auto        _stream_id       = _sms.stream_handle;
+    auto        _queue_id_handle = _sms.queue_id_handle;
+    const auto& _t_info          = thread_info::get(_sms.thread_id, SystemTID);
+    const auto  _thread_id_sequent =
+        (_t_info && _t_info->index_data) ? _t_info->index_data->sequent_value : 0U;
+    auto _beg_ts = _sms.start_timestamp;
+    auto _end_ts = _sms.end_timestamp;
 
     auto _agent_device_id =
         m_agent_manager.get_agent_by_handle(_sms.agent_id_handle).device_type_index;

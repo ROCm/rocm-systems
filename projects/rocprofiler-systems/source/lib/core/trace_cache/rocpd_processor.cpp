@@ -407,7 +407,8 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
                   pmc::collectors::gpu::select_socket_power(enabled, m));
     insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
                   info::format_track_name<category::amd_smi_memory_usage>(),
-                  enabled.bits.memory_usage, m.memory_usage / units::megabyte);
+                  enabled.bits.memory_usage,
+                  static_cast<double>(m.memory_usage) / units::megabyte);
     insert_scalar(trait::name<category::amd_smi_sdma_usage>::value,
                   info::format_track_name<category::amd_smi_sdma_usage>(),
                   enabled.bits.sdma_usage, m.sdma_usage);

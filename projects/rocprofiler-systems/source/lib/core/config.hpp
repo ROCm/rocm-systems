@@ -258,12 +258,6 @@ get_perfetto_combined_traces();
 std::string
 get_perfetto_fill_policy();
 
-std::set<std::string>
-get_enabled_categories();
-
-std::set<std::string>
-get_disabled_categories();
-
 bool
 get_perfetto_annotations() ROCPROFSYS_HOT;
 
