@@ -1478,6 +1478,10 @@ amdsmi_status_t amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processo
   }
   LOG_DEBUG(oam_ss);
 
+  // Retrieve Physical Accelerator ID (UALoE)
+  info->physical_acc_id = std::numeric_limits<uint32_t>::max();
+  get_physical_acc_id_from_ualoe(gpu_device, &(info->physical_acc_id));
+
   return AMDSMI_STATUS_SUCCESS;
 }
 

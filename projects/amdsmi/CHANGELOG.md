@@ -8,6 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `physical_acc_id` to `amdsmi_enumeration_info_t`**.  
+  - Populated by `amdsmi_get_gpu_enumeration_info()`, UALoE-backed like the existing `physical_acc_id` field in `amdsmi_asic_info_t`.
+  - CLI: `amd-smi list --enumeration` now includes `PHYSICAL_ACC_ID` next to `OAM_ID`.
+
 ### Changed
 
 ### Optimized
@@ -350,7 +354,7 @@ GPU: 0
   - Fields not applicable to the current version are set to sentinel values: `0xFFFF` for `uint16_t`, `0xFFFFFFFF` for `uint32_t`, and `UINT64_MAX` for `uint64_t` fields.
   - Python bindings updated with `AmdSmiApuMetrics` ctypes structure.
 
-- **Added `oam_id` to `amdsmi_enumeration_info_t`**.  
+- **Added `oam_id` to `amdsmi_enumeration_info_t`**.
   - `amd-smi list -e` now displays `OAM_ID` (Physical XGMI ID / OAM ID).
   - Added `--enumeration` as a long-form alias for `-e` in `amd-smi list`.
 

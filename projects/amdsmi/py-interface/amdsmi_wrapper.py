@@ -1107,6 +1107,7 @@ struct_amdsmi_enumeration_info_t._fields_ = [
     ('hip_id', ctypes.c_uint32),
     ('hip_uuid', ctypes.c_char * 256),
     ('oam_id', ctypes.c_uint32),
+    ('physical_acc_id', ctypes.c_uint32),
 ]
 
 amdsmi_enumeration_info_t = struct_amdsmi_enumeration_info_t
