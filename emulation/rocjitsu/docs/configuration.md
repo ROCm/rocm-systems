@@ -16,6 +16,7 @@ Pre-built simulator configs are in `configs/`:
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone simulation, no KMD) |
+| `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
@@ -121,5 +122,6 @@ location IDs. Each GPU gets its own command processor, memory, and
 cache hierarchy. The daemon manages all GPUs and routes KFD ioctls
 to the correct device based on `gpu_id`.
 
-See `configs/gfx950_mi355x_kmd_2gpu.json` for a working two-GPU
-configuration used by the RCCL collective tests.
+`configs/gfx950_mi355x_kmd_2gpu.json` is the default multi-GPU
+configuration for RCCL tests. `configs/gfx1250_mi455x_kmd_4gpu.json`
+provides a four-GPU daemon topology for explicit multi-GPU runs.
