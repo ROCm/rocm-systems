@@ -21,7 +21,8 @@ set(rocprofv3-validate-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py)
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py
+                                                          validate_perf.py)
 
 # Collect counters via in-process kernel replay. The number of --pmc groups drives the
 # number of replay passes (one batch per pass), with device memory restored between
@@ -125,5 +126,53 @@ set_tests_properties(
                "${rocprofv3-validate-env}"
                FIXTURES_REQUIRED
                rocprofv3-test-kernel-replay-interval-data
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# One-pass baseline for performance scaling checks (same workload, single --pmc group).
+add_test(
+    NAME rocprofv3-test-kernel-replay-baseline-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU
+        --kernel-replay-beta-enabled --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-baseline -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-baseline-generate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay;kernel-replay-perf"
+               ENVIRONMENT
+               "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-kernel-replay-perf-data)
+
+# Performance regression: total tool duration and per-pass spans must stay within the
+# Figure 5 cost-model ceiling; 5-pass run must not blow up vs the 1-pass baseline.
+add_test(
+    NAME rocprofv3-test-kernel-replay-perf-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate_perf.py --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
+        ${REPLAY_PASSES} --n-elems 1048576 --baseline-json
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-baseline/out_results.json
+        --max-scaling-ratio 10.0)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-perf-validate
+    PROPERTIES TIMEOUT
+               60
+               LABELS
+               "integration-tests;kernel-replay;kernel-replay-perf"
+               ENVIRONMENT
+               "${rocprofv3-validate-env}"
+               FIXTURES_REQUIRED
+               "rocprofv3-test-kernel-replay-data;rocprofv3-test-kernel-replay-perf-data"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
