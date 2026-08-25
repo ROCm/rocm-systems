@@ -664,7 +664,7 @@ class VirtualGPU : public device::VirtualDevice {
   void* allocKernArg(size_t size, size_t alignment);
   //! Returns the size of one managed kernarg pool chunk.
   size_t KernArgPoolChunkSize() const;
-  bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
+  bool isFenceDirty() const override { return fence_dirty_.load(std::memory_order_acquire); }
   void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
 
