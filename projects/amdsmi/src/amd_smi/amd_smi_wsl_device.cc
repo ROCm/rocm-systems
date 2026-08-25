@@ -447,22 +447,23 @@ amdsmi_status_t WSLGPUBackend::get_clock_info(amdsmi_clk_type_t clk_type, amdsmi
   uint32_t clk = Wkmi::kSensorUnavailable;
   if (wsl::QueryPmlogSnapshot(adapter_, &snap)) clk = wsl::PmlogValue(snap, sensor);
 
+  uint32_t max_clk = clk_type == AMDSMI_CLK_TYPE_MEM ? adapter_.device_info.max_memory_clock_mhz
+                                                     : adapter_.device_info.max_engine_clock_mhz;
+
   std::memset(info, 0, sizeof(*info));
-  if (clk != Wkmi::kSensorUnavailable) {
+  // max_clk of 0 means Wkmi::ParseAdapterInfo never populated this field on
+  // this ASIC/driver; report NOT_SUPPORTED rather than a SUCCESS the caller
+  // can't trust (max_clk is otherwise guaranteed non-zero on SUCCESS).
+  if (clk != Wkmi::kSensorUnavailable && max_clk > 0) {
     info->clk = clk;
-    info->max_clk = clk_type == AMDSMI_CLK_TYPE_MEM ? adapter_.device_info.max_memory_clock_mhz
-                                                    : adapter_.device_info.max_engine_clock_mhz;
+    info->max_clk = max_clk;
     return AMDSMI_STATUS_SUCCESS;
   }
 
   // Fallback: static max only, for GFX and MEM (matches
   // rocdxg_smi_get_clock_info's behavior when the PMLog sensor is unavailable).
-  if (clk_type == AMDSMI_CLK_TYPE_SYS) {
-    info->max_clk = adapter_.device_info.max_engine_clock_mhz;
-    return AMDSMI_STATUS_SUCCESS;
-  }
-  if (clk_type == AMDSMI_CLK_TYPE_MEM) {
-    info->max_clk = adapter_.device_info.max_memory_clock_mhz;
+  if ((clk_type == AMDSMI_CLK_TYPE_SYS || clk_type == AMDSMI_CLK_TYPE_MEM) && max_clk > 0) {
+    info->max_clk = max_clk;
     return AMDSMI_STATUS_SUCCESS;
   }
   return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -486,6 +487,10 @@ amdsmi_status_t WSLGPUBackend::get_pcie_info(amdsmi_pcie_info_t* info) {
 
   wsl::PmlogSnapshot snap;
   if (!wsl::QueryPmlogSnapshot(adapter_, &snap)) return AMDSMI_STATUS_API_FAILED;
+  // Static chipset fields never populated on this hardware/driver (pcie_gen ==
+  // 0): report the same API_FAILED the caller already tolerates instead of a
+  // SUCCESS the required-non-zero static fields can't back up.
+  if (device_info_.pcie_gen == 0) return AMDSMI_STATUS_API_FAILED;
   uint32_t width = wsl::PmlogValue(snap, Wkmi::kPmlogBusLanes);
   uint32_t speed_gen = wsl::PmlogValue(snap, Wkmi::kPmlogBusSpeed);
   info->pcie_metric.pcie_width =

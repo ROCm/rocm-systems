@@ -38,7 +38,6 @@ DxcoreLoader::DxcoreLoader()
       pfn_D3DKMTCreateDevice(nullptr),
       pfn_D3DKMTDestroyDevice(nullptr),
       pfn_D3DKMTEnumAdapters2(nullptr),
-      pfn_D3DKMTCloseAdapter(nullptr),
       pfn_D3DKMTQueryAdapterInfo(nullptr),
       pfn_D3DKMTCreateContextVirtual(nullptr),
       pfn_D3DKMTDestroyContext(nullptr),
@@ -69,6 +68,7 @@ DxcoreLoader::DxcoreLoader()
       pfn_D3DKMTOpenResource(nullptr),
       pfn_D3DKMTEnumProcesses(nullptr),
       pfn_D3DKMTQueryVideoMemoryInfo(nullptr),
+      pfn_D3DKMTCloseAdapter(nullptr),
       dxcore_handle_(nullptr) {}
 
 DxcoreLoader::~DxcoreLoader() { Shutdown(); }

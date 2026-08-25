@@ -62,7 +62,6 @@ class DxcoreLoader {
   typedef NTSTATUS(DXCORE_DEF(D3DKMTCreateDevice))(void* args);
   typedef NTSTATUS(DXCORE_DEF(D3DKMTDestroyDevice))(void* args);
   typedef NTSTATUS(DXCORE_DEF(D3DKMTEnumAdapters2))(void* args);
-  typedef NTSTATUS(DXCORE_DEF(D3DKMTCloseAdapter))(void* args);
   typedef NTSTATUS(DXCORE_DEF(D3DKMTQueryAdapterInfo))(void* args);
   typedef NTSTATUS(DXCORE_DEF(D3DKMTCreateContextVirtual))(void* args);
   typedef NTSTATUS(DXCORE_DEF(D3DKMTDestroyContext))(void* args);
@@ -96,6 +95,8 @@ class DxcoreLoader {
   typedef NTSTATUS(DXCORE_DEF(D3DKMTOpenResource))(void* args);
   typedef NTSTATUS(DXCORE_DEF(D3DKMTEnumProcesses))(void* args);
   typedef NTSTATUS(DXCORE_DEF(D3DKMTQueryVideoMemoryInfo))(void* args);
+  // Appended (not inserted above) to preserve the member offsets libwkmi.a was built against.
+  typedef NTSTATUS(DXCORE_DEF(D3DKMTCloseAdapter))(void* args);
 
   static DxcoreLoader& Instance() {
     static DxcoreLoader* instance = new DxcoreLoader();
@@ -115,7 +116,6 @@ class DxcoreLoader {
   DXCORE_DEF(D3DKMTCreateDevice) * DXCORE_PFN(D3DKMTCreateDevice);
   DXCORE_DEF(D3DKMTDestroyDevice) * DXCORE_PFN(D3DKMTDestroyDevice);
   DXCORE_DEF(D3DKMTEnumAdapters2) * DXCORE_PFN(D3DKMTEnumAdapters2);
-  DXCORE_DEF(D3DKMTCloseAdapter) * DXCORE_PFN(D3DKMTCloseAdapter);
   DXCORE_DEF(D3DKMTQueryAdapterInfo) * DXCORE_PFN(D3DKMTQueryAdapterInfo);
   DXCORE_DEF(D3DKMTCreateContextVirtual) * DXCORE_PFN(D3DKMTCreateContextVirtual);
   DXCORE_DEF(D3DKMTDestroyContext) * DXCORE_PFN(D3DKMTDestroyContext);
@@ -149,6 +149,8 @@ class DxcoreLoader {
   DXCORE_DEF(D3DKMTOpenResource) * DXCORE_PFN(D3DKMTOpenResource);
   DXCORE_DEF(D3DKMTEnumProcesses) * DXCORE_PFN(D3DKMTEnumProcesses);
   DXCORE_DEF(D3DKMTQueryVideoMemoryInfo) * DXCORE_PFN(D3DKMTQueryVideoMemoryInfo);
+  // Appended (not inserted above) to preserve the member offsets libwkmi.a was built against.
+  DXCORE_DEF(D3DKMTCloseAdapter) * DXCORE_PFN(D3DKMTCloseAdapter);
 
  private:
   DxcoreLoader();
