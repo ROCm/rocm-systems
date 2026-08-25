@@ -80,11 +80,15 @@ jobs:
       changed_projects: ${{ steps.configure.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure.outputs.skip_tests }}
+      # Build stages this PR does not touch (fed to TheRock's prebuilt_stages).
+      skip_stages: ${{ steps.skip_stages.outputs.skip_stages }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/repos-config.json
+          sparse-checkout: |
+            .github/repos-config.json
+            .github/scripts/compute_skip_stages.py
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock for configure script
@@ -93,7 +97,13 @@ jobs:
           repository: ROCm/TheRock
           ref: main
           path: _therock
-          sparse-checkout: build_tools/github_actions
+          # _therock_utils + (cone-mode) root BUILD_TOPOLOGY.toml and
+          # build_tools/project_mappings.json are needed to map changed projects
+          # to build stages. NOTE: keep this ref in sync with the `setup` job's
+          # TheRock ref so the topology matches what is actually built.
+          sparse-checkout: |
+            build_tools/github_actions
+            build_tools/_therock_utils
           sparse-checkout-cone-mode: true
 
       - name: Configure CI
@@ -108,6 +118,17 @@ jobs:
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --config-path ".github/repos-config.json"
 
+      # Map the changed projects to the minimal set of TheRock build stages and
+      # emit the complement as `skip_stages`. TheRock's build graph
+      # (BUILD_TOPOLOGY.toml) is the source of truth; this only reads it. When
+      # run_all_tests is set (CI-infra change) we skip nothing (full build).
+      - name: Compute skippable stages
+        id: skip_stages
+        run: |
+          python3 .github/scripts/compute_skip_stages.py \
+            --changed-projects "${{ steps.configure.outputs.run_all_tests == 'true' && '' || steps.configure.outputs.changed_projects }}" \
+            --therock-path "_therock"
+
   setup:
     needs: configure
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
@@ -119,14 +140,22 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # rocm-systems affects compiler-runtime (HIP, CLR, runtime, profiler-core)
-      # which cascades to ALL downstream stages. No stages can be reused.
-      # Hard-coding to empty for now.
-      prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
+      # Per-PR stage SKIP (not reuse): the configure job maps the changed
+      # projects to the minimal set of build stages via TheRock's build topology
+      # and returns every other stage in `skip_stages`. We pass that list through
+      # TheRock's existing `prebuilt_stages` input with an EMPTY baseline_run_id:
+      # TheRock skips those stages' build jobs and its copy_prebuilt_stages job
+      # only runs when baseline_run_id != '', so nothing is copied -> a pure skip.
+      # A manual `prebuilt_stages` workflow_dispatch input still takes precedence.
+      # "Skip now, reuse later": to enable reuse, switch stage_reuse_mode to
+      # reuse-stage (and/or provide baseline_run_id) with no other changes.
+      prebuilt_stages: ${{ inputs.prebuilt_stages || needs.configure.outputs.skip_stages }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
-      # Enable automatic stage reuse - TheRock finds commit-compatible baselines
-      # and determines which stages to rebuild based on changed files
-      stage_reuse_mode: reuse-stage
+      # dry-run: report only, apply no automatic reuse. Combined with the
+      # skip list above this yields a deterministic pure skip (build fewer
+      # stages, copy nothing). Flip to reuse-stage later to turn skips into
+      # baseline reuse.
+      stage_reuse_mode: dry-run
       repository: ROCm/TheRock
       ref: main
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
