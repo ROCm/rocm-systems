@@ -18,7 +18,9 @@ from perf_cost_model import max_pass_scaling_ratio, model_max_ms
 from validate_scaling import parse_marker
 
 
-def run_case(testapp: Path, client: Path, passes: int, ballast_mb: int, launches: int) -> str:
+def run_case(
+    testapp: Path, client: Path, passes: int, ballast_mb: int, launches: int
+) -> str:
     env = os.environ.copy()
     env["KR_PERF_PASSES"] = str(passes)
     preload = client.resolve()
@@ -35,9 +37,7 @@ def run_case(testapp: Path, client: Path, passes: int, ballast_mb: int, launches
     )
     out = proc.stdout + proc.stderr
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"P={passes} run failed rc={proc.returncode}\n{out}"
-        )
+        raise RuntimeError(f"P={passes} run failed rc={proc.returncode}\n{out}")
     if "[kr-perf] PASS" not in out:
         raise RuntimeError(f"P={passes} missing PASS marker\n{out}")
     return out
@@ -54,16 +54,21 @@ def main() -> int:
     args = ap.parse_args()
 
     base_out = run_case(args.testapp, args.client, 1, args.ballast_mb, args.launches)
-    high_out = run_case(args.testapp, args.client, args.high_passes, args.ballast_mb, args.launches)
+    high_out = run_case(
+        args.testapp, args.client, args.high_passes, args.ballast_mb, args.launches
+    )
 
     base_m = parse_marker(base_out)
     high_m = parse_marker(high_out)
 
-    for label, m, p in (("P=1", base_m, 1), (f"P={args.high_passes}", high_m, args.high_passes)):
+    for label, m, p in (
+        ("P=1", base_m, 1),
+        (f"P={args.high_passes}", high_m, args.high_passes),
+    ):
         ceiling = model_max_ms(int(m["ballast_mb"]), int(m["launches"]), p)
-        assert m["wall_ms"] <= ceiling, (
-            f"{label} wall_ms={m['wall_ms']:.1f} > ceiling {ceiling:.1f} ms"
-        )
+        assert (
+            m["wall_ms"] <= ceiling
+        ), f"{label} wall_ms={m['wall_ms']:.1f} > ceiling {ceiling:.1f} ms"
         print(f"[kr-perf-run] {label} wall_ms={m['wall_ms']:.1f} <= {ceiling:.1f} ms")
 
     ratio = high_m["wall_ms"] / max(base_m["wall_ms"], 0.001)

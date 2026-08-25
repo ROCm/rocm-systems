@@ -28,16 +28,15 @@ thread_local uint64_t    tl_pass = 0;
 const char*
 counter_name_for_pass(uint64_t pass)
 {
-    static constexpr std::array<const char*, kPasses> names{"SQ_WAVES",
-                                                            "GRBM_COUNT",
-                                                            "GRBM_GUI_ACTIVE"};
+    static constexpr std::array<const char*, kPasses> names{
+        "SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"};
     return names[pass % names.size()];
 }
 
 rocprofiler_counter_config_id_t
 config_for_pass(rocprofiler_agent_id_t agent, uint64_t pass)
 {
-    static std::mutex mutex{};
+    static std::mutex                                                    mutex{};
     static std::unordered_map<uint64_t, rocprofiler_counter_config_id_t> cache{};
     const uint64_t key = (agent.handle << 8) | (pass % kPasses);
     {
@@ -45,7 +44,7 @@ config_for_pass(rocprofiler_agent_id_t agent, uint64_t pass)
         if(auto it = cache.find(key); it != cache.end()) return it->second;
     }
 
-    const char* want_name = counter_name_for_pass(pass);
+    const char*                           want_name = counter_name_for_pass(pass);
     std::vector<rocprofiler_counter_id_t> all{};
     KR_CHECK(rocprofiler_iterate_agent_supported_counters(
         agent,
@@ -74,8 +73,7 @@ config_for_pass(rocprofiler_agent_id_t agent, uint64_t pass)
     return cfg;
 }
 
-uint64_t
-pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -126,12 +124,13 @@ int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
     KR_CHECK(rocprofiler_create_context(&g_replay_ctx));
-    KR_CHECK(rocprofiler_configure_callback_tracing_service(g_replay_ctx,
-                                                            ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
-                                                            nullptr,
-                                                            0,
-                                                            kernel_replay_cb,
-                                                            nullptr));
+    KR_CHECK(
+        rocprofiler_configure_callback_tracing_service(g_replay_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                                                       nullptr,
+                                                       0,
+                                                       kernel_replay_cb,
+                                                       nullptr));
     KR_CHECK(rocprofiler_create_context(&g_counters_ctx));
     KR_CHECK(rocprofiler_configure_callback_dispatch_counting_service(
         g_counters_ctx, counter_dispatch_cb, nullptr, counter_record_cb, nullptr));
@@ -143,7 +142,9 @@ tool_init(rocprofiler_client_finalize_t, void*)
 void
 tool_fini(void*)
 {
-    fprintf(stderr, "[counters] records=%d expected=%lu\n", g_records.load(),
+    fprintf(stderr,
+            "[counters] records=%d expected=%lu\n",
+            g_records.load(),
             static_cast<unsigned long>(kPasses));
     if(g_records.load() != static_cast<int>(kPasses)) std::abort();
 }

@@ -75,8 +75,7 @@ pass_sequence()
             service_kind::spm};
 }
 
-uint64_t
-pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -87,8 +86,8 @@ set_context_for_pass(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
                      bool                                               enabled)
 {
     if(context.handle == 0) return;
-    auto callback = enabled ? payload->replay_local_start_context_cb
-                            : payload->replay_local_stop_context_cb;
+    auto callback =
+        enabled ? payload->replay_local_start_context_cb : payload->replay_local_stop_context_cb;
     KR_CHECK(callback(context));
 }
 
@@ -96,8 +95,7 @@ void
 kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t*, void*)
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) return;
-    auto* payload =
-        static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
+    auto* payload = static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
     if(payload->dispatch_info.workgroup_size.x != kReplayBlockX) return;
 
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
@@ -118,10 +116,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     // These services are intentionally exclusive. ATT+SPM both inject AQL instrumentation;
     // SPM+PC sampling share SQ/performance-monitor resources; counters+PC sampling have the
     // MI2xx/MI3xx clock-gating conflict. Give each non-counter service its own pass.
-    set_context_for_pass(
-        payload, g_counters_ctx, selected == service_kind::counters);
-    set_context_for_pass(
-        payload, g_pcs_ctx, selected == service_kind::pc_sampling);
+    set_context_for_pass(payload, g_counters_ctx, selected == service_kind::counters);
+    set_context_for_pass(payload, g_pcs_ctx, selected == service_kind::pc_sampling);
     set_context_for_pass(payload, g_att_ctx, selected == service_kind::att);
     set_context_for_pass(payload, g_spm_ctx, selected == service_kind::spm);
 
@@ -183,8 +179,7 @@ att_dispatch_cb(rocprofiler_agent_id_t,
                                           : ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
-void
-att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
+void att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
 {
     g_att_records.fetch_add(1);
 }
@@ -216,7 +211,10 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* data,
     std::vector<rocprofiler_counter_id_t> all{};
     KR_CHECK(rocprofiler_spm_iterate_agent_supported_counters(
         agent,
-        [](rocprofiler_agent_id_t, rocprofiler_counter_id_t* counters, size_t count, void* userdata) {
+        [](rocprofiler_agent_id_t,
+           rocprofiler_counter_id_t* counters,
+           size_t                    count,
+           void*                     userdata) {
             auto* output = static_cast<std::vector<rocprofiler_counter_id_t>*>(userdata);
             output->insert(output->end(), counters, counters + count);
             return ROCPROFILER_STATUS_SUCCESS;
@@ -242,7 +240,7 @@ spm_dispatch_cb(const rocprofiler_spm_dispatch_counting_service_data_t* data,
         .size  = sizeof(rocprofiler_spm_parameters_t),
         .type  = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
         .value = 1200};
-    rocprofiler_spm_parameters_t* parameters[] = {&parameter};
+    rocprofiler_spm_parameters_t*   parameters[] = {&parameter};
     rocprofiler_counter_config_id_t created{.handle = 0};
     KR_CHECK(rocprofiler_spm_create_counter_config(
         agent, want.data(), want.size(), parameters, 1, &created));
@@ -287,7 +285,9 @@ configure_pc_sampling()
         std::vector<rocprofiler_pc_sampling_configuration_t> configurations{};
         auto status = rocprofiler_query_pc_sampling_agent_configurations(
             agent,
-            [](const rocprofiler_pc_sampling_configuration_t* values, size_t count, void* userdata) {
+            [](const rocprofiler_pc_sampling_configuration_t* values,
+               size_t                                         count,
+               void*                                          userdata) {
                 auto* output =
                     static_cast<std::vector<rocprofiler_pc_sampling_configuration_t>*>(userdata);
                 output->insert(output->end(), values, values + count);
@@ -296,13 +296,8 @@ configure_pc_sampling()
             &configurations);
         if(status != ROCPROFILER_STATUS_SUCCESS || configurations.empty()) continue;
         const auto& config = configurations.front();
-        status             = rocprofiler_configure_pc_sampling_service(g_pcs_ctx,
-                                                            agent,
-                                                            config.method,
-                                                            config.unit,
-                                                            config.min_interval,
-                                                            g_pcs_buffer,
-                                                            0);
+        status             = rocprofiler_configure_pc_sampling_service(
+            g_pcs_ctx, agent, config.method, config.unit, config.min_interval, g_pcs_buffer, 0);
         configured |= status == ROCPROFILER_STATUS_SUCCESS;
     }
 
@@ -319,15 +314,14 @@ configure_att()
     bool configured = false;
     for(auto agent : gpu_agents())
     {
-        configured |=
-            rocprofiler_configure_dispatch_thread_trace_service(g_att_ctx,
-                                                                agent,
-                                                                parameters.data(),
-                                                                parameters.size(),
-                                                                att_dispatch_cb,
-                                                                att_shader_cb,
-                                                                nullptr) ==
-            ROCPROFILER_STATUS_SUCCESS;
+        configured |= rocprofiler_configure_dispatch_thread_trace_service(g_att_ctx,
+                                                                          agent,
+                                                                          parameters.data(),
+                                                                          parameters.size(),
+                                                                          att_dispatch_cb,
+                                                                          att_shader_cb,
+                                                                          nullptr) ==
+                      ROCPROFILER_STATUS_SUCCESS;
     }
     if(configured) KR_CHECK(rocprofiler_start_context(g_att_ctx));
     return configured;
@@ -348,15 +342,16 @@ int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
     const char* order = std::getenv("KR_SERVICE_ORDER");
-    g_services_first = !order || std::strcmp(order, "services-last") != 0;
+    g_services_first  = !order || std::strcmp(order, "services-last") != 0;
 
     KR_CHECK(rocprofiler_create_context(&g_replay_ctx));
-    KR_CHECK(rocprofiler_configure_callback_tracing_service(g_replay_ctx,
-                                                            ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
-                                                            nullptr,
-                                                            0,
-                                                            kernel_replay_cb,
-                                                            nullptr));
+    KR_CHECK(
+        rocprofiler_configure_callback_tracing_service(g_replay_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                                                       nullptr,
+                                                       0,
+                                                       kernel_replay_cb,
+                                                       nullptr));
 
     KR_CHECK(rocprofiler_create_context(&g_counters_ctx));
     KR_CHECK(rocprofiler_configure_callback_dispatch_counting_service(
@@ -405,7 +400,7 @@ extern "C" rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t, const char*, uint32_t priority, rocprofiler_client_id_t* id)
 {
     if(priority > 0) return nullptr;
-    id->name        = "kernel-replay-service-sequence";
+    id->name           = "kernel-replay-service-sequence";
     static auto config = rocprofiler_tool_configure_result_t{
         sizeof(rocprofiler_tool_configure_result_t), &tool_init, &tool_fini, nullptr};
     return &config;

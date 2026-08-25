@@ -43,8 +43,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_and_validate.py --testapp
         $<TARGET_FILE:kernel-replay-perf-testapp> --client
-        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 64 --launches 8 --high-passes 5
-        --max-scaling-ratio 8.0)
+        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 64 --launches 8
+        --high-passes 5 --max-scaling-ratio 8.0)
 
 set_tests_properties(
     test-kernel-replay-perf-scaling
@@ -69,8 +69,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_pass_sweep.py --testapp
         $<TARGET_FILE:kernel-replay-perf-testapp> --client
-        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 32 --launches 4 --passes 1 3 5 8
-        --slack 2.5)
+        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 32 --launches 4 --passes 1
+        3 5 8 --slack 2.5)
 
 set_tests_properties(
     test-kernel-replay-perf-pass-sweep
@@ -95,8 +95,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_and_validate.py --testapp
         $<TARGET_FILE:kernel-replay-perf-testapp> --client
-        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 16 --launches 6 --high-passes 3
-        --max-scaling-ratio 6.0)
+        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 16 --launches 6
+        --high-passes 3 --max-scaling-ratio 6.0)
 
 set_tests_properties(
     test-kernel-replay-perf-small-footprint
@@ -119,8 +119,8 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_and_validate.py --testapp
         $<TARGET_FILE:kernel-replay-perf-testapp> --client
-        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 32 --launches 16 --high-passes 3
-        --max-scaling-ratio 6.0)
+        $<TARGET_FILE:kernel-replay-perf-client> --ballast-mb 32 --launches 16
+        --high-passes 3 --max-scaling-ratio 6.0)
 
 set_tests_properties(
     test-kernel-replay-perf-many-launches

@@ -85,11 +85,9 @@ add_kernel_replay_sample(kernel-replay-counters-then-pc-sampling
                          counters_then_pc_sampling_client.cpp PC_SAMPLING)
 add_kernel_replay_sample(kernel-replay-att att_client.cpp)
 add_kernel_replay_sample(kernel-replay-spm spm_client.cpp SPM)
-add_kernel_replay_sample(
-    kernel-replay-services-first service_sequence_client.cpp PC_SAMPLING SPM
-    ENVIRONMENT "KR_SERVICE_ORDER=services-first")
-add_kernel_replay_sample(
-    kernel-replay-services-last service_sequence_client.cpp PC_SAMPLING SPM
-    ENVIRONMENT "KR_SERVICE_ORDER=services-last")
+add_kernel_replay_sample(kernel-replay-services-first service_sequence_client.cpp
+                         PC_SAMPLING SPM ENVIRONMENT "KR_SERVICE_ORDER=services-first")
+add_kernel_replay_sample(kernel-replay-services-last service_sequence_client.cpp
+                         PC_SAMPLING SPM ENVIRONMENT "KR_SERVICE_ORDER=services-last")
 add_kernel_replay_sample(kernel-replay-opt-out opt_out_client.cpp)
 add_kernel_replay_sample(kernel-replay-early-exit early_exit_client.cpp)
