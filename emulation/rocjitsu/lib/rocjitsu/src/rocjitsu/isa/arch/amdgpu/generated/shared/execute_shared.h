@@ -1756,7 +1756,7 @@ inline void execute_s_gl1_inv_smem([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_s_icache_inv_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-
+  wf.cu().instruction_cache().invalidate_all();
 }
 
 template <typename Inst>
