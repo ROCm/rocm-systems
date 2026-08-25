@@ -42,7 +42,7 @@ steady::interrupt() noexcept
 void
 steady::reset() noexcept
 {
-    const std::scoped_lock lk{ m_mutex };
+    const std::scoped_lock clk_lcoks{ m_mutex };
     m_interrupted = false;
 }
 }  // namespace rocprofsys::control::clocks
