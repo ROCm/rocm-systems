@@ -25,7 +25,12 @@ concept hipfile_backend_contract = requires(Backend backend, std::uint64_t times
 /**
  * @brief One GPU's view of the shared hipFile stats snapshot.
  *
- * Devices are addressed by GPU ordinal, which is how hipFile indexes @c per_gpu_stats.
+ * hipFile indexes @c per_gpu_stats by HIP device ordinal (@c hipGetDevice()). The
+ * profiler's GPU tracks and @c ROCPROFSYS_SAMPLING_GPUS use the agent's
+ * @c device_type_index, which is not renamed when a visibility mask hides GPUs. Those
+ * two numbers are stored separately: the hipFile slot is used only to read the
+ * snapshot, and @c get_index() returns the profiler device index.
+ *
  * Every device shares one backend, so an interval costs one hipFile query and all
  * devices in it observe the same snapshot.
  *
@@ -41,18 +46,30 @@ class device
 public:
     using backend_type = Backend;
 
-    device(std::shared_ptr<Backend> backend, std::size_t gpu_ordinal)
+    device(std::shared_ptr<Backend> backend, std::size_t hipfile_slot,
+           std::size_t device_index)
     : m_backend{ std::move(backend) }
-    , m_index{ gpu_ordinal }
-    , m_name{ "GPU " + std::to_string(gpu_ordinal) }
+    , m_hipfile_slot{ hipfile_slot }
+    , m_index{ device_index }
+    , m_name{ "GPU " + std::to_string(device_index) }
     {}
 
+    /// Identity mapping: hipFile slot and profiler index are the same ordinal.
+    device(std::shared_ptr<Backend> backend, std::size_t gpu_ordinal)
+    : device(std::move(backend), gpu_ordinal, gpu_ordinal)
+    {}
+
+    /// @brief Profiler GPU index (@c device_type_index), for tracks, RocPD, and
+    ///        @c ROCPROFSYS_SAMPLING_GPUS.
     [[nodiscard]] std::size_t get_index() const noexcept { return m_index; }
+
+    /// @brief HIP ordinal / hipFile @c per_gpu_stats slot.
+    [[nodiscard]] std::size_t get_hipfile_slot() const noexcept { return m_hipfile_slot; }
 
     [[nodiscard]] const std::string& get_name() const noexcept { return m_name; }
 
-    /// @brief Whether this ordinal addresses a real slot in the hipFile snapshot.
-    [[nodiscard]] bool is_supported() const noexcept { return m_index < MAX_GPUS; }
+    /// @brief Whether this HIP ordinal addresses a real slot in the hipFile snapshot.
+    [[nodiscard]] bool is_supported() const noexcept { return m_hipfile_slot < MAX_GPUS; }
 
     [[nodiscard]] enabled_metrics get_supported_metrics() const noexcept
     {
@@ -88,7 +105,7 @@ public:
             return out;
         }
 
-        const auto& stats = snapshot.per_gpu[m_index];
+        const auto& stats = snapshot.per_gpu[m_hipfile_slot];
 
         out.read_bytes       = stats.read_bytes;
         out.write_bytes      = stats.write_bytes;
@@ -144,6 +161,7 @@ private:
     }
 
     std::shared_ptr<Backend> m_backend;
+    const std::size_t        m_hipfile_slot;
     const std::size_t        m_index;
     const std::string        m_name;
 

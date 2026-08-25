@@ -21,8 +21,9 @@ pytestmark = [
     pytest.mark.hipfile,
 ]
 
-# Settings registered only when ROCPROFSYS_BUILD_HIPFILE=ON (see cmake/Packages.cmake
-# and the guarded ROCPROFSYS_CONFIG_SETTING blocks in config.cpp).
+# Settings registered only when hipFile support is compiled in
+# (ROCPROFSYS_HIPFILE_SUPPORT; see cmake/Packages.cmake and the guarded
+# ROCPROFSYS_CONFIG_SETTING blocks in config.cpp).
 HIPFILE_SETTINGS = [
     "ROCPROFSYS_USE_HIPFILE",
     "ROCPROFSYS_HIPFILE_METRICS",
@@ -146,8 +147,8 @@ def require_hipfile_io(rocprof_config: RocprofsysConfig) -> None:
         rocprof_config.get_target_executable("hipfile-io")
     except FileNotFoundError:
         pytest.skip(
-            "hipfile-io example not found — binaries built with "
-            "ROCPROFSYS_BUILD_HIPFILE=OFF"
+            "hipfile-io example not found — binaries built without hipFile support "
+            "(ROCPROFSYS_BUILD_HIPFILE=OFF, or AUTO with no new enough package)"
         )
 
 
@@ -160,9 +161,9 @@ class TestHipFileTelemetry(RocprofsysTest):
     def test_settings_present(self, rocprof_config: RocprofsysConfig):
         """hipFile settings must be listed by ``rocprof-sys-avail --settings``.
 
-        These settings are only registered when the binaries are compiled with
-        ``ROCPROFSYS_BUILD_HIPFILE=ON``, so their presence proves hipFile support
-        was compiled in. No GPU-direct storage hardware is required.
+        These settings are only registered when hipFile support is compiled in,
+        so their presence proves the collector is in the binaries. No GPU-direct
+        storage hardware is required.
         """
         result = subprocess.run(
             [str(rocprof_config.rocprofsys_avail), "--settings"],
@@ -176,7 +177,7 @@ class TestHipFileTelemetry(RocprofsysTest):
         missing = [s for s in HIPFILE_SETTINGS if s not in settings]
         assert not missing, (
             "hipFile settings not reported by rocprof-sys-avail --settings — "
-            "were the binaries built with ROCPROFSYS_BUILD_HIPFILE=OFF?\n"
+            "was hipFile support compiled in?\n"
             f"Missing: {missing}"
         )
 

@@ -99,11 +99,13 @@ struct hipfile_traits
     }
 
     /**
-     * @brief Enumerate one device per ROCm-visible GPU ordinal.
+     * @brief Enumerate one device per HIP-visible GPU.
      *
-     * hipFile indexes its per-GPU stats by GPU ordinal, so the ordinals the ROCm runtime
-     * exposes are exactly the slots worth reading. Ordinals beyond the snapshot's
-     * capacity are dropped rather than silently aliased onto a valid slot.
+     * hipFile indexes @c per_gpu_stats by HIP ordinal. The settings mapping gives the
+     * profiler @c device_type_index of each such ordinal so tracks, RocPD agents, and
+     * @c ROCPROFSYS_SAMPLING_GPUS use the same GPU numbers as the AMD SMI collector.
+     * Ordinals beyond the snapshot's capacity are dropped rather than silently aliased
+     * onto a valid slot.
      */
     template <typename Settings, typename Provider>
     [[nodiscard]] static std::vector<device_entry> enumerate_devices(
@@ -124,22 +126,22 @@ struct hipfile_traits
             return entries;
         }
 
-        const auto visible_gpus = Settings::get_visible_gpu_count();
-        if(visible_gpus == 0)
+        auto type_indices = Settings::get_visible_gpu_type_indices();
+        if(type_indices.empty())
         {
             LOG_DEBUG("No ROCm-visible GPUs; {} sampling disabled", device_name);
             return entries;
         }
 
-        if(visible_gpus > MAX_GPUS)
+        if(type_indices.size() > MAX_GPUS)
         {
             LOG_WARNING("{} GPUs are visible but hipFile reports stats for at most {}; "
                         "telemetry for the remaining GPUs is unavailable",
-                        visible_gpus, MAX_GPUS);
+                        type_indices.size(), MAX_GPUS);
+            type_indices.resize(MAX_GPUS);
         }
 
-        const auto slots   = std::min<std::size_t>(visible_gpus, MAX_GPUS);
-        auto       devices = provider->template get_devices<device_t>(slots);
+        auto devices = provider->template get_devices<device_t>(type_indices);
 
         for(auto& device : devices)
         {

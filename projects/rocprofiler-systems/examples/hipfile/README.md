@@ -22,7 +22,8 @@ workload runs on any filesystem; it is meant to exercise telemetry, not the
 GPU-direct fast path.
 
 Source: `hipfile-io.cpp`. Built only when hipFile is found, and skipped when
-`ROCPROFSYS_BUILD_HIPFILE=OFF` in a rocprofiler-systems tree.
+hipFile support is not compiled into the profiler (`ROCPROFSYS_BUILD_HIPFILE=OFF`,
+or `AUTO` with no new enough package).
 
 Usage: `hipfile-io [FILE] [GPUID] [SECONDS]`
 

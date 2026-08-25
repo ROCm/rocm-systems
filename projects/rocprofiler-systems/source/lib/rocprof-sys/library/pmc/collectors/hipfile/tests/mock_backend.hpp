@@ -60,12 +60,14 @@ struct mock_provider
     bool                          shutdown_called = false;
 
     template <typename Device>
-    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(std::size_t gpu_count)
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(
+        const std::vector<std::size_t>& type_indices)
     {
         std::vector<std::shared_ptr<Device>> devices;
-        devices.reserve(gpu_count);
-        for(std::size_t ordinal = 0; ordinal < gpu_count; ++ordinal)
-            devices.push_back(std::make_shared<Device>(backend, ordinal));
+        devices.reserve(type_indices.size());
+        for(std::size_t slot = 0; slot < type_indices.size(); ++slot)
+            devices.push_back(
+                std::make_shared<Device>(backend, slot, type_indices[slot]));
         return devices;
     }
 
