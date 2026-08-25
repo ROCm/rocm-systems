@@ -1263,8 +1263,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   }
 
   // (4) Direct ReduceScatter (per-peer Send/Recv, native kernel finishes the reduce).
+  // That reduce runs with PreOpSrcs=0 / postOp=false, an unscaled sum, so ncclAvg and
+  // user-defined PreMulSum (op >= ncclNumOps) fall through to the ring kernel instead.
   size_t directMsgSize = totalBytes;
-  if (!symEligible && ncclGroupDepth == 0 && rcclReduceScatterShouldTakeDirectPath(comm, directMsgSize, op)) {
+  if (!symEligible && ncclGroupDepth == 0 && op < ncclAvg && rcclUseReduceScatterDirect(comm, directMsgSize)) {
     decision->algo = RCCL_DIRECT_REDUCESCATTER;
     decision->protocol = NCCL_PROTO_SIMPLE;
     decision->nMaxChannels = comm->p2pnChannels;
@@ -1352,12 +1354,6 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   if (comm->nNodes == 4) return (msgSize <= (size_t)4194304);
   if (comm->nNodes == 8 || comm->nNodes == 16) return true;
   return false;
-}
-
-bool rcclReduceScatterShouldTakeDirectPath(struct ncclComm* comm, size_t msgSize, ncclRedOp_t op) {
-  // Direct ReduceScatter's local reduce uses PreOpSrcs=0 / postOp=false, so
-  // ncclAvg and user-defined PreMulSum (op >= ncclNumOps) fall back to ring.
-  return op < ncclAvg && rcclUseReduceScatterDirect(comm, msgSize);
 }
 
 RCCL_PARAM(HierarchicalReduceScatter, "HIERARCHICAL_REDUCE_SCATTER", 0);
