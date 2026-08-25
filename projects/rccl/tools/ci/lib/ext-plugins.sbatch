@@ -14,13 +14,15 @@
 #   1. consume ROCm (provisioned on the head node) via .ci-out/rocm.env
 #   2. projects/rccl  install.sh              build RCCL from PR sources
 #   3. projects/rccl-tests                    build all_reduce_perf (no MPI)
-#   4. plugins/{tuner,profiler,inspector}     build the example plugins and
-#      install their .so where the pytest harness (conftest.py) expects them
-#   5. test/ext-plugins                       run pytest (mixed/tuner/profiler/...)
+#   4. test/ext-plugins                       run pytest -m ext_mixed
 #
-# The mixed-plugin tests build their own libnccl-mixed.so from in-tree headers,
-# so they run even if the prebuilt example .so's above fail to build (those
-# suites simply skip on the missing .so, per conftest.py).
+# Scope: only the mixed-plugin tests (the pytest port of
+# plugins/mixed/example/test.sh plus the new runtime check). They build their
+# own libnccl-mixed.so from in-tree headers and drive all_reduce_perf in a
+# single multi-GPU process, so they need no OpenMPI and no prebuilt example
+# plugins. The tuner/profiler/inspector suites need a full OpenMPI + every
+# *_perf binary (and cuda.h for the profiler/inspector examples); wiring those
+# in is a separate, heavier follow-up.
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
 #   RCCL_DEVICE_API_WORKDIR   GHA workspace (rocm-systems root)
@@ -92,7 +94,7 @@ build_rc=0
 source "${ci_dir}/lib/ensure-python-yaml.sh"
 
 # 1) RCCL from the PR sources.
-echo "==> [1/4] build RCCL (targets=${gpu_targets})"
+echo "==> [1/3] build RCCL (targets=${gpu_targets})"
 rccl_src="${workdir}/projects/rccl"
 rm -rf "${rccl_prefix}"
 (
@@ -120,7 +122,7 @@ echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
 # 2) rccl-tests: only all_reduce_perf is needed, run as a single multi-GPU
 # process (no MPI launcher), so build without MPI to keep it light.
-echo "==> [2/4] build rccl-tests (all_reduce_perf, no MPI)"
+echo "==> [2/3] build rccl-tests (all_reduce_perf, no MPI)"
 rccl_tests_build="${rccl_tests_src}/build"
 rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
 (
@@ -138,40 +140,9 @@ if [[ ! -x "${rccl_tests_build}/all_reduce_perf" ]]; then
   exit 1
 fi
 
-# 3) Example plugins. Build each and install the produced .so where conftest.py
-# looks for it. Best-effort: a plugin that fails to build only makes its own
-# suite skip (missing .so), it does not fail the whole run. The mixed tests do
-# not depend on these; they build libnccl-mixed.so from source at test time.
-echo "==> [3/4] build + install example plugins"
-plugins_dir="${rccl_src}/plugins"
-install_plugin() {
-  # $1 = source subdir under plugins/, $2 = expected .so name,
-  # $3 = install subdir under ${rccl_install_dir}/plugins/, $@4.. = make args
-  local src="${plugins_dir}/$1" so_name="$2" dst="${rccl_install_dir}/plugins/$3"
-  shift 3
-  echo "    -- ${so_name} (from plugins/$(basename "${src}"))"
-  if ! make -C "${src}" -j"${build_jobs}" "$@"; then
-    echo "    WARNING: build failed for ${so_name}; its tests will skip." >&2
-    return 0
-  fi
-  local produced
-  produced="$(find "${src}" -name "${so_name}" -type f 2>/dev/null | head -n1)"
-  if [[ -z "${produced}" ]]; then
-    echo "    WARNING: ${so_name} not produced; its tests will skip." >&2
-    return 0
-  fi
-  mkdir -p "${dst}"
-  cp -f "${produced}" "${dst}/${so_name}"
-  echo "       installed -> ${dst}/${so_name}"
-}
-
-install_plugin "tuner/example"      "libnccl-tuner-example.so"     "tuner/example"    default
-install_plugin "profiler/example"   "librccl-profiler-example.so"  "profiler/example" build
-# The inspector Makefile checks CUDA_HOME; point it at the ROCm floor. Still
-# best-effort (extra deps), so a failure just skips the inspector tests.
-CUDA_HOME="${ROCM_PATH}" install_plugin "profiler/inspector" "librccl-profiler-inspector.so" "profiler/inspector"
-
-# 4) Hand the install/test locations to the run stage.
+# 3) Hand the install/test locations to the run stage. RCCL_INSTALL_DIR is used
+# by the mixed runtime test for LD_LIBRARY_PATH (librccl.so); RCCL_TESTS_DIR is
+# where it finds build/all_reduce_perf.
 {
   printf 'export RCCL_INSTALL_DIR=%q\n' "${rccl_install_dir}"
   printf 'export RCCL_TESTS_DIR=%q\n'   "${rccl_tests_src}"
@@ -192,7 +163,7 @@ fi
 # instead, which the workflow turns into a red (non-gating) result. ---
 test_rc=0
 {
-echo "==> [4/4] run ext-plugins pytest"
+echo "==> [3/3] run ext-plugins pytest (-m ext_mixed)"
 set -a
 # shellcheck source=/dev/null
 source "${workdir}/.ci-out/ext-plugins.env"
@@ -209,7 +180,7 @@ python3 -m pip install --quiet --disable-pip-version-check -r "${ext_dir}/requir
 
 # conftest.py resolves assets/logs from the current working directory.
 cd "${ext_dir}"
-python3 -m pytest -v -rs --color=no
+python3 -m pytest -v -rs --color=no -m ext_mixed
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"
 if [[ "${test_rc}" -ne 0 ]]; then
