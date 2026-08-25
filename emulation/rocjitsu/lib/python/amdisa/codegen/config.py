@@ -41,6 +41,7 @@ class CodegenConfig:
         isa_output: str,
         *,
         include_root: str | None = None,
+        handwritten_include_base: str = AMDGPU_INCLUDE_BASE,
         use_shared_execute_helpers: bool = True,
     ) -> CodegenConfig:
         """Create path settings for an output tree.
@@ -48,8 +49,8 @@ class CodegenConfig:
         Without an include root, absolute includes make relative output
         independent of the generator's working directory. Supplying an include
         root instead emits stable paths relative to that compiler include root.
-        Direct construction remains available when output and include prefixes
-        need fully independent values.
+        Handwritten includes retain their source-tree prefix unless an
+        independent prefix is supplied.
         """
         output = Path(isa_output).resolve()
         if include_root is None:
@@ -64,7 +65,7 @@ class CodegenConfig:
                 ) from error
 
         return cls(
-            include_base=Path(generated_base).parent.as_posix(),
+            include_base=handwritten_include_base,
             generated_include_base=generated_base,
             shared_generated_include_base=generated_base,
             use_shared_execute_helpers=use_shared_execute_helpers,

@@ -4,8 +4,6 @@
 """Unit tests for ISA dimension properties on IsaProfile subclasses."""
 
 from pathlib import Path
-import shutil
-import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +14,6 @@ from amdisa.codegen._generator import (
     _SourceImplUnit,
 )
 from amdisa.codegen.config import CodegenConfig
-from amdisa.codegen.cpp_file import CppFile
 from amdisa.__main__ import (
     _apply_codegen_identity,
     _codegen_config,
@@ -1077,13 +1074,13 @@ class TestCdna5Profile:
         assert spec.generated_dir_name == 'gfx1250'
         assert spec.cpp_namespace == 'gfx1250'
 
-    def test_codegen_include_paths_derive_from_isa_output(self):
+    def test_codegen_include_paths_keep_handwritten_base_independent(self):
         config = _codegen_config(
             'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated',
             include_root='lib/rocjitsu/src',
         )
 
-        assert config.include_base == 'rocjitsu/isa/arch/amdgpu/custom'
+        assert config.include_base == 'rocjitsu/isa/arch/amdgpu'
         assert (
             config.generated_include_base == 'rocjitsu/isa/arch/amdgpu/custom/generated'
         )
@@ -1092,46 +1089,20 @@ class TestCdna5Profile:
             == 'rocjitsu/isa/arch/amdgpu/custom/generated'
         )
 
+    def test_codegen_include_paths_allow_independent_handwritten_base(self):
+        config = CodegenConfig.for_output(
+            '/tmp/generated',
+            handwritten_include_base='custom/amdgpu',
+        )
+
+        assert config.include_base == 'custom/amdgpu'
+        assert config.generated_include_base == '/tmp/generated'
+
     def test_explicit_codegen_prefix_remains_independent_of_output(self):
         config = CodegenConfig(generated_include_base='stable/generated')
 
         assert config.generated_include('rdna4', 'vop3.h') == (
             'stable/generated/rdna4/vop3.h'
-        )
-
-    def test_relative_output_generated_include_preprocesses(
-        self, tmp_path, monkeypatch
-    ):
-        compiler = shutil.which('c++')
-        if compiler is None:
-            pytest.skip('C++ preprocessor is unavailable')
-
-        monkeypatch.chdir(tmp_path)
-        config = CodegenConfig.for_output('relative')
-        CppFile(
-            'vop3',
-            'relative',
-            True,
-            [],
-            [],
-            ['inline int value() { return 1; }'],
-            'rdna4',
-        ).gen_code()
-        CppFile(
-            'vop3_exec',
-            'relative',
-            False,
-            [(config.generated_include('rdna4', 'vop3.h'), False)],
-            [],
-            ['int use() { return value(); }'],
-            'rdna4',
-        ).gen_code()
-
-        subprocess.run(
-            [compiler, '-E', 'relative/rdna4/vop3_exec.cpp'],
-            check=True,
-            capture_output=True,
-            text=True,
         )
 
     def test_test_encoding_uses_primary_decode_key(self):

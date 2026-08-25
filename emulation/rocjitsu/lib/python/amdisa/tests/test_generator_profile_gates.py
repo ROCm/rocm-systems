@@ -4,6 +4,8 @@
 import xml.etree.ElementTree as elem_tree
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2773,7 +2775,13 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
     ) < ceil_modifier_body.index('ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16')
 
 
-def test_single_isa_cdna1_sources_include_simd_glue_once(tmp_path):
+def test_single_isa_cdna1_sources_preprocess_with_source_includes(
+    tmp_path, rocjitsu_source_root: Path
+):
+    compiler = shutil.which('c++')
+    if compiler is None:
+        pytest.skip('C++ preprocessor is unavailable')
+
     args = SimpleNamespace(
         isafiles=[f'cdna1:{_mrisa_dir() / "amdgpu_isa_cdna1.xml"}'],
         gen_isas=True,
@@ -2788,6 +2796,27 @@ def test_single_isa_cdna1_sources_include_simd_glue_once(tmp_path):
     for source_name in ('vop3_exec.cpp', 'vop3p_exec.cpp'):
         source = (tmp_path / 'cdna1' / source_name).read_text()
         assert source.count(simd_glue_include) == 1
+
+    include_roots = (
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
+        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        rocjitsu_source_root / 'lib' / 'util' / 'include',
+        rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
+    )
+    subprocess.run(
+        [
+            compiler,
+            '-E',
+            *(flag for root in include_roots for flag in ('-I', str(root))),
+            str(tmp_path / 'cdna1' / 'vop3p_exec.cpp'),
+            '-o',
+            os.devnull,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_single_isa_skips_dbt_generation(tmp_path, capsys):
