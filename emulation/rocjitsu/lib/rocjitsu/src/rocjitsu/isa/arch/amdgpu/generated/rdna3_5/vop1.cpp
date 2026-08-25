@@ -4167,10 +4167,10 @@ VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VSwapB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
   dst_operands_[1] = &src0;
+  src_operands_[0] = &vdst;
+  src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 2;
 }
@@ -4201,12 +4201,11 @@ VSwapB16Vop1::VSwapB16Vop1(const MachineInst *inst)
       vdst(16, OperandType::OPR_VGPR,
            static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->vdst), true,
            true),
-      src0(16, OperandType::OPR_SRC_VGPR,
-           static_cast<unsigned short>(reinterpret_cast<const OpEncoding *>(inst)->src0), true) {
-  src_operands_[0] = &vdst;
+      src0(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
   dst_operands_[1] = &src0;
+  src_operands_[0] = &vdst;
+  src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 2;
 }
@@ -4277,11 +4276,11 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 125) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
   dst_operands_[1] = &src0;
-  src_operands_[2] = &m0;
+  src_operands_[0] = &m0;
+  src_operands_[1] = &vdst;
+  src_operands_[2] = &src0;
   num_src_ = 3;
   num_dst_ = 2;
   m0.apply_fieldless_caps(false, false, false);
