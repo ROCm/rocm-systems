@@ -2148,21 +2148,57 @@ covered but incomplete bounded runtime metadata.
 
 ### Slice 4B: barrier policy
 
-- **Current responsibility:** RR, Sampled, and Inline independently qualify
-  barrier sequences, remove redundant members, couple state demand to
-  admission, and reconstruct coverage from emitted patch kinds.
-- **New boundary and contract:** One MOI barrier-policy function produces
-  engine-specific intents from shared sequences and capabilities. It records
-  full logical-sequence coverage and physical insertion coalescing explicitly.
-  SuperCollider receives mutation-only/not-applicable dispositions.
-- **Temporary seam and consumers:** Translate intents to current barrier
-  candidate and prologue options; translate emitted outcomes back to the ledger.
-- **Test gate:** Pure barrier matrices, malformed/redundant/paired/cluster host
-  tests, ordered-tile/double-buffer/RCCL device pairs on all targets, and
-  gfx1250 cluster topology pairs.
-- **Cutover and deletion:** Switch workgroup barriers, then named/cluster forms.
-  Delete engine-local barrier admission and lowering-outcome reconstruction.
+- **Completed boundary and contract:** `plan_consan_barrier_observation` is the
+  single pure admission boundary for all engines. It consumes immutable shared
+  synchronization events and sequences, returns a barrier-only plan fragment,
+  and expresses disabled tracking, mutation-only SuperCollider behavior,
+  container/runtime exclusions, target scope support, malformed encodings,
+  ambiguous or incomplete sequences, adjacent redundant full barriers, and
+  physical-alias contradictions as typed decisions. Record/Replay receives one
+  event-record intent per admitted instruction. Sampled and Inline receive one
+  completion intent covering every semantic event in a qualified signal/wait
+  sequence.
+- **Completed types and composition:** `ConSanBarrierPolicyReason`,
+  `ConSanBarrierSiteDecision`, `ConSanBarrierPolicyRequest`, and
+  `ConSanBarrierPolicyResult` document the barrier contract locally.
+  `ConSanObservationPlan::append` transactionally rebases plan-local intent IDs,
+  allowing independently testable access and barrier policy fragments to form
+  one immutable plan. `ConSanCoverageLedger` now owns both decision families.
+- **Completed temporary seam:** MOI and SuperCollider append barrier policy to
+  their access plan before constructing the ledger. Current MOI resource and
+  lowering candidates may only narrow physical insertion sites admitted by
+  barrier intents. Legacy site dispositions render typed barrier reasons, and
+  final resource/placement results publish through the intent ledger rather
+  than requiring consumers to infer barrier coverage from patch kinds.
+- **Completed test gate:** Focused units cover every enum spelling, request and
+  result validity, plan composition and rollback, ledger ownership, all four
+  engine contracts, paired-sequence coalescing, disabled/filter/runtime
+  exclusions, workgroup and gfx1250 cluster capability boundaries, malformed
+  encodings, redundant barriers, every Sampled qualification fact, incomplete
+  and ambiguous sequences, aliases, determinism, and immutability. Existing
+  integration tests now assert typed Record/Replay, Sampled, and Inline plans
+  and lowering outcomes. The checked-in device gate retains its paired
+  ordered-tile, double-buffer, RCCL, lifecycle, Stream-K, and gfx1250 cluster
+  coverage on every applicable target.
+- **Completed cutover and retained compatibility seam:** Workgroup, named, and
+  cluster barrier admission no longer originates in engine-local disposition
+  scans. The current lowerers still translate admitted intents through their
+  operand-rich candidate structures and reuse the shared Sampled qualification
+  predicate; those structures remain until the resource/placement slices can
+  replace them component by component.
 - **Prerequisite:** Slices 3B and 4A.
+
+The completed host gate passed 1,428 ConSan tests plus two intentionally
+skipped external-object benchmarks, and all 98 ConSan hook/runtime tests. All
+2,908 emulator device rows passed in 87.38 seconds of wall time. The
+physical-gfx950 barrier and ordering subset passed all 132 rows. The physical
+gfx950 `d128-block` E2E row was accepted for all four engines, with complete
+barrier coverage (Record/Replay and Inline 119/119; Sampled 117/117). The
+RocJitsu-emulated gfx1250 row accepted baseline, SuperCollider, Sampled, and
+Inline. Its Record/Replay result retained the pre-existing yellow condition:
+static coverage was complete (18/18 accesses and 8/8 barriers), while the
+bounded runtime report remained incomplete with `metadata-full`; this slice did
+not regress or conceal that limitation.
 
 ### Slice 4C: atomic and fence policy
 

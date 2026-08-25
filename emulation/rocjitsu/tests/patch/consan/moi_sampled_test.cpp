@@ -8000,7 +8000,18 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   ASSERT_EQ(std::ranges::count(result.observation_plan.site_decisions,
                                ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
             kSiteCount);
-  ASSERT_EQ(result.observation_plan.probe_intents.size(), kSiteCount);
+  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u * kSiteCount);
+  EXPECT_TRUE(std::ranges::all_of(result.observation_plan.barrier_site_decisions,
+                                  [](const ConSanBarrierSiteDecision &decision) {
+                                    return decision.kind == ConSanSiteDecisionKind::Admitted &&
+                                           decision.reason == ConSanBarrierPolicyReason::None &&
+                                           decision.intent_ids.size() == 1u;
+                                  }));
+  ASSERT_EQ(result.observation_plan.probe_intents.size(), 2u * kSiteCount);
+  EXPECT_EQ(std::ranges::count(result.observation_plan.probe_intents,
+                               ConSanProbeIntentKind::SampledBarrierEpoch,
+                               &ConSanProbeIntent::kind),
+            kSiteCount);
   EXPECT_TRUE(std::ranges::all_of(result.observation_plan.site_decisions,
                                   [](const ConSanSiteDecision &decision) {
                                     return decision.kind != ConSanSiteDecisionKind::Admitted ||

@@ -2382,6 +2382,21 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirro
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
+  ASSERT_EQ(std::ranges::count(result.observation_plan.probe_intents,
+                               ConSanProbeIntentKind::ExactBarrierEpoch, &ConSanProbeIntent::kind),
+            1u);
+  const auto epoch_intent =
+      std::ranges::find(result.observation_plan.probe_intents,
+                        ConSanProbeIntentKind::ExactBarrierEpoch, &ConSanProbeIntent::kind);
+  ASSERT_NE(epoch_intent, result.observation_plan.probe_intents.end());
+  EXPECT_EQ(epoch_intent->covered_semantic_sites.size(), 2u);
+  EXPECT_EQ(epoch_intent->physical_site.original_text_offset, 3u * sizeof(uint32_t));
+  EXPECT_TRUE(std::ranges::all_of(result.observation_plan.barrier_site_decisions,
+                                  [&](const ConSanBarrierSiteDecision &decision) {
+                                    return decision.kind == ConSanSiteDecisionKind::Admitted &&
+                                           decision.intent_ids == std::vector{epoch_intent->id};
+                                  }));
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -9144,6 +9159,18 @@ TEST(ConSanMoi, InlineShadowBarrierEpochPatchTrampolinesBarrierAndSaturatesEpoch
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
+  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().kind,
+            ConSanSiteDecisionKind::Admitted);
+  const auto epoch_intent =
+      std::ranges::find(result.observation_plan.probe_intents,
+                        ConSanProbeIntentKind::ExactBarrierEpoch, &ConSanProbeIntent::kind);
+  ASSERT_NE(epoch_intent, result.observation_plan.probe_intents.end());
+  EXPECT_EQ(epoch_intent->physical_site.original_text_offset, 2u * sizeof(uint32_t));
+  const ConSanIntentCoverageEntry *epoch_coverage =
+      result.coverage_ledger.intent_entry(epoch_intent->id);
+  ASSERT_NE(epoch_coverage, nullptr);
+  EXPECT_EQ(epoch_coverage->lowering, ConSanLoweringOutcomeKind::Instrumented);
   const auto epoch_patch_it =
       std::find_if(result.patches.begin(), result.patches.end(), [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier;

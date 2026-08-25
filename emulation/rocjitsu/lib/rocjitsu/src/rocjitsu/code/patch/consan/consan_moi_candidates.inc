@@ -728,8 +728,16 @@ void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenan
   };
   ConSanAccessPolicyResult policy = plan_consan_access_observation(inventory, request);
   result.observation_plan = std::move(policy.plan);
+  const ConSanBarrierPolicyResult barrier_policy = plan_consan_barrier_observation(
+      inventory, {
+                     .engine = *engine,
+                     .tracking_enabled = options.moi_track_barriers,
+                     .container_filter = options.test_kernel_name_filter,
+                 });
+  const bool barrier_plan_appended = result.observation_plan.append(barrier_policy.plan);
   result.coverage_ledger = ConSanCoverageLedger(result.observation_plan);
-  if (!policy.errors.empty() || !result.observation_plan.valid()) {
+  if (!policy.errors.empty() || !barrier_policy.errors.empty() || !barrier_plan_appended ||
+      !result.observation_plan.valid()) {
     for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
       if (decision.reason != ConSanAccessPolicyReason::ConflictingPhysicalAliases)
         continue;
@@ -744,8 +752,23 @@ void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenan
           std::to_string(decision.semantic_site.physical.original_text_offset) +
           " was decoded inconsistently through aliases '" + aliases + "'");
     }
+    for (const ConSanBarrierSiteDecision &decision :
+         result.observation_plan.barrier_site_decisions) {
+      if (decision.reason != ConSanBarrierPolicyReason::ConflictingPhysicalAliases)
+        continue;
+      std::string aliases;
+      for (const std::string &name : decision.source_containers) {
+        if (!aliases.empty())
+          aliases += "', '";
+        aliases += name;
+      }
+      result.errors.emplace_back(
+          "ConSan MOI physical barrier at original text offset " +
+          std::to_string(decision.semantic_site.physical.original_text_offset) +
+          " was decoded inconsistently through aliases '" + aliases + "'");
+    }
     if (result.errors.empty())
-      result.errors.emplace_back("ConSan MOI access policy produced an invalid observation plan");
+      result.errors.emplace_back("ConSan MOI policy produced an invalid observation plan");
     return false;
   }
 

@@ -56,6 +56,7 @@ function(rj_add_consan_unit_sources target)
         PRIVATE
             patch/consan/branch_only_relay_router_test.cpp
             patch/consan/analysis_test.cpp
+            patch/consan/barrier_policy_test.cpp
             patch/consan/capability_contract_test.cpp
             patch/consan/composition_test.cpp
             patch/consan/core_test.cpp

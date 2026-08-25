@@ -51,8 +51,16 @@ struct ByteRange {
   ConSanAccessPolicyResult policy =
       plan_consan_access_observation(result.program_inventory, request);
   result.observation_plan = std::move(policy.plan);
+  const ConSanBarrierPolicyResult barrier_policy = plan_consan_barrier_observation(
+      result.program_inventory, {
+                                    .engine = ConSanCapabilityEngine::SuperCollider,
+                                    .tracking_enabled = true,
+                                    .container_filter = {},
+                                });
+  const bool barrier_plan_appended = result.observation_plan.append(barrier_policy.plan);
   result.coverage_ledger = ConSanCoverageLedger(result.observation_plan);
-  if (!policy.errors.empty() || !result.observation_plan.valid()) {
+  if (!policy.errors.empty() || !barrier_policy.errors.empty() || !barrier_plan_appended ||
+      !result.observation_plan.valid()) {
     for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
       if (decision.reason != ConSanAccessPolicyReason::ConflictingPhysicalAliases)
         continue;
@@ -75,6 +83,15 @@ struct ByteRange {
           "ConSan SuperCollider " + std::string(access_kind) + " access at original text offset " +
           std::to_string(decision.semantic_site.physical.original_text_offset) +
           " was decoded inconsistently through aliases '" + aliases + "'");
+    }
+    for (const ConSanBarrierSiteDecision &decision :
+         result.observation_plan.barrier_site_decisions) {
+      if (decision.reason != ConSanBarrierPolicyReason::ConflictingPhysicalAliases)
+        continue;
+      result.errors.emplace_back(
+          "ConSan SuperCollider barrier at original text offset " +
+          std::to_string(decision.semantic_site.physical.original_text_offset) +
+          " was decoded inconsistently through physical aliases");
     }
     if (result.errors.empty()) {
       result.errors.emplace_back(

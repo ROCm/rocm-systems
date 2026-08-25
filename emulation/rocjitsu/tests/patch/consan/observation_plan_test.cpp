@@ -105,6 +105,9 @@ TEST(ConSanObservationPlan, EnumContractsAreExhaustiveNamedAndRejectInvalidValue
   expect_observation_enum_contract(kConSanAccessPolicyReasons, ConSanAccessPolicyReason::Count,
                                    consan_access_policy_reason_name,
                                    "invalid-access-policy-reason");
+  expect_observation_enum_contract(kConSanBarrierPolicyReasons, ConSanBarrierPolicyReason::Count,
+                                   consan_barrier_policy_reason_name,
+                                   "invalid-barrier-policy-reason");
   expect_observation_enum_contract(kConSanProbeIntentKinds, ConSanProbeIntentKind::Count,
                                    consan_probe_intent_kind_name, "invalid-probe-intent-kind");
   expect_observation_enum_contract(kConSanProbePositions, ConSanProbePosition::Count,
@@ -160,6 +163,109 @@ TEST(ConSanObservationPlan, PlanValidationRejectsEveryBrokenTypedRelationship) {
   EXPECT_FALSE(broken.valid());
 }
 
+TEST(ConSanObservationPlan, BarrierDecisionValidationRejectsEveryBrokenTypedRelationship) {
+  ProgramInventoryBuilder builder(std::array<uint8_t, 4>{});
+  builder.set_code_object_facts(true, 0, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
+  ConSanSyncEvent event;
+  event.semantic_id = {
+      .physical = {.code_object = builder.view().code_object_id(), .original_text_offset = 8},
+      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+  };
+  event.kind = ConSanSyncEventKind::Barrier;
+  event.operation = ConSanSyncOperation::BarrierFull;
+  event.memory_role = ConSanSyncMemoryRole::AcquireRelease;
+  event.confidence = ConSanSemanticConfidence::Exact;
+  event.memory_role_confidence = ConSanSemanticConfidence::Exact;
+  event.identity = "barrier";
+  event.container_name = "kernel";
+  event.text_offset = 8;
+  event.file_offset = 0;
+  event.size = 4;
+  event.barrier_id = 0;
+  event.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
+  event.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
+  event.execution_owners.push_back({});
+  ConSanSyncSequence sequence;
+  sequence.kind = ConSanSyncSequenceKind::Barrier;
+  sequence.operation = ConSanSyncOperation::BarrierFull;
+  sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
+  sequence.confidence = ConSanSemanticConfidence::Exact;
+  sequence.memory_role_confidence = ConSanSemanticConfidence::Exact;
+  sequence.identity = "sequence";
+  sequence.container_name = "kernel";
+  sequence.begin_text_offset = 8;
+  sequence.end_text_offset = 12;
+  sequence.basic_block_index = 0;
+  SemanticSiteId member = event.semantic_id;
+  member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+  sequence.member_semantic_ids.push_back(member);
+  sequence.member_event_identities.push_back(event.identity);
+  sequence.barrier_id = 0;
+  sequence.barrier_operand_source = ConSanBarrierSite::OperandSource::Immediate;
+  sequence.barrier_scope = ConSanBarrierSite::Scope::Workgroup;
+  sequence.execution_owners.push_back({});
+  SynchronizationInventoryBuildView synchronization = builder.synchronization();
+  synchronization.sync_events.push_back(std::move(event));
+  synchronization.sync_sequences.push_back(std::move(sequence));
+  const ConSanBarrierPolicyResult policy = plan_consan_barrier_observation(
+      builder.view(), {.engine = ConSanCapabilityEngine::RecordReplay,
+                       .tracking_enabled = true,
+                       .container_filter = {}});
+  ASSERT_TRUE(policy.valid());
+
+  ConSanObservationPlan broken = policy.plan;
+  broken.barrier_site_decisions.front().reason = ConSanBarrierPolicyReason::InvalidBarrierEncoding;
+  EXPECT_FALSE(broken.valid());
+  broken = policy.plan;
+  broken.barrier_site_decisions.front().semantic_site.domain =
+      ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+  EXPECT_FALSE(broken.valid());
+  broken = policy.plan;
+  broken.barrier_site_decisions.front().intent_ids = {{99}};
+  EXPECT_FALSE(broken.valid());
+  broken = policy.plan;
+  broken.barrier_site_decisions.front().source_containers.clear();
+  EXPECT_FALSE(broken.valid());
+}
+
+TEST(ConSanObservationPlan, AppendRebasesBothDecisionFamiliesAndIsTransactional) {
+  const ConSanAccessPolicyResult access = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(access.valid());
+  ConSanObservationPlan combined = access.plan;
+  ConSanObservationPlan fragment = access.plan;
+  fragment.site_decisions.clear();
+  fragment.probe_intents.front().covered_semantic_sites.front().domain =
+      ConSanSemanticSiteDomain::SynchronizationEvent;
+  fragment.probe_intents.front().kind = ConSanProbeIntentKind::BarrierRecord;
+  fragment.probe_intents.front().position = ConSanProbePosition::After;
+  fragment.barrier_site_decisions.push_back({
+      .engine = ConSanCapabilityEngine::RecordReplay,
+      .semantic_site = fragment.probe_intents.front().covered_semantic_sites.front(),
+      .kind = ConSanSiteDecisionKind::Admitted,
+      .reason = ConSanBarrierPolicyReason::None,
+      .intent_ids = {{0}},
+      .source_containers = {"kernel"},
+  });
+  ASSERT_TRUE(fragment.valid());
+  ASSERT_TRUE(combined.append(fragment));
+  ASSERT_TRUE(combined.valid());
+  ASSERT_EQ(combined.probe_intents.size(), 2u);
+  ASSERT_EQ(combined.barrier_site_decisions.size(), 1u);
+  EXPECT_EQ(combined.probe_intents[1].id, ConSanProbeIntentId{1});
+  EXPECT_EQ(combined.barrier_site_decisions.front().intent_ids,
+            (std::vector{ConSanProbeIntentId{1}}));
+
+  const ConSanObservationPlan before = combined;
+  fragment.engine = ConSanCapabilityEngine::Sampled;
+  EXPECT_FALSE(combined.append(fragment));
+  EXPECT_EQ(combined, before);
+  fragment = access.plan;
+  fragment.probe_intents.front().id = {99};
+  EXPECT_FALSE(combined.append(fragment));
+  EXPECT_EQ(combined, before);
+}
+
 TEST(ConSanObservationPlan, CoverageLedgerSeparatesPolicyFromLoweringAndCopiesPlan) {
   const ConSanAccessPolicyResult policy = plan_consan_access_observation(
       one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
@@ -182,6 +288,54 @@ TEST(ConSanObservationPlan, CoverageLedgerSeparatesPolicyFromLoweringAndCopiesPl
   EXPECT_TRUE(copied.set_lowering_outcome({0}, ConSanLoweringOutcomeKind::ResourceRejected));
   EXPECT_EQ(ledger.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_EQ(copied.intent_entry({0})->lowering, ConSanLoweringOutcomeKind::ResourceRejected);
+}
+
+TEST(ConSanObservationPlan, CoverageLedgerOwnsBarrierDecisionsAlongsideAccessDecisions) {
+  const ConSanAccessPolicyResult access = plan_consan_access_observation(
+      one_native_access_inventory(), policy_request(ConSanCapabilityEngine::RecordReplay));
+  ASSERT_TRUE(access.valid());
+  ConSanObservationPlan plan = access.plan;
+  ConSanObservationPlan barrier_fragment{
+      .engine = ConSanCapabilityEngine::RecordReplay,
+      .site_decisions = {},
+      .barrier_site_decisions = {{
+          .engine = ConSanCapabilityEngine::RecordReplay,
+          .semantic_site =
+              {
+                  .physical = plan.probe_intents.front().physical_site,
+                  .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+                  .member_ordinal = 0,
+                  .range_ordinal = 0,
+              },
+          .kind = ConSanSiteDecisionKind::Admitted,
+          .reason = ConSanBarrierPolicyReason::None,
+          .intent_ids = {{0}},
+          .source_containers = {"kernel"},
+      }},
+      .probe_intents = {{
+          .id = {0},
+          .engine = ConSanCapabilityEngine::RecordReplay,
+          .physical_site = plan.probe_intents.front().physical_site,
+          .covered_semantic_sites = {{
+              .physical = plan.probe_intents.front().physical_site,
+              .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+              .member_ordinal = 0,
+              .range_ordinal = 0,
+          }},
+          .kind = ConSanProbeIntentKind::BarrierRecord,
+          .position = ConSanProbePosition::After,
+          .lane_mask = ConSanLaneMaskPolicy::ActiveExecutionMask,
+          .requirement = ConSanProbeRequirement::Required,
+      }},
+  };
+  ASSERT_TRUE(barrier_fragment.valid());
+  ASSERT_TRUE(plan.append(barrier_fragment));
+  ConSanCoverageLedger ledger(plan);
+  EXPECT_TRUE(std::ranges::equal(ledger.site_decisions(), plan.site_decisions));
+  EXPECT_TRUE(std::ranges::equal(ledger.barrier_site_decisions(), plan.barrier_site_decisions));
+  ASSERT_EQ(ledger.intent_entries().size(), 2u);
+  EXPECT_TRUE(ledger.set_lowering_outcome({1}, ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_EQ(ledger.intent_entry({1})->intent.kind, ConSanProbeIntentKind::BarrierRecord);
 }
 
 TEST(ConSanObservationPlan, PhysicalOutcomeAdapterUpdatesOnlyMatchingCoalescedIntents) {

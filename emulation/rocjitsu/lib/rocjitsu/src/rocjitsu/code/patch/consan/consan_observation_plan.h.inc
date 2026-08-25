@@ -191,7 +191,96 @@ consan_access_policy_reason_name(ConSanAccessPolicyReason reason) {
 static_assert(kConSanAccessPolicyReasons.size() ==
               static_cast<size_t>(ConSanAccessPolicyReason::Count));
 
-/// Target-neutral kind of access evidence requested from one physical probe.
+/// Machine-readable reason for a barrier-policy decision.
+///
+/// Barrier policy owns only whether a decoded barrier event belongs to the
+/// selected engine contract and whether inventory has enough semantic facts to
+/// request an observation. Register ownership, report capacity, trampoline
+/// reachability, and emitted patch shape are intentionally absent: those are
+/// later mechanism outcomes recorded by `ConSanCoverageLedger`.
+enum class ConSanBarrierPolicyReason : uint8_t {
+  /// The event was admitted and therefore needs no exclusion reason.
+  None,
+  /// Barrier tracking was disabled for this request.
+  TrackingDisabled,
+  /// The selected engine mutates barriers but does not observe their epochs.
+  EngineMutationOnly,
+  /// A diagnostic-only container filter excluded every alias of the event.
+  ContainerFilterExcluded,
+  /// The event belongs only to a ROCclr runtime kernel excluded by policy.
+  RuntimeKernelExcluded,
+  /// The selected target/engine contract does not support this barrier scope.
+  TargetCapabilityUnavailable,
+  /// The barrier instruction is not the encoding width required by its engine.
+  InvalidBarrierEncoding,
+  /// Shared synchronization analysis did not produce a qualified sequence.
+  UnqualifiedSyncSequence,
+  /// One event was claimed by more than one incompatible logical sequence.
+  AmbiguousSequenceMembership,
+  /// A qualified sequence had no unique physical completion instruction.
+  MissingCompletingEvent,
+  /// This full barrier immediately follows an equivalent full barrier.
+  RedundantAdjacentFullBarrier,
+  /// Symbol aliases decoded incompatible semantics for one physical event.
+  ConflictingPhysicalAliases,
+  /// One-past-the-end iteration bound; never a policy reason.
+  Count,
+};
+
+/// Complete iterable set of barrier-policy reasons, including `None`.
+inline constexpr std::array<ConSanBarrierPolicyReason, 12> kConSanBarrierPolicyReasons = {
+    ConSanBarrierPolicyReason::None,
+    ConSanBarrierPolicyReason::TrackingDisabled,
+    ConSanBarrierPolicyReason::EngineMutationOnly,
+    ConSanBarrierPolicyReason::ContainerFilterExcluded,
+    ConSanBarrierPolicyReason::RuntimeKernelExcluded,
+    ConSanBarrierPolicyReason::TargetCapabilityUnavailable,
+    ConSanBarrierPolicyReason::InvalidBarrierEncoding,
+    ConSanBarrierPolicyReason::UnqualifiedSyncSequence,
+    ConSanBarrierPolicyReason::AmbiguousSequenceMembership,
+    ConSanBarrierPolicyReason::MissingCompletingEvent,
+    ConSanBarrierPolicyReason::RedundantAdjacentFullBarrier,
+    ConSanBarrierPolicyReason::ConflictingPhysicalAliases,
+};
+
+/// Return the stable diagnostic spelling of a barrier-policy reason.
+[[nodiscard]] constexpr std::string_view
+consan_barrier_policy_reason_name(ConSanBarrierPolicyReason reason) {
+  switch (reason) {
+  case ConSanBarrierPolicyReason::None:
+    return "none";
+  case ConSanBarrierPolicyReason::TrackingDisabled:
+    return "tracking-disabled";
+  case ConSanBarrierPolicyReason::EngineMutationOnly:
+    return "engine-mutation-only";
+  case ConSanBarrierPolicyReason::ContainerFilterExcluded:
+    return "container-filter-excluded";
+  case ConSanBarrierPolicyReason::RuntimeKernelExcluded:
+    return "runtime-kernel-excluded";
+  case ConSanBarrierPolicyReason::TargetCapabilityUnavailable:
+    return "target-capability-unavailable";
+  case ConSanBarrierPolicyReason::InvalidBarrierEncoding:
+    return "invalid-barrier-encoding";
+  case ConSanBarrierPolicyReason::UnqualifiedSyncSequence:
+    return "unqualified-sync-sequence";
+  case ConSanBarrierPolicyReason::AmbiguousSequenceMembership:
+    return "ambiguous-sequence-membership";
+  case ConSanBarrierPolicyReason::MissingCompletingEvent:
+    return "missing-completing-event";
+  case ConSanBarrierPolicyReason::RedundantAdjacentFullBarrier:
+    return "redundant-adjacent-full-barrier";
+  case ConSanBarrierPolicyReason::ConflictingPhysicalAliases:
+    return "conflicting-physical-aliases";
+  case ConSanBarrierPolicyReason::Count:
+    break;
+  }
+  return "invalid-barrier-policy-reason";
+}
+
+static_assert(kConSanBarrierPolicyReasons.size() ==
+              static_cast<size_t>(ConSanBarrierPolicyReason::Count));
+
+/// Target-neutral kind of evidence requested from one physical probe.
 ///
 /// The kinds deliberately name the semantic observation rather than an ISA
 /// sequence, report offset, or patch kind. This lets all targets share policy
@@ -205,16 +294,25 @@ enum class ConSanProbeIntentKind : uint8_t {
   SampledAccess,
   /// InlineShadow updates and checks exact on-device shadow state.
   ExactShadowAccess,
+  /// Record/Replay appends one exact barrier event for later host processing.
+  BarrierRecord,
+  /// Sampled closes one selected causal window at a logical barrier sequence.
+  SampledBarrierEpoch,
+  /// InlineShadow advances exact on-device epoch state at barrier completion.
+  ExactBarrierEpoch,
   /// One-past-the-end iteration bound; never an observation intent.
   Count,
 };
 
-/// Complete iterable set of access probe intent kinds.
-inline constexpr std::array<ConSanProbeIntentKind, 4> kConSanProbeIntentKinds = {
+/// Complete iterable set of probe intent kinds.
+inline constexpr std::array<ConSanProbeIntentKind, 7> kConSanProbeIntentKinds = {
     ConSanProbeIntentKind::RedundantAccessObservation,
     ConSanProbeIntentKind::AccessRecord,
     ConSanProbeIntentKind::SampledAccess,
     ConSanProbeIntentKind::ExactShadowAccess,
+    ConSanProbeIntentKind::BarrierRecord,
+    ConSanProbeIntentKind::SampledBarrierEpoch,
+    ConSanProbeIntentKind::ExactBarrierEpoch,
 };
 
 /// Return the stable diagnostic spelling of an access probe intent kind.
@@ -228,6 +326,12 @@ inline constexpr std::array<ConSanProbeIntentKind, 4> kConSanProbeIntentKinds = 
     return "sampled-access";
   case ConSanProbeIntentKind::ExactShadowAccess:
     return "exact-shadow-access";
+  case ConSanProbeIntentKind::BarrierRecord:
+    return "barrier-record";
+  case ConSanProbeIntentKind::SampledBarrierEpoch:
+    return "sampled-barrier-epoch";
+  case ConSanProbeIntentKind::ExactBarrierEpoch:
+    return "exact-barrier-epoch";
   case ConSanProbeIntentKind::Count:
     break;
   }
@@ -360,20 +464,45 @@ struct ConSanSiteDecision {
   bool operator==(const ConSanSiteDecision &) const = default;
 };
 
-/// One target-neutral observation requested at a physical access instruction.
+/// One engine-policy decision for one decoded barrier event.
 ///
-/// `covered_semantic_sites` can contain multiple ranges from one instruction;
-/// that coalescing is explicit and keeps placement capacity at one insertion
-/// point. The intent contains no chosen registers, report addresses, machine
-/// words, branch route, or patch kind.
+/// The decision is about original-program meaning, not a patch. A paired
+/// signal and wait may therefore both cite one completion intent, while a
+/// Record/Replay decision normally cites the per-event intent at its own
+/// instruction. `source_containers` preserves every symbol alias solely for
+/// diagnostics; `semantic_site` remains the authoritative identity.
+struct ConSanBarrierSiteDecision {
+  /// Engine whose barrier contract made this decision.
+  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  /// Stable identity of the original synchronization event being decided.
+  SemanticSiteId semantic_site;
+  /// Applicability/admission result that lowering cannot change.
+  ConSanSiteDecisionKind kind = ConSanSiteDecisionKind::NotApplicable;
+  /// Typed explanation; `None` is reserved for admitted decisions.
+  ConSanBarrierPolicyReason reason = ConSanBarrierPolicyReason::TrackingDisabled;
+  /// Target-neutral intents that collectively observe this event.
+  std::vector<ConSanProbeIntentId> intent_ids;
+  /// Every symbol-container name through which this event was decoded.
+  std::vector<std::string> source_containers;
+
+  bool operator==(const ConSanBarrierSiteDecision &) const = default;
+};
+
+/// One target-neutral observation requested at a physical instruction.
+///
+/// `covered_semantic_sites` can contain multiple access ranges from one
+/// instruction or every event in one logical barrier sequence. That coalescing
+/// is explicit and keeps placement capacity at one insertion point. The intent
+/// contains no chosen registers, report addresses, machine words, branch route,
+/// or patch kind.
 struct ConSanProbeIntent {
   /// Stable plan-local identifier cited by semantic decisions.
   ConSanProbeIntentId id;
   /// Engine whose evidence semantics this intent implements.
   ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
-  /// Physical instruction at which lowering must place the observation.
+  /// Physical instruction at which lowering must place the coalesced probe.
   PhysicalSiteId physical_site;
-  /// All logical access ranges observed by this one physical probe.
+  /// All logical access ranges or synchronization events observed by the probe.
   std::vector<SemanticSiteId> covered_semantic_sites;
   /// Semantic evidence operation requested from target lowering.
   ConSanProbeIntentKind kind = ConSanProbeIntentKind::Count;
@@ -387,16 +516,19 @@ struct ConSanProbeIntent {
   bool operator==(const ConSanProbeIntent &) const = default;
 };
 
-/// Complete target-neutral access-policy output for one engine request.
+/// Complete target-neutral semantic-policy output for one engine request.
 ///
-/// Decisions cover semantic access ranges; intents cover physical insertion
-/// points. The plan is a value object and contains no borrowed inventory
-/// references, so a result may safely retain it across retries and image moves.
+/// Separate decision sequences cover semantic access ranges and barrier events;
+/// their shared intents cover physical insertion points. The plan is a value
+/// object and contains no borrowed inventory references, so a result may safely
+/// retain it across retries and image moves.
 struct ConSanObservationPlan {
   /// Selected engine shared by every decision and intent in this plan.
   ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
   /// Deterministically ordered semantic access decisions.
   std::vector<ConSanSiteDecision> site_decisions;
+  /// Deterministically ordered semantic barrier-event decisions.
+  std::vector<ConSanBarrierSiteDecision> barrier_site_decisions;
   /// Deterministically ordered coalesced physical probe intents.
   std::vector<ConSanProbeIntent> probe_intents;
 
@@ -405,6 +537,13 @@ struct ConSanObservationPlan {
 
   /// Resolve one plan-local intent identifier, rejecting invalid or stale IDs.
   [[nodiscard]] const ConSanProbeIntent *intent(ConSanProbeIntentId id) const;
+
+  /// Transactionally append a valid same-engine policy fragment.
+  ///
+  /// Plan-local intent identifiers in the fragment are rebased and every
+  /// decision reference is rewritten. On invalid input or an engine mismatch,
+  /// this plan is unchanged and the function returns false.
+  [[nodiscard]] bool append(const ConSanObservationPlan &fragment);
 
   bool operator==(const ConSanObservationPlan &) const = default;
 };
@@ -448,6 +587,44 @@ struct ConSanAccessPolicyResult {
 
   bool operator==(const ConSanAccessPolicyResult &) const = default;
 };
+
+/// Immutable request parameters consumed by pure barrier policy.
+///
+/// The request selects semantic applicability only. It contains no report
+/// address, register assignment, code-cave budget, or mutable result object, so
+/// the same inventory/request pair always yields the same plan fragment.
+struct ConSanBarrierPolicyRequest {
+  /// Engine whose barrier-observation contract should be evaluated.
+  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  /// Whether decoded barrier events belong to this request.
+  bool tracking_enabled = false;
+  /// Optional diagnostic-only container substring filter.
+  std::string_view container_filter;
+};
+
+/// Pure barrier-policy output plus typed construction failures.
+///
+/// Ordinary exclusions remain explicit decisions and do not enter `errors`.
+/// Only contradictions such as incompatible physical aliases make the result
+/// unusable, allowing callers to fail closed without parsing diagnostics.
+struct ConSanBarrierPolicyResult {
+  /// Barrier-only observation-plan fragment, ready for transactional append.
+  ConSanObservationPlan plan;
+  /// Typed fatal policy-construction failures.
+  std::vector<ConSanBarrierPolicyReason> errors;
+
+  /// Return whether policy produced a usable, internally valid fragment.
+  [[nodiscard]] bool valid() const { return errors.empty() && plan.valid(); }
+
+  bool operator==(const ConSanBarrierPolicyResult &) const = default;
+};
+
+/// Return whether shared synchronization analysis proved every fact required
+/// by the current Sampled barrier-epoch contract. The predicate is declared at
+/// the policy boundary because both pure admission and the temporary legacy
+/// lowerer must agree during incremental migration.
+[[nodiscard]] bool
+consan_moi_sampled_qualifies_barrier_sequence(const ConSanSyncSequence &sequence);
 
 /// Final mechanism state of one admitted probe intent.
 ///
@@ -512,7 +689,7 @@ struct ConSanIntentCoverageEntry {
   bool operator==(const ConSanIntentCoverageEntry &) const = default;
 };
 
-/// Joined access coverage state without conflating policy and lowering.
+/// Joined semantic coverage state without conflating policy and lowering.
 ///
 /// The ledger owns copies of semantic decisions and admitted intents. Runtime
 /// selection and published-evidence axes will be added by later slices; this
@@ -527,6 +704,11 @@ public:
   /// Return immutable semantic decisions copied from the observation plan.
   [[nodiscard]] std::span<const ConSanSiteDecision> site_decisions() const {
     return site_decisions_;
+  }
+
+  /// Return immutable barrier-event decisions copied from the plan.
+  [[nodiscard]] std::span<const ConSanBarrierSiteDecision> barrier_site_decisions() const {
+    return barrier_site_decisions_;
   }
 
   /// Return immutable joined intent/lowering entries.
@@ -558,6 +740,7 @@ public:
 
 private:
   std::vector<ConSanSiteDecision> site_decisions_;
+  std::vector<ConSanBarrierSiteDecision> barrier_site_decisions_;
   std::vector<ConSanIntentCoverageEntry> intent_entries_;
 };
 
@@ -566,3 +749,10 @@ private:
 [[nodiscard]] ConSanAccessPolicyResult
 plan_consan_access_observation(const ProgramInventory &inventory,
                                const ConSanAccessPolicyRequest &request);
+
+/// Evaluate target-neutral barrier applicability and sequence admission without
+/// mutating inventory, options, diagnostics, candidates, resource plans, or
+/// patches.
+[[nodiscard]] ConSanBarrierPolicyResult
+plan_consan_barrier_observation(const ProgramInventory &inventory,
+                                const ConSanBarrierPolicyRequest &request);

@@ -42,6 +42,30 @@ struct BarrierRecordCandidate {
       consan_detail::invalidate_physical_site_single_owner_hint);
 }
 
+/// Temporary lowering adapter that prevents legacy barrier discovery from
+/// widening the immutable production plan. Only insertion sites named by a
+/// barrier intent survive; access intents at the same instruction do not grant
+/// barrier admission.
+[[nodiscard]] bool plan_admits_barrier_insertion(const ConSanObservationPlan &plan,
+                                                 uint64_t text_offset) {
+  for (const ConSanProbeIntent &intent : plan.probe_intents) {
+    if (intent.kind == ConSanProbeIntentKind::BarrierRecord ||
+        intent.kind == ConSanProbeIntentKind::SampledBarrierEpoch ||
+        intent.kind == ConSanProbeIntentKind::ExactBarrierEpoch) {
+      if (intent.physical_site.original_text_offset == text_offset)
+        return true;
+    }
+  }
+  return false;
+}
+
+void retain_admitted_barrier_record_candidates(const ConSanObservationPlan &plan,
+                                               std::vector<BarrierRecordCandidate> &candidates) {
+  std::erase_if(candidates, [&](const BarrierRecordCandidate &candidate) {
+    return !plan_admits_barrier_insertion(plan, candidate.site.text_offset);
+  });
+}
+
 [[nodiscard]] bool redundant_adjacent_full_barrier(const ConSanBarrierSite &previous,
                                                    const ConSanBarrierSite &current) {
   return previous.operation == ConSanBarrierSite::Operation::Full &&
@@ -972,6 +996,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   apply_test_container_filter(candidates, options);
   if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
     return;
+  retain_admitted_barrier_record_candidates(result.observation_plan, candidates);
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });
@@ -2450,6 +2475,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   apply_test_container_filter(candidates, options);
   if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
     return;
+  retain_admitted_barrier_record_candidates(result.observation_plan, candidates);
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
     return lhs.site.text_offset < rhs.site.text_offset;
   });

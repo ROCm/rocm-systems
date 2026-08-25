@@ -783,6 +783,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                    sequence.container_name);
       continue;
     }
+    if (!plan_admits_barrier_insertion(result.observation_plan,
+                                       completing_sites.front().text_offset))
+      continue;
     if (sequence.member_event_identities.size() >
         std::numeric_limits<uint32_t>::max() - result.sampled_barrier_applicable_event_count) {
       result.errors.emplace_back("ConSan MOI sampled barrier applicable event count overflow");

@@ -228,16 +228,23 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   ASSERT_EQ(std::ranges::count(result.observation_plan.site_decisions,
                                ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
             1u);
-  ASSERT_EQ(result.observation_plan.probe_intents.size(), 1u);
+  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().kind,
+            ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().reason,
+            ConSanBarrierPolicyReason::None);
+  ASSERT_EQ(result.observation_plan.probe_intents.size(), 2u);
   const auto access_decision =
       std::ranges::find(result.observation_plan.site_decisions, ConSanSiteDecisionKind::Admitted,
                         &ConSanSiteDecision::kind);
   ASSERT_NE(access_decision, result.observation_plan.site_decisions.end());
   EXPECT_EQ(access_decision->source_containers,
             (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
-  ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
-  EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
-            ConSanLoweringOutcomeKind::Instrumented);
+  ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(
+      result.coverage_ledger.intent_entries(), [](const ConSanIntentCoverageEntry &entry) {
+        return entry.lowering == ConSanLoweringOutcomeKind::Instrumented;
+      }));
   ASSERT_EQ(result.resource_plans.size(), 2u);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
@@ -7007,6 +7014,17 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
+  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().kind,
+            ConSanSiteDecisionKind::Admitted);
+  const auto barrier_intent =
+      std::ranges::find(result.observation_plan.probe_intents, ConSanProbeIntentKind::BarrierRecord,
+                        &ConSanProbeIntent::kind);
+  ASSERT_NE(barrier_intent, result.observation_plan.probe_intents.end());
+  const ConSanIntentCoverageEntry *barrier_coverage =
+      result.coverage_ledger.intent_entry(barrier_intent->id);
+  ASSERT_NE(barrier_coverage, nullptr);
+  EXPECT_EQ(barrier_coverage->lowering, ConSanLoweringOutcomeKind::Instrumented);
   ASSERT_EQ(result.kernels.size(), 1u);
   ASSERT_EQ(result.kernels.front().barrier_sites.size(), 1u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
@@ -7143,6 +7161,16 @@ TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
   EXPECT_EQ(redundant_disposition->lowering_outcome, ConSanSiteLoweringOutcome::NotApplicable);
   EXPECT_STREQ(consan_site_disposition_reason_name(redundant_disposition->reason),
                "redundant_adjacent_barrier");
+  ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
+  EXPECT_EQ(result.observation_plan.barrier_site_decisions[0].kind,
+            ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(result.observation_plan.barrier_site_decisions[1].kind,
+            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(result.observation_plan.barrier_site_decisions[1].reason,
+            ConSanBarrierPolicyReason::RedundantAdjacentFullBarrier);
+  EXPECT_EQ(std::ranges::count(result.observation_plan.probe_intents,
+                               ConSanProbeIntentKind::BarrierRecord, &ConSanProbeIntent::kind),
+            1u);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -10505,12 +10533,10 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
       words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
     }
     words.insert(words.end(), {
-                                  0xC4050018u,
-                                  0x40883804u,
+                                  0xC4050018u, 0x40883804u,
                                   0x00000005u, // buffer_load_b32 v4, v5, device
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC07Cu,
-                                  0x00080000u,
+                                  0xEE0AC07Cu, 0x00080000u,
                                   0x00000000u, // global_inv scope:device
                                   0xBFC00000u, // s_wait_loadcnt 0
                                   0xBE804EC1u, // s_barrier_signal -1
@@ -11743,8 +11769,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   constexpr uint8_t kGuestVgprMsbMode = 0x01u;
   constexpr uint16_t kEncodedAddressVgpr = 30u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
-      0xDBFC0000u,
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
       0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
   };
   // Even when an inline body would fit in nearby padding, capturing an

@@ -8,6 +8,7 @@ target_sources(
     PRIVATE
         consan.cpp
         consan_access_policy.cpp
+        consan_barrier_policy.cpp
         consan_branch_only_relay_router.cpp
         consan_moi.cpp
         consan_moi_model.cpp
