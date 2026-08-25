@@ -47,6 +47,7 @@ public:
     bool detach();
     bool simple_mmap(void*& addr, size_t length) const;
     bool simple_munmap(void*& addr, size_t length) const;
+    bool has_library(const std::string& library) const;
 
     bool write(size_t addr, const std::vector<uint8_t>& data, size_t size) const;
     bool read(size_t addr, std::vector<uint8_t>& data, size_t size) const;

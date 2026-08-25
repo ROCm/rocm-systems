@@ -748,6 +748,13 @@ PTraceSession::find_library(void*& addr, int inpid, const std::string& library)
 }
 
 bool
+PTraceSession::has_library(const std::string& library) const
+{
+    void* library_addr = nullptr;
+    return find_library(library_addr, m_pid, library);
+}
+
+bool
 PTraceSession::find_symbol(void*& addr, const std::string& library, const std::string& symbol)
 {
     auto searchname = std::stringstream{};

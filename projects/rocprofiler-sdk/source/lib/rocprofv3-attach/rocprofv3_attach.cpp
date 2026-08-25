@@ -150,6 +150,18 @@ handle_ptrace_operations(uint32_t pid)
     // Setup attachement for rocprofiler
     ROCP_TRACE << "Attachment library called for pid " << pid;
     ptrace_session = std::make_unique<rocprofiler::attach::PTraceSession>(pid);
+
+    if(!ptrace_session->has_library("librocprofiler-sdk-attach.so"))
+    {
+        ROCP_ERROR << "Target process " << pid
+                   << " does not have the rocprofiler attachment library loaded. Start the "
+                      "target with ROCP_TOOL_ATTACH=1 or build rocprofiler-register with "
+                      "ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON";
+        ptrace_session->m_setup_status.store(ROCPROFILER_STATUS_ERROR);
+        finished_setup.store(true);
+        return;
+    }
+
     ROCP_TRACE << "Attempting attachment to pid " << pid;
     if(!ptrace_session->attach())
     {
