@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=rccl-ext-plugins
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --ntasks=8
 #SBATCH --partition=interactive
 #SBATCH --exclusive
 #SBATCH --time=04:00:00
