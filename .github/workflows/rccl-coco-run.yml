@@ -29,11 +29,6 @@ on:
         type: string
         required: false
         default: 'main'
-      rocm_systems_ref:
-        description: 'rocm-systems git ref to check out as the sources under test.'
-        type: string
-        required: false
-        default: 'develop'
       trigger_kind:
         description: 'coco --trigger-kind, recorded against the run. No default: every caller must state its own, so a caller that forgets to wire this through fails loudly instead of silently mislabeling its run.'
         type: string
@@ -93,21 +88,14 @@ jobs:
         shell: bash
     env:
       LOG_FILE: ${{ github.workspace }}/coco-${{ inputs.job }}-${{ github.run_id }}.log
-      # coco is installed into a throwaway venv and always invoked by absolute
-      # path. This runner is persistent, so installing into the interpreter
-      # setup-python puts on PATH would leak between runs; and an *activated*
-      # venv is worse than useless here -- rccl-suite.yml documents SLURM
-      # compute-node builds failing because an exported VIRTUAL_ENV/PATH made
-      # cmake's find_package(Python3) pick a runner-only interpreter. Never
-      # activate this; just call its entry point directly.
-      COCO_VENV: ${{ github.workspace }}/_coco/venv
+      # Unique per run + attempt.
+      COCO_DIR: ${{ github.workspace }}/_coco-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      # The sources under test. coco builds RCCL from this checkout, so the ref
-      # chosen here is what the run actually measures.
+      # Limit the checkout to the composite action's own directory.
       - name: Checkout rocm-systems
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          ref: ${{ inputs.rocm_systems_ref }}
+          sparse-checkout: .github/actions/checkout-coco-harness
 
       # The harness itself, cloned rather than vendored so a run can pin any
       # coco ref without touching this repo. Mints its own scoped token; see
@@ -116,7 +104,7 @@ jobs:
         uses: ./.github/actions/checkout-coco-harness
         with:
           ref: ${{ inputs.coco_ref }}
-          path: _coco/tRCCL
+          path: ${{ env.COCO_DIR }}/tRCCL
           app-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
@@ -125,12 +113,15 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: _coco/tRCCL/pyproject.toml
+          cache-dependency-path: ${{ env.COCO_DIR }}/tRCCL/pyproject.toml
 
       - name: Install coco
-        working-directory: _coco/tRCCL
+        working-directory: ${{ env.COCO_DIR }}/tRCCL
+        env:
+          COCO_VENV: ${{ env.COCO_DIR }}/venv
         run: |
           set -euo pipefail
+          # Never activated; invoked by absolute path.
           python3 -m venv "${COCO_VENV}"
           "${COCO_VENV}/bin/python3" -m pip install --upgrade pip
           "${COCO_VENV}/bin/python3" -m pip install -e ".[dev]"
@@ -141,14 +132,20 @@ jobs:
 
       - name: Launch coco
         id: launch
-        working-directory: _coco/tRCCL
+        working-directory: ${{ env.COCO_DIR }}/tRCCL
         env:
           JOB: ${{ inputs.job }}
           TRIGGER_KIND: ${{ inputs.trigger_kind }}
           COCO_ARGS: ${{ inputs.coco_args }}
           COCO_DB_URL: ${{ secrets.RCCL_COCO_DB_URL }}
+          COCO_VENV: ${{ env.COCO_DIR }}/venv
         run: |
           set -euo pipefail
+          # Strip login-node Python from the environment before coco submits
+          # the compute-node SLURM job.
+          unset VIRTUAL_ENV PYTHONHOME pythonLocation Python_ROOT_DIR Python3_ROOT_DIR
+          PATH="$(printf '%s' "${PATH}" | tr ':' '\n' | grep -vE '/_work/_tool/Python/' | paste -sd: -)"
+          export PATH
           if [[ -z "${COCO_DB_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
           fi
@@ -179,7 +176,6 @@ jobs:
           JOB: ${{ inputs.job }}
           TRIGGER_KIND: ${{ inputs.trigger_kind }}
           COCO_REF: ${{ inputs.coco_ref }}
-          ROCM_SYSTEMS_REF: ${{ inputs.rocm_systems_ref }}
           COCO_ARGS: ${{ inputs.coco_args }}
           LAUNCH_OUTCOME: ${{ steps.launch.outcome }}
         run: |
@@ -191,7 +187,6 @@ jobs:
             echo "| outcome | \`${LAUNCH_OUTCOME}\` |"
             echo "| trigger kind | \`${TRIGGER_KIND}\` |"
             echo "| coco ref | \`${COCO_REF}\` |"
-            echo "| rocm-systems ref | \`${ROCM_SYSTEMS_REF}\` |"
             echo "| extra flags | \`${COCO_ARGS:-(none)}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -205,9 +200,8 @@ jobs:
             echo "::endgroup::"
           fi
 
-      # This runner is persistent and keeps its workspace between runs.
       - name: Clean up harness checkout
         if: always()
         run: |
-          rm -rf "${{ github.workspace }}/_coco"
+          rm -rf "${COCO_DIR}"
           rm -f "${LOG_FILE}"
