@@ -1436,8 +1436,6 @@ HIP_TEST_CASE(Unit_deviceAllocationAfterDeviceReset) {
   CHECK_PCIE_ATOMIC_SUPPORT;
 
   REQUIRE(true == TestAllocWriteFree());
-
   HIP_CHECK(hipDeviceReset());
-
   REQUIRE(true == TestAllocWriteFree());
 }
