@@ -2590,6 +2590,141 @@ void VirtMemoryTestBasic::ImportedShareableHandleSetAccessAfterFdClose(void) {
   }
 }
 
+void VirtMemoryTestBasic::ExportShareableHandlePcieMapping(hsa_agent_t agent,
+                                                           hsa_amd_memory_pool_t pool) {
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(pool, &pool_i));
+  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
+
+  const size_t alloc_size = pool_i.alloc_granule * 10;
+  hsa_amd_vmem_alloc_handle_t exported_handle;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_handle_create(pool, alloc_size, MEMORY_TYPE_NONE, 0, &exported_handle));
+
+  /* Request the dmabuf be mapped over PCIe (BAR) rather than the default fabric mapping. */
+  int dmabuf_fd = -1;
+  hsa_status_t status = hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, exported_handle,
+                                                             HSA_AMD_DMABUF_MAPPING_TYPE_PCIE);
+
+  /* PCIe dma-buf mapping is only supported on large-BAR enabled or xgmi connected devices.
+   * Unsupported devices return HSA_STATUS_ERROR_NOT_SUPPORTED - treat that as a
+   * valid, hardware-gated outcome rather than a test failure. */
+  if (status == HSA_STATUS_ERROR_NOT_SUPPORTED) {
+    if (verbosity() > 0) {
+      std::cout << "    PCIe dma-buf mapping not supported on this agent - Skipping." << std::endl;
+    }
+    ASSERT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+    return;
+  }
+
+  ASSERT_SUCCESS(status);
+  ASSERT_GE(dmabuf_fd, 0);
+
+  /* The PCIe-mapped fd must round-trip back into a usable vmem handle. */
+  hsa_amd_vmem_alloc_handle_t imported_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle));
+
+  ASSERT_EQ(close(dmabuf_fd), 0);
+
+  /* A round-tripped handle is not enough: prove the PCIe-mapped memory is actually usable by
+   * the agent. Map it, grant the agent RW access, and DMA a known pattern host->device->host
+   * through the agent, verifying the bytes survive the trip over the PCIe BAR. */
+  std::vector<hsa_agent_t> cpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+  ASSERT_FALSE(cpus.empty());
+  hsa_agent_t cpu_agent = cpus[0];
+
+  hsa_amd_memory_pool_t system_pool = {};
+  ASSERT_SUCCESS(
+      hsa_amd_agent_iterate_memory_pools(cpu_agent, rocrtst::GetGlobalMemoryPool, &system_pool));
+
+  const unsigned int element_count = alloc_size / sizeof(unsigned int);
+  unsigned int* host_src = nullptr;
+  unsigned int* host_dst = nullptr;
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(system_pool, alloc_size, 0,
+                                              reinterpret_cast<void**>(&host_src)));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_allocate(system_pool, alloc_size, 0,
+                                              reinterpret_cast<void**>(&host_dst)));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &agent, nullptr, host_src));
+  ASSERT_SUCCESS(hsa_amd_agents_allow_access(1, &agent, nullptr, host_dst));
+  for (unsigned int i = 0; i < element_count; ++i) {
+    host_src[i] = i;
+  }
+  memset(host_dst, 0, alloc_size);
+
+  void* dev_ptr = nullptr;
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&dev_ptr, alloc_size, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(dev_ptr, alloc_size, 0, imported_handle, 0));
+
+  hsa_amd_memory_access_desc_t perms[] = {{HSA_ACCESS_PERMISSION_RW, agent}};
+  ASSERT_SUCCESS(hsa_amd_vmem_set_access(dev_ptr, alloc_size, perms, ARRAY_SIZE(perms)));
+
+  hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
+  ASSERT_SUCCESS(hsa_amd_vmem_get_access(dev_ptr, &perm, agent));
+  ASSERT_EQ(perm, HSA_ACCESS_PERMISSION_RW);
+
+  hsa_signal_t signal = {0};
+  ASSERT_SUCCESS(hsa_signal_create(1, 0, nullptr, &signal));
+
+  ASSERT_SUCCESS(
+      hsa_amd_memory_async_copy(dev_ptr, agent, host_src, cpu_agent, alloc_size, 0, nullptr, signal));
+  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {
+  }
+  hsa_signal_store_relaxed(signal, 1);
+
+  ASSERT_SUCCESS(
+      hsa_amd_memory_async_copy(host_dst, cpu_agent, dev_ptr, agent, alloc_size, 0, nullptr, signal));
+  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                   HSA_WAIT_STATE_ACTIVE)) {
+  }
+
+  for (unsigned int i = 0; i < element_count; ++i) {
+    ASSERT_EQ(host_dst[i], host_src[i]);
+  }
+
+  ASSERT_SUCCESS(hsa_signal_destroy(signal));
+  ASSERT_SUCCESS(hsa_amd_vmem_unmap(dev_ptr, alloc_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(dev_ptr, alloc_size));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(host_dst));
+  ASSERT_SUCCESS(hsa_amd_memory_pool_free(host_src));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+}
+
+void VirtMemoryTestBasic::ExportShareableHandlePcieMapping(void) {
+  if (verbosity() > 0) {
+    PrintMemorySubtestHeader("Export Shareable Handle - PCIe DMA-BUF Mapping");
+  }
+
+  bool supp = false;
+  ASSERT_SUCCESS(hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, (void*)&supp));
+  if (!supp) {
+    if (verbosity() > 0) {
+      std::cout << "    Virtual Memory API not supported on this system - Skipping." << std::endl;
+      std::cout << kSubTestSeparator << std::endl;
+    }
+    return;
+  }
+
+  std::vector<hsa_agent_t> gpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
+  if (gpus.empty()) return;
+
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
+    hsa_amd_memory_pool_t gpu_pool = {};
+    ASSERT_SUCCESS(
+        hsa_amd_agent_iterate_memory_pools(gpus[i], rocrtst::GetGlobalMemoryPool, &gpu_pool));
+    if (gpu_pool.handle == 0) continue;
+    ExportShareableHandlePcieMapping(gpus[i], gpu_pool);
+  }
+
+  if (verbosity() > 0) {
+    std::cout << "    Subtest finished" << std::endl;
+    std::cout << kSubTestSeparator << std::endl;
+  }
+}
+
 void VirtMemoryTestBasic::TestFabricExportAcceleratorReadiness(hsa_agent_t gpu_agent,
                                                                hsa_amd_memory_pool_t pool) {
   const auto read_accel_state = [](int32_t drm_render_minor, char* state_out) {
