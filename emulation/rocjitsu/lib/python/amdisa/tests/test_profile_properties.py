@@ -1098,6 +1098,17 @@ class TestCdna5Profile:
         assert config.include_base == 'custom/amdgpu'
         assert config.generated_include_base == '/tmp/generated'
 
+    def test_regeneration_helper_uses_stable_generated_include_prefix(self):
+        rocjitsu = Path(__file__).resolve().parents[4]
+        source_root = rocjitsu / 'lib' / 'rocjitsu' / 'src'
+        isa_output = source_root / 'rocjitsu' / 'isa' / 'arch' / 'amdgpu' / 'generated'
+
+        helper = (rocjitsu / 'scripts' / 'generate-amdisa.sh').read_text()
+        assert '--include-root "$rocjitsu/lib/rocjitsu/src"' in helper
+
+        config = _codegen_config(str(isa_output), include_root=str(source_root))
+        assert config.generated_include_base == 'rocjitsu/isa/arch/amdgpu/generated'
+
     def test_explicit_codegen_prefix_remains_independent_of_output(self):
         config = CodegenConfig(generated_include_base='stable/generated')
 

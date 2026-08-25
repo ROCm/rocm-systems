@@ -100,6 +100,7 @@ log "Running amdisa generator"
 "$python" -m amdisa \
   "${isa_entries[@]}" \
   --isa-output "$isa_out" \
+  --include-root "$rocjitsu/lib/rocjitsu/src" \
   --dbt-output "$dbt_out"
 
 isa_rel="${isa_out#"$repo/"}"
