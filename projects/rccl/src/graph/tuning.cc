@@ -1797,7 +1797,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [1] Reduce          -- not used
     128ULL*1024*1024,    // [2] AllGather       -- 128 MiB (placeholder, validate AICOMRCCL-1756)
     128ULL*1024*1024,    // [3] ReduceScatter   -- 128 MiB per-rank shard (placeholder)
-    128ULL*1024*1024,    // [4] AllReduce       -- 128 MiB (CE 2-shot wins 4-256 MiB for R2)
+    16ULL*1024*1024,     // [4] AllReduce       -- 16 MiB (Ring/Simple wins above; CE wins R2 4-256 MiB)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
