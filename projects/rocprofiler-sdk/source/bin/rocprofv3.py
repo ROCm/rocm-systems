@@ -758,15 +758,17 @@ For attachment profiling of running processes:
         action="append",
     )
 
+    kernel_replay_options = parser.add_argument_group("Kernel replay options (beta)")
+
     add_parser_bool_argument(
-        counter_collection_options,
+        kernel_replay_options,
         "--kernel-replay-beta-enabled",
         help=(
-            "Collect all --pmc counter groups within a single application run via in-process "
-            "kernel replay: each dispatch is replayed once per counter group, with device-memory "
+            "Collect all counter groups within a single application run via in-process kernel "
+            "replay: each dispatch is replayed once per counter group, with device-memory "
             "snapshot/restore between passes, instead of re-running the whole application per "
-            "group. Without this flag, multiple --pmc groups use application replay (the app is "
-            "re-run once per group) as usual. Requires --pmc. (beta)"
+            "group. Requires counter collection (--pmc, input-file pmc, or pmc_groups). This is "
+            "not a general performance switch. (beta)"
         ),
     )
 
@@ -2156,10 +2158,10 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
-    if getattr(args, "kernel_replay_beta_enabled", None) and not args.pmc:
+    if getattr(args, "kernel_replay_beta_enabled", None) and not args.pmc and not args.pmc_groups:
         fatal_error(
-            "--kernel-replay-beta-enabled requires --pmc "
-            "(it routes counter collection through replay)"
+            "--kernel-replay-beta-enabled requires counter collection "
+            "(--pmc or pmc_groups)"
         )
 
     if getattr(args, "kernel_replay_beta_enabled", None):
@@ -2510,6 +2512,15 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    input_has_pmc_any = any(has_set_attr(inp, "pmc") for inp in inp_args)
+    has_pmc_groups = getattr(cmd_args, "pmc_groups", None) is not None
+
+    if getattr(cmd_args, "kernel_replay_beta_enabled", None):
+        if not (cli_has_pmc or input_has_pmc_any or has_pmc_groups):
+            fatal_error(
+                "--kernel-replay-beta-enabled requires counter collection "
+                "(--pmc, input-file pmc, or pmc_groups)"
+            )
 
     # Kernel replay collects all counter groups within a SINGLE application run (the SDK replays
     # each dispatch once per group), so it must not use the per-group child-process relaunch. Merge
@@ -2524,11 +2535,19 @@ def main(argv=None):
             if has_set_attr(inp_arg, "pmc"):
                 pmc = inp_arg.pmc
                 replay_groups.append(pmc if isinstance(pmc, list) else [pmc])
-        if replay_groups:
-            cmd_args.pmc = replay_groups
-            inp_args = inp_args[:1] if inp_args else [dotdict({})]
-            if has_set_attr(inp_args[0], "pmc"):
-                inp_args[0].pmc = None
+        if has_pmc_groups:
+            for row in cmd_args.pmc_groups:
+                replay_groups.append(row if isinstance(row, list) else list(row))
+        if not replay_groups:
+            fatal_error(
+                "--kernel-replay-beta-enabled requires at least one counter group "
+                "(--pmc, input-file pmc, or pmc_groups)"
+            )
+        cmd_args.pmc = replay_groups
+        cmd_args.pmc_groups = None
+        inp_args = inp_args[:1] if inp_args else [dotdict({})]
+        if has_set_attr(inp_args[0], "pmc"):
+            inp_args[0].pmc = None
         cli_has_pmc = cmd_args.pmc is not None
         input_has_pmc = False
         cli_multipass = False
