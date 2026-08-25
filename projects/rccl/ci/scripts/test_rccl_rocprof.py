@@ -64,6 +64,25 @@ def resolve_paths():
 PATHS = resolve_paths()
 
 
+def _setup_kpack_env(env, rocm_path):
+    """Set ROCM_KPACK_PATH if .kpack archives exist in the artifact tree.
+
+    ROCM_KPACK_PATH expects literal file paths, not @GFXARCH@ patterns.
+    """
+    artifact_dir = Path(rocm_path)
+    kpack_files = sorted(artifact_dir.rglob("*.kpack"))
+    if not kpack_files:
+        return
+    kpack_paths = []
+    for f in kpack_files:
+        resolved = str(f.resolve())
+        kpack_paths.append(resolved)
+        log.info("kpack archive: %s", resolved)
+    if kpack_paths:
+        env["ROCM_KPACK_PATH"] = ":".join(kpack_paths)
+        log.info("ROCM_KPACK_PATH=%s", env["ROCM_KPACK_PATH"])
+
+
 def make_env():
     env = os.environ.copy()
     env["ROCM_PATH"] = PATHS["rocm_path"]
@@ -88,6 +107,9 @@ def make_env():
         env["HIP_VISIBLE_DEVICES"] = "0,1"
 
     env.pop("GPU_DEVICE_ORDINAL", None)
+
+    _setup_kpack_env(env, PATHS["rocm_path"])
+
     return env
 
 
