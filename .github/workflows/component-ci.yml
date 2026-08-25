@@ -28,6 +28,7 @@ jobs:
     outputs:
       nvidia: ${{ steps.configure.outputs.nvidia }}
       wsl: ${{ steps.configure.outputs.wsl }}
+      hip-contract-tests: ${{ steps.configure.outputs.hip-contract-tests }}
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -39,10 +40,12 @@ jobs:
         run: |
           NVIDIA=false
           WSL=false
+          HIP_CONTRACT_TESTS=false
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             NVIDIA=true
             WSL=true
+            HIP_CONTRACT_TESTS=true
           else
             CHANGED_FILES=$(git diff --name-only "${BASE_REF}")
             echo "Changed files:"
@@ -55,10 +58,15 @@ jobs:
             if echo "${CHANGED_FILES}" | grep -qE '^projects/(rocr-runtime|clr|hip|hip-tests)/|^\.github/workflows/(component-ci|rocr-runtime-wsl)\.yml|^shared/amdgpu-windows-interop/wkmi'; then
               WSL=true
             fi
+
+            if echo "${CHANGED_FILES}" | grep -qE '^projects/hip/include/hip/|^projects/hip-tests/catch/(contract|tools)/|^projects/hip-tests/catch/config/configs/contract\.yaml|^projects/hip-tests/catch/TEST_PLAN\.md|^\.github/workflows/(component-ci|hip-contract-coverage)\.yml'; then
+              HIP_CONTRACT_TESTS=true
+            fi
           fi
 
           echo "nvidia=${NVIDIA}" >> "${GITHUB_OUTPUT}"
           echo "wsl=${WSL}" >> "${GITHUB_OUTPUT}"
+          echo "hip-contract-tests=${HIP_CONTRACT_TESTS}" >> "${GITHUB_OUTPUT}"
 
   nvidia:
     name: "NVIDIA"
@@ -72,10 +80,16 @@ jobs:
     if: ${{ needs.changes.outputs.wsl == 'true' }}
     uses: ./.github/workflows/rocr-runtime-wsl.yml
 
+  hip-contract-tests:
+    name: "HIP contract tests"
+    needs: changes
+    if: ${{ needs.changes.outputs.hip-contract-tests == 'true' }}
+    uses: ./.github/workflows/hip-contract-coverage.yml
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
-    needs: [changes, nvidia, wsl]
+    needs: [changes, nvidia, wsl, hip-contract-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: Check results
