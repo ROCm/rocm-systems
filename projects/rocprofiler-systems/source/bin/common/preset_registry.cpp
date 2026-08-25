@@ -296,13 +296,22 @@ bool
 preset_registry::is_rocpd_output_enabled(std::string_view preset_name,
                                          bool             default_value) const
 {
-    auto it = m_json_cache.find(std::string{ preset_name });
-    if(it == m_json_cache.end()) return default_value;
+    auto iter = m_json_cache.find(std::string{ preset_name });
+    if(iter == m_json_cache.end())
+    {
+        return default_value;
+    }
 
-    const auto& json = it->second;
-    if(!json.contains("output")) return default_value;
+    const auto& json = iter->second;
+    if(!json.contains("output"))
+    {
+        return default_value;
+    }
     const auto& output = json["output"];
-    if(!output.contains("rocpd_output")) return default_value;
+    if(!output.contains("rocpd_output"))
+    {
+        return default_value;
+    }
     return output["rocpd_output"].value("enabled", default_value);
 }
 
