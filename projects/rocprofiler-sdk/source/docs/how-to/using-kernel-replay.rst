@@ -162,6 +162,64 @@ Capture is a **full in-memory copy** of every tracked region into host RAM. Cost
 ``O(tracked_bytes × passes)``, not kernel time alone. The last executed pass is **not** restored,
 so the application sees the memory the kernel actually produced.
 
+.. _kernel-replay-declined:
+
+When a dispatch is not replayed
+===============================
+
+Requesting replay does not guarantee it happens. The SDK declines when it cannot replay soundly or
+affordably, runs the dispatch once with its original completion signal, and logs one
+``[kernel-replay]`` line per dispatch giving the outcome, the reason, the snapshot footprint, the
+untracked byte counts, and the snap/restore timing. A tool that needs to know whether a dispatch was
+actually replayed should count ``PASS`` callbacks rather than assume the requested pass count was
+honored.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Reason
+     - What it means and what to do
+   * - ``untracked_memory``
+     - Live virtual-memory mappings on the agent, whose contents the snapshot cannot cover. This is
+       what ``hipMallocAsync`` on the default pool, ``hipMemAddressReserve``/``hipMemMap``, PyTorch
+       ``PYTORCH_HIP_ALLOC_CONF=expandable_segments``, and Kokkos built with
+       ``KOKKOS_ENABLE_IMPL_HIP_MALLOC_ASYNC`` all produce. Switch the application to an allocator
+       whose memory is snapshottable, or set
+       ``ROCPROFILER_KERNEL_REPLAY_DECLINE_ON_VMEM=0`` to replay anyway and accept that the results
+       may be wrong.
+   * - ``footprint_budget``
+     - The snapshot would exceed the host budget (by default half of ``MemAvailable``). Narrow the
+       replay with kernel filtering, reduce the application's resident footprint, or raise
+       ``ROCPROFILER_KERNEL_REPLAY_MAX_SNAPSHOT_BYTES``.
+   * - ``snapshot_failed``
+     - A host allocation or a device-to-host copy failed during capture. Usually host memory
+       pressure.
+   * - ``queue_drain_stuck``, ``agent_drain_stuck``, ``pass_drain_stuck``
+     - GPU work did not complete within the window's bound (roughly 60 s). Persistent, cooperative
+       and peer-dependent kernels behave this way legitimately; exclude them with kernel filtering.
+
+Tuning knobs, all optional:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Variable
+     - Effect
+   * - ``ROCPROFILER_KERNEL_REPLAY_DECLINE_ON_VMEM``
+     - Decline when live virtual-memory mappings are found. Default ``1``.
+   * - ``ROCPROFILER_KERNEL_REPLAY_DECLINE_ON_UNTRACKED_POOL``
+     - Decline when GPU-resident, non-snapshottable pool allocations are found. Default ``0``,
+       because runtime-internal allocations land in the same class.
+   * - ``ROCPROFILER_KERNEL_REPLAY_MAX_SNAPSHOT_BYTES``
+     - Snapshot budget in bytes. ``0`` means unlimited. Default: half of ``MemAvailable``.
+   * - ``ROCPROFILER_KERNEL_REPLAY_WARN_SECONDS``
+     - Warn when the projected host-link traffic for the window exceeds this. ``0`` disables.
+   * - ``ROCPROFILER_KERNEL_REPLAY_ASSUMED_GBPS``
+     - Bandwidth assumed when projecting that time. The snapshot destination is unpinned host
+       memory, so the default is well below the link's pinned-transfer rate.
+
 .. _kernel-replay-limitations:
 
 Limitations
@@ -179,7 +237,13 @@ Limitations
   coordination.
 * **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
   thread can mutate device memory during the replay window.
-* **Stuck drains abort the process** rather than hanging (roughly 60 s bounds inside the window).
+* **Stuck drains decline the replay** rather than hanging or aborting (roughly 60 s bounds inside
+  the window). See :ref:`kernel-replay-declined`.
+* **A failed restore between passes aborts the process.** A partial restore cannot be undone, and
+  continuing would hand silently corrupted memory to the application.
+* **A tool callback must not launch GPU work on the replaying agent.** It mutates device memory
+  inside the snapshot window, so the replayed dispatch's counters are not trustworthy. The SDK lets
+  the dispatch through rather than deadlocking, and flags the dispatch with ``reentrancy=1``.
 * **Host RAM duplication** of the tracked device footprint for the duration of the replay.
 
 See also

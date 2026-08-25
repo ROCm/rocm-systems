@@ -66,15 +66,29 @@ ROCPROFILER_EXTERN_C_INIT
  * single dispatch. HIP graph launches are not replayed, and a multi-packet submission runs once
  * without replay; each case warns once. Repeatability rests on a snapshot covering coarse-grained
  * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
- * variables. Unified or managed memory, @c hipMallocAsync and other virtual-memory-mapped
- * allocations, and host, fine-grained and kernarg memory are not captured, so a kernel writing to
- * them observes values accumulated across passes rather than identical inputs. Allocations carrying
+ * variables. Host, fine-grained and kernarg memory are not captured. Allocations carrying
  * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are excluded from the snapshot (HIP kernarg pools /
  * profiler buffers share that flag). A direct-HSA application that puts ordinary writable device
  * data behind the same flag sees the same omission -- an unsupported allocation class for beta.
  * Declining every replay while any such trackable allocation is live is not viable because the HIP
- * runtime itself keeps them live under interception. A failed restore aborts the process rather
- * than continuing with partially restored memory.
+ * runtime itself keeps them live under interception.
+ *
+ * A dispatch that requests replay may still run only once. The SDK declines, runs the dispatch with
+ * its original completion signal, and logs the reason on a @c [kernel-replay] line when it cannot
+ * replay soundly or affordably: live virtual-memory mappings on the agent (@c hipMallocAsync on the
+ * default pool, @c hipMemAddressReserve / @c hipMemMap, and the frameworks built on them, whose
+ * contents the snapshot cannot cover), a snapshot larger than the configured host budget, a failed
+ * capture, or GPU work that does not drain within the window's bound. A tool that needs to know
+ * whether a dispatch was actually replayed must count PASS callbacks rather than assume the
+ * requested pass count was honored.
+ *
+ * A tool callback invoked during replay must not launch GPU work on the replaying agent. Doing so
+ * mutates device memory inside the snapshot window, so the counters for the replayed dispatch are
+ * not trustworthy; the SDK allows the dispatch through rather than deadlocking on its own lock, and
+ * reports the condition.
+ *
+ * A failed restore between passes aborts the process. A partial restore has no correct
+ * continuation, and handing that state to the application would corrupt its results silently.
  *
  * @see `docs/how-to/using-kernel-replay.rst` for the full limitation list and
  * `docs/conceptual/kernel_replay/kernel_replay_memory_snapshot.md` for what the snapshot covers

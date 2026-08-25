@@ -72,7 +72,7 @@ Two drains run before `snap()`:
 
 - **Queue drain.** A barrier packet is submitted on the replaying queue and waited on, fencing the
   CPU against all prior GPU work on that queue.
-- **Agent-wide drain.** `replay_drain_agent_or_fatal()` waits until no queue on the agent has an
+- **Agent-wide drain.** `replay_drain_agent_or_decline()` waits until no queue on the agent has an
   async completion handler in flight. Sibling queues (other HIP streams) can have kernels in flight
   that would mutate device memory during snapshot and restore. The writer lock stops other threads
   from *starting* a replayed dispatch, because every kernel dispatch passes through that gate, but it
@@ -109,31 +109,85 @@ in flight per pass — the loop drains before each submit under the agent writer
 invariant is asserted rather than assumed. Draining the handler also implies the GPU work has
 completed, so the loop needs no separate per-pass GPU fence.
 
-## Bounded waits and the abort convention
+## Bounded waits and what happens when they expire
 
-Both drains in the replay window are bounded, and exceeding the bound is fatal rather than a warning.
-This is a deliberate choice for a beta feature: a stuck handler or a stuck queue should fail loudly
-and immediately, rather than hanging the application indefinitely or — worse — silently proceeding to
-snapshot or restore memory that is still being mutated.
+Every drain in the replay window is bounded. Exceeding the bound declines the replay: the dispatch
+runs once, with its original completion signal, and the reason is reported. It does not terminate the
+process.
+
+That is a change from the original beta behavior, which aborted. The reasoning behind aborting was
+that a stuck drain indicates a state too questionable to proceed from — which is right about the
+*replay* and wrong about the *process*. A drain that does not converge is not necessarily a bug at
+all: the HSA full profile requires an agent to make forward progress on several queues concurrently,
+which is precisely what licenses an application to keep two co-dependent kernels resident on one
+agent. A persistent kernel, a spin-waiting cooperative kernel, and a collective whose peer has not
+reached the same point all sit in the drain indefinitely while behaving exactly as specified. Killing
+a multi-hour job under a scheduler because one of its dispatches could not be profiled is a worse
+outcome than not profiling that dispatch.
 
 | Wait | Bound | On expiry |
 |---|---|---|
-| `replay_drain_or_fatal()` — per-pass async handler drain | up to 12 slices of `Queue::sync()`, roughly 60 s total | `ROCP_FATAL` |
-| `replay_drain_agent_or_fatal()` — agent-wide drain | 60 s deadline, polled every ~2 ms outside the queue-map lock | `ROCP_FATAL` |
-| `Queue::sync()` — one drain slice | 5 s HSA signal timeout hint | returns `false` and warns; `replay_drain_or_fatal()` takes another slice, teardown callers proceed |
+| `replay_drain_or_decline()` — per-pass async handler drain | up to 12 slices of `Queue::sync()`, roughly 60 s total | break the pass loop, report `pass_drain_stuck` |
+| `replay_drain_agent_or_decline()` — agent-wide drain | 60 s deadline, polled every ~2 ms outside the queue-map lock | decline, report `agent_drain_stuck` |
+| Queue drain barrier — fences prior GPU work on the replaying queue | 12 slices of a 5 s HSA signal wait | decline, report `queue_drain_stuck` |
+| `Queue::sync()` — one drain slice | 5 s HSA signal timeout hint | returns `false` and warns; `replay_drain_or_decline()` takes another slice, teardown callers proceed |
 | Queue profiling setup signal waits (adjacent to, not inside, the replay window) | 1 s timeout hint — three attempts in one path, a single attempt in the other | `ROCP_FATAL` |
 
 Each expired `Queue::sync()` slice logs its own timeout warning naming the number of kernels still
 active, so a slow drain leaves a trail before the 60 s bound is reached.
 
-The contrast with `Queue::sync()` is the point. `Queue::sync()` is also used at teardown, where
-warning once and proceeding is the right behavior; a replay pass must not proceed on a handler that
-has not finished. `replay_drain_or_fatal()` therefore layers a retry loop over `Queue::sync()` to
-extend the bound and then aborts, instead of accepting `sync()`'s warn-and-continue result.
+The contrast with `Queue::sync()` is still the point. `Queue::sync()` is also used at teardown, where
+warning once and proceeding is right; a replay pass must not proceed on a handler that has not
+finished. `replay_drain_or_decline()` therefore layers a retry loop over `Queue::sync()` to extend the
+bound, and then stops the replay rather than accepting `sync()`'s warn-and-continue result.
 
-The drain barrier on the replaying queue is the one wait that is unbounded (`UINT64_MAX` timeout).
-It fences work the application itself submitted on this queue, which the runtime is expected to
-complete.
+On the queue-drain path the barrier packet is still queued when the wait expires, and it holds a
+reference to the drain signal. That signal is deliberately leaked rather than destroyed: the packet
+processor would otherwise decrement freed memory. Leaking one signal on a path already reporting a
+stuck queue is the lesser fault.
+
+One failure is still fatal: a `restore()` that fails partway through. There is no correct
+continuation from a partial restore — some regions hold pre-kernel bytes and others post-kernel
+bytes, the mix is unknown, and nothing can reconstruct it. Handing that state to the application
+would corrupt its results silently, which is worse than terminating. Reaching it requires a
+host→device DMA on a live allocation to fail, which is a device-level fault rather than a policy
+decision.
+
+## Reentrancy: a tool callback that launches a kernel
+
+The per-agent lock is a `std::shared_mutex`, which is not recursive. A tool callback invoked inside
+the replay window — CONFIG, PASS, `pass_count_cb`, or `replay_continue_cb` — that launches GPU work
+submits a dispatch from the one thread already holding the writer lock. Acquiring the reader side
+then blocks forever, and unlike the drains there is no bound: the process ends up parked in a
+blocking lock acquisition.
+
+The dispatch path therefore consults a thread-scoped marker and skips the reader lock when the
+submitting thread is inside its own replay window. The nested dispatch's writes land inside the
+snapshot window, so the counters for the surrounding replayed dispatch are not trustworthy — that is
+recorded on the outcome (`reentrancy=1`) and logged once per process with an explanation. Reporting
+an untrustworthy measurement is a better outcome than a process that cannot be interrupted.
+
+The marker is thread-scoped, not global: a replay window on one thread must not cause an unrelated
+dispatch on another thread to skip the lock, which would drop exactly the isolation the lock exists
+to provide.
+
+## Admission control
+
+Two questions are answered before any device→host traffic is issued, both from the tracker alone.
+
+**Would the snapshot actually cover the application's data?** `untracked_device_memory(agent)`
+reports live virtual-memory mappings and GPU-resident allocations that are not snapshottable. A live
+virtual-memory mapping declines by default: nothing maps virtual memory unless the application asked
+for it, so it is unambiguous evidence that data is outside the snapshot. Non-coarse GPU-resident pool
+allocations only warn, because runtime-internal allocations land in the same bucket.
+
+**Would it fit and finish?** `estimate_footprint(agent)` reports what a snapshot would cost without
+copying anything. Over the configured budget declines with a diagnostic, rather than surfacing later
+as a `std::bad_alloc` partway through the capture. Merely expensive warns with the projected transfer
+time, so a job that appears to hang is explained instead of mysterious.
+
+Both are reported per dispatch on a single `[kernel-replay]` line, together with the outcome, the
+decline reason, the footprint, and the snap/restore timing.
 
 ## What is not isolated
 
@@ -179,9 +233,12 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Writer lock acquisition | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_guard` in `WriteInterceptor` |
 | Reader lock on the non-replay path | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_reader_guard` in `WriteInterceptor` |
 | Replay activity check | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `has_active_replay_contexts()` |
-| Per-pass handler drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_or_fatal()` |
-| Agent-wide drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_agent_or_fatal()` |
+| Per-pass handler drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_or_decline()` |
+| Agent-wide drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_agent_or_decline()` |
 | One drain slice | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `Queue::sync()` |
+| Reentrancy marker | `source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp` | `enter_replay_window()`, `in_replay_window()` |
+| Admission control and outcome reporting | `source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp` | `check_untracked()`, `check_admission()`, `log_replay_outcome()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
+| Untracked-memory accounting | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `untracked_device_memory()` |
 | Localized context scopes | `source/lib/rocprofiler-sdk/kernel_replay/local_context.hpp` | `scoped_local_context_control`, `set_toggles_armed()` |
 | Localized context consumer | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `local_context_has_overrides()` call in `process_packet_batch` |

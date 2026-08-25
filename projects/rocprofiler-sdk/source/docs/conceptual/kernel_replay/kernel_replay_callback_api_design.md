@@ -123,9 +123,15 @@ implemented; details are on
    excluded).
 4. Teardown finalization guard on the alloc/free wrappers.
 5. Agent-wide drain of sibling queues before snapshot.
-6. Per-pass async completion handler drain (`replay_drain_or_fatal`).
+6. Per-pass async completion handler drain (`replay_drain_or_decline`).
 7. HIP graph warn-once vs fatal at the replay gate.
 8. Incomplete snapshot declines replay.
+9. Accounting for device-visible memory the snapshot cannot cover, so a stream-ordered or
+   virtual-memory allocator declines instead of producing numbers from mutated inputs.
+10. Per-allocation generation stamps, so restore cannot write into an address that a caching
+    allocator handed to a different allocation.
+11. Reader-lock bypass for a dispatch submitted from inside the window, so a tool callback that
+    launches a kernel reports an untrustworthy measurement instead of deadlocking.
 
 ### Remaining: async-copy race
 

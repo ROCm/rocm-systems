@@ -13,11 +13,19 @@ application run, restoring device memory between executions so every pass sees i
 | **Kernel replay** | one dispatch, re-executed in place | device memory snapshot and restore between passes | `O(N ×` kernel time `+ N ×` snap/restore`)` |
 | Counter group rotation | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
 
-Kernel replay is **experimental**. The public header lives under
-`rocprofiler-sdk/experimental/`. Both the API and any later command-line flag are expected to
-change before a stable release. Several waits inside the replay window abort the process
-on expiry rather than proceeding on questionable state — a deliberate choice for a beta feature,
-described in [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md).
+The three approaches differ in what they must reproduce, and that is what decides where each one is
+sound. Application replay reproduces nothing: each run is a fresh process, so correctness is free and
+the cost is the whole application, `N` times. Counter group rotation also reproduces nothing, but it
+answers a different question — it attributes different counter groups to *different* dispatches, so
+it cannot correlate two groups on the same execution. Kernel replay is the only one that gives every
+counter group the same execution of the same kernel, and it pays for that by having to reconstruct
+that execution's inputs. Everything difficult about kernel replay follows from that one obligation.
+
+Kernel replay is **experimental**. The public header lives under `rocprofiler-sdk/experimental/`.
+Both the API and any later command-line flag are expected to change before a stable release. Where a
+dispatch cannot be replayed soundly — memory the snapshot cannot cover, a footprint that will not
+fit, work that will not drain — the window declines and runs the dispatch once, reporting why; see
+[Concurrency and isolation](kernel_replay_concurrency_and_isolation.md).
 
 This is the kernel replay **callback tracing API**. An earlier experimental counting-service
 prototype is not the current contract: there is no dedicated configure function, no pass-count
@@ -40,6 +48,7 @@ experimental/kernel_replay.h            public payload struct (callback tracing 
         |     local_context.cpp         per-pass localized context control (thread-local overrides)
         |     memory_tracker.cpp        HSA allocate/free hooks, per-agent allocation inventory
         |     memory_snapshot.cpp       snap()/restore(), module-scope variable capture
+        |     replay_diagnostics.cpp    admission control, decline reasons, per-dispatch reporting
         |     utils.cpp                 trackable-allocation classifier
         |
         +-- hsa/queue.cpp               the replay window: per-agent lock, drains, pass loop
