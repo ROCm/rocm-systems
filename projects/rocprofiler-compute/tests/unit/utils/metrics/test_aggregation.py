@@ -9,6 +9,7 @@ import pytest
 
 from utils.metrics.aggregation import (
     calc_pct_of_peak,
+    to_bound_ratio,
     to_concat,
     to_int,
     to_max,
@@ -55,6 +56,21 @@ class TestAggregation:
     def test_to_max_returns_maximum_value(self):
         """to_max returns the largest value among its scalar arguments."""
         assert to_max(7, 3, 9, 1) == 9, "to_max should return the largest value"
+
+    def test_to_bound_ratio_caps_per_row_percent(self):
+        """to_bound_ratio caps inflated counter ratios at 100%."""
+        num = pd.Series([152.0, 80.0])
+        den = pd.Series([136.0, 100.0])
+        result = to_bound_ratio(num, den)
+        pd.testing.assert_series_equal(
+            result,
+            pd.Series([100.0, 80.0]),
+        )
+
+    def test_to_bound_ratio_scalar(self):
+        """to_bound_ratio caps scalar ratios."""
+        assert to_bound_ratio(152.0, 136.0) == 100.0
+        assert to_bound_ratio(80.0, 100.0) == 80.0
 
     def test_to_median_returns_nan_for_none(self):
         """to_median returns np.nan when the input is None."""

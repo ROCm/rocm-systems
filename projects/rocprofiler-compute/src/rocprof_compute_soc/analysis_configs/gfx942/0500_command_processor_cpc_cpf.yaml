@@ -14,9 +14,9 @@ Panel Config:
         unit: Unit
       metric:
         CPF Utilization:
-          avg: 100 * SUM(CPF_CPF_STAT_BUSY) / SUM(CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE)
-          min: 100 * MIN(CPF_CPF_STAT_BUSY / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
-          max: 100 * MAX(CPF_CPF_STAT_BUSY / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
+          avg: 100 * SUM(MIN(CPF_CPF_STAT_BUSY, CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE)) / SUM(CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE)
+          min: MIN(BOUND_RATIO(CPF_CPF_STAT_BUSY, CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
+          max: MAX(BOUND_RATIO(CPF_CPF_STAT_BUSY, CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
           unit: Percent
         CPF Stall:
           avg: 100 * SUM(CPF_CPF_STAT_STALL) / SUM(CPF_CPF_STAT_BUSY)
@@ -55,18 +55,18 @@ Panel Config:
           unit: Percent
         CPC Stall Rate:
           avg: 100 * SUM(CPC_CPC_STAT_STALL) / SUM(CPC_CPC_STAT_BUSY)
-          min: 100 * MIN(CPC_CPC_STAT_STALL / CPC_CPC_STAT_BUSY)
-          max: 100 * MAX(CPC_CPC_STAT_STALL / CPC_CPC_STAT_BUSY)
+          min: MIN(BOUND_RATIO(CPC_CPC_STAT_STALL, CPC_CPC_STAT_BUSY))
+          max: MAX(BOUND_RATIO(CPC_CPC_STAT_STALL, CPC_CPC_STAT_BUSY))
           unit: Percent
         CPC Packet Decoding Utilization:
           avg: 100 * SUM(CPC_ME1_BUSY_FOR_PACKET_DECODE) / SUM(CPC_CPC_STAT_BUSY)
-          min: 100 * MIN(CPC_ME1_BUSY_FOR_PACKET_DECODE / CPC_CPC_STAT_BUSY)
-          max: 100 * MAX(CPC_ME1_BUSY_FOR_PACKET_DECODE / CPC_CPC_STAT_BUSY)
+          min: MIN(BOUND_RATIO(CPC_ME1_BUSY_FOR_PACKET_DECODE, CPC_CPC_STAT_BUSY))
+          max: MAX(BOUND_RATIO(CPC_ME1_BUSY_FOR_PACKET_DECODE, CPC_CPC_STAT_BUSY))
           unit: Percent
         CPC-Workgroup Manager Utilization:
           avg: 100 * SUM(CPC_ME1_DC0_SPI_BUSY) / SUM(CPC_CPC_STAT_BUSY)
-          min: 100 * MIN(CPC_ME1_DC0_SPI_BUSY / CPC_CPC_STAT_BUSY)
-          max: 100 * MAX(CPC_ME1_DC0_SPI_BUSY / CPC_CPC_STAT_BUSY)
+          min: MIN(BOUND_RATIO(CPC_ME1_DC0_SPI_BUSY, CPC_CPC_STAT_BUSY))
+          max: MAX(BOUND_RATIO(CPC_ME1_DC0_SPI_BUSY, CPC_CPC_STAT_BUSY))
           unit: Percent
         CPC-L2 Utilization:
           avg: 100 * SUM(CPC_CPC_TCIU_BUSY) / SUM(CPC_CPC_TCIU_BUSY + CPC_CPC_TCIU_IDLE)
