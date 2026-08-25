@@ -5,6 +5,7 @@
 
 import argparse
 from pathlib import Path
+import re
 import sys
 from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as elem_tree
@@ -150,10 +151,19 @@ def _detect_profile(isa_xml: str) -> str:
     return 'cdna'
 
 
+def _normalize_codegen_identity(name: str) -> str:
+    """Normalize and validate an explicit generated directory and namespace."""
+    identity = name.replace('.', '_')
+    if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', identity) is None:
+        raise ValueError(f'invalid ISA name {name!r}: expected a single C++ identifier')
+    return identity
+
+
 def _parse_isa_arg(value: str) -> tuple[str | None, str, str]:
     """Parse ``[NAME:]XML`` and resolve its ISA profile."""
     if ':' in value:
         name, xml_path = value.split(':', 1)
+        _normalize_codegen_identity(name)
     else:
         name, xml_path = None, value
 
@@ -167,7 +177,7 @@ def _apply_codegen_identity(spec, name: str | None) -> None:
     """Use an explicit CLI name for generated paths and C++ namespaces."""
     if name is None:
         return
-    identity = name.replace('.', '_')
+    identity = _normalize_codegen_identity(name)
     spec.generated_dir_name = identity
     spec.cpp_namespace = identity
 

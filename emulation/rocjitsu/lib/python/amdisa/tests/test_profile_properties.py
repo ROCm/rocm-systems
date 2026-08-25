@@ -1061,6 +1061,27 @@ class TestCdna5Profile:
             'rdna3.5',
         )
 
+    @pytest.mark.parametrize(
+        'name',
+        [
+            '',
+            '1250gfx',
+            'gfx-1250',
+            'gfx@1250',
+            'nested/gfx1250',
+            r'nested\gfx1250',
+            '/tmp/escaped',
+        ],
+    )
+    def test_parse_single_isa_arg_rejects_invalid_codegen_identity(
+        self, name, tmp_path
+    ):
+        xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
+        xml.write_text('<Spec />')
+
+        with pytest.raises(ValueError, match='invalid ISA name'):
+            _parse_isa_arg(f'{name}:{xml}')
+
     def test_explicit_name_controls_codegen_identity(self):
         spec = SimpleNamespace(
             arch_name='cdna5',
