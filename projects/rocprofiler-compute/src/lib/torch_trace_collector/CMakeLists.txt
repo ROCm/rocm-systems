@@ -6,7 +6,7 @@
 set(BUILD_TORCH_TRACE_COLLECTOR
     "AUTO"
     CACHE STRING
-    "Build the torch_trace_collector extension: AUTO, ON (error if torch is absent), OFF"
+    "Build the torch_trace_collector extension: AUTO (skip when unavailable), ON (require), OFF"
 )
 set_property(CACHE BUILD_TORCH_TRACE_COLLECTOR PROPERTY STRINGS AUTO ON OFF)
 
@@ -22,32 +22,33 @@ if(BUILD_TORCH_TRACE_COLLECTOR STREQUAL "OFF")
     return()
 endif()
 
-if(BUILD_TORCH_TRACE_COLLECTOR STREQUAL "ON")
-    set(_ttc_unavailable_severity FATAL_ERROR)
-else()
-    set(_ttc_unavailable_severity STATUS)
-endif()
+macro(_ttc_skip reason)
+    if(BUILD_TORCH_TRACE_COLLECTOR STREQUAL "ON")
+        message(
+            FATAL_ERROR
+            "torch_trace_collector: ${reason}; the extension is not built."
+        )
+    else()
+        message(
+            STATUS
+            "torch_trace_collector: ${reason}; the extension is not built."
+        )
+    endif()
+    return()
+endmacro()
 
-# Interpreter and extension headers used to locate Torch and build the pybind module.
+# Pin the interpreter used to find Torch and compile the pybind module.
 if(TORCH_TRACE_PYTHON)
     set(Python3_EXECUTABLE "${TORCH_TRACE_PYTHON}")
 endif()
 find_package(Python3 COMPONENTS Interpreter Development.Module QUIET)
 if(NOT Python3_FOUND)
-    message(
-        ${_ttc_unavailable_severity}
-        "torch_trace_collector: no Python3 interpreter available; the extension is "
-        "not built."
-    )
-    return()
+    _ttc_skip("no Python3 interpreter available")
 endif()
 if(NOT Python3_Development.Module_FOUND)
-    message(
-        ${_ttc_unavailable_severity}
-        "torch_trace_collector: no Python3 development headers available for "
-        "${Python3_EXECUTABLE}; the extension is not built."
+    _ttc_skip(
+        "no Python3 development headers available for ${Python3_EXECUTABLE}"
     )
-    return()
 endif()
 set(_ttc_python "${Python3_EXECUTABLE}")
 
@@ -64,37 +65,23 @@ endif()
 
 find_package(Torch CONFIG QUIET)
 if(NOT TORCH_FOUND)
-    message(
-        ${_ttc_unavailable_severity}
-        "torch_trace_collector: find_package(Torch) failed for ${_ttc_python}; the "
-        "extension is not built."
-    )
-    return()
+    _ttc_skip("find_package(Torch) failed for ${_ttc_python}")
 endif()
 message(STATUS "torch_trace_collector: find_package(Torch) ${TORCH_INSTALL_PREFIX}")
 
-# Artifact name: torch_trace_collector-<torch-version>.so.
-# Match the loader, which uses torch.__version__ without a local +... suffix.
+# Artifact torch_trace_collector-<version>.so; accept 2.11, 2.12, or 2.13.
 set(_torch_version "${Torch_VERSION}")
 string(REGEX REPLACE "\\+.*$" "" _torch_version "${_torch_version}")
-if(NOT _torch_version)
-    message(
-        ${_ttc_unavailable_severity}
-        "torch_trace_collector: Torch version is empty; the extension is not "
-        "built."
+string(REGEX MATCH "^[0-9]+\\.[0-9]+" _torch_minor_version "${_torch_version}")
+if(NOT _torch_minor_version MATCHES "^2\\.(11|12|13)$")
+    _ttc_skip(
+        "Torch ${_torch_version} is not supported (need 2.11, 2.12, or 2.13)"
     )
-    return()
 endif()
 
 set(_torch_includes ${TORCH_INCLUDE_DIRS})
-
 set(_so_name "torch_trace_collector-${_torch_version}")
-
-message(
-    STATUS
-    "torch_trace_collector: building against ${_ttc_python} "
-    "(torch ${_torch_version})"
-)
+set(_torch_lib_search_dirs "${TORCH_INSTALL_PREFIX}/lib")
 
 find_library(
     ROCTX_LIB
@@ -103,8 +90,10 @@ find_library(
     ENV ROCM_PATH
     /opt/rocm
     PATH_SUFFIXES lib lib64
-    REQUIRED
 )
+if(NOT ROCTX_LIB)
+    _ttc_skip("rocprofiler-sdk-roctx library not found")
+endif()
 find_path(
     ROCTX_INCLUDE_DIR
     NAMES rocprofiler-sdk-roctx/roctx.h
@@ -112,10 +101,10 @@ find_path(
     ENV ROCM_PATH
     /opt/rocm
     PATH_SUFFIXES include
-    REQUIRED
 )
-
-set(_torch_lib_search_dirs "${TORCH_INSTALL_PREFIX}/lib")
+if(NOT ROCTX_INCLUDE_DIR)
+    _ttc_skip("rocprofiler-sdk-roctx headers not found")
+endif()
 
 set(_torch_resolved_libs "")
 foreach(_libname IN ITEMS torch torch_cpu c10)
@@ -127,10 +116,8 @@ foreach(_libname IN ITEMS torch torch_cpu c10)
         NO_DEFAULT_PATH
     )
     if(NOT ${_cachevar})
-        message(
-            FATAL_ERROR
-            "torch_trace_collector: lib${_libname}.so not found in any of:\n  "
-            "${_torch_lib_search_dirs}"
+        _ttc_skip(
+            "lib${_libname}.so not found in any of:\n  ${_torch_lib_search_dirs}"
         )
     endif()
     list(APPEND _torch_resolved_libs ${${_cachevar}})
@@ -147,41 +134,20 @@ find_library(
     NO_DEFAULT_PATH
 )
 if(NOT ${_torch_python_cachevar})
-    message(
-        FATAL_ERROR
-        "torch_trace_collector: libtorch_python.so not found in any of:\n  "
-        "${_torch_lib_search_dirs}"
+    _ttc_skip(
+        "libtorch_python.so not found in any of:\n  ${_torch_lib_search_dirs}"
     )
 endif()
 set(_torch_python_lib ${${_torch_python_cachevar}})
 
-# Detect whether c10::DebugInfoKind accepts a custom string_view-backed key.
-# When unavailable, the source falls back to TEST_INFO_2. The standard is set
-# through CMAKE_CXX_STANDARD rather than CMAKE_REQUIRED_FLAGS: try_compile
-# appends its own -std= flag last, which would override anything passed here.
-include(CheckCXXSourceCompiles)
-set(_ttc_saved_standard "${CMAKE_CXX_STANDARD}")
-set(_ttc_saved_standard_required "${CMAKE_CXX_STANDARD_REQUIRED}")
-set(_ttc_saved_includes "${CMAKE_REQUIRED_INCLUDES}")
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_REQUIRED_INCLUDES ${_torch_includes})
-check_cxx_source_compiles(
-    "#include <c10/util/ThreadLocalDebugInfo.h>
-     #include <string_view>
-     inline constexpr std::string_view kProbe = \"PROBE\";
-     const c10::DebugInfoKind kProbeKind(&kProbe);
-     int main() { (void)kProbeKind; return 0; }"
-    ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
+message(
+    STATUS
+    "torch_trace_collector: building against ${_ttc_python} "
+    "(torch ${_torch_version})"
 )
-set(CMAKE_CXX_STANDARD "${_ttc_saved_standard}")
-set(CMAKE_CXX_STANDARD_REQUIRED "${_ttc_saved_standard_required}")
-set(CMAKE_REQUIRED_INCLUDES "${_ttc_saved_includes}")
 
 # --- torch-trace-collector library -------------------------------------------------
-# Usage requirements are PUBLIC so consumers inherit the torch/roctx includes,
-# the torch, synchronized and gsl_assert libraries, and the compile definitions.
-# torch_python is not among them.
+# PUBLIC so tests inherit Torch/ROCTX includes and libs. torch_python is not linked here.
 set(_ttc_headers
     leaf_context.h
     marker_stack.h
@@ -212,21 +178,7 @@ target_compile_options(
 )
 set_target_properties(torch-trace-collector PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-if(ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND)
-    target_compile_definitions(
-        torch-trace-collector
-        PUBLIC ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND=1
-    )
-    message(
-        STATUS
-        "torch_trace_collector: private DebugInfoKind slot ROCPROF_TORCHTRACE_INFO"
-    )
-else()
-    message(STATUS "torch_trace_collector: legacy enum; using TEST_INFO_2")
-endif()
-
 # --- pybind module ----------------------------------------------------------
-# Omit the "lib" prefix. The loader resolves the module by PyTorch version.
 add_library(${_so_name} MODULE torch_trace_collector_module.cpp)
 target_link_libraries(
     ${_so_name}
@@ -236,7 +188,7 @@ target_compile_options(
     ${_so_name}
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
 )
-set_target_properties(${_so_name} PROPERTIES PREFIX "")
+set_target_properties(${_so_name} PROPERTIES PREFIX "")  # torch_trace_collector-<version>.so
 
 # Publish the module target name for the root install rule.
 set(TORCH_TRACE_COLLECTOR_TARGET "${_so_name}" CACHE INTERNAL "")
