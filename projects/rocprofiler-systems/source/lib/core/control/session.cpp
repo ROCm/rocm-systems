@@ -26,8 +26,10 @@ using callback_list = std::vector<std::function<void()>>;
 void
 invoke_all(const callback_list& callbacks)
 {
-    for(const auto& cb : callbacks)
-        cb();
+    for(const auto& callback : callbacks)
+    {
+        callback();
+    }
 }
 
 bool
@@ -173,42 +175,65 @@ session::is_active_without(std::string_view name, scope event_scope) const noexc
     });
 }
 
+callback_list
+session::collect_pause_callbacks(scope event_scope)
+{
+    callback_list          to_fire;
+    const std::scoped_lock subs_lk{ m_subscribers_mutex };
+    to_fire.reserve(m_subscribers.size());
+    for(const auto& sub : m_subscribers)
+    {
+        if(!listens_to(sub, event_scope))
+        {
+            continue;
+        }
+        LOG_DEBUG("session: pausing subscriber '{}'", sub.name);
+        if(sub.on_pause)
+        {
+            to_fire.push_back(sub.on_pause);
+        }
+    }
+    return to_fire;
+}
+
 void
 session::notify_pause(scope event_scope)
 {
     const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
-    callback_list to_fire;
+    invoke_all(collect_pause_callbacks(event_scope));
+}
+
+callback_list
+session::collect_resume_callbacks(scope event_scope)
+{
+    callback_list          to_fire;
+    const std::scoped_lock subs_lk{ m_subscribers_mutex };
+    to_fire.reserve(m_subscribers.size());
+    for(const auto& sub : m_subscribers)
     {
-        const std::scoped_lock subs_lk{ m_subscribers_mutex };
-        to_fire.reserve(m_subscribers.size());
-        for(const auto& sub : m_subscribers)
+        if(!listens_to(sub, event_scope))
         {
-            if(!listens_to(sub, event_scope)) continue;
-            LOG_DEBUG("session: pausing subscriber '{}'", sub.name);
-            if(sub.on_pause) to_fire.push_back(sub.on_pause);
+            continue;
+        }
+        const bool all_active =
+            sub.scopes.all_of([this](scope listened) { return is_active(listened); });
+        if(!all_active)
+        {
+            continue;
+        }
+        LOG_DEBUG("session: resuming subscriber '{}'", sub.name);
+        if(sub.on_resume)
+        {
+            to_fire.push_back(sub.on_resume);
         }
     }
-    invoke_all(to_fire);
+    return to_fire;
 }
 
 void
 session::notify_resume(scope event_scope)
 {
     const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
-    callback_list to_fire;
-    {
-        const std::scoped_lock subs_lk{ m_subscribers_mutex };
-        to_fire.reserve(m_subscribers.size());
-        for(const auto& sub : m_subscribers)
-        {
-            if(!listens_to(sub, event_scope)) continue;
-            const bool all_active =
-                sub.scopes.all_of([this](scope listened) { return is_active(listened); });
-            if(!all_active) continue;
-            LOG_DEBUG("session: resuming subscriber '{}'", sub.name);
-            if(sub.on_resume) to_fire.push_back(sub.on_resume);
-        }
-    }
-    invoke_all(to_fire);
+    invoke_all(collect_resume_callbacks(event_scope));
 }
 }  // namespace rocprofsys::control

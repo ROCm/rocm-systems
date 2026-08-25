@@ -11,13 +11,15 @@
 #include <string>
 #include <thread>
 #include <utility>
-#include <vector>
 
 namespace
 {
 using rocprofsys::control::action;
 using rocprofsys::control::scope;
 using rocprofsys::control::session;
+
+constexpr auto CALLBACK_REENTRY_TIMEOUT = std::chrono::seconds{ 5 };
+constexpr auto SLOW_CALLBACK_SLEEP      = std::chrono::milliseconds{ 200 };
 
 // Minimal trigger stub: registers under a fixed name and scope, and exposes
 // set_action() so a test can drive a later action change.
@@ -188,24 +190,30 @@ TEST_F(session_scope_test, unregister_removes_only_the_matching_scope)
 // only be detached, and must not be left holding references into this frame.
 TEST(session_callback_test, callback_may_re_enter_the_session)
 {
-    auto sess = std::make_shared<session>();
-    auto gate =
+    const auto sess = std::make_shared<session>();
+    const auto gate =
         std::make_shared<mock_trigger>(*sess, "gate", scope::global, action::trace);
-    auto reentered = std::make_shared<std::atomic<int>>(0);
+    const auto reentered = std::make_shared<std::atomic<int>>(0);
 
-    sess->subscribe({ [owner = sess.get(), reentered]() {
-                         owner->subscribe({ nullptr, nullptr, "added_from_callback" });
-                         reentered->fetch_add(1);
-                     },
-                      nullptr, "reentrant_sub" });
+    sess->subscribe({ .on_pause =
+                          [owner = sess.get(), reentered]() {
+                              owner->subscribe({ .on_pause  = nullptr,
+                                                 .on_resume = nullptr,
+                                                 .name      = "added_from_callback",
+                                                 .scopes    = { scope::global } });
+                              reentered->fetch_add(1);
+                          },
+                      .on_resume = nullptr,
+                      .name      = "reentrant_sub",
+                      .scopes    = { scope::global } });
 
     std::packaged_task<void()> publish{ [sess, gate]() {
         gate->set_action(action::pause);
     } };
-    auto        done = publish.get_future();
+    const auto  done = publish.get_future();
     std::thread worker{ std::move(publish) };
 
-    if(done.wait_for(std::chrono::seconds{ 5 }) != std::future_status::ready)
+    if(done.wait_for(CALLBACK_REENTRY_TIMEOUT) != std::future_status::ready)
     {
         worker.detach();
         FAIL() << "subscriber callback deadlocked re-entering the session";
@@ -220,24 +228,29 @@ TEST(session_callback_test, callback_may_re_enter_the_session)
 // shutdown() reaches freed state.
 TEST(session_callback_test, shutdown_waits_for_an_in_flight_callback)
 {
-    auto sess = std::make_shared<session>();
-    auto gate =
+    const auto sess = std::make_shared<session>();
+    const auto gate =
         std::make_shared<mock_trigger>(*sess, "gate", scope::global, action::trace);
 
     std::atomic<bool> callback_entered{ false };
     std::atomic<bool> callback_finished{ false };
 
-    sess->subscribe({ [&callback_entered, &callback_finished]() {
-                         callback_entered.store(true);
-                         std::this_thread::sleep_for(std::chrono::milliseconds{ 200 });
-                         callback_finished.store(true);
-                     },
-                      nullptr, "slow_sub" });
+    sess->subscribe({ .on_pause =
+                          [&callback_entered, &callback_finished]() {
+                              callback_entered.store(true);
+                              std::this_thread::sleep_for(SLOW_CALLBACK_SLEEP);
+                              callback_finished.store(true);
+                          },
+                      .on_resume = nullptr,
+                      .name      = "slow_sub",
+                      .scopes    = { scope::global } });
 
     std::thread publisher{ [gate]() { gate->set_action(action::pause); } };
 
     while(!callback_entered.load())
+    {
         std::this_thread::sleep_for(std::chrono::milliseconds{ 1 });
+    }
 
     sess->shutdown();
     EXPECT_TRUE(callback_finished.load())
