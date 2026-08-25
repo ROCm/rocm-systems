@@ -346,9 +346,13 @@ void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_memrealtime_smem(*this, wf);
 }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_atc_probe_smem(*this, wf);
+}
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_atc_probe_buffer_smem(*this, wf);
+}
 
 void SDcacheDiscardSmem::execute_impl(amdgpu::Wavefront &wf) {
   (void)wf;
