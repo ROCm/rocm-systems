@@ -16,10 +16,11 @@ namespace rocprofsys::pmc::device_providers::hipfile
 /**
  * @brief Device provider for hipFile per-GPU telemetry.
  *
- * hipFile needs no enumeration API: its stats are indexed by GPU ordinal, so the
- * provider hands out one device per requested ordinal. All devices share a single
- * backend session, which is what lets one sampling interval cost one hipFile query
- * and gives every device in that interval the same coherent snapshot.
+ * hipFile needs no enumeration API: its stats are indexed by HIP ordinal, so the
+ * provider hands out one device per mapped ordinal. @c type_indices[k] is the
+ * profiler GPU index of HIP ordinal k. All devices share a single backend session,
+ * which is what lets one sampling interval cost one hipFile query and gives every
+ * device in that interval the same coherent snapshot.
  *
  * @tparam BackendFactory Factory for creating hipFile backend instances.
  */
@@ -41,20 +42,24 @@ public:
     provider& operator=(provider&&)      = default;
 
     /**
-     * @brief Create one device per GPU ordinal in [0, gpu_count).
+     * @brief Create one device per HIP ordinal, tagged with the profiler GPU index.
      *
-     * @param gpu_count Number of ordinals to expose; clamped to the snapshot capacity.
+     * @param type_indices Element k is the profiler @c device_type_index of HIP ordinal
+     *                    k. Clamped to the snapshot capacity.
      */
     template <typename Device>
-    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(std::size_t gpu_count)
+    [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(
+        const std::vector<std::size_t>& type_indices)
     {
-        const auto slots = std::min<std::size_t>(gpu_count, backends::hipfile::MAX_GPUS);
+        const auto slots =
+            std::min<std::size_t>(type_indices.size(), backends::hipfile::MAX_GPUS);
 
         std::vector<std::shared_ptr<Device>> devices;
         devices.reserve(slots);
-        for(std::size_t ordinal = 0; ordinal < slots; ++ordinal)
+        for(std::size_t slot = 0; slot < slots; ++slot)
         {
-            devices.push_back(std::make_shared<Device>(m_backend, ordinal));
+            devices.push_back(
+                std::make_shared<Device>(m_backend, slot, type_indices[slot]));
         }
         return devices;
     }
