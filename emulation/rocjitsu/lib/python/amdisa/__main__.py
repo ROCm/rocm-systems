@@ -256,10 +256,11 @@ def _run(args) -> None:
                 file=sys.stderr,
             )
             return
-        dbt_output = args.dbt_output
+        dbt_output = args.dbt_output or args.isa_output
         if not dbt_output:
             print(
-                'error: --dbt-output is required when generating DBT tables',
+                'error: --dbt-output or --isa-output is required when '
+                'generating DBT tables',
                 file=sys.stderr,
             )
             sys.exit(1)

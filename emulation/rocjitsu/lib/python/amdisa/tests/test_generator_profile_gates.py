@@ -3601,6 +3601,24 @@ def test_single_isa_skips_dbt_generation(tmp_path, capsys):
     assert not list(tmp_path.iterdir())
 
 
+def test_multi_isa_dbt_output_defaults_to_isa_output(tmp_path):
+    args = SimpleNamespace(
+        isafiles=[
+            f'rdna3_5:{_mrisa_dir() / "amdgpu_isa_rdna3_5.xml"}',
+            f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}',
+        ],
+        gen_isas=False,
+        gen_dbt=True,
+        isa_output=str(tmp_path),
+        dbt_output=None,
+    )
+
+    _run(args)
+
+    assert (tmp_path / 'legalization_rdna3_5_to_rdna4.h').is_file()
+    assert (tmp_path / 'encoding_fields.h').is_file()
+
+
 @pytest.mark.parametrize('gen_isas', [False, True])
 def test_encoding_translator_uses_selected_generated_include_tree(tmp_path, gen_isas):
     include_root = tmp_path / 'include'
