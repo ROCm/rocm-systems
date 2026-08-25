@@ -395,6 +395,8 @@ ROCP_SDK_HIPFILE_FORMATTER(hipFileIOEvents_t,
                            v.ret,
                            '}')
 
+ROCP_SDK_HIPFILE_FORMATTER(timespec, "{}tv_sec={}, tv_nsec={}{}", '{', v.tv_sec, v.tv_nsec, '}')
+
 #if HIPFILE_RUNTIME_API_TABLE_STEP_VERSION >= 1
 ROCP_SDK_HIPFILE_FORMATTER(hipFileOpCounter_t, "{}ok={}, err={}{}", '{', v.ok, v.err, '}')
 

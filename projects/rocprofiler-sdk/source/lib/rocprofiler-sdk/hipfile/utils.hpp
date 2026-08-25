@@ -30,7 +30,6 @@
 
 #include <sstream>
 #include <type_traits>
-#include <utility>
 
 namespace rocprofiler
 {
@@ -38,17 +37,6 @@ namespace hipfile
 {
 namespace utils
 {
-template <typename Tp, typename = void>
-struct is_streamable : std::false_type
-{};
-
-template <typename Tp>
-struct is_streamable<
-    Tp,
-    std::void_t<decltype(std::declval<std::stringstream&>() << std::declval<const Tp&>())>>
-: std::true_type
-{};
-
 template <typename Tp>
 auto
 stringize_impl(const Tp& _v)
@@ -59,15 +47,11 @@ stringize_impl(const Tp& _v)
     {
         return fmt::format("{}", _v);
     }
-    else if constexpr(is_streamable<value_type>::value)
+    else
     {
         auto _ss = std::stringstream{};
         _ss << _v;
         return _ss.str();
-    }
-    else
-    {
-        return std::string{"<unformatted>"};
     }
 }
 
