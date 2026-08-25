@@ -2353,13 +2353,13 @@ def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
         pytest.skip('CDNA3 semantics XML not available')
 
     args = SimpleNamespace(
-        multi=[f'cdna3:{isa_xml}'],
+        isafiles=[f'cdna3:{isa_xml}'],
         gen_isas=True,
         gen_dbt=False,
         isa_output=str(tmp_path),
         dbt_output=None,
     )
-    _run_multi(args)
+    _run(args)
 
     vop3p = (tmp_path / 'cdna3' / 'vop3p_exec.cpp').read_text()
     body = _generated_method_body(

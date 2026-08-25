@@ -1163,8 +1163,11 @@ class TestCdna5Profile:
         )
 
     def test_parse_single_isa_arg_without_profile(self, tmp_path):
-        xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
-        xml.write_text('<Spec />')
+        xml = tmp_path / 'amdgpu_isa_cdna5.xml'
+        xml.write_text(
+            '<Spec><ISA><Architecture><ArchitectureName>AMD CDNA 5</ArchitectureName>'
+            '</Architecture></ISA></Spec>'
+        )
         assert _parse_isa_arg(str(xml)) == (None, str(xml), 'cdna5')
 
     @pytest.mark.parametrize('name', ['rdna3.5', 'rdna3_5'])
