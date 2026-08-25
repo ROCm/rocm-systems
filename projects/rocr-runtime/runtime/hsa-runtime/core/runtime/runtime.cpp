@@ -4137,7 +4137,8 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     uint64_t offset;
     auto agentOwner = region->owner();
 
-    /* CPU-owned: DRM via KFD GTT anchor GPU. Device: use owner agent. */
+    /* CPU-owned host memory: DRM import requires a GPU agent; use KFD GTT anchor.
+     * Device-owned: use owner agent. */
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
