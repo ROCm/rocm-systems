@@ -1009,13 +1009,7 @@ if(GENERATE_SYM_KERNELS)
 
     add_custom_command(
       OUTPUT ${_qp_bc}
-      COMMAND ${_llvm_link}
-        ${_bc_dir}/queue_pair.bc
-        ${_bc_dir}/queue_pair_mlx5.bc
-        ${_bc_dir}/queue_pair_bnxt.bc
-        ${_bc_dir}/queue_pair_ionic.bc
-        ${_cm_bc}
-        -o ${_qp_raw}
+      COMMAND ${_llvm_link} ${_cm_bc} -o ${_qp_raw}
       COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
       COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
         ${_qp_raw}.ll > ${_qp_raw}.clean.ll
