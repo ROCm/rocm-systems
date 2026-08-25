@@ -40,6 +40,8 @@ table WavefrontState {
   // its CWSR record. Appended last so older checkpoints still load; see
   // restore_checkpoint() for the fallback applied when the accessor is null.
   wg_coord: [uint32];
+  kernel_wave_size: ubyte; // Architectural wave width.
+  vgpr_lane_count: ubyte; // Per-register lane count in the VGPR payload.
 }
 
 /// Serialized state of a compute unit.

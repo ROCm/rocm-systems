@@ -76,8 +76,10 @@ const char *cdna5_scaled_wmma_mnemonic(const MachineInst *inst) {
                                             : "v_wmma_scale_f32_16x16x128_f8f6f4";
 }
 
-int cdna5_scale_operand_size_bits(const MachineInst *inst) {
-  return cdna5_scaled_wmma_is_scale16(inst) ? 64 : 32;
+int cdna5_scale_operand_size_bits(const MachineInst *inst, uint32_t selector) {
+  const bool is_vgpr = selector >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
+                       selector <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX;
+  return cdna5_scaled_wmma_is_scale16(inst) && is_vgpr ? 64 : 32;
 }
 
 int cdna5_scaled_wmma_dst_size_bits(const MachineInst *inst) {
@@ -95,7 +97,7 @@ int cdna5_scaled_wmma_src1_size_bits(const MachineInst *inst) {
   const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);
   if (cdna5_scaled_wmma_is_f4_32x16x128(inst))
     return 256;
-  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);
+  return cdna5_matrix_fmt_operand_size_bits((high->opsel_hi_2 << 2) | high->opsel_hi, 16, 128);
 }
 
 } // namespace
@@ -1580,6 +1582,18 @@ DecodeResult decodeVFmaMixF32Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mix_f32: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mix_f32: reserved DPP control";
+  }
   return std::make_unique<VFmaMixF32Vop3p>(opcode);
 }
 } // namespace detail
@@ -1647,6 +1661,18 @@ DecodeResult decodeVFmaMixloF16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixlo_f16: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixlo_f16: reserved DPP control";
+  }
   return std::make_unique<VFmaMixloF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -1727,6 +1753,18 @@ DecodeResult decodeVFmaMixhiF16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixhi_f16: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixhi_f16: reserved DPP control";
+  }
   return std::make_unique<VFmaMixhiF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -2357,7 +2395,7 @@ VWmmaF3216x16x128F8f6f4Vop3p::VWmmaF3216x16x128F8f6f4Vop3p(const MachineInst *in
                                               128),
            OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(cdna5_matrix_fmt_operand_size_bits(
-               ((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) |
+               ((reinterpret_cast<const OpEncoding *>(inst)->opsel_hi_2 << 2) |
                 reinterpret_cast<const OpEncoding *>(inst)->opsel_hi),
                16, 128),
            OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
@@ -2398,7 +2436,7 @@ void VWmmaF3216x16x128F8f6f4Vop3p::build_modifiers(std::string &out) const {
   out += " matrix_a_fmt:";
   out += cdna5_matrix_fmt_name(inst_.opsel);
   out += " matrix_b_fmt:";
-  out += cdna5_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);
+  out += cdna5_matrix_fmt_name((inst_.opsel_hi_2 << 2) | inst_.opsel_hi);
 }
 
 VPkMinimum3F16Vop3p::VPkMinimum3F16Vop3p(const MachineInst *inst)
@@ -2675,6 +2713,18 @@ DecodeResult decodeVFmaMixF32Bf16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mix_f32_bf16: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mix_f32_bf16: reserved DPP control";
+  }
   return std::make_unique<VFmaMixF32Bf16Vop3p>(opcode);
 }
 } // namespace detail
@@ -2742,6 +2792,18 @@ DecodeResult decodeVFmaMixloBf16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixlo_bf16: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixlo_bf16: reserved DPP control";
+  }
   return std::make_unique<VFmaMixloBf16Vop3p>(opcode);
 }
 } // namespace detail
@@ -2822,6 +2884,18 @@ DecodeResult decodeVFmaMixhiBf16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error, LiteralSupport::Literal32);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixhi_bf16: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixhi_bf16: reserved DPP control";
+  }
   return std::make_unique<VFmaMixhiBf16Vop3p>(opcode);
 }
 } // namespace detail
@@ -3137,7 +3211,7 @@ void VSwmmacF3216x16x64F16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3187,7 +3261,7 @@ void VSwmmacF3216x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3237,7 +3311,7 @@ void VSwmmacF1616x16x64F16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3287,7 +3361,7 @@ void VSwmmacBf1616x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3337,7 +3411,7 @@ void VSwmmacBf16f3216x16x64Bf16Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3765,7 +3839,7 @@ void VSwmmacF3216x16x128Fp8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3815,7 +3889,7 @@ void VSwmmacF3216x16x128Fp8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3865,7 +3939,7 @@ void VSwmmacF3216x16x128Bf8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3915,7 +3989,7 @@ void VSwmmacF3216x16x128Bf8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -3965,7 +4039,7 @@ void VSwmmacF1616x16x128Fp8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4015,7 +4089,7 @@ void VSwmmacF1616x16x128Fp8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4065,7 +4139,7 @@ void VSwmmacF1616x16x128Bf8Fp8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4115,7 +4189,7 @@ void VSwmmacF1616x16x128Bf8Bf8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4165,7 +4239,7 @@ void VSwmmacI3216x16x128Iu8Vop3p::build_modifiers(std::string &out) const {
     out += " index_key:1";
   if (inst_.opsel & 0x4)
     out += " matrix_a_reuse";
-  if (inst_.pad_14)
+  if (inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 
@@ -4623,10 +4697,12 @@ VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
            reinterpret_cast<const OpEncoding *>(inst + 2)->src1),
       src2(cdna5_scaled_wmma_dst_size_bits(inst), OperandType::OPR_SRC_VGPR_OR_INLINE,
            reinterpret_cast<const OpEncoding *>(inst + 2)->src2),
-      scale_src0(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
-                 reinterpret_cast<const OpEncoding *>(inst)->src0),
-      scale_src1(cdna5_scale_operand_size_bits(inst), OperandType::OPR_SRC_SIMPLE,
-                 reinterpret_cast<const OpEncoding *>(inst)->src1),
+      scale_src0(
+          cdna5_scale_operand_size_bits(inst, reinterpret_cast<const OpEncoding *>(inst)->src0),
+          OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      scale_src1(
+          cdna5_scale_operand_size_bits(inst, reinterpret_cast<const OpEncoding *>(inst)->src1),
+          OperandType::OPR_SRC_SIMPLE, reinterpret_cast<const OpEncoding *>(inst)->src1),
       scale_inst_(*reinterpret_cast<const OpEncoding *>(inst)) {
   raw_words_ = {inst[0], inst[1], inst[2], inst[3]};
   raw_encoding_ = raw_words_.data();
@@ -4651,7 +4727,7 @@ VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
 void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
   if (inst_.op != 0x88) {
     const uint32_t matrix_a_fmt = inst_.opsel;
-    const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
+    const uint32_t matrix_b_fmt = (inst_.opsel_hi_2 << 2) | inst_.opsel_hi;
     if (matrix_a_fmt != 0) {
       out += " matrix_a_fmt:";
       out += cdna5_matrix_fmt_name(matrix_a_fmt);
@@ -4677,7 +4753,7 @@ void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
   }
   if ((scale_inst_.opsel >> 2) & 0x1u)
     out += " matrix_a_reuse";
-  if (scale_inst_.pad_14)
+  if (scale_inst_.opsel_hi_2)
     out += " matrix_b_reuse";
 }
 

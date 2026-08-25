@@ -31,13 +31,8 @@
 
 namespace meta::comms {
 
-// Per-shard staging slot capacity and hard per-shard cap (enforced in the
-// eligibility check). Fixes the slot stride at compile time so the
-// double-buffered layout is identical on every rank and call.
-// Footprint = 2 banks * nRanks * (kDdaLLRsMaxBytes * 2) for the 8B->16B
-// expansion; 4 MiB at 128 KiB / 8 ranks, within the 64 MiB DDA scratch.
-constexpr size_t kDdaLLRsMaxBytes = 131072;                 // 128 KiB
-constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 16384
+// LL is for small-message, so the full payload is well under the staging cap.
+constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
 // per-rank shard (recvcount elements).
@@ -66,17 +61,7 @@ __launch_bounds__(512)
   const size_t slot = kDdaLLRsSlotStridePkts;
   const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
-  // On-device, graph-safe flag/bank derivation (1D grid: flatBlockId=blockIdx.x).
-  const int flatBlockId = blockIdx.x;
-  const int total = gridDim.x;
-  __shared__ uint32_t s_flag;
-  if (threadIdx.x == 0) {
-    uint32_t f = epochDev[flatBlockId] + 1u;
-    if (f == 0u) f = 2u; // skip 0 sentinel; keep bank parity
-    s_flag = f;
-  }
-  __syncthreads();
-  const uint32_t flag = s_flag;
+  const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -118,11 +103,7 @@ __launch_bounds__(512)
     out[2 * pk + 1] = acc1;
   }
 
-  if (threadIdx.x == 0) {
-    for (int e = flatBlockId; e < epochLen; e += total) {
-      epochDev[e] = flag;
-    }
-  }
+  ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
 }
 
 } // namespace meta::comms

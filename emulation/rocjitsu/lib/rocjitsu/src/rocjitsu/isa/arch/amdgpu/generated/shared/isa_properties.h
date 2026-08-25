@@ -16,6 +16,7 @@ namespace rocjitsu {
 
 struct IsaProperties {
   bool supports_wgp_mode = false;
+  bool mode_has_gpr_idx_en = false;
   bool descriptor_sgpr_count_encoded = true;
   bool uses_ttmp_workgroup_ids = false;
   bool uses_cluster_ttmp_workgroup_ids = false;
@@ -33,6 +34,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA1:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = true,
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -45,6 +47,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA2:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = true,
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -57,6 +60,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA3:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = true,
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -69,6 +73,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA4:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = true,
         .descriptor_sgpr_count_encoded = true,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -81,6 +86,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA1:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -93,6 +99,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA2:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -105,6 +112,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA3:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -117,6 +125,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA3_5:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = false,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -129,6 +138,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return {
         .supports_wgp_mode = true,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = false,
@@ -141,6 +151,7 @@ inline constexpr uint32_t MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;
   case ROCJITSU_CODE_ARCH_CDNA5:
     return {
         .supports_wgp_mode = false,
+        .mode_has_gpr_idx_en = false,
         .descriptor_sgpr_count_encoded = false,
         .uses_ttmp_workgroup_ids = true,
         .uses_cluster_ttmp_workgroup_ids = true,
