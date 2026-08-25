@@ -26,6 +26,7 @@
 
 #include <vector>
 #include "common.h"
+#include "gin_sdma_devtime_host.h"
 
 namespace gin_devtime {
 
@@ -105,13 +106,10 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
     CUDACHECK(hipFree(d_start[i]));
     CUDACHECK(hipFree(d_end[i]));
 
-    long long mn = h_start[0], mx = h_end[0];
-    for (int c = 1; c < gridCtas; c++) {
-      if (h_start[c] < mn) mn = h_start[c];
-      if (h_end[c] > mx) mx = h_end[c];
-    }
-    double totalUs = (double)(mx - mn) / (double)rate * 1.0e3;  // cycles/kHz -> ms -> us
-    double perIterUs = (loop > 0) ? totalUs / (double)loop : totalUs;
+    const long long mn = rccl_tests_devtime::reduceMinStart(h_start.data(), gridCtas);
+    const long long mx = rccl_tests_devtime::reduceMaxEnd(h_end.data(), gridCtas);
+    const double perIterUs =
+        rccl_tests_devtime::gridBusyWindowPerIterUs(mn, mx, rate, loop);
     if (perIterUs > localMaxUs) localMaxUs = perIterUs;
   }
   Barrier(args);

@@ -15,6 +15,8 @@ endif()
 #==================================================================================================
 project(rccl-tests LANGUAGES CXX)
 
+enable_testing()
+
 # Build options
 #==================================================================================================
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
@@ -115,7 +117,7 @@ set(CMAKE_CXX_STANDARD   17)   # rocshmem GIN QP device headers require C++17
 set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++14 instead, which has some issues.
 set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Path to install to when packaged.")
 if(ROCM_PATH)
-  #list(APPEND CMAKE_PREFIX_PATH  # Temporary workaround 
+  #list(APPEND CMAKE_PREFIX_PATH  # Temporary workaround
   list(PREPEND CMAKE_PREFIX_PATH  # Add ROCM_PATH to CMake search paths (for finding HIP / HSA
               ${ROCM_PATH}
               ${ROCM_PATH}/hip
@@ -281,6 +283,7 @@ add_subdirectory(verifiable)
 
 # Add all of the tests
 add_subdirectory(src)
+add_subdirectory(test)
 
 rocm_setup_version(VERSION "2.19.6")
 

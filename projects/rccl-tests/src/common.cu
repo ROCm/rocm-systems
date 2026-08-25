@@ -28,6 +28,7 @@
 
 #include "verifiable.h"
 #include "util.h"
+#include "gin_sdma_devtime_host.h"
 
 #if defined(NCCL_OS_LINUX)
 extern char **environ;
@@ -1066,16 +1067,14 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
-  const double iterScale = (double)iters * agg_iters;
   double cputimeSec = blocking_coll == 3 ? collOnlySec : tim.elapsed();
-  cputimeSec = (iterScale > 0.0) ? cputimeSec / iterScale : 0.0;
+  cputimeSec = rccl_tests_devtime::normalizeElapsedPerIter(cputimeSec, iters, agg_iters);
   TESTCHECK(completeColl(args));
 
   // Exclude per-iteration result processing from the reported time.
   double deltaSec = blocking_coll == 3 ? collOnlySec : tim.elapsed();
-  deltaSec = (iterScale > 0.0) ? deltaSec / iterScale : 0.0;
-  if (cudaGraphLaunches >= 1)
-    deltaSec = (cudaGraphLaunches > 0) ? deltaSec / cudaGraphLaunches : 0.0;
+  deltaSec = rccl_tests_devtime::normalizeElapsedPerIter(deltaSec, iters, agg_iters);
+  deltaSec = rccl_tests_devtime::applyCudaGraphLaunchesScale(deltaSec, cudaGraphLaunches);
 
   if (record) {
     // completeColl skips the stream sync in blocking mode with a single aggregated iteration.
@@ -1157,7 +1156,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   // Host-timed path can also yield zero elapsed (timer resolution, fast
   // collectives, or platform quirks). getBw divides by sec; skip rather than
   // SIGFPE or emit inf GB/s -- same rationale as the --device_timing=2 guard.
-  if (deltaSec <= 0.0) {
+  if (rccl_tests_devtime::shouldSkipBenchTimeRow(deltaSec)) {
     if (args->proc == 0 && args->thread == 0) {
       fprintf(stderr, "# WARN: zero or negative elapsed time (deltaSec=%g); "
                       "skipping row (size %ld bytes)\n", deltaSec, args->expectedBytes);
@@ -1274,8 +1273,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     if (allProcessTimes && nProcessRows > 1)
       ReduceProcessMaxIterTimes(iterTimes, allProcessTimes, nProcessRows, iters);
 
-    int summaryIters = iters - per_iter_skip;
-    if (summaryIters > 0) {
+    if (rccl_tests_devtime::shouldComputeIterStats(iters, per_iter_skip)) {
+      const int summaryIters = iters - per_iter_skip;
       struct IterStats stats;
       computeIterStats(iterTimes + per_iter_skip, summaryIters, &stats);
       writePerIterReport(&stats, iterTimes, iters, per_iter_skip, in_place==0, allProcessTimes, nProcessRows);
