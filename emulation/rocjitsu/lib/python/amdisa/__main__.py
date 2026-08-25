@@ -4,7 +4,6 @@
 """CLI entry point: ``python -m amdisa``."""
 
 import argparse
-from pathlib import Path
 import re
 import sys
 from tempfile import TemporaryDirectory
@@ -116,16 +115,11 @@ def _merge_shared_execute_body(
 
 
 def _detect_profile(isa_xml: str) -> str:
-    """Detect the ISA profile from the XML filename and architecture name.
+    """Detect the ISA profile from the XML architecture name.
 
     Parses only the architecture name element to determine the profile
     without loading the full spec.
     """
-    # TODO: Remove this filename override once the gfx1250 XML carries a
-    # finalized architecture name that can be detected through the normal path.
-    if 'gfx1250' in Path(isa_xml).stem:
-        return 'cdna5'
-
     root = elem_tree.parse(isa_xml).getroot()
     isa_node = xs.get_node(root, xs.ISA)
     arch_node = xs.get_node(isa_node, xs.ARCH)

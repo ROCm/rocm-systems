@@ -42,6 +42,20 @@ if(BUILD_TESTS)
   # pipeline instead -- see test/host/run_host_tests.sh (the `guards` phase,
   # folded into `run`).
 
+  # CPU-only net_telemetry unit test: net_telemetry.cc depends only on libc and
+  # pthread, so this compiles it directly with its own harness (no GPU, no gtest,
+  # no librccl) and runs under CTest, returning non-zero on any failed CHECK.
+  find_package(Threads REQUIRED)
+  add_executable(rccl-UnitTestsNetTelemetry
+    ${PROJECT_SOURCE_DIR}/test/net_telemetry_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/transport/net_telemetry.cc
+  )
+  target_include_directories(rccl-UnitTestsNetTelemetry PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_link_libraries(rccl-UnitTestsNetTelemetry PRIVATE Threads::Threads)
+  add_test(NAME rccl-UnitTestsNetTelemetry COMMAND rccl-UnitTestsNetTelemetry)
+  rocm_install(TARGETS rccl-UnitTestsNetTelemetry COMPONENT tests)
+
   if (ENABLE_CODE_COVERAGE)
     add_compile_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
     add_link_options("SHELL:-Xarch_host -fprofile-instr-generate" "SHELL:-Xarch_host -fcoverage-mapping")
@@ -488,6 +502,7 @@ if(BUILD_TESTS)
       PluginCompatV10_test.cpp
       PluginCompatV11_test.cpp
       ProxyTests.cpp
+      PatAlgorithmTests.cpp
       RcclWrapTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
@@ -698,6 +713,7 @@ if(BUILD_TESTS)
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
+      SymmetricAbortCheckModeMPITests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
