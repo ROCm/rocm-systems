@@ -36,7 +36,10 @@ append_seq_id_base_for_rank(
     // set_append_mode starts the process slice at base+1, so a full rank window
     // is valid only when the last possible id (base + rank_stride) is still a
     // std::uint32_t value.
-    if(base + rank_stride >= TRUSTED_SEQ_ID_MAX_EXCLUSIVE) return std::nullopt;
+    if(base + rank_stride >= TRUSTED_SEQ_ID_MAX_EXCLUSIVE)
+    {
+        return std::nullopt;
+    }
 
     return static_cast<std::uint32_t>(base);
 }
