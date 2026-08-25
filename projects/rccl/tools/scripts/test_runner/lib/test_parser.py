@@ -192,6 +192,134 @@ Examples:
             help="PostgreSQL connect + statement timeout in seconds for --db-push (default: 10)."
         )
 
+        # --- init-pipeline execution mode (opt-in; default stays serial) ---
+        self.parser.add_argument(
+            '--exec-mode',
+            choices=['serial', 'init-pipeline'],
+            default='serial',
+            help="Execution mode. 'serial' (default) runs tests one at a time. "
+                 "'init-pipeline' overlaps entries' RCCL device-code init behind a "
+                 "READY/GO barrier and executes them one at a time (no co-tenancy). "
+                 "Experimental."
+        )
+        self.parser.add_argument(
+            '--init-pool',
+            type=int,
+            default=2,
+            help="init-pipeline only: max entries INITIALIZING+READY at once "
+                 "(experimental default 2, ceiling 8). The executing entry sits "
+                 "outside this bound, so worst-case live process trees = N+1."
+        )
+        self.parser.add_argument(
+            '--loader-policy',
+            choices=['continuous', 'quiescent_exec'],
+            default='continuous',
+            help="init-pipeline only: 'continuous' (default) keeps warming entries "
+                 "while one executes (max overlap); 'quiescent_exec' pauses device "
+                 "warmups while a perf/dashboard entry executes (cleaner numbers)."
+        )
+        self.parser.add_argument(
+            '--init-timeout',
+            type=float,
+            default=600,
+            help="init-pipeline only: seconds to wait for an entry to reach READY "
+                 "before failing it (default 600). 0 = wait indefinitely -- NOT "
+                 "recommended: a stuck/mis-configured handshake then hangs the whole "
+                 "run instead of failing that one entry."
+        )
+        self.parser.add_argument(
+            '--release-order',
+            choices=['ready', 'config'],
+            default='ready',
+            help="init-pipeline only: order in which READY entries are executed - "
+                 "'ready' (default) as they become ready, 'config' in config order."
+        )
+        self.parser.add_argument(
+            '--fork-sweep-policy',
+            choices=['legacy', 'independent'],
+            default='legacy',
+            help="init-pipeline only: 'legacy' (default) preserves each fork test's "
+                 "original nested-loop sub-entry order + fail-fast (serial-equivalent); "
+                 "'independent' drops order/fail-fast for maximum overlap (opt-in)."
+        )
+        self.parser.add_argument(
+            '--phase-timings',
+            action='store_true',
+            default=False,
+            help="init-pipeline only: report per-entry/aggregate init/queue-wait/"
+                 "execution phase timings."
+        )
+        self.parser.add_argument(
+            '--queue-wait-warn',
+            type=float,
+            default=0,
+            help="init-pipeline only: warn if an entry waits longer than this many "
+                 "seconds between READY and GO (0 = disabled)."
+        )
+        self.parser.add_argument(
+            '--go-timeout',
+            type=float,
+            default=0,
+            help="init-pipeline only: bounded GO wait (seconds) passed to each "
+                 "pipeline entry (RCCL_TEST_GO_TIMEOUT_SEC). On expiry an entry "
+                 "reports GO_TIMEOUT and all MPI ranks leave together, so a dead/"
+                 "hung runner cannot strand ranks. 0 = indefinite (rely on the "
+                 "liveness pipe / process-group teardown). Use a short value only "
+                 "for runner-death injection tests, never in production."
+        )
+        self.parser.add_argument(
+            '--emit-manifest',
+            action='store_true',
+            default=False,
+            help="init-pipeline only: print the side-effect-free classification "
+                 "manifest (per-entry profile/provenance/binary/disposition/"
+                 "expansion) and exit, without running."
+        )
+        self.parser.add_argument(
+            '--allow-serial-only',
+            action='store_true',
+            default=False,
+            help="init-pipeline only: permit a run that resolves to zero pipeline "
+                 "entries (all serial). Without it, a zero-pipeline init-pipeline run "
+                 "is a hard error (catches mis-classification)."
+        )
+        self.parser.add_argument(
+            '--allow-indefinite-go-wait',
+            action='store_true',
+            default=False,
+            help="init-pipeline only: permit --go-timeout 0 (indefinite GO wait). "
+                 "Without it, init-pipeline requires a positive --go-timeout so a "
+                 "dead/hung runner cannot strand MPI ranks (v11 CR-5)."
+        )
+        self.parser.add_argument(
+            '--expand-sweeps',
+            action='store_true',
+            default=False,
+            help="serial mode only: split fork sweeps into the SAME pinned "
+                 "per-configuration sub-entries the init-pipeline uses (run serially, "
+                 "no warmup/overlap) and emit per-config records. Produces the "
+                 "per-config SERIAL BASELINE to diff against an init-pipeline run "
+                 "(see tools/compare_results.py)."
+        )
+
+    def validate_init_pipeline(self, args):
+        """Validate init-pipeline flags; returns a list of error strings (empty ok)."""
+        errors = []
+        if args.exec_mode == 'init-pipeline':
+            if args.init_pool < 1:
+                errors.append(f"--init-pool must be >= 1 (got {args.init_pool})")
+            if args.init_pool > 8:
+                print(f"WARNING: --init-pool {args.init_pool} exceeds the experimental "
+                      f"ceiling of 8; proceed only for a Gate A5 sweep.")
+            if args.init_timeout < 0:
+                errors.append(f"--init-timeout must be >= 0 (got {args.init_timeout})")
+            # v11 CR-5: a positive GO timeout is required for init-pipeline runs
+            # unless explicitly overridden -- a dead runner must not strand ranks.
+            if (getattr(args, "go_timeout", 0) or 0) <= 0 and not getattr(args, "allow_indefinite_go_wait", False):
+                errors.append("--go-timeout must be > 0 for init-pipeline "
+                              "(pass --allow-indefinite-go-wait to override)")
+        return errors
+
     def parse_arguments(self):
         """Parse command-line arguments"""
         return self.parser.parse_args()
@@ -200,6 +328,9 @@ Examples:
         """Process and validate command-line arguments"""
         self.add_arguments()
         args = self.parse_arguments()
+        errors = self.validate_init_pipeline(args)
+        if errors:
+            self.parser.error("; ".join(errors))
         self.handle_arguments(args)
         return args
 

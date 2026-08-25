@@ -1,0 +1,48 @@
+{
+  "test_configurations": {
+    "warmgate_pipeline": {
+      "description": "Curated init-pipeline warm-gate pipeline entries (v11 §CR-1/CR-6): one verified single-generation fork_coll collective and one verified-safe mpi_coll collective. Each carries an explicit, non-wildcard test_filter matching exactly one gtest case (enforced by the binary-backed --gtest_list_tests preflight). Fault-injection / GDR-flush / visibility-mismatch / plugin-lifecycle / first-init-semantics / NetIb / P2P tests are deliberately excluded.",
+      "tests": [
+        {
+          "name": "warmgate_fork_allreduce",
+          "binary": "rccl-UnitTests",
+          "test_filter": "AllReduce.OutOfPlace",
+          "warmup_profile": "fork_coll",
+          "fork_expand": { "num_gpus": [8], "process_mask": 1, "ranks_per_gpu": 1 },
+          "num_ranks": 1,
+          "timeout": 600,
+          "description": "Pinned single-generation fork collective. Replace test_filter with the exact suite.case verified on your build; the preflight rejects a zero- or multi-match filter."
+        },
+        {
+          "name": "warmgate_mpi_allreduce",
+          "binary": "rccl-UnitTestsMPI",
+          "test_filter": "AllReduceMPITest.OutOfPlace",
+          "warmup_profile": "mpi_coll",
+          "num_ranks": 8,
+          "timeout": 600,
+          "description": "Verified-safe MPI collective that PASSED in an earlier run. Replace test_filter with the exact suite.case; must NOT be a fault-injection / GDR-flush / visibility-mismatch / first-init-semantics case."
+        }
+      ]
+    },
+    "warmgate_serial": {
+      "description": "Host-only serial control (warmup_profile none): must receive NEITHER RCCL_TEST_WARMUP_PROFILE NOR rendezvous env, and must never be launched by the loader.",
+      "tests": [
+        {
+          "name": "warmgate_serial_control",
+          "binary": "rccl-UnitTestsFixtures",
+          "test_filter": "BitOpsTests.CountBits",
+          "warmup_profile": "none",
+          "num_ranks": 1,
+          "timeout": 300,
+          "description": "Replace test_filter with a real host-only test in your build; kept serial by policy."
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    { "name": "warmgate_pipeline", "config": "warmgate_pipeline", "enabled": true,
+      "description": "Fork + MPI pipeline entries." },
+    { "name": "warmgate_serial", "config": "warmgate_serial", "enabled": true,
+      "description": "Host-only serial control (second suite -> proves one run-wide scheduler spans suites)." }
+  ]
+}
