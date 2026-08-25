@@ -162,22 +162,31 @@ check_admission(const memory_snapshot::snapshot_footprint_t& footprint,
 // for liveness. The agent is part of the state because the deadlock is per-agent: a callback that
 // launches work on a *different* GPU contends for a different mutex and must keep its lock, or two
 // concurrent replays on two agents would stop excluding each other's dispatches.
+//
+// That per-agent scoping is also why the marker is a stack rather than a single value. A callback
+// running inside agent A's window may launch on agent B, and a dispatch on B is not declined -- it
+// takes B's mutex and opens a second window on the same thread. A single-valued marker would be
+// overwritten on entry to B and cleared on exit from B, after which this thread no longer knows it
+// is inside A's window and the next dispatch on A blocks forever on the reader lock. Nesting is
+// bounded by the agent count, since a second window on an agent already on the stack is declined
+// before its lock is taken.
 void
 enter_replay_window(rocprofiler_agent_id_t agent);
 
 void
-exit_replay_window();
+exit_replay_window(rocprofiler_agent_id_t agent);
 
 bool
 in_replay_window(rocprofiler_agent_id_t agent);
 
-// Record that a dispatch was submitted from inside this thread's replay window. Cleared by
-// enter_replay_window so the flag describes one window only.
+// Record that a dispatch was submitted from inside `agent`'s replay window on this thread. Recorded
+// against that window's own frame, so a window on another agent neither sees nor clears it. A no-op
+// when no window for `agent` is open.
 void
-note_replay_reentrancy();
+note_replay_reentrancy(rocprofiler_agent_id_t agent);
 
 bool
-replay_reentrancy_observed();
+replay_reentrancy_observed(rocprofiler_agent_id_t agent);
 
 // True the first time it is called per process, so the (long) explanatory message is logged once
 // rather than once per nested dispatch.

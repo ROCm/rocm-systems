@@ -222,15 +222,19 @@ replay_drain_agent_or_decline(hsa_agent_t agent)
 struct replay_window_scope
 {
     explicit replay_window_scope(rocprofiler_agent_id_t agent)
+    : m_agent{agent}
     {
-        kernel_replay::enter_replay_window(agent);
+        kernel_replay::enter_replay_window(m_agent);
     }
-    ~replay_window_scope() { kernel_replay::exit_replay_window(); }
+    ~replay_window_scope() { kernel_replay::exit_replay_window(m_agent); }
 
     replay_window_scope(const replay_window_scope&)     = delete;
     replay_window_scope(replay_window_scope&&) noexcept = delete;
     replay_window_scope& operator=(const replay_window_scope&) = delete;
     replay_window_scope& operator=(replay_window_scope&&) noexcept = delete;
+
+private:
+    rocprofiler_agent_id_t m_agent;
 };
 
 template <typename DomainT, typename... Args>
@@ -1015,8 +1019,9 @@ WriteInterceptor(const void* packets,
             // that is already reporting a stuck queue is the lesser fault.
             auto decline_and_run_once = [&](kernel_replay::decline_reason reason,
                                             bool                          destroy_drain_signal) {
-                outcome.reason              = reason;
-                outcome.reentrancy_observed = kernel_replay::replay_reentrancy_observed();
+                outcome.reason = reason;
+                outcome.reentrancy_observed =
+                    kernel_replay::replay_reentrancy_observed(replay_agent_id);
                 kernel_replay::log_replay_outcome(outcome);
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
@@ -1038,7 +1043,7 @@ WriteInterceptor(const void* packets,
             // and mark the enclosing window's outcome, whose counters are no longer trustworthy.
             if(kernel_replay::in_replay_window(replay_agent_id))
             {
-                kernel_replay::note_replay_reentrancy();
+                kernel_replay::note_replay_reentrancy(replay_agent_id);
                 ROCP_ERROR_IF(kernel_replay::should_warn_replay_reentrancy())
                     << "kernel replay: a dispatch that itself requested replay was launched from "
                        "inside a replay window on the same agent, by a KERNEL_REPLAY callback "
@@ -1236,7 +1241,8 @@ WriteInterceptor(const void* packets,
                 }
             }
 
-            outcome.reentrancy_observed = kernel_replay::replay_reentrancy_observed();
+            outcome.reentrancy_observed =
+                kernel_replay::replay_reentrancy_observed(replay_agent_id);
             kernel_replay::log_replay_outcome(outcome);
 
             kernel_replay::execute_config_phase_exit(
@@ -1284,7 +1290,7 @@ WriteInterceptor(const void* packets,
         const auto dispatch_agent_id = queue.get_agent().get_rocp_agent()->id;
         if(kernel_replay::in_replay_window(dispatch_agent_id))
         {
-            kernel_replay::note_replay_reentrancy();
+            kernel_replay::note_replay_reentrancy(dispatch_agent_id);
             ROCP_ERROR_IF(kernel_replay::should_warn_replay_reentrancy())
                 << "kernel replay: a dispatch was submitted on the replaying agent from inside a "
                    "replay window, on the thread that owns the window. This happens when a tool's "

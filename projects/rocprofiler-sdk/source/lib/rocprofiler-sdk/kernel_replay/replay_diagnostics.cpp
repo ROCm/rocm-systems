@@ -31,8 +31,8 @@
 #include <cstddef>
 #include <fstream>
 #include <limits>
-#include <optional>
 #include <string>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -244,42 +244,77 @@ check_admission(const memory_snapshot::snapshot_footprint_t& footprint,
 
 namespace
 {
-// The agent whose window this thread is inside, or nullopt when it is not inside one. An id is not
-// used as its own sentinel because a zero agent handle is not reserved.
-thread_local std::optional<rocprofiler_agent_id_t> tl_replay_window_agent     = std::nullopt;
-thread_local bool                                  tl_reentrancy_observed     = false;
-std::atomic<bool>                                  reentrancy_warning_emitted = false;
+struct window_frame_t
+{
+    rocprofiler_agent_id_t agent{};
+    bool                   reentrancy_observed = false;
+};
+
+// The replay windows this thread has open, innermost last. Empty when the thread is not inside one.
+// A vector rather than a single value so a window opened on another agent from inside a callback
+// does not erase this thread's knowledge of the enclosing window (see the header).
+std::vector<window_frame_t>&
+window_stack()
+{
+    thread_local auto frames = std::vector<window_frame_t>{};
+    return frames;
+}
+
+window_frame_t*
+find_frame(rocprofiler_agent_id_t agent)
+{
+    auto& frames = window_stack();
+    // Innermost first: with one frame per agent at most, the first match is the only match, and
+    // searching from the top is the cheapest order for the common single-window case.
+    for(auto itr = frames.rbegin(); itr != frames.rend(); ++itr)
+        if(itr->agent.handle == agent.handle) return &(*itr);
+    return nullptr;
+}
+
+std::atomic<bool> reentrancy_warning_emitted = false;
 }  // namespace
 
 void
 enter_replay_window(rocprofiler_agent_id_t agent)
 {
-    tl_replay_window_agent = agent;
-    tl_reentrancy_observed = false;
+    window_stack().push_back(window_frame_t{agent, false});
 }
 
 void
-exit_replay_window()
+exit_replay_window(rocprofiler_agent_id_t agent)
 {
-    tl_replay_window_agent = std::nullopt;
+    auto& frames = window_stack();
+    if(frames.empty()) return;
+
+    // Windows are opened and closed by a scope guard, so the frame being closed is the innermost
+    // one. Anything else means the guards were not nested, which would leave a stale frame behind
+    // and deadlock the next dispatch on that agent, so say so rather than silently unwind.
+    ROCP_ERROR_IF(frames.back().agent.handle != agent.handle) << fmt::format(
+        "kernel replay: closing the replay window for agent {} but the innermost open window is "
+        "for agent {}; replay window guards must nest",
+        agent.handle,
+        frames.back().agent.handle);
+
+    frames.pop_back();
 }
 
 bool
 in_replay_window(rocprofiler_agent_id_t agent)
 {
-    return tl_replay_window_agent && tl_replay_window_agent->handle == agent.handle;
+    return find_frame(agent) != nullptr;
 }
 
 void
-note_replay_reentrancy()
+note_replay_reentrancy(rocprofiler_agent_id_t agent)
 {
-    tl_reentrancy_observed = true;
+    if(auto* frame = find_frame(agent)) frame->reentrancy_observed = true;
 }
 
 bool
-replay_reentrancy_observed()
+replay_reentrancy_observed(rocprofiler_agent_id_t agent)
 {
-    return tl_reentrancy_observed;
+    const auto* frame = find_frame(agent);
+    return frame != nullptr && frame->reentrancy_observed;
 }
 
 bool
