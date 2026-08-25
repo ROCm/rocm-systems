@@ -56,7 +56,9 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
       break()
     endif()
   endforeach()
-  arch_features_to_target_feature_flags("${_FULL_ARCH}" _CLANG_MATTR_FLAGS)
+  # Use -mattr= form for the IR-to-object step: newer LLVM (llvm/llvm-project#204595)
+  # hard-errors on -Xclang -target-feature for xnack/sramecc when compiling IR (-x ir).
+  arch_features_to_mattr_flags("${_FULL_ARCH}" _CLANG_MATTR_FLAGS)
 
   # The device API functions (rocshmem_my_pe, rocshmem_putmem, etc.) are plain
   # __device__ functions. When compiled at -O3 independently, LLVM DCEs them

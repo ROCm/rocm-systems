@@ -42,6 +42,8 @@ endfunction()
 # Convert arch feature suffix to clang -Xclang -target-feature flags.
 # gfx950:sramecc+:xnack-  ->  "-Xclang;-target-feature;-Xclang;+sramecc;-Xclang;-target-feature;-Xclang;-xnack"
 # Caller passes the list directly to add_custom_command COMMAND.
+# NOTE: only valid for HIP source compilation (-x hip / --offload-arch).
+# For IR-to-object compilation (-x ir) use arch_features_to_mattr_flags instead.
 function(arch_features_to_target_feature_flags full_arch out_var)
   string(REPLACE ":" ";" _all_tokens "${full_arch}")
   list(LENGTH _all_tokens _ntokens)
@@ -58,6 +60,34 @@ function(arch_features_to_target_feature_flags full_arch out_var)
     endforeach()
   endif()
   set(${out_var} "${_flags}" PARENT_SCOPE)
+endfunction()
+
+# Convert arch feature suffix to a -mattr=+feat1,-feat2 flag for IR-to-object
+# compilation (-x ir). Newer LLVM (llvm/llvm-project#204595) hard-errors when
+# xnack/sramecc are passed via -Xclang -target-feature for IR inputs; they must
+# be specified as -mattr instead.
+# gfx950:sramecc+:xnack-  ->  "-mattr=+sramecc,-xnack"
+function(arch_features_to_mattr_flags full_arch out_var)
+  string(REPLACE ":" ";" _all_tokens "${full_arch}")
+  list(LENGTH _all_tokens _ntokens)
+  set(_attrs "")
+  if(_ntokens GREATER 1)
+    list(SUBLIST _all_tokens 1 -1 _feat_tokens)
+    foreach(_tok ${_feat_tokens})
+      if(_tok STREQUAL "")
+        continue()
+      endif()
+      # "sramecc+" -> "+sramecc", "xnack-" -> "-xnack"
+      string(REGEX REPLACE "([a-zA-Z0-9_]+)([+-])$" "\\2\\1" _feat "${_tok}")
+      list(APPEND _attrs "${_feat}")
+    endforeach()
+  endif()
+  if(_attrs)
+    string(JOIN "," _attr_str ${_attrs})
+    set(${out_var} "-mattr=${_attr_str}" PARENT_SCOPE)
+  else()
+    set(${out_var} "" PARENT_SCOPE)
+  endif()
 endfunction()
 
 # Resolve the target arch list: GPU_TARGETS CMake var -> auto-detect local GPUs.
