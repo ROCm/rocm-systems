@@ -580,9 +580,12 @@ consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
 [[nodiscard]] std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value);
 [[nodiscard]] std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value);
 
-/// Apply ConSan using the separated immutable request, policy, capability, and
-/// bound-resource contracts. This is the production Slice-2 entry point; it
-/// creates a fresh compatibility value immediately before current lowering.
+/// Compatibility projection of the typed production pipeline.
+///
+/// New production code should consume `TransformResult` from
+/// `consan_pipeline.h`. This overload remains while callers still require the
+/// prototype result shape; it enters the typed pipeline and moves the split
+/// artifacts back into one legacy result at the final boundary.
 [[nodiscard]] ConSanResult
 try_patch_consan(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
                  const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,

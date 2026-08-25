@@ -17,6 +17,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
+#include "rocjitsu/code/patch/consan/consan_pipeline.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
@@ -113,8 +114,14 @@ rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
         request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
     return override(bytes, legacy_options);
   }
-  return rocjitsu::try_patch_consan(bytes, request, transform_policy, runtime_policy, debug,
-                                    mutation, capabilities, resources);
+  rocjitsu::TransformResult result =
+      mutation.has_mutation()
+          ? rocjitsu::transform_consan_with_mutation(bytes, request, transform_policy,
+                                                     runtime_policy, debug, mutation, capabilities,
+                                                     resources)
+          : rocjitsu::transform_consan(bytes, request, transform_policy, runtime_policy, debug,
+                                       capabilities, resources);
+  return std::move(result).take_legacy_result();
 }
 
 rocjitsu::ConSanResult retry_consan_moi_transform(std::span<const uint8_t> bytes,

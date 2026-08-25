@@ -1112,6 +1112,24 @@ than the current roughly 600-line result structure shared by every caller.
 A transform result is static: it says what happened while rewriting, not
 whether a conflict occurred during a later execution.
 
+The Slice-6 implementation records the following dependency order as
+`ConSanPipelineStage` values: configuration, target/runtime capabilities,
+program inventory, observation plan, evidence requirements, runtime binding,
+legacy lowering, final validation, and completion. Each stage records the same
+collision-aware pristine `ConSanCodeObjectId` and a typed status. `Deferred`
+means a valid address-free result awaits runtime binding; `NotApplicable`
+means the selected mode or result needs no value from that stage. Neither is
+silently presented as `Completed`. `ConSanTransformIssue` gives request and
+capability failures a `ConSanContractIssue` payload while retaining legacy or
+validation detail without asking control flow to parse it.
+
+During incremental cutover, `TransformResult` privately owns a stripped
+compatibility result. Immutable inventory, observation plan, coverage,
+replacement bytes, status, and diagnostics live in the split result and are
+moved back only by the rvalue-only `take_legacy_result()` adapter. This keeps
+large replacement images single-owned and makes every unmigrated consumer
+explicit. The private value is not a second source of semantic truth.
+
 `RunVerdict` is produced only after runtime evidence. It distinguishes:
 
 - conflict or SuperCollider mismatch observed;
@@ -2338,27 +2356,54 @@ analysis completed.
 
 ### Slice 6: explicit pipeline and result cutover
 
-- **Current responsibility:** Recursive top-level functions mutate one result
-  through inventory, engine, resource, lowering, validation, ABI retry, and
-  install-policy stages.
-- **New boundary and contract:** Introduce a small orchestrator that passes
-  `ConSanRequest` → target/runtime capabilities → inventory →
-  observation/coverage → evidence requirements → optional runtime binding →
-  `LegacyConSanLowering` → final ELF validation. Return `TransformResult`;
-  mutation composition is a separate entry point that invokes the ordinary
-  pipeline on its mutated image.
-- **Temporary seam and consumers:** The legacy adapter owns the only conversion
-  to/from `ConSanOptions`/legacy lowering result. The old public transform
-  overload delegates to the new pipeline for one slice so remaining host tests
-  can migrate.
-- **Test gate:** Stage-order and immutable-fingerprint units, inventory-only and
-  late-binding tests, invalid/unsupported/no-applicable/install-policy truth
-  table, all host tests, complete simulator device matrix, physical gfx950, and
-  selected current E2E smoke rows for every mode on gfx950/gfx1250.
-- **Cutover and deletion:** Switch the HSA production caller, then test callers.
-  Delete the recursive ordinary pipeline, semantic fields in `ConSanResult`,
-  and option resets now owned by stage values. Retain only the named legacy
-  lowerer/result projection with a measured consumer list.
+- **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
+  and `transform_consan_with_mutation` makes validation-only mutation and
+  perturbation composition explicit. Both return a split `TransformResult`
+  with one immutable input identity, the complete ordered stage record,
+  immutable inventory and policy artifacts, an engine-specific address-free
+  evidence variant, replacement bytes, typed issues, and static outcome.
+- **Binding contract:** An unbound but complete report/marker requirement is
+  explicitly `Deferred`. A concrete binding is accepted only when runtime
+  capabilities satisfy the schema, lifetime scope matches, the engine-specific
+  address is present, and the MOI allocation covers the exact planned byte
+  count. Capacity-limited requirements remain well-formed and explicitly
+  `Unsupported` at binding rather than acquiring an arbitrary address.
+- **Production cutover:** The typed public `try_patch_consan` overload and the
+  HSA production transform caller both enter this pipeline. Installation policy
+  is derivable from `TransformResult`; the old typed overload returns only an
+  rvalue compatibility projection for callers not yet migrated. Hook test
+  overrides retain their deliberately narrow legacy seam.
+- **Temporary seam and remaining responsibility:** `LegacyConSanLowering` is
+  the sole typed-to-`ConSanOptions` entry. The prototype parser/inventory,
+  lowerer, resource/placement machinery, finalizer, ABI retry, and recursive
+  staged-mutation mechanics still execute inside that named boundary. The
+  pipeline republishes their already-produced inventory and observation values
+  in logical dependency order; it does not claim that those internal calls are
+  yet physically separate. The private compatibility result retains mechanism
+  telemetry and unmigrated fields only.
+- **Focused type/unit gate:** Fifteen direct pipeline tests cover exhaustive
+  enum iteration and naming, stage-record and issue validation, malformed
+  cross-type relationships, configuration/capability short-circuiting,
+  immutable fingerprints, all four evidence variants, absent/complete/wrong-
+  schema/undersized bindings, installation truth tables, deterministic input
+  preservation, exact legacy projection, and distinct ordinary/mutation entry
+  points. The complete ConSan host gate passed 1,498 tests with two intentional
+  external-object benchmark skips; all 98 selected hook and transform-memory
+  tests passed.
+- **Completed device and E2E gate:** The complete five-target simulator matrix
+  passed all 2,908 cases in 85.82 seconds. Twenty focused physical-gfx950
+  correct/incorrect contracts passed, including repeated-dispatch identity,
+  dense SuperCollider, full-low-bank Stream-K, and the large-LDS pipeline. The
+  physical gfx950 `d128-block` E2E row passed all four engines with exact
+  coverage. The RocJitsu-emulated gfx1250 row retained its published state:
+  SuperCollider, Sampled, and Inline Shadow passed with exact coverage;
+  Record/Replay retained complete 18/18 access and 8/8 barrier static coverage
+  and the already-published `metadata-full` limitation.
+- **Deferred deletion inventory for Slice 7:** Migrate ordinary test callers,
+  remove the old direct-options overload from the public surface, and delete
+  semantic duplicates and option resets only as each remaining lowerer
+  consumer moves to a typed component. The internal recursive mutation
+  implementation must not escape `LegacyConSanLowering` meanwhile.
 - **Prerequisite:** Slices 1--5B.
 
 ### Slice 7: endpoint cleanup and design reconciliation

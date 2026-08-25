@@ -14,6 +14,7 @@ target_sources(
         consan_moi.cpp
         consan_moi_model.cpp
         consan_moi_report_plan.cpp
+        consan_pipeline.cpp
         consan_resource.cpp
         consan_types.cpp
 )
