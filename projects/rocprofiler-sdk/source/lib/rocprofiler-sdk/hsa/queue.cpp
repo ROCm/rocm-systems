@@ -40,7 +40,9 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -125,21 +127,36 @@ agent_replay_mutex(rocprofiler_agent_id_t agent_id)
     return *mtx;
 }
 
+// Wait for `try_drain_once` to report success, in ~5s slices up to ~60s.
+//
+// A drain that does not converge is not necessarily an application bug. The HSA full profile
+// requires an agent to make forward progress on multiple queues concurrently, which is exactly what
+// licenses an application to keep two co-dependent kernels resident on the same agent -- and a
+// persistent kernel, a spin-waiting cooperative kernel, or a collective whose peer has not reached
+// the same point will all sit here indefinitely. So the timeout returns false and the caller
+// declines the replay, rather than terminating the process: for a multi-hour job under a scheduler,
+// killing the job is a far worse outcome than not profiling one dispatch.
+//
+// @return true if it drained, false on timeout.
 template <typename TryDrainFn>
-void
-replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
+[[nodiscard]] bool
+replay_wait_or_decline(TryDrainFn&& try_drain_once, std::string_view what)
 {
     static constexpr int drain_slices = 5;
     static constexpr int max_slices   = 12;
 
     for(int i = 0; i < max_slices; ++i)
     {
-        if(try_drain_once()) return;
+        if(try_drain_once()) return true;
         ROCP_WARNING << fmt::format(
             "kernel replay: still waiting for {} (~{}s elapsed)", what, (i + 1) * drain_slices);
     }
-    ROCP_FATAL << fmt::format(
-        "kernel replay: {} did not drain after ~{}s", what, max_slices * drain_slices);
+    ROCP_ERROR << fmt::format("kernel replay: {} did not drain after ~{}s; declining replay for "
+                              "this dispatch. A persistent, cooperative, or peer-dependent kernel "
+                              "cannot be replayed -- exclude it with kernel filtering",
+                              what,
+                              max_slices * drain_slices);
+    return false;
 }
 
 // Drain a queue's in-flight async completion handler(s) during replay. Unlike Queue::sync()'s
@@ -147,11 +164,11 @@ replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
 // running: PASS-EXIT, the tool's continue-decision, restore(), and the next submit would race the
 // handler that is still emitting records, releasing signals, and dropping correlation-id refs.
 // Each sync() call blocks up to one ~5s slice and reports whether the queue drained.
-void
-replay_drain_or_fatal(const Queue& queue)
+[[nodiscard]] bool
+replay_drain_or_decline(const Queue& queue)
 {
-    replay_wait_or_fatal([&]() { return queue.sync(); },
-                         "this queue's async completion handler(s)");
+    return replay_wait_or_decline([&]() { return queue.sync(); },
+                                  "this queue's async completion handler(s)");
 }
 
 // Drain every queue on `agent` before snapshotting, WITHOUT holding the queue-map lock across the
@@ -162,13 +179,15 @@ replay_drain_or_fatal(const Queue& queue)
 // Safe against concurrent queue destruction: a Queue is only dereferenced while the read lock is
 // held (destroy_queue erases under the write lock), and the live set is re-read every poll. The
 // per-agent writer lock held by the replay window blocks new dispatches on the agent, so in-flight
-// work only decreases and the poll converges; fatal on a genuinely stuck queue (beta feature),
-// matching replay_drain_or_fatal.
-void
-replay_drain_agent_or_fatal(hsa_agent_t agent)
+// work only decreases and the poll converges; on a genuinely stuck queue it declines rather than
+// aborts, matching replay_drain_or_decline.
+//
+// @return true if every queue on the agent went idle, false on timeout.
+[[nodiscard]] bool
+replay_drain_agent_or_decline(hsa_agent_t agent)
 {
     auto* queue_controller = get_queue_controller();
-    if(queue_controller == nullptr) return;
+    if(queue_controller == nullptr) return true;
 
     constexpr auto poll_interval = std::chrono::milliseconds{2};
     constexpr auto max_wait      = std::chrono::seconds{60};
@@ -182,15 +201,33 @@ replay_drain_agent_or_fatal(hsa_agent_t agent)
                 in_flight += sibling->active_async_packets();
         });
 
-        if(in_flight == 0) return;
+        if(in_flight == 0) return true;
 
-        ROCP_FATAL_IF(std::chrono::steady_clock::now() >= deadline) << fmt::format(
-            "kernel replay: agent-wide drain stuck ({} async handler(s) still active after ~60s)",
-            in_flight);
+        if(std::chrono::steady_clock::now() >= deadline)
+        {
+            ROCP_ERROR << fmt::format(
+                "kernel replay: agent-wide drain stuck ({} async handler(s) still active after "
+                "~60s); declining replay for this dispatch",
+                in_flight);
+            return false;
+        }
 
         std::this_thread::sleep_for(poll_interval);
     }
 }
+
+// RAII marker for "this thread is inside a replay window", used by the reader-lock path below to
+// avoid a non-recursive deadlock. State and predicates live in kernel_replay/replay_diagnostics.hpp.
+struct replay_window_scope
+{
+    replay_window_scope() { kernel_replay::enter_replay_window(); }
+    ~replay_window_scope() { kernel_replay::exit_replay_window(); }
+
+    replay_window_scope(const replay_window_scope&)     = delete;
+    replay_window_scope(replay_window_scope&&) noexcept = delete;
+    replay_window_scope& operator=(const replay_window_scope&) = delete;
+    replay_window_scope& operator=(replay_window_scope&&) noexcept = delete;
+};
 
 template <typename DomainT, typename... Args>
 inline bool
@@ -947,6 +984,15 @@ WriteInterceptor(const void* packets,
             hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
             const auto  replay_guard = std::unique_lock<std::shared_mutex>{
                 agent_replay_mutex(queue.get_agent().get_rocp_agent()->id)};
+            // Must be constructed after the writer lock: it marks the interval in which a nested
+            // dispatch on this thread would deadlock on the reader lock.
+            const auto window_scope = replay_window_scope{};
+
+            const auto& policy  = kernel_replay::resolve_policy();
+            auto        outcome = kernel_replay::replay_outcome_t{};
+            outcome.dispatch_id = replay_dispatch_id;
+            outcome.requested_passes =
+                replay_plan.indefinite ? uint64_t{0} : replay_plan.total_passes;
 
             // The app's original completion signal (completion_signal is at the same offset for
             // dispatch and ext-dispatch packets, per the static_asserts at the top of this file).
@@ -955,9 +1001,60 @@ WriteInterceptor(const void* packets,
             // indefinite loop.
             hsa_signal_t app_completion_signal = dispatch_pkt.kernel_dispatch.completion_signal;
 
+            // Our private drain barrier signal. Declared here so the decline path below can decide
+            // whether it is safe to destroy: it is only safe once the barrier packet referencing it
+            // has actually completed.
+            hsa_signal_t drain_signal = null_hsa_signal;
+
+            // Run the dispatch exactly once, with its original completion signal, and report why.
+            // Every decline funnels through here so the CONFIG sequence is always closed and the
+            // application always observes exactly one execution.
+            //
+            // `destroy_drain_signal` must be false whenever the drain barrier may still be pending:
+            // the packet processor would decrement a destroyed signal. Leaking one signal on a path
+            // that is already reporting a stuck queue is the lesser fault.
+            auto decline_and_run_once = [&](kernel_replay::decline_reason reason,
+                                            bool                         destroy_drain_signal) {
+                outcome.reason              = reason;
+                outcome.reentrancy_observed = kernel_replay::replay_reentrancy_observed();
+                kernel_replay::log_replay_outcome(outcome);
+                kernel_replay::execute_config_phase_exit(
+                    replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
+                if(destroy_drain_signal && drain_signal.handle != 0)
+                    get_core_table()->hsa_signal_destroy_fn(drain_signal);
+                process_packet_batch(packets_arr,
+                                     1,
+                                     forward_to_writer,
+                                     /*is_replay_pass=*/false,
+                                     replay_dispatch_id);
+            };
+
+            // Admission control, before any device->host traffic. Two independent questions:
+            // whether the snapshot would actually cover the application's data, and whether it
+            // would fit and finish in a sane amount of time. Both are answerable from the tracker
+            // alone, so answering them here costs nothing and turns a silently-wrong result (or an
+            // apparently hung job) into a diagnostic naming the cause.
+            outcome.untracked = kernel_replay::memory_tracker::untracked_device_memory(replay_agent);
+            if(const auto reason = kernel_replay::check_untracked(outcome.untracked, policy);
+               reason != kernel_replay::decline_reason::none)
+            {
+                decline_and_run_once(reason, /*destroy_drain_signal=*/false);
+                return;
+            }
+
+            const auto footprint = kernel_replay::memory_snapshot::estimate_footprint(replay_agent);
+            outcome.footprint_bytes   = footprint.bytes;
+            outcome.footprint_regions = footprint.regions;
+            if(const auto reason =
+                   kernel_replay::check_admission(footprint, outcome.requested_passes, policy);
+               reason != kernel_replay::decline_reason::none)
+            {
+                decline_and_run_once(reason, /*destroy_drain_signal=*/false);
+                return;
+            }
+
             // Drain barrier: fence the CPU against all prior in-flight GPU work on this queue so
             // device memory is stable before snapshotting.
-            hsa_signal_t drain_signal = null_hsa_signal;
             Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
             {
                 using namespace std::chrono_literals;
@@ -966,16 +1063,24 @@ WriteInterceptor(const void* packets,
                 CreateBarrierPacket(nullptr, &drain_signal, drain_pkts);
                 writer(drain_pkts.data(), drain_pkts.size());
 
-                replay_wait_or_fatal(
-                    [&]() {
-                        return core.hsa_signal_wait_scacquire_fn(
-                                   drain_signal,
-                                   HSA_SIGNAL_CONDITION_EQ,
-                                   0,
-                                   std::chrono::nanoseconds{5s}.count(),
-                                   HSA_WAIT_STATE_BLOCKED) == 0;
-                    },
-                    "this queue's prior GPU work");
+                if(!replay_wait_or_decline(
+                       [&]() {
+                           return core.hsa_signal_wait_scacquire_fn(
+                                      drain_signal,
+                                      HSA_SIGNAL_CONDITION_EQ,
+                                      0,
+                                      std::chrono::nanoseconds{5s}.count(),
+                                      HSA_WAIT_STATE_BLOCKED) == 0;
+                       },
+                       "this queue's prior GPU work"))
+                {
+                    // The barrier packet is still queued and holds a reference to drain_signal, so
+                    // it must outlive us; deliberately leak it rather than let the packet processor
+                    // decrement freed memory.
+                    decline_and_run_once(kernel_replay::decline_reason::queue_drain_stuck,
+                                         /*destroy_drain_signal=*/false);
+                    return;
+                }
             }
 
             // Agent-wide drain. Sibling queues on this agent can have kernels in flight that mutate
@@ -984,15 +1089,25 @@ WriteInterceptor(const void* packets,
             // It does not block work already submitted to their queues. So wait for every queue on
             // this agent to finish its outstanding kernels before snapshotting. We wait outside the
             // queue-map lock so it does not block stream creation or destruction. See
-            // replay_drain_agent_or_fatal. Async SDMA copies bypass both the AQL queues and the
+            // replay_drain_agent_or_decline. Async SDMA copies bypass both the AQL queues and the
             // replay gate and serializing those is a separate follow-up (TODO: mkuriche,
             // amd-vkale).
-            replay_drain_agent_or_fatal(replay_agent);
+            if(!replay_drain_agent_or_decline(replay_agent))
+            {
+                // Our own barrier completed above, so the signal is safe to destroy here.
+                decline_and_run_once(kernel_replay::decline_reason::agent_drain_stuck,
+                                     /*destroy_drain_signal=*/true);
+                return;
+            }
 
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs. snap() returns ok=false if it could not capture the complete set (host memory
             // pressure or a failed copy)
-            const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
+            const auto snap_started = std::chrono::steady_clock::now();
+            const auto snapshot     = kernel_replay::memory_snapshot::snap(replay_agent);
+            outcome.snap_seconds =
+                std::chrono::duration<double>{std::chrono::steady_clock::now() - snap_started}
+                    .count();
 
             // Snapshot incomplete (memory pressure or a failed capture copy): restoring a partial
             // snapshot between passes would corrupt application data, so decline replay. Close the
@@ -1003,14 +1118,8 @@ WriteInterceptor(const void* packets,
                 ROCP_WARNING << fmt::format(
                     "kernel replay: snapshot capture failed (memory pressure or copy error); "
                     "running this dispatch once without replay");
-                kernel_replay::execute_config_phase_exit(
-                    replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
-                if(drain_signal.handle != 0) get_core_table()->hsa_signal_destroy_fn(drain_signal);
-                process_packet_batch(packets_arr,
-                                     1,
-                                     forward_to_writer,
-                                     /*is_replay_pass=*/false,
-                                     replay_dispatch_id);
+                decline_and_run_once(kernel_replay::decline_reason::snapshot_failed,
+                                     /*destroy_drain_signal=*/true);
                 return;
             }
 
@@ -1047,11 +1156,23 @@ WriteInterceptor(const void* packets,
                 // restore() / next submit, else we race its record delivery and reuse buffers and
                 // signals it still holds. This also implies GPU drain. Exactly one handler is in
                 // flight per pass (we drain before each submit, under the agent writer lock).
-                ROCP_FATAL_IF(queue.active_async_packets() > 1) << fmt::format(
-                    "kernel replay: more than one async handler in flight during a replay pass");
-                replay_drain_or_fatal(queue);
+                ROCP_ERROR_IF(queue.active_async_packets() > 1)
+                    << "kernel replay: more than one async handler in flight during a replay pass";
+
+                if(!replay_drain_or_decline(queue))
+                {
+                    // The pass we just submitted has not completed. We cannot restore over memory a
+                    // running kernel may still be writing, and we cannot trust this pass's record,
+                    // so stop the loop here. The trailing completion barrier below still queues
+                    // behind the stuck work, which is what lets the application make progress if it
+                    // ever finishes.
+                    outcome.reason = kernel_replay::decline_reason::pass_drain_stuck;
+                    ++outcome.executed_passes;
+                    break;
+                }
 
                 kernel_replay::execute_pass_phase_exit(replay_plan, pass, pass_state);
+                ++outcome.executed_passes;
 
                 // Stop once the tool (or the fixed pass count) says we're done; the last executed
                 // pass leaves device memory as the app expects, so no restore follows the break.
@@ -1061,10 +1182,32 @@ WriteInterceptor(const void* packets,
                 // A failed host->device copy leaves the snapshot only partially applied; continuing
                 // would submit the next pass over corrupted memory and (because the final pass
                 // skips restore) would also leave that corruption visible to the application.
-                ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot)) << fmt::format(
-                    "kernel replay: restore failed between passes (partial host->device copy); "
-                    "aborting rather than continuing with corrupted device memory");
+                //
+                // This one stays fatal, unlike the drains above. There is no correct continuation
+                // from a partial restore: some regions hold pre-kernel bytes and others hold
+                // post-kernel bytes, the mix is unknown, and nothing can put it back. Handing that
+                // state to the application would corrupt its results silently, which is strictly
+                // worse than terminating. Reaching it requires a host->device DMA on a live
+                // allocation to fail, which is a device-level fault rather than a policy decision.
+                const auto restore_started = std::chrono::steady_clock::now();
+                const auto restore_ok      = kernel_replay::memory_snapshot::restore(snapshot);
+                outcome.restore_total_seconds +=
+                    std::chrono::duration<double>{std::chrono::steady_clock::now() -
+                                                  restore_started}
+                        .count();
+
+                if(!restore_ok)
+                {
+                    outcome.reason = kernel_replay::decline_reason::snapshot_failed;
+                    kernel_replay::log_replay_outcome(outcome);
+                    ROCP_FATAL << "kernel replay: restore failed between passes (partial "
+                                  "host->device copy); aborting rather than continuing with "
+                                  "corrupted device memory";
+                }
             }
+
+            outcome.reentrancy_observed = kernel_replay::replay_reentrancy_observed();
+            kernel_replay::log_replay_outcome(outcome);
 
             kernel_replay::execute_config_phase_exit(
                 replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
@@ -1095,9 +1238,34 @@ WriteInterceptor(const void* packets,
     // while ordinary dispatches still run concurrently with each other. Gated on has_kernel_replay
     // so non-replay runs take no lock at all. (The async GPU tail is handled by the replay window's
     // agent-wide drain, not by this lock.)
+    //
+    // The one case where the lock must be skipped is a dispatch submitted from inside a replay
+    // window on this same thread -- a tool callback that launches a kernel. std::shared_mutex is not
+    // recursive, so taking the reader lock there would block on the writer lock this thread already
+    // holds, with no timeout and no way out. Skipping it lets the dispatch through: its writes land
+    // inside the snapshot window, so the replay's counters for the surrounding dispatch are not
+    // trustworthy, and that is recorded and reported (see tl_in_replay_window). Reporting an
+    // untrustworthy measurement is a better outcome than an unkillable process.
     std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
     if(has_kernel_replay)
-        replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
+    {
+        if(kernel_replay::in_replay_window())
+        {
+            kernel_replay::note_replay_reentrancy();
+            ROCP_ERROR_IF(kernel_replay::should_warn_replay_reentrancy())
+                << "kernel replay: a dispatch was submitted on the replaying agent from inside a "
+                   "replay window, on the thread that owns the window. This happens when a tool's "
+                   "KERNEL_REPLAY callback (CONFIG, PASS, pass_count_cb, or replay_continue_cb) "
+                   "launches GPU work. The dispatch is allowed through without the replay lock to "
+                   "avoid deadlocking, but it mutates device memory inside the snapshot window, so "
+                   "counters for the replayed dispatch are not trustworthy. Move GPU work out of "
+                   "the replay callbacks";
+        }
+        else
+        {
+            replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
+        }
+    }
 
     bool should_batch_packets = true;
     queue.signal_callback([&should_batch_packets](const auto& map) {

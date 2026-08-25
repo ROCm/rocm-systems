@@ -54,19 +54,30 @@ dma_copy(void* dst, const void* src, size_t n)
 }
 
 /// @brief Run @p copy under the tracker read lock, but only while [@p gpu_addr, +@p size) is still
-/// a live tracked allocation of >= @p size bytes, so a concurrent free (write lock) can't retire it
-/// mid-copy. Direction is caller-supplied: snap reads device->host, restore writes host->device.
-/// @return @p copy's status, or @c std::nullopt if the region was freed/shrunk since it was
-/// recorded.
+/// the same live tracked allocation of >= @p size bytes, so a concurrent free (write lock) can't
+/// retire it mid-copy. Direction is caller-supplied: snap reads device->host, restore writes
+/// host->device.
+///
+/// @param generation The generation the caller expects. Pass 0 to accept whatever is live and adopt
+/// its generation (snap, which is establishing the expectation) and non-zero to require an exact
+/// match (restore, which is checking it). Matching on (base, size) alone is not enough: the
+/// alloc/free wrappers sit outside the per-agent replay lock, so another thread can free a region
+/// and allocate a new one at the same base inside the window -- and a caching allocator makes that
+/// the likely outcome rather than an unlikely one. Restoring the old bytes over the new allocation
+/// would corrupt it silently, which is exactly the failure a profiler must not cause.
+///
+/// @return @p copy's status, or @c std::nullopt if the region was freed, shrunk, or replaced since
+/// it was recorded.
 template <typename CopyFn>
 std::optional<hsa_status_t>
-with_inventory_check(void* gpu_addr, size_t size, CopyFn&& copy)
+with_inventory_check(void* gpu_addr, size_t size, uint64_t generation, CopyFn&& copy)
 {
     return memory_tracker::inventory().rlock(
         [&](const memory_tracker::tracked_map_t& map) -> std::optional<hsa_status_t> {
             auto itr = map.find(gpu_addr);
             if(itr == map.end() || itr->second.size < size) return std::nullopt;
-            return copy();
+            if(generation != 0 && itr->second.generation != generation) return std::nullopt;
+            return copy(itr->second.generation);
         });
 }
 
@@ -144,33 +155,46 @@ snap(hsa_agent_t agent)
     // omitted class for beta (documented in the public header). Direct-HSA apps that put ordinary
     // writable device data behind the flag observe the same omission.
 
-    const auto [inventory, module_vars] = [&]() {
-        try
-        {
-            auto inv   = memory_tracker::snap_inventory(agent);
-            auto mvars = discover_module_variables(agent);
-
-            out.blocks.reserve(inv.size() + mvars.size());
-            return std::pair{std::move(inv), std::move(mvars)};
-        } catch(const std::bad_alloc&)
-        {
-            ROCP_FATAL << "kernel-replay snapshot: out of memory reserving metadata";
-        }
-    }();
+    auto inventory   = memory_tracker::tracked_map_t{};
+    auto module_vars = std::vector<module_variable_t>{};
+    try
+    {
+        inventory   = memory_tracker::snap_inventory(agent);
+        module_vars = discover_module_variables(agent);
+        out.blocks.reserve(inventory.size() + module_vars.size());
+    } catch(const std::bad_alloc&)
+    {
+        // Same policy as a per-region allocation failure below: report an incomplete capture so the
+        // caller declines replay and runs the dispatch once. Aborting the process here would kill a
+        // long job over transient host memory pressure, which is a worse outcome than not profiling
+        // one dispatch -- and the caller already has a correct path for ok == false.
+        ROCP_WARNING << "kernel-replay snapshot: out of memory reserving metadata; declining replay";
+        out.ok = false;
+        return out;
+    }
 
     /// @brief Capture one region (device->host) into the snapshot.
+    /// @param generation Tracker generation expected for @p gpu_addr (0 for module variables).
     /// @retval false The snapshot is incomplete because a host allocation or the DMA copy failed.
     /// The caller must decline replay rather than restore partial state.
-    /// @retval true The region was captured. For tracker regions it may instead have been dropped
-    /// after being freed or shrunk since snap_inventory(). That drop is safe because restore() runs
-    /// the same liveness check, so a region gone now could not have been restored anyway.
-    auto capture =
-        [&](void* gpu_addr, size_t size, std::string_view what, bool from_tracker) -> bool {
+    /// @retval true The region was captured, or was dropped because it had been freed, shrunk, or
+    /// replaced by a different allocation at the same address since snap_inventory(). Dropping a
+    /// freed region is harmless -- restore() runs the same check, so it could not have been restored
+    /// anyway. Dropping a *replaced* region means the new allocation is not reverted between passes,
+    /// so a kernel writing to it sees accumulated values; that is a narrow soundness gap, but it is
+    /// strictly better than restoring the previous allocation's bytes over live data, and the window
+    /// between snap_inventory() and this copy is microseconds.
+    auto capture = [&](void*            gpu_addr,
+                       size_t           size,
+                       uint64_t         generation,
+                       std::string_view what,
+                       bool             from_tracker) -> bool {
         if(size == 0) return true;
 
         mem_block_t blk;
         blk.gpu_addr     = gpu_addr;
         blk.from_tracker = from_tracker;
+        blk.generation   = generation;
         try
         {
             blk.host_copy.resize(size);
@@ -197,13 +221,14 @@ snap(hsa_agent_t agent)
                 ? with_inventory_check(
                       gpu_addr,
                       size,
-                      [&] { return dma_copy(blk.host_copy.data(), gpu_addr, size); })
+                      generation,
+                      [&](uint64_t) { return dma_copy(blk.host_copy.data(), gpu_addr, size); })
                 : std::optional<hsa_status_t>{dma_copy(blk.host_copy.data(), gpu_addr, size)};
 
         if(!st)
         {
-            ROCP_INFO << fmt::format("kernel-replay snapshot: {} {} ({}B) was retired before "
-                                     "capture, dropping from snapshot",
+            ROCP_INFO << fmt::format("kernel-replay snapshot: {} {} ({}B) was retired or replaced "
+                                     "before capture, dropping from snapshot",
                                      what,
                                      gpu_addr,
                                      size);
@@ -224,9 +249,9 @@ snap(hsa_agent_t agent)
         return true;
     };
 
-    for(const auto& [ptr, size] : inventory)
+    for(const auto& [ptr, info] : inventory)
     {
-        if(!capture(ptr, size, "region", /*from_tracker=*/true))
+        if(!capture(ptr, info.size, info.generation, "region", /*from_tracker=*/true))
         {
             out.ok = false;
             return out;
@@ -238,7 +263,7 @@ snap(hsa_agent_t agent)
     // per-block host->device copy as tracked allocations (see restore()).
     for(const auto& var : module_vars)
     {
-        if(!capture(var.gpu_addr, var.size, "module variable", /*from_tracker=*/false))
+        if(!capture(var.gpu_addr, var.size, /*generation=*/0, "module variable", false))
         {
             out.ok = false;
             return out;
@@ -262,18 +287,28 @@ restore(const device_snapshot_t& snapshot)
 
         if(blk.from_tracker)
         {
-            // Re-check liveness and copy under the read lock so a concurrent free cannot race the
-            // check and the write (see with_inventory_check). A nullopt result means the region is
-            // no longer a live allocation of at least its size. It was freed or reallocated after
-            // snap, so skip it (benign -- not a restore failure).
-            const auto st = with_inventory_check(blk.gpu_addr, blk.host_copy.size(), [&] {
-                return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
-            });
+            // Re-check identity and copy under the read lock so a concurrent free cannot race the
+            // check and the write (see with_inventory_check). A nullopt result means the address no
+            // longer names the allocation we captured: it was freed, shrunk, or freed and
+            // reallocated at the same base (the generation stamp is what detects the last case).
+            // Skipping is benign -- not a restore failure -- and is the only safe action, because
+            // writing our bytes into a different allocation would corrupt live application data.
+            const auto st =
+                with_inventory_check(blk.gpu_addr,
+                                     blk.host_copy.size(),
+                                     blk.generation,
+                                     [&](uint64_t) {
+                                         return dma_copy(blk.gpu_addr,
+                                                         blk.host_copy.data(),
+                                                         blk.host_copy.size());
+                                     });
 
             if(!st)
             {
                 ROCP_WARNING << fmt::format(
-                    "kernel-replay restore: skipping region {} ({}B) that is no longer live",
+                    "kernel-replay restore: skipping region {} ({}B); it is no longer the "
+                    "allocation captured at snap time (freed, shrunk, or the address was reused). "
+                    "A kernel writing to it will not see identical inputs on later passes",
                     blk.gpu_addr,
                     blk.host_copy.size());
                 continue;
@@ -306,6 +341,25 @@ restore(const device_snapshot_t& snapshot)
     ROCP_INFO << fmt::format(
         "kernel-replay restore: restored {}/{} regions", restored, snapshot.blocks.size());
     return true;
+}
+
+snapshot_footprint_t
+estimate_footprint(hsa_agent_t agent)
+{
+    auto out = snapshot_footprint_t{};
+
+    const auto tracked = memory_tracker::tracked_footprint(agent);
+    out.bytes          = tracked.bytes;
+    out.regions        = tracked.regions;
+
+    // Module variables are enumerated rather than summed from the tracker, so they cost one
+    // executable walk. That is the same walk snap() does and is cheap relative to any copy.
+    for(const auto& var : discover_module_variables(agent))
+    {
+        out.bytes += var.size;
+        ++out.regions;
+    }
+    return out;
 }
 }  // namespace memory_snapshot
 }  // namespace kernel_replay

@@ -26,12 +26,23 @@
 
 #include <hsa/hsa_ext_amd.h>
 
+#include <cstdint>
+
 namespace rocprofiler
 {
 namespace kernel_replay
 {
 namespace memory_tracker
 {
+namespace
+{
+// HSA_EXT_POINTER_TYPE_HSA_VMEM is absent from HSA headers older than 1.12 (the same reason
+// memory_tracker.cpp defines memory_pool_executable_flag by hand). Comparing the numeric value
+// keeps this file buildable against an older external header; on such a runtime the field simply
+// never reports 6 and the classification degrades to the hsa_amd_vmem_map interception alone.
+constexpr uint32_t pointer_type_hsa_vmem = 6;
+}  // namespace
+
 alloc_query_t
 query_alloc(void* ptr)
 {
@@ -48,12 +59,31 @@ query_alloc(void* ptr)
     if(ext->hsa_amd_pointer_info_fn(ptr, &info, nullptr, nullptr, nullptr) != HSA_STATUS_SUCCESS)
         return q;
 
-    q.agent               = info.agentOwner;
-    const bool is_kernarg = (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT) != 0;
-    const bool is_coarse =
-        (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) != 0;
-    q.trackable = is_coarse && !is_kernarg;
+    q.agent   = info.agentOwner;
+    q.kernarg = (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT) != 0;
+    q.coarse  = (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) != 0;
+    // ROCr does not reliably tag IPC-opened memory with HSA_EXT_POINTER_TYPE_IPC, so this is a
+    // best-effort signal only; it never promotes an allocation into the snapshot, it only keeps one
+    // out and raises the untracked count.
+    q.ipc_shared = (info.type == HSA_EXT_POINTER_TYPE_IPC);
+    q.vmem       = (static_cast<uint32_t>(info.type) == pointer_type_hsa_vmem);
+    q.gpu_owned  = is_gpu_agent(info.agentOwner);
+    q.trackable  = q.coarse && !q.kernarg && !q.ipc_shared && !q.vmem;
     return q;
+}
+
+bool
+is_gpu_agent(hsa_agent_t agent)
+{
+    if(agent.handle == 0) return false;
+
+    auto* core = hsa::get_core_table();
+    if(core == nullptr || core->hsa_agent_get_info_fn == nullptr) return false;
+
+    hsa_device_type_t type{};
+    if(core->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS)
+        return false;
+    return type == HSA_DEVICE_TYPE_GPU;
 }
 }  // namespace memory_tracker
 }  // namespace kernel_replay

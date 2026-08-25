@@ -25,6 +25,7 @@
 #include <hsa/hsa.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace rocprofiler
@@ -48,6 +49,11 @@ struct mem_block_t
     // false = module-scope variable in a loaded executable; always live, so restore
     // unconditionally.
     bool from_tracker = false;
+    // Tracker generation observed at snap time (see memory_tracker::alloc_info_t). restore() refuses
+    // to write unless the address still carries this generation, which is what distinguishes "the
+    // same allocation" from "a different allocation that reused the address". Unused when
+    // from_tracker is false.
+    uint64_t generation = 0;
 };
 
 // A captured set of device allocations (host-side copies) for a single agent.
@@ -69,6 +75,21 @@ struct device_snapshot_t
 // can decline replay rather than restore a partial snapshot.
 device_snapshot_t
 snap(hsa_agent_t agent);
+
+// Bytes and regions snap(agent) would capture, without copying anything. This is the tracked
+// allocation footprint plus the module-scope variables, i.e. the host memory the snapshot will
+// need and the volume that must cross the host link once per pass. The replay window uses it for
+// admission control: a footprint the host cannot hold, or one whose projected copy time dwarfs the
+// kernel being measured, is better declined up front than discovered by a std::bad_alloc partway
+// through the capture or by a user watching an apparently hung job.
+struct snapshot_footprint_t
+{
+    size_t bytes   = 0;
+    size_t regions = 0;
+};
+
+snapshot_footprint_t
+estimate_footprint(hsa_agent_t agent);
 
 // Copy each saved region host->device. Returns true when every live region was restored.
 // A region that was freed after snap is skipped (benign). A failed host->device DMA copy

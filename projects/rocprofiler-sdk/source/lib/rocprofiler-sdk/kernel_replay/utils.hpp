@@ -40,7 +40,29 @@ struct alloc_query_t
 {
     hsa_agent_t agent = {.handle = 0};  // owning (preferred-access) agent, for per-agent scoping
     bool        trackable = false;      // coarse-grained device VRAM, excluding kernarg
+
+    // Classification detail, kept so the caller can separate "not ours to snapshot" (host memory,
+    // kernarg) from "device memory we cannot snapshot" (fine-grained or managed device memory,
+    // IPC-imported memory). Only the latter makes a replay's inputs non-identical across passes, so
+    // only the latter should influence whether replay is declined.
+    bool gpu_owned  = false;  // agentOwner is a GPU agent
+    bool kernarg    = false;  // HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
+    bool coarse     = false;  // HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
+    bool ipc_shared = false;  // HSA_EXT_POINTER_TYPE_IPC: backing pages owned by another process
+    bool vmem       = false;  // HSA_EXT_POINTER_TYPE_HSA_VMEM: virtual-memory mapping
+
+    // GPU-resident memory that snap() will not capture. True for fine-grained device memory,
+    // managed memory that landed on the device, IPC-imported memory, and virtual-memory mappings.
+    bool untracked_device_visible() const
+    {
+        return gpu_owned && !kernarg && (!coarse || ipc_shared || vmem);
+    }
 };
+
+// True when `agent` is a GPU. Used to separate device-resident memory the snapshot cannot capture
+// (which makes replay unsound) from host memory (which is simply out of scope).
+bool
+is_gpu_agent(hsa_agent_t agent);
 
 // Classify a pointer via hsa_amd_pointer_info. Used by the allocation interceptor to decide what to
 // record, and by tests to confirm the exclusions hold. We snapshot only coarse-grained device

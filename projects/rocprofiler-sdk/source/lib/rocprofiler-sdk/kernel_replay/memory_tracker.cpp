@@ -31,6 +31,8 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <cstdint>
+#include <utility>
 
 namespace rocprofiler
 {
@@ -70,18 +72,61 @@ unsupported_executable_inventory()
     struct unsupported_executable_tag
     {};
     static auto*& _v = common::static_object<common::Synchronized<tracked_map_t>,
-                                             unsupported_executable_tag>::construct();
+                                            unsupported_executable_tag>::construct();
+    return *_v;
+}
+
+// Live hsa_amd_vmem_map ranges. Never restored -- the snapshot has no way to reason about a range
+// that can be partially unmapped or remapped to a different physical handle mid-window -- but
+// counted, because their presence means application data is outside the snapshot. See
+// untracked_summary_t.
+common::Synchronized<tracked_map_t>&
+vmem_inventory()
+{
+    struct vmem_tag
+    {};
+    static auto*& _v =
+        common::static_object<common::Synchronized<tracked_map_t>, vmem_tag>::construct();
+    return *_v;
+}
+
+// GPU-owned, non-kernarg pool allocations that failed the coarse-grained test: fine-grained device
+// memory and managed memory that landed on the device. Counted for the same reason as
+// vmem_inventory(), but reported separately because runtime-internal allocations can land here and
+// so a non-zero count is weaker evidence (see untracked_summary_t).
+common::Synchronized<tracked_map_t>&
+untracked_pool_inventory()
+{
+    struct untracked_pool_tag
+    {};
+    static auto*& _v =
+        common::static_object<common::Synchronized<tracked_map_t>, untracked_pool_tag>::construct();
     return *_v;
 }
 
 namespace
 {
+// Monotonic stamp handed to each allocation so (base, size) alone cannot be mistaken for identity.
+// Starts at 1 so a default-constructed alloc_info_t (generation 0) never compares equal to a real
+// record. Never reused, including across free: that is the whole point.
+std::atomic<uint64_t>&
+generation_counter()
+{
+    struct generation_tag
+    {};
+    static auto*& _v =
+        common::static_object<std::atomic<uint64_t>, generation_tag>::construct(uint64_t{0});
+    return *_v;
+}
+
 // Saved "next" function pointers (the already-installed wrappers) we chain through. Types are taken
 // from the HSA table members so signatures match exactly.
 decltype(AmdExtTable{}.hsa_amd_memory_pool_allocate_fn) next_pool_allocate   = nullptr;
 decltype(AmdExtTable{}.hsa_amd_memory_pool_free_fn)     next_pool_free       = nullptr;
 decltype(CoreApiTable{}.hsa_memory_allocate_fn)         next_memory_allocate = nullptr;
 decltype(CoreApiTable{}.hsa_memory_free_fn)             next_memory_free     = nullptr;
+decltype(AmdExtTable{}.hsa_amd_vmem_map_fn)             next_vmem_map        = nullptr;
+decltype(AmdExtTable{}.hsa_amd_vmem_unmap_fn)           next_vmem_unmap      = nullptr;
 
 // HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG is absent from older HSA headers
 constexpr uint32_t memory_pool_executable_flag = (1U << 2);
@@ -97,8 +142,40 @@ record_unsupported_executable(void* ptr, size_t size)
     // stay out of both inventories (silent omit is correct for those).
     if(!q.trackable) return;
     unsupported_executable_inventory().wlock([&](auto& _map) {
-        _map[ptr] = alloc_info_t{size, q.agent};
+        _map[ptr] = alloc_info_t{size, q.agent, 0};
     });
+}
+
+// Record a pool allocation that is GPU-resident but not snapshottable, so the replay window can
+// report how much application data the snapshot is missing. Called only when query_alloc already
+// said the allocation is not trackable, so this never competes with the main inventory.
+void
+record_untracked_pool(void* ptr, size_t size, const alloc_query_t& q)
+{
+    if(registration::get_fini_status() > 0) return;
+    if(!q.untracked_device_visible()) return;
+
+    untracked_pool_inventory().wlock([&](auto& _map) {
+        _map[ptr] = alloc_info_t{size, q.agent, 0};
+    });
+}
+
+// Sum bytes/regions of one inventory for a single agent under a brief read lock.
+std::pair<size_t, size_t>
+sum_for_agent(common::Synchronized<tracked_map_t>& inv, hsa_agent_t agent)
+{
+    size_t bytes   = 0;
+    size_t regions = 0;
+    inv.rlock([&](const tracked_map_t& _map) {
+        for(const auto& [ptr, info] : _map)
+        {
+            (void) ptr;
+            if(info.agent.handle != agent.handle) continue;
+            bytes += info.size;
+            ++regions;
+        }
+    });
+    return {bytes, regions};
 }
 
 hsa_status_t
@@ -154,6 +231,34 @@ memory_free_wrapper(void* ptr)
         record_free(ptr);
     return st;
 }
+
+// hsa_amd_vmem_map is the entry point every virtual-memory allocator funnels through:
+// hipMallocAsync with the default (VM-backed) pool, hipMemAddressReserve/hipMemMap, PyTorch's
+// expandable_segments, and Kokkos when built with KOKKOS_ENABLE_IMPL_HIP_MALLOC_ASYNC. None of it
+// reaches hsa_amd_memory_pool_allocate, so without this hook a snapshot of such an application
+// captures almost nothing and reports success. We only count the mapping -- restoring a range whose
+// physical backing can be swapped underneath us is not something snap/restore can reason about.
+hsa_status_t
+vmem_map_wrapper(void*                       va,
+                 size_t                      size,
+                 size_t                      in_offset,
+                 hsa_amd_vmem_alloc_handle_t memory_handle,
+                 uint64_t                    flags)
+{
+    auto st = next_vmem_map(va, size, in_offset, memory_handle, flags);
+    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && va)
+        record_vmem_map(va, size, query_alloc(va).agent);
+    return st;
+}
+
+hsa_status_t
+vmem_unmap_wrapper(void* va, size_t size)
+{
+    auto st = next_vmem_unmap(va, size);
+    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && va)
+        record_vmem_unmap(va);
+    return st;
+}
 }  // namespace
 
 bool
@@ -177,8 +282,15 @@ record_alloc(void* ptr, size_t size)
     if(registration::get_fini_status() > 0) return;
 
     const auto q = query_alloc(ptr);
-    if(!q.trackable) return;  // skip kernarg / host / fine-grained memory
-    inventory().wlock([&](auto& _map) { _map[ptr] = alloc_info_t{size, q.agent}; });
+    if(!q.trackable)
+    {
+        // Not ours to snapshot. Host and kernarg memory is simply out of scope, but GPU-resident
+        // memory we cannot capture makes replay unsound, so count that separately.
+        record_untracked_pool(ptr, size, q);
+        return;
+    }
+    const auto generation = generation_counter().fetch_add(1, std::memory_order_relaxed) + 1;
+    inventory().wlock([&](auto& _map) { _map[ptr] = alloc_info_t{size, q.agent, generation}; });
 }
 
 void
@@ -187,18 +299,67 @@ record_free(void* ptr)
     if(registration::get_fini_status() > 0) return;
     inventory().wlock([ptr](auto& _map) { _map.erase(ptr); });
     unsupported_executable_inventory().wlock([ptr](auto& _map) { _map.erase(ptr); });
+    untracked_pool_inventory().wlock([ptr](auto& _map) { _map.erase(ptr); });
 }
 
-alloc_map_t
+void
+record_vmem_map(void* va, size_t size, hsa_agent_t agent)
+{
+    if(registration::get_fini_status() > 0) return;
+    vmem_inventory().wlock([&](auto& _map) { _map[va] = alloc_info_t{size, agent, 0}; });
+}
+
+void
+record_vmem_unmap(void* va)
+{
+    if(registration::get_fini_status() > 0) return;
+    vmem_inventory().wlock([va](auto& _map) { _map.erase(va); });
+}
+
+tracked_map_t
 snap_inventory(hsa_agent_t agent)
 {
     if(registration::get_fini_status() > 0) return {};
 
-    alloc_map_t out{};
+    tracked_map_t out{};
     inventory().rlock([&](const auto& _map) {
         for(const auto& [ptr, info] : _map)
-            if(info.agent.handle == agent.handle) out.emplace(ptr, info.size);
+            if(info.agent.handle == agent.handle) out.emplace(ptr, info);
     });
+    return out;
+}
+
+footprint_t
+tracked_footprint(hsa_agent_t agent)
+{
+    if(registration::get_fini_status() > 0) return {};
+
+    const auto [bytes, regions] = sum_for_agent(inventory(), agent);
+    return footprint_t{bytes, regions};
+}
+
+untracked_summary_t
+untracked_device_memory(hsa_agent_t agent)
+{
+    if(registration::get_fini_status() > 0) return {};
+
+    auto out = untracked_summary_t{};
+    // A vmem mapping whose owning agent could not be resolved (handle 0) is still evidence that the
+    // application is using virtual memory, and attributing it to no agent would hide it from every
+    // replay window. Count it against whichever agent asks.
+    vmem_inventory().rlock([&](const tracked_map_t& _map) {
+        for(const auto& [ptr, info] : _map)
+        {
+            (void) ptr;
+            if(info.agent.handle != agent.handle && info.agent.handle != 0) continue;
+            out.vmem_bytes += info.size;
+            ++out.vmem_regions;
+        }
+    });
+
+    const auto [pool_bytes, pool_regions] = sum_for_agent(untracked_pool_inventory(), agent);
+    out.pool_bytes                        = pool_bytes;
+    out.pool_regions                      = pool_regions;
     return out;
 }
 
@@ -249,6 +410,19 @@ tracking_pool_free(void* ptr)
     return pool_free_wrapper(ptr);
 }
 
+uint64_t
+generation_of(void* ptr)
+{
+    if(registration::get_fini_status() > 0) return 0;
+
+    uint64_t generation = 0;
+    inventory().rlock([&](const tracked_map_t& _map) {
+        auto itr = _map.find(ptr);
+        if(itr != _map.end()) generation = itr->second.generation;
+    });
+    return generation;
+}
+
 }  // namespace memory_tracker
 
 void
@@ -281,6 +455,17 @@ memory_tracker_init(hsa::hsa_amd_ext_table_t* table, uint64_t lib_instance)
     memory_tracker::next_pool_free         = table->hsa_amd_memory_pool_free_fn;
     table->hsa_amd_memory_pool_allocate_fn = memory_tracker::pool_allocate_wrapper;
     table->hsa_amd_memory_pool_free_fn     = memory_tracker::pool_free_wrapper;
+
+    // Virtual-memory map/unmap. Only counted, never snapshotted (see vmem_map_wrapper). Guard on
+    // the table entries being present: an older ROCr exposes a shorter AmdExtTable and leaves these
+    // null, in which case the accounting degrades to query_alloc's pointer-type check alone.
+    if(table->hsa_amd_vmem_map_fn != nullptr && table->hsa_amd_vmem_unmap_fn != nullptr)
+    {
+        memory_tracker::next_vmem_map   = table->hsa_amd_vmem_map_fn;
+        memory_tracker::next_vmem_unmap = table->hsa_amd_vmem_unmap_fn;
+        table->hsa_amd_vmem_map_fn      = memory_tracker::vmem_map_wrapper;
+        table->hsa_amd_vmem_unmap_fn    = memory_tracker::vmem_unmap_wrapper;
+    }
 }
 }  // namespace kernel_replay
 }  // namespace rocprofiler
