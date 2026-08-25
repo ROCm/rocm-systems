@@ -97,7 +97,7 @@ struct ncclDevRedOpFull {
 };
 
 
-#include "rccl_ptr.h"
+#include "nccl_device/rccl_ptr.h"
 
 union ncclLLFifoLine {
   /* Flags have to be *after* data, because otherwise, an incomplete receive
