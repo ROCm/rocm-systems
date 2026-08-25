@@ -329,7 +329,7 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [--cpu-dimm-pow-consumption DIMM_ADDR]
                       [--cpu-dimm-thermal-sensor DIMM_ADDR] [--core-boost-limit]
                       [--core-curr-active-freq-core-limit] [--core-energy]
-                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                      [--json | --csv] [--file FILE] [--loglevel LEVEL] [--show-unsupported]
 
 If no GPU is specified, returns metric information for all GPUs on the system.
 If no metric argument is provided, all metric information will be displayed.
@@ -431,7 +431,45 @@ Command Modifiers:
   --file FILE                               Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL                          Set the logging level from the possible choices:
                                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
+  --show-unsupported                        Print every field, including the ones the GPU's gpu_metrics
+                                                table version cannot carry and which are omitted by default;
+                                                affects human-readable output only, since --json and --csv
+                                                always print every field
 ```
+
+The `gpu_metrics` table the driver exposes has a version, and each version
+carries a different set of fields. Fields the detected version cannot carry are
+omitted from human-readable output. Pass `--show-unsupported` to print them as
+`N/A` instead, which restores the output of earlier releases.
+
+`--json` and `--csv` are never filtered. They are consumed by scripts, so they
+keep emitting every field, the `N/A` ones included, and their key and column
+sets are unchanged from earlier releases. `--show-unsupported` is accepted
+alongside them and has no effect.
+
+This is scoped to the metrics table version, not to what the ASIC supports. Only
+fields whose sole sources are the metrics blobs are eligible, such as the
+`hbm_stacks`, `mid`, `aid` and `xcd` temperature arrays and the `uclk_aid` and
+`socclks_mid` clock arrays. Anything the CLI can also read from hwmon or sysfs is
+always printed: the `edge`, `hotspot` and `mem` temperature sensors, the fan
+section, the voltages, and the `gfx_N`, `vclk_N`, `dclk_N`, `mem_N` and
+`socclk_N` clock slots. A field the version *does* carry but the ASIC or driver
+leaves unpopulated also still prints `N/A`.
+
+Filtering never removes a field that reports a value, and it suppresses nothing
+at all when the metrics version is unrecognized or its header cannot be read.
+
+A section named on the command line is never emptied by filtering. Plain
+`amd-smi metric` prints every section, so a section the version can populate
+nothing of is dropped entirely; on a metrics v1.3 GPU that removes the whole
+`throttle` section. Asking for that section by name instead, as in `amd-smi
+metric --throttle`, prints it in full rather than answering with silence. A named
+section that is only partly suppressed is still filtered, so `amd-smi metric
+--usage` on a v1.9 GPU still omits `jpeg_activity`.
+
+`--partition` scopes the data rather than naming a section, so it protects
+nothing and `amd-smi metric --partition` filters exactly like plain `amd-smi
+metric`.
 
 (cmd-process)=
 ### amd-smi process
