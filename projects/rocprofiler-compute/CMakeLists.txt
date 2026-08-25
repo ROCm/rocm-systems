@@ -237,18 +237,10 @@ else()
     set(COVERAGE_DATA_PATH "${PROJECT_SOURCE_DIR}/.coverage")
 endif()
 
-option(
-    SKIP_NATIVE_TOOL_BUILD
-    "Skip building native counter collection tool library (for runtime compilation)"
-    OFF
-)
-
 # -------------------
 # Setup tool library
 # -------------------
-if(NOT SKIP_NATIVE_TOOL_BUILD)
-    add_subdirectory(src/lib)
-endif()
+add_subdirectory(src/lib)
 
 # ---------------------------
 # Profile mode import guard
@@ -1284,24 +1276,11 @@ install(
     COMPONENT main
 )
 
-# install librocprofiler-compute-tool.so or source files
-if(NOT SKIP_NATIVE_TOOL_BUILD)
-    install(
-        TARGETS rocprofiler-compute-tool
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
-    )
-else()
-    # Install source files for runtime compilation. roctx_recordfn/ is
-    # installed by a dedicated rule above and excluded here.
-    install(
-        DIRECTORY src/lib/
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
-        COMPONENT main
-        PATTERN "_build" EXCLUDE
-        PATTERN "tests" EXCLUDE
-        PATTERN "roctx_recordfn" EXCLUDE
-    )
-endif()
+# install librocprofiler-compute-tool.so
+install(
+    TARGETS rocprofiler-compute-tool
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
+)
 
 # top-level bin/rocprof-compute launcher (re-execs into libexec entrypoint)
 configure_file(
