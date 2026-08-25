@@ -2404,6 +2404,58 @@ kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_in
     return (n == 0) ? 1 : n;
 }
 
+// Per-window bookkeeping for "did this dispatch actually collect every counter group?".
+//
+// The SDK may run fewer passes than it was asked for. It declines a replay outright when the
+// snapshot would not cover the application's data, when the footprint exceeds the host budget, when
+// a drain does not converge, or when the dispatch was launched from inside another replay window;
+// and it stops a window early if a pass's completion handler does not drain. In every one of those
+// cases the dispatch still runs, so counter rows still appear -- but they cover only the groups
+// whose passes ran, and nothing in the output says so. A user comparing two counters from two
+// groups would silently be comparing one measured value against one that was never collected.
+//
+// A replay window runs to completion on the thread that opened it, so per-thread counters are
+// enough to pair a CONFIG with the passes inside it.
+thread_local uint64_t tl_replay_passes_expected = 0;
+thread_local uint64_t tl_replay_passes_observed = 0;
+
+// Process-wide tallies, reported once at finalize rather than per dispatch: a workload that trips
+// this trips it on every dispatch, and tens of thousands of identical warnings would bury it.
+std::atomic<uint64_t>&
+replay_incomplete_dispatches()
+{
+    static auto _v = std::atomic<uint64_t>{0};
+    return _v;
+}
+
+std::atomic<uint64_t>&
+replay_total_dispatches()
+{
+    static auto _v = std::atomic<uint64_t>{0};
+    return _v;
+}
+
+// Emitted from tool_fini. Silent when every dispatch collected every group, which is the case this
+// message must not add noise to.
+void
+report_kernel_replay_coverage()
+{
+    const auto incomplete = replay_incomplete_dispatches().load();
+    if(incomplete == 0) return;
+
+    ROCP_WARNING << fmt::format(
+        "kernel replay: {} of {} targeted dispatch(es) did not collect every counter group. Their "
+        "rows cover only the groups whose passes ran, so counters from different groups are not "
+        "comparable for those dispatches. The SDK logs a `[kernel-replay]` line per dispatch "
+        "naming "
+        "the cause; the usual ones are memory the snapshot cannot capture (stream-ordered, "
+        "managed, "
+        "or virtual-memory allocators), a snapshot footprint over the host budget, and GPU work "
+        "launched from a profiler callback",
+        incomplete,
+        replay_total_dispatches().load());
+}
+
 // Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
 // query the number of replay passes for each dispatch.
 void
@@ -2420,6 +2472,29 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     {
         // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
         payload->pass_count_cb = kernel_replay_pass_count_callback;
+
+        // Same value the SDK is about to ask for, recorded so PHASE_EXIT can tell a complete window
+        // from a declined or truncated one.
+        tl_replay_passes_expected =
+            kernel_replay_pass_count_callback(payload->dispatch_info, rocprofiler_user_data_t{});
+        tl_replay_passes_observed = 0;
+    }
+    else if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
+            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+    {
+        // A pass count of 1 is not a replay: the SDK runs the dispatch once and emits no PASS
+        // callbacks, and that single run collects the single group. Only a dispatch that asked for
+        // more than one pass can come up short.
+        if(tl_replay_passes_expected > 1)
+        {
+            replay_total_dispatches().fetch_add(1, std::memory_order_relaxed);
+
+            if(tl_replay_passes_observed < tl_replay_passes_expected)
+                replay_incomplete_dispatches().fetch_add(1, std::memory_order_relaxed);
+        }
+
+        tl_replay_passes_expected = 0;
+        tl_replay_passes_observed = 0;
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
     {
@@ -2436,6 +2511,7 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
                 << "kernel replay: SDK published current_pass=" << payload->current_pass
                 << " out of range for total_passes=" << payload->total_passes;
             tl_current_replay_pass = payload->current_pass;
+            ++tl_replay_passes_observed;
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
@@ -3376,6 +3452,49 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             std::exit(EXIT_FAILURE);
         }
 
+        // Modes that replay makes meaningless rather than merely noisy. Each of these attributes
+        // its results to a dispatch, and replay makes one logical dispatch execute several times
+        // under one dispatch id, so their output would silently mix N executions of the same kernel
+        // with no field distinguishing them. The CLI rejects these combinations too; this is the
+        // backstop for a run driven by the environment variables directly.
+        for(const auto& [enabled, what, env_var] :
+            {std::tuple{tool::get_config().advanced_thread_trace,
+                        "advanced thread trace",
+                        "ROCPROF_ADVANCED_THREAD_TRACE"},
+             std::tuple{
+                 tool::get_config().pc_sampling_method_value != ROCPROFILER_PC_SAMPLING_METHOD_NONE,
+                 "PC sampling",
+                 "ROCPROF_PC_SAMPLING_METHOD"},
+             std::tuple{tool::get_config().spm_counter_collection,
+                        "SPM counter collection",
+                        "ROCPROF_SPM_COUNTER_COLLECTION"}})
+        {
+            if(!enabled) continue;
+
+            ROCP_ERROR << fmt::format(
+                "ROCPROF_KERNEL_REPLAY cannot be combined with {} ({}). Replay executes one "
+                "logical dispatch several times under a single dispatch id, and {} attributes its "
+                "results per dispatch, so the two would produce output in which several executions "
+                "of the same kernel are indistinguishable. Collect them in separate runs",
+                what,
+                env_var,
+                what);
+            std::exit(EXIT_FAILURE);
+        }
+
+        // Tracing, by contrast, still produces correct records -- there really were N executions --
+        // but any per-kernel count, total, or average derived from them is multiplied by the pass
+        // count, and every one of those records carries the same dispatch id. That is worth stating
+        // plainly rather than rejecting, because tracing alongside replay is a reasonable thing to
+        // want when the trace is being read for structure rather than for totals.
+        if(tool::get_config().kernel_trace || tool::get_config().stats)
+        {
+            ROCP_WARNING << "kernel replay: each replay pass emits its own kernel dispatch record, "
+                            "all sharing the replayed dispatch's id. Kernel counts, durations and "
+                            "statistics therefore reflect the number of passes rather than the "
+                            "number of dispatches the application issued";
+        }
+
         auto kernel_replay_ctx = rocprofiler_context_id_t{0};
 
         ROCPROFILER_CALL(rocprofiler_create_context(&kernel_replay_ctx),
@@ -4074,6 +4193,10 @@ tool_fini(void* /*tool_data*/)
         tool::att_no_intercept::finalize();
     rocprofiler_stop_context(get_client_ctx());
     flush();
+
+    // Before the output is written, so a user reading the terminal sees the caveat next to the run
+    // that produced it rather than after the file paths have scrolled past.
+    if(tool::get_config().kernel_replay) report_kernel_replay_coverage();
 
     // Capture the fallback end timestamp after shutdown flushes complete so it
     // reflects when profiling actually stopped.
