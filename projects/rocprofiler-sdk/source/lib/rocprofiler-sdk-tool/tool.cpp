@@ -3369,15 +3369,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     // each dispatch once per group (device memory is snapshot/restored between passes). The tool
     // supplies the pass count (= number of groups) via kernel_replay_callback during CONFIG
     // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
-    if(tool::get_config().kernel_replay)
+    //
+    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
+    // runs inside the profiled application's process during rocprofiler configuration, so exiting
+    // here would tear the application down mid-initialization and run static destructors and atexit
+    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
+    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
+    // skipping replay still produces a usable run, which beats killing the application.
+    if(tool::get_config().kernel_replay && !tool::get_config().counter_collection)
     {
-        if(!tool::get_config().counter_collection)
-        {
-            ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
-                          "(ROCPROF_COUNTER_COLLECTION)";
-            std::exit(EXIT_FAILURE);
-        }
-
+        ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
+                      "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
+    }
+    else if(tool::get_config().kernel_replay)
+    {
         auto kernel_replay_ctx = rocprofiler_context_id_t{0};
 
         ROCPROFILER_CALL(rocprofiler_create_context(&kernel_replay_ctx),
