@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "util/except.h"
 #include "util/log.h"
@@ -89,9 +90,13 @@ template <GpuIsa Isa> void validate_compute_unit_config(const ComputeUnitCore::C
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
     : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
-      wf_size_(wf_size), decoder_(Decoder::create(config.arch)), l2_(l2), l1_scalar_(l2),
-      l1_vector_(l2), lds_(config.lds_size_kb), scalar_mem_pipeline_(&l1_scalar_),
-      global_mem_pipeline_(&l1_vector_, l2), local_mem_pipeline_() {
+      wf_size_(wf_size),
+      decoder_(config.target == ROCJITSU_CODE_TARGET_INVALID
+                   ? Decoder::create(config.arch)
+                   : Decoder::create(default_isa_target_registry(), config.target)),
+      l2_(l2), l1_scalar_(l2), l1_vector_(l2), lds_(config.lds_size_kb),
+      scalar_mem_pipeline_(&l1_scalar_), global_mem_pipeline_(&l1_vector_, l2),
+      local_mem_pipeline_() {
   if (!decoder_)
     throw std::runtime_error("Unsupported architecture for ComputeUnit decoder");
 

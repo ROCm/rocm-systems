@@ -187,6 +187,74 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   rj_code_object_release(obj);
 }
 
+rj_status_t c_api_instruction_list_status(uint32_t mach_flag, rj_code_target_id_t target,
+                                          std::array<uint32_t, 2> words) {
+  const auto image = make_minimal_amdgpu_elf(mach_flag, words);
+  test::ScopedTempFile file("rj-code-object-target-cache-");
+  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+
+  rj_code_executable_t *exec = nullptr;
+  EXPECT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
+  if (exec == nullptr)
+    return ROCJITSU_STATUS_ERROR;
+  rj_code_object_t *obj = nullptr;
+  EXPECT_EQ(rj_code_executable_get_code_object(exec, target, 0, &obj), ROCJITSU_STATUS_SUCCESS);
+  if (obj == nullptr) {
+    rj_code_executable_destroy(exec);
+    return ROCJITSU_STATUS_ERROR;
+  }
+  rj_code_executable_destroy(exec);
+
+  rj_code_inst_list_t *instructions = nullptr;
+  const rj_status_t status = rj_code_inst_list_create(obj, target, &instructions);
+  if (instructions != nullptr)
+    rj_code_inst_list_destroy(instructions);
+  rj_code_object_destroy(obj);
+  rj_code_object_release(obj);
+  return status;
+}
+
+struct CApiListStatuses {
+  rj_status_t instructions;
+  rj_status_t basic_blocks;
+};
+
+CApiListStatuses c_api_list_statuses(uint32_t mach_flag, rj_code_target_id_t object_target,
+                                     rj_code_target_id_t decoder_target) {
+  const auto image = make_minimal_amdgpu_elf(mach_flag);
+  test::ScopedTempFile file("rj-code-object-target-mismatch-");
+  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+
+  rj_code_executable_t *exec = nullptr;
+  EXPECT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
+  if (exec == nullptr)
+    return {ROCJITSU_STATUS_ERROR, ROCJITSU_STATUS_ERROR};
+
+  rj_code_object_t *obj = nullptr;
+  EXPECT_EQ(rj_code_executable_get_code_object(exec, object_target, 0, &obj),
+            ROCJITSU_STATUS_SUCCESS);
+  if (obj == nullptr) {
+    rj_code_executable_destroy(exec);
+    return {ROCJITSU_STATUS_ERROR, ROCJITSU_STATUS_ERROR};
+  }
+
+  rj_code_inst_list_t *instructions = nullptr;
+  const rj_status_t instruction_status =
+      rj_code_inst_list_create(obj, decoder_target, &instructions);
+  if (instructions != nullptr)
+    rj_code_inst_list_destroy(instructions);
+
+  rj_code_basic_block_list_t *blocks = nullptr;
+  const rj_status_t block_status = rj_code_basic_block_list_create(obj, decoder_target, &blocks);
+  if (blocks != nullptr)
+    rj_code_basic_block_list_destroy(blocks);
+
+  rj_code_object_destroy(obj);
+  rj_code_object_release(obj);
+  rj_code_executable_destroy(exec);
+  return {instruction_status, block_status};
+}
+
 //==============================================================================
 // Machine flag -> target_id (one test per supported target)
 //==============================================================================
@@ -213,6 +281,30 @@ TEST(GfxCodeObjectTargets, LoadsGfx1201FromMachineFlags) {
 
 TEST(GfxCodeObjectTargets, LoadsGfx1250FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
+}
+
+TEST(GfxCodeObjectTargets, LoadsGfx1251FromMachineFlags) {
+  expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
+}
+
+TEST(GfxCodeObjectTargets, FatbinMetadataRequiresMatchingConcreteTargetIdentity) {
+  const auto gfx1250 = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const auto gfx1251 = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1251);
+
+  AmdGpuCodeObject matching(gfx1251.data(), gfx1251.size(), "hip", "gfx1251");
+  ASSERT_TRUE(matching.is_valid());
+  EXPECT_EQ(matching.target_id(), ROCJITSU_CODE_TARGET_GFX1251);
+
+  AmdGpuCodeObject gfx1250_as_gfx1251(gfx1250.data(), gfx1250.size(), "hip", "gfx1251");
+  EXPECT_FALSE(gfx1250_as_gfx1251.is_valid());
+
+  AmdGpuCodeObject gfx1251_as_gfx1250(gfx1251.data(), gfx1251.size(), "hip", "gfx1250");
+  EXPECT_FALSE(gfx1251_as_gfx1250.is_valid());
+
+  const auto unknown = make_minimal_amdgpu_elf(/*mach_flag=*/0x1234);
+  AmdGpuCodeObject legacy_fallback(unknown.data(), unknown.size(), "hip", "gfx1250");
+  ASSERT_TRUE(legacy_fallback.is_valid());
+  EXPECT_EQ(legacy_fallback.target_id(), ROCJITSU_CODE_TARGET_GFX1250);
 }
 
 // Machine flags outside the supported set must surface as
@@ -254,6 +346,49 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx1201ForBasicBlockList) {
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx1250ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
+}
+
+TEST(GfxCodeObjectTargets, CApiAcceptsGfx1251ForBasicBlockList) {
+  expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
+}
+
+TEST(GfxCodeObjectTargets, CApiDecoderCacheKeepsGfx1250AndGfx1251Distinct) {
+  constexpr std::array<uint32_t, 2> kGfx1251PackedAdd = {
+      0xCC4B4004u,
+      0x1A021908u,
+  };
+
+  // Populate the thread-local cache with gfx1251 first. A cache keyed only by
+  // the shared CDNA5 descriptor would then incorrectly accept this encoding
+  // for gfx1250.
+  EXPECT_EQ(c_api_instruction_list_status(EF_AMDGPU_MACH_AMDGCN_GFX1251,
+                                          ROCJITSU_CODE_TARGET_GFX1251, kGfx1251PackedAdd),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(c_api_instruction_list_status(EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                                          ROCJITSU_CODE_TARGET_GFX1250, kGfx1251PackedAdd),
+            ROCJITSU_STATUS_ERROR);
+}
+
+TEST(GfxCodeObjectTargets, CApiRejectsConcreteTargetMismatchForBothListBuilders) {
+  const CApiListStatuses gfx1250_as_gfx1251 = c_api_list_statuses(
+      EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251);
+  EXPECT_EQ(gfx1250_as_gfx1251.instructions, ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(gfx1250_as_gfx1251.basic_blocks, ROCJITSU_STATUS_INVALID_ARGUMENT);
+
+  const CApiListStatuses gfx1251_as_gfx1250 = c_api_list_statuses(
+      EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_EQ(gfx1251_as_gfx1250.instructions, ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(gfx1251_as_gfx1250.basic_blocks, ROCJITSU_STATUS_INVALID_ARGUMENT);
+
+  const CApiListStatuses matching = c_api_list_statuses(
+      EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
+  EXPECT_EQ(matching.instructions, ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(matching.basic_blocks, ROCJITSU_STATUS_SUCCESS);
+
+  const CApiListStatuses legacy_fallback = c_api_list_statuses(
+      /*mach_flag=*/0x1234, ROCJITSU_CODE_TARGET_INVALID, ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_EQ(legacy_fallback.instructions, ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(legacy_fallback.basic_blocks, ROCJITSU_STATUS_SUCCESS);
 }
 
 TEST(GfxCodeObjectTargets, CApiContainsInvalidInstructionFromListBuilders) {

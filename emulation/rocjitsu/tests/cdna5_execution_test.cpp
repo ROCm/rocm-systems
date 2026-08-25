@@ -3,10 +3,13 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/isa_features.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <cfenv>
@@ -1137,6 +1140,34 @@ TEST(Gfx1250LiteralOperandTest, PkF32LiteralReplicatesAndUsesAvailableSimdPath) 
   run_case(true);
   if constexpr (util::has_stdx_simd)
     run_case(false);
+}
+
+TEST(Gfx1251ModelLiteralOperandTest, PackedU32LiteralReplicatesBothLanes) {
+  constexpr uint32_t literal = 0x65u;
+  constexpr uint64_t replicated =
+      (static_cast<uint64_t>(literal) << 32) | static_cast<uint64_t>(literal);
+  // Public LLVM gfx1251_asm_vop3p.s encoding for
+  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19].
+  constexpr std::array<uint32_t, 3> words{0xCC7E4004u, 0x1C41FF08u, literal};
+
+  // The public gfx1251 provider deliberately has no execution backend. Link
+  // the existing operand backend directly for this isolated operand-read test;
+  // the gfx1251-only instruction still has no instruction execution callback.
+  auto decoder =
+      make_isa_decoder<cdna5::Isa>(&cdna5::execution_backend(), cdna5::kGfx1251IsaFeatures);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+  ASSERT_NE(decoded, nullptr);
+  EXPECT_EQ(decoded->execute, nullptr);
+  ASSERT_EQ(decoded->num_src_operands(), 3);
+  const Operand *packed_shift = decoded->src_operand(1);
+  ASSERT_NE(packed_shift, nullptr);
+
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(amdgpu::RegisterAccess(*wf).read_lane64(*packed_shift, 0), replicated);
 }
 
 TEST(Gfx1250LiteralOperandTest, PkF32MixedLiteralVgprSourcesUseAvailableSimdPath) {
