@@ -118,21 +118,26 @@ struct settings_policy
     }
 
     /**
-     * @brief Number of GPUs the ROCm runtime exposes.
+     * @brief Profiler GPU indices of the GPUs the HIP runtime exposes, in HIP ordinal
+     *        order.
      *
-     * Honors ROCR_VISIBLE_DEVICES / HIP_VISIBLE_DEVICES. Used by the hipFile collector,
-     * whose stats are indexed by GPU ordinal rather than discovered through an
-     * enumeration API.
+     * Element k is the device_type_index of HIP ordinal k, which is how hipFile indexes
+     * per_gpu_stats. See rocprofsys::gpu::get_visible_gpu_type_indices.
+     */
+    static std::vector<std::size_t> get_visible_gpu_type_indices()
+    {
+        return rocprofsys::gpu::get_visible_gpu_type_indices();
+    }
+
+    /**
+     * @brief Number of GPUs the HIP runtime exposes.
      *
-     * Derived from the same visible-BDF set the GPU collector filters on, so the two
-     * agree on which GPUs exist. std::nullopt means the runtime reported no agents at
-     * all, which is indistinguishable from having no GPUs as far as GPU-direct storage
-     * I/O is concerned, so it reports zero.
+     * Size of @c get_visible_gpu_type_indices(). std::nullopt from the BDF helper is
+     * treated as zero: hipFile has no slots to read.
      */
     static std::size_t get_visible_gpu_count()
     {
-        const auto visible = get_visible_gpu_bdfs();
-        return visible.has_value() ? visible->size() : 0U;
+        return get_visible_gpu_type_indices().size();
     }
 
     /**

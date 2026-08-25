@@ -46,7 +46,7 @@ struct cache_policy
      * Runs at config() time for the whole enumerated device set, so track metadata no
      * longer appears lazily on first activity.
      *
-     * @param gpu_id GPU ordinal.
+     * @param gpu_id Profiler GPU index (@c device_type_index).
      */
     static void initialize_pmc_metadata(std::size_t gpu_id)
     {
@@ -78,7 +78,7 @@ struct cache_policy
     /**
      * @brief Store one GPU's hipFile sample.
      *
-     * @param device_id GPU ordinal.
+     * @param device_id Profiler GPU index (@c device_type_index).
      * @param enabled_metrics_cfg Metrics enabled by configuration.
      * @param supported_metrics Metrics this device can supply.
      * @param metric_values Collected values.

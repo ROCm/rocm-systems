@@ -18,11 +18,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   defaults to `fastpath, fallback, bandwidth, bytes, errors` and accepts `all`, `none`, or any of
   `bytes`, `ops`, `fastpath`, `fallback`, `unaligned`, `errors`, and `bandwidth`;
   select GPUs with `ROCPROFSYS_SAMPLING_GPUS`. Requires hipFile 0.5.0 or later, which
-  is where the per-GPU statistics API first appears; the build is disabled
-  automatically when no such package is found, and the same minimum is re-checked
-  against the hipFile runtime actually loaded into the process. Support is built by
-  default (`-DROCPROFSYS_BUILD_HIPFILE=ON`) whenever a suitable package is present and
-  can be excluded from a package with `-DROCPROFSYS_BUILD_HIPFILE=OFF`; collection is
+  is where the per-GPU statistics API first appears. `ROCPROFSYS_BUILD_HIPFILE`
+  is tri-state (`AUTO` / `ON` / `OFF`, default `AUTO`): missing or too-old hipFile
+  skips the collector with a status message under `AUTO`, fails configure under
+  `ON`, and is never searched for under `OFF`. The same minimum is re-checked
+  against the hipFile runtime actually loaded into the process. Collection is
   then enabled per run with `ROCPROFSYS_USE_HIPFILE=ON` (requires a target application
   that uses hipFile). See
   [hipFile GPU-direct storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
