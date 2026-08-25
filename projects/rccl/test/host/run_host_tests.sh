@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build and run the RCCL CPU-only host unit tests (rccl-HostUnitTests).
+# Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
+# host-only microtests (rccl-UnitTestsMicro, rccl-UnitTestsMicroInit[-uncached]).
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
@@ -20,8 +21,8 @@
 #   hipify          build the hipify_all target -> stages build/hipify/src, the
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
-#   build           build rccl-HostUnitTests
-#   run             run the suite (timestamped log + JUnit XML)
+#   build           build all host binaries (default target)
+#   run             run every host binary (timestamped log + per-binary JUnit XML)
 #   all             rccl-configure -> hipify -> configure -> build -> run
 #
 # Knobs (environment variables, all optional):
@@ -90,18 +91,42 @@ do_build() {
 do_host_tests() {
   echo "==> Run  (filter: $GTEST_FILTER)"
   # Prepend a real-UTC timestamp to each line via `ts` (moreutils) when available,
-  # tee the full stdout+stderr to LOG_FILE, and preserve the test binary's exit
-  # code (pipefail) so a failure still fails CI.
+  # tee the full stdout+stderr to LOG_FILE, and preserve each binary's exit code
+  # (pipefail) so a failure still fails CI.
   local stamp
   if command -v ts >/dev/null 2>&1; then
     stamp=(env TZ=UTC ts '%Y-%m-%dT%H:%M:%.SZ')
   else
     stamp=(cat)
   fi
-  "$BUILD_DIR/rccl-HostUnitTests" \
-    --gtest_filter="$GTEST_FILTER" \
-    --gtest_output="xml:$XML_FILE" \
-    --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee "$LOG_FILE"
+
+  # Every host binary the build produces. Each writes its own JUnit XML
+  # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
+  # rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
+  local -a binaries=(
+    "rccl-HostUnitTests:$XML_FILE"
+    "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
+    "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
+    "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
+  )
+
+  : > "$LOG_FILE"   # truncate; each binary appends below
+  local rc=0 entry name xml
+  for entry in "${binaries[@]}"; do
+    name="${entry%%:*}"
+    xml="${entry#*:}"
+    if [ ! -x "$BUILD_DIR/$name" ]; then
+      echo "ERROR: expected binary not built: $BUILD_DIR/$name" | tee -a "$LOG_FILE"
+      rc=1
+      continue
+    fi
+    echo "----- $name -----" | tee -a "$LOG_FILE"
+    "$BUILD_DIR/$name" \
+      --gtest_filter="$GTEST_FILTER" \
+      --gtest_output="xml:$xml" \
+      --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee -a "$LOG_FILE" || rc=1
+  done
+  return "$rc"
 }
 
 # Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so

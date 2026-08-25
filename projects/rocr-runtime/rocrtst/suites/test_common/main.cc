@@ -494,7 +494,6 @@ TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
 
 // Trap Handler Tests (SWDEV-209233)
 // Tests s_trap instruction handling and queue error callbacks.
-// Working tests: NoTrap, Abort, Generic (validated on MI300X gfx942)
 
 TEST(rocrtstFunc, TrapHandler_NoTrap) {
     TrapHandlerTest th;

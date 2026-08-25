@@ -376,24 +376,22 @@ public:
 
 class VMfmaF3216x16x128F8f6f4Vop3pMfma : public Vop3pMfma {
 public:
-  VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst, bool has_vop3px2_prefix = false);
+  VMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  std::array<uint32_t, 4> raw_words_{};
 };
 
 class VMfmaF3232x32x64F8f6f4Vop3pMfma : public Vop3pMfma {
 public:
-  VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst, bool has_vop3px2_prefix = false);
+  VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
   Operand src1;
   Operand src2;
-  std::array<uint32_t, 4> raw_words_{};
 };
 
 class VMfmaF3216x16x32Bf16Vop3pMfma : public Vop3pMfma {
@@ -1034,6 +1032,38 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+};
+
+class VMfmaScaleF3216x16x128F8f6f4Vop3px2 : public Vop3pMfma {
+public:
+  VMfmaScaleF3216x16x128F8f6f4Vop3px2(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  Operand scale_src0;
+  Operand scale_src1;
+
+private:
+  std::array<uint32_t, 4> raw_words_{};
+};
+
+class VMfmaScaleF3232x32x64F8f6f4Vop3px2 : public Vop3pMfma {
+public:
+  VMfmaScaleF3232x32x64F8f6f4Vop3px2(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+
+  Operand vdst;
+  Operand src0;
+  Operand src1;
+  Operand src2;
+  Operand scale_src0;
+  Operand scale_src1;
+
+private:
+  std::array<uint32_t, 4> raw_words_{};
 };
 
 } // namespace cdna4

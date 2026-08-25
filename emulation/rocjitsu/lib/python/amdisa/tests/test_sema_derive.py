@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from amdisa.isa_profile import Cdna5Profile
 from amdisa.semantics import derive_semantics
 from amdisa.sema_ast import (
     ExecModel,
@@ -720,10 +721,10 @@ class TestDeriveScalarMovrel:
 
 
 class TestDeriveScalarSplitBarrier:
-    def test_barrier_wait_derives_current_workgroup_barrier_model(self):
+    def test_barrier_wait_derives_barrier_wait_model(self):
         sem = derive_semantics('S_BARRIER_WAIT', 'ENC_SOPP')
         assert sem is not None
-        assert sem.semantic_class == 'barrier'
+        assert sem.semantic_class == 'scalar_barrier_wait'
         assert sem.sets_scc is None
 
     def test_get_barrier_state_derives_idle_state_read(self):
@@ -734,19 +735,30 @@ class TestDeriveScalarSplitBarrier:
         assert sem.sets_scc is None
 
     @pytest.mark.parametrize(
-        'name',
+        ('name', 'semantic_class', 'operation'),
         [
-            'S_BARRIER_SIGNAL',
-            'S_BARRIER_SIGNAL_ISFIRST',
-            'S_BARRIER_INIT',
-            'S_BARRIER_JOIN',
-            'S_WAKEUP_BARRIER',
+            ('S_BARRIER_SIGNAL', 'scalar_barrier_signal', 'signal'),
+            ('S_BARRIER_SIGNAL_ISFIRST', 'scalar_barrier_signal', 'signal_isfirst'),
+            ('S_BARRIER_INIT', 'scalar_barrier_init', None),
+            ('S_BARRIER_JOIN', 'scalar_barrier_join', None),
+            ('S_WAKEUP_BARRIER', 'true_nop', None),
         ],
     )
-    def test_named_barrier_ops_derive_current_noop_model(self, name):
+    def test_named_barrier_ops_derive_execution_model(
+        self, name, semantic_class, operation
+    ):
         sem = derive_semantics(name, 'ENC_SOP1')
         assert sem is not None
-        assert sem.semantic_class == 'true_nop'
+        assert sem.semantic_class == semantic_class
+        assert sem.operation == operation
+        if name == 'S_BARRIER_SIGNAL_ISFIRST':
+            assert sem.sets_scc == 'nonzero'
+
+    def test_barrier_leave_derives_execution_model(self):
+        sem = derive_semantics('S_BARRIER_LEAVE', 'ENC_SOPP')
+        assert sem is not None
+        assert sem.semantic_class == 'scalar_barrier_leave'
+        assert sem.sets_scc == 'nonzero'
 
 
 class TestDeriveVectorUnary:
@@ -1118,7 +1130,7 @@ class TestDeriveVectorUnary:
             enc_field_names={'opsel'},
             encoding_map=None,
             enc_name='',
-            arch_name='gfx1250',
+            arch_name='cdna5',
         )
 
         cpp = gen_cvt_fp8(ctx)
@@ -1445,7 +1457,7 @@ class TestDeriveVectorUnary:
             ['src0', 'src1'],
             sem.semantic_class,
             sem.operation,
-            arch_name='gfx1250',
+            arch_name='cdna5',
         )
         assert 'util::f32_to_fp8_e4m3_rne_mode(value, wf.fp16_ovfl())' in cpp
 
@@ -2020,14 +2032,15 @@ class TestDeriveFlatLoad:
         [
             ('GLOBAL_LOAD_TR4_B64', 2, 1),
             ('GLOBAL_LOAD_TR6_B96', 3, 2),
-            ('GLOBAL_LOAD_TR8_B64', 2, 3),
-            ('GLOBAL_LOAD_TR_B64', 2, 3),
+            ('GLOBAL_LOAD_TR8_B64', 2, 6),
+            ('GLOBAL_LOAD_B64_TR_B8', 2, 6),
+            ('GLOBAL_LOAD_TR_B64', 2, 6),
             ('GLOBAL_LOAD_TR16_B128', 4, 4),
             ('GLOBAL_LOAD_TR_B128', 4, 4),
         ],
     )
     def test_gfx1250_global_transpose_loads(self, name, num_elems, transpose_kind):
-        sem = derive_semantics(name, 'ENC_VGLOBAL')
+        sem = derive_semantics(name, 'ENC_VGLOBAL', Cdna5Profile())
         assert sem is not None
         assert sem.semantic_class == 'flat_load'
         assert sem.elem_size == 4
@@ -2233,7 +2246,7 @@ class TestDeriveDsRead:
     def test_gfx1250_ds_transpose_loads(
         self, name, semantic_class, num_elems, transpose_kind
     ):
-        sem = derive_semantics(name, 'ENC_DS')
+        sem = derive_semantics(name, 'ENC_DS', Cdna5Profile())
         assert sem is not None
         assert sem.semantic_class == semantic_class
         assert sem.elem_size == 4

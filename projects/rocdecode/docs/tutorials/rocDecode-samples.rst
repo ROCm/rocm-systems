@@ -11,7 +11,7 @@ rocDecode samples are available in the `rocDecode GitHub repository <https://git
 Linux setup
 -----------
 
-To run the samples on Linux, set the ``ROCM_PATH`` to point to the location of your ROCm installation:
+The ``ROCM_PATH`` environment variable must point to the location of your ROCm installation to use the samples.
 
 .. code:: shell
 

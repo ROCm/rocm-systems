@@ -123,9 +123,17 @@ if(TARGET amd_smi)
   check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
   cmake_pop_check_state()
 
-  # Check if HIP runtime has hipMemFabricHandle_t
+  find_path(_hip_include_dir
+    hip/hip_runtime_api.h
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+  )
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+  if(_hip_include_dir)
+    set(CMAKE_REQUIRED_INCLUDES ${_hip_include_dir})
+  endif()
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
   check_cxx_source_compiles("
     #include <hip/hip_runtime_api.h>
     int main() {

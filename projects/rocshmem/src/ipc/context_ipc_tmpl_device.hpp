@@ -727,7 +727,6 @@ __device__ int IPCContext::reduce_scatter_wave(rocshmem_team_t team, T *dest,
       }
     }
     
-    // Sync with wave 0 of other PEs
     sync_wave(team);
     __builtin_amdgcn_wave_barrier();
 

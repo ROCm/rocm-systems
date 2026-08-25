@@ -84,6 +84,7 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
+option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
 option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
@@ -108,8 +109,19 @@ option(QP_TRACKING                             "Enable per-device QP tracking"  
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
-option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
+# rocSHMEM integration (mutually exclusive — enabling both causes duplicate
+# rocshmem state between librccl.so and the executable at runtime):
+#   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
+#     via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
+#   ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
+#     resolved via per-arch bitcode injection; host symbols resolved at runtime
+#     from the executable.  Does not enable alltoall_wg offload.
+option(ENABLE_ROCSHMEM                         "Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "GIN plugins: device bitcode injected at build, host resolved at runtime" OFF)
+if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
+  message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
+endif()
+set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
@@ -664,6 +676,12 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 #==================================================================================================
 # Source directory contains library creation
 add_subdirectory(src)
+
+# NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
+# NCCL_PROFILER_PLUGIN; the MPI tests pick up the in-tree build automatically.
+if(BUILD_PROFILER_INSPECTOR)
+  add_subdirectory(plugins/profiler/inspector)
+endif()
 
 # LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
 #==================================================================================================

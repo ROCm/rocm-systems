@@ -82,7 +82,6 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/inc/amd_topology.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/host_queue.h"
-#include "core/inc/hotswap.hpp"
 #include "core/inc/hsa_api_trace_int.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_ext_interface.h"
@@ -980,7 +979,7 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
 
   asyncInfo->new_events.PushBack(signal, cond, value, handler, arg);
 
-  hsa_signal_handle(asyncInfo->control.wake)->StoreRelease(1);
+  hsa_signal_handle(asyncInfo->control.wake)->StoreReleaseAndNotify(1);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -1774,11 +1773,11 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       mem_flags.Value = 0;
       mem_flags.ui32.CoarseGrain = 1;
       mem_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
+      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
         mem_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags, numNodes,
-                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
+        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, mem_flags,
+                                                  numNodes, nodes)) != HSAKMT_STATUS_SUCCESS) {
           HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
@@ -2634,7 +2633,6 @@ hsa_status_t Runtime::Load() {
   }
 
   flag_.Refresh();
-  hotswap::ConfigureHotswapBackend();
 
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
@@ -3099,11 +3097,11 @@ void Runtime::LoadTools() {
   }
 }
 
-// Load the rocjitsu backend through the existing HSA tool lifecycle. Keeping
-// its handle in tool_libs_ gives it the normal reverse-order OnUnload and
-// CloseTools handling without dedicated runtime state.
+// Load the rocjitsu hotswap hook through the existing HSA tool lifecycle.
+// Keeping its handle in tool_libs_ gives it the normal reverse-order OnUnload
+// and CloseTools handling without dedicated runtime state.
 hsa_status_t Runtime::LoadHotswapTool() {
-  if (!hotswap::IsRocjitsuHotswapEnabled()) return HSA_STATUS_SUCCESS;
+  if (flag().hotswap_disable()) return HSA_STATUS_SUCCESS;
 
   bool has_gfx1250_a0_agent = false;
   for (const Agent* agent : gpu_agents_) {
@@ -3215,7 +3213,7 @@ void Runtime::CloseTools() {
 
 void Runtime::AsyncEventsControl::Shutdown() {
   exit.store(true, std::memory_order_release);
-  hsa_signal_handle(wake)->StoreRelaxed(1);
+  hsa_signal_handle(wake)->StoreReleaseAndNotify(1);
   os::WaitForThread(thread_);
   os::CloseThread(thread_);
   thread_ = NULL;
@@ -4109,6 +4107,19 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
   memory_handles.erase(MemoryHandle::Convert(handle));
 }
 
+Agent* Runtime::LowestDrmMinorGpu() {
+  auto drm_minor = [](const core::Agent* a) {
+    return static_cast<const AMD::GpuAgent*>(a)->properties().DrmRenderMinor;
+  };
+  core::Agent* selected = nullptr;
+  for (const auto* pool : {&gpu_agents_, &disabled_gpu_agents_}) {
+    for (auto* candidate : *pool) {
+      if (selected == nullptr || drm_minor(candidate) < drm_minor(selected)) selected = candidate;
+    }
+  }
+  return selected;
+}
+
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
                                           MemoryRegion::AllocateFlags alloc_flags,
                                           uint64_t flags_unused,
@@ -4133,12 +4144,11 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (gpus.empty()) {
+      agent_for_drm = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      if (agent_for_drm == nullptr) {
         region->Free(driver_handle);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
-      agent_for_drm = gpus.front();
       drm_owner = agent_for_drm;
     }
 
@@ -4345,9 +4355,9 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     /* For imported handles, we don't have a region/owner, but we can use any GPU agent for mmap.
      * The driver_handle created during import should have the correct mmap_offset. */
     if (mappedHandle->mem_handle->imported) {
-      const auto& gpus = core::Runtime::runtime_singleton_->gpu_agents();
-      if (!gpus.empty()) {
-        agent = gpus.front();
+      core::Agent* drm_agent = core::Runtime::runtime_singleton_->LowestDrmMinorGpu();
+      if (drm_agent != nullptr) {
+        agent = drm_agent;
         agent->driver().GetDeviceFd(agent->node_id(), &mmap_fd);
       }
     } else if (mappedHandle->mem_handle->region) {
