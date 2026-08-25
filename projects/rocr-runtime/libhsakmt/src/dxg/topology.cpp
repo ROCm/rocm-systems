@@ -896,27 +896,12 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.WaveFrontSize = device->WavefrontSize();
   props.NumShaderBanks = device->NumShaderEngine();
   props.NumArrays = device->ShaderArrayPerShaderEngine();
-  /* NumArrays counts shader arrays per shader engine, so the number of arrays
-   * on the whole GPU is NumShaderBanks * NumArrays. Dividing the CU count by
-   * NumArrays alone over-reports NumCUPerArray by the shader engine count on
-   * every multi-SE part (128 CU / 4 SE / 2 arrays per SE is 16 CU per array,
-   * not 64), which is the same relation KFD reports on bare metal.
-   */
-  {
-    const uint32_t total_arrays = props.NumShaderBanks * props.NumArrays;
-    if (total_arrays == 0) {
-      pr_warn("NumShaderBanks(%u)*NumArrays(%u) is 0 for node %u, forcing "
-              "NumCUPerArray to 0\n",
-              props.NumShaderBanks, props.NumArrays, node_id);
-      props.NumCUPerArray = 0;
-    } else {
-      const uint32_t cu_count = device->ComputeUnitCount();
-      if (cu_count % total_arrays != 0)
-        pr_warn("ComputeUnitCount(%u) is not a multiple of the %u shader "
-                "arrays on node %u; NumCUPerArray is truncated\n",
-                cu_count, total_arrays, node_id);
-      props.NumCUPerArray = cu_count / total_arrays;
-    }
+  if (props.NumArrays == 0) {
+    pr_warn("NumArrays is 0 for node %u, forcing NumCUPerArray to 0\n",
+            node_id);
+    props.NumCUPerArray = 0;
+  } else {
+    props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
   }
   props.NumSIMDPerCU = simd_per_cu;
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
@@ -960,18 +945,7 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.Domain = device->Domain();
   props.UniqueID = device->Uuid();
   props.NumXcc = device->NumXcc();
-  /* KFDGpuID has to be unique per GPU and nonzero: the rest of this file uses
-   * it both as the "this node is a GPU" predicate and as the key that
-   * gpuid_to_nodeid() and get_device_id_by_gpu_id() invert. The PCI device id
-   * satisfies neither on a machine with two identical GPUs - both nodes would
-   * claim the same id and the reverse lookups would always resolve to the
-   * first one. The node ordinal is unique by construction and stable for the
-   * life of the snapshot, which is the only scope these lookups span. It is
-   * never handed to the KMD, so it does not have to match any driver-side id.
-   * Bias by one so a GPU can never land on the reserved 0 even if this system
-   * somehow reports no NUMA nodes ahead of the GPU nodes.
-   */
-  props.KFDGpuID = node_id + 1;
+  props.KFDGpuID = device->DeviceId();  // TODO
   props.FamilyID = device->GfxFamily();
   props.LuidLowPart = device->GetLuid().LowPart;
   props.LuidHighPart = device->GetLuid().HighPart;

@@ -732,17 +732,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
 
   return result;
 dxcore_loader_failed:
-  /* Drop the descriptor we just took and forget it. dxg_open_count is still 0,
-   * so nobody else owns it, and leaving dxg_fd pointing at a closed descriptor
-   * makes the next hsaKmtOpenKFD() skip the reopen above and hand out a stale
-   * fd. Note the DxcoreLoader itself latches its result behind a std::once_flag
-   * and so cannot be retried in this process regardless.
-   */
 #if defined(__linux__)
-  if (dxg_runtime->dxg_fd >= 0)
-    close(dxg_runtime->dxg_fd);
+  close(fd);
 #endif
-  dxg_runtime->dxg_fd = -1;
 open_failed:
 
   return result;

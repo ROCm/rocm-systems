@@ -85,10 +85,9 @@ add_test(NAME dxg-installed-header-cxx COMMAND dxg-installed-header-cxx-test)
 # the version script both still read correctly, and nothing at link time would
 # notice, because ROCr binds every one of these by name at run time.
 #
-# The name is given here rather than parsed out of the version script, so that
+# The names are given here rather than parsed out of the version script, so
 # deleting an entry there fails here rather than quietly narrowing the
-# contract. hsaKmtGetNodeProperties stands for the table: it is the entry point
-# whose record both ROCr and rocprofiler-sdk read.
+# five-call contract shared by ROCr and rocprofiler-sdk.
 #
 # Requires nm, which a cross-build might not have.
 if(CMAKE_NM)
@@ -97,7 +96,8 @@ if(CMAKE_NM)
         COMMAND
             ${CMAKE_COMMAND} -DLIBRARY=$<TARGET_FILE:${ROCDXG_TARGET}>
             -DNM=${CMAKE_NM} -DEXPECTED_VERSION=HSAKMT_1
-            -DEXPECTED_SYMBOLS=hsaKmtGetNodeProperties -P
+            -DEXPECTED_SYMBOLS=hsaKmtOpenKFD,hsaKmtCloseKFD,hsaKmtAcquireSystemProperties,hsaKmtReleaseSystemProperties,hsaKmtGetNodeProperties
+            -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_dynamic_exports.cmake
     )
 else()
