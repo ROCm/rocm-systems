@@ -430,15 +430,14 @@ the signal available today. A structured detection mechanism remains an open que
 
 A diagnostic must name the specific unmet condition.
 
-| A diagnostic must identify |
-| --- | --- |
-| Selected replay mode and backend | 
-| Multi-rank detection under kernel replay |
-| SDK capability and agent | 
-| Counter-to-pass mapping |
-| Which failure occurred: option conflict, unavailable native collection, missing profile, snapshot decline, or upstream abort |
-| That partial results are unusable |
-| A recommendation of application replay, on snapshot decline |
+ A diagnostic must identify :
+- Selected replay mode and backend
+- Multi-rank detection under kernel replay
+- SDK capability and agent
+- Counter-to-pass mapping
+- Which failure occurred: option conflict, unavailable native collection, missing profile, snapshot decline, or upstream abort
+- That partial results are unusable
+- snapshot decline and recommend application replay
 
 ## Open questions
 
