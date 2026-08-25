@@ -448,6 +448,13 @@ register reason, container ownership, kernel/function scope, text offset, and
 mnemonic. Only `NotApplicable` records are omitted, preventing unrelated
 instructions from adding noise while preserving exact patched eligibility.
 
+The detailed post-transform report can contain hundreds of thousands of site,
+inventory, and patch-proof rows for a production code object. The logger
+formats each row independently to preserve the stable textual contract, then
+coalesces complete rows into bounded output batches. This keeps memory bounded,
+does not split a record, and amortizes synchronization and output operations
+across many records.
+
 The user-facing vocabulary and exact names are listed in
 [USAGE.md](USAGE.md#coverage-and-diagnostics).
 

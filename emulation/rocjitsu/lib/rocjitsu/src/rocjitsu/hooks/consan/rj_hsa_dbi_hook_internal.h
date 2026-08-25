@@ -1044,6 +1044,7 @@ void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executa
 [[nodiscard]] AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core);
 
 using ConSanTransformOverride = ConSanResult (*)(std::span<const uint8_t>, const ConSanOptions &);
+using LogSinkOverride = void (*)(const char *, size_t);
 
 extern std::atomic<int> g_log_level;
 extern std::atomic<uint64_t> g_dump_sequence;

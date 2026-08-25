@@ -75,6 +75,7 @@ static_assert(sizeof(AmdLoaderExtTable103) == 56);
 
 std::atomic<int> g_log_level{kLogDisabled};
 std::atomic<uint64_t> g_dump_sequence{0};
+std::atomic<LogSinkOverride> g_test_log_sink_override{nullptr};
 
 [[nodiscard]] bool consan_log_level_enabled(int required_level) {
   return g_log_level.load(std::memory_order_relaxed) >= required_level;
@@ -905,22 +906,106 @@ void disable_fault_mutations(rocjitsu::ConSanOptions *options) {
   rocjitsu::disable_consan_fault_mutations(*options);
 }
 
+namespace {
+
+constexpr std::string_view kLogPrefix = "[rocjitsu-dbi-hooks] ";
+constexpr size_t kDetailedLogBatchBytes = 1024u * 1024u;
+
+void write_log_bytes_locked(std::string_view bytes) {
+  if (const LogSinkOverride sink = g_test_log_sink_override.load(std::memory_order_acquire)) {
+    sink(bytes.data(), bytes.size());
+    return;
+  }
+  std::fwrite(bytes.data(), 1, bytes.size(), stderr);
+}
+
+[[nodiscard]] std::string format_log_line(const char *format, va_list args) {
+  va_list measure_args;
+  va_copy(measure_args, args);
+  const int payload_size = std::vsnprintf(nullptr, 0, format, measure_args);
+  va_end(measure_args);
+  if (payload_size < 0)
+    return std::string(kLogPrefix) + "log formatting failed\n";
+
+  std::string line(kLogPrefix);
+  const size_t payload_offset = line.size();
+  line.resize(payload_offset + static_cast<size_t>(payload_size) + 1u);
+  std::vsnprintf(line.data() + payload_offset, static_cast<size_t>(payload_size) + 1u, format,
+                 args);
+  line.back() = '\n';
+  return line;
+}
+
+class ScopedDetailedLogBatch;
+thread_local ScopedDetailedLogBatch *g_active_detailed_log_batch = nullptr;
+
+class ScopedDetailedLogBatch {
+public:
+  ScopedDetailedLogBatch() : previous_(g_active_detailed_log_batch) {
+    if (previous_ != nullptr)
+      previous_->flush();
+    g_active_detailed_log_batch = this;
+  }
+
+  ScopedDetailedLogBatch(const ScopedDetailedLogBatch &) = delete;
+  ScopedDetailedLogBatch &operator=(const ScopedDetailedLogBatch &) = delete;
+
+  ~ScopedDetailedLogBatch() {
+    flush();
+    g_active_detailed_log_batch = previous_;
+  }
+
+  void append(std::string_view line) {
+    if (line.size() > kDetailedLogBatchBytes) {
+      flush();
+      std::lock_guard lock(log_mutex());
+      write_log_bytes_locked(line);
+      return;
+    }
+    if (buffer_.size() + line.size() > kDetailedLogBatchBytes)
+      flush();
+    buffer_.append(line);
+  }
+
+  void flush() {
+    if (buffer_.empty())
+      return;
+    std::lock_guard lock(log_mutex());
+    write_log_bytes_locked(buffer_);
+    buffer_.clear();
+  }
+
+private:
+  ScopedDetailedLogBatch *previous_ = nullptr;
+  std::string buffer_;
+};
+
+void flush_detailed_log_batch() {
+  if (g_active_detailed_log_batch != nullptr)
+    g_active_detailed_log_batch->flush();
+}
+
+} // namespace
+
 void log_message(int required_level, const char *format, ...) {
   if (g_log_level.load(std::memory_order_relaxed) < required_level)
     return;
 
-  std::lock_guard lock(log_mutex());
-  std::fprintf(stderr, "[rocjitsu-dbi-hooks] ");
-
   va_list args;
   va_start(args, format);
-  std::vfprintf(stderr, format, args);
+  std::string line = format_log_line(format, args);
   va_end(args);
 
-  std::fprintf(stderr, "\n");
+  if (g_active_detailed_log_batch != nullptr) {
+    g_active_detailed_log_batch->append(line);
+    return;
+  }
+  std::lock_guard lock(log_mutex());
+  write_log_bytes_locked(line);
 }
 
 void emit_evidence_message(const char *format, ...) {
+  flush_detailed_log_batch();
   std::lock_guard lock(log_mutex());
   std::fprintf(stderr, "[rocjitsu-dbi-hooks] ");
 
@@ -936,6 +1021,7 @@ void emit_evidence_message(const char *format, ...) {
 void emit_fault_summary_message(bool required_evidence, const char *format, ...) {
   if (!required_evidence && g_log_level.load(std::memory_order_relaxed) < kLogInfo)
     return;
+  flush_detailed_log_batch();
   std::lock_guard lock(log_mutex());
   std::fprintf(stderr, "[rocjitsu-dbi-hooks] ");
 
@@ -4329,6 +4415,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       install_action = rocjitsu::ConSanInstallAction::LoadOriginal;
     }
 
+    // A large production object may produce hundreds of thousands of detailed
+    // inventory, coverage, and patch-proof records below. Preserve the stable
+    // line-oriented format while amortizing the stderr lock and write cost.
+    ScopedDetailedLogBatch detailed_log_batch;
     log_message(
         kLogInfo,
         "ConSan inventory reader=%llu flavor=%s moi_engine=%s bytes=%zu visited=%s modified=%s "
@@ -5370,6 +5460,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   patch.sampled_window_bank_count,
                   static_cast<uint32_t>(patch.sampled_access_kind));
     }
+    detailed_log_batch.flush();
     if (config->require_patch && !config->fault_dry_run &&
         !has_consan_site_instrumentation_patch(patch_result)) {
       const bool required = (patch_options.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
@@ -5627,6 +5718,10 @@ extern "C" RJ_HOOK_EXPORT void
 rj_dbi_test_set_consan_transform_override(ConSanTransformOverride override) {
   g_test_consan_transform_override.store(override, std::memory_order_release);
   g_test_consan_moi_retry_count.store(0, std::memory_order_relaxed);
+}
+
+extern "C" RJ_HOOK_EXPORT void rj_dbi_test_set_log_sink_override(LogSinkOverride override) {
+  g_test_log_sink_override.store(override, std::memory_order_release);
 }
 
 extern "C" RJ_HOOK_EXPORT size_t rj_dbi_test_consan_moi_retry_count() {

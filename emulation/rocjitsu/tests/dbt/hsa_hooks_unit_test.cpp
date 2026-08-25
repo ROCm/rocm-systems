@@ -466,6 +466,10 @@ std::vector<uint64_t> g_loaded_code_object_readers;
 std::vector<std::pair<uint64_t, uint64_t>> g_loaded_executable_readers;
 rocjitsu::ConSanResult g_transform_override_result;
 std::deque<rocjitsu::ConSanResult> g_transform_override_results;
+size_t g_log_sink_write_count = 0;
+size_t g_log_sink_max_write_size = 0;
+bool g_log_sink_writes_end_in_newline = true;
+std::string g_log_sink_bytes;
 std::vector<rocjitsu::ConSanFlavor> g_transform_override_flavors;
 std::vector<rocjitsu::ConSanMoiEngine> g_transform_override_engines;
 std::vector<bool> g_transform_override_abort_unmatched_waits;
@@ -523,6 +527,13 @@ std::vector<size_t> g_fake_allocation_sizes;
 std::vector<void *> g_fake_freed_allocations;
 std::array<hsa_kernel_dispatch_packet_t, 4> g_fake_queue_packets{};
 hsa_queue_t g_fake_queue{};
+
+void capture_log_sink(const char *bytes, size_t size) {
+  ++g_log_sink_write_count;
+  g_log_sink_max_write_size = std::max(g_log_sink_max_write_size, size);
+  g_log_sink_writes_end_in_newline &= size != 0u && bytes[size - 1u] == '\n';
+  g_log_sink_bytes.append(bytes, size);
+}
 std::array<hsa_kernel_dispatch_packet_t, 4> g_fake_batch_queue_packets{};
 hsa_queue_t g_fake_batch_queue{};
 int g_fake_amd_queue_create_calls = 0;
@@ -1656,10 +1667,12 @@ public:
     on_unload_ = reinterpret_cast<OnUnloadFn>(dlsym(library_, "OnUnload"));
     set_override_ = reinterpret_cast<SetOverrideFn>(
         dlsym(library_, "rj_dbi_test_set_consan_transform_override"));
+    set_log_sink_override_ = reinterpret_cast<SetLogSinkOverrideFn>(
+        dlsym(library_, "rj_dbi_test_set_log_sink_override"));
     moi_retry_count_ =
         reinterpret_cast<MoiRetryCountFn>(dlsym(library_, "rj_dbi_test_consan_moi_retry_count"));
     if (on_load_ == nullptr || on_unload_ == nullptr || set_override_ == nullptr ||
-        moi_retry_count_ == nullptr) {
+        set_log_sink_override_ == nullptr || moi_retry_count_ == nullptr) {
       error_ = dlerror();
       return;
     }
@@ -1672,6 +1685,8 @@ public:
   }
   ~InstalledDbiHook() {
     unload();
+    if (set_log_sink_override_ != nullptr)
+      set_log_sink_override_(nullptr);
     if (set_override_ != nullptr)
       set_override_(nullptr);
     if (library_ != nullptr)
@@ -1682,6 +1697,9 @@ public:
   [[nodiscard]] bool installed() const { return installed_; }
   [[nodiscard]] const std::string &error() const { return error_; }
   [[nodiscard]] size_t moi_retry_count() const { return moi_retry_count_(); }
+  void set_log_sink_override(rocjitsu::consan_hook::LogSinkOverride sink) {
+    set_log_sink_override_(sink);
+  }
   void unload() {
     if (on_unload_ != nullptr && needs_unload_) {
       on_unload_();
@@ -1713,12 +1731,14 @@ private:
   using OnLoadFn = bool (*)(HsaApiTable *, uint64_t, uint64_t, const char *const *);
   using OnUnloadFn = void (*)();
   using SetOverrideFn = void (*)(ConSanTransformOverride);
+  using SetLogSinkOverrideFn = void (*)(rocjitsu::consan_hook::LogSinkOverride);
   using MoiRetryCountFn = size_t (*)();
   rocjitsu::test::ScopedTempDirectory runtime_dir_;
   void *library_ = nullptr;
   OnLoadFn on_load_ = nullptr;
   OnUnloadFn on_unload_ = nullptr;
   SetOverrideFn set_override_ = nullptr;
+  SetLogSinkOverrideFn set_log_sink_override_ = nullptr;
   MoiRetryCountFn moi_retry_count_ = nullptr;
   bool installed_ = false;
   bool needs_unload_ = false;
@@ -3886,7 +3906,8 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
                         uint64_t expected_loaded_reader,
                         std::span<const uint8_t> expected_replacement = {},
                         bool fail_replacement_reader_create = false,
-                        bool use_moi_auto_report = false) {
+                        bool use_moi_auto_report = false,
+                        rocjitsu::consan_hook::LogSinkOverride log_sink_override = nullptr) {
   reset_code_object_observations();
   g_fail_replacement_reader_create = fail_replacement_reader_create;
   configure_consan_profile(profile, fail_closed);
@@ -3902,6 +3923,7 @@ void run_hook_load_case(const ConSanHookProfile &profile, bool fail_closed,
   FakeApiTable api;
   InstalledDbiHook hook(api);
   ASSERT_TRUE(hook.installed()) << profile.name << ": " << hook.error();
+  hook.set_log_sink_override(log_sink_override);
 
   constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
   hsa_code_object_reader_t original_reader{};
@@ -5062,6 +5084,57 @@ TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSource
                      "container=fence_kernel scope=kernel text=0x40 mnemonic=fence"),
             std::string::npos)
       << log;
+}
+
+TEST(HsaHooksUnitTest, ConSanHighCardinalityDiagnosticsUseBoundedBatchedWrites) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
+  const ConSanHookProfile &profile = kConSanHookProfiles[1];
+  rocjitsu::ConSanResult result = diagnostic_coverage_transform_result();
+  constexpr size_t kRecordCount = 4096;
+
+  const rocjitsu::ConSanSiteDispositionRecord site_prototype = result.site_dispositions.front();
+  result.site_dispositions.clear();
+  result.site_dispositions.reserve(kRecordCount);
+  result.patches.reserve(kRecordCount);
+  for (size_t i = 0; i < kRecordCount; ++i) {
+    rocjitsu::ConSanSiteDispositionRecord site = site_prototype;
+    site.text_offset = i * 4u;
+    result.site_dispositions.push_back(std::move(site));
+
+    rocjitsu::ConSanPatchInfo patch;
+    patch.kind = rocjitsu::ConSanPatchKind::InlineMoiAccessRecordStore;
+    patch.anchor_offset = i * 4u;
+    patch.trampoline_offset = 0x100000u + i * 64u;
+    patch.original_size = 4u;
+    patch.trampoline_size = 64u;
+    result.patches.push_back(std::move(patch));
+  }
+
+  const auto count_records = [](std::string_view log, std::string_view marker) {
+    size_t count = 0;
+    for (size_t offset = 0; (offset = log.find(marker, offset)) != std::string_view::npos;
+         offset += marker.size()) {
+      ++count;
+    }
+    return count;
+  };
+
+  g_log_sink_write_count = 0;
+  g_log_sink_max_write_size = 0;
+  g_log_sink_writes_end_in_newline = true;
+  g_log_sink_bytes.clear();
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.elf_bytes, false,
+                     false, capture_log_sink);
+
+  EXPECT_EQ(count_records(g_log_sink_bytes, "ConSan coverage_site "), kRecordCount);
+  EXPECT_EQ(count_records(g_log_sink_bytes, "ConSan proof patch "), kRecordCount);
+  EXPECT_TRUE(g_log_sink_writes_end_in_newline);
+  EXPECT_LE(g_log_sink_max_write_size, 1024u * 1024u);
+  // This is a structural regression check for the reported per-record write
+  // path, not a machine-dependent stopwatch assertion. The old implementation
+  // performed more than two writes per record; bounded batching needs only a
+  // handful of writes per MiB plus low-cardinality setup diagnostics.
+  EXPECT_LT(g_log_sink_write_count, kRecordCount / 16u);
 }
 
 TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificationLogLevel) {
