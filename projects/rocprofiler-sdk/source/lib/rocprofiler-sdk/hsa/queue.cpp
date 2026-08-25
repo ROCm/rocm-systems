@@ -354,11 +354,7 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
     using session_info_t = std::shared_ptr<barrier_info_session_t>;
 
-    if(!data)
-    {
-        ROCP_FATAL << "BarrierAsyncSignalHandler called with null data pointer";
-        return true;
-    }
+    ROCP_FATAL_IF(!data) << "BarrierAsyncSignalHandler called with null data pointer";
 
     auto* _session_ptr = static_cast<session_info_t*>(data);
 
@@ -376,11 +372,7 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     }};
 
     auto _session = *_session_ptr;
-    if(!_session.get())
-    {
-        ROCP_FATAL << "nullptr to barrier session information";
-        return true;
-    }
+    ROCP_FATAL_IF(!_session.get()) << "nullptr to barrier session information";
 
     auto& barrier_session = *_session;
 
@@ -408,11 +400,11 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             auto pending_entries =
                 common::container::small_vector<hip::event::coalesce_pending_t, 4>{};
 
-            bdata.coalesce_group->wlock([&](auto& g) {
-                g.barrier_time  = barrier_time;
-                g.completed     = true;
-                pending_entries = std::move(g.pending);
-                g.pending.clear();
+            bdata.coalesce_group->wlock([&](auto& grp) {
+                grp.barrier_time = barrier_time;
+                grp.completed    = true;
+                pending_entries  = std::move(grp.pending);
+                grp.pending.clear();
             });
 
             for(auto& p : pending_entries)
@@ -424,6 +416,11 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                              barrier_time,
                                              ROCPROFILER_HIP_EVENT_RECORD,
                                              p.callback_record);
+                if(p.corr_id_ref)
+                {
+                    p.corr_id_ref->sub_kern_count();
+                    p.corr_id_ref->sub_ref_count();
+                }
             }
         }
 
@@ -712,7 +709,10 @@ WriteInterceptor(const void* packets,
 
                 auto* event_ctx = hip::event::get_active_event_context();
 
-                if(is_barrier && event_ctx && !event_ctx->barrier_captured &&
+                const bool has_completion_signal =
+                    is_barrier && (_packets[i].barrier_and.completion_signal.handle != 0);
+
+                if(has_completion_signal && event_ctx && !event_ctx->barrier_captured &&
                    !hip_event_tracing_data_v.empty())
                 {
                     corr_id->add_ref_count();

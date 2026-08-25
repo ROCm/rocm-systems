@@ -39,6 +39,10 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct correlation_id;
+}
 namespace hip
 {
 namespace event
@@ -95,6 +99,7 @@ struct coalesce_pending_t
     rocprofiler_thread_id_t                       tid              = 0;
     uint64_t                                      internal_corr_id = 0;
     uint64_t                                      ancestor_corr_id = 0;
+    context::correlation_id*                      corr_id_ref      = nullptr;
 };
 
 struct coalesce_group_t
@@ -111,6 +116,9 @@ store_coalesce_group(uint64_t hip_event_handle, coalesce_group_ptr_t group);
 
 coalesce_group_ptr_t
 lookup_coalesce_group(uint64_t hip_event_handle);
+
+void
+erase_event_info(uint64_t hip_event_handle);
 
 template <typename TableT>
 void

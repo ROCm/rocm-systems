@@ -21,8 +21,10 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hip/event.hpp"
+#include "lib/common/abi.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -203,8 +205,33 @@ thread_local active_event_context_t g_active_event_ctx = {};
 using event_info_map_t     = std::unordered_map<uint64_t, event_record_info_t>;
 using coalesce_group_map_t = std::unordered_map<uint64_t, coalesce_group_ptr_t>;
 
-common::Synchronized<event_info_map_t>     g_event_info_map     = {};
-common::Synchronized<coalesce_group_map_t> g_coalesce_group_map = {};
+using stream_is_capturing_fn_t = hipError_t (*)(hipStream_t, hipStreamCaptureStatus*);
+
+stream_is_capturing_fn_t g_original_stream_is_capturing_fn = nullptr;
+
+auto*
+get_event_info_map()
+{
+    static auto*& _v = common::static_object<common::Synchronized<event_info_map_t>>::construct();
+    return _v;
+}
+
+auto*
+get_coalesce_group_map()
+{
+    static auto*& _v =
+        common::static_object<common::Synchronized<coalesce_group_map_t>>::construct();
+    return _v;
+}
+
+bool
+is_stream_capturing(hipStream_t stream)
+{
+    if(!g_original_stream_is_capturing_fn || stream == nullptr) return false;
+    auto status = hipStreamCaptureStatusNone;
+    auto err    = g_original_stream_is_capturing_fn(stream, &status);
+    return (err == hipSuccess && status == hipStreamCaptureStatusActive);
+}
 
 void
 check_coalesced_record(uint64_t hip_event_handle)
@@ -245,19 +272,22 @@ check_coalesced_record(uint64_t hip_event_handle)
     pending.tid              = thr_id;
     pending.internal_corr_id = corr_id->internal;
     pending.ancestor_corr_id = corr_id->ancestor;
+    pending.corr_id_ref      = corr_id;
+    corr_id->add_ref_count();
+    corr_id->add_kern_count();
 
     auto already_completed = false;
     auto completed_time    = profiling_time{};
 
-    group->wlock([&](auto& g) {
-        if(g.completed)
+    group->wlock([&](auto& grp) {
+        if(grp.completed)
         {
             already_completed = true;
-            completed_time    = g.barrier_time;
+            completed_time    = grp.barrier_time;
         }
         else
         {
-            g.pending.emplace_back(std::move(pending));
+            grp.pending.emplace_back(std::move(pending));
         }
     });
 
@@ -270,6 +300,8 @@ check_coalesced_record(uint64_t hip_event_handle)
                          completed_time,
                          ROCPROFILER_HIP_EVENT_RECORD,
                          pending.callback_record);
+        pending.corr_id_ref->sub_kern_count();
+        pending.corr_id_ref->sub_ref_count();
     }
 }
 
@@ -282,7 +314,8 @@ auto event_record_wrapper(RetT (*next)(hipEvent_t, hipStream_t))
             ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
         auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
         auto ret      = next_func(event, stream);
-        check_coalesced_record(reinterpret_cast<uint64_t>(event));
+        if(ret == hipSuccess && !is_stream_capturing(stream))
+            check_coalesced_record(reinterpret_cast<uint64_t>(event));
         return ret;
     };
 }
@@ -296,7 +329,8 @@ auto event_record_with_flags_wrapper(RetT (*next)(hipEvent_t, hipStream_t, unsig
             ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false};
         auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
         auto ret      = next_func(event, stream, flags);
-        check_coalesced_record(reinterpret_cast<uint64_t>(event));
+        if(ret == hipSuccess && !is_stream_capturing(stream))
+            check_coalesced_record(reinterpret_cast<uint64_t>(event));
         return ret;
     };
 }
@@ -324,13 +358,13 @@ get_active_event_context()
 void
 record_event_info(uint64_t hip_event_handle, event_record_info_t info)
 {
-    g_event_info_map.wlock([&](auto& map) { map[hip_event_handle] = info; });
+    get_event_info_map()->wlock([&](auto& map) { map[hip_event_handle] = info; });
 }
 
 event_record_info_t
 lookup_event_info(uint64_t hip_event_handle)
 {
-    return g_event_info_map.rlock([&](const auto& map) -> event_record_info_t {
+    return get_event_info_map()->rlock([&](const auto& map) -> event_record_info_t {
         auto it = map.find(hip_event_handle);
         if(it != map.end()) return it->second;
         return event_record_info_t{};
@@ -340,13 +374,20 @@ lookup_event_info(uint64_t hip_event_handle)
 void
 store_coalesce_group(uint64_t hip_event_handle, coalesce_group_ptr_t group)
 {
-    g_coalesce_group_map.wlock([&](auto& map) { map[hip_event_handle] = std::move(group); });
+    get_coalesce_group_map()->wlock([&](auto& map) { map[hip_event_handle] = std::move(group); });
+}
+
+void
+erase_event_info(uint64_t hip_event_handle)
+{
+    get_event_info_map()->wlock([&](auto& map) { map.erase(hip_event_handle); });
+    get_coalesce_group_map()->wlock([&](auto& map) { map.erase(hip_event_handle); });
 }
 
 coalesce_group_ptr_t
 lookup_coalesce_group(uint64_t hip_event_handle)
 {
-    return g_coalesce_group_map.rlock([&](const auto& map) -> coalesce_group_ptr_t {
+    return get_coalesce_group_map()->rlock([&](const auto& map) -> coalesce_group_ptr_t {
         auto it = map.find(hip_event_handle);
         if(it != map.end()) return it->second;
         return nullptr;
@@ -362,29 +403,64 @@ struct hipStreamWaitEvent;
 struct hipStreamWaitEvent_spt;
 }  // namespace api
 
+namespace
+{
+template <size_t AbiOffset>
+bool
+table_has_entry(const ::HipDispatchTable* table)
+{
+    return common::abi::compute_table_offset(AbiOffset) < table->size;
+}
+}  // namespace
+
 template <>
 void
 update_table<::HipDispatchTable>(::HipDispatchTable* table)
 {
     if(table == nullptr) return;
-    if(table->hipEventRecord_fn)
+
+    // ABI offset 81 -- hipEventRecord_fn (step 0, always present)
+    if(table_has_entry<81>(table) && table->hipEventRecord_fn)
         table->hipEventRecord_fn =
             event_record_wrapper<api::hipEventRecord>(table->hipEventRecord_fn);
-    if(table->hipEventRecord_spt_fn)
+
+    // ABI offset 417 -- hipEventRecord_spt_fn (step 0, always present)
+    if(table_has_entry<417>(table) && table->hipEventRecord_spt_fn)
         table->hipEventRecord_spt_fn =
             event_record_wrapper<api::hipEventRecord_spt>(table->hipEventRecord_spt_fn);
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
-    if(table->hipEventRecordWithFlags_fn)
+    // ABI offset 473 -- hipEventRecordWithFlags_fn (step 10+)
+    if(table_has_entry<473>(table) && table->hipEventRecordWithFlags_fn)
         table->hipEventRecordWithFlags_fn =
             event_record_with_flags_wrapper<api::hipEventRecordWithFlags>(
                 table->hipEventRecordWithFlags_fn);
 #endif
-    if(table->hipStreamWaitEvent_fn)
+
+    // ABI offset 348 -- hipStreamWaitEvent_fn (step 0, always present)
+    if(table_has_entry<348>(table) && table->hipStreamWaitEvent_fn)
         table->hipStreamWaitEvent_fn =
             stream_wait_event_wrapper<api::hipStreamWaitEvent>(table->hipStreamWaitEvent_fn);
-    if(table->hipStreamWaitEvent_spt_fn)
+
+    // ABI offset 414 -- hipStreamWaitEvent_spt_fn (step 0, always present)
+    if(table_has_entry<414>(table) && table->hipStreamWaitEvent_spt_fn)
         table->hipStreamWaitEvent_spt_fn = stream_wait_event_wrapper<api::hipStreamWaitEvent_spt>(
             table->hipStreamWaitEvent_spt_fn);
+
+    // ABI offset 344 -- hipStreamIsCapturing_fn (step 0, always present)
+    if(table_has_entry<344>(table) && table->hipStreamIsCapturing_fn)
+        g_original_stream_is_capturing_fn = table->hipStreamIsCapturing_fn;
+
+    // ABI offset 78 -- hipEventDestroy_fn (step 0, always present)
+    if(table_has_entry<78>(table) && table->hipEventDestroy_fn)
+    {
+        static auto next_destroy_fn = table->hipEventDestroy_fn;
+        table->hipEventDestroy_fn   = +[](hipEvent_t event) -> hipError_t {
+            auto ret = next_destroy_fn(event);
+            if(ret == hipSuccess) erase_event_info(reinterpret_cast<uint64_t>(event));
+            return ret;
+        };
+    }
 }
 
 }  // namespace event
