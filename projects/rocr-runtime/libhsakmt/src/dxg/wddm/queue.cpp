@@ -496,17 +496,19 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
     return false;
   }
 
-  if (scratch_size_ >= scratch_size) return true;
+  if (scratch_size_ >= scratch_size)
+    return true;
 
-  pr_debug("need realloc scratch buffer, size %" PRIx64 " -> %" PRIx64 "\n", scratch_size_,
-           scratch_size);
+  pr_debug("need realloc scratch buffer, size %" PRIx64 " -> %" PRIx64 "\n",
+           scratch_size_, scratch_size);
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = scratch_size;
   create_info.domain = Wkmi::kLocal;
-  GpuMemory* gpu_mem = nullptr;
+  GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
-  if (code != ErrorCode::Success) return false;
+  if (code != ErrorCode::Success)
+    return false;
 
   if (scratch_base_) {
     auto scratch_gpu_mem = GpuMemory::Convert(scratch_mem_);
@@ -515,7 +517,7 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
 
   scratch_size_per_wave_ = scratch_size_per_wave;
   scratch_size_ = scratch_size;
-  scratch_base_ = reinterpret_cast<void*>(gpu_mem->GpuAddress());
+  scratch_base_ = reinterpret_cast<void *>(gpu_mem->GpuAddress());
   scratch_mem_ = gpu_mem->GetGpuMemoryHandle();
 
   InitScratchSRD();
@@ -903,8 +905,8 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
       reinterpret_cast<uint32_t*>((static_cast<uint64_t>(packet->ib_jump_cmd[2]) << 32) |
                                   (static_cast<uint64_t>(packet->ib_jump_cmd[1]) & ~3ull));
   uint32_t pm4_size = packet->ib_jump_cmd[3] & 0xfffff;
-  size_t required_size =
-      platform_atomic_support_ ? sizeof(AtomicTemplate) : sizeof(WriteDataTemplate);
+  size_t required_size = platform_atomic_support_ ? sizeof(AtomicTemplate)
+                                                  : sizeof(WriteDataTemplate);
   bool process_packet = dxg_runtime->vendor_packet_process;
 
   if (process_packet) {
@@ -1162,8 +1164,7 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
 
         amd_signal_t* signal = (amd_signal_t*)((char*)poll_addr - offsetof(amd_signal_t, value));
         uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
-        pr_debug("poll signal %#" PRIx64 " addr %#" PRIx64 " val %" PRId64 "\n", signal_handle,
-                 poll_addr, poll_val);
+        pr_debug("poll signal %#" PRIx64 " addr %#" PRIx64 " val %" PRId64 "\n", signal_handle, poll_addr, poll_val);
         hsa_signal_t hsa_signal = {signal_handle};
         hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
             hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
