@@ -1,0 +1,101 @@
+////////////////////////////////////////////////////////////////////////////////
+//
+// The University of Illinois/NCSA
+// Open Source License (NCSA)
+//
+// Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
+//
+// Developed by:
+//
+//                 AMD Research and AMD HSA Software Development
+//
+//                 Advanced Micro Devices, Inc.
+//
+//                 www.amd.com
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal with the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+//  - Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimers.
+//  - Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimers in
+//    the documentation and/or other materials provided with the distribution.
+//  - Neither the names of Advanced Micro Devices, Inc,
+//    nor the names of its contributors may be used to endorse or promote
+//    products derived from this Software without specific prior written
+//    permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS WITH THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+
+#include "core/inc/amd_kfd_lifecycle.h"
+
+namespace rocr {
+namespace AMD {
+
+hsa_status_t KfdLifecycle::Open(const std::function<hsa_status_t()>& open) {
+  if (owns_open_) return HSA_STATUS_SUCCESS;
+
+  const hsa_status_t status = open();
+  if (status == HSA_STATUS_SUCCESS) owns_open_ = true;
+
+  return status;
+}
+
+hsa_status_t KfdLifecycle::EnableRuntime(const std::function<hsa_status_t()>& enable) {
+  const hsa_status_t status = enable();
+  if (status == HSA_STATUS_SUCCESS) owns_runtime_enable_ = true;
+
+  return status;
+}
+
+hsa_status_t KfdLifecycle::AcquireSnapshot(const std::function<hsa_status_t()>& acquire) {
+  if (owns_snapshot_) return HSA_STATUS_SUCCESS;
+
+  const hsa_status_t status = acquire();
+  if (status == HSA_STATUS_SUCCESS) owns_snapshot_ = true;
+
+  return status;
+}
+
+hsa_status_t KfdLifecycle::ShutDown() {
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+  auto record = [&status](hsa_status_t err) {
+    if (status == HSA_STATUS_SUCCESS) status = err;
+  };
+
+  // Ownership is dropped before the call, not after: a step that fails has
+  // still had its one chance, and retrying it from a later ShutDown() would
+  // release a reference twice.
+  if (owns_runtime_enable_) {
+    owns_runtime_enable_ = false;
+    record(ops_.disable_runtime());
+  }
+
+  if (owns_snapshot_) {
+    owns_snapshot_ = false;
+    record(ops_.release_snapshot());
+  }
+
+  if (owns_open_) {
+    owns_open_ = false;
+    record(ops_.close());
+  }
+
+  return status;
+}
+
+}  // namespace AMD
+}  // namespace rocr

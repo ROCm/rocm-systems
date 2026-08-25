@@ -48,6 +48,7 @@
 
 #include "hsakmt/hsakmt.h"
 
+#include "core/inc/amd_kfd_lifecycle.h"
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
 
@@ -191,14 +192,13 @@ public:
   /// @brief Take the one topology snapshot reference this driver owns.
   hsa_status_t AcquireTopologySnapshot() const;
 
-  /// @brief Release this driver's topology snapshot reference, if held.
-  hsa_status_t ReleaseTopologySnapshot();
+  /// @brief Builds the thunk call table KfdLifecycle drives.
+  static KfdLifecycleOps ThunkOps();
 
-  /// @brief Disable the KFD runtime if Init() enabled it.
-  hsa_status_t DisableRuntime();
+  /// @brief Owns whatever this driver has taken from the thunk.
+  mutable KfdLifecycle lifecycle_{ThunkOps()};
 
-  mutable bool topology_snapshot_acquired_ = false;
-  bool runtime_enabled_ = false;
+  /// @brief What the one acquire this driver performs reported.
   mutable HsaSystemProperties sys_props_{};
 
   // Minimum acceptable KFD version numbers.

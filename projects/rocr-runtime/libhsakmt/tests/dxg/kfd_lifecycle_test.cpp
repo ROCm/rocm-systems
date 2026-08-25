@@ -1,0 +1,134 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <string>
+#include <vector>
+
+#include "core/inc/amd_kfd_lifecycle.h"
+#include "unit_test_harness.h"
+
+using rocr::AMD::KfdLifecycle;
+using rocr::AMD::KfdLifecycleOps;
+
+namespace {
+
+struct Recorder {
+  std::vector<std::string> calls;
+  hsa_status_t disable_status = HSA_STATUS_SUCCESS;
+  hsa_status_t release_status = HSA_STATUS_SUCCESS;
+  hsa_status_t close_status = HSA_STATUS_SUCCESS;
+
+  KfdLifecycleOps Ops() {
+    return {
+        [this]() {
+          calls.emplace_back("disable");
+          return disable_status;
+        },
+        [this]() {
+          calls.emplace_back("release");
+          return release_status;
+        },
+        [this]() {
+          calls.emplace_back("close");
+          return close_status;
+        },
+    };
+  }
+};
+
+void AcquireAll(KfdLifecycle& lifecycle) {
+  CHECK_EQ(lifecycle.Open([]() { return HSA_STATUS_SUCCESS; }), HSA_STATUS_SUCCESS);
+  CHECK_EQ(lifecycle.AcquireSnapshot([]() { return HSA_STATUS_SUCCESS; }), HSA_STATUS_SUCCESS);
+  CHECK_EQ(lifecycle.EnableRuntime([]() { return HSA_STATUS_SUCCESS; }), HSA_STATUS_SUCCESS);
+}
+
+}  // namespace
+
+TEST_CASE(a_complete_lifecycle_releases_in_reverse_order) {
+  Recorder recorder;
+  KfdLifecycle lifecycle(recorder.Ops());
+  AcquireAll(lifecycle);
+
+  CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+  CHECK_EQ(recorder.calls, (std::vector<std::string>{"disable", "release", "close"}));
+}
+
+TEST_CASE(each_failed_acquire_stage_releases_only_what_preceded_it) {
+  {
+    Recorder recorder;
+    KfdLifecycle lifecycle(recorder.Ops());
+    CHECK_EQ(lifecycle.Open([]() { return HSA_STATUS_ERROR; }), HSA_STATUS_ERROR);
+    CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+    CHECK(recorder.calls.empty());
+  }
+
+  {
+    Recorder recorder;
+    KfdLifecycle lifecycle(recorder.Ops());
+    CHECK_EQ(lifecycle.Open([]() { return HSA_STATUS_SUCCESS; }), HSA_STATUS_SUCCESS);
+    CHECK_EQ(lifecycle.AcquireSnapshot([]() { return HSA_STATUS_ERROR; }), HSA_STATUS_ERROR);
+    CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+    CHECK_EQ(recorder.calls, (std::vector<std::string>{"close"}));
+  }
+
+  {
+    Recorder recorder;
+    KfdLifecycle lifecycle(recorder.Ops());
+    CHECK_EQ(lifecycle.Open([]() { return HSA_STATUS_SUCCESS; }), HSA_STATUS_SUCCESS);
+    CHECK_EQ(lifecycle.AcquireSnapshot([]() { return HSA_STATUS_SUCCESS; }), HSA_STATUS_SUCCESS);
+    CHECK_EQ(lifecycle.EnableRuntime([]() { return HSA_STATUS_ERROR; }), HSA_STATUS_ERROR);
+    CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+    CHECK_EQ(recorder.calls, (std::vector<std::string>{"release", "close"}));
+  }
+}
+
+TEST_CASE(shutdown_continues_after_errors_and_reports_the_first_one) {
+  Recorder recorder;
+  recorder.disable_status = HSA_STATUS_ERROR;
+  recorder.release_status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  recorder.close_status = HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  KfdLifecycle lifecycle(recorder.Ops());
+  AcquireAll(lifecycle);
+
+  CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_ERROR);
+  CHECK_EQ(recorder.calls, (std::vector<std::string>{"disable", "release", "close"}));
+}
+
+TEST_CASE(shutdown_is_idempotent) {
+  Recorder recorder;
+  KfdLifecycle lifecycle(recorder.Ops());
+  AcquireAll(lifecycle);
+
+  CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+  const auto first_shutdown = recorder.calls;
+  CHECK_EQ(lifecycle.ShutDown(), HSA_STATUS_SUCCESS);
+  CHECK_EQ(recorder.calls, first_shutdown);
+}
+
+TEST_CASE(open_and_snapshot_acquisition_are_each_idempotent) {
+  Recorder recorder;
+  KfdLifecycle lifecycle(recorder.Ops());
+  int open_calls = 0;
+  int snapshot_calls = 0;
+
+  auto open = [&]() {
+    ++open_calls;
+    return HSA_STATUS_SUCCESS;
+  };
+  auto acquire = [&]() {
+    ++snapshot_calls;
+    return HSA_STATUS_SUCCESS;
+  };
+
+  CHECK_EQ(lifecycle.Open(open), HSA_STATUS_SUCCESS);
+  CHECK_EQ(lifecycle.Open(open), HSA_STATUS_SUCCESS);
+  CHECK_EQ(lifecycle.AcquireSnapshot(acquire), HSA_STATUS_SUCCESS);
+  CHECK_EQ(lifecycle.AcquireSnapshot(acquire), HSA_STATUS_SUCCESS);
+  CHECK_EQ(open_calls, 1);
+  CHECK_EQ(snapshot_calls, 1);
+}
+
+int main() { return unittest::RunAllTests(); }
