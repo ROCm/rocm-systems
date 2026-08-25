@@ -16,6 +16,7 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
@@ -592,6 +593,55 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
         enabled.bits.req_rx_impl_nak_seq_err,
         trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
         "ainic_req_rx_impl_nak_seq_err", mtrcs.req_rx_impl_nak_seq_err);
+}
+
+void
+rocpd_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& hipfile_sample)
+{
+    namespace collector = pmc::collectors::hipfile;
+
+    const auto* name         = trait::name<category::hipfile>::value;
+    const auto& process_info = m_metadata->get_process_info();
+    const auto& agent_ref    = m_agent_manager->get_agent_by_type_index(
+        hipfile_sample.device_id, agent_type::GPU);
+
+    const auto agent_uid = make_agent_uid(agent_ref);
+    const auto event     = make_event(0, 0, 0, name);
+
+    const auto enabled = hipfile_sample.enabled_metric.value;
+
+    for(const auto& metric : collector::METRIC_TABLE)
+    {
+        if((enabled & (1U << metric.bit)) == 0U) continue;
+
+        // track_info_t::name and pmc_info_unique_id_t::name are string_views, so both
+        // strings must outlive the insert call rather than being built in place.
+        const auto track_label =
+            collector::track_name(hipfile_sample.device_id, metric.suffix);
+        const auto pmc_identifier = collector::pmc_name(metric.suffix);
+
+        profiler_hub::writer_types::pmc_event_data_t pmc_data;
+        pmc_data.event = event;
+        pmc_data.value = metric.value(hipfile_sample.metric_values);
+
+        // Display label for the counter track; the device-independent identifier that
+        // RocPD joins on goes in the PMC unique id below.
+        profiler_hub::writer_types::track_info_t track;
+        track.name       = track_label;
+        track.node_id    = node_info::get_instance().id;
+        track.process_id = process_info.pid;
+
+        profiler_hub::writer_types::sample_data_t sample;
+        sample.timestamp = hipfile_sample.timestamp;
+        sample.track     = track;
+        pmc_data.sample  = sample;
+
+        profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
+        pmc_uid.name     = pmc_identifier;
+        pmc_uid.agent_id = agent_uid;
+
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+    }
 }
 
 void

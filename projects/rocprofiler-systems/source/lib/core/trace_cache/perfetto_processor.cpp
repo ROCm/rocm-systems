@@ -17,6 +17,7 @@
 #include "core/perfetto/engine.hpp"
 #include "core/track_registry.hpp"
 #include "core/utility.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/thread_info.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
@@ -1406,6 +1407,36 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
             trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
             amd_smi_nic_req_rx_impl_nak_seq_err_track::at(_device_id, 0), _ts,
             static_cast<double>(_nic_sample.metric_values.req_rx_impl_nak_seq_err));
+    }
+}
+
+void
+perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile_sample)
+{
+    using hipfile_track = core::perfetto::counter_track<category::hipfile>;
+    namespace collector = pmc::collectors::hipfile;
+
+    const auto _ts        = _hipfile_sample.timestamp;
+    const auto _device_id = _hipfile_sample.device_id;
+    const auto _enabled   = _hipfile_sample.enabled_metric.value;
+
+    for(const auto& _metric : collector::METRIC_TABLE)
+    {
+        if((_enabled & (1U << _metric.bit)) == 0U) continue;
+
+        auto _name = collector::track_name(_device_id, _metric.suffix);
+
+        // Keyed on name and ordinal together so each GPU keeps a distinct track even
+        // though every GPU emits the same metric set.
+        const auto _track_key =
+            std::hash<std::string>{}(_name + std::to_string(_device_id));
+
+        if(!hipfile_track::exists(_track_key))
+            hipfile_track::emplace(_track_key, _name, "");
+
+        TRACE_COUNTER(trait::name<category::hipfile>::value,
+                      hipfile_track::at(_track_key, 0), _ts,
+                      _metric.value(_hipfile_sample.metric_values));
     }
 }
 

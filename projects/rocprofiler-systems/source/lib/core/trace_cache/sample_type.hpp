@@ -30,6 +30,7 @@ enum class type_identifier_t : std::uint32_t
     ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
     gpu_perf_counter_sample = 0x000C,
+    hipfile_pmc_sample      = 0x000D,
     fragmented_space        = 0xFFFF
 };
 

@@ -306,9 +306,9 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 # hipFile telemetry is requested with ROCPROFSYS_BUILD_HIPFILE (ON / OFF / AUTO).
-# The derived ROCPROFSYS_HIPFILE_SUPPORT cache (INTERNAL FORCE, same shape as
-# ROCPROFSYS_BUILD_AINIC) is what every downstream if(), compile definition, and
-# add_subdirectory consults. The user-facing cache is never overwritten:
+# The derived ROCPROFSYS_HIPFILE_SUPPORT cache (INTERNAL FORCE) is what every
+#downstream if(), compile definition, and add_subdirectory consults.
+#The user-facing cache is never overwritten:
 #
 #   AUTO + package missing  -> SUPPORT OFF, STATUS (default; a box without hipFile still builds)
 #   ON   + package missing  -> FATAL_ERROR naming the version found, the version required,

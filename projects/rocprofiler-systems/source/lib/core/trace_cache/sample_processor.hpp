@@ -9,6 +9,7 @@
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
 
 #include <rocprofiler-sdk/version.h>
@@ -65,6 +66,11 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+    void handle(const hipfile_pmc_sample& sample)
+    {
+        static_cast<T*>(this)->handle(sample);
+    }
+
     void handle(const backtrace_region_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
@@ -96,9 +102,10 @@ struct processor_view_t
     using cpu_pmc_sample_fn_t   = void (*)(void*, const cpu_pmc_sample&) noexcept;
     using gpu_perf_counter_sample_fn_t =
         void (*)(void*, const gpu_perf_counter_sample&) noexcept;
-    using backtrace_region_fn_t       = void (*)(void*,
+    using hipfile_pmc_sample_fn_t = void (*)(void*, const hipfile_pmc_sample&) noexcept;
+    using backtrace_region_fn_t   = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
-    using kfd_sample_fn_t             = void (*)(void*, const kfd_sample&) noexcept;
+    using kfd_sample_fn_t         = void (*)(void*, const kfd_sample&) noexcept;
     using prepare_for_processing_fn_t = void (*)(void*) noexcept;
     using finalize_processing_fn_t    = void (*)(void*) noexcept;
 
@@ -117,6 +124,7 @@ struct processor_view_t
         ainic_pmc_sample_fn_t        handle_ainic_pmc_sample;
         cpu_pmc_sample_fn_t          handle_cpu_pmc_sample;
         gpu_perf_counter_sample_fn_t handle_gpu_perf_counter_sample;
+        hipfile_pmc_sample_fn_t      handle_hipfile_pmc_sample;
         backtrace_region_fn_t        handle_backtrace_region;
         kfd_sample_fn_t              handle_kfd_sample;
         prepare_for_processing_fn_t  prepare_for_processing;
@@ -191,6 +199,11 @@ struct processor_view_t
         m_vtable->handle_cpu_pmc_sample(m_object, sample);
     }
 
+    ROCPROFSYS_INLINE void handle(const hipfile_pmc_sample& sample) const noexcept
+    {
+        m_vtable->handle_hipfile_pmc_sample(m_object, sample);
+    }
+
     ROCPROFSYS_INLINE void handle(const backtrace_region_sample& sample) const noexcept
     {
         m_vtable->handle_backtrace_region(m_object, sample);
@@ -249,6 +262,9 @@ private:
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const gpu_perf_counter_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const hipfile_pmc_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const backtrace_region_sample& sample) noexcept {
@@ -337,6 +353,9 @@ struct sample_processor_t
                 break;
             case type_identifier_t::cpu_pmc_sample:
                 handle_sample(static_cast<const cpu_pmc_sample&>(sample));
+                break;
+            case type_identifier_t::hipfile_pmc_sample:
+                handle_sample(static_cast<const hipfile_pmc_sample&>(sample));
                 break;
             case type_identifier_t::gpu_perf_counter_sample:
                 handle_sample(static_cast<const gpu_perf_counter_sample&>(sample));
