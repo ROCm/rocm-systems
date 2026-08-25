@@ -1404,6 +1404,38 @@ def has_set_attr(obj, key):
         return False
 
 
+def conflicting_input_settings(inp_args, ignore=()):
+    """Settings that would be lost by collapsing several input-file jobs down to the first one.
+
+    An input file holds a list of jobs, one per pass. Kernel replay merges them into a single
+    run, so only the first job's settings survive. A setting is reported when a later job sets
+    it to something the first job does not already say -- either a different value, or a value
+    the first job never set at all. Settings named in `ignore` are merged separately by the
+    caller and are not reported.
+
+    Returns the sorted names of the clashing settings; an empty list means collapsing is
+    lossless.
+    """
+    if not inp_args:
+        return []
+
+    ignored = set(ignore)
+    first = inp_args[0]
+    conflicts = set()
+
+    for later in inp_args[1:]:
+        if not later:
+            continue
+        for key in later.keys():
+            if key in ignored or not has_set_attr(later, key):
+                continue
+            base = getattr(first, key) if has_set_attr(first, key) else None
+            if getattr(later, key) != base:
+                conflicts.add(key)
+
+    return sorted(conflicts)
+
+
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
 
@@ -2549,7 +2581,25 @@ def main(argv=None):
             )
         cmd_args.pmc = replay_groups
         cmd_args.pmc_groups = None
-        inp_args = inp_args[:1] if inp_args else [dotdict({})]
+        # The pmc lines from every input-file job were merged into replay_groups above, but only
+        # one job can supply the remaining settings, because kernel replay produces a single
+        # application run. Keeping the first job and discarding the rest would silently drop their
+        # output configuration, kernel filters and ranges. Collapsing is lossless only when the
+        # jobs agree on everything outside pmc; when they disagree there is no single run that
+        # satisfies all of them, so name the settings that clash instead of quietly picking one.
+        if inp_args:
+            conflicts = conflicting_input_settings(inp_args, ignore=("pmc",))
+            if conflicts:
+                fatal_error(
+                    "--kernel-replay-beta-enabled replays each dispatch within a single "
+                    "application run, so it cannot honor {} input-file jobs that disagree. "
+                    "These settings differ between them: {}. Give every job the same settings "
+                    "and vary only pmc, or drop --kernel-replay-beta-enabled to run each job "
+                    "as its own pass.".format(len(inp_args), ", ".join(conflicts))
+                )
+            inp_args = inp_args[:1]
+        else:
+            inp_args = [dotdict({})]
         if has_set_attr(inp_args[0], "pmc"):
             inp_args[0].pmc = None
         cli_has_pmc = cmd_args.pmc is not None
