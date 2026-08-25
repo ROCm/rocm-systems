@@ -80,7 +80,10 @@
 #include "dda_all_reduce.h"
 #include "ipc_init.h"
 #include "fabric_init.h"
-#include <cpuid.h>
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
+#define IS_X86_64
+#include  <cpuid.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include "kernel_config.h"
@@ -299,6 +302,7 @@ static ncclResult_t ncclInit() {
     if (verStr == NULL) break;
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
+#ifdef IS_X86_64
   if (strstr(verStr, "cray") == NULL) {
     unsigned int eax, ebx, ecx, edx;
     if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) ecx = 0; // cpuid not supported
@@ -326,6 +330,7 @@ static ncclResult_t ncclInit() {
            "instablity or hang!");
 #endif
   }
+#endif
   std::call_once(initOnceFlag, initOnceFunc);
   return initResult;
 }

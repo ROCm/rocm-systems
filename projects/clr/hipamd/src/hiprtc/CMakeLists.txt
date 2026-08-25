@@ -134,9 +134,8 @@ endif()
 if(DEFINED Clang_ROOT)
     set(Clang_BIN ${Clang_ROOT}/bin)
 endif()
-# Requires clang and llvm-mc to create this library.
+# Requires clang to create this library.
 find_program(clang clang HINTS ${Clang_BIN} ${ENV_Clang_BIN} ${ROCM_PATH}/llvm/bin ${ROCM_PATH})
-find_program(llvm-mc llvm-mc HINTS ${LLVM_BIN} ${ENV_LLVM_BIN} ${ROCM_PATH}/llvm/bin ${ROCM_PATH})
 set(HIPRTC_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/hip_rtc_gen")
 set(HIPRTC_GEN_HEADER "${HIPRTC_GEN_DIR}/hipRTC_header.h")
 set(HIPRTC_GEN_MCIN "${HIPRTC_GEN_DIR}/hipRTC_header.mcin")
@@ -204,10 +203,11 @@ add_custom_command(
   COMMAND ${clang} -O3 --rocm-path=${PROJECT_SOURCE_DIR}/include/.. -std=c++17 -nogpulib --hip-version=${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR} -isystem ${HIP_COMMON_INCLUDE_DIR} -isystem ${PROJECT_SOURCE_DIR}/include -isystem ${PROJECT_BINARY_DIR}/include -isystem ${CMAKE_CURRENT_SOURCE_DIR}/include --cuda-device-only -D__HIPCC_RTC__ -DHIP_VERSION_MAJOR=${HIP_LIB_VERSION_MAJOR} -DHIP_VERSION_MINOR=${HIP_LIB_VERSION_MINOR} ${HIPRTC_ASAN_OPTIONS} -x hip ${HIPRTC_GEN_HEADER} -E -P -o ${HIPRTC_GEN_PREPROCESSED}
   COMMAND ${CMAKE_COMMAND} -DHIPRTC_ADD_MACROS=1 -DHIPRTC_HEADERS="${HIPRTC_HEADERS}" -DHIPRTC_PREPROCESSED_FILE=${HIPRTC_GEN_PREPROCESSED} -P ${HIPRTC_CMAKE}
   DEPENDS ${clang} ${HIPRTC_GEN_HEADER})
+# Note: LLVM_TARGET_TRIPLE defined on /opt/rocm/llvm/lib/cmake/llvm/LLVMConfig.cmake
 add_custom_command(
   OUTPUT ${HIPRTC_GEN_OBJ}
-  COMMAND ${llvm-mc} -o ${HIPRTC_GEN_OBJ} ${HIPRTC_GEN_MCIN} --filetype=obj
-  DEPENDS ${llvm-mc} ${HIPRTC_GEN_PREPROCESSED} ${HIPRTC_GEN_MCIN})
+  COMMAND ${clang} -target ${LLVM_TARGET_TRIPLE} -o ${HIPRTC_GEN_OBJ} -x assembler ${HIPRTC_GEN_MCIN} -c
+  DEPENDS ${clang} ${HIPRTC_GEN_PREPROCESSED} ${HIPRTC_GEN_MCIN})
 
 # Create hiprtc-builtins library.
 add_library(hiprtc-builtins ${HIPRTC_GEN_OBJ})

@@ -72,6 +72,19 @@
 #if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
 #include "intrin.h"
 #endif
+#if defined(__loongarch_lp64)
+// See linux-kernel arch/loongarch/include/asm/barrier.h
+// full barrier-mb
+static inline void _mm_clflush(const void* ptr) { (void)ptr; asm volatile ("dbar 0" ::: "memory"); }
+// sfence->wmb->c_wsync->c_w_w
+// LoongArch barrier:  c_w_w completion previous(W) succeeding(W)
+static inline void _mm_sfence(void) { asm volatile ("dbar 0xa" ::: "memory"); }
+// mfence->mb->c_sync->crwrw
+// LoongArch barrier:  crwrw completion previous(R/W) succeeding(R/W)
+static inline void _mm_mfence(void) { asm volatile ("dbar 0" ::: "memory"); }
+// LoongArch does not have an alternative to mm_pause. It is set to execute empty here.
+static inline void _mm_pause(void) {}
+#endif
 
 namespace rocr {
 extern FILE* log_file;
