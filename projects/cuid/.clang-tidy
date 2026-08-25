@@ -1,6 +1,4 @@
-# Modelled on projects/amdsmi/.clang-tidy so the two sibling C++ libraries in
-# this monorepo report the same class of findings. Deviations from that file
-# are listed at the bottom with a reason.
+# Check list for projects/cuid. Each disable below is here on its own merits.
 Checks:
   bugprone*,
   clang-analyzer*,
@@ -25,8 +23,6 @@ Checks:
   -misc-include-cleaner,
   -misc-non-copyable-objects,
   -misc-unused-parameters,
-  -misc-use-anonymous-namespace,
-  -misc-use-internal-linkage,
   -modernize-avoid-c-arrays,
   -modernize-macro-to-enum,
   -modernize-redundant-void-arg,
@@ -40,7 +36,7 @@ Checks:
   -readability*,
   readability-delete-null-pointer,
 
-# Deviations from projects/amdsmi/.clang-tidy:
+# Notes:
 #
 #   +cert-*         libamdcuid handles key material and parses firmware tables
 #                   read from sysfs, so the CERT rules about buffer handling and
@@ -51,6 +47,9 @@ Checks:
 #   +concurrency-*  CuidDeviceManager is a shared, mutex-guarded singleton
 #                   reached from the public C API, and the daemon serves
 #                   multiple clients.
+#   +misc-use-*     libamdcuid is a static library, so a file-scope helper
+#                   without internal linkage is exported to everything that
+#                   links it. Unnamed namespace is the idiom, per SF.22.
 #
 # Treat findings as advisory: fix what is real, do not silence what is not.
 HeaderFilterRegex: 'projects/cuid/(lib|cli|daemon)/.*\.(h|hpp)$'
