@@ -398,6 +398,7 @@ def _register_handlers() -> None:
         c.src_ops,
         arch_name=c.arch_name,
         supports_gpr_idx=c.profile.supports_gpr_idx,
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
     )
 
 

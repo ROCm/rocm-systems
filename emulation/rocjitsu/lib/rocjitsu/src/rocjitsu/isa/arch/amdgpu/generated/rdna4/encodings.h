@@ -400,6 +400,7 @@ public:
   bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
@@ -444,6 +445,8 @@ public:
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -473,6 +476,8 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -502,6 +507,8 @@ public:
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_dpp8();
+  bool has_dpp16();
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
@@ -548,6 +555,8 @@ public:
   bool has_lit_0_has_lit_2();
   bool has_lit_1_has_lit_2();
   bool has_lit_0_has_lit_1_has_lit_2();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
@@ -581,6 +590,8 @@ public:
   bool has_lit_0_has_lit_2();
   bool has_lit_1_has_lit_2();
   bool has_lit_0_has_lit_1_has_lit_2();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
@@ -605,6 +616,7 @@ public:
   bool default_encoding();
   using OpEncoding = VdsdirMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Vds : public IsaInstruction<Isa> {
@@ -689,6 +701,8 @@ public:
   bool has_lit_0_has_lit_2();
   bool has_lit_1_has_lit_2();
   bool has_lit_0_has_lit_1_has_lit_2();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
