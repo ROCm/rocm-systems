@@ -252,7 +252,6 @@ set(SRC_FILES
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
-  include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_sdma.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_copy.h
   include/nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h
@@ -516,6 +515,12 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_rocshmem_gda_factory.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_ipc_table_host.cc
+  )
+  list(APPEND SRC_FILES
+    src/include/nccl_device/gin/rocshmem_gda/log.hpp
+    src/include/nccl_device/gin/rocshmem_gda/util.hpp
+    src/include/nccl_device/gin/rocshmem_gda/gda/ibv_core.hpp
+    src/include/nccl_device/gin/rocshmem_gda/rocshmem/rocshmem_common.hpp
   )
 endif()
 
@@ -934,6 +939,59 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   endif()
 
   if (ROCSHMEM_SOURCE_DIR)
+    set(GIN_GDA_INCLUDE_DIR "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda")
+    target_include_directories(rccl PRIVATE ${GIN_GDA_INCLUDE_DIR})
+    # Copy rocSHMEM QueuePair device headers into RCCL
+    set(ROCSHMEM_QUEUEPAIR_HEADERS
+      # Queue Pair core
+      gda/queue_pair/queue_pair_common.hpp
+      gda/queue_pair/queue_pair_option.hpp
+      gda/queue_pair/queue_pair_interface.hpp
+      gda/queue_pair/queue_pair_shmem.hpp
+      gda/queue_pair/queue_pair_device.hpp
+      gda/queue_pair_provider.hpp
+      # GDA_MUX (Multiplexing provider)
+      gda/queue_pair_mux.hpp
+      # GDA_IONIC (AMD Pensando IONIC RDMA provider)
+      gda/ionic/queue_pair_ionic.hpp
+      gda/ionic/provider_gda_ionic.hpp
+      gda/ionic/ionic_dv.h
+      gda/ionic/ionic_fw.h
+      # GDA_BNXT (Broadcom BNXT RDMA provider)
+      gda/bnxt/queue_pair_bnxt.hpp
+      gda/bnxt/provider_gda_bnxt.hpp
+      gda/bnxt/bnxt_re_dv.h
+      gda/bnxt/bnxt_re_hsi.h
+      # GDA_MLX5 (Mellanox MLX5 RDMA provider)
+      gda/mlx5/queue_pair_mlx5.hpp
+      gda/mlx5/provider_gda_mlx5.hpp
+      gda/mlx5/mlx5dv_core.hpp
+      gda/mlx5/mlx5_ifc_core.hpp
+      # rocSHMEM internals / miscellaneous
+      gda/endian.hpp
+      gda/gda_enums.hpp
+      #rocshmem/rocshmem_config.h
+      bit.hpp
+      constmem.hpp
+      constants.hpp
+    )
+    foreach(qp_hdr ${ROCSHMEM_QUEUEPAIR_HEADERS})
+      set(gin_gda_qp_hdr "${GIN_GDA_INCLUDE_DIR}/${qp_hdr}")
+      set(rocshmem_src_qp_hdr "${ROCSHMEM_SOURCE_DIR}/src/${qp_hdr}")
+      get_filename_component(gin_gda_qp_hdr_dir "${gin_gda_qp_hdr}" DIRECTORY)
+      add_custom_command(
+        OUTPUT "${gin_gda_qp_hdr}"
+        COMMAND  ${CMAKE_COMMAND} -E make_directory "${gin_gda_qp_hdr_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${rocshmem_src_qp_hdr}" "${gin_gda_qp_hdr_dir}"
+        DEPENDS "${rocshmem_src_qp_hdr}"
+        COMMENT "Copying ${rocshmem_src_qp_hdr} -> ${gin_gda_qp_hdr}"
+        VERBATIM
+      )
+      list(APPEND GIN_GDA_QUEUEPAIR_HEADERS "${gin_gda_qp_hdr}")
+    endforeach()
+    add_custom_target(copy_rocshmem_queuepair_headers DEPENDS ${GIN_GDA_QUEUEPAIR_HEADERS})
+    add_dependencies(rccl copy_rocshmem_queuepair_headers)
+    # Include rocSHMEM source dirs directly
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/src)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SOURCE_DIR}/include)
     if (ROCSHMEM_BUILD_DIR)
