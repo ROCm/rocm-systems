@@ -13,42 +13,24 @@ def has_kfd_profiler_interface():
 
 
 def skip_if_hw_counter_values_unavailable(values):
-    """Skip value assertions when the platform did not report counter data.
+    """Fail when expected hardware counter output is missing or non-positive.
 
-    A KFD interface means the platform collects counters natively, so a value
-    read back as zero there is a real result and is always asserted. Only where
-    there is no /dev/kfd at all can this skip, and then only when at least one
-    value was not reported or came back as zero.
-
-    WSL/DXG is that case: it does not expose /dev/kfd, but it can still collect
-    counters through libhsakmt's DXG vendor-packet path when supported. Prefer
-    the observed counter output over a raw /dev/kfd presence check there: if
-    every reported value is non-zero, keep validating it.
-
-    This preserves single-counter validation on WSL/DXG while avoiding false
-    failures against a stock libhsakmt that lacks the DXG PMC frame-size
-    headroom in WDDMDevice::InitCmdbufInfo(): there a multi-counter pass
-    overflows the PM4 frame and arms no counters. A libhsakmt that carries that
-    headroom does report multi-counter values, and they are validated normally.
+    Runtime capability checks must skip before result validation. Observed
+    output must never be used to infer that counter collection is unsupported.
     """
-    if has_kfd_profiler_interface():
-        return
-
-    numeric_values = []
+    found_value = False
     for value in values:
+        found_value = True
         try:
-            numeric_values.append(float(value))
+            numeric_value = float(value)
         except (TypeError, ValueError):
-            continue
+            pytest.fail(f"hardware counter value is not numeric: {value!r}")
 
-    if numeric_values and all(value > 0 for value in numeric_values):
-        return
+        if not numeric_value > 0:
+            pytest.fail(f"hardware counter value is not positive: {value!r}")
 
-    pytest.skip(
-        "hardware counter values were not fully reported on this platform; "
-        "/dev/kfd is unavailable and dxg vendor-packet counter collection "
-        "either is not available or did not arm this counter set"
-    )
+    if not found_value:
+        pytest.fail("no hardware counter values were reported")
 
 
 def skip_if_scratch_memory_unavailable(scratch_records):

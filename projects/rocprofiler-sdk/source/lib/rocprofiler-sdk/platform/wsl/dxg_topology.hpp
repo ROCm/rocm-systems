@@ -81,6 +81,12 @@ struct DxgNode
     HsaNodeProperties props   = {};
 };
 
+// True only while the SDK is being initialized through rocprof-attach.
+// rocprofiler-register sets this explicit marker before invoking tool
+// registration; it is not inferred from any librocdxg state.
+bool
+is_late_attach_mode();
+
 // Every GPU node the thunk reported, in KMT node order. CPU-only nodes are
 // dropped: the agent enumerator pairs these against DXCore adapters.
 std::vector<DxgNode>

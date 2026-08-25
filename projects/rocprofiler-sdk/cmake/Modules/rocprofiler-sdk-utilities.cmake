@@ -12,6 +12,10 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
     endif()
 
     set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}]${ARG_PREFIX} ")
+    set(rocminfo_RET 1)
+    set(rocminfo_OUT)
+    set(rocminfo_ERR)
+    set(rocminfo_GFXINFO)
 
     find_program(
         rocminfo_EXECUTABLE
@@ -31,31 +35,32 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
         if(rocminfo_RET EQUAL 0)
             string(REGEX MATCHALL "gfx([0-9A-Fa-f]+)" rocminfo_GFXINFO "${rocminfo_OUT}")
             list(REMOVE_DUPLICATES rocminfo_GFXINFO)
-            # Fallback for environments where rocminfo enumerates no GPU agent at
-            # configure time (WSL, containers without /dev/kfd, cross-compile); use the
-            # GPU_TARGETS CMake variable if it was set explicitly.
-            if("${rocminfo_GFXINFO}" STREQUAL ""
-               AND DEFINED GPU_TARGETS
-               AND NOT "${GPU_TARGETS}" STREQUAL "")
-                set(rocminfo_GFXINFO "${GPU_TARGETS}")
-                message(
-                    STATUS
-                        "${ARG_PREFIX}rocminfo returned no GPU; using GPU_TARGETS=${GPU_TARGETS}"
-                    )
-            endif()
-            set(${_VAR}
-                "${rocminfo_GFXINFO}"
-                PARENT_SCOPE)
-
-            if(ARG_ECHO)
-                string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${rocminfo_GFXINFO}")
-                message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
-            endif()
         else()
             message(
                 AUTHOR_WARNING
                     "${rocminfo_EXECUTABLE} returned ${rocminfo_RET}\nstderr:\n${rocminfo_ERR}\nstdout:\n${rocminfo_OUT}"
                 )
+        endif()
+    endif()
+
+    # Fallback for environments where rocminfo is unavailable or cannot enumerate a GPU at
+    # configure time (WSL, containers without /dev/kfd, cross-compile).
+    if("${rocminfo_GFXINFO}" STREQUAL ""
+       AND DEFINED GPU_TARGETS
+       AND NOT "${GPU_TARGETS}" STREQUAL "")
+        set(rocminfo_GFXINFO "${GPU_TARGETS}")
+        message(STATUS "${ARG_PREFIX}using explicit GPU_TARGETS=${GPU_TARGETS}")
+    endif()
+
+    # Preserve the prior behavior when rocminfo cannot run and no fallback was provided.
+    if(rocminfo_RET EQUAL 0 OR rocminfo_GFXINFO)
+        set(${_VAR}
+            "${rocminfo_GFXINFO}"
+            PARENT_SCOPE)
+
+        if(ARG_ECHO)
+            string(REPLACE ";" "${ARG_DELIM}" _GFXINFO_ECHO "${rocminfo_GFXINFO}")
+            message(STATUS "${ARG_PREFIX}System architectures: ${_GFXINFO_ECHO}")
         endif()
     endif()
 endfunction()

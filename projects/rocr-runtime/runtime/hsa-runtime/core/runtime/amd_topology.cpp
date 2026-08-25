@@ -65,7 +65,6 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
-#include "core/util/os.h"
 #include "core/util/utils.h"
 #ifdef HSAKMT_VIRTIO_ENABLED
 #include "core/inc/amd_virtio_driver.h"
@@ -90,12 +89,13 @@ const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
                  static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
 #endif
                  >
-    discover_driver_funcs = {
-        KfdDriver::DiscoverDriver
+    discover_driver_funcs = {KfdDriver::DiscoverDriver
 #ifdef __linux__
-        , XdnaDriver::DiscoverDriver
+                             ,
+                             XdnaDriver::DiscoverDriver
 #ifdef HSAKMT_VIRTIO_ENABLED
-        , KfdVirtioDriver::DiscoverDriver
+                             ,
+                             KfdVirtioDriver::DiscoverDriver
 #endif
 #endif
 };
@@ -151,8 +151,8 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
                       bool enabled, core::DriverType driver_type) {
   GpuAgent* gpu = nullptr;
   if (node_prop.NumFComputeCores == 0) {
-      // Ignore non GPUs.
-      return nullptr;
+    // Ignore non GPUs.
+    return nullptr;
   }
   try {
     gpu = new GpuAgent(node_id, node_prop, xnack_mode,
@@ -163,8 +163,8 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
     // Check for sramecc incompatibility due to sramecc not being reported correctly in kfd before
     // 1.4.
     if (gpu->supported_isas()[0]->IsSrameccSupported() &&
-         (kfd_version.KernelInterfaceMajorVersion <= 1 &&
-              kfd_version.KernelInterfaceMinorVersion < 4)) {
+        (kfd_version.KernelInterfaceMajorVersion <= 1 &&
+         kfd_version.KernelInterfaceMinorVersion < 4)) {
       // gfx906 has both sramecc modes in use.  Suppress the device.
       if ((gpu->supported_isas()[0]->GetProcessorName() == "gfx906") &&
           core::Runtime::runtime_singleton_->flag().check_sramecc_validity()) {
@@ -195,12 +195,12 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
       std::string desc = GpuNodeDescription(node_id, node_prop);
       ifdebug {
         fprintf(stderr,
-              "ROCm/HSA: Skipping unsupported GPU: %s.\n"
-              "  Reason: %s\n"
-              "  Use ROCR_VISIBLE_DEVICES to limit to supported GPU(s) if needed.\n",
-              desc.c_str(),
-              (e.what() == nullptr || strIsEmpty(e.what())) ? "unsupported or deprecated device"
-                                                            : e.what());
+                "ROCm/HSA: Skipping unsupported GPU: %s.\n"
+                "  Reason: %s\n"
+                "  Use ROCR_VISIBLE_DEVICES to limit to supported GPU(s) if needed.\n",
+                desc.c_str(),
+                (e.what() == nullptr || strIsEmpty(e.what())) ? "unsupported or deprecated device"
+                                                              : e.what());
       }
       return nullptr;
     }
@@ -322,8 +322,7 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
         bool disable_image = core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg();
         core::Runtime::runtime_singleton_->flag().disable_image(disable_image);
 
-        if (node_prop.Capability2.ui32.AqlEmulationPm4_)
-        {
+        if (node_prop.Capability2.ui32.AqlEmulationPm4_) {
           core::g_use_interrupt_wait = false;
           core::Runtime::runtime_singleton_->flag().disable_scratch();
         }
@@ -333,12 +332,6 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
         core::Runtime::runtime_singleton_->flag().set_ipc_mode_legacy(false);
         core::Runtime::runtime_singleton_->flag().disable_dev_mem_queue_buf();
         core::Runtime::runtime_singleton_->flag().disable_sdma_hdp_flush();
-        // Registration is disabled by default on DXG, but profiling tools need the
-        // HSA API table to be offered to rocprofiler-register to intercept dispatches.
-        // HSA_TOOLS_DISABLE_REGISTER already drives this flag, so an explicit user
-        // setting of it must win over this platform default.
-        if (!os::IsEnvVarSet("HSA_TOOLS_DISABLE_REGISTER"))
-          core::Runtime::runtime_singleton_->flag().set_disable_tool_register(true);
       }
 
       // Instantiate a Gpu device. The IO links
@@ -374,10 +367,9 @@ bool BuildTopology() {
   // for each driver, then update the runtime's link count before traversing each
   // driver's individual nodes.
   for (const auto& driver : rt->AgentDrivers()) {
-    auto &sys_props = driver_sys_props[driver->kernel_driver_type_];
-    auto &node_props_vec = driver_node_props[driver->kernel_driver_type_];
-    if (driver->GetSystemProperties(sys_props) != HSA_STATUS_SUCCESS)
-      return false;
+    auto& sys_props = driver_sys_props[driver->kernel_driver_type_];
+    auto& node_props_vec = driver_node_props[driver->kernel_driver_type_];
+    if (driver->GetSystemProperties(sys_props) != HSA_STATUS_SUCCESS) return false;
 
     const auto num_nodes = sys_props.NumNodes;
 
@@ -486,8 +478,7 @@ bool BuildTopology() {
     }
 
     // skip the pre-loop if NumSdmaXgmiEngines != 6
-    if (((AMD::GpuAgent*)src_gpu)->properties().NumSdmaXgmiEngines != 6)
-      break;
+    if (((AMD::GpuAgent*)src_gpu)->properties().NumSdmaXgmiEngines != 6) break;
 
     for (auto& dst_gpu : rt->gpu_agents()) {
       uint32_t dst_id = dst_gpu->node_id();
@@ -523,8 +514,9 @@ bool BuildTopology() {
           if (linfo.info.numa_distance == 13 || linfo.info.numa_distance == 41)
             gang_factor = isXgmiApu ? 2 : 1;
           else if (linfo.info.numa_distance == 15 && linfo.info.min_bandwidth)
-            gang_factor = linfo.info.max_bandwidth/linfo.info.min_bandwidth;
-          else gang_factor = 1;
+            gang_factor = linfo.info.max_bandwidth / linfo.info.min_bandwidth;
+          else
+            gang_factor = 1;
 
           rec_sdma_eng_id_mask = linfo.rec_sdma_eng_id_mask;
 
@@ -532,9 +524,10 @@ bool BuildTopology() {
           // Using one pcie sdma for device to device copy with limited XGMI SDMA engine.
           // This will help improve all to all copy with limited XGMI SDMA engine.
           if (rec_sdma_engine_override) {
-            uint32_t sdma_engine_mask = (1 << (((AMD::GpuAgent*)src_gpu)->properties().NumSdmaEngines - 1));
-            rec_sdma_eng_id_mask = !IsPowerOfTwo(rec_sdma_eng_id_mask) ?
-              sdma_engine_mask : rec_sdma_eng_id_mask;
+            uint32_t sdma_engine_mask =
+                (1 << (((AMD::GpuAgent*)src_gpu)->properties().NumSdmaEngines - 1));
+            rec_sdma_eng_id_mask =
+                !IsPowerOfTwo(rec_sdma_eng_id_mask) ? sdma_engine_mask : rec_sdma_eng_id_mask;
           }
         }
       }
@@ -572,5 +565,5 @@ bool Unload() {
 
   return true;
 }
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr

@@ -22,12 +22,6 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/input-kernel-rename.yml.in
                ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml @ONLY)
 
-# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
-# these workloads run slower in practice and need more timeout headroom (root cause TBD),
-# so scale the timeout only there for the kernel-rename workloads.
-rocprofiler_sdk_wsl_timeout_scale(_KERNEL_RENAME_YAML_TIMEOUT BASE 45)
-rocprofiler_sdk_wsl_timeout_scale(_KERNEL_RENAME_CMD_TIMEOUT BASE 45)
-
 ##########################################################################################
 #
 #   Command line input
@@ -45,7 +39,8 @@ rocprofiler_add_integration_execute_test(
         --perfetto-buffer-fill-policy ring_buffer --perfetto-backend inprocess --
         $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT ${_KERNEL_RENAME_CMD_TIMEOUT}
+    TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-kernel-rename-cmd-line)
@@ -77,7 +72,8 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input-kernel-rename.yml -- $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT ${_KERNEL_RENAME_YAML_TIMEOUT}
+    TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-kernel-rename-inp-yaml)

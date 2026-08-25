@@ -427,13 +427,6 @@ get_bdf_info(const rocprofiler_agent_t* agent)
             .function = static_cast<uint8_t>(agent->location_id & 0x07)};
 }
 
-std::vector<aqlprofile_agent_handle_t>&
-get_aql_handles_storage()
-{
-    static auto*& _v = common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct();
-    return *CHECK_NOTNULL(_v);
-}
-
 // Attempt V2 agent registration with cu_bitmap from DRM for WGP harvesting support.
 // Returns true on success, false if any step fails (caller should fall back to V1).
 //
@@ -500,17 +493,16 @@ try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_
 }
 #endif  // !ROCPROFILER_EXTERNAL_AQLPROFILE
 
-// Registers every agent with aqlprofile and stores the returned handles.
+// Registers every agent with aqlprofile and returns the handles.
 // aqlprofile's RegisterAgent caches cu_num/se_num/shader_arrays_per_se at
 // registration time and never updates an existing entry, so this must observe
 // the final agent topology. It does: every platform enumerator publishes fully
 // populated, immutable agent records, so whenever the lazy registration below
 // first runs it already sees the values profiling will use.
-void
+std::vector<aqlprofile_agent_handle_t>
 register_aql_handles()
 {
-    auto& agent_handles = get_aql_handles_storage();
-    agent_handles.clear();
+    auto agent_handles = std::vector<aqlprofile_agent_handle_t>{};
     agent_handles.reserve(get_agents().size());
 
     for(auto& agent : get_agents())
@@ -581,18 +573,15 @@ register_aql_handles()
 #endif
         agent_handles.push_back(handle);
     }
+    return agent_handles;
 }
 
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
 {
-    static const bool _once = []() {
-        register_aql_handles();
-        return true;
-    }();
-    common::consume_args(_once);
-
-    return get_aql_handles_storage();
+    static auto*& _v = common::static_object<std::vector<aqlprofile_agent_handle_t>>::construct(
+        register_aql_handles());
+    return *CHECK_NOTNULL(_v);
 }
 }  // namespace
 
@@ -985,11 +974,23 @@ parse_gfx_target_version(std::string_view gfx_name)
     else
         return std::nullopt;
 
-    uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
-    uint32_t maj = 0;
+    constexpr auto max_packed_version = std::numeric_limits<uint32_t>::max();
+    constexpr auto major_scale        = uint32_t{10000};
+    constexpr auto minor_scale        = uint32_t{100};
+    constexpr auto max_major          = max_packed_version / major_scale;
+
+    const uint32_t min = static_cast<uint32_t>(digits[digits.size() - 2] - '0');
+    uint32_t       maj = 0;
     for(size_t k = 0; k + 2 < digits.size(); ++k)
-        maj = maj * 10 + static_cast<uint32_t>(digits[k] - '0');
-    return maj * 10000 + min * 100 + stp;
+    {
+        const auto digit = static_cast<uint32_t>(digits[k] - '0');
+        if(maj > (max_major - digit) / 10) return std::nullopt;
+        maj = maj * 10 + digit;
+    }
+
+    const auto minor_component = min * minor_scale;
+    if(maj > (max_packed_version - minor_component - stp) / major_scale) return std::nullopt;
+    return maj * major_scale + minor_component + stp;
 }
 
 bool
@@ -1016,7 +1017,8 @@ kfd_device_available()
 }  // namespace agent
 }  // namespace rocprofiler
 
-extern "C" {
+extern "C"
+{
 rocprofiler_status_t
 rocprofiler_query_available_agents(rocprofiler_agent_version_t             version,
                                    rocprofiler_query_available_agents_cb_t callback,

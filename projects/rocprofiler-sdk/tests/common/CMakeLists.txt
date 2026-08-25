@@ -195,6 +195,8 @@ function(rocprofiler_add_integration_execute_test NAME)
         "WILL_FAIL" # failure is expected in order for test to pass
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
         "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
+        "DISABLED_NO_KFD" # disable when KFD is unavailable
+        "WSL_TIMEOUT_SCALE" # scale TIMEOUT when KFD is unavailable
         )
     set(_SINGLE_OPTS "TARGET" "WORKING_DIRECTORY" "DEPENDS" "TIMEOUT" "LABELS" "DISABLED"
                      "DISABLED_MEMCHECKS")
@@ -221,6 +223,14 @@ function(rocprofiler_add_integration_execute_test NAME)
 
     rocprofiler_set_integration_test_name(arg_NAME "${NAME}" "execute")
 
+    if(arg_WSL_TIMEOUT_SCALE AND (NOT DEFINED arg_TIMEOUT OR "${arg_TIMEOUT}" STREQUAL ""
+                                 ))
+        message(
+            FATAL_ERROR
+                "rocprofiler_add_integration_execute_test: WSL_TIMEOUT_SCALE requires TIMEOUT for ${NAME} (${arg_NAME})"
+            )
+    endif()
+
     if("${arg_ENVIRONMENT}" MATCHES "LD_PRELOAD=.*")
         message(
             FATAL_ERROR
@@ -239,6 +249,10 @@ function(rocprofiler_add_integration_execute_test NAME)
     set_arg_if_empty(arg_TIMEOUT 60)
     set_arg_if_empty(arg_FIXTURES_SETUP ${NAME})
 
+    if(arg_WSL_TIMEOUT_SCALE)
+        rocprofiler_sdk_wsl_timeout_scale(arg_TIMEOUT BASE "${arg_TIMEOUT}")
+    endif()
+
     # the test is marked as unstable
     if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS AND arg_UNSTABLE)
         set(arg_DISABLED ON)
@@ -253,6 +267,14 @@ function(rocprofiler_add_integration_execute_test NAME)
     # the tests shouldn't be run when rocprofiler-sdk is built with code-coverage support
     if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLED_CODECOV)
         set(arg_DISABLED ON)
+    endif()
+
+    # the test shouldn't be run when KFD is unavailable
+    if(arg_DISABLED_NO_KFD)
+        rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+        if(NOT _KFD_AVAILABLE)
+            set(arg_DISABLED ON)
+        endif()
     endif()
 
     # insert sanitizer libraries into LD_PRELOAD
@@ -368,6 +390,7 @@ function(rocprofiler_add_integration_validate_test NAME)
         "WILL_FAIL" # failure is expected in order for test to pass
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
         "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
+        "DISABLED_NO_KFD" # disable when KFD is unavailable
         "STRIP_PARAM_BRACKETS"
         "INCLUDE_FILE_PATH"
         "BUNDLE_TESTS")
@@ -443,6 +466,14 @@ function(rocprofiler_add_integration_validate_test NAME)
     # the tests shouldn't be run when rocprofiler-sdk is built with code-coverage support
     if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLED_CODECOV)
         set(arg_DISABLED ON)
+    endif()
+
+    # the test shouldn't be run when KFD is unavailable
+    if(arg_DISABLED_NO_KFD)
+        rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
+        if(NOT _KFD_AVAILABLE)
+            set(arg_DISABLED ON)
+        endif()
     endif()
 
     if(NOT "integration-tests" IN_LIST arg_LABELS)

@@ -18,15 +18,11 @@ else()
     set(PRELOAD_ENV "$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()
 
-# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
-# these workloads run slower in practice and need more timeout headroom (root cause TBD),
-# so scale the timeout only there.
-rocprofiler_sdk_wsl_timeout_scale(_ASYNC_COPY_TIMEOUT BASE 45)
-
 rocprofiler_add_integration_execute_test(
     async-copy-tracing
     TARGET transpose
-    TIMEOUT ${_ASYNC_COPY_TIMEOUT}
+    TIMEOUT 45
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROFILER_TOOL_OUTPUT_FILE=async-copy-tracing-test.json"

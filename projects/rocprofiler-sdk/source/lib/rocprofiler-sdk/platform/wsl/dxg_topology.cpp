@@ -83,7 +83,7 @@ struct RocdxgHandle
         if(handle) ops.close(handle);
     }
 
-    RocdxgHandle(const RocdxgHandle&) = delete;
+    RocdxgHandle(const RocdxgHandle&)            = delete;
     RocdxgHandle& operator=(const RocdxgHandle&) = delete;
 
     bool ready() const { return handle != nullptr && thunk.complete(); }
@@ -165,6 +165,15 @@ static_assert(offsetof(NodePropsScratch, overrun) == sizeof(HsaNodeProperties),
               "the slack must directly follow the record it is there to absorb overruns into");
 }  // namespace
 
+bool
+is_late_attach_mode()
+{
+    // rocprofiler-register owns this marker and sets it before invoking tool
+    // registration. Presence is the signal; do not reinterpret a value copied
+    // from the attaching process as permission to enter librocdxg.
+    return std::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED") != nullptr;
+}
+
 const DxgLoaderOps&
 default_loader_ops()
 {
@@ -207,6 +216,9 @@ resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops)
 std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgLoaderOps& ops)
 {
+    // Keep the late-attach refusal ahead of dlopen as well as every KMT call.
+    if(is_late_attach_mode()) return {};
+
     const auto dxg = RocdxgHandle{ops};
     if(!dxg.ready()) return {};
     return read_dxg_gpu_topology(dxg.thunk);
@@ -222,6 +234,10 @@ std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgThunk& dxg)
 {
     auto out = std::vector<DxgNode>{};
+
+    // This overload is the unit-test seam and may also be used by future
+    // already-resolved callers. Preserve the same pre-call safety boundary.
+    if(is_late_attach_mode()) return out;
 
     if(!dxg.complete()) return out;
 
@@ -244,18 +260,45 @@ read_dxg_gpu_topology(const DxgThunk& dxg)
         ~OpenGuard() { dxg.close_kfd(); }
     } _open_guard{dxg};
 
-    // Not refcounted, unlike the open above. Acquire copies out the one global
-    // snapshot without recording a holder, and the release below drops it
-    // outright: topology_drop_snapshot() frees it and deletes the WDDM devices
-    // for every consumer, not just this one. (hsaKmtOpenKFD() likewise resets
-    // the suballocator on every call, including one that reports
-    // KERNEL_ALREADY_OPENED.)
+    // Released external librocdxg packages do not refcount this, unlike the
+    // open above. Acquire copies out their one global snapshot without
+    // recording a holder, and release drops it outright: topology_drop_snapshot()
+    // frees it and deletes the WDDM devices for every consumer, not just this
+    // one. (Those packages likewise reset the suballocator on every
+    // hsaKmtOpenKFD(), including one that reports KERNEL_ALREADY_OPENED.) The
+    // prerequisite in-tree runtime fixes both ownership defects, but exposes no
+    // run-time capability bit by which this caller can distinguish it.
     //
-    // Safe here only because of ordering: rocprofv3 sets
-    // ROCPROFILER_LIBRARY_CTOR, so this open/acquire/release/close runs from a
-    // library constructor and completes before main(), and so before
-    // hsa_init(). rocprof-attach, which injects into a process that is already
-    // running, gets no such ordering.
+    // Safe here with an older external thunk only because normal rocprofv3
+    // startup is constructor-ordered: this sequence completes before main(),
+    // and so before hsa_init(). rocprof-attach injects into a process that is
+    // already running, so is_late_attach_mode() refuses it above before any
+    // librocdxg load or call. PR #10034 adds the refcounted snapshot ownership
+    // needed to remove that late-attach restriction in a follow-up; it is not a
+    // prerequisite for constructor-ordered enumeration in PR #7016.
+    //
+    // The explicit attach marker is essential because librocdxg exposes no
+    // run-time snapshot-ownership capability:
+    //
+    //   - There is no capability signal to read. DxgAbiCheck negotiates
+    //     sizeof(HsaNodeProperties) and nothing else, and which thunks export
+    //     it runs the wrong way round for this purpose: the released librocdxg
+    //     packages (v1.1.2 through 1.2.x) do export it, while a thunk built
+    //     from the in-tree sources does not. Reading it as a refcount bit would
+    //     report exactly the shipped thunks - the ones keeping one global
+    //     snapshot with no holder count - as the capable ones.
+    //   - KERNEL_ALREADY_OPENED counts something else. It reports that
+    //     hsaKmtOpenKFD()'s open count was already non-zero, which any second
+    //     consumer produces; what matters is whether a snapshot already exists,
+    //     and hsaKmtAcquireSystemProperties() answers SUCCESS whether it took a
+    //     fresh one or handed back the live one.
+    //   - Probing is not free. hsaKmtOpenKFD() resets the shared suballocator
+    //     before it returns, on the already-opened path too, and
+    //     hsaKmtCloseKFD() does not undo that. Once the acquire below has
+    //     happened there is no per-caller release to unwind with at all.
+    //
+    // Therefore this sequence stays unconditional once the explicit
+    // constructor-versus-late-attach decision above has admitted the call.
     auto sys_props = HsaSystemProperties{};
     if(auto st = dxg.acquire_snapshot(&sys_props); st != HSAKMT_STATUS_SUCCESS)
     {
@@ -441,8 +484,12 @@ apply_node_topology(const DxgNode& node, rocprofiler_agent_t& info)
     info.uuid        = static_cast<rocprofiler_uuid_t>(_uuid);
 
     // Workgroup and grid limits are architectural constants the HSA runtime
-    // itself hardcodes (see amd_gpu_agent.cpp) rather than topology the KMT
-    // driver reports, so they are the same values the KFD path uses.
+    // itself hardcodes rather than topology the KMT driver reports, so they are
+    // the same values the KFD path publishes. ROCr answers
+    // HSA_AGENT_INFO_GRID_MAX_SIZE as min(kern_cluster_max_dim_.x, INT32_MAX),
+    // and kern_cluster_max_dim_.x is itself constructed as INT32_MAX and never
+    // refreshed from the driver (amd_gpu_agent.cpp), so INT32_MAX is exactly
+    // what HSA reports rather than an approximation of it.
     constexpr auto workgrp_max = 1024;
     constexpr auto grid_max    = std::numeric_limits<int32_t>::max();
     constexpr auto grid_max_y  = std::numeric_limits<uint16_t>::max();

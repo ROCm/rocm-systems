@@ -34,8 +34,6 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <mutex>
-
 namespace rocprofiler
 {
 namespace counters
@@ -180,17 +178,11 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
         // capability probe is shared at the topology level (rocprofiler::agent)
         // so this stays consistent with KFD event tracing rather than being an
         // ad-hoc check here.
-        if(!::rocprofiler::agent::kfd_device_available())
-        {
-            static std::once_flag warned_once{};
-            std::call_once(warned_once, []() {
-                ROCP_WARNING << "/dev/kfd is not available (expected under WSL/DXG). Hardware "
-                                "performance counters are collected via the dxg vendor-packet "
-                                "path in libhsakmt (requires WSLKMT_VENDOR_PACKET=1, enabled "
-                                "automatically by the WSL platform layer). Single- and "
-                                "multi-counter collection are supported.";
-            });
-        }
+        LOG_IF_FIRST_N(WARNING, !::rocprofiler::agent::kfd_device_available(), 1)
+            << "/dev/kfd is not available (expected under WSL/DXG). Hardware performance "
+               "counters are collected via the dxg vendor-packet path in libhsakmt (requires "
+               "WSLKMT_VENDOR_PACKET=1, enabled automatically by the WSL platform layer). "
+               "Single- and multi-counter collection are supported.";
     }
 
     auto& cb = *ctx.dispatch_counter_collection->callbacks.emplace_back(

@@ -36,7 +36,9 @@
 #include <dlfcn.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -48,6 +50,34 @@ using rocprofiler::platform::wsl::read_dxg_gpu_topology;
 using rocprofiler::platform::wsl::resolve_dxg_thunk;
 
 constexpr HSAKMT_STATUS kFailure = HSAKMT_STATUS_ERROR;
+
+class ToolAttachedEnv
+{
+public:
+    explicit ToolAttachedEnv(bool enabled)
+    {
+        if(const char* value = ::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED")) previous_ = value;
+
+        if(enabled)
+            ::setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", "1", /*overwrite=*/1);
+        else
+            ::unsetenv("ROCPROFILER_REGISTER_TOOL_ATTACHED");
+    }
+
+    ~ToolAttachedEnv()
+    {
+        if(previous_)
+            ::setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", previous_->c_str(), /*overwrite=*/1);
+        else
+            ::unsetenv("ROCPROFILER_REGISTER_TOOL_ATTACHED");
+    }
+
+    ToolAttachedEnv(const ToolAttachedEnv&)            = delete;
+    ToolAttachedEnv& operator=(const ToolAttachedEnv&) = delete;
+
+private:
+    std::optional<std::string> previous_;
+};
 
 // The fake thunk's answers and its call log. A DxgThunk is a table of plain
 // function pointers, so the trampolines below reach the fixture through this
@@ -97,7 +127,7 @@ struct FakeThunk
     FakeThunk() { g_state = &state; }
     ~FakeThunk() { g_state = nullptr; }
 
-    FakeThunk(const FakeThunk&) = delete;
+    FakeThunk(const FakeThunk&)            = delete;
     FakeThunk& operator=(const FakeThunk&) = delete;
 
     static HSAKMT_STATUS OpenKfd()
@@ -254,8 +284,9 @@ const std::vector<std::string> kResolvedSymbols = {"hsaKmtOpenKFD",
 
 // --- the happy path --------------------------------------------------------
 
-TEST(wsl_dxg_thunk, a_healthy_thunk_is_called_in_order_and_left_balanced)
+TEST(wsl_dxg_thunk, constructor_ordered_enumeration_calls_the_thunk_and_leaves_it_balanced)
 {
+    auto mode = ToolAttachedEnv{false};
     auto fake = FakeThunk{};
     fake.publish_gpu_nodes(2);
 
@@ -273,6 +304,27 @@ TEST(wsl_dxg_thunk, a_healthy_thunk_is_called_in_order_and_left_balanced)
                                         "close_kfd"}));
 }
 
+TEST(wsl_dxg_thunk, explicit_late_attach_never_loads_or_calls_the_thunk)
+{
+    auto mode   = ToolAttachedEnv{true};
+    auto fake   = FakeThunk{};
+    auto loader = FakeLoader{};
+    fake.publish_gpu_nodes(2);
+
+    EXPECT_TRUE(read_dxg_gpu_topology(loader.ops()).empty());
+    EXPECT_TRUE(loader.open_flags.empty()) << "late attach must be rejected before dlopen";
+    EXPECT_TRUE(loader.requested_symbols.empty());
+    EXPECT_EQ(loader.close_count, 0);
+    EXPECT_TRUE(fake.state.calls.empty());
+
+    // rocprofiler-register owns marker presence. A copied helper environment
+    // must not turn a different value into permission to touch the thunk.
+    ::setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", "0", /*overwrite=*/1);
+    EXPECT_TRUE(read_dxg_gpu_topology(fake.table()).empty());
+    EXPECT_TRUE(fake.state.calls.empty())
+        << "late attach must not call ABI/open/acquire/get/release/close";
+}
+
 // KERNEL_ALREADY_OPENED means another consumer - normally the HSA runtime -
 // had the thunk open and we took an additional reference. It is a success and
 // it still owes a close.
@@ -288,6 +340,69 @@ TEST(wsl_dxg_thunk, an_already_open_thunk_is_used_and_still_closed)
     EXPECT_EQ(fake.state.count("close_kfd"), 1);
     EXPECT_EQ(fake.state.count("release_snapshot"), 1);
     EXPECT_EQ(fake.state.calls.back(), "close_kfd");
+}
+
+// --- the snapshot lifetime prerequisite ------------------------------------
+//
+// Released external thunks do not refcount the snapshot pair:
+// hsaKmtReleaseSystemProperties() drops their one global snapshot and deletes
+// every WDDMDevice with it, for all consumers. read_dxg_gpu_topology() is safe
+// with one of those packages only because rocprofv3 runs it from a library
+// constructor, before hsa_init(). The prerequisite in-tree runtime refcounts
+// the snapshot, but does not expose a run-time capability bit for that behavior.
+//
+// Late attach is gated above by ROCPROFILER_REGISTER_TOOL_ATTACHED, which
+// rocprofiler-register sets explicitly before tool initialization. The two
+// tests below pin why inferred thunk state must never replace that marker.
+// Once constructor-ordered enumeration has been admitted, the sequence stays
+// balanced and unconditional with either ownership model.
+
+// hsaKmtOpenKFD() reports whether its open count was already non-zero, not
+// whether a snapshot already exists - any second consumer of the thunk produces
+// KERNEL_ALREADY_OPENED, and hsaKmtAcquireSystemProperties() answers SUCCESS
+// whether it took a fresh snapshot or handed back the live one. So the status
+// cannot select a different teardown, and the sequence does not branch on it.
+TEST(wsl_dxg_thunk, the_open_status_does_not_select_a_different_teardown)
+{
+    auto observe = [](HSAKMT_STATUS open_status) {
+        auto fake              = FakeThunk{};
+        fake.state.open_status = open_status;
+        fake.publish_gpu_nodes(2);
+        read_dxg_gpu_topology(fake.table());
+        return fake.state.calls;
+    };
+
+    const auto fresh   = observe(HSAKMT_STATUS_SUCCESS);
+    const auto already = observe(HSAKMT_STATUS_KERNEL_ALREADY_OPENED);
+
+    EXPECT_EQ(fresh, already) << "KERNEL_ALREADY_OPENED cannot distinguish a late attach, so "
+                                 "nothing here may be made conditional on it";
+    EXPECT_EQ(already.back(), "close_kfd");
+}
+
+// DxgAbiCheck negotiates sizeof(HsaNodeProperties) and nothing else, and which
+// thunks export it runs the wrong way round to stand in for a snapshot-lifetime
+// capability: the released librocdxg packages do export it, while a thunk built
+// from the in-tree sources does not. Gating on it would mark exactly the shipped
+// thunks as capable. Whether it is present must therefore change nothing about
+// the open/acquire/release/close sequence.
+TEST(wsl_dxg_thunk, the_abi_handshake_is_not_a_snapshot_lifetime_capability_bit)
+{
+    auto observe = [](bool exports_handshake) {
+        auto fake = FakeThunk{};
+        fake.publish_gpu_nodes(2);
+        auto thunk = fake.table();
+        if(exports_handshake) thunk.abi_check = &FakeThunk::AbiCheck;
+        read_dxg_gpu_topology(thunk);
+
+        auto calls = fake.state.calls;
+        // The handshake call itself is the one permitted difference.
+        if(!calls.empty() && calls.front() == "abi_check") calls.erase(calls.begin());
+        return calls;
+    };
+
+    EXPECT_EQ(observe(false), observe(true))
+        << "the structure-size handshake must not gate the snapshot lifetime";
 }
 
 // CPU-only nodes are skipped, but the walk still visits every node and the

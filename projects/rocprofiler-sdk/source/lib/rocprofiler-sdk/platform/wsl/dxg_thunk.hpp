@@ -61,14 +61,23 @@ inline constexpr const char* kLibRocdxgSoname = "librocdxg.so";
 // exports. Requiring all five before any of them is called is what keeps the
 // read from having to unwind a half-open thunk.
 //
-// The snapshot pair is not refcounted the way the open pair is: librocdxg
-// keeps one global snapshot and no count of who holds it, so a release drops
-// it for every consumer. What makes this read safe is ordering rather than
-// sharing - see read_dxg_gpu_topology() in dxg_topology.cpp.
+// Released external librocdxg packages keep one global snapshot and no count
+// of who holds it, so a release drops it for every consumer. The prerequisite
+// in-tree runtime refcounts that snapshot, but no entry point in this table
+// reports which ownership model a loaded thunk implements. What makes this read
+// safe with an older external package is ordering rather than sharing - it runs
+// from a library constructor, before hsa_init(). Attaching to an already-running
+// process has no such ordering, so the explicit rocprofiler-register attach
+// marker disables WSL enumeration before this table is resolved or called.
+// PR #10034 is required to enable WSL late attach, but it is not a prerequisite
+// for constructor-ordered enumeration in PR #7016; see dxg_topology.cpp.
 //
 // abi_check is the sixth and is deliberately outside complete(): it is the
 // structure-size handshake, and a thunk built before the handshake existed does
-// not export it. Requiring it would refuse thunks that work.
+// not export it. Requiring it would refuse thunks that work. It is not a
+// capability bit for anything else either - the released packages export it and
+// the in-tree build does not, which says which librocdxg is installed and
+// nothing about how it manages the snapshot.
 struct DxgThunk
 {
     PFN_hsaKmtOpenKFD                 open_kfd         = nullptr;
