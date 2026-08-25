@@ -313,9 +313,7 @@ ncclResult_t IbCastPortRecoverySenderQpsCreate(struct ncclIbResiliency* resCtx,
   qpCreateAttrs.type = IBV_QPT_UD;
   qpCreateAttrs.maxRecvWorkRequest = 1;
   qpCreateAttrs.maxSendWorkRequest = NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX;
-  qpCreateAttrs.isQpSharingEnabled = false;
-  qpCreateAttrs.qpSharingGroupIdx = -1;
-  qpCreateAttrs.cqDepthMultiplier = 1;
+  IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % sendComm->base.vProps.ndevs;
     ncclIbSendCommDev* sendCommDev = &sendComm->devs[localDevIndex];
@@ -387,9 +385,7 @@ ncclResult_t IbCastPortRecoveryReceiverQpsCreateToRts(struct ncclIbResiliency* r
   qpCreateAttrs.type = IBV_QPT_UD;
   qpCreateAttrs.maxRecvWorkRequest = NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX;
   qpCreateAttrs.maxSendWorkRequest = 1;
-  qpCreateAttrs.isQpSharingEnabled = false;
-  qpCreateAttrs.qpSharingGroupIdx = -1;
-  qpCreateAttrs.cqDepthMultiplier = 1;
+  IbCastQpCreateAttrInitSharing(&qpCreateAttrs);
   for (int localQpIndex = 0; localQpIndex < nQps; localQpIndex++) {
     int localDevIndex = localQpIndex % recvComm->base.vProps.ndevs;
     ncclIbRecvCommDev* recvCommDev = &recvComm->devs[localDevIndex];

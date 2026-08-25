@@ -360,6 +360,10 @@ ncclResult_t IbCastFinalizeDevices(void) {
   // No telemetry flush here: netRefCount reaching 0 is not process exit, and
   // the flush is one-shot. atexit(rcclTelemetryFlush) covers the process.
   --netRefCount;
+  if (netRefCount == 0) {
+    // debug validation
+    IbCastValidateSharedQpPool();
+  }
   return ncclSuccess;
 }
 
@@ -635,7 +639,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       IbCastAinicCtsInlineData = IbCastUseInline;
 
       // CTS offload and QP sharing are mutually exclusive. disable CTS offload when QP sharing is enabled
-      if (IbCastOffloadEnabled && (rcclParamIbCastCommNGroups() > 0)) {
+      if (IbCastOffloadEnabled && IbCastQpSharingEnabled()) {
         INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling CTS Offload (not yet supported with QP sharing)");
         IbCastOffloadEnabled = false;
       }
@@ -655,7 +659,7 @@ exit:
                                "(load balancer integration with resiliency is pending)");
     castGlobalQpSchedParms.enable = false;
   }
-  if (ret == ncclSuccess && castGlobalQpSchedParms.enable && rcclParamIbCastCommNGroups() > 0) {
+  if (ret == ncclSuccess && castGlobalQpSchedParms.enable && IbCastQpSharingEnabled()) {
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : QP sharing enabled - disabling QP scheduler");
     castGlobalQpSchedParms.enable = false;
   }
