@@ -116,20 +116,6 @@ TEST(ShouldBatchPackets, BatchesPacketsWhenNoSubsystemActive)
     EXPECT_TRUE(rocprofiler::hsa::queue_hooks::should_batch_packets());
 }
 
-// Every subsystem that injects per-dispatch AQL packets must veto batching. A
-// subsystem that installs a write hook but is missing from should_batch_packets()
-// would have its injection silently dropped for every packet after the first in a
-// multi-packet submission, so the veto set is stated as an invariant: any subsystem
-// reporting active must force per-packet mode.
-TEST(ShouldBatchPackets, AnyPacketInjectingSubsystemVetoesBatching)
-{
-    const bool any_injector_active = rocprofiler::counters::is_any_active() ||
-                                     rocprofiler::thread_trace::is_any_active() ||
-                                     rocprofiler::spm::is_any_active();
-
-    EXPECT_EQ(rocprofiler::hsa::queue_hooks::should_batch_packets(), !any_injector_active);
-}
-
 // inst_pkt entries are routed back to their producer by client id at completion.
 // Two subsystems sharing an id would hand each other's AQL packets to the wrong
 // post-dispatch handler, so the ids must be pairwise distinct.
@@ -141,26 +127,6 @@ TEST(QueueHookClientIds, ArePairwiseDistinct)
         COUNTERS_CLIENT_ID, THREAD_TRACE_CLIENT_ID, PC_SAMPLING_CLIENT_ID, SPM_CLIENT_ID};
 
     EXPECT_EQ(ids.size(), 4U) << "queue hook client ids must be pairwise distinct";
-}
-
-// A subsystem missing from any_consumer_active() never sees a dispatch at all: the
-// interceptor forwards the submission untouched before reaching any write hook.
-// Batching-relevant subsystems are a subset of consumers, so anything that vetoes
-// batching must also count as a consumer.
-TEST(AnyConsumerActive, VetoingBatchingImpliesBeingAConsumer)
-{
-    const auto agents = rocprofiler::agent::get_agents();
-    if(agents.empty()) GTEST_SKIP() << "no agents available";
-
-    for(const auto* itr : agents)
-    {
-        if(itr->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
-        if(!rocprofiler::hsa::queue_hooks::should_batch_packets())
-        {
-            EXPECT_TRUE(rocprofiler::hsa::queue_hooks::any_consumer_active(itr->id))
-                << "a subsystem that forces per-packet mode must also gate the interceptor on";
-        }
-    }
 }
 
 // Uses the full registered-context activation pattern (configure + start_context)
@@ -193,6 +159,17 @@ TEST(ShouldBatchPackets, RequiresPerPacketWhenCountersActive)
 
     EXPECT_TRUE(rocprofiler::counters::is_any_active());
     EXPECT_FALSE(rocprofiler::hsa::queue_hooks::should_batch_packets());
+
+    // Vetoing batching is only meaningful if the interceptor runs in the first place:
+    // a subsystem missing from any_consumer_active() has its submission forwarded
+    // untouched and never reaches a write hook. Checked here rather than standalone
+    // because with nothing active the implication holds trivially.
+    for(const auto* itr : rocprofiler::agent::get_agents())
+    {
+        if(itr->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+        EXPECT_TRUE(rocprofiler::hsa::queue_hooks::any_consumer_active(itr->id))
+            << "a subsystem that forces per-packet mode must also gate the interceptor on";
+    }
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
     EXPECT_FALSE(rocprofiler::counters::is_any_active());

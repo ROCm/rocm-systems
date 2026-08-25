@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/activation.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -1088,6 +1089,62 @@ TEST(spm_core, write_hook_tags_packets_with_the_spm_client_id)
     }
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+}
+
+// Regression test for the two ways a live SPM session can be skipped by the
+// interceptor. Both predicates are checked while an SPM context is genuinely
+// active, because with nothing active they are trivially satisfied.
+//
+//   * any_consumer_active() false would make WriteInterceptor forward the
+//     submission untouched, so write_hook would never be reached at all.
+//   * should_batch_packets() true would process a multi-packet submission as one
+//     batch, so SPM's per-dispatch packet would only be injected for the first
+//     dispatch in the batch.
+TEST(spm_core, an_active_context_gates_the_interceptor_on_and_vetoes_batching)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    registration::set_fini_status(0);
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(get_client_ctx(),
+                                                                         null_dispatch_callback,
+                                                                         (void*) 0x12345,
+                                                                         null_record_callback,
+                                                                         (void*) 0x54321),
+                     "Could not setup counting service");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    ASSERT_TRUE(spm::is_any_active()) << "test is vacuous unless SPM is really active";
+
+    EXPECT_FALSE(hsa::queue_hooks::should_batch_packets())
+        << "SPM injects a packet per dispatch, so batching must be vetoed";
+
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+    for(const auto& [_, agent] : agents)
+    {
+        const auto* rocp_agent = CHECK_NOTNULL(agent.get_rocp_agent());
+        EXPECT_TRUE(hsa::queue_hooks::any_consumer_active(rocp_agent->id))
+            << "an active SPM context must keep the interceptor on for agent "
+            << rocp_agent->id.handle;
+    }
+
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+
+    // And the veto lifts once the session stops, so an unrelated workload does not
+    // keep paying per-packet mode.
+    EXPECT_TRUE(hsa::queue_hooks::should_batch_packets());
 
     registration::set_init_status(1);
     registration::finalize();
