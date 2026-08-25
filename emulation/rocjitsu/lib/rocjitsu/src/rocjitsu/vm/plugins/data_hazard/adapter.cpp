@@ -3,9 +3,9 @@
 
 #include "rocjitsu/vm/plugins/data_hazard/adapter.h"
 
-#include "detail/waitcnt_decode.h"
-
 #include <algorithm>
+#include <charconv>
+#include <system_error>
 
 namespace rocjitsu::plugins::data_hazard {
 
@@ -51,6 +51,38 @@ void add_counter(WaitAction &action, WaitCntType kind, uint32_t keep_count) {
   action.counters.push_back({kind, keep_count});
 }
 
+/// The first run of digits in @p text, which is how a wait that names no field
+/// states its count.
+uint32_t first_decimal(std::string_view text, uint32_t fallback = 0) {
+  for (size_t i = 0; i < text.size(); ++i) {
+    if (text[i] < '0' || text[i] > '9')
+      continue;
+    size_t end = i;
+    while (end < text.size() && text[end] >= '0' && text[end] <= '9')
+      ++end;
+    uint32_t value = fallback;
+    const auto result = std::from_chars(text.data() + i, text.data() + end, value);
+    return result.ec == std::errc{} ? value : fallback;
+  }
+  return fallback;
+}
+
+/// The count @p field names in @p text, as in the `lgkmcnt(` of
+/// `vmcnt(1) expcnt(0) lgkmcnt(3)`.
+uint32_t parse_waitcnt_field(std::string_view text, std::string_view field, uint32_t fallback) {
+  const size_t field_pos = text.find(field);
+  if (field_pos == std::string_view::npos)
+    return fallback;
+  const size_t begin = field_pos + field.size();
+  const size_t end = text.find(')', begin);
+  if (end == std::string_view::npos || end <= begin)
+    return fallback;
+
+  uint32_t value = fallback;
+  const auto result = std::from_chars(text.data() + begin, text.data() + end, value);
+  return result.ec == std::errc{} ? value : fallback;
+}
+
 ResourceAccessEvent make_base_resource_event(const InstructionDescriptor &instruction,
                                              uint32_t size_bytes, bool is_atomic,
                                              uint64_t exec_mask) {
@@ -93,48 +125,41 @@ WaitAction make_wait_action(const WaitInfo &wait) {
   switch (wait.kind) {
   case WaitKind::None:
     break;
-  case WaitKind::Waitcnt: {
-    const auto fields = data_hazard_waitcnt::decode_legacy_waitcnt(
-        wait.immediate, data_hazard_waitcnt::LEGACY_LGKMCNT_4BIT_MASK);
+  case WaitKind::Waitcnt:
     // Drains the stores as well on gfx9 and CDNA, where they are outstanding
     // on this same counter. gfx10 and gfx11 kept the s_waitcnt mnemonic but
     // count stores on vscnt, drained by the separate s_waitcnt_vscnt, and
     // their stores are tracked against that counter instead.
-    add_counter(action, WaitCntType::VMEM, fields.vmcnt);
-    add_counter(action, WaitCntType::LDS, fields.lgkmcnt);
-    add_counter(action, WaitCntType::SMEM, fields.lgkmcnt);
+    add_counter(action, WaitCntType::VMEM, wait.count);
+    add_counter(action, WaitCntType::LDS, wait.paired_count);
+    add_counter(action, WaitCntType::SMEM, wait.paired_count);
     break;
-  }
   case WaitKind::WaitLoadcnt:
-    add_counter(action, WaitCntType::VMEM, wait.immediate);
+    add_counter(action, WaitCntType::VMEM, wait.count);
     break;
   case WaitKind::WaitStorecnt:
   case WaitKind::WaitVscnt:
-    add_counter(action, WaitCntType::STORE, wait.immediate);
+    add_counter(action, WaitCntType::STORE, wait.count);
     break;
   case WaitKind::WaitKmcnt:
-    add_counter(action, WaitCntType::SMEM, wait.immediate);
+    add_counter(action, WaitCntType::SMEM, wait.count);
     break;
   case WaitKind::WaitDscnt:
-    add_counter(action, WaitCntType::LDS, wait.immediate);
+    add_counter(action, WaitCntType::LDS, wait.count);
     break;
-  case WaitKind::WaitLoadcntDscnt: {
-    const auto fields = data_hazard_waitcnt::decode_split_waitcnt(wait.immediate);
-    add_counter(action, WaitCntType::VMEM, fields.primary);
-    add_counter(action, WaitCntType::LDS, fields.dscnt);
+  case WaitKind::WaitLoadcntDscnt:
+    add_counter(action, WaitCntType::VMEM, wait.count);
+    add_counter(action, WaitCntType::LDS, wait.paired_count);
     break;
-  }
-  case WaitKind::WaitStorecntDscnt: {
-    const auto fields = data_hazard_waitcnt::decode_split_waitcnt(wait.immediate);
-    add_counter(action, WaitCntType::STORE, fields.primary);
-    add_counter(action, WaitCntType::LDS, fields.dscnt);
+  case WaitKind::WaitStorecntDscnt:
+    add_counter(action, WaitCntType::STORE, wait.count);
+    add_counter(action, WaitCntType::LDS, wait.paired_count);
     break;
-  }
   case WaitKind::WaitIdle:
     action.waits_for_idle = true;
     break;
   case WaitKind::WaitTensorcnt:
-    add_counter(action, WaitCntType::TENSOR, wait.immediate);
+    add_counter(action, WaitCntType::TENSOR, wait.count);
     break;
   case WaitKind::BarrierWait:
     // Deliberately not a completed workgroup barrier: this runs before the
@@ -154,6 +179,32 @@ WaitAction make_wait_action(const WaitInfo &wait) {
   }
 
   return action;
+}
+
+WaitInfo make_wait_info(WaitKind kind, std::string_view operand_text) {
+  WaitInfo wait;
+  wait.kind = kind;
+
+  switch (kind) {
+  case WaitKind::None:
+    break;
+  case WaitKind::Waitcnt:
+    wait.count = parse_waitcnt_field(operand_text, "vmcnt(", 0);
+    wait.paired_count = parse_waitcnt_field(operand_text, "lgkmcnt(", 0);
+    break;
+  case WaitKind::WaitLoadcntDscnt:
+    wait.count = parse_waitcnt_field(operand_text, "loadcnt(", first_decimal(operand_text));
+    wait.paired_count = parse_waitcnt_field(operand_text, "dscnt(", 0);
+    break;
+  case WaitKind::WaitStorecntDscnt:
+    wait.count = parse_waitcnt_field(operand_text, "storecnt(", first_decimal(operand_text));
+    wait.paired_count = parse_waitcnt_field(operand_text, "dscnt(", 0);
+    break;
+  default:
+    wait.count = first_decimal(operand_text);
+    break;
+  }
+  return wait;
 }
 
 WaitKind make_wait_kind(std::string_view mnemonic) {

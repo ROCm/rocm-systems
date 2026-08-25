@@ -3,7 +3,6 @@
 
 #include "rocjitsu/vm/plugins/data_hazard/plugin.h"
 
-#include "detail/waitcnt_decode.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -14,12 +13,10 @@
 #include "flatbuffers/idl.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cstdlib>
 #include <mutex>
 #include <sstream>
 #include <string_view>
-#include <system_error>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -74,63 +71,16 @@ bool has_routed_memory_state(const Instruction &inst) {
   }
 }
 
-uint32_t first_decimal(std::string_view text, uint32_t fallback = 0) {
-  for (size_t i = 0; i < text.size(); ++i) {
-    if (text[i] < '0' || text[i] > '9')
-      continue;
-    size_t end = i;
-    while (end < text.size() && text[end] >= '0' && text[end] <= '9')
-      ++end;
-    uint32_t value = fallback;
-    const auto result = std::from_chars(text.data() + i, text.data() + end, value);
-    return result.ec == std::errc{} ? value : fallback;
-  }
-  return fallback;
-}
-
-uint32_t parse_waitcnt_field(std::string_view text, std::string_view field, uint32_t fallback) {
-  const size_t field_pos = text.find(field);
-  if (field_pos == std::string_view::npos)
-    return fallback;
-  const size_t begin = field_pos + field.size();
-  const size_t end = text.find(')', begin);
-  if (end == std::string_view::npos || end <= begin)
-    return fallback;
-
-  uint32_t value = fallback;
-  const auto result = std::from_chars(text.data() + begin, text.data() + end, value);
-  return result.ec == std::errc{} ? value : fallback;
-}
-
-/// Wait immediates are recovered from the operand text because the encoded
-/// field layout differs across GFX generations.
-uint32_t parse_wait_immediate(const Instruction &inst, WaitKind wait_kind) {
-  if (wait_kind == WaitKind::None || inst.num_src_operands() == 0)
-    return 0;
+/// The wait an instruction expresses, read from the operand text because the
+/// encoded field layout differs across GFX generations.
+WaitInfo parse_wait(const Instruction &inst) {
+  const WaitKind kind = make_wait_kind(inst.mnemonic());
+  if (kind == WaitKind::None || inst.num_src_operands() == 0)
+    return WaitInfo{kind, 0, 0};
 
   const auto *op = inst.src_operand(0);
   const std::string text = op != nullptr ? op->name() : std::string{};
-
-  if (wait_kind == WaitKind::Waitcnt) {
-    const uint32_t vmcnt = parse_waitcnt_field(text, "vmcnt(", 0);
-    const uint32_t lgkmcnt = parse_waitcnt_field(text, "lgkmcnt(", 0);
-    return data_hazard_waitcnt::encode_legacy_waitcnt(
-        vmcnt, lgkmcnt, data_hazard_waitcnt::LEGACY_LGKMCNT_4BIT_MASK);
-  }
-
-  if (wait_kind == WaitKind::WaitLoadcntDscnt) {
-    const uint32_t loadcnt = parse_waitcnt_field(text, "loadcnt(", first_decimal(text));
-    const uint32_t dscnt = parse_waitcnt_field(text, "dscnt(", 0);
-    return data_hazard_waitcnt::encode_split_waitcnt(loadcnt, dscnt);
-  }
-
-  if (wait_kind == WaitKind::WaitStorecntDscnt) {
-    const uint32_t storecnt = parse_waitcnt_field(text, "storecnt(", first_decimal(text));
-    const uint32_t dscnt = parse_waitcnt_field(text, "dscnt(", 0);
-    return data_hazard_waitcnt::encode_split_waitcnt(storecnt, dscnt);
-  }
-
-  return first_decimal(text);
+  return make_wait_info(kind, text);
 }
 
 RegisterClass make_register_class(RegClass cls) {
@@ -439,8 +389,7 @@ void DataHazardPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instr
   view.instruction_id = next_instruction_id();
   view.pc = pc;
   view.raw_isa = copy_raw_isa(inst);
-  view.wait.kind = make_wait_kind(inst.mnemonic());
-  view.wait.immediate = parse_wait_immediate(inst, view.wait.kind);
+  view.wait = parse_wait(inst);
 
   const bool is_memory_op = inst.is_memory_op() || has_routed_memory_state(inst);
 

@@ -187,7 +187,8 @@ TEST(DataHazardAdapterTest, InstructionCallbackMapsContextAndWaitAction) {
   instruction.pc = 0x1234;
   instruction.raw_isa = {0xDEAD, 0xBEEF, 0xCAFE, 0xBABE};
   instruction.wait.kind = dh::WaitKind::WaitLoadcntDscnt;
-  instruction.wait.immediate = (1u << 8) | 3u; // loadcnt(1) dscnt(3)
+  instruction.wait.count = 1;        // loadcnt(1)
+  instruction.wait.paired_count = 3; // dscnt(3)
   adapter.on_instruction(instruction);
 
   ASSERT_EQ(api.instructions.size(), 1u);
@@ -523,7 +524,7 @@ TEST(DataHazardAdapterTest, StorecntClearsAtomicSourceBeforeVectorWrite) {
 
   dh::InstructionView wait = h.instruction(2, 0x104);
   wait.wait.kind = dh::WaitKind::WaitStorecnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(3, 0x108));
@@ -712,7 +713,7 @@ TEST(DataHazardAdapterTest, StorecntClearsGlobalStoreSourceBeforeVectorWrite) {
 
   dh::InstructionView wait = h.instruction(2, 0x104);
   wait.wait.kind = dh::WaitKind::WaitStorecnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(3, 0x108));
@@ -755,7 +756,7 @@ TEST(DataHazardAdapterTest, LegacyWaitcntClearsBothVmemLoadsAndStores) {
 
   dh::InstructionView wait = h.instruction(3, 0x108);
   wait.wait.kind = dh::WaitKind::Waitcnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(4, 0x10c));
@@ -806,7 +807,7 @@ TEST(DataHazardAdapterTest, PartialLegacyWaitcntKeepsNewestVmemLoad) {
 
   dh::InstructionView wait = h.instruction(3, 0x108);
   wait.wait.kind = dh::WaitKind::Waitcnt;
-  wait.wait.immediate = 1;
+  wait.wait.count = 1;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(4, 0x10c));
@@ -857,7 +858,7 @@ TEST(DataHazardAdapterTest, SplitLoadcntDoesNotClearSmem) {
 
   dh::InstructionView wait = h.instruction(3, 0x108);
   wait.wait.kind = dh::WaitKind::WaitLoadcnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(4, 0x10c));
@@ -902,7 +903,7 @@ TEST(DataHazardAdapterTest, SplitDscntClearsLdsVectorDestination) {
 
   dh::InstructionView wait = h.instruction(2, 0x104);
   wait.wait.kind = dh::WaitKind::WaitDscnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(3, 0x108));
@@ -944,7 +945,7 @@ TEST(DataHazardAdapterTest, SplitStorecntDscntClearsStoreSourceAndLocalWrite) {
 
   dh::InstructionView wait = h.instruction(3, 0x108);
   wait.wait.kind = dh::WaitKind::WaitStorecntDscnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(4, 0x10c));
@@ -1232,7 +1233,7 @@ TEST(DataHazardAdapterTest, LoadcntClearsGlobalToLdsRouteBeforeLocalRead) {
 
   dh::InstructionView wait = h.instruction(2, 0x104);
   wait.wait.kind = dh::WaitKind::WaitLoadcnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(3, 0x108));
@@ -1271,7 +1272,7 @@ TEST(DataHazardAdapterTest, GlobalToLdsRouteFeedsCrossWaveLdsRaceDetection) {
 
   dh::InstructionView wait = h.instruction(2, 0x104);
   wait.wait.kind = dh::WaitKind::WaitLoadcnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   dh::InstructionView read_inst;
@@ -1321,7 +1322,7 @@ TEST(DataHazardAdapterTest, GlobalToLdsPerLaneRouteFeedsSpecificLdsRegion) {
 
   dh::InstructionView wait = h.instruction(2, 0x104);
   wait.wait.kind = dh::WaitKind::WaitLoadcnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   dh::InstructionView read_inst;
@@ -1781,7 +1782,7 @@ TEST(DataHazardAdapterTest, TensorcntClearsTensorLdsWriteBeforeLocalRead) {
 
   dh::InstructionView wait = h.instruction(2, 0x104);
   wait.wait.kind = dh::WaitKind::WaitTensorcnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(3, 0x108));
@@ -1956,7 +1957,7 @@ TEST(DataHazardAdapterTest, DirectToLdsLoadcntClearsPendingWriteBeforeLocalRead)
 
   dh::InstructionView wait = h.instruction(2, 0x104);
   wait.wait.kind = dh::WaitKind::WaitLoadcnt;
-  wait.wait.immediate = 0;
+  wait.wait.count = 0;
   h.adapter.on_instruction(wait);
 
   h.adapter.on_instruction(h.instruction(3, 0x108));
@@ -1990,6 +1991,41 @@ TEST(DataHazardAdapterTest, MapsWaitMnemonicsToWaitKinds) {
   EXPECT_EQ(dh::make_wait_kind("v_add_u32"), dh::WaitKind::None);
 }
 
+TEST(DataHazardAdapterTest, ReadsWaitCountsFromTheDisassembledOperand) {
+  const dh::WaitInfo waitcnt =
+      dh::make_wait_info(dh::WaitKind::Waitcnt, "vmcnt(1) expcnt(0) lgkmcnt(3)");
+  EXPECT_EQ(waitcnt.count, 1u);
+  EXPECT_EQ(waitcnt.paired_count, 3u);
+
+  const dh::WaitInfo split =
+      dh::make_wait_info(dh::WaitKind::WaitLoadcntDscnt, "loadcnt(2) dscnt(5)");
+  EXPECT_EQ(split.count, 2u);
+  EXPECT_EQ(split.paired_count, 5u);
+
+  // A wait naming one counter prints the count on its own.
+  const dh::WaitInfo single = dh::make_wait_info(dh::WaitKind::WaitDscnt, "4");
+  EXPECT_EQ(single.count, 4u);
+  EXPECT_EQ(single.paired_count, 0u);
+}
+
+// The RDNA families count lgkmcnt in six bits where CDNA uses four. A count
+// above fifteen has to reach the engine as written: shortened, it would drain
+// operations the wait never named and hide the hazards behind them.
+TEST(DataHazardAdapterTest, WaitCountsWiderThanTheCdnaFieldSurviveTheAdapter) {
+  const dh::WaitInfo parsed =
+      dh::make_wait_info(dh::WaitKind::Waitcnt, "vmcnt(40) expcnt(0) lgkmcnt(20)");
+  EXPECT_EQ(parsed.count, 40u);
+  EXPECT_EQ(parsed.paired_count, 20u);
+
+  const WaitAction action = dh::make_wait_action(parsed);
+  ASSERT_NE(find_counter(action, WaitCntType::VMEM), nullptr);
+  ASSERT_NE(find_counter(action, WaitCntType::LDS), nullptr);
+  ASSERT_NE(find_counter(action, WaitCntType::SMEM), nullptr);
+  EXPECT_EQ(find_counter(action, WaitCntType::VMEM)->keep_count, 40u);
+  EXPECT_EQ(find_counter(action, WaitCntType::LDS)->keep_count, 20u);
+  EXPECT_EQ(find_counter(action, WaitCntType::SMEM)->keep_count, 20u);
+}
+
 TEST(DataHazardAdapterTest, SemaphoreWaitClosesWavegroupEpochRatherThanDrainingACounter) {
   dh::WaitInfo wait;
   wait.kind = dh::WaitKind::SemaphoreWait;
@@ -2006,7 +2042,8 @@ TEST(DataHazardAdapterTest, SemaphoreWaitClosesWavegroupEpochRatherThanDrainingA
 TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
   dh::WaitInfo wait;
   wait.kind = dh::WaitKind::Waitcnt;
-  wait.immediate = 0x4000u | (5u << 8) | 7u;
+  wait.count = 0x17u;    // vmcnt(23)
+  wait.paired_count = 5; // lgkmcnt(5)
 
   // s_waitcnt drains the vector memory counter, LDS and scalar memory. It
   // names no store counter of its own: a gfx9 store is outstanding on the
@@ -2024,7 +2061,8 @@ TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
   EXPECT_EQ(find_counter(action, WaitCntType::SMEM)->keep_count, 5u);
 
   wait.kind = dh::WaitKind::WaitLoadcntDscnt;
-  wait.immediate = (9u << 8) | 4u; // loadcnt(9) dscnt(4)
+  wait.count = 9;        // loadcnt(9)
+  wait.paired_count = 4; // dscnt(4)
   action = dh::make_wait_action(wait);
   ASSERT_EQ(action.counters.size(), 2u);
   ASSERT_NE(find_counter(action, WaitCntType::VMEM), nullptr);
@@ -2033,7 +2071,8 @@ TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
   EXPECT_EQ(find_counter(action, WaitCntType::LDS)->keep_count, 4u);
 
   wait.kind = dh::WaitKind::WaitStorecntDscnt;
-  wait.immediate = (11u << 8) | 6u; // storecnt(11) dscnt(6)
+  wait.count = 11;       // storecnt(11)
+  wait.paired_count = 6; // dscnt(6)
   action = dh::make_wait_action(wait);
   ASSERT_EQ(action.counters.size(), 2u);
   ASSERT_NE(find_counter(action, WaitCntType::STORE), nullptr);
