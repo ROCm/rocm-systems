@@ -43,6 +43,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <shared_mutex>
 #include <string>
 
 namespace rocprofiler
@@ -192,5 +193,34 @@ replay_reentrancy_observed(rocprofiler_agent_id_t agent);
 // rather than once per nested dispatch.
 bool
 should_warn_replay_reentrancy();
+
+/// @brief The per-agent replay lock, one distinct mutex per agent.
+///
+/// A replay's snapshot->restore window must exclude any concurrent GPU work on the agent that could
+/// mutate tracked device memory, but ordinary dispatches do not conflict with one another. So this
+/// is a shared_mutex: the window takes it exclusively for its whole drain->snap->passes->restore
+/// sequence, and an ordinary dispatch takes it shared across its submit, so many normal dispatches
+/// still run concurrently while a pending window waits for in-flight submits to finish and blocks
+/// new ones from entering.
+///
+/// One mutex per agent is what keeps multi-GPU replay isolated: combined with agent-scoped
+/// snapshots, two replays on two agents neither exclude each other nor each other's dispatches. The
+/// lock bounds *submission* only; the async GPU tail is drained by the window before it snapshots.
+///
+/// Lives beside the window marker above because the two answer one question together: this is the
+/// lock that is not recursive, and that marker is how a thread knows it already holds it.
+std::shared_mutex&
+agent_replay_mutex(rocprofiler_agent_id_t agent);
+
+/// @brief The lock a *non-replay* dispatch on @p agent must hold across its submit, so a replay
+/// window on that agent cannot open while the submit is in flight and revert its writes.
+///
+/// @return @c nullptr when the lock must be skipped rather than taken, in which case reentrancy has
+/// been recorded against the enclosing window and reported. That is the in_replay_window() case
+/// described above: this thread already owns @p agent's window, so taking the shared lock would
+/// block forever on the exclusive lock it holds itself. A callback launching work on a *different*
+/// agent contends for a different mutex, so it keeps its lock and stays isolated.
+std::shared_mutex*
+dispatch_lock_for(rocprofiler_agent_id_t agent);
 }  // namespace kernel_replay
 }  // namespace rocprofiler

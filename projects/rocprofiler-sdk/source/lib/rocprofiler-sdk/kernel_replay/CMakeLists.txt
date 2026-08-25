@@ -4,6 +4,7 @@ set(ROCPROFILER_LIB_KERNEL_REPLAY_HEADERS
     local_context.hpp
     memory_snapshot.hpp
     memory_tracker.hpp
+    queue_hooks.hpp
     replay_callbacks.hpp
     replay_diagnostics.hpp
     utils.hpp)
@@ -12,6 +13,7 @@ set(ROCPROFILER_LIB_KERNEL_REPLAY_SOURCES
     local_context.cpp
     memory_snapshot.cpp
     memory_tracker.cpp
+    queue_hooks.cpp
     replay_callbacks.cpp
     replay_diagnostics.cpp
     utils.cpp)

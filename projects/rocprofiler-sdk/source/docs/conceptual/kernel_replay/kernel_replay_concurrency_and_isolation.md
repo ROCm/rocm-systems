@@ -7,9 +7,17 @@ agent's device memory between the moment the snapshot is taken and the moment th
 finishes. This page describes how that window is isolated, what the isolation deliberately does not
 cover, and why the waits inside the window abort instead of hanging.
 
-Everything here is implemented in the HSA `WriteInterceptor` in
-`source/lib/rocprofiler-sdk/hsa/queue.cpp`. Replay runs synchronously on the thread that submitted
-the dispatch — there is no replay worker thread.
+The window itself is `run_replay_window()` in
+`source/lib/rocprofiler-sdk/kernel_replay/queue_hooks.cpp`, driven from the HSA `WriteInterceptor` in
+`source/lib/rocprofiler-sdk/hsa/queue.cpp`. The interceptor decides *whether* a dispatch is eligible
+and supplies two callables — submit this dispatch once, and put a barrier on the queue — and the
+window does everything else. Replay runs synchronously on the thread that submitted the dispatch:
+there is no replay worker thread, and the interceptor does not return until the last pass has
+completed.
+
+The per-agent lock and the reentrancy marker live together in
+`source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp`, because both dispatch paths — the
+replay window and an ordinary dispatch — consult them, and neither is meaningful without the other.
 
 ## The replay window
 
@@ -161,8 +169,9 @@ submits a dispatch from the one thread already holding the writer lock. Acquirin
 then blocks forever, and unlike the drains there is no bound: the process ends up parked in a
 blocking lock acquisition.
 
-The dispatch path therefore consults a thread-scoped marker and skips the reader lock when the
-submitting thread is inside its own replay window. The nested dispatch's writes land inside the
+The dispatch path therefore asks `dispatch_lock_for()` which lock to take rather than taking one
+directly, and it answers "none" — consulting a thread-scoped marker — when the submitting thread is
+inside its own replay window on that agent. The nested dispatch's writes land inside the
 snapshot window, so the counters for the surrounding replayed dispatch are not trustworthy — that is
 recorded on the outcome (`reentrancy=1`) and logged once per process with an explanation. Reporting
 an untrustworthy measurement is a better outcome than a process that cannot be interrupted.
@@ -248,12 +257,15 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 
 | Component | File | Symbol |
 |---|---|---|
-| Per-agent reader/writer lock | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `agent_replay_mutex()` |
-| Writer lock acquisition | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_guard` in `WriteInterceptor` |
-| Reader lock on the non-replay path | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_reader_guard` in `WriteInterceptor` |
+| The replay window | `source/lib/rocprofiler-sdk/kernel_replay/queue_hooks.cpp` | `run_replay_window()` |
+| What the window needs from the interceptor | `source/lib/rocprofiler-sdk/kernel_replay/queue_hooks.hpp` | `replay_dispatch_t` |
+| Replay eligibility gate | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `has_kernel_replay` branch in `WriteInterceptor` |
+| Per-agent reader/writer lock | `source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp` | `agent_replay_mutex()` |
+| Writer lock acquisition | `source/lib/rocprofiler-sdk/kernel_replay/queue_hooks.cpp` | `replay_guard` in `run_replay_window()` |
+| Lock decision on the non-replay path | `source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp` | `dispatch_lock_for()` |
 | Replay activity check | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `has_active_replay_contexts()` |
-| Per-pass handler drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_or_decline()` |
-| Agent-wide drain | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `replay_drain_agent_or_decline()` |
+| Per-pass handler drain | `source/lib/rocprofiler-sdk/kernel_replay/queue_hooks.cpp` | `replay_drain_or_decline()` |
+| Agent-wide drain | `source/lib/rocprofiler-sdk/kernel_replay/queue_hooks.cpp` | `replay_drain_agent_or_decline()` |
 | One drain slice | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `Queue::sync()` |
 | Reentrancy marker | `source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp` | `enter_replay_window()`, `in_replay_window()` |
 | Restore identity gate | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `region_is_restorable()` |

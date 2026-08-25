@@ -41,10 +41,13 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -716,6 +719,162 @@ TEST(kernel_replay_diagnostics, reentrancy_warning_is_emitted_once)
     EXPECT_TRUE(should_warn_replay_reentrancy()) << "the first occurrence must warn";
     EXPECT_FALSE(should_warn_replay_reentrancy());
     EXPECT_FALSE(should_warn_replay_reentrancy());
+}
+
+// ------------------------- the per-agent dispatch lock -------------------------
+//
+// dispatch_lock_for() is the whole of the isolation contract as a dispatch sees it: which mutex to
+// take, or that it must be skipped. The failure modes are asymmetric and both silent. Handing back
+// the wrong agent's mutex loses isolation on multi-GPU runs -- a replay on one GPU stops excluding
+// dispatches on it. Handing back a mutex when it should have answered nullptr blocks the process in
+// an untimed lock acquisition, unkillable by signal.
+//
+// The predicate underneath is tested above; what is asserted here is the mapping from agent to
+// mutex, which is the part a dispatch actually acts on.
+
+namespace
+{
+// Opens a window for the duration of a test. A failing ASSERT returns from the test body, so a bare
+// enter/exit pair leaks the frame into every test that follows and turns one real failure into a
+// cascade of unrelated ones.
+struct scoped_window
+{
+    explicit scoped_window(rocprofiler_agent_id_t agent)
+    : m_agent{agent}
+    {
+        enter_replay_window(m_agent);
+    }
+    ~scoped_window() { exit_replay_window(m_agent); }
+
+    scoped_window(const scoped_window&)     = delete;
+    scoped_window(scoped_window&&) noexcept = delete;
+    scoped_window& operator=(const scoped_window&) = delete;
+    scoped_window& operator=(scoped_window&&) noexcept = delete;
+
+private:
+    rocprofiler_agent_id_t m_agent;
+};
+}  // namespace
+
+TEST(kernel_replay_dispatch_lock, an_ordinary_dispatch_gets_its_agents_lock)
+{
+    ASSERT_FALSE(in_replay_window(agent_a));
+
+    auto* mutex = dispatch_lock_for(agent_a);
+    ASSERT_NE(mutex, nullptr) << "a dispatch outside any window must hold the lock";
+    EXPECT_EQ(mutex, &agent_replay_mutex(agent_a)) << "and it must be that agent's lock";
+}
+
+// The same agent has to name the same mutex on every call, or the window's exclusive hold and a
+// dispatch's shared hold would be on different objects and neither would see the other.
+TEST(kernel_replay_dispatch_lock, an_agent_always_names_the_same_lock)
+{
+    EXPECT_EQ(&agent_replay_mutex(agent_a), &agent_replay_mutex(agent_a));
+    EXPECT_EQ(dispatch_lock_for(agent_a), &agent_replay_mutex(agent_a));
+}
+
+// One mutex per agent, not one shared by all of them. Sharing would serialize every GPU behind the
+// slowest replay: correct, but it would turn an 8-GPU run into a sequential one.
+TEST(kernel_replay_dispatch_lock, distinct_agents_have_distinct_locks)
+{
+    EXPECT_NE(&agent_replay_mutex(agent_a), &agent_replay_mutex(agent_b));
+}
+
+// The nullptr case. A tool callback launching GPU work on the replaying agent reaches here on the
+// thread that already holds that agent's lock exclusively.
+TEST(kernel_replay_dispatch_lock, a_dispatch_inside_its_agents_window_skips_the_lock)
+{
+    {
+        const auto window = scoped_window{agent_a};
+
+        EXPECT_EQ(dispatch_lock_for(agent_a), nullptr)
+            << "taking the shared lock here would block forever on the exclusive lock this thread "
+               "already holds";
+    }
+
+    EXPECT_NE(dispatch_lock_for(agent_a), nullptr) << "and the lock is required again afterwards";
+}
+
+// The multi-GPU case, and the reason the marker is agent-scoped. A callback running inside agent
+// A's window that launches on agent B contends for B's mutex, which this thread does not hold, so
+// that dispatch must still take it -- otherwise a concurrent replay on B loses its isolation.
+TEST(kernel_replay_dispatch_lock, a_dispatch_on_another_agent_still_takes_its_lock)
+{
+    const auto window = scoped_window{agent_a};
+
+    auto* mutex = dispatch_lock_for(agent_b);
+    ASSERT_NE(mutex, nullptr) << "a window on one agent must not waive the lock on another";
+    EXPECT_EQ(mutex, &agent_replay_mutex(agent_b));
+}
+
+// Skipping the lock is what makes the enclosing dispatch's counters untrustworthy, so it must be
+// recorded against that window -- otherwise the outcome line reports a clean replay of a kernel
+// whose inputs were mutated underneath it.
+TEST(kernel_replay_dispatch_lock, skipping_the_lock_marks_the_enclosing_window)
+{
+    const auto window = scoped_window{agent_a};
+    ASSERT_FALSE(replay_reentrancy_observed(agent_a));
+
+    EXPECT_EQ(dispatch_lock_for(agent_a), nullptr);
+    EXPECT_TRUE(replay_reentrancy_observed(agent_a));
+}
+
+// ...and the converse: a dispatch that did take its lock is not reentrancy, on either agent. A
+// false positive here would report every multi-GPU replay as untrustworthy.
+TEST(kernel_replay_dispatch_lock, taking_the_lock_marks_nothing)
+{
+    const auto window = scoped_window{agent_a};
+    ASSERT_FALSE(replay_reentrancy_observed(agent_a));
+
+    EXPECT_NE(dispatch_lock_for(agent_b), nullptr);
+
+    EXPECT_FALSE(replay_reentrancy_observed(agent_a))
+        << "work launched on a second GPU does not touch this agent's snapshot";
+    EXPECT_FALSE(replay_reentrancy_observed(agent_b));
+}
+
+// The lock a dispatch is told to take is genuinely the one a window would hold, so the two really
+// do exclude each other. Asserted by holding it exclusively on another thread and observing that
+// the shared acquisition cannot proceed -- if agent_replay_mutex() handed out per-call objects, or
+// dispatch_lock_for() named a different one, this would sail through.
+TEST(kernel_replay_dispatch_lock, the_dispatch_lock_is_the_lock_a_window_holds)
+{
+    constexpr auto agent = rocprofiler_agent_id_t{.handle = 0xBEEF};
+
+    auto* dispatch_mutex = dispatch_lock_for(agent);
+    ASSERT_NE(dispatch_mutex, nullptr);
+
+    std::atomic<bool> held{false};
+    std::atomic<bool> release{false};
+    std::atomic<bool> acquired{false};
+
+    auto window = std::thread{[&]() {
+        auto guard = std::unique_lock<std::shared_mutex>{agent_replay_mutex(agent)};
+        held.store(true);
+        while(!release.load())
+            std::this_thread::yield();
+    }};
+
+    while(!held.load())
+        std::this_thread::yield();
+
+    auto dispatch = std::thread{[&]() {
+        auto guard = std::shared_lock<std::shared_mutex>{*dispatch_mutex};
+        acquired.store(true);
+    }};
+
+    // The exclusive holder is still in its critical section, so the shared acquisition must not
+    // have completed. Sampled rather than waited on: this asserts the absence of an event, so it
+    // can only ever be evidence, and a generous sleep here would slow the suite for no added
+    // strength.
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    EXPECT_FALSE(acquired.load()) << "a dispatch acquired the lock while a window held it";
+
+    release.store(true);
+    window.join();
+    dispatch.join();
+
+    EXPECT_TRUE(acquired.load()) << "and it must proceed once the window releases";
 }
 
 // ------------------------- virtual-memory accounting -------------------------

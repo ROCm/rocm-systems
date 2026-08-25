@@ -24,6 +24,8 @@
 
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 
 #include <fmt/format.h>
 
@@ -31,7 +33,10 @@
 #include <cstddef>
 #include <fstream>
 #include <limits>
+#include <memory>
+#include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace rocprofiler
@@ -321,6 +326,43 @@ bool
 should_warn_replay_reentrancy()
 {
     return !reentrancy_warning_emitted.exchange(true, std::memory_order_relaxed);
+}
+
+std::shared_mutex&
+agent_replay_mutex(rocprofiler_agent_id_t agent)
+{
+    // No get_fini_status() guard is needed here. Every caller reaches this only when
+    // has_active_replay_contexts() is true, and that returns false during finalization, so the
+    // static lock map below is never touched after teardown.
+    using lock_map_t    = std::unordered_map<uint64_t, std::unique_ptr<std::shared_mutex>>;
+    static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
+
+    std::shared_mutex* mtx = nullptr;
+    locks->wlock([&](lock_map_t& _map) {
+        auto& slot = _map[agent.handle];
+        if(!slot) slot = std::make_unique<std::shared_mutex>();
+        mtx = slot.get();
+    });
+    return *mtx;
+}
+
+std::shared_mutex*
+dispatch_lock_for(rocprofiler_agent_id_t agent)
+{
+    if(in_replay_window(agent))
+    {
+        note_replay_reentrancy(agent);
+        ROCP_ERROR_IF(should_warn_replay_reentrancy())
+            << "kernel replay: a dispatch was submitted on the replaying agent from inside a "
+               "replay window, on the thread that owns the window. This happens when a tool's "
+               "KERNEL_REPLAY callback (CONFIG, PASS, pass_count_cb, or replay_continue_cb) "
+               "launches GPU work. The dispatch is allowed through without the replay lock to "
+               "avoid deadlocking, but it mutates device memory inside the snapshot window, so "
+               "counters for the replayed dispatch are not trustworthy. Move GPU work out of the "
+               "replay callbacks";
+        return nullptr;
+    }
+    return &agent_replay_mutex(agent);
 }
 }  // namespace kernel_replay
 }  // namespace rocprofiler
