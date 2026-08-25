@@ -63,7 +63,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <new>

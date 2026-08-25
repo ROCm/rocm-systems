@@ -67,6 +67,7 @@
 #include <fstream>
 #include <limits>
 #include <linux/capability.h>
+#include <memory>
 #include <numeric>
 #include <ostream>
 #include <set>
@@ -85,8 +86,20 @@ using settings = tim::settings;
 
 namespace
 {
-int  verbose_value  = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
-bool debug_value    = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
+int&
+verbose_value()
+{
+    static int value = rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
+    return value;
+}
+
+bool&
+debug_value()
+{
+    static bool value = rocprofsys::get_env<bool>(env_vars::DEBUG_MODE, false);
+    return value;
+}
+
 auto configure_once = std::once_flag{};
 
 bool&
@@ -1736,11 +1749,11 @@ configure_settings(bool _init)
 
     if(auto opt = get_setting_value<int>(std::string{ env_vars::VERBOSE }); opt)
     {
-        verbose_value = *opt;
+        verbose_value() = *opt;
     }
     if(auto opt = get_setting_value<bool>(std::string{ env_vars::DEBUG_MODE }); opt)
     {
-        debug_value = *opt;
+        debug_value() = *opt;
     }
 
     if(get_env(env_vars::MONOCHROME,
@@ -1838,11 +1851,11 @@ configure_settings(bool _init)
 
     if(auto opt = get_setting_value<int>(std::string{ env_vars::VERBOSE }); opt)
     {
-        verbose_value = *opt;
+        verbose_value() = *opt;
     }
     if(auto opt = get_setting_value<bool>(std::string{ env_vars::DEBUG_MODE }); opt)
     {
-        debug_value = *opt;
+        debug_value() = *opt;
     }
 
     _settings_are_configured() = true;
@@ -2430,7 +2443,7 @@ print_settings(
         return lhs.at(0) < rhs.at(0);
     });
 
-    auto tot_width = std::accumulate(_widths.begin(), _widths.end(), 0);
+    auto tot_width = std::accumulate(_widths.begin(), _widths.end(), std::size_t{ 0 });
     if(!_print_desc)
     {
         tot_width -= _widths.back() + 4;
@@ -2456,9 +2469,10 @@ print_settings(
         {
             switch(i)
             {
-                case 0: _os << std::left; break;
-                case 1: _os << std::left; break;
+                case 0:
+                case 1:
                 case 2: _os << std::left; break;
+                default: break;
             }
             if(_md)
             {
@@ -2484,6 +2498,7 @@ print_settings(
                     case 0: _os << "= "; break;
                     case 1: _os << "[ "; break;
                     case 2: _os << "]"; break;
+                    default: break;
                 }
             }
         }
@@ -2660,7 +2675,7 @@ bool
 get_debug()
 {
     std::call_once(configure_once, []() { (void) get_config(); });
-    return debug_value;
+    return debug_value();
 }
 
 bool
@@ -2683,7 +2698,7 @@ int
 get_verbose()
 {
     std::call_once(configure_once, []() { (void) get_config(); });
-    return verbose_value;
+    return verbose_value();
 }
 
 bool&
@@ -3580,15 +3595,14 @@ get_ump_absolute_path()
             return std::string{ pwd };
         }
 
-        char* current_dir = getcwd(nullptr, 0);
+        std::unique_ptr<char, decltype(&std::free)> current_dir(getcwd(nullptr, 0),
+                                                                std::free);
         if(current_dir == nullptr)
         {
             return std::string{ "." };
         }
 
-        auto result = std::string{ current_dir };
-        free(current_dir);
-        return result;
+        return std::string{ current_dir.get() };
     };
 
     auto const make_absolute = [&](std::string path) {
