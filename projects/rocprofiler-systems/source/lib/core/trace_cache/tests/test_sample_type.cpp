@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/trace_cache/sample_type.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 
 #include <array>
 #include <cstdint>
@@ -478,7 +479,75 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::backtrace_region_sample),
               0x0008);
+    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::hipfile_pmc_sample), 0x000D);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
+}
+
+TEST_F(sample_type_test, hipfile_pmc_sample_serialize_deserialize)
+{
+    rocprofsys::pmc::collectors::hipfile::metrics values{};
+    // Every field distinct so a transposed pairing between serialize() and
+    // deserialize() cannot round-trip successfully.
+    values.read_bytes       = 4096;
+    values.write_bytes      = 8192;
+    values.read_ops         = 10;
+    values.write_ops        = 20;
+    values.fastpath_reads   = 7;
+    values.fastpath_writes  = 13;
+    values.fallback_reads   = 3;
+    values.fallback_writes  = 5;
+    values.unaligned_reads  = 1;
+    values.unaligned_writes = 2;
+    values.read_errors      = 11;
+    values.write_errors     = 17;
+    values.read_bandwidth   = 1234.5;
+    values.write_bandwidth  = 6789.25;
+
+    rocprofsys::pmc::collectors::hipfile::enabled_metrics enabled;
+    enabled.value = 0x2A5;
+
+    const hipfile_pmc_sample original{ enabled, 3, 987654321, values };
+
+    ASSERT_LE(get_size(original), buffer.size());
+    serialize(buffer.data(), original);
+
+    std::uint8_t* buffer_ptr   = buffer.data();
+    auto          deserialized = deserialize<hipfile_pmc_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.enabled_metric.value, original.enabled_metric.value);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.timestamp, original.timestamp);
+
+    const auto& m = deserialized.metric_values;
+    EXPECT_EQ(m.read_bytes, 4096U);
+    EXPECT_EQ(m.write_bytes, 8192U);
+    EXPECT_EQ(m.read_ops, 10U);
+    EXPECT_EQ(m.write_ops, 20U);
+    EXPECT_EQ(m.fastpath_reads, 7U);
+    EXPECT_EQ(m.fastpath_writes, 13U);
+    EXPECT_EQ(m.fallback_reads, 3U);
+    EXPECT_EQ(m.fallback_writes, 5U);
+    EXPECT_EQ(m.unaligned_reads, 1U);
+    EXPECT_EQ(m.unaligned_writes, 2U);
+    EXPECT_EQ(m.read_errors, 11U);
+    EXPECT_EQ(m.write_errors, 17U);
+    EXPECT_DOUBLE_EQ(m.read_bandwidth, 1234.5);
+    EXPECT_DOUBLE_EQ(m.write_bandwidth, 6789.25);
+
+    // A stored sample is never a failed query, so the default must survive the trip.
+    EXPECT_FALSE(m.query_failed);
+
+    EXPECT_EQ(buffer_ptr - buffer.data(),
+              static_cast<std::ptrdiff_t>(get_size(original)));
+}
+
+TEST_F(sample_type_test, hipfile_pmc_sample_default_constructor)
+{
+    const hipfile_pmc_sample sample{};
+    EXPECT_EQ(hipfile_pmc_sample::type_identifier, type_identifier_t::hipfile_pmc_sample);
+    EXPECT_EQ(sample.enabled_metric.value, 0U);
+    EXPECT_EQ(sample.device_id, 0U);
+    EXPECT_EQ(sample.timestamp, 0U);
 }
 
 TEST_F(sample_type_test, kernel_dispatch_sample_default_constructor)
