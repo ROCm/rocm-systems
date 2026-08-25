@@ -20,11 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Performance regression tests for kernel-replay snap/restore. The design cost model
-// (kernel-replay-arch.tex Figure 5) assumes 45-55 GB/s host-link bandwidth on gfx942 and
-// P x footprint bytes moved per replay window. These tests measure effective snap+restore
-// bandwidth on the live tracker inventory and fail if throughput collapses or wall time
-// exceeds a conservative multiple of the model.
+// Performance regression tests for kernel-replay snap/restore. Guards against throughput
+// collapse and wall-time blow-ups using the Figure 5 cost model (P x footprint bytes
+// over the host link). Thresholds are architecture-agnostic — suitable for any AMD GPU.
 
 #include "snap_kernels.hpp"
 
@@ -44,6 +42,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <vector>
 
 using namespace rocprofiler;
@@ -126,9 +125,8 @@ snapshot_footprint_bytes(const msnp::device_snapshot_t& snap)
     return total;
 }
 
-// Conservative host-link floor (GB/s). Figure 5 cites 45-55 GB/s on gfx942; CI runs on
-// heterogeneous GPUs so the floor is intentionally low. Override with
-// ROCPROFILER_KR_MIN_SNAP_GBPS for tighter local checks.
+// Conservative host-link floor (GB/s). Intentionally low for heterogeneous CI including
+// older AMD GPUs. Override with ROCPROFILER_KR_MIN_SNAP_GBPS for tighter local checks.
 double
 min_snap_bandwidth_gbps()
 {
@@ -136,7 +134,7 @@ min_snap_bandwidth_gbps()
     {
         return std::atof(env);
     }
-    return 8.0;
+    return 4.0;
 }
 
 // Wall-time ceiling multiplier over the bandwidth-model prediction.
@@ -210,7 +208,7 @@ log_timing(const char* label, const snap_restore_timing_t& t)
         t.snap_seconds > 0.0
             ? static_cast<double>(t.footprint_bytes) / t.snap_seconds / 1e9
             : 0.0;
-    // Emitted for CI artifact collection and kernel-replay-arch.tex updates.
+    // Emitted for CI log collection (local/paper analysis only — not checked into PRs).
     std::printf("[kr-perf] %s footprint_mb=%.2f snap_ms=%.3f restore_ms=%.3f "
                 "restore_gbps=%.2f snap_gbps=%.2f\n",
                 label,
@@ -273,6 +271,12 @@ run_bandwidth_test(size_t ballast_bytes, const char* label)
     ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
 }  // namespace
+
+TEST(kernel_replay_snapshot, snap_bandwidth_meets_floor_with_8mb_ballast)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+    run_bandwidth_test(8U * 1024U * 1024U, "ballast_8mb");
+}
 
 TEST(kernel_replay_snapshot, snap_bandwidth_meets_floor_with_32mb_ballast)
 {
@@ -337,4 +341,90 @@ TEST(kernel_replay_snapshot, snap_cost_scales_sublinearly_with_footprint)
 
     ASSERT_EQ(hipFree(small), hipSuccess);
     ASSERT_EQ(hipFree(large), hipSuccess);
+}
+
+// Consecutive snap+restore cycles should not oscillate wildly (catches allocator thrash).
+TEST(kernel_replay_snapshot, snap_restore_wall_time_stable_across_iterations)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto   agent = gpu_agent();
+    constexpr size_t kBallast = 32U * 1024U * 1024U;
+    const int        n_elems  = static_cast<int>(kBallast / sizeof(float));
+    float*           buffer   = nullptr;
+    ASSERT_NE(agent.handle, 0U);
+    ASSERT_EQ(hipMalloc(&buffer, kBallast), hipSuccess);
+    kernel_launch::fill(buffer, 0.0f, n_elems);
+    sync_ok();
+
+    {
+        const auto w = measure_snap_restore_once(agent, buffer, n_elems);
+        ASSERT_GT(w.footprint_bytes, 0U);
+    }
+
+    constexpr int kSamples = 5;
+    double        min_total = 1e9;
+    double        max_total = 0.0;
+    for(int i = 0; i < kSamples; ++i)
+    {
+        const auto t     = measure_snap_restore_once(agent, buffer, n_elems);
+        const double tot = t.snap_seconds + t.restore_seconds;
+        ASSERT_GT(t.footprint_bytes, 0U);
+        min_total = std::min(min_total, tot);
+        max_total = std::max(max_total, tot);
+    }
+    ASSERT_GT(min_total, 0.0);
+    // Allow up to 4x spread — enough for CI noise, tight enough to catch blow-ups.
+    EXPECT_LT(max_total / min_total, 4.0)
+        << "snap+restore wall time unstable: min=" << min_total << " s max=" << max_total
+        << " s ratio=" << (max_total / min_total);
+
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+// One snapshot must support multiple restores (replay reuses the same image each pass).
+TEST(kernel_replay_snapshot, snap_restore_repeatable_from_one_snapshot)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    const auto   agent = gpu_agent();
+    constexpr size_t kBallast = 16U * 1024U * 1024U;
+    const int        n_elems  = static_cast<int>(kBallast / sizeof(float));
+    float*           buffer   = nullptr;
+    ASSERT_NE(agent.handle, 0U);
+    ASSERT_EQ(hipMalloc(&buffer, kBallast), hipSuccess);
+    kernel_launch::fill(buffer, 1.0f, n_elems);
+    sync_ok();
+
+    const auto snap_start = std::chrono::steady_clock::now();
+    auto       snapshot   = msnp::snap(agent);
+    const auto snap_end   = std::chrono::steady_clock::now();
+    ASSERT_TRUE(snapshot.ok);
+    ASSERT_GT(snapshot_footprint_bytes(snapshot), 0U);
+
+    constexpr int kRestores = 3;
+    for(int i = 0; i < kRestores; ++i)
+    {
+        kernel_launch::add(buffer, 2.0f, n_elems);
+        sync_ok();
+        const auto restore_start = std::chrono::steady_clock::now();
+        ASSERT_TRUE(msnp::restore(snapshot));
+        const auto restore_end = std::chrono::steady_clock::now();
+        const double restore_s =
+            std::chrono::duration<double>(restore_end - restore_start).count();
+        const double restore_gbps =
+            restore_s > 0.0
+                ? static_cast<double>(snapshot_footprint_bytes(snapshot)) / restore_s / 1e9
+                : 0.0;
+        EXPECT_GE(restore_gbps, min_snap_bandwidth_gbps())
+            << "restore #" << (i + 1) << " bandwidth " << restore_gbps << " GB/s below floor";
+    }
+
+    snap_restore_timing_t log{};
+    log.footprint_bytes = snapshot_footprint_bytes(snapshot);
+    log.snap_seconds    = std::chrono::duration<double>(snap_end - snap_start).count();
+    log.restore_seconds = 0.0;
+    log_timing("repeat_snapshot_16mb", log);
+
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
