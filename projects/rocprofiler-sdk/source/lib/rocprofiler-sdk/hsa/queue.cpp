@@ -420,7 +420,7 @@ WriteInterceptor(const void* packets,
 
     using packet_writer_fn_t = std::function<void(packet_vector_t &&)>;
 
-    auto process_packet_batch = [&queue, &corr_id, tracing_data_v](
+    auto process_packet_batch = [&queue, &corr_id, tracing_data_v, counters_active](
                                     const rocprofiler_packet* _packets,
                                     uint64_t                  _num_packets,
                                     const packet_writer_fn_t& _writer) {
@@ -633,16 +633,28 @@ WriteInterceptor(const void* packets,
 
             // Counter collection is migrated off the per-queue callback registry: call its hook
             // explicitly (the other services still flow through signal_callback above).
-            counters::kernel_dispatch_phase_enter_hook(
-                queue,
-                kernel_packet,
-                kernel_id,
-                dispatch_id,
-                &_packet_data.user_data,
-                _packet_data.tracing_data.external_correlation_ids,
-                corr_id,
-                _packet_data.instrumentation_packets,
-                _packet_data.is_serialized);
+            //
+            // Gate on the snapshot taken once at interceptor entry rather than re-reading the
+            // active contexts here. The same snapshot decides whether this write is batched,
+            // and counter collection only tolerates one dispatch per queue_info_session_t: if
+            // the hook consulted live state it could inject counter packets into a session that
+            // the batching decision had already made cover several dispatches. A context that
+            // becomes active part-way through a write is simply not instrumented for it, which
+            // is the same guarantee starting a context has ever offered against concurrent
+            // dispatches.
+            if(counters_active)
+            {
+                counters::kernel_dispatch_phase_enter_hook(
+                    queue,
+                    kernel_packet,
+                    kernel_id,
+                    dispatch_id,
+                    &_packet_data.user_data,
+                    _packet_data.tracing_data.external_correlation_ids,
+                    corr_id,
+                    _packet_data.instrumentation_packets,
+                    _packet_data.is_serialized);
+            }
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
@@ -779,6 +791,7 @@ WriteInterceptor(const void* packets,
     });
 
     // Counter collection requires per-packet mode; it no longer participates in the registry.
+    // This reads the same snapshot the enter hook is gated on, so the two cannot disagree.
     if(counters_active) should_batch_packets = false;
 
     if(should_batch_packets)
