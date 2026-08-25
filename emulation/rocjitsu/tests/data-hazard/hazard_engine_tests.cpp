@@ -2178,6 +2178,143 @@ TEST(GenericDataHazardEngineTest, DisjointWriterDoesNotDisplaceTheWriterItDoesNo
   EXPECT_EQ(warnings[0].finding.source_instruction.execution.workgroup_id, 0u);
 }
 
+namespace {
+
+/// What one global access does to the location. An atomic reads and writes it
+/// under a single lock, which is how the frontend reports every atomic.
+struct GlobalAccessKind {
+  bool is_read;
+  bool is_write;
+  bool is_atomic;
+  const char *name;
+};
+
+constexpr GlobalAccessKind kOrdinaryRead{true, false, false, "ordinary read"};
+constexpr GlobalAccessKind kOrdinaryWrite{false, true, false, "ordinary write"};
+constexpr GlobalAccessKind kAtomic{true, true, true, "atomic"};
+
+/// Runs *first* then *second* against one address from two distinct workgroups
+/// of one dispatch and returns the warnings raised.
+std::vector<EngineWarning> run_cross_workgroup_global_pair(DataHazardEngine &engine,
+                                                           const GlobalAccessKind &first,
+                                                           const GlobalAccessKind &second) {
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+
+  ExecutionKey first_wave{1, 0, 0, 0, 0};
+  ExecutionKey second_wave{1, 0, 1, 0, 0};
+  engine.on_wave_begin(first_wave);
+  engine.on_wave_begin(second_wave);
+
+  EntityId next_id = 1;
+  for (const auto &[access, wave] :
+       {std::pair{first, first_wave}, std::pair{second, second_wave}}) {
+    InstructionEvent inst;
+    inst.instruction = make_instruction(next_id, 0x100 * next_id);
+    inst.instruction.execution = wave;
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = 0x4000;
+    event.size_bytes = 4;
+    event.is_read = access.is_read;
+    event.is_write = access.is_write;
+    event.is_atomic = access.is_atomic;
+    engine.on_resource_access(event);
+    ++next_id;
+  }
+  return engine.warning_snapshot();
+}
+
+} // namespace
+
+// Two workgroups touching one address either race or they do not; which of them
+// the simulator happened to run first cannot decide it.
+TEST(GenericDataHazardEngineTest, GlobalRaceVerdictIsTheSameInEitherAccessOrder) {
+  FakeFormatter formatter;
+  const std::array<GlobalAccessKind, 3> kinds{kOrdinaryRead, kOrdinaryWrite, kAtomic};
+
+  for (const auto &first : kinds) {
+    for (const auto &second : kinds) {
+      const size_t forward =
+          run_cross_workgroup_global_pair(reset_generic_engine(formatter), first, second).size();
+      const size_t reverse =
+          run_cross_workgroup_global_pair(reset_generic_engine(formatter), second, first).size();
+      EXPECT_EQ(forward, reverse) << first.name << " then " << second.name
+                                  << " is judged differently from " << second.name << " then "
+                                  << first.name;
+    }
+  }
+}
+
+// An atomic orders itself only against other atomics, so an ordinary access to
+// the same location is unsynchronized whichever side of the atomic it lands on.
+TEST(GenericDataHazardEngineTest, OrdinaryGlobalAccessRacesWithAnAtomicFromAnotherWorkgroup) {
+  FakeFormatter formatter;
+
+  const auto after_atomic =
+      run_cross_workgroup_global_pair(reset_generic_engine(formatter), kAtomic, kOrdinaryRead);
+  ASSERT_EQ(after_atomic.size(), 1u) << "the read must see the atomic that wrote before it";
+  EXPECT_EQ(after_atomic[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(after_atomic[0].message.find("Global memory RAW data race at address 0x4000"),
+            std::string::npos);
+
+  const auto before_atomic =
+      run_cross_workgroup_global_pair(reset_generic_engine(formatter), kOrdinaryRead, kAtomic);
+  ASSERT_EQ(before_atomic.size(), 1u) << "the atomic must see the read it overwrites";
+  EXPECT_EQ(before_atomic[0].finding.kind, HazardKind::GlobalMemoryRace);
+  EXPECT_NE(before_atomic[0].message.find("Global memory WAR data race at address 0x4000"),
+            std::string::npos);
+}
+
+TEST(GenericDataHazardEngineTest, AtomicsFromDifferentWorkgroupsDoNotRaceWithEachOther) {
+  FakeFormatter formatter;
+  EXPECT_TRUE(
+      run_cross_workgroup_global_pair(reset_generic_engine(formatter), kAtomic, kAtomic).empty())
+      << "atomics to one address are ordered by the hardware, not by the program";
+}
+
+// The atomic history is kept apart from the ordinary history so that an atomic
+// cannot stand in for the ordinary access its own workgroup made earlier.
+TEST(GenericDataHazardEngineTest, AtomicDoesNotHideTheOrdinaryWriteOfItsOwnWorkgroup) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  engine.on_workgroup_begin(1, 0, 0);
+  engine.on_workgroup_begin(1, 0, 1);
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 1, 0, 0});
+
+  auto access = [&](EntityId instruction_id, EntityId workgroup, const GlobalAccessKind &kind) {
+    InstructionEvent inst;
+    inst.instruction = make_instruction(instruction_id, 0x100 * instruction_id);
+    inst.instruction.execution = ExecutionKey{1, 0, workgroup, 0, 0};
+    engine.on_instruction(inst);
+
+    ResourceAccessEvent event;
+    event.instruction = inst.instruction;
+    event.resource_kind = ResourceKind::GlobalMemory;
+    event.address = 0x5000;
+    event.size_bytes = 4;
+    event.is_read = kind.is_read;
+    event.is_write = kind.is_write;
+    event.is_atomic = kind.is_atomic;
+    engine.on_resource_access(event);
+  };
+
+  access(1, 0, kOrdinaryWrite);
+  access(2, 0, kAtomic);
+  ASSERT_TRUE(engine.warning_snapshot().empty()) << "one workgroup never races with itself";
+
+  access(3, 1, kAtomic);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u) << "the atomic still races the ordinary write of workgroup 0";
+  EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 1u);
+}
+
 TEST(GenericDataHazardEngineTest, RejectsInvalidGlobalAccessSizes) {
   FakeFormatter formatter;
   auto &engine = reset_generic_engine(formatter);
