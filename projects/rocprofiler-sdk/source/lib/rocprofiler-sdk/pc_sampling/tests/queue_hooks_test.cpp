@@ -40,7 +40,7 @@ TEST(pc_sampling_queue_hooks, is_configured_on_agent_unconfigured)
 
 TEST(pc_sampling_queue_hooks, signal_completion_hook_null_session_is_noop)
 {
-    rocprofiler::hsa::rocprofiler_packet kern_pkt{};
+    rocprofiler::hsa::rocprofiler_packet                    kern_pkt{};
     std::shared_ptr<rocprofiler::hsa::queue_info_session_t> null_session;
     rocprofiler::hsa::packet_data_t                         packet{};
     rocprofiler::hsa::inst_pkt_t                            inst_pkt{};
