@@ -12,13 +12,7 @@
 // are uncached; a single explicit vector load avoids relying on the backend to
 // fuse two independent 64-bit nontemporal loads into one 16-byte op.
 inline __device__ void loadLLLine(const union ncclLLFifoLine* src, union ncclLLFifoLine& dst) {
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.v = __builtin_nontemporal_load((v4u_gptr)src->v);
-  dst.v[0] = u.u64[0];
-  dst.v[1] = u.u64[1];
+  dst.v4u = __builtin_nontemporal_load((v4u_gptr)&src->v4u);
 }
 
 // Plain 128-bit vector store for LL FIFO lines. Like LL128 store128Plain, a
@@ -29,13 +23,7 @@ inline __device__ void storeLLLine(union ncclLLFifoLine* dst, const union ncclLL
   __hip_atomic_store((u64_gptr)dst->v, src.v[0], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
   __hip_atomic_store((u64_gptr)dst->v + 1, src.v[1], __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 #else
-  union {
-    v4u v;
-    uint64_t u64[2];
-  } u;
-  u.u64[0] = src.v[0];
-  u.u64[1] = src.v[1];
-  *((v4u_gptr)dst->v) = u.v;
+  *((v4u_gptr)&dst->v4u) = src.v4u;
 #endif
 }
 
