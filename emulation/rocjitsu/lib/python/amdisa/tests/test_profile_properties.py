@@ -230,6 +230,26 @@ def test_legacy_dpp_prohibition_tables(profile, opcode):
 
 @pytest.mark.parametrize(
     'profile',
+    [
+        CdnaProfile(),
+        Cdna1Profile(),
+        Cdna2Profile(),
+        Rdna1Profile(),
+        Rdna2Profile(),
+        Rdna3Profile(),
+        Rdna3_5Profile(),
+        Rdna4Profile(),
+    ],
+)
+def test_public_snapshot_literal_field_normalizes_to_simm32(profile):
+    assert profile.field_renames('VOP2_INST_LITERAL')['literal'] == 'simm32'
+    assert (
+        profile.normalize_operand_field_name('VOP2_INST_LITERAL', 'literal') == 'simm32'
+    )
+
+
+@pytest.mark.parametrize(
+    'profile',
     [Cdna1Profile(), Cdna2Profile(), CdnaProfile(), Rdna1Profile(), Rdna2Profile()],
 )
 @pytest.mark.parametrize('opcode', ['V_MOV_B64', 'V_CMP_EQ_U32', 'V_SWAPREL_B32'])
@@ -307,6 +327,23 @@ def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
 )
 def test_dpp_opcode_rules(profile, encoding, opcode, expected):
     assert profile.dpp_opcode_rule(encoding, opcode) is expected
+
+
+@pytest.mark.parametrize(
+    'profile',
+    [
+        CdnaProfile(),
+        Cdna1Profile(),
+        Cdna2Profile(),
+        Rdna1Profile(),
+        Rdna2Profile(),
+        Rdna3Profile(),
+        Rdna3_5Profile(),
+        Rdna4Profile(),
+    ],
+)
+def test_public_snapshot_profiles_support_schema_1_1_1(profile):
+    assert '1.1.1' in profile.supported_versions
 
 
 def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
@@ -445,6 +482,23 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
     ).read_text()
 
     assert generated == checked_in
+
+
+def test_public_literal_type_preserves_legacy_extension_identity():
+    assert (
+        Cdna1Profile().normalize_operand_type('ENC_VOP2', 'literal', 'OPR_SIMM16')
+        == 'OPR_SIMM32'
+    )
+    assert (
+        Cdna5Profile().normalize_operand_type('ENC_VOP2', 'literal', 'OPR_SIMM16')
+        == 'OPR_SIMM16'
+    )
+
+
+def test_selector_case_normalization_is_schema_specific():
+    assert Cdna1Profile().lowercase_operand_selector_names is True
+    assert Rdna4Profile().lowercase_operand_selector_names is True
+    assert Cdna5Profile().lowercase_operand_selector_names is False
 
 
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
@@ -636,8 +690,14 @@ class TestCdnaProfile:
         renames = self.p.field_renames('ENC_VOP3P')
         assert renames.get('pad_14') == 'op_sel_hi_2'
 
-    def test_field_renames_other_enc_empty(self):
-        assert self.p.field_renames('ENC_VOP2') == {}
+    def test_field_renames_literal(self):
+        assert self.p.field_renames('ENC_VOP2') == {'literal': 'simm32'}
+
+    def test_literal_operand_uses_normalized_field_name(self):
+        assert (
+            self.p.normalize_operand_field_name('VOP2_INST_LITERAL', 'literal')
+            == 'simm32'
+        )
 
     def test_compound_mfma_is_not_a_family_default(self):
         assert self.p.mfma_scale_vop3px2_specs == ()
@@ -764,6 +824,11 @@ class TestRdna3Profile:
         assert self.p.vopd_x_slot_opcodes == frozenset(range(14))
         assert self.p.vopd_y_slot_opcodes == frozenset((*range(14), 16, 17, 18))
 
+    def test_sop1_base_condition_imports_as_default(self):
+        cond = 'Nothas_lit_0_Nothas_lit_1'
+        assert self.p.normalize_encoding_condition('ENC_SOP1', cond) == 'default'
+        assert self.p.skip_inst_encoding('ENC_SOP1', cond) is False
+
     def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
         generator = CodeGenerator(
             SimpleNamespace(
@@ -814,6 +879,11 @@ class TestRdna4Profile:
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
 
+    def test_sop1_base_condition_imports_as_default(self):
+        cond = 'Nothas_lit_0_Nothas_lit_1'
+        assert self.p.normalize_encoding_condition('ENC_SOP1', cond) == 'default'
+        assert self.p.skip_inst_encoding('ENC_SOP1', cond) is False
+
 
 class TestCdna5Profile:
     def setup_method(self):
@@ -847,6 +917,12 @@ class TestCdna5Profile:
 
     def test_field_renames_literal(self):
         assert self.p.field_renames('ENC_SOP1').get('literal') == 'simm32'
+
+    def test_literal_operand_keeps_gfx1250_identity(self):
+        assert (
+            self.p.normalize_operand_field_name('VOP2_INST_LITERAL', 'literal')
+            == 'literal'
+        )
 
     def test_sop1_base_condition_imports_as_default(self):
         cond = '!has_lit64_0&!has_lit64_1&!has_lit_0&!has_lit_1'
