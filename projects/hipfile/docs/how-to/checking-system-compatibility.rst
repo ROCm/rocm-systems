@@ -66,11 +66,13 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
 SR-IOV virtual functions
 ========================
 
-hipFile's fastpath is only supported on GPU physical functions (PFs). When a GPU
-is an SR-IOV virtual function (VF), the fastpath is disabled and I/O falls back to
-the slower compatibility path. ``ais-check`` uses ``amd-smi`` to detect VFs (a
-VF's device name ends in ``VF``, for example ``AMD Instinct MI300X VF``) and, if
-any are present, prints a ``WARNING`` to stderr. Because a VF is a performance
-caveat rather than a missing component, this warning does not change the exit
-code. If ``amd-smi`` is not installed the check is skipped.
+.. note::
+
+   hipFile's fastpath is only supported on GPU physical functions (PFs). When a
+   GPU is an SR-IOV virtual function (VF), the fastpath is disabled and I/O falls
+   back to the compatibility path. ``ais-check`` uses ``amd-smi`` to detect VFs.
+   If ``amd-smi`` is not installed, the check is skipped. If a VF is present,
+   ``amd-smi`` will print a warning to stderr. This warning won't affect the exit
+   code. VFs can be identified by a device name that ends in ``VF``, such as
+   ``AMD Instinct MI300X VF``.
 
