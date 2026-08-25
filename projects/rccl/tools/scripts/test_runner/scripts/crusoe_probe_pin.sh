@@ -31,6 +31,8 @@ echo "Probing for ${SALLOC_NODES} symmetric idle GPU nodes (partition=${SALLOC_P
 # that keeps happening the OOB interface / fabric is broken cluster-wide, not a
 # stray bad node: surface that instead of silently waiting out the job timeout.
 PROBE_MAX_SMOKE_REJECTS="${PROBE_MAX_SMOKE_REJECTS:-10}"
+# Fresh blacklist for this run (RUNNER_TEMP is reused across runs).
+reset_bad_nodes
 PIN=""
 while true; do
   rebuild_exclude_arg
@@ -40,8 +42,10 @@ while true; do
   fi
   # In this step BAD_NODES only grows from mpi_smoke_pair rejections (no
   # allocation faults here), so its size is the count of idle-but-unusable
-  # nodes proven this run.
-  nrej=$(printf '%s' "${BAD_NODES}" | tr ',' '\n' | sed '/^$/d' | wc -l)
+  # nodes proven this run. probe_symmetric_pair runs in a $() subshell, so pull
+  # the rejections it recorded back from the file before counting them.
+  sync_bad_nodes
+  nrej=$(printf '%s\n' "${BAD_NODES}" | tr ',' '\n' | sed '/^$/d' | wc -l)
   if [ "${nrej}" -ge "${PROBE_MAX_SMOKE_REJECTS}" ]; then
     echo "::error::MPI bootstrap smoke failed on ${nrej} idle nodes over ${PROBE_OOB_IF:-ens3} (e.g. \"an ORTE daemon has unexpectedly failed ... no route found between them\"). This is not a busy cluster: OpenMPI cannot bring up daemons across nodes on the pinned OOB interface, so every suite would die at launch. Check the ${PROBE_OOB_IF:-ens3} routing/fabric or the oob_tcp_if_include/btl_tcp_if_include in the ainic mpi_args. Blacklisted: ${BAD_NODES}"
     exit 1

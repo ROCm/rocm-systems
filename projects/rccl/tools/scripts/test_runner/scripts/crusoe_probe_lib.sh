@@ -173,7 +173,26 @@ mpi_smoke_pair() {
 # no hand-maintained list and no re-push needed when a node starts misbehaving
 # mid-run.
 BAD_NODES="${BAD_NODES:-}"
+# File-backed source of truth for the blacklist. probe_pin captures
+# probe_symmetric_pair via $(...), so any BAD_NODES that blacklist_nodes sets
+# inside that command-substitution subshell would be lost to the parent loop
+# (the cap counter and the exclude list would never grow, and the probe would
+# spin until the job timeout). Persisting to a file makes the blacklist survive
+# the subshell; the parent syncs BAD_NODES back from it via sync_bad_nodes.
+BAD_NODES_FILE="${BAD_NODES_FILE:-${RUNNER_TEMP:-/tmp}/crusoe_bad_nodes}"
+# Start each probe run from a clean slate: RUNNER_TEMP is reused across runs on
+# the self-hosted runner, so a stale file would carry blacklisted nodes (and a
+# false rejection count) into an unrelated run.
+reset_bad_nodes() {
+  BAD_NODES=""
+  : > "${BAD_NODES_FILE}" 2>/dev/null || true
+}
+sync_bad_nodes() {
+  [ -f "${BAD_NODES_FILE}" ] || return 0
+  BAD_NODES=$(paste -sd, "${BAD_NODES_FILE}" 2>/dev/null)
+}
 rebuild_exclude_arg() {
+  sync_bad_nodes
   local combined="${SALLOC_EXCLUDE:-}"
   if [ -n "${BAD_NODES}" ]; then
     combined="${combined:+${combined},}${BAD_NODES}"
@@ -192,6 +211,10 @@ blacklist_nodes() {
       *",${nn},"*) : ;;
       *) BAD_NODES="${BAD_NODES:+${BAD_NODES},}${nn}" ;;
     esac
+    # Persist so the parent loop (which runs probe_symmetric_pair in a $()
+    # subshell) still sees this rejection after the subshell exits.
+    touch "${BAD_NODES_FILE}" 2>/dev/null || true
+    grep -qxF "${nn}" "${BAD_NODES_FILE}" 2>/dev/null || printf '%s\n' "${nn}" >> "${BAD_NODES_FILE}"
   done
 }
 # Of the given nodes, echo the comma-separated subset that is actually in a
