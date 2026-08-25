@@ -39,6 +39,11 @@ struct recorded_sample
  * Mirrors the real cache_policy's gating - a failed query writes nothing, and only
  * metrics both enabled and supported are emitted - so the workflow tests exercise the
  * same decisions without a trace cache behind them.
+ *
+ * The real policy stores the whole per-GPU snapshot as one hipfile_pmc_sample and lets
+ * the Perfetto and RocPD processors expand it over METRIC_TABLE. This stub expands
+ * eagerly instead, because these tests assert on individual metric values; the gating
+ * decisions under test are the same either way.
  */
 struct stub_cache
 {
