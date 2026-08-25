@@ -39,13 +39,17 @@ class _Args:
 
     def __init__(self, **kw):
         self.jobs = kw.get("jobs", 1)
-        self.max_parallel_gpus = kw.get("max_parallel_gpus", 8)
+        self.max_parallel_gpus = kw.get("max_parallel_gpus", None)
         self.rerun_failed = kw.get("rerun_failed", False)
         self.stop_on_rerun_failure = kw.get("stop_on_rerun_failure", False)
 
 
 def _executor(max_parallel_gpus=8, detected_gpus=8):
-    """A TestExecutor with just enough state for the pure policy methods (no real init)."""
+    """A TestExecutor with just enough state for the pure policy methods (no real init).
+
+    max_parallel_gpus=None models the flag being left at its default, which makes the
+    budget resolve to the detected node size.
+    """
     ex = _Executor.__new__(_Executor)
     ex._gpus_per_node = detected_gpus
     ex._gpus_per_node_detected = True
@@ -201,6 +205,46 @@ def test_jobs_without_rerun_is_allowed():
 def test_stop_on_rerun_requires_rerun_failed():
     err = test_runner.validate_arg_combinations(_Args(stop_on_rerun_failure=True, rerun_failed=False))
     assert err is not None and "stop-on-rerun-failure" in err
+
+
+# --------------------------------------------------------------------------- #
+# _parallel_gpu_budget: the budget defaults to the detected node size
+# --------------------------------------------------------------------------- #
+
+def test_budget_defaults_to_detected_node_size():
+    # --max-parallel-gpus not given -> follow the hardware, not a literal 8.
+    assert _executor(max_parallel_gpus=None, detected_gpus=2)._parallel_gpu_budget() == 2
+    assert _executor(max_parallel_gpus=None, detected_gpus=8)._parallel_gpu_budget() == 8
+    assert _executor(max_parallel_gpus=None, detected_gpus=16)._parallel_gpu_budget() == 16
+
+
+def test_budget_explicit_flag_wins_over_detection():
+    assert _executor(max_parallel_gpus=4, detected_gpus=8)._parallel_gpu_budget() == 4
+    assert _executor(max_parallel_gpus=16, detected_gpus=8)._parallel_gpu_budget() == 16
+
+
+def test_budget_falls_back_to_8_when_detection_failed():
+    # gpus_per_node returns 0 when it cannot tell; keep _resolve_gpu_count's convention.
+    assert _executor(max_parallel_gpus=None, detected_gpus=0)._parallel_gpu_budget() == 8
+
+
+def test_single_gpu_node_does_not_admit_co_tenants():
+    """Regression: with a hard-coded budget of 8, four 1-GPU entries piled onto one GPU."""
+    ex = _executor(max_parallel_gpus=None, detected_gpus=1)
+    assert ex._parallel_gpu_budget() == 1
+    one_gpu = {"num_ranks": 1, "num_gpus": "auto"}
+    assert ex._gpu_demand(one_gpu, {}) == 1
+    # Eligible, but the budget of 1 lets exactly one hold it at a time.
+    b = GpuBudget(ex._parallel_gpu_budget())
+    b.acquire(ex._gpu_demand(one_gpu, {}))
+    assert b._avail == 0, "a second 1-GPU entry must not fit alongside the first"
+
+
+def test_two_gpu_node_bounds_co_tenancy_to_two():
+    ex = _executor(max_parallel_gpus=None, detected_gpus=2)
+    b = GpuBudget(ex._parallel_gpu_budget())
+    b.acquire(1); b.acquire(1)
+    assert b._avail == 0
 
 
 if __name__ == "__main__":

@@ -461,7 +461,7 @@ Optional:
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   -j, --jobs N              Run N test entries concurrently within a suite (default: 4). Use --jobs 1 for serial.
-  --max-parallel-gpus N     Aggregate per-node GPU budget shared by concurrent entries under --jobs>1 (default: 8)
+  --max-parallel-gpus N     Aggregate per-node GPU budget shared by concurrent entries under --jobs>1 (default: detected GPUs per node)
   --rerun-failed            Rerun failed tests with additional environment variables (requires --jobs 1)
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
   --stop-on-rerun-failure   Stop testing immediately if a rerun also fails (requires --rerun-failed)

@@ -1879,11 +1879,25 @@ class TestExecutor:
         # co-tenancy budget can never share the node, so it runs serially. The aggregate
         # budget across *several* co-tenants is enforced separately by the GPU budget in
         # _run_test_suite_parallel -- this rule only rejects the single-entry-too-big case.
-        budget = getattr(self.args, "max_parallel_gpus", 8)
-        if self._gpu_demand(test, suite_config) > budget:
+        if self._gpu_demand(test, suite_config) > self._parallel_gpu_budget():
             return False
 
         return True
+
+    def _parallel_gpu_budget(self):
+        """
+        Co-tenancy GPU budget: --max-parallel-gpus when given, else the detected node size.
+
+        Defaulting to the detected count rather than a literal 8 keeps the budget matched to
+        the hardware: on a 2-GPU box a hard-coded 8 would admit four 1-GPU entries onto two
+        GPUs. Falls back to 8 only when detection failed (gpus_per_node returns 0, which it
+        already warns about), matching _resolve_gpu_count's convention. Both the eligibility
+        rule and the runtime semaphore call this, so they can never disagree.
+        """
+        configured = getattr(self.args, "max_parallel_gpus", None)
+        if configured is not None:
+            return configured
+        return self.gpus_per_node or 8
 
     def _gpu_demand(self, test, suite_config):
         """
@@ -1980,7 +1994,7 @@ class TestExecutor:
                 serial_entries.append(test)
 
         jobs = self.args.jobs
-        budget = GpuBudget(getattr(self.args, "max_parallel_gpus", 8))
+        budget = GpuBudget(self._parallel_gpu_budget())
         print(f"\n[parallel] suite '{suite_name}': {len(parallel_entries)} concurrent + "
               f"{len(serial_entries)} serial entries, jobs={jobs}, gpu_budget={budget.total}"
               f"{f', {skipped_count} filtered' if skipped_count else ''}")

@@ -204,12 +204,13 @@ Examples:
         self.parser.add_argument(
             '--max-parallel-gpus',
             type=int,
-            default=8,
+            default=None,
             help="Under --jobs>1, the aggregate per-node GPU budget shared by concurrent "
                  "entries: co-tenants run only while their combined GPU demand fits this "
-                 "budget, so the total never oversubscribes the node (default 8 = a full "
-                 "8-GPU node). An entry whose own demand exceeds the budget, or one flagged "
-                 "serial_only, always runs serially. Default: 8."
+                 "budget, so the total never oversubscribes the node. Defaults to the "
+                 "detected GPUs per node (8 if detection fails), so the budget matches the "
+                 "hardware; override to cap or widen it. An entry whose own demand exceeds "
+                 "the budget, or one flagged serial_only, always runs serially."
         )
 
     def parse_arguments(self):
