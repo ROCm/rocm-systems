@@ -20,11 +20,18 @@ DEFAULT_OVERHEAD_MARGIN = float(os.environ.get("ROCPROFILER_KR_OVERHEAD_MARGIN",
 KERNEL_OVERHEAD_PER_PASS_S = 0.002
 
 # End-to-end fixed cost (snap inventory, client attach, context) not in byte budget.
-FIXED_REPLAY_OVERHEAD_MS = float(os.environ.get("ROCPROFILER_KR_FIXED_OVERHEAD_MS", "120.0"))
+FIXED_REPLAY_OVERHEAD_MS = float(
+    os.environ.get("ROCPROFILER_KR_FIXED_OVERHEAD_MS", "120.0")
+)
 
 
-def model_max_ms(ballast_mb: int, launches: int, passes: int, min_gbps: float | None = None,
-                 margin: float | None = None) -> float:
+def model_max_ms(
+    ballast_mb: int,
+    launches: int,
+    passes: int,
+    min_gbps: float | None = None,
+    margin: float | None = None,
+) -> float:
     gbps = DEFAULT_MIN_GBPS if min_gbps is None else min_gbps
     overhead = DEFAULT_OVERHEAD_MARGIN if margin is None else margin
     footprint_bytes = ballast_mb * 1024 * 1024

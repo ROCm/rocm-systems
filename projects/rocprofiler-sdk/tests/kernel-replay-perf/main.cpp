@@ -41,7 +41,7 @@ main(int argc, char** argv)
     int ballast_mb = 64;
     int launches   = 8;
     if(argc > 1) ballast_mb = std::atoi(argv[1]);
-    if(argc > 2) launches   = std::atoi(argv[2]);
+    if(argc > 2) launches = std::atoi(argv[2]);
     if(ballast_mb < 1) ballast_mb = 1;
     if(launches < 1) launches = 1;
 
@@ -55,7 +55,7 @@ main(int argc, char** argv)
     HIP_CHECK(hipMemset(ballast, 0, ballast_bytes));
     HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
 
-    using clock = std::chrono::steady_clock;
+    using clock      = std::chrono::steady_clock;
     const auto start = clock::now();
     for(int i = 0; i < launches; ++i)
     {

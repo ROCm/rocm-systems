@@ -15,8 +15,8 @@
 
 namespace
 {
-constexpr uint64_t kPasses    = 2;
-constexpr uint64_t kAttPass   = kPasses - 1;
+constexpr uint64_t kPasses  = 2;
+constexpr uint64_t kAttPass = kPasses - 1;
 
 rocprofiler_context_id_t g_replay_ctx{0};
 rocprofiler_context_id_t g_counters_ctx{0};
@@ -26,8 +26,7 @@ rocprofiler_kernel_id_t  g_target_kernel = UINT64_MAX;
 std::atomic<int> g_counter_records{0};
 std::atomic<int> g_att_records{0};
 
-uint64_t
-pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
+uint64_t pass_count_cb(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t)
 {
     return kPasses;
 }
@@ -52,10 +51,10 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
         return;
 
     const bool counters = p->current_pass != kAttPass;
-    KR_CHECK((counters ? p->replay_local_start_context_cb : p->replay_local_stop_context_cb)(
-        g_counters_ctx));
-    KR_CHECK((counters ? p->replay_local_stop_context_cb : p->replay_local_start_context_cb)(
-        g_att_ctx));
+    KR_CHECK((counters ? p->replay_local_start_context_cb
+                       : p->replay_local_stop_context_cb)(g_counters_ctx));
+    KR_CHECK(
+        (counters ? p->replay_local_stop_context_cb : p->replay_local_start_context_cb)(g_att_ctx));
 }
 
 void
@@ -95,8 +94,7 @@ att_dispatch_cb(rocprofiler_agent_id_t,
                                           : ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
 
-void
-att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
+void att_shader_cb(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)
 {
     g_att_records.fetch_add(1);
 }
@@ -105,12 +103,13 @@ int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
     KR_CHECK(rocprofiler_create_context(&g_replay_ctx));
-    KR_CHECK(rocprofiler_configure_callback_tracing_service(g_replay_ctx,
-                                                            ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
-                                                            nullptr,
-                                                            0,
-                                                            kernel_replay_cb,
-                                                            nullptr));
+    KR_CHECK(
+        rocprofiler_configure_callback_tracing_service(g_replay_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                                                       nullptr,
+                                                       0,
+                                                       kernel_replay_cb,
+                                                       nullptr));
 
     KR_CHECK(rocprofiler_create_context(&g_counters_ctx));
     KR_CHECK(rocprofiler_configure_callback_dispatch_counting_service(
