@@ -928,6 +928,8 @@ class Graph {
   void DecrementMemAllocNodeCount() { memalloc_nodes_ -= (memalloc_nodes_ > 0); }
   //! returns device object
   hip::Device* Device() { return device_; }
+  //! Returns the device on which the graph was created.
+  int DeviceId() const { return device_->deviceId(); }
   bool IsLeafNodeSyncRequired() const {
     // A single-segment graph runs entirely on the launch stream; no explicit sync needed.
     // For all multi-segment graphs we always require leaf sync: a single leaf segment
@@ -1067,6 +1069,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
 
   virtual hipError_t Init() = 0;
   virtual hipError_t Run(hip::Stream* stream) = 0;
+  //! Create internal parallel streams for every device in max_streams_dev_.
+  hipError_t CreateAllParallelStreams();
   // AQL packet update — no-op on the classic path (PAL has no AQL capture).
   virtual hipError_t UpdateAQLPacket(hip::GraphNode* node) { return hipSuccess; }
   virtual hipError_t UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* node, bool isEnabled) {
@@ -1086,7 +1090,7 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   //! Compute per-device stream requirements from streams_dev_ids_ mappings
   void FindStreamsReqPerDev();
   //! Update streams_ for a launch and resolve HW queue collisions.
-  //! If launch_stream is null, streams_ is built from captureDeviceId_ internal streams only.
+  //! If launch_stream is null, streams_dev_ is built from internal pools only.
   void UpdateStreams(hip::Stream* launch_stream);
 };
 
@@ -1122,11 +1126,6 @@ class GraphExecSegmented : public GraphExecBase {
     segmentBatches_.clear();
   }
 
-  //! Check if kernel node has hidden heap
-  bool HasHiddenHeap() const { return hasHiddenHeap_; }
-  //! Graph has nodes that require hidden heap.
-  void SetHiddenHeap() { hasHiddenHeap_ = true; }
-
   hipError_t Init() override;
   hipError_t Run(hip::Stream* stream) override;
   // Capture GPU Packets from graph commands
@@ -1156,7 +1155,6 @@ class GraphExecSegmented : public GraphExecBase {
   //! recursive child-graph path), signals are created locally and destroyed by
   //! the AccumulateCommand destructor.
   amd::Command* EnqueueSegmentedGraph(hip::Stream* launch_stream,
-                                      const std::vector<hip::Stream*>& streams,
                                       hipError_t* out_status = nullptr,
                                       std::vector<void*>* out_signal_set = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
@@ -1185,9 +1183,13 @@ class GraphExecSegmented : public GraphExecBase {
   }
 
  protected:
+  //! Block until all streams participating in the current launch are idle.
+  void DrainParticipatingStreams();
+
   GraphKernelArgManager* kernArgManager_ = nullptr;  //!< Kernel Arg manager for graph.
   GraphSignalManager* signalManager_ = nullptr;      //!< HW event signal pool for graph launches.
-  bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
+  std::unordered_set<int> hiddenHeapDevices_;        //!< Devices that require hidden heap
+  //! Devices whose hidden heap has already been initialized for this GraphExec.
   std::unordered_set<int> hiddenHeapInitializedDevices_;
 
   // PacketBatch structure
@@ -1355,10 +1357,9 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
     // Note: For segmented graphs, EnqueueSegment now calls EnqueueSegmentedGraph recursively
     // This method is kept as a fallback for non-segmented execution or legacy paths
     if (graphCaptureStatus_ || !segments_.empty()) {
-      // Use hierarchical segment-based enqueue via EnqueueSegmentedGraph
-      // Use this child graph's own parallel_streams_, so pass empty vector
+      UpdateStreams(stream);
       hipError_t status = hipSuccess;
-      amd::Command* last_cmd = EnqueueSegmentedGraph(stream, {}, &status);
+      amd::Command* last_cmd = EnqueueSegmentedGraph(stream, &status);
 
       if (last_cmd != nullptr) {
         // This is a fallback path - we don't need to track the command

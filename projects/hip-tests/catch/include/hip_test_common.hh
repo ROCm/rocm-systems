@@ -785,6 +785,16 @@ class BlockingContext {
 };
 }  // namespace HipTest
 
+// Call at the start of tests that require at least two GPU devices.
+#define CHECK_MULTIGPU                                                \
+  {                                                                   \
+    int device_count_ = 0;                                            \
+    HIP_CHECK(hipGetDeviceCount(&device_count_));                     \
+    if (device_count_ < 2) {                                          \
+      HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);          \
+    }                                                                 \
+  }
+
 // Call at the start of tests that require image/texture support to indicate whether it
 // is supported on the current device.
 #define CHECK_IMAGE_SUPPORT                                                                        \
