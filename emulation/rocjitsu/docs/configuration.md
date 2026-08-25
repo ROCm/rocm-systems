@@ -70,7 +70,7 @@ The example above is intentionally minimal.
 | Field | Type | Description |
 |---|---|---|
 | `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
-| `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default |
+| `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | Architecture: `cdna3`, `cdna4`, etc. |
 
@@ -88,18 +88,29 @@ round-robin to four partitions; with `num_threads: 8`, each XCD gets its own
 partition. A single XCD is never split across partitions.
 
 **Default.** Omitting `num_threads` (or setting it to `0`) selects
-`min(host hardware threads, XCD count)` — normally one partition per XCD, since
-any host that runs the simulator has more threads than the GPU has XCDs. The
-host cap keeps the simulation from asking for more workers than it can run
-concurrently; the conservative PDES barrier makes oversubscription markedly
-worse than a smaller partition count. The shipped configs omit the field and
-take this default. Set it explicitly to pin a count.
+`min(available host threads, XCD count)` — normally one partition per XCD, since
+any host that runs the simulator has more CPUs than the GPU has XCDs. "Available"
+is the process's CPU affinity mask, not the machine's core count, so a job
+confined to one CPU by a cgroup, a container, or `taskset` gets one partition
+rather than eight. The cap keeps the simulation from asking for more workers
+than it can actually run concurrently; the conservative PDES barrier makes
+oversubscription markedly worse than a smaller partition count. The shipped
+configs omit the field and take this default. Set it explicitly to pin a count.
 
-Two things need `num_threads: 1` and have to say so in the config:
-`rj_vm_step()` and `SimulationEngine::step()` both require a single partition,
-and any code that builds an engine from a `LoadedConfig` without calling
-`partition_topology_by_xcds()` will fail `create()` with "multi-threaded
-SimulationEngine requires an explicit topology partition policy".
+Two separate contracts constrain consumers, and only the first is about the
+config file.
+
+**Stepping requires a single partition.** `rj_vm_step()` and
+`SimulationEngine::step()` both reject a multi-partition engine. Either pin
+`"num_threads": 1` in the config, or set `loaded.engine_config.num_threads = 1`
+on the `LoadedConfig` after `load_config()` returns and before constructing the
+engine — the loader resolves the default, it does not enforce it.
+
+**A multi-partition engine needs a partition policy.** Code that builds an
+engine by hand must call `partition_topology_by_xcds()` after `set_root()` and
+before `create()`, or `create()` throws "multi-threaded SimulationEngine
+requires an explicit topology partition policy". `rj_vm_create()` already does
+this, so this only affects direct `SimulationEngine` users.
 
 For multi-GPU VMs, both the default and the clamp use the aggregate XCD count
 across all SoCs. Partition assignment follows one global XCD ordering across

@@ -319,38 +319,25 @@ jobs:
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
 
-      # The point of this lane is racing the engine's worker threads against each
+      # This lane exists to race the engine's worker threads against each
       # other, and the shipped configs get there by omitting num_threads and
-      # taking the default of min(host threads, XCD count). Two things would
-      # quietly turn it back into a single-threaded run that reports green while
-      # testing nothing: a single-core runner, or a config that re-pins
-      # "num_threads": 1. Fail loudly on either.
-      - name: Verify the TSan lane races the multi-partition engine
+      # taking the default of min(available host threads, XCD count). That
+      # default collapses to a single partition on a one-CPU allocation, which
+      # would leave the lane green while racing nothing. nproc honours the
+      # affinity mask, so it measures the same thing the runtime policy does.
+      #
+      # The configs' half of the policy is enforced by
+      # XcdPartitioningTest.ShippedConfigsOmitNumThreadsExceptTheDocumentedPin,
+      # which runs with the main suite above and covers every config rather
+      # than the handful a step-level grep would list.
+      - name: Verify the TSan lane can race the multi-partition engine
         if: matrix.name == 'tsan'
-        working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         shell: bash
         run: |
           if (( $(nproc) < 2 )); then
-            echo "::error::TSan lane needs a multi-core runner (nproc=$(nproc))"
+            echo "::error::TSan lane needs more than one usable CPU (nproc=$(nproc))"
             exit 1
           fi
-
-          for cfg in configs/gfx950_mi355x.json configs/gfx950_mi355x_kmd.json; do
-            if grep -q '"num_threads"' "${cfg}"; then
-              echo "::error::${cfg} pins num_threads, so this lane would not" \
-                "exercise the multi-partition engine"
-              exit 1
-            fi
-          done
-
-          # Re-run the multi-partition cases on their own (~4 s under TSan) so
-          # --no-tests=error can assert the selection is non-empty: that flag is
-          # a no-op under -N, and a rename would otherwise silently empty this
-          # coverage while the lane stayed green.
-          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
-            -R 'XcdPartitioningTest\.|_MultiThreaded$' \
-            --no-tests=error \
-            --output-on-failure
 
       - name: Test static ASan launcher preload
         if: matrix.run_static_asan_launch

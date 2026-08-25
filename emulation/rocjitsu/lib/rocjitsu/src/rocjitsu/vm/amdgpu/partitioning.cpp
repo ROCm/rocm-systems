@@ -11,6 +11,10 @@
 #include <unordered_set>
 #include <vector>
 
+#if defined(__linux__)
+#include <sched.h>
+#endif
+
 namespace rocjitsu {
 namespace amdgpu {
 
@@ -27,13 +31,22 @@ uint32_t total_xcds(std::span<SoC *> socs) {
 
 } // namespace
 
+uint32_t available_host_threads() {
+#if defined(__linux__)
+  cpu_set_t affinity;
+  if (sched_getaffinity(0, sizeof(affinity), &affinity) == 0) {
+    const int usable = CPU_COUNT(&affinity);
+    if (usable > 0)
+      return static_cast<uint32_t>(usable);
+  }
+#endif
+  return std::thread::hardware_concurrency();
+}
+
 uint32_t default_xcd_partition_count(std::span<SoC *> socs) {
-  // hardware_concurrency() returns 0 when the host thread count is
-  // indeterminate; fall back to a single partition rather than guessing.
-  const uint32_t host_threads = std::thread::hardware_concurrency();
-  if (host_threads == 0)
-    return 1;
-  return std::max(std::min(host_threads, total_xcds(socs)), 1u);
+  // The clamp already maps an indeterminate host thread count (0) to 1 and caps
+  // at the XCD total, which is exactly min(host threads, XCDs) floored at 1.
+  return clamp_xcd_partition_count(socs, available_host_threads());
 }
 
 uint32_t default_xcd_partition_count(SoC *soc) {
@@ -42,6 +55,8 @@ uint32_t default_xcd_partition_count(SoC *soc) {
 }
 
 uint32_t clamp_xcd_partition_count(std::span<SoC *> socs, uint32_t requested_partitions) {
+  // The max() is not redundant: std::clamp requires lo <= hi, and a topology
+  // with no XCDs at all still has to yield one runnable partition.
   return std::clamp(requested_partitions, 1u, std::max(total_xcds(socs), 1u));
 }
 

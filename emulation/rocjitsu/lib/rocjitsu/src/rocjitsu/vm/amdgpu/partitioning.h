@@ -17,12 +17,22 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+/// @brief Host threads this process may actually run on.
+///
+/// @details The CPU affinity mask size, falling back to
+/// std::thread::hardware_concurrency() where the mask is unavailable. Affinity
+/// is the right measure because hardware_concurrency() reports the machine's
+/// total, which overshoots inside a cgroup, a container, or under taskset: a
+/// one-CPU job would otherwise be told it has every core on the box.
+/// @returns The usable host thread count, or 0 if it is indeterminate.
+[[nodiscard]] uint32_t available_host_threads();
+
 /// @brief Default partition count for a set of SoCs.
 ///
-/// @details min(host hardware threads, total XCDs), floored at 1. This is what
+/// @details min(available host threads, total XCDs), floored at 1. This is what
 /// a config resolves to when it leaves `num_threads` unset (or sets it to 0):
-/// one engine partition per XCD, capped so the simulation never asks the host
-/// for more worker threads than it can actually run concurrently. The
+/// one engine partition per XCD, capped so the simulation never asks for more
+/// worker threads than the process can actually run concurrently. The
 /// conservative PDES barrier makes oversubscription markedly worse than a
 /// smaller partition count.
 /// @returns The default partition count, always at least 1.

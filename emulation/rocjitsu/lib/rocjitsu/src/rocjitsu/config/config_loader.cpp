@@ -687,16 +687,16 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config) {
   }
 
   // An unset (or zero) num_threads means "use the default": one engine
-  // partition per XCD, capped at the host's hardware thread count. Resolve it
-  // here, once the SoC trees exist, so every LoadedConfig consumer sees a
-  // concrete worker count instead of re-deriving one.
+  // partition per XCD, capped at the host threads this process may run on.
+  // Resolve it here, once the SoC trees exist, so every LoadedConfig consumer
+  // sees a concrete worker count instead of re-deriving one.
   if (result.engine_config.num_threads == 0) {
     std::vector<SoC *> socs;
     socs.reserve(result.extra_gpu_builds.size() + 1);
-    if (auto *soc = result.soc())
+    if (SoC *soc = result.soc())
       socs.push_back(soc);
-    for (auto &eb : result.extra_gpu_builds) {
-      if (auto *extra_soc = dynamic_cast<SoC *>(eb.root.get()))
+    for (TopologyBuildResult &extra_gpu : result.extra_gpu_builds) {
+      if (SoC *extra_soc = dynamic_cast<SoC *>(extra_gpu.root.get()))
         socs.push_back(extra_soc);
     }
     result.engine_config.num_threads = amdgpu::default_xcd_partition_count(socs);

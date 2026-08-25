@@ -56,7 +56,7 @@ std::string single_threaded_config_json(const std::string &path) {
     throw std::runtime_error("Failed to open config: " + path);
 
   std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-  const auto brace_pos = json.find('{');
+  const size_t brace_pos = json.find('{');
   if (brace_pos == std::string::npos)
     throw std::runtime_error("Config is not a JSON object: " + path);
 
