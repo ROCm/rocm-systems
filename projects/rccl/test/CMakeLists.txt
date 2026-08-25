@@ -241,6 +241,7 @@ if(BUILD_TESTS)
     common/ProcessIsolatedTestRunner.cpp
     common/TestBed.cpp
     common/TestBedChild.cpp
+    common/Rendezvous.cpp
     common/StandaloneUtils.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc
@@ -663,6 +664,7 @@ if(BUILD_TESTS)
       common/MPIHelpers.cpp
       common/MPITestCore.cpp
       common/MPIEnvironment.cpp
+      common/Rendezvous.cpp
       common/TestChecks.cpp
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp

@@ -32,6 +32,12 @@ namespace RcclUnitTesting
     bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
     EnvVars                    ev;                    // Environment variables
 
+    // Init-pipeline defense-in-depth: counts InitComms calls over this TestBed's
+    // lifetime. When RCCL_TEST_READY_GO is set, an entry must be pinned to a
+    // single child generation (Option B), so a second InitComms is a mis-pinning
+    // bug and fails loudly. Backstop only -- routing is decided pre-launch.
+    int                        initCommsGenerationCount = 0;
+
     // Constructor - Creates one child process per detected GPU device that waits for further commands
     TestBed();
 

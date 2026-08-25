@@ -21,6 +21,7 @@ import time
 import datetime
 import copy
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from enum import IntEnum, Enum
 from pathlib import Path
 
@@ -30,6 +31,26 @@ try:
     from lib.test_config import expand_env_vars
 except ImportError:
     from test_config import expand_env_vars
+
+# Init-pipeline scheduler + planning (opt-in via --exec-mode=init-pipeline).
+try:
+    from lib.pipeline import (
+        PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
+        INJECT_ENV_PREFIX, RUNNER_OWNED_ENV,
+    )
+    from lib.pipeline_runner import (
+        plan_entries, assemble_records, aggregate_phase_timings, classify_errors,
+        validate_execution_intervals, CONFIG_ERROR_EXIT_CODE,
+    )
+except ImportError:
+    from pipeline import (
+        PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
+        INJECT_ENV_PREFIX, RUNNER_OWNED_ENV,
+    )
+    from pipeline_runner import (
+        plan_entries, assemble_records, aggregate_phase_timings, classify_errors,
+        validate_execution_intervals, CONFIG_ERROR_EXIT_CODE,
+    )
 
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
@@ -78,6 +99,18 @@ class TestResult(str, Enum):
     RESULT_FAILED = "FAILED"
     RESULT_TIMEOUT = "TIMEOUT"
     RESULT_SKIPPED = "SKIPPED"
+
+
+# Results that must make the runner exit non-zero. TestResult spells none of the scheduler's TIMED_OUT/CANCELLED/INFRA_ERROR, so those exited 0.
+TIMEOUT_RESULTS = frozenset({"TIMEOUT", "TIMED_OUT"})
+FAILING_RESULTS = frozenset({"FAILED", "CANCELLED", "INFRA_ERROR"}) | TIMEOUT_RESULTS
+
+
+def count_failures(results):
+    """(failed, timeout) over any mix of serial and init-pipeline result strings."""
+    timeout = sum(1 for r in results if r in TIMEOUT_RESULTS)
+    failed = sum(1 for r in results if r in FAILING_RESULTS and r not in TIMEOUT_RESULTS)
+    return failed, timeout
 
 
 def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str:
@@ -230,6 +263,34 @@ def _distinct_host_count(mpi_hosts: dict) -> int:
     return 0
 
 
+@dataclass
+class LaunchSpec:
+    """Everything needed to launch one test process and infer its result.
+
+    It is the pure output of ``TestExecutor._build_launch_spec`` -- no process is
+    started while building it. Splitting the launch (spec) from the blocking wait
+    (``_wait_and_infer``) lets a scheduler own the process handle across a
+    READY/GO boundary without duplicating command/env assembly. The serial
+    ``run_test`` just chains build -> spawn -> wait back-to-back, so its behavior
+    is byte-identical to the previous monolithic implementation.
+    """
+    name: str
+    cmd: str
+    run_cwd: str
+    env: dict
+    timeout: float
+    is_gtest: bool
+    gtest_json_path: str = ""     # temp gtest --gtest_output=json path; "" when not a gtest
+    emit_log_path: str = None     # per-test captured-log path; None unless emission enabled
+    binary: str = ""
+    perf_dtype: object = None
+    num_nodes: int = 1
+    num_gpus: int = 0
+    num_ranks: int = 1
+    exec_mode: str = "single"
+    perf_nthreads: int = 1
+
+
 class TestExecutor:
     """
     Executes tests and manages build/test workflows
@@ -295,6 +356,10 @@ class TestExecutor:
         self.test_names = []
         self.test_durations = []
         self.test_suites = []
+
+        # Init-pipeline EXECUTING<=1 / timestamp-ordering validity: the one guard on this mode's correctness, so a failure must not exit 0.
+        self.interval_validation = []
+        self.interval_validation_failed = False
 
         # Structured result emission (dashboard). Enabling either --emit-results or
         # --db-push turns on per-test log capture so perf output can be parsed.
@@ -998,16 +1063,25 @@ class TestExecutor:
             return detected if detected else 8
         return int(value)
 
-    def run_test(self, test_config, suite_config):
+    def _build_launch_spec(self, test_config, suite_config):
         """
-        Run a single test
+        Build the LaunchSpec for a single test without starting any process.
+
+        This is the pure, side-effect-light front half of the old ``run_test``:
+        it resolves the binary, applies every skip/validation rule, and assembles
+        the exact command, environment and working directory that ``_spawn`` will
+        launch. It does *not* fork/exec, so a scheduler can build many specs up
+        front and own each process handle across a READY/GO boundary.
 
         Args:
             test_config: Test configuration dict
             suite_config: Test suite configuration dict
 
         Returns:
-            dict: Test result
+            tuple[LaunchSpec | None, dict | None]: exactly one is non-None.
+            ``(spec, None)`` when the test is launchable; ``(None, result)`` when
+            the test is skipped, mis-configured, or already fully handled (e.g. a
+            pytest-harness suite returns its own result dict here).
         """
         test_name = test_config.get("name")
         is_gtest = test_config.get("is_gtest", True)  # Default to True for backward compatibility
@@ -1035,7 +1109,7 @@ class TestExecutor:
         except (ValueError, TypeError) as e:
             msg = f"Invalid num_nodes/num_gpus/num_ranks for test '{test_name}': {e}"
             print(f"ERROR: {msg}")
-            return {
+            return None, {
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
@@ -1076,7 +1150,7 @@ class TestExecutor:
         # Pytest-harness suites use a dedicated runner; the gtest/MPI path below
         # is left untouched.
         if test_config.get("is_pytest", False):
-            return self._run_pytest_test(test_config, merged_env)
+            return None, self._run_pytest_test(test_config, merged_env)
 
         if self.args.verbose:
             if description:
@@ -1105,14 +1179,14 @@ class TestExecutor:
         if not os.path.isfile(test_binary_path):
             if num_ranks > 1:
                 print(f"SKIP: MPI test binary not found: {test_binary_path} (build may not have --enable-mpi-tests)")
-                return {
+                return None, {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
                     "error": f"MPI binary not found: {test_binary_path}"
                 }
             print(f"ERROR: Test binary not found: {test_binary_path}")
-            return {
+            return None, {
                 "name": test_name,
                 "result": TestResult.RESULT_FAILED.value,
                 "duration": 0,
@@ -1127,7 +1201,7 @@ class TestExecutor:
                 mpirun = None
             if not mpirun:
                 print(f"SKIP: mpirun not found, cannot run MPI test '{test_name}'")
-                return {
+                return None, {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
@@ -1148,7 +1222,7 @@ class TestExecutor:
                     f"node has {detected_gpus}"
                 )
                 print(msg)
-                return {
+                return None, {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
@@ -1164,7 +1238,7 @@ class TestExecutor:
                     f"hostfile/SLURM has {avail}"
                 )
                 print(msg)
-                return {
+                return None, {
                     "name": test_name,
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
@@ -1173,6 +1247,10 @@ class TestExecutor:
 
         # Setup environment
         env = os.environ.copy()
+
+        # Drop ambient runner-owned / RCCL_TEST_INJECT_* vars: the C++ contract _exit(42)s on them, killing every SERIAL test undiagnosed.
+        for _k in [k for k in env if k in RUNNER_OWNED_ENV or k.startswith(INJECT_ENV_PREFIX)]:
+            env.pop(_k, None)
 
         # Build LD_LIBRARY_PATH.  Priority order (highest → lowest):
         #   1. build_dir          – always first so the test-built librccl.so wins
@@ -1388,102 +1466,184 @@ class TestExecutor:
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}")
             print(f"  LLVM_PROFILE_FILE: {env.get('LLVM_PROFILE_FILE', 'Not set')}\n")
 
-        # Inherit stdout/stderr (no PIPE capture). For gtest, --gtest_output=json:…
-        # (temp file, removed in finally) supplies reliable SKIPPED vs PASSED on exit 0.
-        #
-        # Launch the test in its own session (start_new_session=True) so the
-        # shell AND every descendant -- mpirun, orted, and the spawned ranks /
-        # perf binaries -- share a single process group we can signal as a unit.
-        # subprocess.run(timeout=...) only SIGKILLs the immediate /bin/sh child,
-        # leaving mpirun and all of its ranks running (and holding the GPUs),
-        # which is exactly the orphaned-process behaviour seen on timeout.
-        # When result emission is enabled, tee output to a per-test log so perf
-        # (busbw/algbw) numbers can be parsed afterwards, while still streaming to
-        # the console. ``set -o pipefail`` keeps the pipeline's exit status equal to
-        # the test's (not tee's). Default behaviour (inherited stdout, no capture)
-        # is unchanged when emission is off.
-        emit_log_path = None
-        start_time = time.time()
-        if self.emit_enabled:
-            emit_log_path = self._emit_log_path(test_name)
-            wrapped = f"set -o pipefail; ({cmd}) 2>&1 | tee {shlex.quote(emit_log_path)}"
-            proc = subprocess.Popen(
+        # The per-test captured-log path is computed here so the spec is fully
+        # self-describing; _spawn decides how to wire it (tee to console + file
+        # on the serial path). None unless result emission is enabled -- the
+        # default (inherited stdout, no capture) is unchanged when emission is off.
+        emit_log_path = self._emit_log_path(test_name) if self.emit_enabled else None
+
+        return LaunchSpec(
+            name=test_name,
+            cmd=cmd,
+            run_cwd=run_cwd,
+            env=env,
+            timeout=timeout,
+            is_gtest=is_gtest,
+            gtest_json_path=gtest_json_path or "",
+            emit_log_path=emit_log_path,
+            binary=binary,
+            perf_dtype=perf_dtype,
+            num_nodes=num_nodes,
+            num_gpus=num_gpus,
+            num_ranks=num_ranks,
+            exec_mode=exec_mode,
+            perf_nthreads=perf_nthreads,
+        ), None
+
+    def _spawn(self, spec):
+        """Launch ``spec.cmd`` non-blocking in its own session; return the Popen.
+
+        Byte-identical to the previous serial launch: when result emission is on,
+        output is tee'd to the per-test log (streamed to the console too) via
+        ``set -o pipefail`` so the pipeline's exit status is the test's, not
+        tee's; otherwise stdout/stderr are inherited with no capture.
+        ``start_new_session=True`` keeps the shell, mpirun, orted and every rank
+        in one process group ``_terminate_process_group`` can signal as a unit.
+        """
+        if spec.emit_log_path:
+            wrapped = f"set -o pipefail; ({spec.cmd}) 2>&1 | tee {shlex.quote(spec.emit_log_path)}"
+            return subprocess.Popen(
                 ["bash", "-c", wrapped],
-                cwd=run_cwd,
-                env=env,
+                cwd=spec.run_cwd,
+                env=spec.env,
                 start_new_session=True,
             )
-        else:
-            proc = subprocess.Popen(
-                cmd,
-                shell=True,
-                cwd=run_cwd,
-                env=env,
-                start_new_session=True,
-            )
+        return subprocess.Popen(
+            spec.cmd,
+            shell=True,
+            cwd=spec.run_cwd,
+            env=spec.env,
+            start_new_session=True,
+        )
+
+    def _spawn_captured(self, spec):
+        """Launch primitive for the init-pipeline scheduler (Phase 4).
+
+        Captures the whole process tree's stdout+stderr into a per-entry file via
+        a real file descriptor -- NOT ``subprocess.PIPE`` -- so ``proc.wait()``
+        can never deadlock on a full pipe buffer while the runner holds the handle
+        across a READY/GO boundary. Returns ``(proc, capture_fd)``; the caller
+        owns ``capture_fd`` and must close it after the process exits. Additive:
+        the serial ``run_test`` does not use this path.
+
+        Requires ``spec.emit_log_path`` (the capture target) to be set.
+        """
+        if not spec.emit_log_path:
+            raise ValueError("_spawn_captured requires spec.emit_log_path to be set")
+        capture_fd = open(spec.emit_log_path, "wb")
         try:
-            try:
-                returncode = proc.wait(timeout=timeout if timeout > 0 else None)
-            except subprocess.TimeoutExpired:
-                duration = time.time() - start_time
-                print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
-                print("  Killing process group (mpirun and all ranks)...")
-                self._terminate_process_group(proc)
-                return {
-                    "name": test_name,
-                    "result": TestResult.RESULT_TIMEOUT.value,
-                    "duration": duration,
-                    "error": f"Test timed out after {timeout} seconds",
-                    "binary": binary, "is_gtest": is_gtest, "dtype": perf_dtype,
-                    "num_nodes": num_nodes, "num_gpus": num_gpus,
-                    "num_ranks": num_ranks, "log_file": emit_log_path,
-                    "exec_mode": exec_mode, "nthreads": perf_nthreads,
-                }
-            except KeyboardInterrupt:
-                # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
-                print("\n  Interrupted -- killing process group (mpirun and all ranks)...")
-                self._terminate_process_group(proc)
-                raise
-            except Exception as e:
-                duration = time.time() - start_time
-                self._terminate_process_group(proc)
-                print(f"\n  ERROR: {e}")
-                return {
-                    "name": test_name,
-                    "result": TestResult.RESULT_FAILED.value,
-                    "duration": duration,
-                    "error": str(e)
-                }
+            proc = subprocess.Popen(
+                spec.cmd,
+                shell=True,
+                cwd=spec.run_cwd,
+                env=spec.env,
+                stdout=capture_fd,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except BaseException:
+            capture_fd.close()
+            raise
+        return proc, capture_fd
 
+    def _wait_and_infer(self, proc, spec, start_time):
+        """Block on the process tree, then map (exit code, gtest JSON) to a result.
+
+        The unchanged back half of the old ``run_test``: timeout/interrupt tear
+        down the whole process group; duration is measured from ``start_time``
+        (taken by the caller immediately before ``_spawn``) to now, so a real 2 s
+        test reports ~2 s and never 0.000 s. A nonzero/crash return code always
+        maps to FAILED via ``infer_gtest_result_from_json_file`` -- a partial or
+        stale gtest JSON can never turn a crash into PASSED.
+        """
+        try:
+            returncode = proc.wait(timeout=spec.timeout if spec.timeout > 0 else None)
+        except subprocess.TimeoutExpired:
             duration = time.time() - start_time
-
-            if is_gtest:
-                rc = returncode if returncode is not None else -1
-                test_result = infer_gtest_result_from_json_file(gtest_json_path or "", rc)
-            else:
-                if returncode == ExitCode.EXIT_SUCCESS:
-                    test_result = TestResult.RESULT_PASSED.value
-                elif returncode == ExitCode.EXIT_TIMEOUT:
-                    test_result = TestResult.RESULT_TIMEOUT.value
-                else:
-                    test_result = TestResult.RESULT_FAILED.value
-
-            print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
-
+            print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {spec.timeout} seconds")
+            print("  Killing process group (mpirun and all ranks)...")
+            self._terminate_process_group(proc)
             return {
-                "name": test_name,
-                "result": test_result,
+                "name": spec.name,
+                "result": TestResult.RESULT_TIMEOUT.value,
                 "duration": duration,
-                "exit_code": int(returncode) if returncode is not None else -1,
-                "binary": binary, "is_gtest": is_gtest, "dtype": perf_dtype,
-                "num_nodes": num_nodes, "num_gpus": num_gpus,
-                "num_ranks": num_ranks, "log_file": emit_log_path,
-                "exec_mode": exec_mode, "nthreads": perf_nthreads,
+                "error": f"Test timed out after {spec.timeout} seconds",
+                "binary": spec.binary, "is_gtest": spec.is_gtest, "dtype": spec.perf_dtype,
+                "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
+                "num_ranks": spec.num_ranks, "log_file": spec.emit_log_path,
+                "exec_mode": spec.exec_mode, "nthreads": spec.perf_nthreads,
             }
+        except KeyboardInterrupt:
+            # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
+            print("\n  Interrupted -- killing process group (mpirun and all ranks)...")
+            self._terminate_process_group(proc)
+            raise
+        except Exception as e:
+            duration = time.time() - start_time
+            self._terminate_process_group(proc)
+            print(f"\n  ERROR: {e}")
+            return {
+                "name": spec.name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": duration,
+                "error": str(e)
+            }
+
+        duration = time.time() - start_time
+
+        if spec.is_gtest:
+            rc = returncode if returncode is not None else -1
+            test_result = infer_gtest_result_from_json_file(spec.gtest_json_path or "", rc)
+        else:
+            if returncode == ExitCode.EXIT_SUCCESS:
+                test_result = TestResult.RESULT_PASSED.value
+            elif returncode == ExitCode.EXIT_TIMEOUT:
+                test_result = TestResult.RESULT_TIMEOUT.value
+            else:
+                test_result = TestResult.RESULT_FAILED.value
+
+        print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+
+        return {
+            "name": spec.name,
+            "result": test_result,
+            "duration": duration,
+            "exit_code": int(returncode) if returncode is not None else -1,
+            "binary": spec.binary, "is_gtest": spec.is_gtest, "dtype": spec.perf_dtype,
+            "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
+            "num_ranks": spec.num_ranks, "log_file": spec.emit_log_path,
+            "exec_mode": spec.exec_mode, "nthreads": spec.perf_nthreads,
+        }
+
+    def run_test(self, test_config, suite_config):
+        """
+        Run a single test serially: build the launch spec, spawn, wait + infer.
+
+        This is a thin wrapper that chains the three extracted stages back-to-back
+        so its observable behavior is byte-identical to the previous monolithic
+        implementation. ``start_time`` is captured immediately before ``_spawn``
+        (never before spec-building) so the reported duration measures only the
+        test process, and the gtest JSON temp file is always cleaned up.
+
+        Args:
+            test_config: Test configuration dict
+            suite_config: Test suite configuration dict
+
+        Returns:
+            dict: Test result
+        """
+        spec, early_result = self._build_launch_spec(test_config, suite_config)
+        if early_result is not None:
+            return early_result
+
+        start_time = time.time()
+        proc = self._spawn(spec)
+        try:
+            return self._wait_and_infer(proc, spec, start_time)
         finally:
-            if gtest_json_path:
+            if spec.gtest_json_path:
                 try:
-                    os.unlink(gtest_json_path)
+                    os.unlink(spec.gtest_json_path)
                 except OSError:
                     pass
 
@@ -1667,6 +1827,664 @@ class TestExecutor:
             "exit_code": int(rc),
         }
 
+    def _infer_pipeline_result(self, spec, rc):
+        """Map an exit code to a result for an init-pipeline entry (same rule as
+        the serial _wait_and_infer). A crash/nonzero rc is never PASSED."""
+        # A binary that self-rejects a mis-routed profile (v10 §5.1) is a
+        # configuration error, not a test failure.
+        if rc == CONFIG_ERROR_EXIT_CODE:
+            return "INFRA_ERROR"
+        if spec.is_gtest:
+            return infer_gtest_result_from_json_file(spec.gtest_json_path or "",
+                                                     rc if rc is not None else -1)
+        if rc == ExitCode.EXIT_SUCCESS:
+            return TestResult.RESULT_PASSED.value
+        if rc == ExitCode.EXIT_TIMEOUT:
+            return TestResult.RESULT_TIMEOUT.value
+        return TestResult.RESULT_FAILED.value
+
+    def _build_pipeline_spec(self, planned, suite_config, base_by_name, rdv, rerun=False):
+        """Build the LaunchSpec for one planned init-pipeline entry.
+
+        Starts from the parent test config, merges the pinned sweep env
+        (planned.env_overrides) and -- for a pipeline entry -- turns on the
+        warmup + rendezvous (RCCL_TEST_READY_GO + a per-entry
+        RCCL_TEST_RENDEZVOUS_DIR). A serial entry gets neither, so it just runs.
+        When ``rerun`` is set, the suite/test rerun_env_variables are merged on top
+        (matching the serial --rerun-failed path). Returns (spec, early_result).
+        """
+        parent = base_by_name[planned.parent_name]
+        tcfg = copy.deepcopy(parent)
+        env = dict(tcfg.get("env_variables", {}))
+        env.update(planned.env_overrides)
+        if rerun:
+            env.update(suite_config.get("rerun_env_variables", {}))
+            env.update(parent.get("rerun_env_variables", {}))
+        if planned.kind == KIND_PIPELINE:
+            env["RCCL_TEST_READY_GO"] = "1"
+            # Canonical profile var (v10 §5.1): pipeline entries get exactly one
+            # profile; the C++ validates it against its compiled role before warmup.
+            env["RCCL_TEST_WARMUP_PROFILE"] = planned.warmup_profile
+            go_timeout = getattr(self.args, "go_timeout", 0) or 0
+            if go_timeout > 0:
+                env["RCCL_TEST_GO_TIMEOUT_SEC"] = str(go_timeout)
+            if rdv is not None:
+                # Absolute: the binary/ranks run with a different cwd than the runner.
+                env["RCCL_TEST_RENDEZVOUS_DIR"] = os.path.abspath(rdv.dir)
+        tcfg["env_variables"] = env
+        tcfg["name"] = planned.name  # sub-entry name drives its log + records
+        return self._build_launch_spec(tcfg, suite_config)
+
+    def _execute_pipeline_plan(self, planned, suite_config, suite_name, base_by_name, rerun=False):
+        """Run one batch of planned units through the PipelineScheduler and return
+        ``results_by_name`` (entry name -> result record).
+
+        Shared by the main pass and the --rerun-failed pass. Sibling grouping is
+        computed over the given ``planned`` list, so a rerun *subset* is re-indexed
+        0..k-1 per parent and its legacy order is preserved among the reruns.
+        """
+        # Sibling grouping for legacy per-parent ordering (config order within the
+        # batch): keep a split sweep's sub-entries in order + fail-fast.
+        _groups = {}
+        for _p in planned:
+            _groups.setdefault(_p.parent_name, []).append(_p)
+        sib_info = {}
+        for _parent, _members in _groups.items():
+            for _i, _p in enumerate(_members):
+                sib_info[_p.name] = (_parent, _i, len(_members))
+
+        # Finite init timeout so a stuck READY fails one entry, not the whole run.
+        init_timeout = self.args.init_timeout if (getattr(self.args, "init_timeout", 0) or 0) > 0 else None
+        if init_timeout is None:
+            print("WARNING: --init-timeout 0 (indefinite): a stuck READY handshake "
+                  "will hang the whole run. Set a finite --init-timeout to fail the "
+                  "entry instead.")
+
+        run_uuid = Rendezvous.new_run_uuid()
+        # ABSOLUTE base: the binary runs with cwd=build_dir/test (MPI ranks may be
+        # on other nodes), so a relative RCCL_TEST_RENDEZVOUS_DIR would resolve to a
+        # path the runner never watches (deadlock). Anchor it under log_dir.
+        rdv_root = os.path.abspath(self.log_dir)
+        rdv_base = os.path.join(rdv_root, "rendezvous", run_uuid)
+        print(f"  init-pipeline{' rerun' if rerun else ''}: "
+              f"init_pool={getattr(self.args, 'init_pool', 2)}, "
+              f"init_timeout={'indefinite' if init_timeout is None else f'{init_timeout:g}s'}, "
+              f"rendezvous={rdv_base}")
+
+        specs = {}
+        proc_to_spec = {}
+        sched_entries = []
+        results_by_name = {}
+        gtest_jsons = []
+        rdvs = []
+        seq = 0
+        for p in planned:
+            rdv = Rendezvous.for_entry(rdv_root, run_uuid, seq) if p.kind == KIND_PIPELINE else None
+            if rdv is not None and self.args.verbose:
+                print(f"    entry {seq} {p.name}: rendezvous={rdv.dir}")
+            spec, early = self._build_pipeline_spec(p, suite_config, base_by_name, rdv, rerun=rerun)
+            if early is not None:
+                results_by_name[p.name] = {**early, "suite": suite_name}
+                if rdv is not None:
+                    rdv.cleanup()
+                continue
+            if not spec.emit_log_path:
+                spec.emit_log_path = self._emit_log_path(p.name)
+            if spec.gtest_json_path:
+                gtest_jsons.append(spec.gtest_json_path)
+            _parent, _idx, _total = sib_info.get(p.name, (p.parent_name, 0, 1))
+            _perf = bool(base_by_name.get(p.parent_name, {}).get("perf_sensitive", False))
+            sched_entries.append(SchedEntry(seq=seq, label=p.name, kind=p.kind,
+                                            rendezvous=rdv, log_path=spec.emit_log_path,
+                                            parent=_parent, sibling_index=_idx,
+                                            sibling_total=_total, perf_sensitive=_perf))
+            specs[seq] = spec
+            if rdv is not None:
+                rdvs.append(rdv)
+            seq += 1
+
+        def spawn(entry):
+            spec = specs[entry.seq]
+            proc, fd = self._spawn_captured(spec)
+            proc_to_spec[id(proc)] = spec
+            return proc, fd
+
+        def wait_exit(proc, deadline):
+            spec = proc_to_spec.get(id(proc))
+            timeout = spec.timeout if (spec and spec.timeout and spec.timeout > 0) else None
+            if deadline is not None:
+                # Honour the scheduler's exec deadline; ignoring it made a future --exec-timeout a silent no-op.
+                remaining = max(0.0, deadline - time.monotonic())
+                timeout = remaining if timeout is None else min(timeout, remaining)
+            try:
+                return proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                return "timeout"
+
+        def infer(entry, rc):
+            return self._infer_pipeline_result(specs[entry.seq], rc)
+
+        def terminate(proc):
+            self._terminate_process_group(proc)
+
+        try:
+            if sched_entries:
+                sched = PipelineScheduler(
+                    sched_entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                    terminate=terminate,
+                    init_pool=getattr(self.args, "init_pool", 2),
+                    init_timeout=init_timeout,
+                    exec_timeout=None,  # per-entry timeout enforced in wait_exit
+                    fork_sweep_policy=getattr(self.args, "fork_sweep_policy", "legacy"),
+                    release_order=getattr(self.args, "release_order", "ready"),
+                    loader_policy=getattr(self.args, "loader_policy", "continuous"),
+                    log=(print if self.args.verbose else (lambda *a: None)),
+                )
+                sched.run()
+                for entry in sched_entries:
+                    spec = specs[entry.seq]
+                    # Reported duration must EXCLUDE the READY->GO park, or a --init-pool run looks like a slowdown vs serial.
+                    _pt = entry.phase_timings()
+                    dur = _pt["total"] if entry.kind == KIND_SERIAL else _pt["execution_time"]
+                    if dur is None:
+                        dur = 0
+                    is_serial = (entry.kind == KIND_SERIAL)
+                    rec = {
+                        "result": entry.result, "duration": dur, "suite": suite_name,
+                        "log_file": spec.emit_log_path, "exit_code": entry.exit_code,
+                        "phase": entry.phase, "binary": spec.binary, "is_gtest": spec.is_gtest,
+                        "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
+                        "num_ranks": spec.num_ranks, "exec_mode": spec.exec_mode,
+                        # Combined-interval execution-serialization evidence
+                        # (review amendment 1): pipeline exec = [GO, reap]; serial
+                        # exec = [spawn, reap] (whole lifetime owns the slot). Both
+                        # kinds feed one max-EXECUTING==1 check. Monotonic stamps.
+                        "entry_kind": "serial" if is_serial else "pipeline",
+                        "exec_start_reason": "serial_spawned" if is_serial else "go_issued",
+                        "exec_start": entry.t_launch if is_serial else entry.t_go,
+                        "exec_end": entry.t_exit,
+                        "launch_ts": entry.t_launch, "ready_ts": entry.t_ready,
+                        "go_ts": entry.t_go, "exit_ts": entry.t_exit,
+                    }
+                    # Collected unconditionally so --queue-wait-warn works; the
+                    # aggregate presentation is gated on --phase-timings.
+                    rec["phase_timings"] = entry.phase_timings()
+                    # Preserve a failed entry's rendezvous artifacts for postmortem
+                    # (v10 §7): clean up only on a clean pass/skip.
+                    ok = entry.result in ("PASSED", "SKIPPED")
+                    if entry.rendezvous is not None:
+                        if ok:
+                            entry.rendezvous.cleanup()
+                        else:
+                            rec["rendezvous_dir"] = entry.rendezvous.dir
+                            print(f"  init-pipeline: retained rendezvous for failed "
+                                  f"{entry.label}: {entry.rendezvous.dir}")
+                    results_by_name[entry.label] = rec
+                if sched.failed():
+                    print("WARNING: init-pipeline recorded a scheduler/launch fault "
+                          "(INFRA_ERROR); see per-entry results.")
+        finally:
+            # gtest JSON temp files are always safe to remove; rendezvous dirs are
+            # cleaned per-entry above (retained on failure). Any rdv left when the
+            # scheduler itself raised is also retained (not cleaned here).
+            for j in gtest_jsons:
+                try:
+                    os.unlink(j)
+                except OSError:
+                    pass
+        return results_by_name
+
+    def plan_init_pipeline_run(self, test_suites, run_preflight=True):
+        """Whole-run pre-pass for init-pipeline (v10 §7 / v11 CR-1/CR-2). Resolves
+        every test's classification across all suites, runs the binary-backed
+        gtest filter preflight for pipeline gtest entries, prints the planning
+        summary, and runs the run-wide guardrails. Returns (resolved_rows,
+        fatal_errors); the caller MUST abort the run before spawn if fatal_errors
+        is non-empty. Side-effect-free apart from the (cached) --gtest_list_tests
+        preflight, which carries no pipeline env."""
+        from lib.pipeline_runner import resolve_test, planning_summary, run_guards
+        from lib.gtest_preflight import preflight_filter
+        resolved = []
+        list_cache = {}
+        for suite in test_suites:
+            sd = suite.get("suite_details", {})
+            if not sd.get("enabled", True):
+                continue
+            sname = sd.get("name")
+            if self.args.suite_name and not glob_filter_matches(sname, self.args.suite_name):
+                continue
+            for test in suite.get("tests", []):
+                tname = test.get("name")
+                if self.args.test_name and not glob_filter_matches(tname, self.args.test_name):
+                    continue
+                row = resolve_test(test, exec_mode="init-pipeline")
+                row["suite"] = sname
+                row["test_filter"] = test.get("test_filter")
+                # Binary-backed filter preflight for pipeline gtest entries: prove
+                # the filter resolves to exactly one real test before spawn (v11 CR-1).
+                if run_preflight and row["disposition"] == "pipeline" and test.get("is_gtest", True):
+                    try:
+                        bpath = self._resolve_binary_path(test.get("binary", ""), test)
+                        matches = preflight_filter(bpath, test.get("test_filter"),
+                                                   curated=True, cache=list_cache)
+                        row["preflight_matches"] = matches
+                        row["resolved_test_identity"] = matches[0]
+                    # OSError covers a missing/unbuilt binary: subprocess.run raises FileNotFoundError, which must reject cleanly.
+                    except (ValueError, RuntimeError, OSError) as e:
+                        row["disposition"] = "rejected"
+                        row["error"] = f"filter preflight: {e}"
+                        row["exclusion_reason"] = "unclassified"
+                resolved.append(row)
+
+        s = planning_summary(resolved)
+        print("\nPlanning summary (--exec-mode init-pipeline):")
+        print(f"  mpi_coll pipeline entries:   {s['mpi_pipeline_entries']}")
+        print(f"  fork_coll parent descriptors:{s['fork_parent_descriptors']}   "
+              f"(+{s['fork_resolved_subentries']} resolved sub-entries)")
+        print(f"  netib rejected:              {s['netib_rejected']}   (rejected until implemented)")
+        print(f"  other rejected (config):     {s['rejected_total'] - s['netib_rejected']}")
+        print(f"  serial entries:              {s['serial_entries']}")
+        print(f"  executable pipeline entries: {s['executable_pipeline_entries']}")
+
+        # Persist the manifest as an artifact (v11 CR-7), not only stdout.
+        try:
+            from lib.pipeline_runner import stable_id
+            manifest = [{"stable_id": stable_id(r), **r} for r in resolved]
+            mpath = os.path.join(self.log_dir, "init_pipeline_manifest.json")
+            with open(mpath, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2, default=str)
+            print(f"  init-pipeline manifest written: {mpath}")
+        except OSError as e:
+            print(f"WARNING: could not persist init-pipeline manifest: {e}")
+
+        errors = run_guards(resolved, exec_mode="init-pipeline",
+                            allow_serial_only=getattr(self.args, "allow_serial_only", False))
+        return resolved, errors
+
+    def emit_init_pipeline_manifest(self, test_suites):
+        """Print the classification manifest (one JSON object per resolved test)
+        and return the resolved rows. Used by --emit-manifest."""
+        resolved, _ = self.plan_init_pipeline_run(test_suites)
+        print("\n# init-pipeline manifest (one JSON row per resolved test):")
+        for row in resolved:
+            print(json.dumps(row, default=str))
+        return resolved
+
+    def run_all_suites_init_pipeline(self, test_suites):
+        """One run-wide init-pipeline scheduler across ALL suites (v11 CR-6).
+
+        Resolves + expands every enabled/filtered suite into one ordered plan,
+        drives them through a SINGLE PipelineScheduler (so execution intervals
+        cannot overlap across suites and later suites' init can overlap an earlier
+        suite's execution), then reports per suite. Entry labels/parents are
+        suite-qualified so identity, logs, and legacy sibling ordering stay correct.
+        """
+        # ---- Build the ordered run plan across suites ----
+        plan = []  # each: {planned, suite, suite_config, base, sib}
+        for suite in test_suites:
+            sd = suite.get("suite_details", {})
+            if not sd.get("enabled", True):
+                continue
+            sname = sd.get("name")
+            _sfilter = getattr(self.args, "suite_name", None)
+            if _sfilter and not glob_filter_matches(sname, _sfilter):
+                continue
+            filtered = []
+            for test in suite.get("tests", []):
+                tname = test.get("name")
+                if getattr(self.args, "test_name", None) and not glob_filter_matches(tname, self.args.test_name):
+                    continue
+                tr = test.get("num_ranks", suite.get("num_ranks", 1))
+                is_auto = isinstance(tr, str) and tr.strip().lower() == "auto"
+                is_mpi = is_auto or (not isinstance(tr, str) and tr > 1)
+                if self.args.skip_mpi_check and is_mpi:
+                    continue
+                filtered.append(test)
+            if not filtered:
+                continue
+            base_by_name = {t.get("name"): t for t in filtered}
+            planned = plan_entries(filtered, exec_mode="init-pipeline")
+            groups = {}
+            for p in planned:
+                groups.setdefault(p.parent_name, []).append(p)
+            sib = {}
+            for parent, members in groups.items():
+                for i, p in enumerate(members):
+                    sib[p.name] = (parent, i, len(members))
+            for p in planned:
+                plan.append({"planned": p, "suite": sname, "suite_config": suite,
+                             "base": base_by_name, "sib": sib})
+        if not plan:
+            print("WARNING: init-pipeline resolved no runnable entries")
+            return []
+
+        init_timeout = self.args.init_timeout if (getattr(self.args, "init_timeout", 0) or 0) > 0 else None
+        run_uuid = Rendezvous.new_run_uuid()
+        rdv_root = os.path.abspath(self.log_dir)
+        print(f"  init-pipeline (run-wide): entries={len(plan)}, "
+              f"init_pool={getattr(self.args, 'init_pool', 2)}, "
+              f"init_timeout={'indefinite' if init_timeout is None else f'{init_timeout:g}s'}")
+
+        specs, proc_to_spec, sched_entries = {}, {}, []
+        results_by_key, gtest_jsons, rdvs = {}, [], []
+        seq = 0
+        for item in plan:
+            p, sname, scfg, base, sib = (item["planned"], item["suite"],
+                                         item["suite_config"], item["base"], item["sib"])
+            key = f"{sname}::{p.name}"
+            rdv = Rendezvous.for_entry(rdv_root, run_uuid, seq) if p.kind == KIND_PIPELINE else None
+            spec, early = self._build_pipeline_spec(p, scfg, base, rdv)
+            if early is not None:
+                results_by_key[key] = {**early, "suite": sname}
+                if rdv is not None:
+                    rdv.cleanup()
+                continue
+            if not spec.emit_log_path:
+                spec.emit_log_path = self._emit_log_path(f"{sname}_{p.name}")
+            if spec.gtest_json_path:
+                gtest_jsons.append(spec.gtest_json_path)
+            parent, idx, total = sib.get(p.name, (p.parent_name, 0, 1))
+            perf = bool(base.get(p.parent_name, {}).get("perf_sensitive", False))
+            sched_entries.append(SchedEntry(
+                seq=seq, label=key, kind=p.kind, rendezvous=rdv, log_path=spec.emit_log_path,
+                parent=f"{sname}::{parent}", sibling_index=idx, sibling_total=total,
+                perf_sensitive=perf))
+            specs[seq] = spec
+            if rdv is not None:
+                rdvs.append(rdv)
+            seq += 1
+
+        def spawn(entry):
+            spec = specs[entry.seq]
+            proc, fd = self._spawn_captured(spec)
+            proc_to_spec[id(proc)] = spec
+            return proc, fd
+
+        def wait_exit(proc, deadline):
+            spec = proc_to_spec.get(id(proc))
+            timeout = spec.timeout if (spec and spec.timeout and spec.timeout > 0) else None
+            if deadline is not None:
+                # Honour the scheduler's exec deadline; ignoring it made a future --exec-timeout a silent no-op.
+                remaining = max(0.0, deadline - time.monotonic())
+                timeout = remaining if timeout is None else min(timeout, remaining)
+            try:
+                return proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                return "timeout"
+
+        def infer(entry, rc):
+            return self._infer_pipeline_result(specs[entry.seq], rc)
+
+        try:
+            if sched_entries:
+                sched = PipelineScheduler(
+                    sched_entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                    terminate=lambda proc: self._terminate_process_group(proc),
+                    init_pool=getattr(self.args, "init_pool", 2), init_timeout=init_timeout,
+                    exec_timeout=None,
+                    fork_sweep_policy=getattr(self.args, "fork_sweep_policy", "legacy"),
+                    release_order=getattr(self.args, "release_order", "ready"),
+                    loader_policy=getattr(self.args, "loader_policy", "continuous"),
+                    log=(print if self.args.verbose else (lambda *a: None)))
+                sched.run()
+                for entry in sched_entries:
+                    spec = specs[entry.seq]
+                    # Reported duration must EXCLUDE the READY->GO park, or a --init-pool run looks like a slowdown vs serial.
+                    _pt = entry.phase_timings()
+                    dur = _pt["total"] if entry.kind == KIND_SERIAL else _pt["execution_time"]
+                    if dur is None:
+                        dur = 0
+                    is_serial = (entry.kind == KIND_SERIAL)
+                    rec = {
+                        "result": entry.result, "duration": dur, "exit_code": entry.exit_code,
+                        "phase": entry.phase, "binary": spec.binary, "is_gtest": spec.is_gtest,
+                        "num_nodes": spec.num_nodes, "num_gpus": spec.num_gpus,
+                        "num_ranks": spec.num_ranks, "exec_mode": spec.exec_mode,
+                        "log_file": spec.emit_log_path,
+                        "entry_kind": "serial" if is_serial else "pipeline",
+                        "exec_start_reason": "serial_spawned" if is_serial else "go_issued",
+                        "exec_start": entry.t_launch if is_serial else entry.t_go,
+                        "exec_end": entry.t_exit, "launch_ts": entry.t_launch,
+                        "ready_ts": entry.t_ready, "go_ts": entry.t_go, "exit_ts": entry.t_exit,
+                        "phase_timings": entry.phase_timings(),
+                    }
+                    ok = entry.result in ("PASSED", "SKIPPED")
+                    if entry.rendezvous is not None:
+                        if ok:
+                            entry.rendezvous.cleanup()
+                        else:
+                            rec["rendezvous_dir"] = entry.rendezvous.dir
+                    results_by_key[entry.label] = rec
+        finally:
+            for j in gtest_jsons:
+                try:
+                    os.unlink(j)
+                except OSError:
+                    pass
+
+        # ---- Per-suite reporting (v11 CR-6) ----
+        all_records = []
+        results = []
+        by_suite = {}
+        for item in plan:
+            by_suite.setdefault(item["suite"], []).append(item["planned"])
+        for sname, planned_list in by_suite.items():
+            suite_results = {p.name: results_by_key.get(f"{sname}::{p.name}", {})
+                             for p in planned_list}
+            records = assemble_records(planned_list, suite_results)
+            for rec in records:
+                rec["suite"] = sname
+                results.append(rec)
+                all_records.append(rec)
+                if rec.get("counts_toward_topline"):
+                    self.test_names.append(rec.get("test_name"))
+                    self.test_results.append(rec.get("result"))
+                    self.test_durations.append(rec.get("duration", 0) or 0)
+                    self.test_suites.append(sname)
+                if self.emit_enabled:
+                    self.test_records.append(rec)
+
+        # Queue-wait warnings (READY->GO held longer than the threshold).
+        qw = getattr(self.args, "queue_wait_warn", 0) or 0
+        if qw > 0:
+            for rec in all_records:
+                w = (rec.get("phase_timings") or {}).get("ready_queue_wait")
+                if w is not None and w > qw:
+                    print(f"  WARNING: {rec.get('name')} waited {w:.1f}s READY->GO (> {qw:g}s)")
+
+        # Aggregate phase timings (init / queue-wait / execution) across the whole run.
+        if getattr(self.args, "phase_timings", False):
+            agg = aggregate_phase_timings(all_records)
+            print("\n  init-pipeline run-wide phase timings (seconds):")
+            for p in ("time_to_ready", "ready_queue_wait", "execution_time", "total"):
+                st = agg.get(p)
+                if st:
+                    print(f"    {p:16s} n={st['count']:<4d} min={st['min']:.2f} "
+                          f"med={st['median']:.2f} p95={st['p95']:.2f} "
+                          f"max={st['max']:.2f} sum={st['sum']:.1f}")
+
+        # Run-wide execution-serialization + timing validity (v11 CR-8).
+        okv, ival_report, ival_errors = validate_execution_intervals(all_records)
+        print(f"  init-pipeline run-wide interval validation: "
+              f"max_executing={ival_report['max_executing']} "
+              f"executed={ival_report['executed_entries']} ok={okv}")
+        for e in ival_errors:
+            print(f"    INTERVAL-VALIDATION FAILURE: {e}")
+        if not hasattr(self, "interval_validation"):
+            self.interval_validation = []
+        self.interval_validation.append({"scope": "run", **ival_report, "errors": ival_errors})
+        if not okv:
+            self.interval_validation_failed = True
+        return results
+
+    def _run_suite_serial_expanded(self, suite_config, suite_name, tests):
+        """Serial per-config baseline for the correctness gate (plan §12).
+
+        Expands fork sweeps into the SAME pinned per-config sub-entries the
+        init-pipeline uses (via plan_entries), but runs each one serially through
+        the normal run_test path -- NO warmup, NO rendezvous, NO overlap -- and
+        folds the results into per-config records with a parent_summary. Diffing
+        this run's tests.jsonl against an init-pipeline run gives a true
+        per-configuration pass/fail/skip comparison (not just the roll-up).
+        """
+        filtered = []
+        for test in tests:
+            name = test.get("name")
+            if self.args.test_name and not glob_filter_matches(name, self.args.test_name):
+                continue
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_auto = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
+            is_mpi = is_auto or (not isinstance(test_ranks, str) and test_ranks > 1)
+            if self.args.skip_mpi_check and is_mpi:
+                continue
+            filtered.append(test)
+        if not filtered:
+            return []
+
+        base_by_name = {t.get("name"): t for t in filtered}
+        # Expand exactly as the pipeline does (fork -> per-generation sub-entries;
+        # mpi/netib/unprofiled -> one entry).
+        planned = plan_entries(filtered, exec_mode="init-pipeline")
+
+        results_by_name = {}
+        for p in planned:
+            base = base_by_name[p.parent_name]
+            tcfg = copy.deepcopy(base)
+            env = dict(tcfg.get("env_variables", {}))
+            env.update(p.env_overrides)          # pinned selectors only; no warmup/rendezvous
+            tcfg["env_variables"] = env
+            tcfg["name"] = p.name
+            res = self.run_test(tcfg, suite_config)
+            results_by_name[p.name] = {**res, "suite": suite_name}
+
+        records = assemble_records(planned, results_by_name)
+        results = []
+        for rec in records:
+            results.append(rec)
+            if rec.get("counts_toward_topline"):
+                self.test_names.append(rec.get("test_name"))
+                self.test_results.append(rec.get("result"))
+                self.test_durations.append(rec.get("duration", 0) or 0)
+                self.test_suites.append(suite_name)
+            if self.emit_enabled:
+                self.test_records.append(rec)
+        return results
+
+    def _run_suite_init_pipeline(self, suite_config, suite_name, tests):
+        """Run a suite in init-pipeline mode: overlap entries' device-code init
+        behind a READY/GO barrier, execute one at a time (no co-tenancy), and roll
+        split sweep sub-entries back into a parent summary.
+
+        Needs a real build to validate end to end (it drives the actual test
+        binaries); the planning, scheduler and roll-up it composes are host-tested
+        separately.
+        """
+        # Apply the same name / MPI-skip filters as the serial path.
+        filtered = []
+        for test in tests:
+            name = test.get("name")
+            if self.args.test_name and not glob_filter_matches(name, self.args.test_name):
+                continue
+            test_ranks = test.get("num_ranks", suite_config.get("num_ranks", 1))
+            is_auto = isinstance(test_ranks, str) and test_ranks.strip().lower() == "auto"
+            is_mpi = is_auto or (not isinstance(test_ranks, str) and test_ranks > 1)
+            if self.args.skip_mpi_check and is_mpi:
+                continue
+            filtered.append(test)
+        if not filtered:
+            return []
+
+        # Planner validation (v10 §5.1/§5.4): reject unknown profiles, netib, and
+        # binary/profile mismatches BEFORE spawn -> record as configuration errors,
+        # never launch them.
+        config_errors = classify_errors(filtered, exec_mode="init-pipeline")
+        bad_names = {name for name, _ in config_errors}
+        for name, msg in config_errors:
+            print(f"ERROR (init-pipeline config): {name}: {msg}")
+        filtered = [t for t in filtered if t.get("name") not in bad_names]
+
+        base_by_name = {t.get("name"): t for t in filtered}
+        planned = plan_entries(filtered, exec_mode="init-pipeline")
+
+        results_by_name = self._execute_pipeline_plan(planned, suite_config, suite_name, base_by_name)
+
+        # --rerun-failed: re-run the failed/cancelled sub-entries (with rerun env)
+        # in legacy order; prior-passed siblings keep their results, so the parent
+        # roll-up converges to the same coverage a clean serial sweep would (§9).
+        if getattr(self.args, "rerun_failed", False):
+            fail_set = {TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value,
+                        "TIMED_OUT", "CANCELLED", "INFRA_ERROR"}
+            rerun_planned = [p for p in planned
+                             if (results_by_name.get(p.name) or {}).get("result") in fail_set]
+            if rerun_planned:
+                print(f"\n{'='*80}\nRERUNNING {len(rerun_planned)} FAILED init-pipeline "
+                      f"sub-entrie(s) in suite '{suite_name}'\n{'='*80}")
+                rerun_results = self._execute_pipeline_plan(
+                    rerun_planned, suite_config, suite_name, base_by_name, rerun=True)
+                results_by_name.update(rerun_results)  # overwrite reruns; prior-passed kept
+
+        # Fold sub-entries into parent summaries; only top-line records feed the
+        # run totals so a split sweep is never double-counted.
+        records = assemble_records(planned, results_by_name)
+
+        # Planner-rejected (mis-classified) tests: emitted as configuration errors,
+        # never spawned. Distinct from a test FAILED.
+        for name, msg in config_errors:
+            records.append({
+                "record_type": "entry", "suite": suite_name, "test_name": name,
+                "name": name, "result": "INFRA_ERROR", "reason": "configuration_error",
+                "error": msg, "counts_toward_topline": True,
+            })
+
+        results = []
+        for rec in records:
+            results.append(rec)
+            if rec.get("counts_toward_topline"):
+                self.test_names.append(rec.get("test_name"))
+                self.test_results.append(rec.get("result"))
+                self.test_durations.append(rec.get("duration", 0) or 0)
+                self.test_suites.append(suite_name)
+            if self.emit_enabled:
+                self.test_records.append(rec)
+
+        # Queue-wait warnings (READY->GO held longer than the threshold): a
+        # measured/perf entry distorted by a long park is worth flagging.
+        qw = getattr(self.args, "queue_wait_warn", 0) or 0
+        if qw > 0:
+            for rec in records:
+                pt = rec.get("phase_timings") or {}
+                w = pt.get("ready_queue_wait")
+                if w is not None and w > qw:
+                    print(f"  WARNING: {rec.get('name')} waited {w:.1f}s READY->GO (> {qw:g}s)")
+
+        # Execution-serialization + timing validity (v11 CR-8): run automatically,
+        # store the result, and surface a failure loudly (EXECUTING>1, missing
+        # reap, or unordered timestamps make the run diagnostic-only).
+        ok, ival_report, ival_errors = validate_execution_intervals(records)
+        if not hasattr(self, "interval_validation"):
+            self.interval_validation = []
+        self.interval_validation.append({"suite": suite_name, **ival_report, "errors": ival_errors})
+        if not ok:
+            self.interval_validation_failed = True
+        print(f"  init-pipeline interval validation [{suite_name}]: "
+              f"max_executing={ival_report['max_executing']} "
+              f"executed={ival_report['executed_entries']} ok={ok}")
+        for e in ival_errors:
+            print(f"    INTERVAL-VALIDATION FAILURE: {e}")
+
+        # Aggregate phase timings (init / queue-wait / execution): refines the
+        # ledger's init_overhead by splitting warmup from post-GO time.
+        if getattr(self.args, "phase_timings", False):
+            agg = aggregate_phase_timings(records)
+            print(f"\n  init-pipeline phase timings for suite '{suite_name}' (seconds):")
+            for p in ("time_to_ready", "ready_queue_wait", "execution_time", "total"):
+                st = agg.get(p)
+                if st:
+                    print(f"    {p:16s} n={st['count']:<4d} min={st['min']:.2f} "
+                          f"med={st['median']:.2f} p95={st['p95']:.2f} "
+                          f"max={st['max']:.2f} sum={st['sum']:.1f}")
+        return results
+
     def run_test_suite(self, suite_config):
         """
         Run all tests in a test suite
@@ -1688,6 +2506,17 @@ class TestExecutor:
         if not tests:
             print(f"WARNING: No tests defined for test suite '{suite_name}'")
             return []
+
+        # Init-pipeline execution mode: overlap init behind a READY/GO barrier and
+        # execute one entry at a time. Opt-in; the serial path below is untouched.
+        if getattr(self.args, "exec_mode", "serial") == "init-pipeline":
+            return self._run_suite_init_pipeline(suite_config, suite_name, tests)
+
+        # Serial per-config baseline: same sub-entry expansion as the pipeline, run
+        # serially with no warmup/overlap, emitting per-config rows to diff against
+        # an init-pipeline run (plan §12). Opt-in; plain serial is unchanged.
+        if getattr(self.args, "expand_sweeps", False):
+            return self._run_suite_serial_expanded(suite_config, suite_name, tests)
 
         results = []
         skipped_count = 0
@@ -1815,9 +2644,9 @@ class TestExecutor:
         """Print test execution summary"""
         total_tests = len(self.test_results)
         passed = self.test_results.count(TestResult.RESULT_PASSED.value)
-        failed = self.test_results.count(TestResult.RESULT_FAILED.value)
-        timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
+        failed, timeout = count_failures(self.test_results)
         skipped = self.test_results.count(TestResult.RESULT_SKIPPED.value)
+        unaccounted = total_tests - (passed + failed + timeout + skipped)
 
         # Calculate total test time
         total_time_seconds = sum(self.test_durations) if self.test_durations else 0
@@ -1831,11 +2660,12 @@ class TestExecutor:
             print(f"{'Test Suite':<40} {'Test Name':<40} {'Result':<10} {'Duration'}")
             print("-"*120)
             for i in range(total_tests):
+                # str(): a row with no recorded result carries None, and a bare f"{None:<10}" raises TypeError.
                 print(
-                    f"{self.test_suites[i]:<40} "
-                    f"{self.test_names[i]:<40} "
-                    f"{self.test_results[i]:<10} "
-                    f"{self.test_durations[i]:.3f} seconds"
+                    f"{str(self.test_suites[i]):<40} "
+                    f"{str(self.test_names[i]):<40} "
+                    f"{str(self.test_results[i]):<10} "
+                    f"{self.test_durations[i] or 0:.3f} seconds"
                 )
             print("-"*120)
             print(f"Total Tests:   {total_tests}")
@@ -1843,6 +2673,8 @@ class TestExecutor:
             print(f"Failed:        {failed}")
             print(f"Skipped:       {skipped}")
             print(f"Timeout:       {timeout}")
+            if unaccounted:
+                print(f"Unaccounted:   {unaccounted}  (results with no known status)")
             if skipped > 0:
                 print(f"Skipped:       {skipped}")
             print(f"Total Time:    {self._format_duration(total_time_seconds)}")

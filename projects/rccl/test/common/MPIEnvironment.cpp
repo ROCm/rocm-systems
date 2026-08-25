@@ -11,12 +11,16 @@
 
 #include "MPIEnvironment.hpp"
 #include "MPITestBase.hpp"
+#include "Rendezvous.hpp"
 
 #ifdef MPI_TESTS_ENABLED
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <thread>
+#include <unistd.h>
 
 /**
  * @brief Initialize the global test environment
@@ -32,6 +36,184 @@ void MPIEnvironment::SetUp()
     // One-time initialization (MPI_Init can only be called once)
     initialize_mpi();
     initialize_devices();
+    // Init-pipeline device-code warmup. No-op unless RCCL_TEST_READY_GO is set,
+    // so the default (serial) path is byte-identical. Must run AFTER
+    // initialize_devices() so the assigned device/context already exist.
+    warmup_device_code();
+}
+
+void MPIEnvironment::warmup_device_code()
+{
+    // Full environment-contract validation BEFORE any HIP/RCCL warmup (v11 CR-3).
+    // The runner owns these four vars; a pipeline entry must present a complete,
+    // consistent set. Any inconsistency is a configuration error (exit 42), not a
+    // test failure. All ranks share the same env, so all exit uniformly.
+    {
+        const char* profile = std::getenv("RCCL_TEST_WARMUP_PROFILE");
+        const bool  readyGo = std::getenv("RCCL_TEST_READY_GO") != nullptr;
+        const char* rdvDir  = std::getenv("RCCL_TEST_RENDEZVOUS_DIR");
+        const char* goTo    = std::getenv("RCCL_TEST_GO_TIMEOUT_SEC");
+        // An EMPTY profile is absent, like an empty rendezvous dir; treating it as present misdiagnosed "missing profile" as "wrong profile".
+        const bool  hasProf = profile && profile[0];
+        const bool  anyVar  = hasProf || readyGo || (rdvDir && rdvDir[0]) || goTo;
+
+        if(!anyVar)
+        {
+            return;  // serial entry: all pipeline vars absent -> no-op.
+        }
+        double goTimeoutSec = 0.0;
+        const char* why = nullptr;
+        if(!hasProf)                                 why = "READY_GO/rendezvous set without RCCL_TEST_WARMUP_PROFILE";
+        else if(std::strcmp(profile, "mpi_coll"))    why = "wrong RCCL_TEST_WARMUP_PROFILE for this binary (expected mpi_coll)";
+        else if(!readyGo)                            why = "RCCL_TEST_WARMUP_PROFILE set without RCCL_TEST_READY_GO";
+        else if(!(rdvDir && rdvDir[0]))              why = "pipeline profile without RCCL_TEST_RENDEZVOUS_DIR";
+        else if(goTo && !RcclUnitTesting::ParseGoTimeoutSec(goTo, goTimeoutSec)) why = "invalid RCCL_TEST_GO_TIMEOUT_SEC";
+        if(why)
+        {
+            if(world_rank == 0)
+            {
+                std::fprintf(stderr, "[RCCL_TEST_CONFIG_ERROR] rccl-UnitTestsMPI: %s\n", why);
+                std::fflush(stderr);
+            }
+            _exit(RcclUnitTesting::RCCL_TEST_CONFIG_ERROR);
+        }
+    }
+
+    // One uniform state machine every rank runs on SUCCESS AND failure, so no
+    // rank is ever stranded (the verified pre-v10 bug: rank 0 returned on a
+    // PublishReady failure while ranks 1..N blocked forever at MPI_Bcast). See
+    // plan v10 §5.3.
+    const pid_t pid = getpid();
+
+    // ---- Step 0: converge DEVICE-SETUP status across ranks (v11 CR-4).
+    // initialize_devices() ran per rank and set retCode on a rank-local failure;
+    // in pipeline mode it skips its own final barrier so this Allreduce is the
+    // sync point (no rank stranded). A test-only hook can fail a target rank's
+    // setup to exercise the convergence path.
+    int local_setup_ok = (retCode == 0) ? 1 : 0;
+    if(local_setup_ok)
+    {
+        // Also catch a rank whose device was never set (a device-init failure that
+        // asserted without setting retCode) so it does not warm on a bad context.
+        int dev = -1;
+        if(hipGetDevice(&dev) != hipSuccess) local_setup_ok = 0;
+    }
+    if(const char* r = std::getenv("RCCL_TEST_INJECT_SETUP_FAIL_RANK"))
+    {
+        if(std::atoi(r) == world_rank) local_setup_ok = 0;
+    }
+    int all_setup_ok = 0;
+    MPICHECK(MPI_Allreduce(&local_setup_ok, &all_setup_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!all_setup_ok)
+    {
+        if(world_rank == 0) TEST_WARN("MPI device setup failed on at least one rank");
+        retCode = 1;
+        ASSERT_TRUE(false) << "MPI device setup failed on at least one rank";
+        return;
+    }
+
+    // ---- Step 1: local device-code warmup. Retain status; NEVER early-return
+    // (every rank must reach the collectives below). ----
+    int local_ok = 1;  // setup converged OK above
+    if(local_ok)
+    {
+        int assigned_device = -1;
+        if(hipGetDevice(&assigned_device) != hipSuccess)
+        {
+            local_ok = 0;
+        }
+        else
+        {
+            // Same-PID proof diagnostic: the process that warms a device is the
+            // process that runs the test on it (MPI does not fork).
+            std::fprintf(stderr, "[RCCL_TEST_WARMUP] rank %d pid %d device %d: start\n",
+                         world_rank, static_cast<int>(pid), assigned_device);
+            std::fflush(stderr);
+
+            const auto   t0   = std::chrono::steady_clock::now();
+            ncclComm_t   warm = nullptr;
+            ncclResult_t nr   = ncclCommInitAll(&warm, 1, &assigned_device);
+            if(nr == ncclSuccess && warm != nullptr) { ncclCommDestroy(warm); }
+            else                                     { local_ok = 0; }
+            (void)hipDeviceSynchronize();
+            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - t0).count();
+            std::fprintf(stderr, "[RCCL_TEST_WARMUP] rank %d pid %d device %d: %s (%lld ms)\n",
+                         world_rank, static_cast<int>(pid), assigned_device,
+                         local_ok ? "ok" : "FAILED", static_cast<long long>(ms));
+            std::fflush(stderr);
+        }
+    }
+    // Test-only warmup-failure injection on a target rank (v11 CR-4).
+    if(const char* r = std::getenv("RCCL_TEST_INJECT_WARMUP_FAIL_RANK"))
+    {
+        if(std::atoi(r) == world_rank) local_ok = 0;
+    }
+
+    // ---- Step 2: converge warmup status across ranks (MIN). ----
+    int all_warmup_ok = 0;
+    MPICHECK(MPI_Allreduce(&local_ok, &all_warmup_ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!all_warmup_ok)
+    {
+        if(world_rank == 0) TEST_WARN("MPI device-code warmup failed on at least one rank");
+        retCode = 1;
+        ASSERT_TRUE(false) << "MPI device-code warmup failed on at least one rank";
+        return;
+    }
+
+    // (The environment contract above guarantees a rendezvous dir here, so there
+    // is no warmup-only path: a pipeline profile always drives the full barrier.)
+
+    // ---- Step 3: rank 0 publishes exactly one entry-level READY. ----
+    int ready_publish_ok = 1;
+    if(world_rank == 0)
+    {
+        ready_publish_ok = RcclUnitTesting::Rendezvous::PublishReady() ? 1 : 0;
+        if(std::getenv("RCCL_TEST_INJECT_READY_FAIL")) ready_publish_ok = 0;  // test-only
+    }
+    // ---- Step 4: broadcast READY-publish status to EVERY rank. ----
+    MPICHECK(MPI_Bcast(&ready_publish_ok, 1, MPI_INT, 0, MPI_COMM_WORLD));
+
+    // ---- Step 5: on any failure so far, ALL ranks take the same cleanup path;
+    // no rank polls GO. ----
+    if(!ready_publish_ok)
+    {
+        if(world_rank == 0) TEST_WARN("rank 0 failed to publish READY token");
+        retCode = 1;
+        ASSERT_TRUE(false) << "rank 0 failed to publish READY token";
+        return;
+    }
+
+    // ---- Steps 6-7: rank 0 polls GO (bounded, runner-derived), then broadcasts
+    // the release status so all ranks leave together. ----
+    int release = static_cast<int>(RcclUnitTesting::RELEASE_GO);
+    if(world_rank == 0)
+    {
+        if(std::getenv("RCCL_TEST_INJECT_GO_TIMEOUT"))
+        {
+            release = static_cast<int>(RcclUnitTesting::RELEASE_GO_TIMEOUT);  // test-only
+        }
+        else
+        {
+            double go_timeout = 0.0;  // 0 = indefinite (rely on process-group teardown)
+            if(const char* t = std::getenv("RCCL_TEST_GO_TIMEOUT_SEC"))
+            {
+                (void)RcclUnitTesting::ParseGoTimeoutSec(t, go_timeout);  // already validated above
+            }
+            release = static_cast<int>(RcclUnitTesting::Rendezvous::WaitForGo(go_timeout));
+        }
+    }
+    MPICHECK(MPI_Bcast(&release, 1, MPI_INT, 0, MPI_COMM_WORLD));
+
+    // ---- Step 8: uniformly return from SetUp() (test bodies then run inside the
+    // already-running RUN_ALL_TESTS) or take the common cleanup path. ----
+    if(release != static_cast<int>(RcclUnitTesting::RELEASE_GO))
+    {
+        if(world_rank == 0) TEST_WARN("MPI release was not GO (status=%d)", release);
+        retCode = 1;
+        ASSERT_TRUE(false) << "MPI release was not GO (status=" << release << ")";
+        return;
+    }
 }
 
 /**
@@ -203,8 +385,15 @@ void MPIEnvironment::initialize_devices()
     // Clean up node communicator
     MPI_Comm_free(&node_comm);
 
-    // Ensure all ranks have set their devices before proceeding
-    MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
+    // Ensure all ranks have set their devices before proceeding. In init-pipeline
+    // mode this barrier is SKIPPED (v11 CR-4): a rank-local failure above returns
+    // before reaching here, which would strand healthy ranks at this barrier;
+    // warmup_device_code()'s setup-status MPI_Allreduce is the convergence point
+    // instead, so every rank (healthy or failed) meets there.
+    if(std::getenv("RCCL_TEST_WARMUP_PROFILE") == nullptr)
+    {
+        MPICHECK(MPI_Barrier(MPI_COMM_WORLD));
+    }
 
     devices_initialized = true;
 

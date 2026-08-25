@@ -27,6 +27,7 @@ namespace RcclUnitTesting
     bool verbose;        // Show verbose TestBed output for debug  [UT_VERBOSE]
     int  printValues;    // Print out input/output/expected arrays [UT_PRINT_VALUES]
     int  maxRanksPerGpu; // Number of ranks using the same GPU     [UT_MAX_RANKS_PER_GPU]
+    int  ranksPerGpu;    // Exact ranks-per-GPU to pin, 0 = unset  [UT_RANKS_PER_GPU]
     bool showTiming;     // Show timing per case at end            [UT_SHOW_TIMING]
     bool useInteractive; // Run in interactive mode                [UT_INTERACTIVE]
     int  timeoutUs;      // Set timeout for child in microseconds  [UT_TIMEOUT_US]
