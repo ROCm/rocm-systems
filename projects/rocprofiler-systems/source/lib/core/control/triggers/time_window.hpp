@@ -19,18 +19,14 @@ template <typename Clock>
 class time_window
 {
 public:
-    struct config
-    {
-        clock_duration delay{};
-        clock_duration duration{};
-    };
-
-    time_window(std::shared_ptr<session> sess, Clock& clk, config cfg)
+    time_window(std::shared_ptr<session> sess, Clock& clk, clock_duration delay,
+                clock_duration duration)
     : m_session{ std::move(sess) }
     , m_clock{ clk }
-    , m_config{ cfg }
+    , m_delay{ delay }
+    , m_duration{ duration }
     {
-        m_session->register_trigger(trigger_name, initial_action(cfg));
+        m_session->register_trigger(trigger_name, initial_action(delay, duration));
     }
 
     ~time_window()
@@ -50,6 +46,7 @@ public:
     /// serializing start()/stop() calls (guarded via m_lifecycle_mutex).
     void start()
     {
+        const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock window_lk{ m_lifecycle_mutex };
         if(!has_window())
         {
@@ -69,6 +66,7 @@ public:
     /// the destructor), never from worker().
     void stop() noexcept
     {
+        const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
         const std::scoped_lock window_lk{ m_lifecycle_mutex };
         if(!m_thread.joinable())
         {
@@ -83,17 +81,19 @@ private:
 
     std::shared_ptr<session> m_session;
     Clock&                   m_clock;
-    const config             m_config;
+    const clock_duration     m_delay;
+    const clock_duration     m_duration;
     std::thread              m_thread;
     std::mutex               m_lifecycle_mutex;
 
-    [[nodiscard]] static action initial_action(const config& cfg) noexcept
+    [[nodiscard]] static action initial_action(clock_duration delay,
+                                               clock_duration duration) noexcept
     {
-        if(cfg.delay > clock_duration::zero())
+        if(delay > clock_duration::zero())
         {
             return action::pause;
         }
-        if(cfg.duration > clock_duration::zero())
+        if(duration > clock_duration::zero())
         {
             return action::trace;
         }
@@ -102,8 +102,7 @@ private:
 
     [[nodiscard]] bool has_window() const noexcept
     {
-        return m_config.delay > clock_duration::zero() ||
-               m_config.duration > clock_duration::zero();
+        return m_delay > clock_duration::zero() || m_duration > clock_duration::zero();
     }
 
     void worker()
@@ -111,12 +110,12 @@ private:
         const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         const auto current_ts   = m_clock.now();
-        const bool has_delay    = m_config.delay > clock_duration::zero();
-        const bool has_duration = m_config.duration > clock_duration::zero();
+        const bool has_delay    = m_delay > clock_duration::zero();
+        const bool has_duration = m_duration > clock_duration::zero();
 
         if(has_delay)
         {
-            if(!m_clock.sleep_until(current_ts + m_config.delay))
+            if(!m_clock.sleep_until(current_ts + m_delay))
             {
                 return;  // interrupted
             }
@@ -125,7 +124,7 @@ private:
 
         if(has_duration)
         {
-            const auto end = current_ts + m_config.delay + m_config.duration;
+            const auto end = current_ts + m_delay + m_duration;
             if(!m_clock.sleep_until(end))
             {
                 return;  // interrupted

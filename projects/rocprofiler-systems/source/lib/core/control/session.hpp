@@ -45,17 +45,13 @@ public:
     void subscribe(subscriber sub);
 
     /// Seed a trigger's action. @p name identifies the trigger for the
-    /// lifetime of its registration.
+    /// lifetime of its registration. Broadcasts to subscribers if this
+    /// registration changes the session's active/paused state.
     void register_trigger(std::string_view name, action initial);
 
     void unregister_trigger(std::string_view name);
 
     void set_action(std::string_view name, action act);
-
-    /// If the session is currently paused, fire pause on all subscribers
-    /// to reflect the initial state. Subscribers default to "running", so
-    /// only the paused-initial case needs to be broadcast.
-    void force_initial_pause();
 
     [[nodiscard]] bool is_active() const noexcept
     {
@@ -74,5 +70,10 @@ private:
     [[nodiscard]] bool resolve_locked() const noexcept;
     void               notify_pause();
     void               notify_resume();
+
+    /// Applies @p mutate to m_actions under lock, recomputes the active
+    /// state, and broadcasts to subscribers only if that state changed.
+    void apply_locked_transition(const std::function<void()>& mutate,
+                                 std::string_view             name);
 };
 }  // namespace rocprofsys::control

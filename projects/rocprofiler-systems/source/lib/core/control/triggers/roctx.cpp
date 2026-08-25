@@ -5,6 +5,7 @@
 
 #include "common/delimit.hpp"
 #include "core/control/session.hpp"
+#include "core/state.hpp"
 
 #include "logger/debug.hpp"
 #include <spdlog/fmt/ranges.h>  // NOLINT
@@ -19,6 +20,33 @@
 
 namespace rocprofsys::control::triggers
 {
+namespace
+{
+/// Runs @p fn when the guard goes out of scope, on every exit path
+/// (early return or fall-through). Used to keep refresh_state() calls out
+/// of every early-return branch in the roctx entry points below.
+template <typename Func>
+class scope_exit
+{
+public:
+    explicit scope_exit(Func on_exit_action)
+    : m_func{ std::move(on_exit_action) }
+    {}
+    ~scope_exit() { m_func(); }
+
+    scope_exit(const scope_exit&)            = delete;
+    scope_exit& operator=(const scope_exit&) = delete;
+    scope_exit(scope_exit&&)                 = delete;
+    scope_exit& operator=(scope_exit&&)      = delete;
+
+private:
+    Func m_func;
+};
+
+template <typename Func>
+scope_exit(Func) -> scope_exit<Func>;
+}  // namespace
+
 roctx::roctx(std::shared_ptr<session> sess, std::string_view trace_regions)
 : m_session{ std::move(sess) }
 {
@@ -32,7 +60,7 @@ roctx::roctx(std::shared_ptr<session> sess, std::string_view trace_regions)
     if(filter_active())
     {
         LOG_INFO("roctx trigger: filter active for regions: [{}]",
-                 fmt::join(m_trace_regions, ", "));  // NOLINT
+                 fmt::join(m_trace_regions, ", "));  // NOLINT(misc-include-cleaner)
     }
 
     m_should_write.store(compute_should_write(), std::memory_order_relaxed);
@@ -49,26 +77,21 @@ roctx::on_range_start(std::uint64_t range_id, const char* message)
         return;
     }
 
-    bool was_empty = false;
-    {
-        const std::scoped_lock notify_lk{ m_mutex };
-        was_empty = m_active_range_ids.empty();
-        m_active_range_ids.insert(range_id);
-        if(was_empty)
-        {
-            m_in_region.store(true, std::memory_order_relaxed);
-        }
-    }
-
+    const auto       _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const scope_exit refresh{ [this] { refresh_state(); } };
+    const std::scoped_lock notify_lk{ m_mutex };
+    const bool             was_empty = m_active_range_ids.empty();
+    m_active_range_ids.insert(range_id);
     if(was_empty)
     {
-        refresh_state();
+        m_in_region.store(true, std::memory_order_relaxed);
     }
 }
 
 void
 roctx::on_range_stop(std::uint64_t range_id)
 {
+    const scope_exit refresh{ [this] { refresh_state(); } };
     if(!filter_active())
     {
         return;
@@ -80,12 +103,12 @@ roctx::on_range_stop(std::uint64_t range_id)
     }
 
     warn_if_paused_region_ended();
-    refresh_state();
 }
 
 bool
 roctx::remove_active_range(std::uint64_t range_id)
 {
+    const auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
     const std::scoped_lock notify_lk{ m_mutex };
     if(m_active_range_ids.erase(range_id) == 0)
     {
@@ -115,6 +138,8 @@ roctx::warn_if_paused_region_ended()
 void
 roctx::on_pause()
 {
+    const auto       _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const scope_exit refresh{ [this] { refresh_state(); } };
     if(filter_active())
     {
         const std::scoped_lock notify_lk{ m_mutex };
@@ -133,7 +158,6 @@ roctx::on_pause()
     }
 
     LOG_INFO("Pausing tracing session...");
-    refresh_state();
 }
 
 void
@@ -145,6 +169,8 @@ roctx::on_resume()
         return;
     }
 
+    const auto       _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const scope_exit refresh{ [this] { refresh_state(); } };
     if(filter_active())
     {
         const std::scoped_lock notify_lk{ m_mutex };
@@ -157,7 +183,6 @@ roctx::on_resume()
 
     m_user_paused.store(false, std::memory_order_relaxed);
     LOG_INFO("Resuming tracing session...");
-    refresh_state();
 }
 
 action
