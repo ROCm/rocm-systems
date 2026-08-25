@@ -11,7 +11,7 @@
         "vendor_id": 4098,
         "device_id": 30145,
         "family_id": 0,
-        "unique_id": 1250,
+        "unique_id": 0,
         "revision_id": 1,
         "marketing_name": "AMD Instinct MI455X",
         "simd_count": 1024,
