@@ -268,9 +268,10 @@ struct ConSanKernelTargetProfile {
 };
 
 [[nodiscard]] constexpr uint16_t consan_capability_form_bit(ConSanCapabilityForm form) {
-  return form == ConSanCapabilityForm::Count
-             ? 0u
-             : static_cast<uint16_t>(1u << static_cast<uint8_t>(form));
+  const uint8_t index = static_cast<uint8_t>(form);
+  return index < static_cast<uint8_t>(ConSanCapabilityForm::Count)
+             ? static_cast<uint16_t>(1u << index)
+             : 0u;
 }
 
 inline constexpr uint16_t kConSanCommonSemanticFormMask =
@@ -519,11 +520,15 @@ consan_target_profile(rj_code_target_id_t target) {
   return nullptr;
 }
 
-[[nodiscard]] constexpr bool consan_target_profiles_are_valid() {
+template <std::size_t N>
+[[nodiscard]] constexpr bool
+consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profiles) {
   constexpr uint16_t all_form_bits =
       static_cast<uint16_t>((1u << static_cast<uint8_t>(ConSanCapabilityForm::Count)) - 1u);
-  for (std::size_t lhs = 0; lhs < kConSanTargetProfiles.size(); ++lhs) {
-    const ConSanTargetProfile &profile = kConSanTargetProfiles[lhs];
+  if (profiles.empty())
+    return false;
+  for (std::size_t lhs = 0; lhs < profiles.size(); ++lhs) {
+    const ConSanTargetProfile &profile = profiles[lhs];
     if (profile.target == ROCJITSU_CODE_TARGET_INVALID ||
         profile.arch == ROCJITSU_CODE_ARCH_INVALID || !profile.supports_wave64 ||
         profile.exec_register_width_bits != 64u || profile.global_address_width_bits != 64u ||
@@ -551,13 +556,16 @@ consan_target_profile(rj_code_target_id_t target) {
             profile.reserved_ordinary_sgpr_count >
         profile.ordinary_sgpr_limit)
       return false;
-    for (std::size_t rhs = lhs + 1; rhs < kConSanTargetProfiles.size(); ++rhs) {
-      if (profile.target == kConSanTargetProfiles[rhs].target ||
-          profile.arch == kConSanTargetProfiles[rhs].arch)
+    for (std::size_t rhs = lhs + 1; rhs < profiles.size(); ++rhs) {
+      if (profile.target == profiles[rhs].target || profile.arch == profiles[rhs].arch)
         return false;
     }
   }
   return true;
+}
+
+[[nodiscard]] constexpr bool consan_target_profiles_are_valid() {
+  return consan_target_profiles_are_valid(kConSanTargetProfiles);
 }
 
 [[nodiscard]] constexpr rj_code_arch_t consan_arch_for_target(rj_code_target_id_t target) {
@@ -717,8 +725,8 @@ consan_arch_has_descriptor_partitioned_accumulators(rj_code_arch_t arch) {
 [[nodiscard]] constexpr bool consan_arch_supports_capability_form(rj_code_arch_t arch,
                                                                   ConSanCapabilityForm form) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
-  return profile && form != ConSanCapabilityForm::Count &&
-         (profile->semantic_form_mask & consan_capability_form_bit(form)) != 0u;
+  const uint16_t form_bit = consan_capability_form_bit(form);
+  return profile && form_bit != 0u && (profile->semantic_form_mask & form_bit) != 0u;
 }
 
 /// Return the documented high-level disposition. Exact instruction admission
@@ -729,8 +737,9 @@ consan_arch_has_descriptor_partitioned_accumulators(rj_code_arch_t arch) {
 consan_capability_disposition(rj_code_target_id_t target, ConSanCapabilityEngine engine,
                               ConSanCapabilityForm form) {
   const rj_code_arch_t arch = consan_arch_for_target(target);
-  if (arch == ROCJITSU_CODE_ARCH_INVALID || engine == ConSanCapabilityEngine::Count ||
-      form == ConSanCapabilityForm::Count)
+  if (arch == ROCJITSU_CODE_ARCH_INVALID ||
+      static_cast<uint8_t>(engine) >= static_cast<uint8_t>(ConSanCapabilityEngine::Count) ||
+      static_cast<uint8_t>(form) >= static_cast<uint8_t>(ConSanCapabilityForm::Count))
     return ConSanCapabilityDisposition::OutOfContract;
   if (!consan_arch_supports_capability_form(arch, form))
     return ConSanCapabilityDisposition::NotApplicable;

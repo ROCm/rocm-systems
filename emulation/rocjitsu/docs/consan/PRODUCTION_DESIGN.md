@@ -1544,6 +1544,35 @@ contracts, and E2E/physical qualification. A **target-exclusive mechanism** is
 an ISA/ABI facility absent from the other targets, not merely a test that was
 first written for one target.
 
+### Standing type documentation and unit-test policy
+
+ConSan follows a **type-first contract policy** throughout the production
+migration. Every named enum, structure, class, variant, or type alias that is
+introduced or materially changed must carry a generous type-level comment. The
+comment explains the semantic concept represented by the type, its invariants,
+ownership or lifetime when relevant, sentinel and failure states, and the
+responsibilities that deliberately remain outside it. A reader should be able
+to understand the component's vocabulary primarily from its types instead of
+reconstructing it from control flow or scattered field comments.
+
+Every reasonably testable unit behavior owned by such a type must also have a
+focused host unit test. This includes construction and validation, enum
+iteration and naming, mappings between typed domains, lookup and derivation,
+boundary arithmetic, target matrices, derived predicates, and invalid or
+sentinel inputs. Passive target data receives an independent expected-value row
+for every supported architecture. Compile-time assertions and generated-
+documentation comparisons supplement these tests; they do not replace focused
+unit tests with precise failure names. Behavior observable only in device code
+instead receives the narrowest applicable paired correct/incorrect device
+contract, in addition to any host-testable planning or encoding boundary.
+
+No migration slice is complete merely because a new type compiles or is
+indirectly exercised by a large integration test. Its type comment and focused
+unit contract land with the type. When a type later gains functionality, the
+same change extends its focused tests. Tests assert the type's semantic
+contract and owned invariants, not incidental representation choices belonging
+to another component.
+
 ### 8.1 Test tiers
 
 | Tier | What it proves | Preservation rule during migration |
@@ -1857,13 +1886,16 @@ no longer use `instrumentation_builder.h`'s encoding-routing predicates as
 product admission policy; the generic builder keeps those predicates for its
 non-ConSan consumers.
 
-The five-row host matrix cross-checks generic scratch encodings and branch/call
-boundaries as well as the profile itself. The generated capability manifest,
-the complete ConSan host suite, and a correct/incorrect simulator pair on each
-supported target form the completed cutover gate. The deletion audit has one
-profile table and no remaining ConSan references to the generic admission/
-family predicates or duplicated `CDNA3 || CDNA4` / `RDNA4 || CDNA5` family
-tests; exact single-target branches remain in classifiers and lowerers.
+The dedicated `capability_contract_test.cpp` suite owns the five-row host
+matrix and focused tests for profile validation, lookup and derivation, enum
+iteration/naming/domain mapping, masks, predicates, boundary arithmetic,
+disposition matrices, and invalid typed inputs. It also cross-checks generic
+scratch encodings and branch/call boundaries. The generated capability
+manifest, the complete ConSan host suite, and a correct/incorrect simulator
+pair on each supported target form the completed cutover gate. The deletion
+audit has one profile table and no remaining ConSan references to the generic
+admission/family predicates or duplicated `CDNA3 || CDNA4` / `RDNA4 || CDNA5`
+family tests; exact single-target branches remain in classifiers and lowerers.
 
 - **Current responsibility:** Architecture predicates and constants are spread
   through analysis, resource planning, prologues, access/synchronization lowerers,
