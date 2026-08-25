@@ -601,7 +601,7 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
       fence();
       if (is_thread_zero_in_block()) {
-        wait_val = seg + 100;
+        wait_val = seg + 10;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
 #if defined(__gfx90a__)

@@ -435,7 +435,7 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
       __syncthreads();
       fence(send_pe);
       if (is_thread_zero_in_block()) {
-        wait_val = seg + 100;
+        wait_val = seg + 10;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
         wait_until(&pSync[iter], ROCSHMEM_CMP_EQ, wait_val);
       }
@@ -511,7 +511,7 @@ __device__ void IPCContext::internal_ring_allreduce_wave(
       __builtin_amdgcn_wave_barrier();
       fence(send_pe);
       
-      wait_val = seg + 100;
+      wait_val = seg + 10;
       if (is_thread_zero_in_wave()) {
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe);
       }
