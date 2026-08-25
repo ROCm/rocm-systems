@@ -30,6 +30,14 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+# Vendored DRM/amdgpu UAPI headers. Keep their standard libdrm include layout
+# and propagate it through targets whose headers expose KFD or DRM ABI types.
+add_library(rocjitsu_drm_headers INTERFACE)
+target_include_directories(
+    rocjitsu_drm_headers
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external_headers/drm_headers
+)
+
 add_subdirectory(src/rocjitsu/analysis)
 add_subdirectory(src/rocjitsu/code)
 add_subdirectory(src/rocjitsu/isa)

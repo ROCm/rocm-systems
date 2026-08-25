@@ -1035,7 +1035,10 @@ target_include_directories(
     guest_kfd_test
     PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include ${HSA_INCLUDE_DIR}
 )
-target_link_libraries(guest_kfd_test PRIVATE Threads::Threads GTest::gtest_main)
+target_link_libraries(
+    guest_kfd_test
+    PRIVATE rocjitsu_drm_headers Threads::Threads GTest::gtest_main
+)
 rj_configure_target(guest_kfd_test TEST)
 add_dependencies(guest_kfd_test rocjitsu_bin rocjitsu_shared rocjitsu_hooks)
 rj_add_test(
@@ -1418,13 +1421,11 @@ add_executable(interposer_dup_test interposer_dup_test.cpp)
 rj_configure_target(interposer_dup_test TEST)
 target_include_directories(
     interposer_dup_test
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
-        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/drm_headers
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib/rocjitsu/external_headers/hsa_headers
 )
 target_link_libraries(
     interposer_dup_test
-    PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
+    PRIVATE rocjitsu_drm_headers GTest::gtest_main ${CMAKE_DL_LIBS}
 )
 add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
 if(RJ_INSTALL_TESTS)

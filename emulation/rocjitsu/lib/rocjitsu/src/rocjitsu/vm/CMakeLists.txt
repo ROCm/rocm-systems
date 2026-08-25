@@ -9,7 +9,7 @@ rj_add_object_library(rocjitsu_vm
 )
 
 # rj_vm.cpp uses config and checkpoint APIs which depend on FlatBuffers.
-target_link_libraries(rocjitsu_vm PRIVATE flatbuffers)
+target_link_libraries(rocjitsu_vm PRIVATE flatbuffers rocjitsu_drm_headers)
 target_include_directories(rocjitsu_vm PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_vm flatbuffers_schemas)
 
