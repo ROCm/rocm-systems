@@ -4390,10 +4390,10 @@ VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VSwapB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
   dst_operands_[1] = &src0;
+  src_operands_[0] = &vdst;
+  src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 2;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);

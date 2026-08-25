@@ -5095,7 +5095,7 @@ VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
                : "v_sat_pk_u8_i16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSatPkU8I16Vop1)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -5163,6 +5163,12 @@ DecodeResult decodeVSatPkU8I16Vop1(const MachineInst *opcode,
   return std::make_unique<VSatPkU8I16Vop1>(opcode);
 }
 } // namespace detail
+
+void VSatPkU8I16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
 
 VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
@@ -5340,10 +5346,10 @@ VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VSwapB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
   dst_operands_[1] = &src0;
+  src_operands_[0] = &vdst;
+  src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 2;
 }
@@ -5376,11 +5382,11 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
   dst_operands_[1] = &src0;
-  src_operands_[2] = &m0;
+  src_operands_[0] = &m0;
+  src_operands_[1] = &vdst;
+  src_operands_[2] = &src0;
   num_src_ = 3;
   num_dst_ = 2;
   m0.apply_fieldless_caps(false, false, false);

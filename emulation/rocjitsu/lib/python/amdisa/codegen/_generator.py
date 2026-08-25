@@ -911,6 +911,12 @@ class CodeGenerator:
         ):
             return 'amdgpu::sdwa::SourceModifierFormat::NONE'
 
+        # GFX9 accepts the SDWA modifier bits for V_PK_FMAC_F16, but its packed
+        # operation ignores source negate and absolute-value modifiers. Source
+        # selection and sign extension remain active through the NONE format.
+        if sem.name == 'V_PK_FMAC_F16':
+            return 'amdgpu::sdwa::SourceModifierFormat::NONE'
+
         suffix = {
             'FMT_NUM_F16': 'F16',
             'FMT_NUM_BF16': 'BF16',
@@ -1322,7 +1328,14 @@ class CodeGenerator:
         )
 
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
-        return self._instruction_supports_modifier_encoding(inst, enc_name, 'sdwa')
+        has_modifier_encoding = self._instruction_supports_modifier_encoding(
+            inst, enc_name, 'sdwa'
+        )
+        return self.isa_spec.profile.supports_sdwa_opcode(
+            enc_name,
+            inst.name,
+            has_modifier_encoding=has_modifier_encoding,
+        )
 
     def _instruction_supports_literal_encoding(
         self, inst: Instruction, parent_enc_name: str, width: int
@@ -2901,6 +2914,51 @@ class CodeGenerator:
                     )
                 else:
                     modifier_lines += f'if ({field_ref}) modifiers_ += "{mod.display}";'
+            if (
+                enc_upper == 'ENC_DS'
+                and {'offset0', 'offset1', 'gds'} <= enc_field_names
+            ):
+                split_offset_opcodes = []
+                for inst in inst_enc.insts:
+                    sem = (
+                        self.semantics.instructions.get(inst.name)
+                        if self.semantics
+                        else None
+                    )
+                    if sem is not None and sem.semantic_class in (
+                        'ds_read2',
+                        'ds_write2',
+                        'ds_atomic2',
+                    ):
+                        split_offset_opcodes.append(inst.opcode)
+                if split_offset_opcodes:
+                    public_members.append(
+                        cgen.Line('bool uses_split_ds_offsets() const;')
+                    )
+                    class_func_impls.append(
+                        cgen.Line(
+                            self._opcode_predicate_helper_impl(
+                                inst_enc,
+                                'uses_split_ds_offsets',
+                                sorted(set(split_offset_opcodes)),
+                            )
+                        )
+                    )
+                split_offset_condition = (
+                    'uses_split_ds_offsets()' if split_offset_opcodes else 'false'
+                )
+                modifier_lines += (
+                    f'if ({split_offset_condition}) {{'
+                    'if (inst->offset0) modifiers_ += " offset0:"'
+                    ' + std::to_string(inst->offset0);'
+                    'if (inst->offset1) modifiers_ += " offset1:"'
+                    ' + std::to_string(inst->offset1);'
+                    '} else {'
+                    'const uint32_t offset = inst->offset0 | (inst->offset1 << 8);'
+                    'if (offset) modifiers_ += " offset:" + std::to_string(offset);'
+                    '}'
+                    'if (inst->gds) modifiers_ += " gds";'
+                )
             dpp8_modifier_line = ''
             if dpp8_struct is not None:
                 dpp8_modifier_line = (
@@ -4207,8 +4265,9 @@ class CodeGenerator:
         if opnd_name == 'src0':
             fmt_expr = 'reinterpret_cast<const OpEncoding *>(inst)->opsel'
         else:
+            opsel_hi_2 = self._op_sel_hi_2_field('ENC_VOP3P')
             fmt_expr = (
-                '((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) | '
+                f'((reinterpret_cast<const OpEncoding *>(inst)->{opsel_hi_2} << 2) | '
                 'reinterpret_cast<const OpEncoding *>(inst)->opsel_hi)'
             )
         return f'cdna5_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
@@ -4317,8 +4376,7 @@ class CodeGenerator:
             }
             } // namespace''')
 
-    @staticmethod
-    def _emit_cdna5_matrix_fmt_helpers() -> _ImplOutputs:
+    def _emit_cdna5_matrix_fmt_helpers(self) -> _ImplOutputs:
         """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
         execution = textwrap.dedent('''\
             namespace {
@@ -4418,11 +4476,11 @@ class CodeGenerator:
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
                 '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 256;\n'
-                '  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits((high->@OPSEL_HI_2@ << 2) | high->opsel_hi, 16, 128);\n'
                 '}\n'
             )
             + '\n} // namespace'
-        )
+        ).replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
         execution += '\n' + (
             'uint16_t read_fma_mix_f16_bits(uint32_t raw, uint32_t src_selector, bool high_half) {\n'
             '  switch (src_selector) {\n'
@@ -4505,7 +4563,8 @@ class CodeGenerator:
 
     def _emit_cdna5_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
         exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
-        model = textwrap.dedent('''\
+        model = (
+            textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
                 : Vop3p(cdna5_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
                         @EXEC_FN@, Vop3p::ExtensionDecodePolicy::Skip),
@@ -4549,7 +4608,7 @@ class CodeGenerator:
             void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
               if (inst_.op != 0x88) {
                 const uint32_t matrix_a_fmt = inst_.opsel;
-                const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
+                const uint32_t matrix_b_fmt = (inst_.@OPSEL_HI_2@ << 2) | inst_.opsel_hi;
                 if (matrix_a_fmt != 0) {
                   out += " matrix_a_fmt:";
                   out += cdna5_matrix_fmt_name(matrix_a_fmt);
@@ -4575,10 +4634,13 @@ class CodeGenerator:
               }
               if ((scale_inst_.opsel >> 2) & 0x1u)
                 out += " matrix_a_reuse";
-              if (scale_inst_.pad_14)
+              if (scale_inst_.@OPSEL_HI_2@)
                 out += " matrix_b_reuse";
             }
-            ''').replace('@EXEC_FN@', exec_fn)
+            ''')
+            .replace('@EXEC_FN@', exec_fn)
+            .replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+        )
 
         execution = textwrap.dedent('''\
             void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
@@ -4602,11 +4664,11 @@ class CodeGenerator:
               }
 
               const uint32_t matrix_a_fmt = inst_.opsel;
-              const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
+              const uint32_t matrix_b_fmt = (inst_.@OPSEL_HI_2@ << 2) | inst_.opsel_hi;
               const uint32_t matrix_a_scale =
                   (scale_inst_.opsel & 0x1u) | (((scale_inst_.opsel >> 2u) & 0x1u) << 1u);
               const uint32_t matrix_b_scale =
-                  (scale_inst_.opsel_hi & 0x1u) | ((scale_inst_.pad_14 & 0x1u) << 1u);
+                  (scale_inst_.opsel_hi & 0x1u) | ((scale_inst_.@OPSEL_HI_2@ & 0x1u) << 1u);
               const uint32_t matrix_a_scale_fmt = scale_inst_.neg & 0x3u;
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               const bool scale16 = scale_inst_.op == 0x3a;
@@ -4660,11 +4722,10 @@ class CodeGenerator:
               if (!dispatched)
                 throw util::UnimplementedInst(mnemonic());
             }
-            ''')
+            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
         return _ImplOutputs(model=[model], execution=[execution])
 
-    @staticmethod
-    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers(self) -> str:
         return textwrap.dedent('''\
             namespace {
 
@@ -4713,13 +4774,13 @@ class CodeGenerator:
               if (matrix->op == 0x88u)
                 return isGfx1250WmmaScaleFormatPairLegal(4u, 4u, scale_a_fmt, scale_b_fmt);
               const uint32_t matrix_a_fmt = matrix->opsel;
-              const uint32_t matrix_b_fmt = (matrix->pad_14 << 2u) | matrix->opsel_hi;
+              const uint32_t matrix_b_fmt = (matrix->@OPSEL_HI_2@ << 2u) | matrix->opsel_hi;
               return isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_a_fmt,
                                                        scale_b_fmt);
             }
 
             } // namespace
-            ''')
+            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
 
     def _execute_operand_roles(
         self, inst: Instruction, sem: InstructionSemantics
@@ -8596,13 +8657,18 @@ class CodeGenerator:
                     # XML operand position to preserve the architectural source
                     # order (e.g. s_addk_i32/s_mulk_i32 read sdst as src0).
                     _enc_upper_for_defer = enc.enc_name.upper()
-                    defer_readwrite_outputs = _enc_upper_for_defer in (
-                        'ENC_VOP1',
-                        'ENC_VOP2',
-                    ) or (
-                        _enc_upper_for_defer
-                        in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
-                        and self._supports_vop_dpp_encoding(_enc_upper_for_defer)
+                    # V_PK_FMAC_F16 is the VOP2 exception: its accumulator is
+                    # architecturally the first source, and its generated
+                    # DPP/SDWA paths operate on the named src0/vsrc1 operands.
+                    # Keep vdst first even when a snapshot models it as
+                    # output-only and read/write inference supplies the use.
+                    defer_readwrite_outputs = inst.name.upper() != 'V_PK_FMAC_F16' and (
+                        _enc_upper_for_defer in ('ENC_VOP1', 'ENC_VOP2')
+                        or (
+                            _enc_upper_for_defer
+                            in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
+                            and self._supports_vop_dpp_encoding(_enc_upper_for_defer)
+                        )
                     )
                     readwrite_output_sources = []
                     vgpr_msb_role_body = []
@@ -8706,13 +8772,28 @@ class CodeGenerator:
                             enc.enc_name.upper() in ('ENC_VFLAT', 'ENC_VGLOBAL')
                             and opnd.name == 'saddr'
                         )
-                        if (
-                            opnd.is_input or _is_buffer_atomic_payload
-                        ) and not _is_optional_vflat_saddr:
+                        _is_optional_flat_scratch = (
+                            enc.enc_name.upper() == 'ENC_FLAT'
+                            and opnd.fieldless
+                            and opnd.operand_type == 'OPR_FLAT_SCRATCH'
+                        )
+                        if (opnd.is_input or _is_buffer_atomic_payload) and not (
+                            _is_optional_vflat_saddr or _is_optional_flat_scratch
+                        ):
                             opnd_body.append(
                                 f'src_operands_[{src_idx}] = &{opnd.name};'
                             )
                             src_idx += 1
+                        elif opnd.is_input and _is_optional_flat_scratch:
+                            # The generic FLAT encoding can select FLAT,
+                            # SCRATCH, or GLOBAL at runtime.  GLOBAL does not
+                            # consume the flat-scratch base; the public XML's
+                            # GPUMEM pseudo-operand remains its sole fieldless
+                            # memory source.
+                            conditional_src_body.append(
+                                'if (inst_.seg != 2) '
+                                'src_operands_[num_src_++] = &flat_scratch;'
+                            )
                         elif opnd.is_input and _is_optional_vflat_saddr:
                             conditional_src_body.append(
                                 f'if (inst_.saddr != {self._saddr_null_expr(enc.enc_name)}) '
@@ -10057,7 +10138,11 @@ class CodeGenerator:
                             _src_input_ops = [
                                 o
                                 for o in inst.operands
-                                if o.is_input and not o.fieldless
+                                # Read/write destinations such as V_FMAC's
+                                # accumulator are semantic inputs, but they are
+                                # not the encoded src0/src1 fields modified by
+                                # DPP or SDWA.
+                                if o.is_input and not o.is_output and not o.fieldless
                             ]
                             _src0_name = (
                                 _src_input_ops[0].name if _src_input_ops else None
@@ -10801,7 +10886,7 @@ class CodeGenerator:
                                 f'  out += " matrix_a_fmt:";\n'
                                 f'  out += cdna5_matrix_fmt_name(inst_.opsel);\n'
                                 f'  out += " matrix_b_fmt:";\n'
-                                f'  out += cdna5_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);\n'
+                                f'  out += cdna5_matrix_fmt_name((inst_.{self._op_sel_hi_2_field("ENC_VOP3P")} << 2) | inst_.opsel_hi);\n'
                                 f'}}'
                             )
                         )
@@ -10813,7 +10898,7 @@ class CodeGenerator:
                                 f'    out += " index_key:1";\n'
                                 f'  if (inst_.opsel & 0x4)\n'
                                 f'    out += " matrix_a_reuse";\n'
-                                f'  if (inst_.pad_14)\n'
+                                f'  if (inst_.{self._op_sel_hi_2_field("ENC_VOP3P")})\n'
                                 f'    out += " matrix_b_reuse";\n'
                                 f'}}'
                             )
