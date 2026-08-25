@@ -953,11 +953,12 @@ def test_display_dedup_across_dataframes():
 MI350_IP_BLOCKS = "SQ|LDS|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF|roofline"
 
 
-def _mi350_mspec() -> MachineSpecsCDNA:
-    """Fully populated MI350 (gfx950) specs, mirroring the vcopy fixture.
+def make_mi350_machine_specs() -> MachineSpecsCDNA:
+    """
+    Fully populated MI350 (gfx950) specs.
 
-    Values match tests/workloads/vcopy/MI350/sysinfo.csv so that
-    get_class_members() reports no missing required fields.
+    Values match sysinfo.csv so that get_class_members() reports
+    no missing required fields.
     """
     return MachineSpecsCDNA(
         workload_path="/workloads/vcopy/MI350",
@@ -1009,7 +1010,7 @@ class TestCorrectSysInfo:
 
     def test_single_pair_overrides_spec(self) -> None:
         """One name:value pair updates the spec object and the returned frame."""
-        mspec = _mi350_mspec()
+        mspec = make_mi350_machine_specs()
         sys_info = correct_sys_info(mspec, "num_xcd:4")
 
         assert mspec.num_xcd == "4"
@@ -1018,7 +1019,7 @@ class TestCorrectSysInfo:
 
     def test_multiple_pairs_override_every_spec(self) -> None:
         """Comma-separated pairs are all applied."""
-        mspec = _mi350_mspec()
+        mspec = make_mi350_machine_specs()
         sys_info = correct_sys_info(mspec, "num_xcd:4,cu_per_gpu:64")
 
         assert sys_info["num_xcd"].item() == "4"
@@ -1026,18 +1027,21 @@ class TestCorrectSysInfo:
 
     def test_surrounding_whitespace_is_stripped(self) -> None:
         """Spaces around names and values do not break the override."""
-        sys_info = correct_sys_info(_mi350_mspec(), " num_xcd : 4 , cu_per_gpu:64 ")
+        sys_info = correct_sys_info(
+            make_mi350_machine_specs(), " num_xcd : 4 , cu_per_gpu:64 "
+        )
 
         assert sys_info["num_xcd"].item() == "4"
         assert sys_info["cu_per_gpu"].item() == "64"
 
     def test_untouched_specs_are_preserved(self) -> None:
-        """Specs that were not corrected survive the rebuild of sys_info.
+        """
+        Specs that were not corrected survive the rebuild of sys_info.
 
         analysis_base.initalize_runs() reads sys_info["ip_blocks"] straight
         after the correction, so dropping columns here would break analysis.
         """
-        sys_info = correct_sys_info(_mi350_mspec(), "num_xcd:4")
+        sys_info = correct_sys_info(make_mi350_machine_specs(), "num_xcd:4")
 
         assert sys_info["ip_blocks"].item() == MI350_IP_BLOCKS
         assert sys_info["gpu_arch"].item() == "gfx950"
@@ -1046,7 +1050,7 @@ class TestCorrectSysInfo:
 
     def test_fragment_without_separator_is_ignored(self) -> None:
         """A fragment with no ':' is skipped; valid pairs still apply."""
-        mspec = _mi350_mspec()
+        mspec = make_mi350_machine_specs()
         sys_info = correct_sys_info(mspec, "num_xcd:4,garbage")
 
         assert sys_info["num_xcd"].item() == "4"
@@ -1054,7 +1058,9 @@ class TestCorrectSysInfo:
 
     def test_value_keeps_everything_after_the_first_colon(self) -> None:
         """Only the first ':' separates name from value."""
-        sys_info = correct_sys_info(_mi350_mspec(), "command:./vcopy -n 1:2")
+        sys_info = correct_sys_info(
+            make_mi350_machine_specs(), "command:./vcopy -n 1:2"
+        )
 
         assert sys_info["command"].item() == "./vcopy -n 1:2"
 
@@ -1071,19 +1077,22 @@ class TestCorrectSysInfo:
         )
 
         with pytest.raises(SystemExit):
-            correct_sys_info(_mi350_mspec(), "not_a_spec:1")
+            correct_sys_info(make_mi350_machine_specs(), "not_a_spec:1")
 
         assert "not_a_spec" in str(error_calls[0])
         assert "--specs" in str(error_calls[0])
 
     def test_corrected_specs_reach_metric_evaluation(self) -> None:
-        """Overrides land in the ammolite__* variables metric formulas use.
+        """
+        Overrides land in the ammolite__* variables metric formulas use.
 
         create_sys_vars() consumes the corrected sys_info row, so this is what
         makes $num_xcd and $cu_per_gpu in the panel configs pick up the
         --specs-correction values.
         """
-        corrected = correct_sys_info(_mi350_mspec(), "num_xcd:4,cu_per_gpu:64")
+        corrected = correct_sys_info(
+            make_mi350_machine_specs(), "num_xcd:4,cu_per_gpu:64"
+        )
         sys_vars = create_sys_vars(corrected.iloc[0])
 
         assert sys_vars["ammolite__num_xcd"] == 4
