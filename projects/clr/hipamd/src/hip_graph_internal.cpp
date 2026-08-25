@@ -413,15 +413,15 @@ void GraphExecSegmented::BuildSyncPlan() {
 
   auto* device = g_devices[captureDeviceId_]->devices()[0];
 
-  // PASS 0: Barrier-ROI collapse. When multi-stream's cross-stream sync would not
-  // pay for the overlap it unlocks (see ShouldCollapseToSingleStream), fold every
-  // segment onto stream 0. EnqueueSegmentedGraph resolves stream 0 to the launch
-  // stream (streams_[0]), so the whole graph runs on that one in-order queue: the
-  // subsequent passes then emit zero cross-stream barriers and zero completion
-  // signals, and graph completion is observed through the launch stream itself.
+  // PASS 0: Barrier-ROI collapse. Only runs in mode 0 (default) and only when
+  // the graph is shallow (max_level<=4). Modes 1 (round-robin) and 2 (DFS)
+  // never collapse. When collapse fires, every segment is folded onto stream 0
+  // so the whole graph runs on the launch stream with no cross-stream barriers.
   // Init() reads collapsed_to_single_stream_ to create just one stream per device.
   collapsed_to_single_stream_ = false;
-  if (ShouldCollapseToSingleStream()) {
+  const bool collapse_eligible = (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 0) &&
+                                 (max_dependency_level_ <= 4);
+  if (collapse_eligible && ShouldCollapseToSingleStream()) {
     for (auto& seg : segments_) {
       seg.stream_id = 0;
       seg.needs_completion_signal = false;
@@ -1278,8 +1278,16 @@ void GraphExecSegmented::ComputeCompletionSignalFlags() {
 
 // ================================================================================================
 // DFS-based stream assignment for segment DAG.
-// Linear chains of segments stay on the same stream; branches rotate to a new stream at each leaf.
+// Modeled after the classic path's ScheduleOneNode traversal pattern:
+//   - linear chains stay on the same stream
+//   - sid rotates at leaf segments (end of branch), not at forks
+//   - DFS is started from every unscheduled segment (not just dependency-free
+//     roots), with sid incrementing once per outer-loop iteration
+//   - stream pool size is derived from graph parallelism, not DEBUG_HIP_FORCE_GRAPH_QUEUES
 void GraphExecSegmented::DFSStreamAssignment() {
+  // Use actual graph parallelism (max concurrent segments at any level) as the
+  // pool size — avoids allocating more streams than the graph can use in parallel,
+  // which would add unnecessary cross-stream barrier/signal overhead.
   auto getPoolSize = [&](int dev_id) -> int {
     auto it = max_streams_dev_.find(dev_id);
     return (it != max_streams_dev_.end() && it->second > 0) ? it->second : 1;
@@ -1292,118 +1300,91 @@ void GraphExecSegmented::DFSStreamAssignment() {
 
   int sid = 0;
 
-  // Find root segments (no dependencies) — these are DFS entry points
-  std::vector<int> roots;
+  // Mirrors ScheduleNodes(): iterate all segments, start a new DFS for each
+  // unscheduled one with the current sid, then increment sid for the next entry.
   for (int i = 0; i < static_cast<int>(segments_.size()); ++i) {
-    if (segments_[i].segment_ids_dependencies.empty()) {
-      roots.push_back(i);
-    }
-  }
+    if (segments_[i].stream_id != -1) continue;
 
-  // Stack-based DFS over segment DAG — mirrors ScheduleOneNode exactly
-  std::vector<int> pending;
-  for (int i = static_cast<int>(roots.size()) - 1; i >= 0; --i) {
-    pending.push_back(roots[i]);
-  }
+    // Determine pool size for this entry's device
+    int pool = getPoolSize(segments_[i].dev_id);
 
-  while (!pending.empty()) {
-    int cur_id = pending.back();
-    pending.pop_back();
+    // Stack carries segment ids — sid is shared across the entire DFS from this
+    // entry point, exactly like ScheduleOneNode's single `sid` variable.
+    std::vector<int> pending;
+    pending.push_back(i);
 
-    if (cur_id < 0 || cur_id >= static_cast<int>(segments_.size())) continue;
-    auto& cur = segments_[cur_id];
+    while (!pending.empty()) {
+      int cur_id = pending.back();
+      pending.pop_back();
 
-    // Skip if already assigned
-    if (cur.stream_id != -1) continue;
+      if (cur_id < 0 || cur_id >= static_cast<int>(segments_.size())) continue;
+      auto& cur = segments_[cur_id];
 
-    // Assign current segment to current stream, capped per device pool
-    int pool = getPoolSize(cur.dev_id);
-    cur.stream_id = sid % pool;
+      if (cur.stream_id != -1) continue;
 
-    // Push unassigned successors in reverse order (preserve left-to-right)
-    bool end_of_branch = true;
-    for (int i = static_cast<int>(cur.segment_ids_edges.size()) - 1; i >= 0; --i) {
-      int edge_id = cur.segment_ids_edges[i];
-      if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size()) &&
-          segments_[edge_id].stream_id == -1) {
-        pending.push_back(edge_id);
-        end_of_branch = false;
-      }
-    }
+      cur.stream_id = sid % pool;
 
-    // Rotate stream at branch leaf
-    if (end_of_branch) {
-      sid = (sid + 1) % static_cast<int>(DEBUG_HIP_FORCE_GRAPH_QUEUES);
-    }
-  }
-
-  // Compute needs_completion_signal — same logic as RoundRobinStreamAssignment
-  for (auto& seg : segments_) {
-    seg.needs_completion_signal = false;
-    if (seg.segment_ids_edges.empty()) {
-      seg.needs_completion_signal = true;
-      continue;
-    }
-    for (int edge_id : seg.segment_ids_edges) {
-      if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size())) {
-        const auto& edge_seg = segments_[edge_id];
-        if (edge_seg.dev_id != seg.dev_id || edge_seg.stream_id != seg.stream_id) {
-          seg.needs_completion_signal = true;
-          break;
+      // Push unassigned successors in reverse order (preserve left-to-right)
+      bool end_of_branch = true;
+      for (int j = static_cast<int>(cur.segment_ids_edges.size()) - 1; j >= 0; --j) {
+        int edge_id = cur.segment_ids_edges[j];
+        if (edge_id >= 0 && edge_id < static_cast<int>(segments_.size()) &&
+            segments_[edge_id].stream_id == -1) {
+          pending.push_back(edge_id);
+          end_of_branch = false;
         }
       }
+
+      // Rotate sid at leaf — mirrors ScheduleOneNode exactly
+      if (end_of_branch) {
+        sid = (sid + 1) % pool;
+      }
     }
+
+    // Mirrors ScheduleNodes()'s stream_id = (stream_id+1) % pool after each entry
+    sid = (sid + 1) % pool;
   }
+
+  ComputeCompletionSignalFlags();
 }
 
 // ================================================================================================
 // Select stream assignment algorithm (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING):
-//   0 = Hybrid/auto: complex graphs (16+ segs, avg length < 8) → DFS; else round-robin
-//   1 = Force round-robin
-//   2 = Force DFS
+//   0 = Collapse (with existing ROI check + max_level<=4 guard) then round-robin
+//   1 = Round-robin only, no collapse
+//   2 = DFS only, no collapse
 void GraphExecSegmented::SelectStreamAssignment() {
   if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 1) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: forced round-robin (%zu segs)", segments_.size());
+            "[hipGraph] SelectStreamAssignment: round-robin, no collapse (%zu segs)",
+            segments_.size());
     RoundRobinStreamAssignment();
     return;
   }
   if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: forced DFS (%zu segs)", segments_.size());
+            "[hipGraph] SelectStreamAssignment: DFS, no collapse (%zu segs)", segments_.size());
     DFSStreamAssignment();
     return;
   }
 
-  // 0 = Hybrid: auto-select based on graph complexity
-  const size_t kSegmentSizeThreshold = 16;
-  const double kAvgSegmentLengthThreshold = 8.0;
-
-  bool use_dfs = false;
-  if (segments_.size() >= kSegmentSizeThreshold) {
-    size_t total_nodes = 0;
-    for (const auto& seg : segments_) {
-      total_nodes += seg.nodes.size();
-    }
-    double avg = static_cast<double>(total_nodes) / segments_.size();
-    if (avg < kAvgSegmentLengthThreshold) {
-      use_dfs = true;
-      ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-              "[hipGraph] SelectStreamAssignment: complex graph (%zu segs, avg %.2f nodes) "
-              "→ DFS stream assignment",
-              segments_.size(), avg);
-    }
-  }
-
-  if (use_dfs) {
-    DFSStreamAssignment();
+  // 0 = collapse-eligible (ROI heuristic + max_level<=4) then round-robin.
+  // ShouldCollapseToSingleStream() is called later in BuildSyncPlan; the extra
+  // max_level guard here prevents collapse on deep graphs where multi-stream
+  // overlap is genuinely valuable.
+  const bool deep_graph = max_dependency_level_ > 4;
+  if (deep_graph) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] SelectStreamAssignment: deep graph (max_level=%d>4), skip collapse -> "
+            "round-robin (%zu segs)",
+            max_dependency_level_, segments_.size());
   } else {
     ClPrint(amd::LOG_INFO, amd::LOG_CODE,
-            "[hipGraph] SelectStreamAssignment: simple/parallel graph (%zu segs) "
-            "→ round-robin stream assignment",
-            segments_.size());
-    RoundRobinStreamAssignment();
+            "[hipGraph] SelectStreamAssignment: collapse-eligible (max_level=%d) -> round-robin "
+            "(%zu segs)",
+            max_dependency_level_, segments_.size());
   }
+  RoundRobinStreamAssignment();
 }
 
 // ================================================================================================
