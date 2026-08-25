@@ -189,11 +189,13 @@ def test_available_implies_a_supported_provider(gda_qp):
 def test_default_context_raises(gda_qp):
     """ctx_id <= 0 is a caller error: that QP is the one rocSHMEM drives itself.
 
-    Posting external WQEs into the default context corrupts rocSHMEM's
-    send-queue bookkeeping and deadlocks collectives such as
-    rocshmem_barrier_all, so this is rejected rather than left to documentation.
-    It raises rather than returning None because it is a mistake in the call,
-    not a property of the environment.
+    The default context's producer index, send-queue lock and cached doorbell
+    position are private to rocSHMEM, and an external descriptor builder updates
+    none of them. Measured on ionic, external posts alone leave collectives
+    working, but a workload that also polls completions on that shared queue
+    does not finish, where the same workload on a user context does. Rejected
+    rather than left to documentation. It raises rather than returning None
+    because it is a mistake in the call, not a property of the environment.
     """
     for ctx_id in (0, -1):
         with pytest.raises(ValueError, match="ctx_id"):

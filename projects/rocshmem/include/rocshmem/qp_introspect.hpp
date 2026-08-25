@@ -32,16 +32,24 @@
  * Deliberately a flat POD plus a free function: callers (including language
  * bindings) need no internal rocSHMEM headers.
  *
- * IMPORTANT -- choosing ctx_id. ctx_id 0 is the default context, which is the
- * one rocSHMEM's own collectives use. Posting raw WQEs into that QP corrupts
- * rocSHMEM's producer/consumer bookkeeping, after which its collectives (e.g.
- * rocshmem_barrier_all) deadlock. Pass ctx_id > 0 to borrow a user-context QP
- * that rocSHMEM does not drive itself; then an external builder and rocSHMEM's
- * own collectives can run concurrently.
+ * IMPORTANT -- choosing ctx_id. ctx_id 0 is the default context, the queue
+ * rocSHMEM drives for its own operations. Its producer index, send-queue lock
+ * and cached doorbell position are private to rocSHMEM, and an external builder
+ * updates none of them: it bumps the shared producer index and rings the
+ * doorbell on its own. Pass ctx_id > 0 to borrow a user-context QP that
+ * rocSHMEM does not drive itself, so the two never share that state.
+ *
+ * Measured on gfx950/ionic, sharing ctx 0 does not fail the way one might
+ * guess. Posting external descriptors and then calling rocshmem_barrier_all
+ * is fine -- the barrier completes. But a full workload that mixes external
+ * posts with the caller's own completion polling on that same queue does not
+ * run to completion, while the identical workload on a user context does.
+ * The exact stall was not characterised; the queue is simply not safely
+ * shared.
  *
  * This is enforced, not merely advised: rocshmem_query_qp_info() returns false
  * for ctx_id <= 0. Describing the default-context QP is the one thing this API
- * must not do, so a caller cannot opt into the deadlock by mistake.
+ * must not do, so a caller cannot opt into that state by mistake.
  */
 #ifndef ROCSHMEM_QP_INTROSPECT_HPP
 #define ROCSHMEM_QP_INTROSPECT_HPP

@@ -627,9 +627,10 @@ NB_MODULE(_rocshmem4py, m) {
       // ambiguity that lets a broken caller look like an inactive one.
       if (ctx_id <= 0) {
         throw value_error(
-            "ctx_id must be > 0; ctx_id 0 is the default context that "
-            "rocSHMEM's own collectives drive, and posting external WQEs there "
-            "corrupts its bookkeeping and deadlocks subsequent collectives");
+            "ctx_id must be > 0; ctx_id 0 is the default context whose "
+            "producer index, send-queue lock and cached doorbell position "
+            "rocSHMEM keeps to itself, and a queue shared with an external "
+            "builder does not run a workload to completion");
       }
       // Check the environment before the peer bound: without an active backend
       // rocshmem_n_pes() is not meaningful, and "wrong backend" is the more
@@ -653,8 +654,7 @@ NB_MODULE(_rocshmem4py, m) {
     "`ctx_id` names no QP (e.g. beyond the configured context count). Use\n"
     "rocshmem_qp_introspect_available() to distinguish 'wrong backend' up front.\n\n"
     "Raises ValueError for caller errors: ctx_id <= 0, or peer outside\n"
-    "[0, n_pes). ctx_id 0 is the default context that rocSHMEM's own collectives\n"
-    "drive; posting external WQEs there corrupts its bookkeeping and subsequent\n"
-    "collectives deadlock.",
+    "[0, n_pes). ctx_id 0 is the default context rocSHMEM drives itself; its\n"
+    "queue state is not safely shared with an external descriptor builder.",
     arg("peer"), arg("ctx_id"));
 }

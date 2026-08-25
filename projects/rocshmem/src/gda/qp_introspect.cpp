@@ -185,11 +185,14 @@ bool rocshmem_query_qp_info(int peer, int ctx_id, QpInfo *out) {
     return false;
   }
   // Refuse the default context. ctx_id 0 is the QP rocSHMEM drives for its own
-  // collectives, and it keeps private send-queue bookkeeping for it. A caller
-  // that posts its own WQEs there corrupts that state and deadlocks operations
-  // like rocshmem_barrier_all. Handing the descriptor out is the whole risk, so
-  // the refusal belongs here rather than in a doc comment. Callers must
-  // create a user context (ctx_id > 0) and introspect that.
+  // operations, keeping a private producer index, send-queue lock and cached
+  // doorbell position that an external builder updates none of. Measured on
+  // ionic: external posts alone do not break collectives (barrier_all still
+  // completes), but a workload mixing external posts with its own completion
+  // polling on that queue fails to finish, where the same workload on a user
+  // context does. Handing the descriptor out is the whole risk, so the refusal
+  // belongs here rather than in a doc comment. Callers must create a user
+  // context (ctx_id > 0) and introspect that.
   //
   // fill_qp_info() itself still accepts ctx_id 0: it is the backend's own
   // accessor and the default context is legitimate internally. Only this
