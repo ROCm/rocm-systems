@@ -383,8 +383,13 @@ class CodeGenerator:
 
     @property
     def generated_dir_name(self) -> str:
-        """Filesystem directory for this ISA's generated and handwritten files."""
+        """Filesystem directory for this ISA's generated files."""
         return self.isa_spec.generated_dir_name
+
+    @property
+    def handwritten_dir_name(self) -> str:
+        """Profile directory containing this ISA's handwritten files."""
+        return self.isa_spec.arch_name
 
     @property
     def cpp_namespace(self) -> str:
@@ -1468,7 +1473,7 @@ class CodeGenerator:
 
         arch = self.cpp_namespace
         generated_arch = self.config.generated_include(self.generated_dir_name)
-        handwritten_arch = self.config.handwritten_include(self.generated_dir_name)
+        handwritten_arch = self.config.handwritten_include(self.handwritten_dir_name)
         execution_ids = ''.join(
             f'  {class_name},\n' for class_name in self._split_execution_classes
         )
@@ -3535,7 +3540,7 @@ class CodeGenerator:
             True,
             [
                 (
-                    self.config.handwritten_include(self.generated_dir_name, 'isa.h'),
+                    self.config.handwritten_include(self.handwritten_dir_name, 'isa.h'),
                     False,
                 ),
                 (
@@ -11079,7 +11084,7 @@ class CodeGenerator:
                         [
                             (
                                 self.config.handwritten_include(
-                                    self.generated_dir_name, 'addr_calc.h'
+                                    self.handwritten_dir_name, 'addr_calc.h'
                                 ),
                                 False,
                             ),
@@ -11118,7 +11123,7 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             self.config.handwritten_include(
-                                self.generated_dir_name, 'mma_exec.h'
+                                self.handwritten_dir_name, 'mma_exec.h'
                             ),
                             False,
                         )
@@ -11263,7 +11268,7 @@ class CodeGenerator:
                     ),
                     (
                         self.config.handwritten_include(
-                            self.generated_dir_name, 'isa.h'
+                            self.handwritten_dir_name, 'isa.h'
                         ),
                         False,
                     ),
@@ -14052,7 +14057,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         ).append(resolve_code)
 
         operand_header_includes = [
-            (self.config.handwritten_include(self.generated_dir_name, 'isa.h'), False),
+            (
+                self.config.handwritten_include(self.handwritten_dir_name, 'isa.h'),
+                False,
+            ),
             (
                 self.config.generated_include(
                     self.generated_dir_name, 'operand_types.h'
