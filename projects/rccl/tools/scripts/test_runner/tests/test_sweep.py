@@ -105,6 +105,12 @@ def test_env_pins_all_three_dimensions():
     assert env["UT_PROCESS_MASK"] == str(PROCESS_MULTI)
     assert env["UT_RANKS_PER_GPU"] == "2"
     assert env["UT_POW2_GPUS"] == "0"
+    # The C++ max defaults to 1 and RunSimpleSweep hard-FAIL()s above it, so the max must be pinned too.
+    assert env["UT_MAX_RANKS_PER_GPU"] == "2"
+
+
+def test_env_pins_max_ranks_at_least_one():
+    assert SweepConfig(8, False, 1).env()["UT_MAX_RANKS_PER_GPU"] == "1"
 
 
 def test_suffix_is_stable_and_safe():

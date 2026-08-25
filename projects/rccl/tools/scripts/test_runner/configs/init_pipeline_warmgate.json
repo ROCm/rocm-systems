@@ -1,7 +1,7 @@
 {
   "test_configurations": {
     "warmgate_pipeline": {
-      "description": "Curated init-pipeline warm-gate pipeline entries (v11 §CR-1/CR-6): one verified single-generation fork_coll collective and one verified-safe mpi_coll collective. Each carries an explicit, non-wildcard test_filter matching exactly one gtest case (enforced by the binary-backed --gtest_list_tests preflight). Fault-injection / GDR-flush / visibility-mismatch / plugin-lifecycle / first-init-semantics / NetIb / P2P tests are deliberately excluded.",
+      "description": "Curated init-pipeline warm-gate pipeline entries: one single-generation fork_coll collective and one mpi_coll collective. Each carries an explicit, non-wildcard test_filter matching exactly one gtest case (enforced by the binary-backed --gtest_list_tests preflight). Fault-injection / GDR-flush / visibility-mismatch / plugin-lifecycle / first-init-semantics / NetIb / P2P tests are deliberately excluded.",
       "tests": [
         {
           "name": "warmgate_fork_allreduce",
@@ -16,11 +16,11 @@
         {
           "name": "warmgate_mpi_allreduce",
           "binary": "rccl-UnitTestsMPI",
-          "test_filter": "AllReduceMPITest.OutOfPlace",
+          "test_filter": "CeMPI_AllReduce.EightRanks",
           "warmup_profile": "mpi_coll",
           "num_ranks": 8,
           "timeout": 600,
-          "description": "Verified-safe MPI collective that PASSED in an earlier run. Replace test_filter with the exact suite.case; must NOT be a fault-injection / GDR-flush / visibility-mismatch / first-init-semantics case."
+          "description": "Plain MPI collective from ce/CeMPITests.cpp (real suite.case, verified present in the tree). Confirm it is built and passing on your configuration before relying on the gate; must NOT be a fault-injection / GDR-flush / visibility-mismatch / first-init-semantics case."
         }
       ]
     },
@@ -30,11 +30,11 @@
         {
           "name": "warmgate_serial_control",
           "binary": "rccl-UnitTestsFixtures",
-          "test_filter": "BitOpsTests.CountBits",
+          "test_filter": "DIVUP.DIVUPSuccess",
           "warmup_profile": "none",
           "num_ranks": 1,
           "timeout": 300,
-          "description": "Replace test_filter with a real host-only test in your build; kept serial by policy."
+          "description": "Host-only case from BitOpsTests.cpp (built into rccl-UnitTestsFixtures); kept serial by policy. Serial entries skip the gtest preflight, so a filter that matches nothing here would exit 0 having run nothing."
         }
       ]
     }

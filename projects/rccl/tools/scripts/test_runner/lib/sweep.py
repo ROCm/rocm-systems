@@ -10,7 +10,13 @@ outer loops (``TestBed.cpp``): it turns a fork test's sweep selectors into the
 exact list of ``(num_gpus, multi_process, ranks_per_gpu)`` points, in the same
 nested-loop order. No HIP, no fork, no communicator, no dependence on runtime
 failure -- so the runner can use ONE enumerator for both ``--dry-run`` manifest
-output and real sub-entry expansion, and the Python/C++ sweep shapes cannot drift.
+output and real sub-entry expansion.
+
+Known divergence: RunSimpleSweep also drops points with ``enableSweep == false &&
+(numGpus < 8 || numRanks < 8)``. There is no ``enableSweep`` dimension here, so a
+caller that passes ``enableSweep = false`` would be over-enumerated. Latent today --
+the only two such call sites loop over 2 channels and are therefore multi-generation,
+which the single-generation backstop (TestBed.cpp) rejects before this matters.
 
 Option B pins each fork entry to a single child generation by expanding the sweep
 into per-point sub-entries and pinning the three outer dimensions
@@ -55,9 +61,12 @@ class SweepConfig:
         return {
             "UT_MIN_GPUS": str(self.num_gpus),
             "UT_MAX_GPUS": str(self.num_gpus),
+            # Deliberately pinned off: the C++ default is onlyPow2Gpus = isCpxMode, which on CPX would drop this pinned point for non-pow2 g.
             "UT_POW2_GPUS": "0",
             "UT_PROCESS_MASK": str(PROCESS_MULTI if self.multi_process else PROCESS_SINGLE),
             "UT_RANKS_PER_GPU": str(self.ranks_per_gpu),
+            # Pin the max too: the C++ default is 1 and RunSimpleSweep hard-FAIL()s above it, so any ranks_per_gpu > 1 aborted before READY.
+            "UT_MAX_RANKS_PER_GPU": str(max(1, self.ranks_per_gpu)),
         }
 
     def suffix(self):

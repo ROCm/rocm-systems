@@ -329,9 +329,11 @@ class TestConfigProcessor:
         """
         # Fields that can have defaults at config level. is_pytest/test_dir/
         # python_bin/setup_venv/venv_dir/requirements drive pytest-harness suites.
+        # Schema-blessed at configuration and suite level; omitting them here dropped them into the "resolved ZERO pipeline entries" fatal.
         default_fields = [
             "is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout",
             "is_pytest", "test_dir", "python_bin", "setup_venv", "venv_dir", "requirements",
+            "warmup_profile", "perf_sensitive", "fork_expand",
         ]
 
         processed_tests = []
@@ -346,6 +348,10 @@ class TestConfigProcessor:
 
             # Override with test-specific values
             merged_test.update(test)
+
+            # Provenance for the overbroad-default guard: an inherited warmup_profile is suite-scoped, not an explicit per-entry decision.
+            if "warmup_profile" in merged_test and "warmup_profile" not in test:
+                merged_test["_warmup_profile_from_suite"] = True
 
             processed_tests.append(merged_test)
 
@@ -390,6 +396,9 @@ class TestConfigProcessor:
                 "setup_venv": combined_config.get("setup_venv"),
                 "venv_dir": combined_config.get("venv_dir"),
                 "requirements": combined_config.get("requirements"),
+                "warmup_profile": combined_config.get("warmup_profile"),
+                "perf_sensitive": combined_config.get("perf_sensitive"),
+                "fork_expand": combined_config.get("fork_expand"),
             }
             # Remove None values
             config_defaults = {k: v for k, v in config_defaults.items() if v is not None}
@@ -408,6 +417,9 @@ class TestConfigProcessor:
                 "setup_venv": suite.get("setup_venv"),
                 "venv_dir": suite.get("venv_dir"),
                 "requirements": suite.get("requirements"),
+                "warmup_profile": suite.get("warmup_profile"),
+                "perf_sensitive": suite.get("perf_sensitive"),
+                "fork_expand": suite.get("fork_expand"),
             }
             # Remove None values
             suite_defaults = {k: v for k, v in suite_defaults.items() if v is not None}
