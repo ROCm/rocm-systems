@@ -76,7 +76,7 @@ python -m amdisa [--gen-isas] [--gen-dbt]
 
 | Option | Description |
 |---|---|
-| `[NAME:]XML ...` | One or more ISA XMLs. An optional name overrides the generated directory and C++ namespace while the XML determines the semantic profile |
+| `[NAME:]XML ...` | One or more ISA XMLs. A recognized name selects its semantic profile. An unrecognized explicit name is treated as a custom generated identity, with its semantic profile detected from the XML |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies) |
 | `--gen-dbt` | Generate DBT legalization tables and encoding translators |
 | `--isa-output DIR` | Output path for generated ISA C++ files |
