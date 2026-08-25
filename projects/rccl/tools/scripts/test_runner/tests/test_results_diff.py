@@ -23,15 +23,36 @@ def _topline(suite, name, result):
             "record_type": "parent_summary", "counts_toward_topline": True}
 
 
-def _sub(suite, name, result):
-    return {"suite": suite, "test_name": name, "name": name + ".x", "result": result,
+def _sub(suite, name, result, cfg="x"):
+    return {"suite": suite, "test_name": name, "name": f"{name}.{cfg}", "result": result,
             "record_type": "sub_entry", "counts_toward_topline": False}
 
 
-def test_index_skips_sub_entries():
+def test_index_keeps_sub_entries_and_drops_the_rollup():
+    # The gate is per-CONFIG: the sub_entry must survive and the parent_summary must not shadow it with an equal roll-up.
     recs = [_topline("S", "A", "PASSED"), _sub("S", "A", "FAILED")]
     idx = index_results(recs)
-    assert idx == {("S", "A"): "PASSED"}  # sub_entry ignored, parent counted
+    assert idx == {("S", "A.x"): "FAILED"}
+
+
+def test_per_config_regression_is_not_masked_by_an_equal_rollup():
+    base = [_sub("S", "t1", "FAILED", "g8"), _sub("S", "t1", "PASSED", "g2"),
+            _topline("S", "t1", "FAILED")]
+    cand = [_sub("S", "t1", "PASSED", "g8"), _sub("S", "t1", "FAILED", "g2"),
+            _topline("S", "t1", "FAILED")]
+    d = diff_results(base, cand)
+    assert not d["gate_ok"]
+    assert d["regressions"] == [(("S", "t1.g2"), "PASSED", "FAILED")]
+    assert d["fixes"] == [(("S", "t1.g8"), "FAILED", "PASSED")]
+
+
+def test_missing_candidate_result_is_a_regression():
+    base = [_serial("S", "A", "PASSED")]
+    cand = [{"suite": "S", "test_name": "A", "result": None,
+             "record_type": "entry", "counts_toward_topline": True}]
+    d = diff_results(base, cand)
+    assert not d["gate_ok"]
+    assert d["regressions"] == [(("S", "A"), "PASSED", None)]
 
 
 def test_identical_runs_gate_pass():

@@ -15,7 +15,9 @@ _RUNNER_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _RUNNER_ROOT not in sys.path:
     sys.path.insert(0, _RUNNER_ROOT)
 
-from lib.pipeline import KIND_PIPELINE, KIND_SERIAL, RESULT_FAILED, RESULT_TIMED_OUT  # noqa: E402
+from lib.pipeline import (  # noqa: E402
+    KIND_PIPELINE, KIND_SERIAL, RESULT_CANCELLED, RESULT_FAILED, RESULT_TIMED_OUT,
+)
 from lib.pipeline_runner import (  # noqa: E402
     aggregate_phase_timings,
     assemble_records,
@@ -385,6 +387,41 @@ def test_aggregate_empty():
         "time_to_ready": None, "ready_queue_wait": None,
         "execution_time": None, "total": None,
     }
+
+
+def test_cancelled_sub_entry_fails_the_rollup():
+    """A cancelled sub-entry never ran, so it is not a pass: it used to roll up to
+    PASSED while results_diff already classified CANCELLED as a failure."""
+    assert rollup_result([RESULT_CANCELLED, "PASSED"]) == RESULT_FAILED
+    assert rollup_result(["PASSED", "PASSED"]) == "PASSED"
+
+
+def test_missing_sub_entry_result_fails_the_rollup():
+    """A None sub-result means the scheduler recorded no terminal state; never PASSED."""
+    assert rollup_result([None]) == RESULT_FAILED
+    assert rollup_result(["PASSED", None]) == RESULT_FAILED
+
+
+def test_cancelled_single_entry_counts_as_failed():
+    counts = topline_counts([{"counts_toward_topline": True, "result": RESULT_CANCELLED}])
+    assert counts[RESULT_FAILED] == 1
+
+
+def test_runner_owned_env_is_rejected_in_every_mode():
+    """The C++ contract _exit(42)s on these, so a SERIAL config that sets one is fatal
+    too -- the check used to be skipped entirely outside init-pipeline mode."""
+    t = {"name": "T", "binary": "rccl-UnitTests",
+         "env_variables": {"RCCL_TEST_READY_GO": "1"}}
+    for mode in ("serial", "init-pipeline"):
+        errs = classify_errors([t], exec_mode=mode)
+        assert any("RCCL_TEST_READY_GO" in m for _, m in errs), mode
+
+
+def test_fault_injection_env_is_rejected():
+    t = {"name": "T", "binary": "rccl-UnitTests",
+         "env_variables": {"RCCL_TEST_INJECT_READY_FAIL": "1"}}
+    errs = classify_errors([t], exec_mode="serial")
+    assert any("fault-injection" in m for _, m in errs)
 
 
 if __name__ == "__main__":

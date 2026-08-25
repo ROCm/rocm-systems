@@ -42,6 +42,28 @@ def test_serial_mode_no_go_timeout_requirement():
     assert p.validate_init_pipeline(a) == []
 
 
+def test_init_pool_below_one_rejected():
+    p, a = _args(["-c", "x.json", "--exec-mode", "init-pipeline",
+                  "--go-timeout", "10", "--init-pool", "0"])
+    assert any("--init-pool" in e for e in p.validate_init_pipeline(a))
+
+
+def test_negative_init_timeout_rejected():
+    p, a = _args(["-c", "x.json", "--exec-mode", "init-pipeline",
+                  "--go-timeout", "10", "--init-timeout", "-1"])
+    assert any("--init-timeout" in e for e in p.validate_init_pipeline(a))
+
+
+def test_rerun_failed_rejected_for_init_pipeline():
+    """--rerun-failed has no effect in init-pipeline mode (the run-wide driver has no
+    rerun pass), so it must be an error rather than a silent no-op."""
+    p, a = _args(["-c", "x.json", "--exec-mode", "init-pipeline",
+                  "--go-timeout", "10", "--rerun-failed"])
+    assert any("--rerun-failed" in e for e in p.validate_init_pipeline(a))
+    p2, a2 = _args(["-c", "x.json", "--exec-mode", "serial", "--rerun-failed"])
+    assert p2.validate_init_pipeline(a2) == []
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-v"]))

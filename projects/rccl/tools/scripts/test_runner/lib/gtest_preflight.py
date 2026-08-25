@@ -25,6 +25,11 @@ import os
 import re
 import subprocess
 
+try:
+    from lib.pipeline import INJECT_ENV_PREFIX, RUNNER_OWNED_ENV
+except ImportError:  # allow "import lib.*" from the runner root
+    from pipeline import INJECT_ENV_PREFIX, RUNNER_OWNED_ENV
+
 # Filters the planner treats as an unbounded whole-binary selection (rejected for
 # pipeline gtest entries, v11 CR-1).
 WILDCARD_FILTERS = frozenset({"", "*", "ALL", "all"})
@@ -114,10 +119,10 @@ def list_tests(binary_path, *, env=None, timeout=120, cache=None, runner=None):
     if cache is not None and ident in cache:
         return cache[ident]
 
-    # The preflight must NOT carry any pipeline/warmup environment.
+    # The preflight must carry NO pipeline/warmup env and no RCCL_TEST_INJECT_* hook (which would fail --gtest_list_tests on purpose).
     clean_env = dict(env if env is not None else os.environ)
-    for k in ("RCCL_TEST_WARMUP_PROFILE", "RCCL_TEST_READY_GO",
-              "RCCL_TEST_RENDEZVOUS_DIR", "RCCL_TEST_GO_TIMEOUT_SEC"):
+    for k in [k for k in clean_env
+              if k in RUNNER_OWNED_ENV or k.startswith(INJECT_ENV_PREFIX)]:
         clean_env.pop(k, None)
 
     if runner is None:

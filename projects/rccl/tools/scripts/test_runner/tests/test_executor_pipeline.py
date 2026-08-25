@@ -46,6 +46,8 @@ def _make_executor(tmp_path, **arg_over):
     ex._emit_log_counter = 0
     ex.test_names, ex.test_results, ex.test_durations, ex.test_suites = [], [], [], []
     ex.test_records = []
+    ex.interval_validation = []
+    ex.interval_validation_failed = False
     return ex
 
 
@@ -155,6 +157,14 @@ def test_run_suite_init_pipeline_end_to_end(tmp_path):
     # Top-line tracking got exactly 3 entries (AR once via parent_summary).
     assert len(ex.test_results) == 3
     assert ex.test_results.count("PASSED") == 3
+    assert ex.interval_validation_failed is False
+    # A pipeline entry's duration EXCLUDES its READY->GO park, so it tracks post-GO execution, not the --init-pool-inflated lifetime.
+    for nm in ("AR.g8_sp_r1", "AR.g8_mp_r1", "M"):
+        pt = by[nm]["phase_timings"]
+        assert by[nm]["duration"] == pytest.approx(pt["execution_time"])
+        assert by[nm]["duration"] <= pt["total"]
+    # A serial entry has no queue wait, so it keeps its full lifetime.
+    assert by["Sx"]["duration"] == pytest.approx(by["Sx"]["phase_timings"]["total"])
 
 
 @POSIX_ONLY
@@ -255,6 +265,112 @@ def test_rerun_failed_converges_split_sweep(tmp_path):
     assert by["AR.g8_mp_r1"]["result"] == "PASSED"
     assert by["AR"]["record_type"] == "parent_summary" and by["AR"]["result"] == "PASSED"
     assert ex.test_results == ["PASSED"]  # one top-line entry, now passing
+
+
+# --------------------------------------------------------------------------- #
+# Ambient env isolation, exit accounting, planning robustness
+# --------------------------------------------------------------------------- #
+def _spec_executor(tmp_path):
+    """Minimal TestExecutor able to run the real _build_launch_spec."""
+    ex = Executor.__new__(Executor)
+    ex.args = types.SimpleNamespace(
+        verbose=False, coverage_report=False, mpi_args="", system=None,
+        exec_mode="serial", test_name=None, skip_mpi_check=False, suite_name=None,
+    )
+    ex.global_env = {}
+    ex._gpus_per_node = 8
+    ex._gpus_per_node_detected = True
+    ex.mpi_hosts = ""
+    ex.paths = {"mpi_path": ""}
+    ex.build_dir = str(tmp_path)
+    ex.log_dir = str(tmp_path)
+    ex.emit_enabled = False
+    ex._emit_log_counter = 0
+    ex._rocm_root = lambda: "/opt/rocm"
+
+    def _resolve(binary, tc):
+        path = os.path.join(str(tmp_path), binary)
+        open(path, "a").close()   # _build_launch_spec rejects a nonexistent binary
+        return path
+    ex._resolve_binary_path = _resolve
+    return ex
+
+
+def test_ambient_runner_env_is_scrubbed_from_a_serial_launch(tmp_path, monkeypatch):
+    """A stray `export RCCL_TEST_READY_GO=1` used to reach every SERIAL test through
+    os.environ.copy(); the C++ contract then _exit(42)s and it reports as a plain
+    gtest FAILURE with no hint of the cause."""
+    monkeypatch.setenv("RCCL_TEST_READY_GO", "1")
+    monkeypatch.setenv("RCCL_TEST_WARMUP_PROFILE", "fork_coll")
+    monkeypatch.setenv("RCCL_TEST_RENDEZVOUS_DIR", str(tmp_path))
+    monkeypatch.setenv("RCCL_TEST_INJECT_READY_FAIL", "1")
+    ex = _spec_executor(tmp_path)
+    spec, early = ex._build_launch_spec(
+        {"name": "T", "binary": "rccl-UnitTests", "test_filter": "A.B", "num_ranks": 1},
+        {"suite_details": {"name": "S"}})
+    assert early is None and spec is not None
+    for k in ("RCCL_TEST_READY_GO", "RCCL_TEST_WARMUP_PROFILE",
+              "RCCL_TEST_RENDEZVOUS_DIR", "RCCL_TEST_INJECT_READY_FAIL"):
+        assert k not in spec.env, k
+
+
+def test_pipeline_entry_still_receives_its_own_rendezvous_env(tmp_path, monkeypatch):
+    """The scrub must not defeat the feature: config-supplied values still win."""
+    monkeypatch.setenv("RCCL_TEST_READY_GO", "stale")
+    ex = _spec_executor(tmp_path)
+    spec, _ = ex._build_launch_spec(
+        {"name": "T", "binary": "rccl-UnitTests", "test_filter": "A.B", "num_ranks": 1,
+         "env_variables": {"RCCL_TEST_READY_GO": "1",
+                           "RCCL_TEST_RENDEZVOUS_DIR": str(tmp_path)}},
+        {"suite_details": {"name": "S"}})
+    assert spec.env["RCCL_TEST_READY_GO"] == "1"
+    assert spec.env["RCCL_TEST_RENDEZVOUS_DIR"] == str(tmp_path)
+
+
+def test_missing_binary_is_a_clean_preflight_rejection(tmp_path):
+    """_resolve_binary_path does no existence check and subprocess.run raises
+    FileNotFoundError (an OSError): it must become a rejected row, not a traceback."""
+    ex = _make_executor(tmp_path, allow_serial_only=True, suite_name=None)
+    ex._resolve_binary_path = lambda b, tc: os.path.join(str(tmp_path), "does-not-exist")
+    suites = [{"suite_details": {"name": "S", "enabled": True},
+               "tests": [{"name": "T", "binary": "rccl-UnitTests", "test_filter": "A.B",
+                          "warmup_profile": "fork_coll",
+                          "fork_expand": {"num_gpus": [8], "process_mask": 1,
+                                          "ranks_per_gpu": 1}}]}]
+    resolved, errors = ex.plan_init_pipeline_run(suites)
+    assert resolved[0]["disposition"] == "rejected"
+    assert "filter preflight" in resolved[0]["error"]
+    assert errors, "a rejected entry must abort the run before any spawn"
+
+
+def test_pipeline_result_strings_reach_the_exit_code():
+    """TIMED_OUT / CANCELLED / INFRA_ERROR are scheduler spellings the serial
+    TestResult enum does not have; counting only FAILED+TIMEOUT exited 0 on them."""
+    from lib.test_executor import count_failures
+    assert count_failures(["PASSED", "SKIPPED"]) == (0, 0)
+    assert count_failures(["FAILED"]) == (1, 0)
+    assert count_failures(["TIMEOUT"]) == (0, 1)
+    assert count_failures(["TIMED_OUT"]) == (0, 1)
+    assert count_failures(["CANCELLED"]) == (1, 0)
+    assert count_failures(["INFRA_ERROR"]) == (1, 0)
+
+
+def test_interval_validation_failure_is_recorded_not_discarded(tmp_path, monkeypatch):
+    """v11 CR-8 was computed, printed and thrown away: two overlapping executions
+    still exited 0. The result must now reach a flag the runner can act on."""
+    import lib.test_executor as te
+    monkeypatch.setattr(te, "validate_execution_intervals",
+                        lambda recs: (False, {"max_executing": 2, "executed_entries": 2,
+                                              "total_records": len(recs), "ok": False},
+                                      ["max EXECUTING == 2: execution intervals overlap"]))
+    ex = _make_executor(tmp_path, suite_name=None)
+    ex._build_launch_spec = lambda tcfg, suite: (None, {"result": "PASSED", "duration": 0})
+    ex.run_all_suites_init_pipeline([
+        {"suite_details": {"name": "S", "enabled": True},
+         "tests": [{"name": "M", "binary": "rccl-UnitTestsMPI",
+                    "warmup_profile": "mpi_coll", "test_filter": "M.C"}]}])
+    assert ex.interval_validation_failed is True
+    assert ex.interval_validation[-1]["max_executing"] == 2
 
 
 if __name__ == "__main__":

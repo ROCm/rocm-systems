@@ -36,6 +36,7 @@ except ImportError:
 try:
     from lib.pipeline import (
         PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
+        INJECT_ENV_PREFIX, RUNNER_OWNED_ENV,
     )
     from lib.pipeline_runner import (
         plan_entries, assemble_records, aggregate_phase_timings, classify_errors,
@@ -44,6 +45,7 @@ try:
 except ImportError:
     from pipeline import (
         PipelineScheduler, Rendezvous, SchedEntry, KIND_PIPELINE, KIND_SERIAL,
+        INJECT_ENV_PREFIX, RUNNER_OWNED_ENV,
     )
     from pipeline_runner import (
         plan_entries, assemble_records, aggregate_phase_timings, classify_errors,
@@ -97,6 +99,18 @@ class TestResult(str, Enum):
     RESULT_FAILED = "FAILED"
     RESULT_TIMEOUT = "TIMEOUT"
     RESULT_SKIPPED = "SKIPPED"
+
+
+# Results that must make the runner exit non-zero. TestResult spells none of the scheduler's TIMED_OUT/CANCELLED/INFRA_ERROR, so those exited 0.
+TIMEOUT_RESULTS = frozenset({"TIMEOUT", "TIMED_OUT"})
+FAILING_RESULTS = frozenset({"FAILED", "CANCELLED", "INFRA_ERROR"}) | TIMEOUT_RESULTS
+
+
+def count_failures(results):
+    """(failed, timeout) over any mix of serial and init-pipeline result strings."""
+    timeout = sum(1 for r in results if r in TIMEOUT_RESULTS)
+    failed = sum(1 for r in results if r in FAILING_RESULTS and r not in TIMEOUT_RESULTS)
+    return failed, timeout
 
 
 def infer_gtest_result_from_output(captured_output: str, returncode: int) -> str:
@@ -342,6 +356,10 @@ class TestExecutor:
         self.test_names = []
         self.test_durations = []
         self.test_suites = []
+
+        # Init-pipeline EXECUTING<=1 / timestamp-ordering validity: the one guard on this mode's correctness, so a failure must not exit 0.
+        self.interval_validation = []
+        self.interval_validation_failed = False
 
         # Structured result emission (dashboard). Enabling either --emit-results or
         # --db-push turns on per-test log capture so perf output can be parsed.
@@ -1230,6 +1248,10 @@ class TestExecutor:
         # Setup environment
         env = os.environ.copy()
 
+        # Drop ambient runner-owned / RCCL_TEST_INJECT_* vars: the C++ contract _exit(42)s on them, killing every SERIAL test undiagnosed.
+        for _k in [k for k in env if k in RUNNER_OWNED_ENV or k.startswith(INJECT_ENV_PREFIX)]:
+            env.pop(_k, None)
+
         # Build LD_LIBRARY_PATH.  Priority order (highest → lowest):
         #   1. build_dir          – always first so the test-built librccl.so wins
         #   2. test JSON value    – per-test custom lib dir (e.g. a backport HIP stack)
@@ -1930,6 +1952,10 @@ class TestExecutor:
         def wait_exit(proc, deadline):
             spec = proc_to_spec.get(id(proc))
             timeout = spec.timeout if (spec and spec.timeout and spec.timeout > 0) else None
+            if deadline is not None:
+                # Honour the scheduler's exec deadline; ignoring it made a future --exec-timeout a silent no-op.
+                remaining = max(0.0, deadline - time.monotonic())
+                timeout = remaining if timeout is None else min(timeout, remaining)
             try:
                 return proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -1957,7 +1983,11 @@ class TestExecutor:
                 sched.run()
                 for entry in sched_entries:
                     spec = specs[entry.seq]
-                    dur = (entry.t_exit - entry.t_launch) if (entry.t_launch and entry.t_exit) else 0
+                    # Reported duration must EXCLUDE the READY->GO park, or a --init-pool run looks like a slowdown vs serial.
+                    _pt = entry.phase_timings()
+                    dur = _pt["total"] if entry.kind == KIND_SERIAL else _pt["execution_time"]
+                    if dur is None:
+                        dur = 0
                     is_serial = (entry.kind == KIND_SERIAL)
                     rec = {
                         "result": entry.result, "duration": dur, "suite": suite_name,
@@ -2039,7 +2069,8 @@ class TestExecutor:
                                                    curated=True, cache=list_cache)
                         row["preflight_matches"] = matches
                         row["resolved_test_identity"] = matches[0]
-                    except (ValueError, RuntimeError) as e:
+                    # OSError covers a missing/unbuilt binary: subprocess.run raises FileNotFoundError, which must reject cleanly.
+                    except (ValueError, RuntimeError, OSError) as e:
                         row["disposition"] = "rejected"
                         row["error"] = f"filter preflight: {e}"
                         row["exclusion_reason"] = "unclassified"
@@ -2172,6 +2203,10 @@ class TestExecutor:
         def wait_exit(proc, deadline):
             spec = proc_to_spec.get(id(proc))
             timeout = spec.timeout if (spec and spec.timeout and spec.timeout > 0) else None
+            if deadline is not None:
+                # Honour the scheduler's exec deadline; ignoring it made a future --exec-timeout a silent no-op.
+                remaining = max(0.0, deadline - time.monotonic())
+                timeout = remaining if timeout is None else min(timeout, remaining)
             try:
                 return proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -2194,7 +2229,11 @@ class TestExecutor:
                 sched.run()
                 for entry in sched_entries:
                     spec = specs[entry.seq]
-                    dur = (entry.t_exit - entry.t_launch) if (entry.t_launch and entry.t_exit) else 0
+                    # Reported duration must EXCLUDE the READY->GO park, or a --init-pool run looks like a slowdown vs serial.
+                    _pt = entry.phase_timings()
+                    dur = _pt["total"] if entry.kind == KIND_SERIAL else _pt["execution_time"]
+                    if dur is None:
+                        dur = 0
                     is_serial = (entry.kind == KIND_SERIAL)
                     rec = {
                         "result": entry.result, "duration": dur, "exit_code": entry.exit_code,
@@ -2245,6 +2284,25 @@ class TestExecutor:
                 if self.emit_enabled:
                     self.test_records.append(rec)
 
+        # Queue-wait warnings (READY->GO held longer than the threshold).
+        qw = getattr(self.args, "queue_wait_warn", 0) or 0
+        if qw > 0:
+            for rec in all_records:
+                w = (rec.get("phase_timings") or {}).get("ready_queue_wait")
+                if w is not None and w > qw:
+                    print(f"  WARNING: {rec.get('name')} waited {w:.1f}s READY->GO (> {qw:g}s)")
+
+        # Aggregate phase timings (init / queue-wait / execution) across the whole run.
+        if getattr(self.args, "phase_timings", False):
+            agg = aggregate_phase_timings(all_records)
+            print("\n  init-pipeline run-wide phase timings (seconds):")
+            for p in ("time_to_ready", "ready_queue_wait", "execution_time", "total"):
+                st = agg.get(p)
+                if st:
+                    print(f"    {p:16s} n={st['count']:<4d} min={st['min']:.2f} "
+                          f"med={st['median']:.2f} p95={st['p95']:.2f} "
+                          f"max={st['max']:.2f} sum={st['sum']:.1f}")
+
         # Run-wide execution-serialization + timing validity (v11 CR-8).
         okv, ival_report, ival_errors = validate_execution_intervals(all_records)
         print(f"  init-pipeline run-wide interval validation: "
@@ -2255,6 +2313,8 @@ class TestExecutor:
         if not hasattr(self, "interval_validation"):
             self.interval_validation = []
         self.interval_validation.append({"scope": "run", **ival_report, "errors": ival_errors})
+        if not okv:
+            self.interval_validation_failed = True
         return results
 
     def _run_suite_serial_expanded(self, suite_config, suite_name, tests):
@@ -2404,6 +2464,8 @@ class TestExecutor:
         if not hasattr(self, "interval_validation"):
             self.interval_validation = []
         self.interval_validation.append({"suite": suite_name, **ival_report, "errors": ival_errors})
+        if not ok:
+            self.interval_validation_failed = True
         print(f"  init-pipeline interval validation [{suite_name}]: "
               f"max_executing={ival_report['max_executing']} "
               f"executed={ival_report['executed_entries']} ok={ok}")
@@ -2582,9 +2644,9 @@ class TestExecutor:
         """Print test execution summary"""
         total_tests = len(self.test_results)
         passed = self.test_results.count(TestResult.RESULT_PASSED.value)
-        failed = self.test_results.count(TestResult.RESULT_FAILED.value)
-        timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
+        failed, timeout = count_failures(self.test_results)
         skipped = self.test_results.count(TestResult.RESULT_SKIPPED.value)
+        unaccounted = total_tests - (passed + failed + timeout + skipped)
 
         # Calculate total test time
         total_time_seconds = sum(self.test_durations) if self.test_durations else 0
@@ -2598,11 +2660,12 @@ class TestExecutor:
             print(f"{'Test Suite':<40} {'Test Name':<40} {'Result':<10} {'Duration'}")
             print("-"*120)
             for i in range(total_tests):
+                # str(): a row with no recorded result carries None, and a bare f"{None:<10}" raises TypeError.
                 print(
-                    f"{self.test_suites[i]:<40} "
-                    f"{self.test_names[i]:<40} "
-                    f"{self.test_results[i]:<10} "
-                    f"{self.test_durations[i]:.3f} seconds"
+                    f"{str(self.test_suites[i]):<40} "
+                    f"{str(self.test_names[i]):<40} "
+                    f"{str(self.test_results[i]):<10} "
+                    f"{self.test_durations[i] or 0:.3f} seconds"
                 )
             print("-"*120)
             print(f"Total Tests:   {total_tests}")
@@ -2610,6 +2673,8 @@ class TestExecutor:
             print(f"Failed:        {failed}")
             print(f"Skipped:       {skipped}")
             print(f"Timeout:       {timeout}")
+            if unaccounted:
+                print(f"Unaccounted:   {unaccounted}  (results with no known status)")
             if skipped > 0:
                 print(f"Skipped:       {skipped}")
             print(f"Total Time:    {self._format_duration(total_time_seconds)}")

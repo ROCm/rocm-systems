@@ -263,8 +263,10 @@ Examples:
             help="init-pipeline only: bounded GO wait (seconds) passed to each "
                  "pipeline entry (RCCL_TEST_GO_TIMEOUT_SEC). On expiry an entry "
                  "reports GO_TIMEOUT and all MPI ranks leave together, so a dead/"
-                 "hung runner cannot strand ranks. 0 = indefinite (rely on the "
-                 "liveness pipe / process-group teardown). Use a short value only "
+                 "hung runner cannot strand ranks. 0 = indefinite -- the runner-liveness "
+                 "pipe is not implemented yet, so 0 relies solely on process-group "
+                 "teardown and a SIGKILLed runner leaves parked ranks spinning. "
+                 "Use a short value only "
                  "for runner-death injection tests, never in production."
         )
         self.parser.add_argument(
@@ -318,6 +320,10 @@ Examples:
             if (getattr(args, "go_timeout", 0) or 0) <= 0 and not getattr(args, "allow_indefinite_go_wait", False):
                 errors.append("--go-timeout must be > 0 for init-pipeline "
                               "(pass --allow-indefinite-go-wait to override)")
+            # The run-wide init-pipeline driver has no rerun pass, so accepting this would silently drop every rerun.
+            if getattr(args, "rerun_failed", False):
+                errors.append("--rerun-failed is not supported with --exec-mode=init-pipeline "
+                              "(the run-wide pipeline driver has no rerun pass)")
         return errors
 
     def parse_arguments(self):

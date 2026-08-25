@@ -140,17 +140,21 @@ def main():
         executor.emit_results()
 
         # Return based on results
-        if executor.test_results:
-            from lib.test_executor import TestResult
+        # Overlapping/unordered execution intervals mean the serial-execution guarantee did not hold: diagnostic-only, never green.
+        if getattr(executor, "interval_validation_failed", False):
+            print("\nERROR: init-pipeline interval validation FAILED "
+                  "(execution was not serialized); see INTERVAL-VALIDATION FAILURE above")
+            sys.exit(1)
 
-            # Count failures from original run
-            failed = executor.test_results.count(TestResult.RESULT_FAILED.value)
-            timeout = executor.test_results.count(TestResult.RESULT_TIMEOUT.value)
+        if executor.test_results:
+            from lib.test_executor import count_failures
+
+            # count_failures also covers the init-pipeline TIMED_OUT / CANCELLED / INFRA_ERROR spellings.
+            failed, timeout = count_failures(executor.test_results)
 
             # Also check rerun results if any
             if executor.rerun_results:
-                rerun_failed = executor.rerun_results.count(TestResult.RESULT_FAILED.value)
-                rerun_timeout = executor.rerun_results.count(TestResult.RESULT_TIMEOUT.value)
+                rerun_failed, rerun_timeout = count_failures(executor.rerun_results)
 
                 if rerun_failed > 0 or rerun_timeout > 0:
                     if args.verbose:

@@ -32,8 +32,8 @@ try:
         expand_fork_entry,
     )
     from lib.pipeline import (
-        KIND_PIPELINE, KIND_SERIAL,
-        RESULT_FAILED, RESULT_TIMED_OUT, RESULT_INFRA_ERROR,
+        KIND_PIPELINE, KIND_SERIAL, INJECT_ENV_PREFIX, RUNNER_OWNED_ENV,
+        RESULT_CANCELLED, RESULT_FAILED, RESULT_TIMED_OUT, RESULT_INFRA_ERROR,
     )
 except ImportError:  # allow "import lib.*" from the runner root
     from sweep import (
@@ -41,8 +41,8 @@ except ImportError:  # allow "import lib.*" from the runner root
         expand_fork_entry,
     )
     from pipeline import (
-        KIND_PIPELINE, KIND_SERIAL,
-        RESULT_FAILED, RESULT_TIMED_OUT, RESULT_INFRA_ERROR,
+        KIND_PIPELINE, KIND_SERIAL, INJECT_ENV_PREFIX, RUNNER_OWNED_ENV,
+        RESULT_CANCELLED, RESULT_FAILED, RESULT_TIMED_OUT, RESULT_INFRA_ERROR,
     )
 
 RESULT_PASSED = "PASSED"
@@ -206,15 +206,17 @@ def classify_errors(tests, *, exec_mode):
             errors.append((name, f"unknown warmup_profile '{prof}' "
                                  f"(expected one of {sorted(_VALID_PROFILES)})"))
             continue
-        if exec_mode != "init-pipeline":
-            continue
-        # The runner owns the pipeline env vars; a test/suite may not override them.
+        # Checked in EVERY mode: the C++ contract _exit(42)s on these, so a serial-mode config that sets one kills the test undiagnosed.
         user_env = t.get("env_variables", {}) or {}
-        for k in ("RCCL_TEST_WARMUP_PROFILE", "RCCL_TEST_READY_GO",
-                  "RCCL_TEST_RENDEZVOUS_DIR", "RCCL_TEST_GO_TIMEOUT_SEC"):
-            if k in user_env:
+        for k in user_env:
+            if k in RUNNER_OWNED_ENV:
                 errors.append((name, f"env_variables may not set runner-owned '{k}' "
                                      f"(the init-pipeline runner constructs it)"))
+            elif k.startswith(INJECT_ENV_PREFIX):
+                errors.append((name, f"env_variables may not set fault-injection '{k}' "
+                                     f"(test-only hook; it silently forces failures)"))
+        if exec_mode != "init-pipeline":
+            continue
         if prof == PROFILE_NETIB:
             errors.append((name, "warmup_profile 'netib_plugin' is rejected until its "
                                  "READY boundary is implemented (v10 §5.4)"))
@@ -236,9 +238,9 @@ def classify_errors(tests, *, exec_mode):
                                      "'name' is the runner label, not the gtest filter"))
     return errors
 
-# Results that make a parent roll-up FAILED. Includes both the scheduler's
-# "TIMED_OUT" and the gtest-inference "TIMEOUT" spellings.
-_FAIL_RESULTS = frozenset({RESULT_FAILED, RESULT_TIMED_OUT, RESULT_INFRA_ERROR, "TIMEOUT"})
+# Results that make a parent roll-up FAILED: both "TIMED_OUT"/"TIMEOUT" spellings, plus CANCELLED -- a sub-entry that never ran is not a pass.
+_FAIL_RESULTS = frozenset({RESULT_FAILED, RESULT_TIMED_OUT, RESULT_INFRA_ERROR,
+                           RESULT_CANCELLED, "TIMEOUT"})
 
 
 @dataclass
@@ -302,9 +304,10 @@ def plan_entries(tests, *, exec_mode):
 
 def rollup_result(sub_results):
     """Parent roll-up from sub-entry result strings (plan 9): FAILED if any
-    sub failed/timed-out/infra-errored, else SKIPPED if all skipped, else PASSED."""
+    sub failed/timed-out/infra-errored/was cancelled, else SKIPPED if all skipped, else PASSED."""
     results = list(sub_results)
-    if any(r in _FAIL_RESULTS for r in results):
+    # None = the scheduler never recorded a terminal result for that sub-entry; never a pass.
+    if any(r is None or r in _FAIL_RESULTS for r in results):
         return RESULT_FAILED
     if results and all(r == RESULT_SKIPPED for r in results):
         return RESULT_SKIPPED

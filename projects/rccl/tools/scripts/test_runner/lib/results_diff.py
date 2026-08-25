@@ -7,7 +7,7 @@ Per-configuration results diff for the init-pipeline correctness gate (plan §12
 
 The decisive gate is "identical per-configuration pass/fail/skip vs the serial
 baseline" -- compared on the per-config rows, NOT the parent roll-up. This module
-indexes each run's top-line records by (suite, test) and reports:
+indexes each run's per-config records by (suite, config name) and reports:
 
   * regressions      -- passed/skipped in baseline, failed in candidate (gate-fail)
   * fixes            -- failed in baseline, passed in candidate
@@ -29,24 +29,27 @@ _FAIL = frozenset({"FAILED", "TIMED_OUT", "TIMEOUT", "INFRA_ERROR", "CANCELLED"}
 _PASSLIKE = frozenset({"PASSED", "SKIPPED"})
 
 
-def _is_topline(rec):
-    """A serial record has no record_type -> it is top-line; a pipeline record is
-    top-line iff counts_toward_topline is set (parent_summary / single entry)."""
-    if "counts_toward_topline" in rec:
-        return bool(rec["counts_toward_topline"])
-    return True
-
-
 def _key(rec):
-    return (rec.get("suite"), rec.get("test_name") or rec.get("name"))
+    # 'name' carries the pinned sweep suffix (e.g. T.g8_mp_r1); test_name is the parent.
+    return (rec.get("suite"), rec.get("name") or rec.get("test_name"))
 
 
 def index_results(records):
-    """Map (suite, test) -> result over the top-line records (last one wins)."""
+    """Map (suite, config) -> result over the per-CONFIG records (last one wins).
+
+    A ``parent_summary`` is a roll-up over its sub-entries; keeping it instead of them
+    masks a per-config regression behind an equal aggregate. It is therefore dropped --
+    but only when its sub-entries are actually present, so a summary is never silently
+    lost from a record set that carries no per-config rows.
+    """
+    covered = {(r.get("suite"), r.get("test_name")) for r in records
+               if r.get("record_type") == "sub_entry"}
     out = {}
     for r in records:
-        if _is_topline(r):
-            out[_key(r)] = r.get("result")
+        if (r.get("record_type") == "parent_summary"
+                and (r.get("suite"), r.get("test_name")) in covered):
+            continue
+        out[_key(r)] = r.get("result")
     return out
 
 
@@ -80,7 +83,8 @@ def diff_results(baseline_records, candidate_records, exclude=None):
         if ra == rb:
             matched += 1
             continue
-        a_fail, b_fail = ra in _FAIL, rb in _FAIL
+        # A missing/None result is not a pass: it must be able to register as a regression.
+        a_fail, b_fail = (ra is None or ra in _FAIL), (rb is None or rb in _FAIL)
         if not a_fail and b_fail:
             regressions.append((k, ra, rb))
         elif a_fail and not b_fail:
