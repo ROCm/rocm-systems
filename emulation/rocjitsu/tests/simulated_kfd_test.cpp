@@ -58,6 +58,10 @@ TestVM create_test_vm() {
   t.loaded = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
   auto *soc = t.loaded.soc();
 
+  // These tests drive the engine directly and inspect single-partition state, so
+  // pin one worker instead of taking the config's default of one partition per
+  // XCD.
+  t.loaded.engine_config.num_threads = 1;
   t.loaded.engine_config.max_ticks = 0;
   t.loaded.engine_config.await_primaries = true;
   t.engine = std::make_unique<simdojo::SimulationEngine>(t.loaded.engine_config);

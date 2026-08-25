@@ -52,6 +52,10 @@ struct XcdDistributionFixture {
   XcdDistributionFixture() : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
     soc = loaded.soc();
     memory = loaded.memory();
+    // These tests drive the engine directly and inspect single-partition state,
+    // so pin one worker instead of taking the config's default of one partition
+    // per XCD.
+    loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
