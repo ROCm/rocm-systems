@@ -27,6 +27,12 @@ using nccl_dda_detail::DdaIpcBarrierState;
 using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
+// Single source of the launch geometry: grid/block for a byte payload. The
+// kernel is instantiated for int8_t, so `bytes` is the per-block element count.
+static inline std::pair<dim3, dim3> ddaAllGatherIpcGeom(size_t bytes) {
+  return meta::comms::getGridAndBlockDims(bytes, 1, ddaMaxNBlocksForScratch());
+}
+
 template <typename T>
 static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t sendcount, ncclComm* comm,
                                              cudaStream_t stream) {
@@ -42,9 +48,8 @@ static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuf
     return ncclInvalidArgument;
   }
 
-  const int nBlocksMax = ddaMaxNBlocksForScratch();
-  // For allgather, we use sendcount for grid calculation
-  auto gridBlock = meta::comms::getGridAndBlockDims(sendcount, sizeof(T), nBlocksMax);
+  // sendcount is already the byte count (kernel instantiated for int8_t).
+  auto gridBlock = ddaAllGatherIpcGeom(sendcount);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -97,6 +102,12 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   }
 
   return true;
+}
+
+uint32_t ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
+  (void)comm;
+  const auto grid = ddaAllGatherIpcGeom(sendcount * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
 }
 
 ncclResult_t ncclAllGatherDdaIpc(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,

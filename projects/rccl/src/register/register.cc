@@ -126,21 +126,23 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
            reg->collnetProxyconn->rank);
     }
   }
-  if (reg->state & IPC_REG_COMPLETE) {
-    if (reg->ipcInfos) {
-      for (int i = 0; i < reg->ipcInfosSize; ++i)
-        if (reg->ipcInfos[i]) {
-          if (ncclIpcDeregBuffer(comm, reg->ipcInfos[i]) != ncclSuccess) {
-            WARN("rank %d deregister IPC buffer %p peerRank %d failed", comm->rank, reg->ipcInfos[i]->baseAddr,
-                 reg->ipcInfos[i]->peerRank);
-          }
-          free(reg->ipcInfos[i]);
+
+  // RCCL: do not gate this on IPC_REG_COMPLETE. ipcInfos is allocated before the first peer
+  // registration is attempted, so a record that never reaches the flag still owns the array.
+  // Entries are non-NULL only for peers that completed.
+  if (reg->ipcInfos) {
+    for (int i = 0; i < reg->ipcInfosSize; ++i)
+      if (reg->ipcInfos[i]) {
+        if (ncclIpcDeregBuffer(comm, reg->ipcInfos[i]) != ncclSuccess) {
+          WARN("rank %d deregister IPC buffer %p peerRank %d failed", comm->rank, reg->ipcInfos[i]->baseAddr,
+               reg->ipcInfos[i]->peerRank);
         }
-      free(reg->ipcInfos);
-    }
-    if (reg->regIpcAddrs.hostPeerRmtAddrs) free(reg->regIpcAddrs.hostPeerRmtAddrs);
-    if (reg->regIpcAddrs.devPeerRmtAddrs) NCCLCHECK(ncclCudaFree(reg->regIpcAddrs.devPeerRmtAddrs, comm->memManager));
+        free(reg->ipcInfos[i]);
+      }
+    free(reg->ipcInfos);
   }
+  if (reg->regIpcAddrs.hostPeerRmtAddrs) free(reg->regIpcAddrs.hostPeerRmtAddrs);
+  if (reg->regIpcAddrs.devPeerRmtAddrs) NCCLCHECK(ncclCudaFree(reg->regIpcAddrs.devPeerRmtAddrs, comm->memManager));
   return ncclSuccess;
 }
 

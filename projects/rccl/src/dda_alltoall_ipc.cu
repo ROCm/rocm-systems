@@ -56,11 +56,11 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
 
   if (meta::comms::ddaAlltoAllSingleBlockGrid(count, sizeof(T))) {
     meta::comms::ddaAllToAllIpc<T, kDdaNranks, false, true><<<grid, block, 0, stream>>>(
-        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   } else {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     meta::comms::ddaAllToAllIpc<T, kDdaNranks, false, false><<<grid, block, 0, stream>>>(
-        d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
+      d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   }
   CUDACHECK(cudaGetLastError());
 
