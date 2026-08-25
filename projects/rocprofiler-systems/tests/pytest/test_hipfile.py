@@ -258,9 +258,7 @@ class TestHipFileTelemetry(RocprofsysTest):
 
     @pytest.mark.timeout(180)
     @pytest.mark.rocpd("hipfile_fallback_env")
-    def test_telemetry_fallback_path(
-        self, hipfile_fallback_env, hipfile_telemetry_rules
-    ):
+    def test_telemetry_fallback_path(self, hipfile_fallback_env, hipfile_telemetry_rules):
         """
         Force hipFile's POSIX fallback and assert the split reflects it.
 

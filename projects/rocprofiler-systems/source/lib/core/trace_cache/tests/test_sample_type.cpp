@@ -335,7 +335,7 @@ TEST_F(sample_type_test, size_consistency_with_system_tid)
     std::uint8_t* buffer_ptr   = buf.data();
     auto          deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
     ASSERT_TRUE(deserialized.system_tid.has_value());
-    EXPECT_EQ(deserialized.system_tid.value(), 12345);
+    EXPECT_EQ(*deserialized.system_tid, 12345);
     // Verify we consumed exactly calculated_size bytes
     EXPECT_EQ(buffer_ptr - buf.data(), static_cast<std::ptrdiff_t>(calculated_size));
 }
@@ -483,30 +483,52 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::fragmented_space), 0xFFFF);
 }
 
+namespace hipfile_values
+{
+constexpr std::uint64_t read_bytes       = 4096;
+constexpr std::uint64_t write_bytes      = 8192;
+constexpr std::uint64_t read_ops         = 10;
+constexpr std::uint64_t write_ops        = 20;
+constexpr std::uint64_t fastpath_reads   = 7;
+constexpr std::uint64_t fastpath_writes  = 13;
+constexpr std::uint64_t fallback_reads   = 3;
+constexpr std::uint64_t fallback_writes  = 5;
+constexpr std::uint64_t unaligned_reads  = 1;
+constexpr std::uint64_t unaligned_writes = 2;
+constexpr std::uint64_t read_errors      = 11;
+constexpr std::uint64_t write_errors     = 17;
+constexpr double        read_bandwidth   = 1234.5;
+constexpr double        write_bandwidth  = 6789.25;
+constexpr std::uint32_t enabled_mask     = 0x2A5;
+constexpr std::uint32_t device_id        = 3;
+constexpr std::uint64_t timestamp        = 987654321;
+}  // namespace hipfile_values
+
 TEST_F(sample_type_test, hipfile_pmc_sample_serialize_deserialize)
 {
     rocprofsys::pmc::collectors::hipfile::metrics values{};
     // Every field distinct so a transposed pairing between serialize() and
     // deserialize() cannot round-trip successfully.
-    values.read_bytes       = 4096;
-    values.write_bytes      = 8192;
-    values.read_ops         = 10;
-    values.write_ops        = 20;
-    values.fastpath_reads   = 7;
-    values.fastpath_writes  = 13;
-    values.fallback_reads   = 3;
-    values.fallback_writes  = 5;
-    values.unaligned_reads  = 1;
-    values.unaligned_writes = 2;
-    values.read_errors      = 11;
-    values.write_errors     = 17;
-    values.read_bandwidth   = 1234.5;
-    values.write_bandwidth  = 6789.25;
+    values.read_bytes       = hipfile_values::read_bytes;
+    values.write_bytes      = hipfile_values::write_bytes;
+    values.read_ops         = hipfile_values::read_ops;
+    values.write_ops        = hipfile_values::write_ops;
+    values.fastpath_reads   = hipfile_values::fastpath_reads;
+    values.fastpath_writes  = hipfile_values::fastpath_writes;
+    values.fallback_reads   = hipfile_values::fallback_reads;
+    values.fallback_writes  = hipfile_values::fallback_writes;
+    values.unaligned_reads  = hipfile_values::unaligned_reads;
+    values.unaligned_writes = hipfile_values::unaligned_writes;
+    values.read_errors      = hipfile_values::read_errors;
+    values.write_errors     = hipfile_values::write_errors;
+    values.read_bandwidth   = hipfile_values::read_bandwidth;
+    values.write_bandwidth  = hipfile_values::write_bandwidth;
 
     rocprofsys::pmc::collectors::hipfile::enabled_metrics enabled;
-    enabled.value = 0x2A5;
+    enabled.value = hipfile_values::enabled_mask;
 
-    const hipfile_pmc_sample original{ enabled, 3, 987654321, values };
+    const hipfile_pmc_sample original{ enabled, hipfile_values::device_id,
+                                       hipfile_values::timestamp, values };
 
     ASSERT_LE(get_size(original), buffer.size());
     serialize(buffer.data(), original);

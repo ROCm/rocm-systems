@@ -226,7 +226,7 @@ struct processor_view_t
 
 private:
     template <typename T>
-    static inline const vtable_t& get_vtable_for_type() noexcept
+    static const vtable_t& get_vtable_for_type() noexcept
     {
         static const vtable_t vtable{
             +[](void* obj, const kernel_dispatch_sample& sample) noexcept {
@@ -312,7 +312,7 @@ struct sample_processor_t
             view.finalize_processing();
     }
 
-    ROCPROFSYS_INLINE bool is_empty() const noexcept
+    [[nodiscard]] ROCPROFSYS_INLINE bool is_empty() const noexcept
     {
         return m_processor_view_list.empty();
     }

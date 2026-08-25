@@ -38,7 +38,7 @@ template <typename Tp>
 struct category_enum_id;
 
 template <size_t Idx>
-using category_type_id_t = typename category_type_id<Idx>::type;
+using category_type_id_t = category_type_id<Idx>::type;
 }  // namespace rocprofsys
 
 #define ROCPROFSYS_DEFINE_CATEGORY_TRAIT(TYPE, ENUM)                                     \
