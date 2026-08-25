@@ -543,7 +543,8 @@ NB_MODULE(_rocshmem4py, m) {
       "Device-visible resources of one peer's RC queue pair.\n\n"
       "Addresses are device virtual addresses in the address space of the GPU "
       "owning the QP; depths are in ring slots. The vendor-specific attributes "
-      "raise RuntimeError unless `vendor` matches.")
+      "raise AttributeError unless `vendor` matches, so hasattr() reports False "
+      "for the arms that do not apply.")
     .def_ro("sq_buf", &QpInfo::sq_buf, "Send queue ring buffer.")
     .def_ro("sq_prod", &QpInfo::sq_prod,
         "Address of the live SQ producer counter. An external WQE builder must "

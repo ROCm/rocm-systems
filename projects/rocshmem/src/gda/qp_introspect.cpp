@@ -15,6 +15,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include <atomic>
+
 #include "backend_bc.hpp"
 #include "backend_type.hpp"
 #include "gda/backend_gda.hpp"
@@ -59,36 +61,62 @@ bool GDABackend::fill_qp_info(int peer, int ctx_id, QpInfo *out) {
   if (conn >= static_cast<size_t>(num_qps)) return false;
 
   // initialize_gpu_qp writes the field VALUES straight into gpu_qps[conn] in
-  // device memory; host_qps[conn] holds only the initial construct. So read the
-  // device copy. QueuePair has no default constructor -- copy the bytes
-  // into raw aligned storage and read POD members from it; no constructor
-  // or destructor runs on this buffer.
-  alignas(QueuePair) unsigned char storage[sizeof(QueuePair)];
-  if (hipMemcpy(storage, &gpu_qps[conn], sizeof(QueuePair),
-                hipMemcpyDeviceToHost) != hipSuccess) {
-    return false;
-  }
-  const QueuePair *qp = reinterpret_cast<const QueuePair *>(storage);
+  // device memory; host_qps[conn] holds only the initial construct, so the
+  // device copy is the one to read.
+  //
+  // Copy the individual members rather than the whole object. QueuePair is
+  // polymorphic (virtual destructor), so it is not trivially copyable: memcpy
+  // of the object bytes followed by reinterpret_cast to QueuePair* would be
+  // undefined behaviour, and the copied vtable pointer would be meaningless on
+  // the host anyway. Each member read below is a POD, which is well defined.
+  const QueuePair *dev_qp = &gpu_qps[conn];  // device address, never
+                                             // dereferenced on the host
+  auto fetch = [](auto *dst, const auto *device_src) {
+    return hipMemcpy(dst, device_src, sizeof(*dst),
+                     hipMemcpyDeviceToHost) == hipSuccess;
+  };
 
-  out->base_heap = static_cast<uint64_t>(qp->base_heap);
-  out->lkey = qp->lkey;
-  out->rkey = qp->rkey;
-  out->qpn = qp->qp_num;
+  decltype(QueuePair::base_heap) base_heap{};
+  decltype(QueuePair::lkey) lkey{};
+  decltype(QueuePair::rkey) rkey{};
+  decltype(QueuePair::qp_num) qp_num{};
+  if (!fetch(&base_heap, &dev_qp->base_heap)) return false;
+  if (!fetch(&lkey, &dev_qp->lkey)) return false;
+  if (!fetch(&rkey, &dev_qp->rkey)) return false;
+  if (!fetch(&qp_num, &dev_qp->qp_num)) return false;
+
+  out->base_heap = static_cast<uint64_t>(base_heap);
+  out->lkey = lkey;
+  out->rkey = rkey;
+  out->qpn = qp_num;
   out->vendor = static_cast<QpInfoVendor>(gda_provider);
 
   switch (gda_provider) {
     case GDAProvider::IONIC: {
-      out->sq_buf = reinterpret_cast<uint64_t>(qp->ionic_sq_buf);
-      out->cq_buf = reinterpret_cast<uint64_t>(qp->ionic_cq_buf);
+      decltype(QueuePair::ionic_sq_buf) ionic_sq_buf{};
+      decltype(QueuePair::ionic_cq_buf) ionic_cq_buf{};
+      decltype(QueuePair::sq_mask) sq_mask{};
+      decltype(QueuePair::cq_mask) cq_mask{};
+      decltype(QueuePair::sq_dbreg) sq_dbreg{};
+      decltype(QueuePair::sq_dbval) sq_dbval{};
+      if (!fetch(&ionic_sq_buf, &dev_qp->ionic_sq_buf)) return false;
+      if (!fetch(&ionic_cq_buf, &dev_qp->ionic_cq_buf)) return false;
+      if (!fetch(&sq_mask, &dev_qp->sq_mask)) return false;
+      if (!fetch(&cq_mask, &dev_qp->cq_mask)) return false;
+      if (!fetch(&sq_dbreg, &dev_qp->sq_dbreg)) return false;
+      if (!fetch(&sq_dbval, &dev_qp->sq_dbval)) return false;
+
+      out->sq_buf = reinterpret_cast<uint64_t>(ionic_sq_buf);
+      out->cq_buf = reinterpret_cast<uint64_t>(ionic_cq_buf);
       // Live producer index, taken from the device array itself rather than the
       // host copy: an external builder has to continue this sequence.
       out->sq_prod = reinterpret_cast<uint64_t>(&gpu_qps[conn].sq_prod);
-      out->sq_depth = static_cast<uint32_t>(qp->sq_mask + 1);
-      out->cq_depth = static_cast<uint32_t>(qp->cq_mask + 1);
-      out->ionic.db = reinterpret_cast<uint64_t>(qp->sq_dbreg);
-      out->ionic.dbval = qp->sq_dbval;
-      out->ionic.sq_mask = qp->sq_mask;
-      out->ionic.cq_mask = qp->cq_mask;
+      out->sq_depth = static_cast<uint32_t>(sq_mask + 1);
+      out->cq_depth = static_cast<uint32_t>(cq_mask + 1);
+      out->ionic.db = reinterpret_cast<uint64_t>(sq_dbreg);
+      out->ionic.dbval = sq_dbval;
+      out->ionic.sq_mask = sq_mask;
+      out->ionic.cq_mask = cq_mask;
       // Which UDMA engine this QP is bound to. Not derivable from the device
       // struct; query the verbs QP the same way setup_gpu_qp does.
       if (qps.size() <= conn || qps[conn] == nullptr) return false;
@@ -143,9 +171,11 @@ bool rocshmem_query_qp_info(int peer, int ctx_id, QpInfo *out) {
     // caller this failure is otherwise indistinguishable from "no GDA backend",
     // and the fix for each is completely different.
     if (provider != QpInfoVendor::UNKNOWN) {
-      static bool warned = false;  // benign race: at worst the warning repeats
-      if (!warned) {
-        warned = true;
+      // Atomic, not a plain bool: this entry point can be called from several
+      // threads, and a non-atomic read/write pair would be a data race, which
+      // is undefined behaviour however harmless the intent.
+      static std::atomic<bool> warned{false};
+      if (!warned.exchange(true, std::memory_order_relaxed)) {
         LOG_WARN("QP introspection is not implemented for the detected GDA "
                  "provider (%s), so no queue pair will be reported. Only ionic "
                  "is supported today.",
