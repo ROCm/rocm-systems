@@ -537,10 +537,9 @@ QueueController::serializer(const Queue* queue)
                 return false;
             },
             [&](auto& m) {
-                ret =
-                    m.emplace(agent_id,
-                              std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
-                        .first->second.get();
+                ret = m.emplace(agent_id,
+                                std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
+                          .first->second.get();
                 if(should_serialize)
                 {
                     ret->wlock([&](auto& serializer) { serializer.enable({}); });
@@ -613,8 +612,7 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                     if(itr->second == state.enabled(agent_id)) continue;
 
                     auto queues = hsa_barrier::queue_map_ptr_t{};
-                    if(auto it = pd_map.find(agent_id); it != pd_map.end())
-                        queues = it->second;
+                    if(auto it = pd_map.find(agent_id); it != pd_map.end()) queues = it->second;
 
                     auto ser_itr = serializers.find(agent_id);
                     if(ser_itr == serializers.end() || !ser_itr->second) continue;
