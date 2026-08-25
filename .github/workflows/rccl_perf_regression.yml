@@ -154,7 +154,7 @@ jobs:
         # Self-healing janitor. The cleanup steps below cover the paths we can
         # predict, but a runner dying mid-job leaves its copy behind forever on
         # NFS. Anything older than a day is unambiguously dead: the longest a run
-        # can legally live is the detect job's 560min timeout.
+        # can legally live is the detect job's 500min timeout.
         run: |
           find "${RCCL_CI_ROOT}/configs" -maxdepth 1 -name 'ci_detect_run_*.json' \
             -mmin +1440 -print -delete 2>/dev/null || true
@@ -317,20 +317,22 @@ jobs:
     # by MAX_QUEUE_SEC. Worth doing once there is queue data to justify it.
     runs-on: [self-hosted, rccl-detect]
     # Outermost layer of the timeout nest. Must stay above MAX_QUEUE_SEC (4h)
-    # plus MAX_WAIT_SEC (5h10m) in submit_and_poll.sh, so that script gets to
+    # plus MAX_WAIT_SEC (4h10m) in submit_and_poll.sh, so that script gets to
     # cancel the Slurm job and report *why* rather than being killed here with
     # a bare "exceeded the maximum execution time". See the table in
     # submit_and_poll.sh; retune both together.
     #
-    # 510 -> 560 because MAX_WAIT_SEC went 4h10m -> 5h10m when alltoall_perf
-    # was re-enabled: at 10 groups the circuit-breaker worst case is exactly
-    # 4.0h, so the sbatch --time had to go to 5h to stay a real bound. 4h00
-    # queue + 5h10 run = 9h10, and this is 9h20.
+    # 560 -> 500 because MAX_WAIT_SEC went 5h10m -> 4h10m when broadcast_perf
+    # was dropped from the matrix: at 8 groups the circuit-breaker worst case
+    # is 3.2h, so the sbatch --time is a real bound again at 4h. 4h00 queue +
+    # 4h10 run = 8h10, and this is 8h20. The nest last held these two values
+    # at 510; 500 keeps the +10min of slack 560 carried rather than the +20.
     #
-    # It is also a runner-capacity number, not just a safety net: this runner
-    # takes one active job and one queued, so every hour a wedged detect run
-    # sits here is an hour no other PR can be tested. It was 540.
-    timeout-minutes: 560
+    # This bounds the wedged case only -- it is not a capacity number. It does
+    # not bound how long a PR waits for a runner, because timeout-minutes does
+    # not start counting until a runner is assigned, so time spent queueing for
+    # rccl-detect is invisible to every timeout in this file.
+    timeout-minutes: 500
     steps:
       - name: Run A/B detector (pinned 4-node allocation)
         id: detect
