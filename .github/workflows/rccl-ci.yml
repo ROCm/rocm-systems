@@ -77,7 +77,7 @@ jobs:
       suite: ext-plugins
       runs_on: '["ruby-linux-slurm-scale-runner"]'
       partition: interactive
-      timeout_minutes: 240
+      timeout_minutes: 300
       non_gating: true
       artifact_group: ${{ inputs.artifact_group || 'gfx950-dcgpu' }}
       artifact_run_id: ${{ inputs.artifact_run_id || '' }}

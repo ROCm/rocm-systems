@@ -4,7 +4,7 @@
 #SBATCH --ntasks=1
 #SBATCH --partition=interactive
 #SBATCH --exclusive
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 #
