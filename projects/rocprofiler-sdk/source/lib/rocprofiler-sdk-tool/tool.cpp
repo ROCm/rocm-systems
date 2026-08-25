@@ -1953,6 +1953,9 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     }
 }
 
+// rocprofv3 registers callback dispatch counting (not buffered dispatch counting), so counter
+// records arrive on this path. replay_pass is populated here; the SDK buffered counter callback
+// path is not wired in this tool.
 void
 counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                         rocprofiler_counter_record_t*                record_data,
@@ -3366,6 +3369,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
     if(tool::get_config().kernel_replay)
     {
+        if(!tool::get_config().counter_collection)
+        {
+            ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
+                          "(ROCPROF_COUNTER_COLLECTION)";
+            std::exit(EXIT_FAILURE);
+        }
+
         auto kernel_replay_ctx = rocprofiler_context_id_t{0};
 
         ROCPROFILER_CALL(rocprofiler_create_context(&kernel_replay_ctx),
