@@ -1,0 +1,598 @@
+<h1>8. Design evaluation against real-world use cases</h1>
+<p><em>Written to be dropped into the internal Confluence design document as its "Real-world use case
+evaluation" section. It is deliberately structured as an evaluation rather than a description: each
+subsection states what we were trying to learn, what the evidence says, and what design position
+follows.</em></p>
+<hr />
+<h2>8.1 Why this section exists</h2>
+<p>The design document up to this point describes a mechanism: intercept a dispatch, lock the agent,
+drain, snapshot device memory, re-execute N times, restore between passes, signal once. That
+description is accurate and it is not sufficient to decide anything, because every interesting
+question about kernel replay is a question about the <em>application it is pointed at</em>:</p>
+<ul>
+<li>Does the application allocate the kernel's outputs where the tracker can see them?</li>
+<li>Is one dispatch the unit the user wants a number for?</li>
+<li>Is the application's resident footprint 200 MB or 150 GB?</li>
+<li>Does anything other than an AQL queue write the buffers during the window?</li>
+<li>Can the application tolerate its GPU going quiet for several seconds?</li>
+</ul>
+<p>The answers differ by orders of magnitude across the workload classes we care about, and they point
+at <em>different designs</em>, not at one design with a longer limitations list. This section makes that
+explicit so that scope decisions are made against evidence rather than against the mechanism's
+current shape.</p>
+<h3>8.1.1 What "evaluated against" means here</h3>
+<p>For each use-case class we asked four things:</p>
+<ol>
+<li><strong>What is the user's actual profiling question?</strong> Not "collect these counters" — the reason they
+   want the counters.</li>
+<li><strong>What fraction of the work is even eligible</strong> under the mechanism's gates (single packet, single
+   dispatch, not a graph)?</li>
+<li><strong>Is replay sound for that work</strong>, in the specific sense of §6: is the kernel's write set inside
+   the restored set, and is the window actually isolated?</li>
+<li><strong>Is replay economic</strong>, per the cost model <code>K \cdot F \lesssim B \cdot T_{app}\frac{P-1}{P}</code> of
+   §1.3.2?</li>
+</ol>
+<p>A use case only "works" when all four line up. Most of the interesting findings are cases where
+three of the four line up and the fourth kills it — and in several of those the fix is a different
+replay <em>scope</em>, not a repair to the current one.</p>
+<hr />
+<h2>8.2 The use-case classes we evaluated against</h2>
+<p>These are grouped by the <em>shape</em> of the GPU work rather than by scientific domain, because the shape
+is what determines the verdict. Domain-by-domain verdicts are in §4; this table is the design-facing
+summary.</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Representative workloads</th>
+<th>GPU work shape</th>
+<th>Footprint per GPU</th>
+<th>Eligible fraction</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>C1. Dense-kernel HPC</strong></td>
+<td>LAMMPS/Kokkos, LULESH, miniFE, stencil and finite-element codes</td>
+<td>many launches of a few kernels, one or two streams, <code>hipMalloc</code>-provenance arrays</td>
+<td>10 MB – few GB</td>
+<td>high</td>
+<td><strong>works today</strong>; the design's best case</td>
+</tr>
+<tr>
+<td><strong>C2. Library microbenchmarking</strong></td>
+<td>rocBLAS/hipBLASLt GEMM, MIOpen convolutions, BabelStream</td>
+<td>isolated kernels, tiny surrounding state</td>
+<td>small</td>
+<td>high, except multi-kernel solutions</td>
+<td><strong>works today</strong>; also the least valuable, since these are easy to profile by other means</td>
+</tr>
+<tr>
+<td><strong>C3. Large-footprint AI training</strong></td>
+<td>transformer pre-training and fine-tuning, PyTorch eager or compiled</td>
+<td>thousands of launches per step, caching allocator, collectives, sometimes graphs</td>
+<td>20 – 170 GB</td>
+<td>medium in eager, near zero under graph capture</td>
+<td><strong>blocked on economics</strong> (footprint) and <strong>soundness</strong> (allocator mode), not on the core logic</td>
+</tr>
+<tr>
+<td><strong>C4. Graph-captured inference serving</strong></td>
+<td>batched LLM decode, compiled inference steps</td>
+<td>almost all steady-state work inside graph launches</td>
+<td>10 – 170 GB</td>
+<td>≈ 0</td>
+<td><strong>blocked on scope</strong>: needs graph replay (§5.1A)</td>
+</tr>
+<tr>
+<td><strong>C5. Collective-bound distributed</strong></td>
+<td>data/tensor/pipeline-parallel training, GPU-aware-MPI halo exchange</td>
+<td>collectives interleaved with compute; peer progress required</td>
+<td>large</td>
+<td>eligible but unsound</td>
+<td><strong>hard carveout</strong>; today it hangs then aborts the job</td>
+</tr>
+<tr>
+<td><strong>C6. Long-setup, short-kernel-of-interest</strong></td>
+<td>docking and screening pipelines, MD after system preparation, inference after a long warm-up, simulation after mesh generation and partitioning</td>
+<td>expensive setup, then a kernel someone wants to optimize</td>
+<td>small to medium</td>
+<td>high</td>
+<td><strong>the strongest value case</strong>, because application replay pays the setup <code>P</code> times and kernel replay pays it once</td>
+</tr>
+<tr>
+<td><strong>C7. Real-time / closed-loop</strong></td>
+<td>robotics perception and control, streaming media, low-latency trading inference</td>
+<td>fixed deadlines, sensor or network DMA into device buffers</td>
+<td>small</td>
+<td>eligible</td>
+<td><strong>offline-only</strong>; the window violates deadlines, and non-AQL DMA writers break isolation</td>
+</tr>
+<tr>
+<td><strong>C8. Pure-device-state simulation</strong></td>
+<td>quantum circuit state-vector simulation, some Monte Carlo engines</td>
+<td>one enormous device array, no host interaction in steady state</td>
+<td>up to all of HBM</td>
+<td>high</td>
+<td><strong>sound and useless without write-set restore</strong>: the footprint <em>is</em> the state</td>
+</tr>
+</tbody>
+</table>
+<p>Two observations from this table drive the rest of the section.</p>
+<p><strong>The classes where replay is sound are not the classes where it is valuable.</strong> C1 and C2 work today,
+but C1 codes launch the same kernel thousands of times — which means the cheapest correct way to
+collect several counter groups is to collect different groups on different <em>iterations</em> and never
+snapshot anything, and C2 is trivially profiled by running the microbenchmark again. The classes
+where replay would be transformative are C3, C4 and C6, and of those only C6 works today.</p>
+<p><strong>The blockers are three different kinds of problem, and they need three different responses.</strong> C3 is
+blocked by <em>cost</em> (a performance engineering problem: §9 R12–R14). C4 is blocked by <em>scope</em> (a feature
+problem: graph replay). C5 is blocked by <em>semantics</em> (a carveout that must be detected, not fixed).
+Conflating them into one "limitations" list is what makes the roadmap hard to argue about.</p>
+<hr />
+<h2>8.3 Research questions</h2>
+<p>These are the questions where we do not currently have the data to make a confident design decision,
+stated with what evidence would settle each. Every one is answerable with a bounded experiment on a
+single node, and several are answerable with the matrix in §7.</p>
+<p><strong>RQ1 — What fraction of dispatches in production workloads passes the eligibility gate?</strong>
+The gate requires a single-packet, single-dispatch, non-graph submission. We do not know the real
+distribution. <em>Evidence:</em> count dispatches with <code>--kernel-trace</code> and compare against replayed
+dispatch ids, per workload in §7.3–§7.4. <em>Why it matters:</em> if the answer is 95% for HPC and 5% for
+inference serving, the graph-replay work in §5.1A moves from "nice" to "the only way this feature
+reaches the AI workloads it was justified by".</p>
+<p><strong>RQ2 — How large is a kernel's write set relative to the agent's resident footprint?</strong>
+This ratio is the entire payoff of write-set-only restore. <em>Evidence:</em> instrument a device-side page
+hash before and after a dispatch across the §7 workload suite and report the distribution of
+(bytes written ÷ tracked bytes). <em>Why it matters:</em> if the median is 1%, R13 is a 100× win and should
+be built before anything else; if it is 60%, R13 is not worth the complexity and the answer is
+reachable-set narrowing (R12) alone.</p>
+<p><strong>RQ3 — How much does replay perturb the measurement?</strong>
+Separate from correctness (§1.4). <em>Evidence:</em> collect one counter group with replay and the same
+group without replay, on the same dispatch, and compare; then compare pass 0 against pass k within a
+replay. <em>Why it matters:</em> if pass-to-pass drift on cache metrics is 5%, we document it; if it is 50%,
+derived metrics that combine groups from different passes are not meaningful and cache control (R10)
+becomes a correctness feature rather than a refinement.</p>
+<p><strong>RQ4 — Is iteration multiplexing statistically equivalent to replay for iterative codes?</strong>
+For a code that launches the same kernel with the same shape thousands of times, collecting group A
+on iteration <em>i</em> and group B on iteration <em>i+1</em> costs nothing and needs no snapshot. Replay's claim
+to superiority is that it guarantees <em>identical inputs</em>, whereas multiplexing only gives
+<em>statistically similar</em> ones. <em>Evidence:</em> collect the same metric set both ways on a C1 workload and
+compare distributions; look specifically at whether the variance across iterations exceeds the
+variance across replay passes. <em>Why it matters:</em> this is the single biggest threat to the value
+proposition for HPC. If multiplexing is equivalent for C1, then replay's justified scope narrows to
+C3/C4/C6 — which is a defensible and much clearer story, and it changes which optimizations matter.</p>
+<p><strong>RQ5 — How often do real applications allocate kernel outputs outside the tracked set?</strong>
+<em>Evidence:</em> wrap the managed, stream-ordered and virtual-memory allocation entry points and report
+untracked device-visible bytes per run, alongside tracked bytes, across the §7 suite and across
+allocator configurations. <em>Why it matters:</em> it converts §2.2's argument from "this could happen" into
+a coverage number per workload, and it tells us whether the untracked-coverage decline rule (R6) will
+fire on 5% or 80% of real runs.</p>
+<p><strong>RQ6 — Can a conservative reachable-set closure be made sound in practice?</strong>
+Narrowing the snapshot to what the kernel can reach requires discovering device pointers from the
+kernarg segment and, transitively, from captured regions. <em>Evidence:</em> prototype the closure, compare
+its result against the full-agent footprint and against a device-hash-derived ground-truth write set,
+and count how often the closure misses a written region. <em>Why it matters:</em> R12 is the largest
+single cost reduction available, and its risk is entirely "did we miss a pointer". A measured miss
+rate of zero across the suite, plus a conservative fallback, is what makes it shippable.</p>
+<p><strong>RQ7 — Is there a read-only fast path?</strong>
+A kernel whose write set does not intersect the tracked set needs no restore at all — replay becomes
+free. Kernel argument metadata in the code object may indicate read-only pointer arguments, and a
+device hash can confirm emptiness after pass 0. <em>Evidence:</em> measure what fraction of dispatches in
+the suite are read-only with respect to tracked memory (reduction kernels writing only a small
+accumulator are nearly free too). <em>Why it matters:</em> a cheap, high-confidence fast path that removes
+the dominant cost for a subset of dispatches, with no carveout implications.</p>
+<p><strong>RQ8 — Where is the crossover between device-resident and host-resident snapshots?</strong>
+<em>Evidence:</em> implement both and sweep footprint. <em>Why it matters:</em> it decides the default policy for
+R14 and it determines how much free HBM the feature should be willing to consume.</p>
+<p><strong>RQ9 — What do users actually want the unit of repetition to be?</strong>
+Dispatch, graph, annotated range, or application. <em>Evidence:</em> the fastest route is to prototype
+user-driven range replay (§5.1B), which is small, and put it in front of two or three internal
+consumers alongside per-dispatch replay. <em>Why it matters:</em> it is the difference between building
+API-capture range replay (large) and exposing a pass loop (small).</p>
+<hr />
+<h2>8.4 Design questions and their trade-offs</h2>
+<p>Each question is stated with its options, the trade-off axis, and a recommended position. These are
+the decisions the design document should record explicitly, because most of them are currently
+implicit in the code.</p>
+<h3>DQ1 — What is the snapshot scope?</h3>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Cost</th>
+<th>Risk</th>
+<th>Complexity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Whole agent (today)</td>
+<td>proportional to the process's entire resident footprint</td>
+<td>lowest — cannot miss a region the kernel touches</td>
+<td>lowest</td>
+</tr>
+<tr>
+<td>Reachable set from kernargs (+ transitive closure)</td>
+<td>proportional to the kernel's operands</td>
+<td>may miss a region reached by a pointer the closure did not find</td>
+<td>moderate</td>
+</tr>
+<tr>
+<td>Write set only, discovered by hashing after pass 0</td>
+<td>proportional to bytes actually written</td>
+<td>needs a correct first pass and page-granular hashing</td>
+<td>moderate</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Trade-off:</strong> conservatism against cost, and the conservative choice is the one that makes the
+feature unusable on the workloads it was justified by. <strong>Recommended position:</strong> reachable set with a
+conservative fallback to whole-agent, then write-set restore layered on top; keep whole-agent as an
+explicit "paranoid" mode for validating the narrower modes. Note the ordering matters: reachable-set
+narrowing helps <em>every</em> workload including read-only kernels, while write-set restore only helps the
+restore half.</p>
+<h3>DQ2 — Where does the snapshot live?</h3>
+<p>Unpinned host memory (today), pinned host memory, device memory, or device-first with host spill.
+<strong>Trade-off:</strong> speed against HBM pressure. A device-resident snapshot runs at HBM bandwidth — roughly
+two orders of magnitude faster than the current path — but consumes HBM in a process that may already
+be near capacity, which is exactly the C3/C8 case. <strong>Recommended position:</strong> device-first with host
+spill, and pinned host buffers when spilling. This is also what the closest prior art does, which is
+a reasonable signal.</p>
+<h3>DQ3 — Abort or decline on failure?</h3>
+<p><strong>Trade-off:</strong> a decline risks the user silently getting no data; an abort risks killing a
+multi-hour job. <strong>Recommended position:</strong> decline, always, with a machine-readable reason recorded in
+the output. The current use of a fatal abort for drain timeouts converts every unsupported-kernel
+encounter into a job kill, which is the one outcome strictly worse than not profiling. The single
+exception is a partially applied restore, where continuing would corrupt application data — that must
+stay fatal, and it already is.</p>
+<h3>DQ4 — What is the isolation granularity?</h3>
+<p>Per HSA agent (today), per physical device, per peer-access clique, or process-global.
+<strong>Trade-off:</strong> parallelism against correctness. Per-agent maximizes concurrent replays and is wrong
+whenever peer access is enabled or the device is partitioned into multiple agents that share memory
+and caches. <strong>Recommended position:</strong> keep per-agent as the <em>lock</em>, but make eligibility conditional:
+decline when peer-exposed allocations are live, and widen the lock to the physical device when the
+agent is one partition of several in use. Peer-clique windows are the correct long-term answer and
+only become affordable once DQ1 and DQ2 are resolved.</p>
+<h3>DQ5 — What is the cache and clock policy?</h3>
+<p>None (today), flush between passes, warm-up pass discarded, or user-selectable.
+<strong>Trade-off:</strong> comparability against realism. Flushing makes passes comparable <em>to each other</em>,
+which is what you need to combine counter groups — but it makes them all equally unlike the
+production execution. Not flushing makes pass 0 unlike passes 1..P−1, which is worse, because it
+introduces a systematic bias that the user cannot see. <strong>Recommended position:</strong> flush by default,
+expose the policy, and record which policy produced the output.</p>
+<h3>DQ6 — Is the pass count a cap or a minimum?</h3>
+<p>Today it is a hard cap and the continue callback can only break early; there is already a TODO
+noting that treating it as a minimum would be useful. <strong>Trade-off:</strong> predictability against
+adaptivity. Adaptive pass counts enable "keep going until the counter variance is below a threshold",
+which is genuinely useful for noisy metrics, but it makes the cost unbounded. <strong>Recommended
+position:</strong> keep the cap as the default, allow an explicit "minimum with a ceiling" mode, and require
+the ceiling.</p>
+<h3>DQ7 — Where does the pass loop live?</h3>
+<p>In the SDK (today), or in the application via a range API.
+<strong>Trade-off:</strong> transparency against correctness and cost. An SDK-driven loop needs no source change
+and cannot handle anything requiring external progress; an application-driven loop needs two lines of
+annotation and handles collectives, MPI, real-time pipelines and graph-captured work, while making
+the snapshot optional. <strong>Recommended position:</strong> both, with the range API prioritized higher than its
+size suggests, because it is the only path to C5 and it dissolves rather than mitigates the cost
+model.</p>
+<h3>DQ8 — What is the output contract?</h3>
+<p>Today: P records sharing one dispatch id, distinguished by <code>replay_pass</code>.
+<strong>Trade-off:</strong> fidelity against consumer simplicity. Sharing the dispatch id is right — it is one
+logical dispatch — but it breaks any consumer that assumes dispatch ids are unique per record, and it
+leaves open how a derived metric combining counters from different passes should be attributed.
+<strong>Recommended position:</strong> keep the shared id, document it as a contract, and add the per-dispatch
+provenance fields from R11 (footprint, timings, cache policy, canary consistency) so a consumer can
+decide whether combining passes is legitimate for that row.</p>
+<h3>DQ9 — Opt-in granularity</h3>
+<p>All eligible dispatches (today), or require a kernel filter above a footprint threshold.
+<strong>Trade-off:</strong> ease of use against pathological cost. Defaulting to "replay everything" in a process
+with a 150 GB footprint produces a run that never finishes, and the user's only clue is that it is
+slow. <strong>Recommended position:</strong> admission control with a projected-cost diagnostic that names the
+remedy.</p>
+<h3>DQ10 — Detection versus documentation for unsound cases</h3>
+<p><strong>Trade-off:</strong> engineering effort against silent wrong answers. Several unsound cases are cheaply
+detectable (peer pointers in kernargs, collective kernel names, untracked allocation volume,
+concurrent async copies if the copy APIs are intercepted). Others are not detectable in-process at all
+(another process writing IPC memory, NIC RDMA). <strong>Recommended position:</strong> detect everything
+detectable and decline; for the remainder, rely on the verify mode of R9 rather than on documentation,
+because documentation does not protect a user who did not read it.</p>
+<h3>DQ11 — Graph handling</h3>
+<p>Decline (today), replay the graph as a unit, or expand the graph into individual dispatches.
+<strong>Trade-off:</strong> expansion would maximize per-kernel detail but requires re-deriving each node's
+dependencies and defeats the purpose of graphs; replaying the graph as a unit is simple and gives
+range-level numbers. <strong>Recommended position:</strong> replay the graph as a unit, declining graphs with
+allocation nodes or collective kernels.</p>
+<h3>DQ12 — Should device-memory checkpointing live in the profiler at all?</h3>
+<p>This is the architectural question the design document should confront directly. Snapshotting and
+restoring device memory, tracking allocations, draining queues and handling partition and peer
+topology is <em>runtime</em> functionality, not profiler functionality. On the comparable platform the
+equivalent capability ships as part of the profiling and driver layers rather than being
+re-implemented by each tool. Keeping it in ROCprofiler-SDK means the profiler carries an allocation
+tracker that must stay correct against every future allocator change in HIP, and every new
+allocation path (stream-ordered pools, virtual memory mapping, whatever comes next) silently
+degrades the profiler's soundness with no signal.
+<strong>Trade-off:</strong> shipping velocity now against a recurring correctness liability. <strong>Recommended
+position:</strong> ship the profiler-side implementation, and open the conversation with the runtime team
+about a supported "save/restore device state for this agent" primitive with allocation-provenance
+awareness. The tracker's blind spots are all consequences of guessing at the runtime's allocation
+behaviour from outside it.</p>
+<hr />
+<h2>8.5 How the trade-offs resolve differently per application class</h2>
+<p>The same design question gets different answers depending on the workload, which is the main argument
+for making these policies configurable and for recording which policy was used.</p>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Snapshot scope</th>
+<th>Residence</th>
+<th>Cache policy</th>
+<th>Pass count</th>
+<th>Failure policy</th>
+<th>Right replay scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C1 dense HPC</td>
+<td>reachable set is enough; whole-agent is tolerable</td>
+<td>host is fine at these sizes</td>
+<td>flush</td>
+<td>small <code>P</code>, kernel-filtered</td>
+<td>decline</td>
+<td>per-dispatch, or <strong>iteration multiplexing instead</strong></td>
+</tr>
+<tr>
+<td>C2 library benchmarks</td>
+<td>reachable set</td>
+<td>either</td>
+<td>flush</td>
+<td>any</td>
+<td>decline</td>
+<td>per-dispatch</td>
+</tr>
+<tr>
+<td>C3 AI training</td>
+<td>write set, mandatory</td>
+<td>device-first, mandatory</td>
+<td>flush</td>
+<td>small <code>P</code>, aggressive filtering</td>
+<td>decline</td>
+<td>per-dispatch for eager; graph for compiled</td>
+</tr>
+<tr>
+<td>C4 inference serving</td>
+<td>write set</td>
+<td>device-first</td>
+<td>flush</td>
+<td>small <code>P</code></td>
+<td>decline</td>
+<td><strong>graph</strong></td>
+</tr>
+<tr>
+<td>C5 collective-bound</td>
+<td>n/a</td>
+<td>n/a</td>
+<td>n/a</td>
+<td>n/a</td>
+<td><strong>detect and refuse</strong></td>
+<td><strong>application-driven range</strong></td>
+</tr>
+<tr>
+<td>C6 long setup</td>
+<td>reachable set</td>
+<td>either</td>
+<td>flush</td>
+<td>large <code>P</code> is affordable here</td>
+<td>decline</td>
+<td>per-dispatch</td>
+</tr>
+<tr>
+<td>C7 real-time</td>
+<td>reachable set</td>
+<td>device-first</td>
+<td>flush</td>
+<td>small <code>P</code></td>
+<td>decline, and refuse when deadlines are declared</td>
+<td>offline bench harness, not the live system</td>
+</tr>
+<tr>
+<td>C8 pure device state</td>
+<td><strong>write set is the only option</strong></td>
+<td>device-first impossible (the state fills HBM) → host, pinned</td>
+<td>flush</td>
+<td>small <code>P</code></td>
+<td>decline</td>
+<td>per-dispatch with write-set restore</td>
+</tr>
+</tbody>
+</table>
+<p>Reading the table by column is instructive: the <em>cache policy</em> answer is the same everywhere, so it
+should simply be the default. The <em>snapshot scope</em> and <em>residence</em> answers vary by two orders of
+magnitude in their consequences, so they must be policies with good defaults and diagnostics. And the
+<em>right replay scope</em> column is different for four of the eight classes, which is the strongest
+argument in this document that a single per-dispatch mechanism cannot be the whole feature.</p>
+<hr />
+<h2>8.6 Lessons learned</h2>
+<p>Including from the basic case, where no carveout applies.</p>
+<p><strong>L1 — The unit of profiling value is rarely a single dispatch.</strong> Users ask "why is my attention block
+slow", "why does my timestep take 40 ms", "where does my decode latency go". A per-dispatch mechanism
+answers a narrower question than the one being asked, and the gap is filled by graphs and ranges
+rather than by more per-dispatch fidelity. This is not a criticism of the implementation; it is the
+reason §5 exists.</p>
+<p><strong>L2 — Provenance decides soundness, not semantics.</strong> We spent effort reasoning about which <em>kernels</em>
+are safe to replay. The productive framing turned out to be: which <em>allocator</em> produced the buffers
+the kernel writes. A kernel doing a floating-point atomic accumulation into a <code>hipMalloc</code> buffer is
+perfectly safe; the identical kernel writing a stream-ordered pool allocation is silently wrong. That
+reframing is what makes the §2 decision procedure short.</p>
+<p><strong>L3 — Isolation is only as strong as the narrowest chokepoint you intercept.</strong> The AQL write
+interceptor is an excellent chokepoint for <em>kernel dispatches</em> and it sees nothing of SDMA copies,
+peer-agent kernels, host stores to mapped memory, or NIC RDMA. Building an isolation guarantee on a
+single chokepoint means the guarantee holds exactly for the traffic that flows through it. Every
+remaining isolation gap in §6.3 is an instance of this one lesson.</p>
+<p><strong>L4 — A bounded wait followed by a fatal abort is the wrong default for observability code.</strong> It was
+chosen for good reasons — hanging silently is worse than dying loudly — but the third option, declining
+and continuing, is better than both and was not on the menu when the bound was written.</p>
+<p><strong>L5 — Unobservability and measurement fidelity are separate correctness properties, and only the
+first one was specified.</strong> The mechanism is careful and largely correct about the application not
+being able to <em>tell</em> that the kernel ran P times. It says nothing about whether the numbers collected
+in pass 3 describe the same execution conditions as pass 0. For a profiler, the second property is the
+product.</p>
+<p><strong>L6 — A conservative design can be safe and still unusable.</strong> Snapshotting the whole agent cannot
+miss anything, which is why it was the right first implementation, and it scales with a quantity
+(process resident footprint) that has nothing to do with the kernel being measured. Safety chosen
+along the wrong axis costs three orders of magnitude on the workloads that matter most.</p>
+<p><strong>L7 — What cannot be proven must be measured at runtime.</strong> Two of the six proof obligations in §6
+are unverifiable by construction from inside the mechanism. The only honest response is a runtime
+check: a canary counter in every group, and an optional repeated-pass verification. This is worth
+more than any additional documentation, because it turns an assumption into a per-run measurement
+that the user sees.</p>
+<p><strong>L8 — Getting the lock <em>shape</em> right early paid off; getting its <em>granularity</em> right did not.</strong> The
+reader/writer split is a genuinely good decision: ordinary dispatches stay concurrent with each other
+and only pay a shared lock, and the writer window is what needs exclusivity. The granularity — one
+lock per HSA agent — was fixed before peer access and device partitioning were considered, and both
+break it. The shape survives; the granularity needs to become a policy.</p>
+<p><strong>L9 — Making replay a callback-tracing domain with a per-dispatch, per-agent pass count was the
+right call.</strong> It decoupled replay from counter collection, allowed any per-dispatch service to use
+it, and made heterogeneous nodes work without a global pass count. This is the part of the design
+that should be preserved unchanged as new scopes are added, and it is why adding graph replay is a
+small change rather than a redesign.</p>
+<p><strong>L10 — Beta features need decline telemetry from the first day they exist.</strong> Every gate in the
+current implementation logs a one-shot warning and continues. That is the right behaviour and the
+wrong observability: a user running a real application cannot tell how much of their workload was
+skipped, and neither can we. The eligibility fraction is the most important number about this
+feature and we currently cannot report it.</p>
+<hr />
+<h2>8.7 Future improvements in the basic case, with no carveouts involved</h2>
+<p>This subsection deliberately excludes everything about managed memory, collectives, MPI, graphs,
+peer access, partitions and async copies. Assume the friendliest possible workload: <strong>one GPU, one
+stream, one thread, all buffers from <code>hipMalloc</code>, no other actors, kernel write set entirely
+tracked.</strong> In that basic case the mechanism is <em>sound</em>. It is still leaving most of its value on the
+table, in ways worth listing separately from the carveout discussion because none of them requires
+resolving a semantic question.</p>
+<h3>8.7.1 Cost, in the basic case</h3>
+<ol>
+<li><strong>Narrow the snapshot to the kernel's operands.</strong> Even in the basic case, <code>snap()</code> copies every
+   tracked allocation on the agent, not the three buffers the kernel uses. For a 4 MB kernel in a
+   2 GB process this is a 500× overcharge, with no correctness benefit in the basic case at all.</li>
+<li><strong>Do not restore what was not written.</strong> A basic-case reduction kernel writes 4 KB and gets a full
+   footprint restore between every pass.</li>
+<li><strong>Skip the snapshot entirely for read-only kernels.</strong> A kernel that writes nothing in the tracked
+   set needs no snapshot and no restore. Replay becomes free. This is detectable after one pass with a
+   device hash, and possibly statically from kernel argument metadata.</li>
+<li><strong>Use a transfer path that can actually DMA.</strong> The snapshot destination is an unpinned
+   <code>std::vector</code>, so the copy cannot be a device-to-host DMA into it. Pinning the destination, or
+   keeping the image in device memory, is a pure win in the basic case.</li>
+<li><strong>Stop issuing one blocking copy per region, serially.</strong> Basic-case processes still have dozens to
+   hundreds of tracked regions, and each one pays full latency with no overlap. Batching small regions
+   and issuing copies concurrently is straightforward and the existing perf test already sees the
+   fixed per-inventory offset this creates.</li>
+<li><strong>Overlap what can be overlapped.</strong> Counter readout for pass <em>i</em> and the restore preparing pass
+   <em>i+1</em> are independent for most of their duration.</li>
+<li><strong>Offer iteration multiplexing as an alternative mode.</strong> In the basic case of an iterative
+   application launching the same kernel repeatedly, collecting a different counter group on each
+   launch achieves the same end result with <em>zero</em> snapshot cost. It is a weaker guarantee (similar
+   inputs rather than identical ones), and for many uses it is enough. Not offering it means users pay
+   the strong guarantee's price whether or not they need it.</li>
+</ol>
+<h3>8.7.2 Measurement quality, in the basic case</h3>
+<ol start="8">
+<li><strong>Flush caches between passes, or say that you did not.</strong> In the basic case, pass 0 runs after a
+   full-footprint device-to-host read and passes 1..P−1 run immediately after a full host-to-device
+   write. Cache-sensitive counters are biased by pass index. Nothing about carveouts is involved.</li>
+<li><strong>Offer a discarded warm-up pass.</strong> Standard practice everywhere else in performance measurement,
+   and free to implement given the pass loop already exists.</li>
+<li><strong>Address clock and power state.</strong> The window stalls the agent for seconds, then runs the same
+    kernel P times back to back. Clock behaviour at pass 0 and pass 7 differ. At minimum record the
+    clocks; better, expose a clock-control policy.</li>
+<li><strong>Report the canary.</strong> One counter present in every group, compared across passes, per dispatch.
+    In the basic case it should always agree — which is exactly why a disagreement is worth an
+    error: in the basic case, a disagreement means either kernel nondeterminism or a bug in the
+    mechanism, and both are things we want to hear about.</li>
+<li><strong>State the serialization effect.</strong> In the basic case with one stream this costs nothing
+    semantically, but the measured kernel still runs with the whole cache hierarchy to itself and no
+    concurrent work. If the application normally overlaps that kernel with anything, the replayed
+    measurement is of a different regime. Recording "measured under exclusive agent access" in the
+    output prevents a class of misinterpretation.</li>
+</ol>
+<h3>8.7.3 Robustness and ergonomics, in the basic case</h3>
+<ol start="13">
+<li><strong>Fix the address-reuse hole.</strong> Even a basic-case, single-stream application has a host thread
+    that may free and allocate during the window, because the allocation wrappers are outside the
+    replay lock by design. A generation counter closes it.</li>
+<li><strong>Decline instead of aborting.</strong> A basic-case application with a slow kernel and an unlucky
+    system hiccup can exceed a 5-second drain slice. Twelve of those and the process dies.</li>
+<li><strong>Fail fast on reentrancy rather than hanging.</strong> A tool whose callback launches a kernel is a
+    basic-case programming error that currently produces an unbounded hang with no diagnostic.</li>
+<li><strong>Add admission control with a projected cost.</strong> In the basic case the user's mistake is usually
+    "I asked for eight counter groups on every dispatch of a program with a 30 GB footprint". Telling
+    them the projected cost and the remedy is more useful than being slow.</li>
+<li><strong>Report footprint, timings and declines per dispatch.</strong> Today the only way to learn the snapshot
+    size is to read info-level log lines. This is the data both users and we need most.</li>
+<li><strong>Make the output contract explicit.</strong> P records share one dispatch id. Downstream consumers need
+    to be told, and derived metrics that combine counter groups from different passes need a stated
+    attribution rule.</li>
+<li><strong>Document that indefinite loops require the continue callback</strong>, which the implementation already
+    enforces with a warning, and consider whether the pass-count-as-minimum variant is worth the
+    unbounded cost it permits.</li>
+</ol>
+<p>The point of separating this list from the carveout discussion: <strong>even for the friendliest possible
+workload, the largest single improvement available is a 2–3 order of magnitude cost reduction that
+requires no new semantics, no new interception, and no resolution of any open correctness question.</strong>
+That should be the top of the roadmap, ahead of extending coverage to harder workload classes, because
+extending coverage multiplies a cost that is currently 100× too high.</p>
+<hr />
+<h2>8.8 Open risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Consequence if unaddressed</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Allocator drift in HIP</td>
+<td>new allocation paths silently move memory out of the tracked set, degrading soundness with no signal</td>
+<td>untracked-byte accounting (RQ5) plus a runtime-owned save/restore primitive (DQ12)</td>
+</tr>
+<tr>
+<td>Iteration multiplexing is equivalent for HPC</td>
+<td>the feature's value narrows to AI and long-setup cases, after the effort was justified by HPC</td>
+<td>settle RQ4 early</td>
+</tr>
+<tr>
+<td>Graph adoption increases</td>
+<td>the eligible fraction of modern workloads trends toward zero</td>
+<td>graph replay (DQ11)</td>
+</tr>
+<tr>
+<td>Job kills in production</td>
+<td>one abort on a large distributed run and the feature will not be enabled again</td>
+<td>DQ3, immediately</td>
+</tr>
+<tr>
+<td>Silent wrong numbers</td>
+<td>the worst possible outcome for a measurement tool, and currently reachable without any warning</td>
+<td>canary and verify mode (L7)</td>
+</tr>
+</tbody>
+</table>
+<h2>8.9 Recommended positions, collected</h2>
+<p>For the design document's decision log:</p>
+<ol>
+<li>Snapshot the reachable set, fall back to whole-agent, add write-set restore afterwards.</li>
+<li>Device-resident snapshot with pinned host spill.</li>
+<li>Decline and record; never abort except on a partially applied restore.</li>
+<li>Keep the reader/writer lock shape; make its granularity a policy driven by peer exposure and
+   partition topology.</li>
+<li>Flush caches between passes by default; record the policy.</li>
+<li>Pass count remains a cap by default.</li>
+<li>Build user-driven range replay early; it is small and it is the only route to collectives and MPI.</li>
+<li>Keep the shared dispatch id; add provenance fields to the output.</li>
+<li>Require kernel filtering above a projected-cost threshold.</li>
+<li>Detect everything detectable; use runtime verification for the rest.</li>
+<li>Replay graphs as units rather than excluding them.</li>
+<li>Open the runtime-owned checkpoint primitive conversation now, not after the tracker's third
+    allocator surprise.</li>
+</ol>
