@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <string>
 #include <system_error>
 
 #include <fcntl.h>
@@ -27,13 +28,17 @@ namespace
 ensure_parent_directory(const std::string& filename)
 {
     const auto parent = std::filesystem::path{ filename }.parent_path();
-    if(parent.empty()) return true;
-
-    std::error_code ec{};
-    std::filesystem::create_directories(parent, ec);
-    if(ec)
+    if(parent.empty())
     {
-        LOG_ERROR("could not create directory '{}': {}", parent.string(), ec.message());
+        return true;
+    }
+
+    std::error_code dir_ec{};
+    std::filesystem::create_directories(parent, dir_ec);
+    if(dir_ec)
+    {
+        LOG_ERROR("could not create directory '{}': {}", parent.string(),
+                  dir_ec.message());
         return false;
     }
     return true;
@@ -44,10 +49,16 @@ bool
 write_proto_to(const std::string& filename, const char* data, std::size_t size,
                output_file_registry& registry)
 {
-    if(!ensure_parent_directory(filename)) return false;
+    if(!ensure_parent_directory(filename))
+    {
+        return false;
+    }
 
     std::ofstream ofs{ filename, std::ios::out | std::ios::binary };
-    if(!ofs.is_open() || !ofs.good()) return false;
+    if(!ofs.is_open() || !ofs.good())
+    {
+        return false;
+    }
 
     ofs.write(data, static_cast<std::streamsize>(size));
     registry.register_file(filename, output_format::perfetto);
@@ -57,7 +68,10 @@ write_proto_to(const std::string& filename, const char* data, std::size_t size,
 locked_append_status
 append_with_file_lock(const std::string& filename, const char* data, std::size_t size)
 {
-    if(!ensure_parent_directory(filename)) return locked_append_status::open_failed;
+    if(!ensure_parent_directory(filename))
+    {
+        return locked_append_status::open_failed;
+    }
 
     const int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
     if(fd < 0) return locked_append_status::open_failed;
