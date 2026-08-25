@@ -40,12 +40,7 @@ enum class WaitCntType {
   XCNT,  // Address translation counter (s_wait_xcnt) — tracks XACK/XNACK, not data completion
   // TODO: Implement tracking for these wait counter types when needed
   ASYNC,  // Async copy operations (s_wait_asynccnt) - not yet tracked
-  TENSOR, // Tensor DMA operations (s_wait_tensorcnt) — tensor_load_to_lds, tensor_store_from_lds
-  // Wavegroup semaphore synchronization (s_sema_wait). Unlike the entries
-  // above this is not a per-wave counter: it orders LDS accesses between the
-  // waves of a wavegroup, so it has no FIFO to drain and reaches the engine as
-  // WaitAction::is_wavegroup_semaphore_wait rather than as a WaitCounterClear.
-  SEMA
+  TENSOR  // Tensor DMA operations (s_wait_tensorcnt) — tensor_load_to_lds, tensor_store_from_lds
 };
 
 // =============================================================================

@@ -111,7 +111,7 @@ uint32_t logical_sgpr_base(const amdgpu::Wavefront &wf, uint32_t physical_reg) {
 }
 
 hazard_core::ExecutionKey make_wave_key(const amdgpu::Wavefront &wf) {
-  return hazard_core::ExecutionKey{wf.dispatch_id(), 0, wf.wg_id(), 0, wf.wf_id()};
+  return hazard_core::ExecutionKey{wf.dispatch_id(), 0, wf.wg_id(), wf.wf_id()};
 }
 
 std::array<uint32_t, 4> copy_raw_isa(const Instruction &inst) {
@@ -350,7 +350,7 @@ void DataHazardPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_
                                                    std::span<amdgpu::Wavefront *> wavefronts) {
   if (shutting_down())
     return;
-  adapter_.on_workgroup_begin(hazard_core::ExecutionKey{dispatch_id, 0, wg_id, 0, 0});
+  adapter_.on_workgroup_begin(hazard_core::ExecutionKey{dispatch_id, 0, wg_id, 0});
   for (amdgpu::Wavefront *wf : wavefronts) {
     if (wf != nullptr)
       seed_wave_state(*wf);
@@ -360,7 +360,7 @@ void DataHazardPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_
 void DataHazardPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
   if (shutting_down())
     return;
-  adapter_.on_workgroup_end(hazard_core::ExecutionKey{dispatch_id, 0, wg_id, 0, 0});
+  adapter_.on_workgroup_end(hazard_core::ExecutionKey{dispatch_id, 0, wg_id, 0});
 }
 
 void DataHazardPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {

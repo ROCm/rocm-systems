@@ -242,9 +242,8 @@ inline const PendingAsyncOp *find_pending_lds_read(WaveState *wave, uint32_t add
 /// @param wave       Pointer to wave state (may be null, no-op if null)
 /// @param type       Which wait counter type to clear (VMEM, SMEM, LDS, STORE, TENSOR)
 /// @param keep_count Number of most recent operations to keep (0 = clear all)
-/// @return False when @p type has no FIFO to drain (NONE, ASYNC which is not
-///         implemented yet, or SEMA which is not a per-wave counter); the wave
-///         is left untouched in that case
+/// @return False when @p type has no FIFO to drain (NONE, or ASYNC which is not
+///         implemented yet); the wave is left untouched in that case
 inline bool clear_pending_ops(WaveState *wave, WaitCntType type, uint32_t keep_count) {
   if (!wave)
     return true;
@@ -285,10 +284,6 @@ inline bool clear_pending_ops(WaveState *wave, WaitCntType type, uint32_t keep_c
 
   case WaitCntType::NONE:
   case WaitCntType::ASYNC:
-  // SEMA is not a per-wave counter: a semaphore wait closes a cross-wave LDS
-  // epoch and reaches the engine as WaitAction::is_wavegroup_semaphore_wait.
-  // Arriving here means a caller built it as a counter clear instead.
-  case WaitCntType::SEMA:
     return false;
   }
   return true;

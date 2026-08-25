@@ -35,10 +35,6 @@ inline const char *wait_counter_mnemonic(WaitCntType type) {
   case WaitCntType::NONE:
   case WaitCntType::XCNT:
   case WaitCntType::ASYNC:
-  // SEMA orders LDS accesses between the waves of a wavegroup rather than
-  // draining a counter of this wave, so the advice it needs names both halves
-  // of the signal/wait pair and is worded where that race is reported.
-  case WaitCntType::SEMA:
     break;
   }
   return nullptr;

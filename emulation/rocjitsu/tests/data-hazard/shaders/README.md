@@ -93,21 +93,18 @@ partially written data. This framework automates that process:
 | `trans_lds.hip` | LDS (shared memory) | RAW (LDS read→transcendental) | `s_wait_dscnt`, `s_wait_kmcnt` |
 | `wmma_exp.hip` | WMMA (builtin) | RAW (WMMA→transcendental) | `s_wait_loadcnt`, `s_wait_kmcnt` |
 | `wmma_rocwmma.hip` | WMMA (rocWMMA lib) | RAW (WMMA→transcendental) | `s_wait_loadcnt`, `s_wait_kmcnt` |
-| `wavegroup_sema.hip` | LDS + wavegroup semaphores | Producer/consumer LDS across `s_sema_signal`/`s_sema_wait` | `s_wait_dscnt` |
-| `wavegroup_example1.hip` | LDS + wavegroup semaphores | Elementwise add staged through LDS | `s_wait_dscnt`, `s_wait_loadcnt` |
-| `wavegroup_example2.hip` | LDS + wavegroup semaphores | Three-stage IO/XDL/VEC pipeline | `s_wait_dscnt`, `s_wait_loadcnt` |
 
 `wmma_rocwmma.hip` needs the rocWMMA headers; point the harness at them with
 `--cxxflags "-I/path/to/rocwmma/include"`.
 
-The `wavegroup_*.hip` kernels use arcadia wavegroup semaphores, which only
-assemble for `gfx1260`. They declare that with a `// requires: gfx1260` comment,
-and both the CLI and the pytest suite skip a shader whose `requires:` list does
-not contain the target architecture. `tensor_lds.hip` and `wmma_exp.hip` declare
-`// requires: gfx1250` for the same reason: their builtins need the
-`gfx1250-insts` target feature. A shader without that comment is treated as
-portable and runs everywhere, so a kernel that names its target only in prose
-is compiled for every architecture and fails there instead of being skipped.
+A kernel that only assembles for particular targets declares them with a
+`// requires: <arch>` comment, and both the CLI and the pytest suite skip a
+shader whose `requires:` list does not contain the target architecture.
+`tensor_lds.hip` and `wmma_exp.hip` declare `// requires: gfx1250` because their
+builtins need the `gfx1250-insts` target feature. A shader without that comment
+is treated as portable and runs everywhere, so a kernel that names its target
+only in prose is compiled for every architecture and fails there instead of
+being skipped.
 
 ## Build Pipeline
 

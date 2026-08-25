@@ -34,19 +34,6 @@ inline void on_workgroup_end(hazard_core::DataHazardSimulatorApi &api,
   api.on_workgroup_end(workgroup.dispatch_id, workgroup.cluster_id, workgroup.workgroup_id);
 }
 
-/// Wavegroup lifecycle. Both take the wavegroup from ExecutionKey::wavegroup_id.
-inline void on_wavegroup_begin(hazard_core::DataHazardSimulatorApi &api,
-                               const hazard_core::ExecutionKey &wavegroup) {
-  api.on_wavegroup_begin(wavegroup.dispatch_id, wavegroup.cluster_id, wavegroup.workgroup_id,
-                         wavegroup.wavegroup_id);
-}
-
-inline void on_wavegroup_end(hazard_core::DataHazardSimulatorApi &api,
-                             const hazard_core::ExecutionKey &wavegroup) {
-  api.on_wavegroup_end(wavegroup.dispatch_id, wavegroup.cluster_id, wavegroup.workgroup_id,
-                       wavegroup.wavegroup_id);
-}
-
 inline void on_wave_begin(hazard_core::DataHazardSimulatorApi &api,
                           const hazard_core::ExecutionKey &wave) {
   api.on_wave_begin(wave);
@@ -76,12 +63,6 @@ template <typename NativeBarrier, typename MakeEvent>
 void on_barrier(hazard_core::DataHazardSimulatorApi &api, const NativeBarrier &native_barrier,
                 MakeEvent make_event) {
   api.on_barrier(make_event(native_barrier));
-}
-
-template <typename NativeSemaphore, typename MakeEvent>
-void on_semaphore(hazard_core::DataHazardSimulatorApi &api, const NativeSemaphore &native_semaphore,
-                  MakeEvent make_event) {
-  api.on_semaphore(make_event(native_semaphore));
 }
 
 inline void on_shutdown(hazard_core::DataHazardSimulatorApi &api) { api.on_shutdown(); }

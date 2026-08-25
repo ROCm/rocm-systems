@@ -20,12 +20,11 @@ struct ExecutionKey {
   EntityId dispatch_id = 0;
   EntityId cluster_id = 0;
   EntityId workgroup_id = 0;
-  EntityId wavegroup_id = 0;
   EntityId wave_id = 0;
 
   bool operator==(const ExecutionKey &o) const noexcept {
     return dispatch_id == o.dispatch_id && cluster_id == o.cluster_id &&
-           workgroup_id == o.workgroup_id && wavegroup_id == o.wavegroup_id && wave_id == o.wave_id;
+           workgroup_id == o.workgroup_id && wave_id == o.wave_id;
   }
 };
 
@@ -35,7 +34,6 @@ struct ExecutionKeyHash {
     hash_combine(seed, k.dispatch_id);
     hash_combine(seed, k.cluster_id);
     hash_combine(seed, k.workgroup_id);
-    hash_combine(seed, k.wavegroup_id);
     hash_combine(seed, k.wave_id);
     return seed;
   }

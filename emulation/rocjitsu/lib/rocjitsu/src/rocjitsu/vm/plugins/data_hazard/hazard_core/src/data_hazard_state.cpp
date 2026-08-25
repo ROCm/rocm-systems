@@ -47,7 +47,6 @@ void merge_instruction_context(EngineInstructionContext &current,
   current.workgroup_id = update.workgroup_id;
   current.dispatch_id = update.dispatch_id;
   current.cluster_id = update.cluster_id;
-  current.wavegroup_id = update.wavegroup_id;
 }
 
 } // namespace
@@ -59,7 +58,6 @@ void EngineState::reset() {
   wave_index.clear();
   wave_to_workgroup.clear();
   reported_lds_races.clear();
-  reported_wavegroup_lds_races.clear();
   global_shadow.clear();
   warnings.clear();
   wave_cache_generation.fetch_add(1, std::memory_order_release);
@@ -79,7 +77,6 @@ EngineInstructionContext make_engine_instruction_context(const InstructionDescri
   ctx.workgroup_id = instruction.execution.workgroup_id;
   ctx.dispatch_id = instruction.execution.dispatch_id;
   ctx.cluster_id = instruction.execution.cluster_id;
-  ctx.wavegroup_id = instruction.execution.wavegroup_id;
   ctx.pc = instruction.pc;
   for (int i = 0; i < 4; ++i)
     ctx.raw_isa[i] = instruction.raw_isa[i];

@@ -60,7 +60,7 @@ TEST(GenericDataHazardEngineTest, DetectsRawHazardFromGenericEvents) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -100,7 +100,7 @@ TEST(GenericDataHazardEngineTest, PendingVgprWriteDoesNotHazardUnrelatedAccRead)
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -138,7 +138,7 @@ TEST(GenericDataHazardEngineTest, DetectsVectorRawInsideMultiDwordReadRange) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -179,7 +179,7 @@ TEST(GenericDataHazardEngineTest, DoesNotInferVectorWriteWaitFromPriorMemoryRead
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load_without_semantics;
@@ -224,7 +224,7 @@ TEST(GenericDataHazardEngineTest, ResourceLevelVectorWriteWaitDetectsRawHazard) 
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -266,7 +266,7 @@ TEST(GenericDataHazardEngineTest, ResourceEventsCanCarryInstructionContextWithou
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionDescriptor load = make_instruction(1, 0x100);
@@ -307,7 +307,7 @@ TEST(GenericDataHazardEngineTest, ResourceLevelVectorReadWaitDetectsWarHazard) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent store;
@@ -349,7 +349,7 @@ TEST(GenericDataHazardEngineTest, ReportsVectorAndScalarWawForSameInstructionAnd
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent vector_load;
@@ -425,7 +425,7 @@ TEST(GenericDataHazardEngineTest, MergesStagedInstructionSemanticsWithExistingId
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent decoded_instruction;
@@ -478,7 +478,7 @@ TEST(GenericDataHazardEngineTest, SupportsOperandAccessesBeforeRouteSemanticUpda
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent first_load;
@@ -561,7 +561,7 @@ TEST(GenericDataHazardEngineTest, RocjitsuStyleRouteReplayDoesNotDuplicateDestin
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent first_load;
@@ -645,7 +645,7 @@ TEST(GenericDataHazardEngineTest, SemanticUpdateDoesNotReplayExistingWaitAction)
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -711,7 +711,7 @@ TEST(GenericDataHazardEngineTest, WaitActionClearsPendingRawHazard) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -757,7 +757,7 @@ TEST(GenericDataHazardEngineTest, PartialWaitLeavesEveryDestinationOfAWideLoadPe
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -803,7 +803,7 @@ TEST(GenericDataHazardEngineTest, WaitDropsTheContextsOfTheInstructionsItDrains)
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -847,7 +847,7 @@ TEST(GenericDataHazardEngineTest, LoadLeftPendingByAWaitKeepsTheContextItIsRepor
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent drained_load;
@@ -916,7 +916,7 @@ TEST(GenericDataHazardEngineTest, ContextsStayBoundedThroughALongStretchWithoutW
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -976,7 +976,7 @@ TEST(GenericDataHazardEngineTest, DeepPendingQueueStillPrunesOnlyOncePerSlack) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   constexpr EntityId kStores = 2 * kInstructionContextSlack;
@@ -1011,7 +1011,7 @@ namespace {
 /// from gfx10 and later.
 void run_load_stores_wait_read(DataHazardEngine &engine, WaitCntType store_counter,
                                uint32_t keep_count) {
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_wave_begin(wave);
 
@@ -1100,7 +1100,7 @@ TEST(GenericDataHazardEngineTest, CounterWaitClearsPendingEvenWithoutWaitInstruc
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent load;
@@ -1143,7 +1143,7 @@ TEST(GenericDataHazardEngineTest, IdleWaitClearsAllPendingDomainsWithoutExplicit
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent vmem_load;
@@ -1236,7 +1236,7 @@ TEST(GenericDataHazardEngineTest, DetectsPureDsVectorDestinationWithDscntSuggest
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent ds_read;
@@ -1278,7 +1278,7 @@ TEST(GenericDataHazardEngineTest, TracksFlatVectorDestinationOnBothCounters) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent flat_load;
@@ -1308,7 +1308,7 @@ TEST(GenericDataHazardEngineTest, ReportsFlatVectorRawWithCombinedWaitSuggestion
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent flat_load;
@@ -1351,7 +1351,7 @@ TEST(GenericDataHazardEngineTest, FlatVectorDscntSideAloneDoesNotReportWaw) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent flat_load;
@@ -1396,7 +1396,7 @@ TEST(GenericDataHazardEngineTest, DetectsVgprWawFromDsWriteAfterVmemWrite) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent vmem_load;
@@ -1439,7 +1439,7 @@ TEST(GenericDataHazardEngineTest, DetectsVgprWawBetweenPureDsVectorDestinations)
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent first_ds_read;
@@ -1482,7 +1482,7 @@ TEST(GenericDataHazardEngineTest, DetectsLdsRawHazardWithLdsSuggestion) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent write_inst;
@@ -1522,7 +1522,7 @@ TEST(GenericDataHazardEngineTest, DetectsLdsWarHazardWithLdsAddressSuggestion) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent read_inst;
@@ -1561,7 +1561,7 @@ TEST(GenericDataHazardEngineTest, DetectsVgprWawHazardWithWriteSuggestion) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent first_load;
@@ -1603,7 +1603,7 @@ TEST(GenericDataHazardEngineTest, DetectsSgprWawHazardWithWriteSuggestion) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent smem_load;
@@ -1649,7 +1649,7 @@ namespace {
 DataHazardEngine &wide_scalar_load_pending(FakeFormatter &formatter) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
-  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
 
   InstructionEvent smem_load;
   smem_load.instruction = make_instruction(1, 0x100);
@@ -1737,7 +1737,7 @@ TEST(GenericDataHazardEngineTest, DetectsVgprWarOnlyForExplicitAsyncReadSemantic
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent async_read;
@@ -1779,7 +1779,7 @@ TEST(GenericDataHazardEngineTest, UsesPendingWaitTypeForExplicitVectorReadWar) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent async_read;
@@ -1822,8 +1822,8 @@ TEST(GenericDataHazardEngineTest, DetectsCrossWorkgroupGlobalRace) {
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_workgroup_begin(1, 0, 1);
 
-  ExecutionKey writer_wave{1, 0, 0, 0, 0};
-  ExecutionKey reader_wave{1, 0, 1, 0, 0};
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 1, 0};
   engine.on_wave_begin(writer_wave);
   engine.on_wave_begin(reader_wave);
 
@@ -1878,13 +1878,13 @@ TEST(GenericDataHazardEngineTest, GlobalWarSurvivesReadsFromOtherWorkgroups) {
     auto &engine = reset_generic_engine(formatter);
     for (EntityId workgroup = 0; workgroup < kReadingWorkgroups; ++workgroup) {
       engine.on_workgroup_begin(1, 0, workgroup);
-      engine.on_wave_begin(ExecutionKey{1, 0, workgroup, 0, 0});
+      engine.on_wave_begin(ExecutionKey{1, 0, workgroup, 0});
     }
 
     auto access = [&](EntityId instruction_id, EntityId workgroup, bool is_write) {
       InstructionEvent instruction;
       instruction.instruction = make_instruction(instruction_id, 0x100 + instruction_id * 4);
-      instruction.instruction.execution = ExecutionKey{1, 0, workgroup, 0, 0};
+      instruction.instruction.execution = ExecutionKey{1, 0, workgroup, 0};
       engine.on_instruction(instruction);
 
       ResourceAccessEvent event;
@@ -1921,8 +1921,8 @@ TEST(GenericDataHazardEngineTest, GlobalRaceSourceInstructionUsesConflictingExec
   engine.on_workgroup_begin(2, 3, 4);
   engine.on_workgroup_begin(2, 7, 8);
 
-  ExecutionKey writer_wave{2, 3, 4, 5, 6};
-  ExecutionKey reader_wave{2, 7, 8, 9, 10};
+  ExecutionKey writer_wave{2, 3, 4, 6};
+  ExecutionKey reader_wave{2, 7, 8, 10};
   engine.on_wave_begin(writer_wave);
   engine.on_wave_begin(reader_wave);
 
@@ -1959,7 +1959,6 @@ TEST(GenericDataHazardEngineTest, GlobalRaceSourceInstructionUsesConflictingExec
   EXPECT_EQ(source_execution.dispatch_id, 2u);
   EXPECT_EQ(source_execution.cluster_id, 3u);
   EXPECT_EQ(source_execution.workgroup_id, 4u);
-  EXPECT_EQ(source_execution.wavegroup_id, 0u);
   EXPECT_EQ(source_execution.wave_id, 6u);
   EXPECT_EQ(warnings[0].finding.source_instruction.instruction_id, 11u);
   EXPECT_EQ(warnings[0].finding.source_instruction.raw_isa[0], 0x11111111u);
@@ -1972,8 +1971,8 @@ TEST(GenericDataHazardEngineTest, GlobalShadowIsDispatchScoped) {
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_workgroup_begin(1, 0, 1);
 
-  ExecutionKey dispatch_one_writer{1, 0, 0, 0, 0};
-  ExecutionKey dispatch_one_reader{1, 0, 1, 0, 1};
+  ExecutionKey dispatch_one_writer{1, 0, 0, 0};
+  ExecutionKey dispatch_one_reader{1, 0, 1, 1};
   engine.on_wave_begin(dispatch_one_writer);
   engine.on_wave_begin(dispatch_one_reader);
 
@@ -1992,7 +1991,7 @@ TEST(GenericDataHazardEngineTest, GlobalShadowIsDispatchScoped) {
 
   engine.on_dispatch_begin(2);
   engine.on_workgroup_begin(2, 0, 0);
-  ExecutionKey dispatch_two_reader{2, 0, 0, 0, 0};
+  ExecutionKey dispatch_two_reader{2, 0, 0, 0};
   engine.on_wave_begin(dispatch_two_reader);
 
   InstructionEvent dispatch_two_read_inst;
@@ -2047,8 +2046,8 @@ std::vector<EngineWarning> run_cross_workgroup_global_accesses(DataHazardEngine 
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_workgroup_begin(1, 0, 1);
 
-  ExecutionKey first_wave{1, 0, 0, 0, 0};
-  ExecutionKey second_wave{1, 0, 1, 0, 0};
+  ExecutionKey first_wave{1, 0, 0, 0};
+  ExecutionKey second_wave{1, 0, 1, 0};
   engine.on_wave_begin(first_wave);
   engine.on_wave_begin(second_wave);
 
@@ -2151,7 +2150,7 @@ TEST(GenericDataHazardEngineTest, DisjointWriterDoesNotDisplaceTheWriterItDoesNo
 
   for (EntityId workgroup = 0; workgroup < writes.size(); ++workgroup) {
     engine.on_workgroup_begin(1, 0, workgroup);
-    ExecutionKey wave{1, 0, workgroup, 0, 0};
+    ExecutionKey wave{1, 0, workgroup, 0};
     engine.on_wave_begin(wave);
 
     InstructionEvent inst;
@@ -2201,8 +2200,8 @@ std::vector<EngineWarning> run_cross_workgroup_global_pair(DataHazardEngine &eng
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_workgroup_begin(1, 0, 1);
 
-  ExecutionKey first_wave{1, 0, 0, 0, 0};
-  ExecutionKey second_wave{1, 0, 1, 0, 0};
+  ExecutionKey first_wave{1, 0, 0, 0};
+  ExecutionKey second_wave{1, 0, 1, 0};
   engine.on_wave_begin(first_wave);
   engine.on_wave_begin(second_wave);
 
@@ -2284,13 +2283,13 @@ TEST(GenericDataHazardEngineTest, AtomicDoesNotHideTheOrdinaryWriteOfItsOwnWorkg
 
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_workgroup_begin(1, 0, 1);
-  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0, 0});
-  engine.on_wave_begin(ExecutionKey{1, 0, 1, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 0, 0});
+  engine.on_wave_begin(ExecutionKey{1, 0, 1, 0});
 
   auto access = [&](EntityId instruction_id, EntityId workgroup, const GlobalAccessKind &kind) {
     InstructionEvent inst;
     inst.instruction = make_instruction(instruction_id, 0x100 * instruction_id);
-    inst.instruction.execution = ExecutionKey{1, 0, workgroup, 0, 0};
+    inst.instruction.execution = ExecutionKey{1, 0, workgroup, 0};
     engine.on_instruction(inst);
 
     ResourceAccessEvent event;
@@ -2320,7 +2319,7 @@ TEST(GenericDataHazardEngineTest, RejectsInvalidGlobalAccessSizes) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent inst;
@@ -2355,7 +2354,7 @@ TEST(GenericDataHazardEngineTest, RejectsOutOfRangeLocalMemoryAddress) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent inst;
@@ -2382,8 +2381,8 @@ TEST(GenericDataHazardEngineTest, HandlesGlobalAccessNearUint64MaxWithoutOverflo
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_workgroup_begin(1, 0, 1);
 
-  ExecutionKey writer_wave{1, 0, 0, 0, 0};
-  ExecutionKey reader_wave{1, 0, 1, 0, 0};
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 1, 0};
   engine.on_wave_begin(writer_wave);
   engine.on_wave_begin(reader_wave);
 
@@ -2424,7 +2423,7 @@ TEST(GenericDataHazardEngineTest, TracksVmemGuardedLocalWriteWithLoadcnt) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent direct_to_lds;
@@ -2469,7 +2468,7 @@ TEST(GenericDataHazardEngineTest, LoadcntClearsVmemGuardedLocalWrite) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent direct_to_lds;
@@ -2511,7 +2510,7 @@ TEST(GenericDataHazardEngineTest, TracksTensorLocalWriteWithTensorWait) {
   auto &engine = reset_generic_engine(formatter);
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
   engine.on_wave_begin(wave);
 
   InstructionEvent tensor_write_inst;
@@ -2570,8 +2569,8 @@ TEST(GenericDataHazardEngineTest, DoesNotMixLdsRaceEpochsAcrossDispatches) {
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_workgroup_begin(2, 0, 0);
 
-  ExecutionKey dispatch_one_wave{1, 0, 0, 0, 0};
-  ExecutionKey dispatch_two_wave{2, 0, 0, 0, 1};
+  ExecutionKey dispatch_one_wave{1, 0, 0, 0};
+  ExecutionKey dispatch_two_wave{2, 0, 0, 1};
   engine.on_wave_begin(dispatch_one_wave);
   engine.on_wave_begin(dispatch_two_wave);
 
@@ -2614,10 +2613,10 @@ TEST(GenericDataHazardEngineTest, WorkgroupBarrierFlushesOnlyMatchingDispatchEpo
   engine.on_workgroup_begin(1, 0, 0);
   engine.on_workgroup_begin(2, 0, 0);
 
-  ExecutionKey dispatch_one_wave_a{1, 0, 0, 0, 0};
-  ExecutionKey dispatch_one_wave_b{1, 0, 0, 0, 1};
-  ExecutionKey dispatch_two_wave_a{2, 0, 0, 0, 0};
-  ExecutionKey dispatch_two_wave_b{2, 0, 0, 0, 1};
+  ExecutionKey dispatch_one_wave_a{1, 0, 0, 0};
+  ExecutionKey dispatch_one_wave_b{1, 0, 0, 1};
+  ExecutionKey dispatch_two_wave_a{2, 0, 0, 0};
+  ExecutionKey dispatch_two_wave_b{2, 0, 0, 1};
   engine.on_wave_begin(dispatch_one_wave_a);
   engine.on_wave_begin(dispatch_one_wave_b);
   engine.on_wave_begin(dispatch_two_wave_a);
@@ -2668,10 +2667,10 @@ TEST(GenericDataHazardEngineTest, DispatchlessWorkgroupBarrierFlushesAllMatching
   engine.on_dispatch_begin(2);
   engine.on_workgroup_begin(2, 0, 0);
 
-  ExecutionKey dispatch_one_wave_a{1, 0, 0, 0, 0};
-  ExecutionKey dispatch_one_wave_b{1, 0, 0, 0, 1};
-  ExecutionKey dispatch_two_wave_a{2, 0, 0, 0, 0};
-  ExecutionKey dispatch_two_wave_b{2, 0, 0, 0, 1};
+  ExecutionKey dispatch_one_wave_a{1, 0, 0, 0};
+  ExecutionKey dispatch_one_wave_b{1, 0, 0, 1};
+  ExecutionKey dispatch_two_wave_a{2, 0, 0, 0};
+  ExecutionKey dispatch_two_wave_b{2, 0, 0, 1};
   engine.on_wave_begin(dispatch_one_wave_a);
   engine.on_wave_begin(dispatch_one_wave_b);
   engine.on_wave_begin(dispatch_two_wave_a);
@@ -2721,8 +2720,8 @@ TEST(GenericDataHazardEngineTest, DispatchlessLocalMemoryAtomicBarrierClearsAllM
   engine.on_dispatch_begin(2);
   engine.on_workgroup_begin(2, 0, 0);
 
-  ExecutionKey dispatch_one_wave{1, 0, 0, 0, 0};
-  ExecutionKey dispatch_two_wave{2, 0, 0, 0, 0};
+  ExecutionKey dispatch_one_wave{1, 0, 0, 0};
+  ExecutionKey dispatch_two_wave{2, 0, 0, 0};
   engine.on_wave_begin(dispatch_one_wave);
   engine.on_wave_begin(dispatch_two_wave);
 
@@ -2764,7 +2763,7 @@ TEST(GenericDataHazardEngineTest, DispatchBeginDoesNotResetOtherDispatchState) {
   auto &engine = reset_generic_engine(formatter);
 
   engine.on_workgroup_begin(1, 0, 0);
-  ExecutionKey dispatch_one_wave{1, 0, 0, 0, 0};
+  ExecutionKey dispatch_one_wave{1, 0, 0, 0};
   engine.on_wave_begin(dispatch_one_wave);
 
   InstructionEvent load;
@@ -2829,10 +2828,10 @@ TEST(GenericDataHazardEngineTest, DispatchEndFlushesAndErasesOnlyMatchingDispatc
     engine.on_resource_access(access);
   };
 
-  record_lds_access(1, ExecutionKey{1, 0, 0, 0, 0}, true);
-  record_lds_access(2, ExecutionKey{1, 0, 0, 0, 1}, false);
-  record_lds_access(3, ExecutionKey{2, 0, 0, 0, 0}, true);
-  record_lds_access(4, ExecutionKey{2, 0, 0, 0, 1}, false);
+  record_lds_access(1, ExecutionKey{1, 0, 0, 0}, true);
+  record_lds_access(2, ExecutionKey{1, 0, 0, 1}, false);
+  record_lds_access(3, ExecutionKey{2, 0, 0, 0}, true);
+  record_lds_access(4, ExecutionKey{2, 0, 0, 1}, false);
 
   ASSERT_EQ(engine.wave_count(), 4u);
 
@@ -2857,8 +2856,8 @@ TEST(GenericDataHazardEngineTest, ShutdownFlushesOutstandingWorkgroupEpochs) {
 
   engine.on_workgroup_begin(1, 0, 0);
 
-  ExecutionKey writer_wave{1, 0, 0, 0, 0};
-  ExecutionKey reader_wave{1, 0, 0, 0, 1};
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 0, 1};
   engine.on_wave_begin(writer_wave);
   engine.on_wave_begin(reader_wave);
 
@@ -2896,215 +2895,4 @@ TEST(GenericDataHazardEngineTest, ShutdownFlushesOutstandingWorkgroupEpochs) {
   ASSERT_EQ(warnings.size(), 1u);
   EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
   EXPECT_EQ(warnings[0].finding.instruction.execution.dispatch_id, 1u);
-}
-
-// =============================================================================
-// Wavegroup semaphores
-//
-// Waves of one wavegroup order their LDS accesses with s_sema_signal /
-// s_sema_wait instead of a workgroup barrier, so those pairs are judged against
-// the semaphores rather than against the barrier.
-// =============================================================================
-
-namespace {
-
-/// Issues an LDS access on @p wave, whose ExecutionKey carries the wavegroup.
-void record_wavegroup_lds_access(DataHazardEngine &engine, EntityId instruction_id,
-                                 const ExecutionKey &wave, bool is_write, uint64_t address = 0x100,
-                                 WaitCntType local_write_wait = WaitCntType::NONE) {
-  InstructionEvent instruction;
-  instruction.instruction = make_instruction(instruction_id, 0x200 + instruction_id * 4);
-  instruction.instruction.execution = wave;
-  instruction.hazards.local_write_wait = local_write_wait;
-  engine.on_instruction(instruction);
-
-  ResourceAccessEvent access;
-  access.instruction = instruction.instruction;
-  access.resource_kind = ResourceKind::LocalMemory;
-  access.address = address;
-  access.size_bytes = 4;
-  access.is_read = !is_write;
-  access.is_write = is_write;
-  engine.on_resource_access(access);
-}
-
-/// Issues s_sema_wait on @p wave, closing that wave's wavegroup LDS epoch.
-void record_semaphore_wait(DataHazardEngine &engine, EntityId instruction_id,
-                           const ExecutionKey &wave) {
-  InstructionEvent instruction;
-  instruction.instruction = make_instruction(instruction_id, 0x200 + instruction_id * 4);
-  instruction.instruction.execution = wave;
-  instruction.wait_action.is_wait_instruction = true;
-  instruction.wait_action.is_wavegroup_semaphore_wait = true;
-  engine.on_instruction(instruction);
-}
-
-} // namespace
-
-TEST(GenericDataHazardEngineTest, ReportsUnsynchronizedWavegroupLdsAccessesAtWavegroupEnd) {
-  FakeFormatter formatter;
-  auto &engine = reset_generic_engine(formatter);
-
-  engine.on_workgroup_begin(1, 0, 0);
-  const ExecutionKey producer{1, 0, 0, 7, 0};
-  const ExecutionKey consumer{1, 0, 0, 7, 1};
-  engine.on_wavegroup_begin(1, 0, 0, 7);
-  engine.on_wave_begin(producer);
-  engine.on_wave_begin(consumer);
-
-  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true);
-  record_wavegroup_lds_access(engine, 2, consumer, /*is_write=*/false);
-
-  ASSERT_TRUE(engine.warning_snapshot().empty());
-
-  engine.on_wavegroup_end(1, 0, 0, 7);
-
-  const auto warnings = engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
-  EXPECT_EQ(warnings[0].finding.instruction.execution.wavegroup_id, 7u);
-  EXPECT_NE(warnings[0].message.find("without wavegroup semaphore"), std::string::npos);
-  EXPECT_NE(warnings[0].suggestion.find("s_sema_signal / s_sema_wait"), std::string::npos);
-}
-
-TEST(GenericDataHazardEngineTest, SemaphoreWaitSeparatesConflictingWavegroupLdsAccesses) {
-  FakeFormatter formatter;
-  auto &engine = reset_generic_engine(formatter);
-
-  engine.on_workgroup_begin(1, 0, 0);
-  const ExecutionKey producer{1, 0, 0, 7, 0};
-  const ExecutionKey consumer{1, 0, 0, 7, 1};
-  engine.on_wave_begin(producer);
-  engine.on_wave_begin(consumer);
-
-  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true);
-  record_semaphore_wait(engine, 2, consumer);
-  record_wavegroup_lds_access(engine, 3, consumer, /*is_write=*/false);
-
-  engine.on_wavegroup_end(1, 0, 0, 7);
-
-  EXPECT_TRUE(engine.warning_snapshot().empty());
-}
-
-TEST(GenericDataHazardEngineTest, WorkgroupBarrierLeavesIntraWavegroupPairToSemaphoreScope) {
-  FakeFormatter formatter;
-  auto &engine = reset_generic_engine(formatter);
-
-  engine.on_workgroup_begin(1, 0, 0);
-  const ExecutionKey producer{1, 0, 0, 7, 0};
-  const ExecutionKey consumer{1, 0, 0, 7, 1};
-  engine.on_wave_begin(producer);
-  engine.on_wave_begin(consumer);
-
-  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true);
-  record_wavegroup_lds_access(engine, 2, consumer, /*is_write=*/false);
-
-  BarrierEvent barrier;
-  barrier.wave = producer;
-  barrier.kind = BarrierKind::Workgroup;
-  engine.on_barrier(barrier);
-
-  // Reported once, by the scope that names the synchronization the waves were
-  // actually meant to use.
-  const auto warnings = engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_NE(warnings[0].message.find("without wavegroup semaphore"), std::string::npos);
-  EXPECT_EQ(warnings[0].finding.instruction.execution.wavegroup_id, 7u);
-}
-
-TEST(GenericDataHazardEngineTest, CrossWavegroupLdsPairStaysWorkgroupScoped) {
-  FakeFormatter formatter;
-  auto &engine = reset_generic_engine(formatter);
-
-  engine.on_workgroup_begin(1, 0, 0);
-  const ExecutionKey first_wavegroup_wave{1, 0, 0, 7, 0};
-  const ExecutionKey second_wavegroup_wave{1, 0, 0, 8, 1};
-  engine.on_wave_begin(first_wavegroup_wave);
-  engine.on_wave_begin(second_wavegroup_wave);
-
-  record_wavegroup_lds_access(engine, 1, first_wavegroup_wave, /*is_write=*/true);
-  record_wavegroup_lds_access(engine, 2, second_wavegroup_wave, /*is_write=*/false);
-
-  engine.on_workgroup_end(1, 0, 0);
-
-  // A semaphore orders only one wavegroup, so waves in different wavegroups
-  // still need the workgroup barrier.
-  const auto warnings = engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_NE(warnings[0].message.find("without workgroup barrier"), std::string::npos);
-  EXPECT_EQ(warnings[0].finding.instruction.execution.wavegroup_id, 0u);
-}
-
-TEST(GenericDataHazardEngineTest, WorkgroupEndFlushesWavegroupEpochLeftOpen) {
-  FakeFormatter formatter;
-  auto &engine = reset_generic_engine(formatter);
-
-  engine.on_workgroup_begin(1, 0, 0);
-  const ExecutionKey producer{1, 0, 0, 7, 0};
-  const ExecutionKey consumer{1, 0, 0, 7, 1};
-  engine.on_wave_begin(producer);
-  engine.on_wave_begin(consumer);
-
-  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true);
-  record_wavegroup_lds_access(engine, 2, consumer, /*is_write=*/false);
-
-  // No on_wavegroup_end: a frontend need not report it, so the workgroup ending
-  // has to drain what is left.
-  engine.on_workgroup_end(1, 0, 0);
-
-  const auto warnings = engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_NE(warnings[0].message.find("without wavegroup semaphore"), std::string::npos);
-}
-
-TEST(GenericDataHazardEngineTest, SemaphoreSignalWithPendingLdsStoreReportsMissingDscnt) {
-  FakeFormatter formatter;
-  auto &engine = reset_generic_engine(formatter);
-
-  engine.on_workgroup_begin(1, 0, 0);
-  const ExecutionKey producer{1, 0, 0, 7, 0};
-  engine.on_wave_begin(producer);
-
-  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true, 0x100, WaitCntType::LDS);
-  ASSERT_EQ(engine.wave_snapshot(producer)->core.lds_fifo.size(), 1u);
-
-  SemaphoreEvent signal;
-  signal.wave = producer;
-  signal.wavegroup_id = 7;
-  signal.kind = SemaphoreKind::Signal;
-  engine.on_semaphore(signal);
-
-  const auto warnings = engine.warning_snapshot();
-  ASSERT_EQ(warnings.size(), 1u);
-  EXPECT_NE(warnings[0].message.find("s_sema_signal issued with 1 pending LDS store"),
-            std::string::npos);
-  EXPECT_NE(warnings[0].suggestion.find("s_wait_dscnt 0 before s_sema_signal"), std::string::npos);
-  EXPECT_EQ(warnings[0].finding.instruction.execution.wavegroup_id, 7u);
-}
-
-TEST(GenericDataHazardEngineTest, SemaphoreSignalAfterDrainingLdsStoresIsClean) {
-  FakeFormatter formatter;
-  auto &engine = reset_generic_engine(formatter);
-
-  engine.on_workgroup_begin(1, 0, 0);
-  const ExecutionKey producer{1, 0, 0, 7, 0};
-  engine.on_wave_begin(producer);
-
-  record_wavegroup_lds_access(engine, 1, producer, /*is_write=*/true, 0x100, WaitCntType::LDS);
-
-  InstructionEvent drain;
-  drain.instruction = make_instruction(2, 0x300);
-  drain.instruction.execution = producer;
-  drain.wait_action.is_wait_instruction = true;
-  drain.wait_action.counters.push_back(WaitCounterClear{WaitCntType::LDS, 0});
-  engine.on_instruction(drain);
-  ASSERT_TRUE(engine.wave_snapshot(producer)->core.lds_fifo.empty());
-
-  SemaphoreEvent signal;
-  signal.wave = producer;
-  signal.wavegroup_id = 7;
-  signal.kind = SemaphoreKind::Signal;
-  engine.on_semaphore(signal);
-
-  EXPECT_TRUE(engine.warning_snapshot().empty());
 }

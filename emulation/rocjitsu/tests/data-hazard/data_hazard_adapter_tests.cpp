@@ -48,7 +48,7 @@ struct AdapterHarness {
   FakeFormatter formatter;
   DataHazardEngine &engine = data_hazard_engine();
   dh::DataHazardAdapter adapter{engine};
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
 
   AdapterHarness() {
     engine.reset();
@@ -82,12 +82,12 @@ public:
 
   void on_workgroup_begin(hazard_core::EntityId dispatch_id, hazard_core::EntityId cluster_id,
                           hazard_core::EntityId workgroup_id) override {
-    workgroup_begin_keys.push_back({dispatch_id, cluster_id, workgroup_id, 0, 0});
+    workgroup_begin_keys.push_back({dispatch_id, cluster_id, workgroup_id, 0});
   }
 
   void on_workgroup_end(hazard_core::EntityId dispatch_id, hazard_core::EntityId cluster_id,
                         hazard_core::EntityId workgroup_id) override {
-    workgroup_end_keys.push_back({dispatch_id, cluster_id, workgroup_id, 0, 0});
+    workgroup_end_keys.push_back({dispatch_id, cluster_id, workgroup_id, 0});
   }
 
   void on_wave_begin(const ExecutionKey &wave) override { wave_begin_keys.push_back(wave); }
@@ -128,11 +128,10 @@ const WaitCounterClear *find_counter(const WaitAction &action, WaitCntType type)
 
 void expect_key(const ExecutionKey &key, hazard_core::EntityId dispatch_id,
                 hazard_core::EntityId cluster_id, hazard_core::EntityId workgroup_id,
-                hazard_core::EntityId wavegroup_id, hazard_core::EntityId wave_id) {
+                hazard_core::EntityId wave_id) {
   EXPECT_EQ(key.dispatch_id, dispatch_id);
   EXPECT_EQ(key.cluster_id, cluster_id);
   EXPECT_EQ(key.workgroup_id, workgroup_id);
-  EXPECT_EQ(key.wavegroup_id, wavegroup_id);
   EXPECT_EQ(key.wave_id, wave_id);
 }
 
@@ -141,7 +140,7 @@ void expect_key(const ExecutionKey &key, hazard_core::EntityId dispatch_id,
 TEST(DataHazardAdapterTest, LifecycleCallbacksMapToGenericApi) {
   RecordingSimulatorApi api;
   dh::DataHazardAdapter adapter{api};
-  ExecutionKey wave{11, 3, 5, 7, 13};
+  ExecutionKey wave{11, 3, 5, 13};
 
   adapter.on_dispatch_begin(wave.dispatch_id);
   adapter.on_workgroup_begin(wave);
@@ -157,20 +156,20 @@ TEST(DataHazardAdapterTest, LifecycleCallbacksMapToGenericApi) {
   ASSERT_EQ(api.dispatch_begin_ids.size(), 1u);
   EXPECT_EQ(api.dispatch_begin_ids[0], 11u);
   ASSERT_EQ(api.workgroup_begin_keys.size(), 1u);
-  expect_key(api.workgroup_begin_keys[0], 11, 3, 5, 0, 0);
+  expect_key(api.workgroup_begin_keys[0], 11, 3, 5, 0);
   ASSERT_EQ(api.wave_begin_keys.size(), 1u);
-  expect_key(api.wave_begin_keys[0], 11, 3, 5, 7, 13);
+  expect_key(api.wave_begin_keys[0], 11, 3, 5, 13);
 
   ASSERT_EQ(api.barriers.size(), 3u);
   EXPECT_EQ(api.barriers[0].kind, BarrierKind::Workgroup);
   EXPECT_EQ(api.barriers[1].kind, BarrierKind::LocalMemoryAtomic);
   EXPECT_EQ(api.barriers[2].kind, BarrierKind::LocalMemoryAtomicAsync);
-  expect_key(api.barriers[0].wave, 11, 3, 5, 7, 13);
+  expect_key(api.barriers[0].wave, 11, 3, 5, 13);
 
   ASSERT_EQ(api.wave_end_keys.size(), 1u);
-  expect_key(api.wave_end_keys[0], 11, 3, 5, 7, 13);
+  expect_key(api.wave_end_keys[0], 11, 3, 5, 13);
   ASSERT_EQ(api.workgroup_end_keys.size(), 1u);
-  expect_key(api.workgroup_end_keys[0], 11, 3, 5, 0, 0);
+  expect_key(api.workgroup_end_keys[0], 11, 3, 5, 0);
   ASSERT_EQ(api.dispatch_end_ids.size(), 1u);
   EXPECT_EQ(api.dispatch_end_ids[0], 11u);
   EXPECT_EQ(api.shutdown_count, 1u);
@@ -179,7 +178,7 @@ TEST(DataHazardAdapterTest, LifecycleCallbacksMapToGenericApi) {
 TEST(DataHazardAdapterTest, InstructionCallbackMapsContextAndWaitAction) {
   RecordingSimulatorApi api;
   dh::DataHazardAdapter adapter{api};
-  ExecutionKey wave{4, 2, 6, 1, 9};
+  ExecutionKey wave{4, 2, 6, 9};
 
   dh::InstructionView instruction;
   instruction.execution = wave;
@@ -196,7 +195,7 @@ TEST(DataHazardAdapterTest, InstructionCallbackMapsContextAndWaitAction) {
   EXPECT_EQ(event.instruction.instruction_id, 42u);
   EXPECT_EQ(event.instruction.pc, 0x1234u);
   EXPECT_EQ(event.instruction.raw_isa[0], 0xDEADu);
-  expect_key(event.instruction.execution, 4, 2, 6, 1, 9);
+  expect_key(event.instruction.execution, 4, 2, 6, 9);
   ASSERT_TRUE(event.wait_action.is_wait_instruction);
   ASSERT_EQ(event.wait_action.counters.size(), 2u);
   ASSERT_NE(find_counter(event.wait_action, WaitCntType::VMEM), nullptr);
@@ -208,7 +207,7 @@ TEST(DataHazardAdapterTest, InstructionCallbackMapsContextAndWaitAction) {
 TEST(DataHazardAdapterTest, RegisterCallbacksMapScalarVectorAccumAndDropUnknown) {
   RecordingSimulatorApi api;
   dh::DataHazardAdapter adapter{api};
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
 
   dh::InstructionView instruction;
   instruction.execution = wave;
@@ -271,7 +270,7 @@ TEST(DataHazardAdapterTest, RegisterCallbacksMapScalarVectorAccumAndDropUnknown)
 TEST(DataHazardAdapterTest, GlobalFlatLoadRouteEmitsGlobalReadAndDualCounterVectorDestination) {
   RecordingSimulatorApi api;
   dh::DataHazardAdapter adapter{api};
-  ExecutionKey wave{1, 0, 0, 0, 0};
+  ExecutionKey wave{1, 0, 0, 0};
 
   dh::InstructionView instruction;
   instruction.execution = wave;
@@ -372,7 +371,7 @@ TEST(DataHazardAdapterTest, ScratchLoadRouteEmitsScratchMemoryAndVectorDestinati
   dh::DataHazardAdapter adapter{api};
   dh::InstructionView instruction;
   dh::MemoryRouteView load;
-  ExecutionKey const wave{1, 0, 0, 0, 0};
+  ExecutionKey const wave{1, 0, 0, 0};
 
   instruction.execution = wave;
   instruction.instruction_id = 1;
@@ -410,7 +409,7 @@ TEST(DataHazardAdapterTest, ScratchStorePerLaneRouteEmitsActiveScratchWritesOnly
   dh::DataHazardAdapter adapter{api};
   dh::InstructionView instruction;
   dh::MemoryRouteView store;
-  ExecutionKey const wave{1, 0, 0, 0, 0};
+  ExecutionKey const wave{1, 0, 0, 0};
 
   instruction.execution = wave;
   instruction.instruction_id = 1;
@@ -449,7 +448,7 @@ TEST(DataHazardAdapterTest, ReturningAtomicRouteEmitsMemoryRmwAndReturnEvents) {
   dh::DataHazardAdapter adapter{api};
   dh::InstructionView instruction;
   dh::MemoryRouteView atomic;
-  ExecutionKey const wave{1, 0, 0, 0, 0};
+  ExecutionKey const wave{1, 0, 0, 0};
 
   instruction.execution = wave;
   instruction.instruction_id = 1;
@@ -1120,7 +1119,7 @@ TEST(DataHazardAdapterTest, LocalRouteWithDirectLocalFlagEmitsOneLocalMemoryEven
   dh::DataHazardAdapter adapter{api};
   dh::InstructionView instruction;
   dh::MemoryRouteView local_store;
-  ExecutionKey const wave{1, 0, 0, 0, 0};
+  ExecutionKey const wave{1, 0, 0, 0};
 
   instruction.execution = wave;
   instruction.instruction_id = 1;
@@ -1986,7 +1985,6 @@ TEST(DataHazardAdapterTest, MapsWaitMnemonicsToWaitKinds) {
   EXPECT_EQ(dh::make_wait_kind("s_waitcnt_vscnt"), dh::WaitKind::WaitVscnt);
   EXPECT_EQ(dh::make_wait_kind("s_wait_tensorcnt"), dh::WaitKind::WaitTensorcnt);
   EXPECT_EQ(dh::make_wait_kind("s_barrier_wait"), dh::WaitKind::BarrierWait);
-  EXPECT_EQ(dh::make_wait_kind("s_sema_wait"), dh::WaitKind::SemaphoreWait);
   EXPECT_EQ(dh::make_wait_kind("s_wait_xcnt"), dh::WaitKind::AddressTranslation);
   EXPECT_EQ(dh::make_wait_kind("v_add_u32"), dh::WaitKind::None);
 }
@@ -2024,19 +2022,6 @@ TEST(DataHazardAdapterTest, WaitCountsWiderThanTheCdnaFieldSurviveTheAdapter) {
   EXPECT_EQ(find_counter(action, WaitCntType::VMEM)->keep_count, 40u);
   EXPECT_EQ(find_counter(action, WaitCntType::LDS)->keep_count, 20u);
   EXPECT_EQ(find_counter(action, WaitCntType::SMEM)->keep_count, 20u);
-}
-
-TEST(DataHazardAdapterTest, SemaphoreWaitClosesWavegroupEpochRatherThanDrainingACounter) {
-  dh::WaitInfo wait;
-  wait.kind = dh::WaitKind::SemaphoreWait;
-
-  const WaitAction action = dh::make_wait_action(wait);
-  EXPECT_TRUE(action.is_wait_instruction);
-  EXPECT_TRUE(action.is_wavegroup_semaphore_wait);
-  // A semaphore orders waves, so it neither drains this wave's counters nor
-  // closes the workgroup-wide epoch a barrier closes.
-  EXPECT_TRUE(action.counters.empty());
-  EXPECT_FALSE(action.is_workgroup_barrier);
 }
 
 TEST(DataHazardAdapterTest, MapsWaitInfoToGenericWaitActions) {
