@@ -15,7 +15,6 @@
 #include <cstddef>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -39,14 +38,7 @@ public:
     std::vector<StackEntry> chain;
 };
 
-// DebugInfoKind slot used to publish the USER_SCOPE chain: a private
-// string-keyed slot when available, otherwise TEST_INFO_2.
-#ifdef ROCPROF_TORCHTRACE_HAS_CUSTOM_DBGINFOKIND
-inline constexpr std::string_view kRoctxUserScopeName = "ROCPROF_TORCHTRACE_INFO";
-inline const c10::DebugInfoKind   kRoctxDbgKind(&kRoctxUserScopeName);
-#else
 inline const c10::DebugInfoKind kRoctxDbgKind = c10::DebugInfoKind::TEST_INFO_2;
-#endif
 
 // Overlays the published USER_SCOPE chain onto the thread stack.
 inline std::size_t apply_userscope_overlay()

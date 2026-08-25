@@ -5,8 +5,7 @@ set(target test-torch-trace-collector)
 
 add_executable(${target} test_torch_trace_collector.cpp roctx_range_intercept.cpp)
 
-# Includes, torch libraries, and the DebugInfoKind flag are inherited from
-# torch-trace-collector. Only the runtime search paths below are test-specific.
+# Runtime search paths below are test-specific; includes and Torch libs come from torch-trace-collector.
 target_link_libraries(${target} PRIVATE torch-trace-collector gtest_main)
 
 # torch's shared libraries cross-reference one another at load time.
