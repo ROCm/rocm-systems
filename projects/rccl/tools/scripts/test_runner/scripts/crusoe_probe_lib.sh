@@ -138,8 +138,7 @@ mpi_smoke_pair() {
     --cpus-per-task=8 \
     --gpus-per-node=8 \
     --time=00:05:00 \
-    --export=ALL,PROBE_OOB_IF="${PROBE_OOB_IF:-ens3}" \
-    --wrap "bash ${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_mpi_smoke.sh" 2>&1 \
+    --wrap "PROBE_OOB_IF=${PROBE_OOB_IF:-ens3} bash ${GITHUB_WORKSPACE}/${TEST_RUNNER_DIR}/scripts/crusoe_mpi_smoke.sh" 2>&1 \
     | tee /dev/stderr | grep -oE '^[0-9]+$' | tail -1 || true)
   if [ -z "${j}" ]; then
     echo "mpi smoke sbatch failed to submit for ${pair}; treating pair as unusable" >&2
