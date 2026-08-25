@@ -320,6 +320,14 @@ endfunction()
 
 # --- Unit / integration test suite ---
 
+add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
+set_tests_properties(
+    RocjitsuVersion
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "rocjitsu ${PROJECT_VERSION}[\r\n]+git revision: .+[\r\n]+git commit: .+"
+)
+
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
     rj_decode_fuzz_test
