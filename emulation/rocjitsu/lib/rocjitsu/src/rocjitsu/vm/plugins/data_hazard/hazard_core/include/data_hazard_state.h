@@ -44,31 +44,6 @@ struct EngineWorkgroupKeyHash {
   }
 };
 
-/// Identifies one wavegroup, the level of the hierarchy between a workgroup and
-/// a wave whose waves synchronize with semaphores instead of a full barrier.
-struct EngineWavegroupKey {
-  EntityId dispatch_id = 0;
-  EntityId cluster_id = 0;
-  EntityId workgroup_id = 0;
-  EntityId wavegroup_id = 0;
-
-  bool operator==(const EngineWavegroupKey &other) const noexcept {
-    return dispatch_id == other.dispatch_id && cluster_id == other.cluster_id &&
-           workgroup_id == other.workgroup_id && wavegroup_id == other.wavegroup_id;
-  }
-};
-
-struct EngineWavegroupKeyHash {
-  size_t operator()(const EngineWavegroupKey &key) const noexcept {
-    size_t seed = 0;
-    hash_combine(seed, key.dispatch_id);
-    hash_combine(seed, key.cluster_id);
-    hash_combine(seed, key.workgroup_id);
-    hash_combine(seed, key.wavegroup_id);
-    return seed;
-  }
-};
-
 struct EngineWaveKey {
   EntityId dispatch_id = 0;
   EntityId cluster_id = 0;
@@ -102,10 +77,6 @@ struct EngineLdsAccessRecord {
   bool is_write = false;
   bool is_atomic = false;
   std::array<uint32_t, 4> raw_isa{};
-  /// Lets the workgroup detector leave pairs from one wavegroup to the
-  /// wavegroup detector, which knows the semaphores that order them. Zero means
-  /// the access belongs to no wavegroup and stays workgroup-scoped.
-  EntityId wavegroup_id = 0;
 };
 
 struct EngineInstructionContext {
@@ -116,7 +87,6 @@ struct EngineInstructionContext {
   EntityId workgroup_id = 0;
   EntityId dispatch_id = 0;
   EntityId cluster_id = 0;
-  EntityId wavegroup_id = 0;
   uint64_t pc = 0;
   std::array<uint32_t, 4> raw_isa{};
 };
@@ -124,11 +94,6 @@ struct EngineInstructionContext {
 struct EngineWorkgroupState {
   SpinLock mutex;
   std::vector<EngineLdsAccessRecord> lds_epoch;
-  /// One LDS epoch per wavegroup, closed by that wavegroup's s_sema_wait or by
-  /// the wavegroup ending. Held here rather than in a wavegroup of their own
-  /// because they share the workgroup's lock and lifetime, and kept apart from
-  /// lds_epoch because a semaphore closes only its own wavegroup's accesses.
-  std::unordered_map<EntityId, std::vector<EngineLdsAccessRecord>> wavegroup_lds_epochs;
 };
 
 struct EngineWaveState {
@@ -180,40 +145,6 @@ struct EngineLdsRaceKeyHash {
     hash_combine(seed, key.dispatch_id);
     hash_combine(seed, key.cluster_id);
     hash_combine(seed, key.workgroup_id);
-    hash_combine(seed, key.address);
-    hash_combine(seed, key.wave_a);
-    hash_combine(seed, key.wave_b);
-    return seed;
-  }
-};
-
-/// Dedup key for wavegroup-scope LDS races. Distinct from EngineLdsRaceKey so
-/// that a workgroup-scope and a wavegroup-scope report about the same address
-/// and wave pair do not suppress one another: they name different missing
-/// synchronization, so both are worth reporting.
-struct EngineWavegroupLdsRaceKey {
-  EntityId dispatch_id;
-  EntityId cluster_id;
-  EntityId workgroup_id;
-  EntityId wavegroup_id;
-  uint32_t address;
-  EntityId wave_a;
-  EntityId wave_b;
-
-  bool operator==(const EngineWavegroupLdsRaceKey &other) const noexcept {
-    return dispatch_id == other.dispatch_id && cluster_id == other.cluster_id &&
-           workgroup_id == other.workgroup_id && wavegroup_id == other.wavegroup_id &&
-           address == other.address && wave_a == other.wave_a && wave_b == other.wave_b;
-  }
-};
-
-struct EngineWavegroupLdsRaceKeyHash {
-  size_t operator()(const EngineWavegroupLdsRaceKey &key) const noexcept {
-    size_t seed = 0;
-    hash_combine(seed, key.dispatch_id);
-    hash_combine(seed, key.cluster_id);
-    hash_combine(seed, key.workgroup_id);
-    hash_combine(seed, key.wavegroup_id);
     hash_combine(seed, key.address);
     hash_combine(seed, key.wave_a);
     hash_combine(seed, key.wave_b);
@@ -303,8 +234,6 @@ struct EngineState {
   std::unordered_map<EngineWaveKey, ExecutionKey, EngineWaveKeyHash> wave_index;
   std::unordered_map<ExecutionKey, EngineWorkgroupKey, ExecutionKeyHash> wave_to_workgroup;
   std::unordered_set<EngineLdsRaceKey, EngineLdsRaceKeyHash> reported_lds_races;
-  std::unordered_set<EngineWavegroupLdsRaceKey, EngineWavegroupLdsRaceKeyHash>
-      reported_wavegroup_lds_races;
   std::unordered_map<EngineGlobalShadowKey, EngineGlobalShadowEntry, EngineGlobalShadowKeyHash>
       global_shadow;
   std::vector<EngineWarning> warnings;

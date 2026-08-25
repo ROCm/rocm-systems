@@ -35,7 +35,6 @@ struct HazardWarning {
   hazard_core::EntityId dispatch_id = 0;
   hazard_core::EntityId cluster_id = 0;
   hazard_core::EntityId workgroup_id = 0;
-  hazard_core::EntityId wavegroup_id = 0;
   std::string instruction_text;
   std::array<uint32_t, 4> raw_isa{};
   uint64_t suppressed_occurrences = 0;

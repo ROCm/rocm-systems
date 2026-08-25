@@ -310,7 +310,6 @@ EngineWarning make_global_race_warning(const EngineInstructionContext &ctx,
   warning.finding.source_instruction.execution.dispatch_id = conflicting_access.dispatch_id;
   warning.finding.source_instruction.execution.cluster_id = conflicting_access.cluster_id;
   warning.finding.source_instruction.execution.workgroup_id = conflicting_access.workgroup_id;
-  warning.finding.source_instruction.execution.wavegroup_id = 0;
   warning.finding.source_instruction.execution.wave_id = conflicting_access.wave_id;
   warning.finding.source_instruction.instruction_id = conflicting_access.instruction_id;
   warning.finding.source_instruction.pc = conflicting_access.pc;
@@ -444,11 +443,6 @@ void DataHazardEngine::on_workgroup_end(EntityId dispatch_id, EntityId cluster_i
   }
 }
 
-void DataHazardEngine::on_wavegroup_end(EntityId dispatch_id, EntityId cluster_id,
-                                        EntityId workgroup_id, EntityId wavegroup_id) {
-  flush_wavegroup_epoch(EngineWavegroupKey{dispatch_id, cluster_id, workgroup_id, wavegroup_id});
-}
-
 void DataHazardEngine::on_wave_begin(const ExecutionKey &wave_key) {
   const EngineWorkgroupKey workgroup_key{wave_key.dispatch_id, wave_key.cluster_id,
                                          wave_key.workgroup_id};
@@ -485,8 +479,6 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
 
   std::vector<EngineLdsAccessRecord> epoch_to_check;
   EngineWorkgroupKey epoch_key{};
-  std::vector<EngineLdsAccessRecord> wavegroup_epoch_to_check;
-  EngineWavegroupKey wavegroup_epoch_key{};
   {
     std::lock_guard<SpinLock> lock(wave->mutex);
     track_instruction_context(*wave, instruction);
@@ -519,25 +511,10 @@ void DataHazardEngine::on_instruction(const InstructionEvent &instruction) {
       wave->workgroup->lds_epoch.clear();
       epoch_key = EngineWorkgroupKey{ctx.dispatch_id, ctx.cluster_id, ctx.workgroup_id};
     }
-
-    // s_sema_wait closes the epoch of the waiting wave's wavegroup only, which
-    // is why it is kept apart from the workgroup epoch above.
-    if (action.is_wavegroup_semaphore_wait && wave->workgroup && ctx.wavegroup_id != 0) {
-      std::lock_guard<SpinLock> wg_lock(wave->workgroup->mutex);
-      auto it = wave->workgroup->wavegroup_lds_epochs.find(ctx.wavegroup_id);
-      if (it != wave->workgroup->wavegroup_lds_epochs.end()) {
-        wavegroup_epoch_to_check = std::move(it->second);
-        wave->workgroup->wavegroup_lds_epochs.erase(it);
-      }
-      wavegroup_epoch_key =
-          EngineWavegroupKey{ctx.dispatch_id, ctx.cluster_id, ctx.workgroup_id, ctx.wavegroup_id};
-    }
   }
 
   if (!epoch_to_check.empty())
     check_lds_epoch_for_races(epoch_key, epoch_to_check);
-  if (!wavegroup_epoch_to_check.empty())
-    check_wavegroup_lds_epoch_for_races(wavegroup_epoch_key, wavegroup_epoch_to_check);
 }
 
 void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
@@ -554,11 +531,6 @@ void DataHazardEngine::on_resource_access(const ResourceAccessEvent &event) {
   EngineInstructionContext ctx = get_instruction_context(*wave, event.instruction.instruction_id);
   if (ctx.instruction_id == 0 && event.instruction.instruction_id != 0)
     ctx = make_engine_instruction_context(event.instruction);
-  // A frontend may know the wavegroup only when it reports the access, leaving
-  // the context stored at instruction time with none. Take it from the access
-  // so the record still lands in the right wavegroup epoch.
-  if (ctx.wavegroup_id == 0 && event.instruction.execution.wavegroup_id != 0)
-    ctx.wavegroup_id = event.instruction.execution.wavegroup_id;
 
   InstructionHazardSemantics hazards = merge_resource_semantics(ctx.hazards, event);
   if (event.hazards.memory_op_wait != WaitCntType::NONE) {
@@ -609,26 +581,6 @@ void DataHazardEngine::on_barrier(const BarrierEvent &barrier) {
   }
 }
 
-void DataHazardEngine::on_semaphore(const SemaphoreEvent &semaphore) {
-  // Only the signal is of interest: it must not be issued while the signalling
-  // wave still has LDS stores in flight, or the woken wave reads stale data.
-  // The wait itself is handled as a WaitAction on the instruction.
-  if (semaphore.kind != SemaphoreKind::Signal)
-    return;
-
-  auto wave = get_wave(semaphore.wave);
-  if (!wave)
-    return;
-
-  EngineInstructionContext ctx;
-  ctx.dispatch_id = semaphore.wave.dispatch_id;
-  ctx.cluster_id = semaphore.wave.cluster_id;
-  ctx.workgroup_id = semaphore.wave.workgroup_id;
-  ctx.wavegroup_id = semaphore.wavegroup_id;
-  ctx.wave_id = semaphore.wave.wave_id;
-  report_pending_ds_before_signal(*wave, ctx);
-}
-
 void DataHazardEngine::on_shutdown() {
   std::vector<EngineWorkgroupKey> workgroups;
   {
@@ -638,8 +590,6 @@ void DataHazardEngine::on_shutdown() {
       workgroups.push_back(key);
   }
 
-  // flush_workgroup_epoch drains the wavegroup epochs the workgroup still holds,
-  // so this covers both scopes.
   for (const auto &key : workgroups)
     flush_workgroup_epoch(key);
 }
@@ -1282,14 +1232,8 @@ void DataHazardEngine::handle_lds_access(EngineWaveState &wave, const EngineInst
     record.is_write = event.is_write;
     record.is_atomic = event.is_atomic;
     record.raw_isa = ctx.raw_isa;
-    record.wavegroup_id = ctx.wavegroup_id;
     std::lock_guard<SpinLock> lock(wave.workgroup->mutex);
     wave.workgroup->lds_epoch.push_back(record);
-    // Accesses inside a wavegroup are collected a second time so the semaphore
-    // detector can judge them on their own, at the granularity a semaphore
-    // orders. Accesses belonging to no wavegroup stay workgroup-scoped.
-    if (ctx.wavegroup_id != 0)
-      wave.workgroup->wavegroup_lds_epochs[ctx.wavegroup_id].push_back(record);
   }
 }
 
@@ -1384,71 +1328,21 @@ void DataHazardEngine::flush_workgroup_epoch(const EngineWorkgroupKey &key) {
     return;
 
   std::vector<EngineLdsAccessRecord> epoch;
-  std::vector<EngineWavegroupKey> open_wavegroups;
   {
     std::lock_guard<SpinLock> lock(workgroup->mutex);
     epoch = std::move(workgroup->lds_epoch);
     workgroup->lds_epoch.clear();
-    // A frontend need not report the end of every wavegroup, so any epoch still
-    // open belongs to this workgroup and is drained below.
-    for (const auto &[wavegroup_id, _] : workgroup->wavegroup_lds_epochs)
-      open_wavegroups.push_back(
-          EngineWavegroupKey{key.dispatch_id, key.cluster_id, key.workgroup_id, wavegroup_id});
   }
   if (!epoch.empty())
     check_lds_epoch_for_races(key, epoch);
-
-  for (const auto &wavegroup_key : open_wavegroups)
-    flush_wavegroup_epoch(wavegroup_key);
 }
 
-void DataHazardEngine::flush_wavegroup_epoch(const EngineWavegroupKey &key) {
-  std::shared_ptr<EngineWorkgroupState> workgroup;
-  {
-    std::shared_lock<std::shared_mutex> lock(state_.mutex);
-    auto it = state_.workgroups.find(
-        EngineWorkgroupKey{key.dispatch_id, key.cluster_id, key.workgroup_id});
-    if (it != state_.workgroups.end())
-      workgroup = it->second;
-  }
-  if (!workgroup)
-    return;
+void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
+                                                 const std::vector<EngineLdsAccessRecord> &epoch) {
+  static constexpr const char *kMessageSuffix = "without workgroup barrier";
+  static constexpr const char *kSuggestion =
+      "Add s_barrier_signal / s_barrier_wait between conflicting LDS accesses";
 
-  std::vector<EngineLdsAccessRecord> epoch;
-  {
-    std::lock_guard<SpinLock> lock(workgroup->mutex);
-    auto it = workgroup->wavegroup_lds_epochs.find(key.wavegroup_id);
-    if (it != workgroup->wavegroup_lds_epochs.end()) {
-      epoch = std::move(it->second);
-      workgroup->wavegroup_lds_epochs.erase(it);
-    }
-  }
-  if (!epoch.empty())
-    check_wavegroup_lds_epoch_for_races(key, epoch);
-}
-
-namespace {
-
-/// The pairwise sweep shared by the workgroup and wavegroup LDS detectors. They
-/// look for the same thing — two waves touching one address with no ordering
-/// between them — and differ only in which synchronization was missing, so the
-/// parts that differ are passed in.
-///
-/// @param wavegroup_id          Zero for a workgroup-scope sweep; names the
-///                              wavegroup otherwise. Reported on the finding.
-/// @param epoch                 Accesses collected since the epoch last closed.
-/// @param skip_intra_wavegroup  Set by the workgroup sweep to pass over pairs
-///                              from a single wavegroup, which the wavegroup
-///                              sweep judges against its semaphores instead.
-/// @param insert_dedup          Records the race and returns false if this pair
-///                              and address were already reported.
-/// @param message_suffix        Names the missing synchronization.
-/// @param emit                  Stores and publishes a finished warning.
-template <typename InsertDedup, typename EmitWarning>
-void check_lds_epoch_impl(EntityId dispatch_id, EntityId cluster_id, EntityId workgroup_id,
-                          EntityId wavegroup_id, const std::vector<EngineLdsAccessRecord> &epoch,
-                          bool skip_intra_wavegroup, InsertDedup &&insert_dedup,
-                          const char *message_suffix, const char *suggestion, EmitWarning &&emit) {
   if (epoch.size() < 2)
     return;
 
@@ -1478,15 +1372,17 @@ void check_lds_epoch_impl(EntityId dispatch_id, EntityId cluster_id, EntityId wo
         continue;
       if (first.is_atomic && second.is_atomic)
         continue;
-      if (skip_intra_wavegroup && first.wavegroup_id != 0 &&
-          first.wavegroup_id == second.wavegroup_id)
-        continue;
 
       const EntityId wave_lo = std::min(first.wave_id, second.wave_id);
       const EntityId wave_hi = std::max(first.wave_id, second.wave_id);
       const uint32_t overlap_addr = std::max(first.address, second.address);
-      if (!insert_dedup(overlap_addr, wave_lo, wave_hi))
-        continue;
+      {
+        const EngineLdsRaceKey race_key{key.dispatch_id, key.cluster_id, key.workgroup_id,
+                                        overlap_addr,    wave_lo,        wave_hi};
+        std::lock_guard<std::shared_mutex> lock(state_.mutex);
+        if (!state_.reported_lds_races.insert(race_key).second)
+          continue;
+      }
 
       const auto &writer = first.is_write ? first : second;
       const auto &other = first.is_write ? second : first;
@@ -1496,7 +1392,7 @@ void check_lds_epoch_impl(EntityId dispatch_id, EntityId cluster_id, EntityId wo
       msg << "LDS data race: Wave " << writer.wave_id << " writes LDS address 0x" << std::hex
           << writer.address << " (size " << std::dec << writer.size << ") and Wave "
           << other.wave_id << " " << other_action << " LDS address 0x" << std::hex << other.address
-          << " (size " << std::dec << other.size << ") " << message_suffix;
+          << " (size " << std::dec << other.size << ") " << kMessageSuffix;
 
       EngineWarning warning;
       warning.finding.kind = HazardKind::LocalMemoryRace;
@@ -1504,112 +1400,25 @@ void check_lds_epoch_impl(EntityId dispatch_id, EntityId cluster_id, EntityId wo
       warning.finding.access_kind =
           other.is_write ? HazardAccessKind::Write : HazardAccessKind::Read;
       warning.finding.instruction.instruction_id = other.instruction_id;
-      warning.finding.instruction.execution.dispatch_id = dispatch_id;
-      warning.finding.instruction.execution.cluster_id = cluster_id;
-      warning.finding.instruction.execution.workgroup_id = workgroup_id;
-      warning.finding.instruction.execution.wavegroup_id = wavegroup_id;
+      warning.finding.instruction.execution.dispatch_id = key.dispatch_id;
+      warning.finding.instruction.execution.cluster_id = key.cluster_id;
+      warning.finding.instruction.execution.workgroup_id = key.workgroup_id;
       warning.finding.instruction.execution.wave_id = other.wave_id;
       warning.finding.instruction.pc = other.pc;
       warning.finding.instruction.raw_isa = other.raw_isa;
       warning.finding.address = overlap_addr;
       warning.finding.size_bytes = other.size;
       warning.finding.message_template = msg.str();
-      warning.finding.suggestion_template = suggestion;
+      warning.finding.suggestion_template = kSuggestion;
       warning.message = msg.str();
-      warning.suggestion = suggestion;
-      emit(std::move(warning));
+      warning.suggestion = kSuggestion;
+      {
+        std::lock_guard<std::shared_mutex> lock(state_.mutex);
+        state_.warnings.push_back(warning);
+      }
+      emit_warning(warning);
     }
   }
-}
-
-} // namespace
-
-void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
-                                                 const std::vector<EngineLdsAccessRecord> &epoch) {
-  check_lds_epoch_impl(
-      key.dispatch_id, key.cluster_id, key.workgroup_id, /*wavegroup_id=*/0, epoch,
-      /*skip_intra_wavegroup=*/true,
-      [&](uint32_t overlap_addr, EntityId wave_lo, EntityId wave_hi) {
-        const EngineLdsRaceKey race_key{key.dispatch_id, key.cluster_id, key.workgroup_id,
-                                        overlap_addr,    wave_lo,        wave_hi};
-        std::lock_guard<std::shared_mutex> lock(state_.mutex);
-        return state_.reported_lds_races.insert(race_key).second;
-      },
-      "without workgroup barrier",
-      "Add s_barrier_signal / s_barrier_wait between conflicting LDS accesses",
-      [&](EngineWarning &&warning) {
-        {
-          std::lock_guard<std::shared_mutex> lock(state_.mutex);
-          state_.warnings.push_back(warning);
-        }
-        emit_warning(warning);
-      });
-}
-
-void DataHazardEngine::check_wavegroup_lds_epoch_for_races(
-    const EngineWavegroupKey &key, const std::vector<EngineLdsAccessRecord> &epoch) {
-  check_lds_epoch_impl(
-      key.dispatch_id, key.cluster_id, key.workgroup_id, key.wavegroup_id, epoch,
-      // Pairs from one wavegroup are exactly what this sweep is here to judge.
-      /*skip_intra_wavegroup=*/false,
-      [&](uint32_t overlap_addr, EntityId wave_lo, EntityId wave_hi) {
-        const EngineWavegroupLdsRaceKey race_key{key.dispatch_id,  key.cluster_id, key.workgroup_id,
-                                                 key.wavegroup_id, overlap_addr,   wave_lo,
-                                                 wave_hi};
-        std::lock_guard<std::shared_mutex> lock(state_.mutex);
-        return state_.reported_wavegroup_lds_races.insert(race_key).second;
-      },
-      "without wavegroup semaphore",
-      "Add s_sema_signal / s_sema_wait between conflicting wavegroup LDS accesses",
-      [&](EngineWarning &&warning) {
-        {
-          std::lock_guard<std::shared_mutex> lock(state_.mutex);
-          state_.warnings.push_back(warning);
-        }
-        emit_warning(warning);
-      });
-}
-
-void DataHazardEngine::report_pending_ds_before_signal(EngineWaveState &wave,
-                                                       const EngineInstructionContext &ctx) {
-  std::lock_guard<SpinLock> lock(wave.mutex);
-  if (wave.core.lds_fifo.empty())
-    return;
-  const auto &[address, pending] = wave.core.lds_fifo.front();
-
-  std::ostringstream msg;
-  msg << "s_sema_signal issued with " << wave.core.lds_fifo.size()
-      << " pending LDS store(s) (earliest store at LDS address 0x" << std::hex << address << ")";
-  const std::string suggestion =
-      "Add s_wait_dscnt 0 before s_sema_signal so the LDS stores are visible to the waiting wave";
-
-  EngineWarning warning;
-  warning.finding.kind = HazardKind::LocalMemoryRace;
-  warning.finding.resource_kind = ResourceKind::LocalMemory;
-  warning.finding.access_kind = HazardAccessKind::Write;
-  warning.finding.instruction.instruction_id = ctx.instruction_id;
-  warning.finding.instruction.execution.dispatch_id = ctx.dispatch_id;
-  warning.finding.instruction.execution.cluster_id = ctx.cluster_id;
-  warning.finding.instruction.execution.workgroup_id = ctx.workgroup_id;
-  warning.finding.instruction.execution.wavegroup_id = ctx.wavegroup_id;
-  warning.finding.instruction.execution.wave_id = ctx.wave_id;
-  warning.finding.instruction.pc = ctx.pc;
-  warning.finding.instruction.raw_isa = ctx.raw_isa;
-  warning.finding.address = address;
-  warning.finding.size_bytes = pending.size;
-  warning.finding.required_wait = WaitCntType::LDS;
-  warning.finding.message_template = msg.str();
-  warning.finding.suggestion_template = suggestion;
-  warning.message = msg.str();
-  warning.suggestion = suggestion;
-  warning.source_raw_isa = get_pending_raw_isa(wave, pending.instruction_id);
-  warning.source_pc = pending.pc;
-  warning.has_source = true;
-  {
-    std::lock_guard<std::shared_mutex> lock(state_.mutex);
-    state_.warnings.push_back(warning);
-  }
-  emit_warning(warning);
 }
 
 void DataHazardEngine::emit_warning(const EngineWarning &warning) {

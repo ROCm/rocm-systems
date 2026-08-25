@@ -53,17 +53,11 @@ struct WaitAction {
   bool is_workgroup_barrier = false;
   bool is_address_translation = false;
   bool is_wait_instruction = false;
-  // Closes the wavegroup LDS epoch (s_sema_wait), the wavegroup-scope analogue
-  // of is_workgroup_barrier. Safe to set when the instruction is classified,
-  // because the epoch it closes holds only the accesses of the waves in one
-  // wavegroup and the signal that releases the wait has already been issued.
-  bool is_wavegroup_semaphore_wait = false;
 };
 
 inline bool wait_action_has_effect(const WaitAction &action) {
   return action.is_wait_instruction || action.waits_for_idle || action.is_workgroup_barrier ||
-         action.is_address_translation || action.is_wavegroup_semaphore_wait ||
-         !action.counters.empty();
+         action.is_address_translation || !action.counters.empty();
 }
 
 struct InstructionDescriptor {
@@ -163,22 +157,6 @@ struct BarrierEvent {
   ExecutionKey wave;
   EntityId barrier_id = 0;
   BarrierKind kind = BarrierKind::Unknown;
-};
-
-/// A wavegroup semaphore operation, which is not a barrier: a barrier
-/// synchronizes every wave of a workgroup, while a semaphore is a directed
-/// signal between the few waves of one wavegroup.
-enum class SemaphoreKind {
-  /// s_sema_signal: the wave publishes its progress. It does not stall, so the
-  /// engine uses it only to check the wave drained its LDS stores beforehand.
-  Signal,
-  Unknown,
-};
-
-struct SemaphoreEvent {
-  ExecutionKey wave;
-  EntityId wavegroup_id = 0;
-  SemaphoreKind kind = SemaphoreKind::Unknown;
 };
 
 enum class HazardKind {

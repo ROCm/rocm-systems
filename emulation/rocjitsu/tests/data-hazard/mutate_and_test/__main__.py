@@ -53,9 +53,9 @@ DEFAULT_TIMEOUT = 240  # 4 minutes
 
 WAIT_RE = re.compile(r"^\s+(s_wait\w+)\s+", re.MULTILINE)
 
-# Shaders using instructions that only assemble for some targets (arcadia
-# wavegroup semaphores, for one) declare them with a `// requires: gfx1260`
-# comment; they are skipped on every other architecture.
+# Shaders using instructions that only assemble for some targets declare them
+# with a `// requires: <arch>` comment; they are skipped on every other
+# architecture.
 REQUIRES_RE = re.compile(r"^\s*//\s*requires:\s*(.+)$", re.MULTILINE)
 
 # s_wait_xcnt tracks address translation (XNACK replay), not data completion.

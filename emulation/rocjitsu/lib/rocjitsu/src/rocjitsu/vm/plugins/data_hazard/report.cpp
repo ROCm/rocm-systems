@@ -245,7 +245,6 @@ std::string WarningCollector::to_json() const {
     append_uint_field(out, 2, "dispatch_id", w.dispatch_id, true);
     append_uint_field(out, 2, "cluster_id", w.cluster_id, true);
     append_uint_field(out, 2, "workgroup_id", w.workgroup_id, true);
-    append_uint_field(out, 2, "wavegroup_id", w.wavegroup_id, true);
 
     append_indent(out, 2);
     append_json_string(out, "consumer");
@@ -255,7 +254,6 @@ std::string WarningCollector::to_json() const {
     append_uint_field(out, 3, "dispatch_id", w.dispatch_id, true);
     append_uint_field(out, 3, "cluster_id", w.cluster_id, true);
     append_uint_field(out, 3, "workgroup_id", w.workgroup_id, true);
-    append_uint_field(out, 3, "wavegroup_id", w.wavegroup_id, true);
     append_uint_field(out, 3, "wave_id", w.wave_id, true);
     append_string_field(out, 3, "instruction_text", w.instruction_text, true);
     append_string_field(out, 3, "raw_isa", raw_isa, false);
@@ -337,7 +335,6 @@ void CollectingWarningSink::emit_warning(const hazard_core::EngineWarning &warni
   out.dispatch_id = inst.execution.dispatch_id;
   out.cluster_id = inst.execution.cluster_id;
   out.workgroup_id = inst.execution.workgroup_id;
-  out.wavegroup_id = inst.execution.wavegroup_id;
   out.raw_isa = inst.raw_isa;
   if (formatter_ != nullptr)
     out.instruction_text = formatter_->format_instruction(inst);

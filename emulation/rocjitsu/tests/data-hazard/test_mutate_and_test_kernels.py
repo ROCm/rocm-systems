@@ -34,7 +34,7 @@ visibility. CI uploads those two files as job artifacts.
 
 ROCm tool discovery uses ``ROCM_PATH`` / ``ROCM_HOME`` when set; architecture uses
 ``TARGET_ARCH`` when set. A kernel that declares ``// requires: <arch>`` is skipped on
-every other architecture — the wavegroup semaphore kernels only assemble for gfx1260.
+every other architecture.
 """
 
 from __future__ import annotations
