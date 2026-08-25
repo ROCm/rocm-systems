@@ -989,6 +989,7 @@ bool Vop2::has_encoded_sdwa() const {
   case 52:
   case 53:
   case 54:
+  case 60:
   case 61:
     return true;
   default:
@@ -1077,12 +1078,45 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
 }
 
+bool Ds::uses_split_ds_offsets() const {
+  switch (inst_.op) {
+  case 14:
+  case 15:
+  case 55:
+  case 56:
+  case 78:
+  case 79:
+  case 119:
+  case 120:
+    return true;
+  default:
+    return false;
+  }
+}
+
 Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+}
+
+void Ds::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (uses_split_ds_offsets()) {
+    if (inst->offset0)
+      out += " offset0:" + std::to_string(inst->offset0);
+    if (inst->offset1)
+      out += " offset1:" + std::to_string(inst->offset1);
+  } else {
+    const uint32_t offset = inst->offset0 | (inst->offset1 << 8);
+    if (offset)
+      out += " offset:" + std::to_string(offset);
+  }
+  if (inst->gds)
+    out += " gds";
 }
 
 Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn)
@@ -1152,7 +1186,11 @@ Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exe
 void Flat::build_modifiers(std::string &out) const {
   auto *inst = &inst_;
   (void)inst;
-  int flat_offset = (inst->seg != 0) ? (inst->offset | (inst->pad_12 << 12)) : inst->offset;
+  int flat_offset = inst->offset | (inst->pad_12 << 12);
+  if (inst->seg == 0)
+    flat_offset = inst->offset;
+  else if (flat_offset & 0x1000)
+    flat_offset -= 0x2000;
   if (flat_offset)
     out += " offset:" + std::to_string(flat_offset);
   if (inst->glc)

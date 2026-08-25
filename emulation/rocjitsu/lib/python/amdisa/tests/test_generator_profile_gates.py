@@ -126,6 +126,49 @@ def _profile_for_arch(arch_name: str):
     return profile_types[arch_name]()
 
 
+@pytest.mark.parametrize(
+    'arch_name',
+    (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ),
+)
+def test_shared_scalar_pair_selector_contract_matches_in_tree_isas(
+    arch_name: str,
+) -> None:
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+
+    CodeGenerator(spec, '')._validate_shared_scalar_pair_selector_contract()
+
+
+def test_shared_scalar_pair_selector_contract_rejects_value_drift() -> None:
+    arch_name = 'cdna4'
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    selector = next(
+        item for item in spec.opnd_selectors if item.operand_type == 'OPR_SSRC'
+    )
+    selector.op_sel_vals = [
+        (name, '105' if name == 'OPR_SSRC_VCC_LO' else value)
+        for name, value in selector.op_sel_vals
+    ]
+
+    with pytest.raises(ValueError, match=r'OPR_SSRC_VCC_LO=106'):
+        CodeGenerator(spec, '')._validate_shared_scalar_pair_selector_contract()
+
+
 def gen_mfma(
     inst: Instruction,
     dst: list[str],
@@ -3328,6 +3371,26 @@ def test_generated_sdwa_uses_shared_source_staging(
     assert checked_sdwa_files > 0
 
 
+def test_cdna3_generated_disassembly_preserves_ds_and_flat_offsets(
+    amdgpu_generated_root: Path,
+) -> None:
+    encodings_cpp = (amdgpu_generated_root / 'cdna3' / 'encodings.cpp').read_text()
+
+    ds_start = encodings_cpp.index('void Ds::build_modifiers')
+    ds_modifiers = encodings_cpp[ds_start : ds_start + 1000]
+    assert 'uses_split_ds_offsets()' in ds_modifiers
+    assert 'out += " offset0:"' in ds_modifiers
+    assert 'out += " offset1:"' in ds_modifiers
+    assert 'inst->offset0 | (inst->offset1 << 8)' in ds_modifiers
+    assert 'out += " gds"' in ds_modifiers
+
+    flat_start = encodings_cpp.index('void Flat::build_modifiers')
+    flat_modifiers = encodings_cpp[flat_start : flat_start + 1000]
+    assert 'if (inst->seg == 0)' in flat_modifiers
+    assert 'flat_offset & 0x1000' in flat_modifiers
+    assert 'flat_offset -= 0x2000' in flat_modifiers
+
+
 def test_generated_sdwa_uses_source_specific_modifier_formats(
     cdna4_generated_root: Path,
 ) -> None:
@@ -3349,6 +3412,12 @@ def test_generated_sdwa_uses_source_specific_modifier_formats(
 
     add_f16 = _generated_method_body(vop2, 'VAddF16Vop2', 'VSubF16Vop2')
     assert add_f16.count('SourceModifierFormat::F16') == 2
+
+    pk_fmac_f16 = _generated_method_body(vop2, 'VPkFmacF16Vop2', 'VXnorB32Vop2')
+    assert pk_fmac_f16.count('SourceModifierFormat::NONE') == 2
+    assert 'stage_source(src0,' in pk_fmac_f16
+    assert 'stage_source(vsrc1,' in pk_fmac_f16
+    assert 'stage_source(vdst,' not in pk_fmac_f16
 
     ldexp_f16 = _generated_method_body(vop2, 'VLdexpF16Vop2', 'VAddU32Vop2')
     assert 'SourceModifierFormat::F16' in ldexp_f16

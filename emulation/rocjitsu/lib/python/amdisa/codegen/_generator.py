@@ -322,6 +322,12 @@ class CodeGenerator:
     _SRC_OPERANDS_CAPACITY = 6
     _DST_OPERANDS_CAPACITY = 3
 
+    # Shared scalar execution uses these encoding values without including one
+    # ISA's generated operand enums. Validate the corresponding OPR_SSRC
+    # contract for every generated ISA so ISA description changes cannot
+    # silently make the shared resolver stale.
+    _SHARED_SCALAR_PAIR_VALUES = frozenset((*range(0, 107), *range(108, 123), 126))
+
     # These selectors name a canonical unified register namespace, while their
     # instruction fields use a format-dependent bank namespace completed by
     # separate ACC/ACC_CD bits or format selectors. Some malformed fields are
@@ -905,6 +911,12 @@ class CodeGenerator:
         ):
             return 'amdgpu::sdwa::SourceModifierFormat::NONE'
 
+        # GFX9 accepts the SDWA modifier bits for V_PK_FMAC_F16, but its packed
+        # operation ignores source negate and absolute-value modifiers. Source
+        # selection and sign extension remain active through the NONE format.
+        if sem.name == 'V_PK_FMAC_F16':
+            return 'amdgpu::sdwa::SourceModifierFormat::NONE'
+
         suffix = {
             'FMT_NUM_F16': 'F16',
             'FMT_NUM_BF16': 'BF16',
@@ -1316,7 +1328,14 @@ class CodeGenerator:
         )
 
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
-        return self._instruction_supports_modifier_encoding(inst, enc_name, 'sdwa')
+        has_modifier_encoding = self._instruction_supports_modifier_encoding(
+            inst, enc_name, 'sdwa'
+        )
+        return self.isa_spec.profile.supports_sdwa_opcode(
+            enc_name,
+            inst.name,
+            has_modifier_encoding=has_modifier_encoding,
+        )
 
     def _instruction_supports_literal_encoding(
         self, inst: Instruction, parent_enc_name: str, width: int
@@ -2895,6 +2914,51 @@ class CodeGenerator:
                     )
                 else:
                     modifier_lines += f'if ({field_ref}) modifiers_ += "{mod.display}";'
+            if (
+                enc_upper == 'ENC_DS'
+                and {'offset0', 'offset1', 'gds'} <= enc_field_names
+            ):
+                split_offset_opcodes = []
+                for inst in inst_enc.insts:
+                    sem = (
+                        self.semantics.instructions.get(inst.name)
+                        if self.semantics
+                        else None
+                    )
+                    if sem is not None and sem.semantic_class in (
+                        'ds_read2',
+                        'ds_write2',
+                        'ds_atomic2',
+                    ):
+                        split_offset_opcodes.append(inst.opcode)
+                if split_offset_opcodes:
+                    public_members.append(
+                        cgen.Line('bool uses_split_ds_offsets() const;')
+                    )
+                    class_func_impls.append(
+                        cgen.Line(
+                            self._opcode_predicate_helper_impl(
+                                inst_enc,
+                                'uses_split_ds_offsets',
+                                sorted(set(split_offset_opcodes)),
+                            )
+                        )
+                    )
+                split_offset_condition = (
+                    'uses_split_ds_offsets()' if split_offset_opcodes else 'false'
+                )
+                modifier_lines += (
+                    f'if ({split_offset_condition}) {{'
+                    'if (inst->offset0) modifiers_ += " offset0:"'
+                    ' + std::to_string(inst->offset0);'
+                    'if (inst->offset1) modifiers_ += " offset1:"'
+                    ' + std::to_string(inst->offset1);'
+                    '} else {'
+                    'const uint32_t offset = inst->offset0 | (inst->offset1 << 8);'
+                    'if (offset) modifiers_ += " offset:" + std::to_string(offset);'
+                    '}'
+                    'if (inst->gds) modifiers_ += " gds";'
+                )
             dpp8_modifier_line = ''
             if dpp8_struct is not None:
                 dpp8_modifier_line = (
@@ -4322,13 +4386,8 @@ class CodeGenerator:
             };
 
             PkF32Words read_pk_f32_words(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-              const uint32_t lo = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
-              const auto reg = operand.to_register_ref();
-              if (!reg || reg->cls != RegClass::VGPR)
-                return {lo, lo};
-
-              const uint64_t raw = amdgpu::RegisterAccess(wf).read_lane64(operand, lane);
-              return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
+              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
+              return {pair.lo, pair.hi};
             }
             ''')
         model = (
@@ -8359,6 +8418,91 @@ class CodeGenerator:
         self._selector_interval_cache[operand_type] = merged
         return merged
 
+    def _validate_shared_scalar_pair_selector_contract(self) -> None:
+        """Validate selector values consumed by the shared scalar-pair resolver."""
+        selector = next(
+            (
+                item
+                for item in self.isa_spec.opnd_selectors
+                if item.operand_type == 'OPR_SSRC'
+            ),
+            None,
+        )
+        if selector is None:
+            return
+
+        enum_values: dict[str, int] = {}
+        for name, value in selector.op_sel_vals:
+            try:
+                enum_values[name] = int(value, 0)
+            except (TypeError, ValueError):
+                continue
+
+        arch = self.isa_spec.arch_name
+
+        def require(name: str, expected: int) -> None:
+            actual = enum_values.get(name)
+            if actual != expected:
+                raise ValueError(
+                    f'{arch}: shared scalar-pair selector contract requires '
+                    f'{name}={expected}, got {actual!r}'
+                )
+
+        require('OPR_SSRC_SGPR_MIN', 0)
+        require('OPR_SSRC_VCC_LO', 106)
+        require('OPR_SSRC_VCC_HI', 107)
+        require('OPR_SSRC_EXEC_LO', 126)
+        require('OPR_SSRC_EXEC_HI', 127)
+
+        sgpr_max = enum_values.get('OPR_SSRC_SGPR_MAX')
+        if sgpr_max not in (101, 105):
+            raise ValueError(
+                f'{arch}: shared scalar-pair selector contract requires '
+                f'OPR_SSRC_SGPR_MAX to be 101 or 105, got {sgpr_max!r}'
+            )
+        if sgpr_max == 101:
+            require('OPR_SSRC_FLAT_SCRATCH_LO', 102)
+            require('OPR_SSRC_FLAT_SCRATCH_HI', 103)
+            require('OPR_SSRC_XNACK_MASK_LO', 104)
+            require('OPR_SSRC_XNACK_MASK_HI', 105)
+
+        pair_block_starts = (
+            'OPR_SSRC_TTMP_MIN',
+            'OPR_SSRC_TTMP0',
+            'OPR_SSRC_TBA_LO',
+        )
+        if not any(enum_values.get(name) == 108 for name in pair_block_starts):
+            raise ValueError(
+                f'{arch}: shared scalar-pair selector contract requires a '
+                'TTMP or TBA/TMA register block starting at 108'
+            )
+        pair_block_ends = ('OPR_SSRC_TTMP_MAX', 'OPR_SSRC_TTMP15')
+        if not any(enum_values.get(name) == 123 for name in pair_block_ends):
+            raise ValueError(
+                f'{arch}: shared scalar-pair selector contract requires the '
+                'TTMP register block to end at 123'
+            )
+
+        flat_base_names = (
+            'OPR_SSRC_SRC_FLAT_SCRATCH_BASE_LO',
+            'OPR_SSRC_SRC_FLAT_SCRATCH_BASE_HI',
+        )
+        if any(name in enum_values for name in flat_base_names):
+            require(flat_base_names[0], 230)
+            require(flat_base_names[1], 231)
+
+        intervals = self._operand_selector_intervals('OPR_SSRC')
+        missing = sorted(
+            value
+            for value in self._SHARED_SCALAR_PAIR_VALUES
+            if not any(lo <= value <= hi for lo, hi in intervals)
+        )
+        if missing:
+            raise ValueError(
+                f'{arch}: OPR_SSRC is missing shared scalar-pair selector '
+                f'values {missing}'
+            )
+
     def _operand_selector_contains(self, operand_type: str, value: int) -> bool | None:
         """Whether a selector declares ``value``, or None for a non-selector type."""
         try:
@@ -9971,7 +10115,11 @@ class CodeGenerator:
                             _src_input_ops = [
                                 o
                                 for o in inst.operands
-                                if o.is_input and not o.fieldless
+                                # Read/write destinations such as V_FMAC's
+                                # accumulator are semantic inputs, but they are
+                                # not the encoded src0/src1 fields modified by
+                                # DPP or SDWA.
+                                if o.is_input and not o.is_output and not o.fieldless
                             ]
                             _src0_name = (
                                 _src_input_ops[0].name if _src_input_ops else None
@@ -11705,7 +11853,7 @@ class CodeGenerator:
                 )
                 register_access_arg_pattern = (
                     rf'((?:(?:amdgpu::)?RegisterAccess\(wf\)|regs)\.'
-                    rf'(?:read|write)_(?:scalar64|scalar|lane64|lane|chunk)\()'
+                    rf'(?:read|write)_(?:scalar64|scalar|lane_pair32|lane64|lane|chunk)\()'
                     rf'{_re.escape(opnd.name)}(?=\s*[,)])'
                 )
                 prefixed_body = _re.sub(
@@ -12315,6 +12463,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
     def gen_operand_types(self) -> None:
         """Generate operand type and OpSel enums."""
+        self._validate_shared_scalar_pair_selector_contract()
         code_lines = []
         opnd_type_enum = 'enum class OperandType {'
         for opnd_type in self.isa_spec.operand_types:
