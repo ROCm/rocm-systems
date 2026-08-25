@@ -2866,7 +2866,7 @@ flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 }  // namespace
 
 void
-bind_session(std::shared_ptr<control::session> sess)
+set_session(std::shared_ptr<control::session> sess)
 {
     g_session = std::move(sess);
 }

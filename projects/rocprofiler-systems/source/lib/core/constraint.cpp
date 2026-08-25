@@ -40,7 +40,7 @@ constexpr auto k_max_poll_interval = 100ms;
 const std::set<clock_identifier>&
 accepted_clock_ids()
 {
-    // NOLINTBEGIN
+    // NOLINTBEGIN(misc-include-cleaner)
     static const auto instance =
         std::set<clock_identifier>{ ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
                                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
@@ -49,7 +49,7 @@ accepted_clock_ids()
                                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
                                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
                                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) };
-    // NOLINTEND
+    // NOLINTEND(misc-include-cleaner)
     return instance;
 }
 
@@ -57,11 +57,13 @@ template <typename Tp>
 clock_identifier
 find_clock_identifier(const Tp& _v)
 {
+    const auto& _accepted = accepted_clock_ids();
+
     const char* _descript = "";
     if constexpr(std::is_integral<Tp>::value)
     {
         _descript = "value";
-        for(const auto& itr : accepted_clock_ids())
+        for(const auto& itr : _accepted)
         {
             if(itr.value == _v)
             {
@@ -73,7 +75,7 @@ find_clock_identifier(const Tp& _v)
     {
         _descript            = "name";
         auto normalized_name = utility::string::clock_name(_v);
-        for(const auto& itr : accepted_clock_ids())
+        for(const auto& itr : _accepted)
         {
             if(itr.name == normalized_name || itr.raw_name == _v ||
                std::to_string(itr.value) == _v)
@@ -84,8 +86,8 @@ find_clock_identifier(const Tp& _v)
     }
 
     auto _choices = std::vector<std::string>{};
-    _choices.reserve(accepted_clock_ids().size());
-    for(const auto& itr : accepted_clock_ids())
+    _choices.reserve(_accepted.size());
+    for(const auto& itr : _accepted)
     {
         _choices.emplace_back(itr.as_string());
     }
