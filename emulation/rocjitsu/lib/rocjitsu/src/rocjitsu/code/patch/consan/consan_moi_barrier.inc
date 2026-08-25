@@ -363,7 +363,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     std::optional<uint16_t> call_return_sgpr, std::optional<uint16_t> gfx1250_vgpr_msb_mode,
     std::vector<std::string> &errors) {
   const bool publish_visible_evidence = visible_evidence_scratch_vgpr.has_value();
-  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool control_gfx1250_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   if (publish_visible_evidence &&
@@ -379,7 +379,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     // CDNA global atomics require the address tuple to start at an even
     // VGPR. Keep the three-register barrier layout target-neutral by rotating
     // its rank/result into the tail instead of forming an odd v+1:v+2 pair.
-    const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
     const uint16_t rank_vgpr = static_cast<uint16_t>(scratch + (cdna ? 2u : 0u));
     const uint16_t address_vgpr = static_cast<uint16_t>(scratch + (cdna ? 0u : 1u));
     const uint16_t active_exec_sgpr = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u);
@@ -600,7 +600,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   }
 
   std::vector<uint32_t> words;
-  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool control_gfx1250_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   words.reserve(
@@ -942,7 +942,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                  ConSanResult &result) {
   if (!options.moi_track_barriers)
     return;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow barrier epoch patch does not support this architecture");
     return;
@@ -1150,7 +1150,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
       const uint32_t ephemeral_base = access_patch->persistent_private_state_end.value_or(
           *access_patch->persistent_epoch_private_offset + SpillManager::kSlotBytes);
-      const auto private_limit = address_free_scratch_private_limit(arch);
+      const auto private_limit = consan_address_free_private_limit(arch);
       if (!private_limit) {
         result.warnings.emplace_back(
             "ConSan MOI private epoch barrier has no address-free scratch support");
@@ -1512,8 +1512,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             has_spill_backed_inline_router || has_spill_backed_record_replay_router;
         const bool has_dense_router =
             arch == ROCJITSU_CODE_ARCH_CDNA5 ||
-            ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-              arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+            ((consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA4) &&
              (candidate_options.moi_engine == ConSanMoiEngine::InlineShadow ||
               (candidate_options.moi_engine == ConSanMoiEngine::RecordReplay &&
                candidate_options.moi_record_replay_dense_barrier_router))) ||
@@ -1767,9 +1766,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const MoiIndirectJumpSgprs indirect_state = scalar_abi->indirect_jump;
       const uint16_t call_return_sgpr = *scalar_abi->call_return_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+        if (consan_arch_has_s_call_i64(arch))
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+        if (consan_arch_has_s_call_b64(arch) && arch == ROCJITSU_CODE_ARCH_RDNA4)
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
@@ -2005,10 +2004,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const bool derive_key_at_entry = spill_backed_router;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+        if (consan_arch_has_s_call_i64(arch))
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-            arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+        if (consan_arch_has_s_call_b64(arch))
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };

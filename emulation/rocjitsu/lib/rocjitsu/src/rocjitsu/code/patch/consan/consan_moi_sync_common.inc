@@ -490,7 +490,7 @@ ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanResult &resul
   // guest RMW, predecessor import, and causal-snapshot scan. CDNA3/4 also keep
   // token-transaction producer state and scalar persistent owner/epoch
   // materialization ahead of that final aligned address pair.
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 28u : 26u;
+  return consan_uses_gfx9_cdna_encoding(arch) ? 28u : 26u;
 }
 
 [[nodiscard]] bool is_first_light_atomic_record_candidate(const ConSanAtomicSite &site,
@@ -1039,7 +1039,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // CDNA3/4 FLAT compare-swap encodes the new/expected operands as an aligned
   // VGPR pair. Preserve the RDNA4 allocation, whose three-dword encoding does
   // not have that constraint, and move the CDNA pair down by one register.
-  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
   const uint16_t value = static_cast<uint16_t>(base + (cdna ? 18u : 19u));
   const uint16_t expected = static_cast<uint16_t>(base + (cdna ? 19u : 20u));
   const uint16_t hash = static_cast<uint16_t>(base + 21u);
@@ -1822,7 +1822,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // Swap the address and temporary lifetimes within the existing register
   // window; the token transaction reuses this space only after the snapshot
   // loads have completed.
-  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
   const uint16_t snapshot_address = static_cast<uint16_t>(scratch_vgpr + (cdna ? 18u : 17u));
   const uint16_t snapshot_temporary = static_cast<uint16_t>(scratch_vgpr + (cdna ? 17u : 19u));
   const uint16_t snapshot_hash = static_cast<uint16_t>(scratch_vgpr + 21u);
@@ -2062,7 +2062,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
       (snapshot_table_capacity & (snapshot_table_capacity - 1u)) != 0u)
     return false;
   const uint16_t base = *options.scratch_vgpr;
-  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
   const uint16_t snapshot_address = static_cast<uint16_t>(base + (cdna ? 6u : 5u));
   const uint16_t count = static_cast<uint16_t>(base + (cdna ? 5u : 7u));
   const uint16_t flags = static_cast<uint16_t>(base + 8u);
@@ -2589,7 +2589,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   // CDNA3/4 FLAT compare-swap requires an even-aligned new/expected pair.
   // These three registers are all recomputed after causal-snapshot capture,
   // so rotating their allocation does not extend any live range.
-  const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
   const uint16_t temporary = static_cast<uint16_t>(base + (cdna ? 6u : 4u));
   const uint16_t cas_new = static_cast<uint16_t>(base + (cdna ? 4u : 5u));
   const uint16_t cas_expected = static_cast<uint16_t>(base + (cdna ? 5u : 6u));
@@ -3286,7 +3286,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   const uint16_t temporary_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 6u);
   const uint16_t address_vgpr = address_plan.result_address_vgpr;
   const bool is_compare_exchange = consan_atomic_is_compare_exchange(candidate.site);
-  const bool claims_release_predecessor = instrumentation::is_admitted_arch(arch);
+  const bool claims_release_predecessor = consan_is_capability_arch(arch);
 
   std::vector<uint32_t> words;
   words.reserve(

@@ -6,7 +6,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       std::ranges::any_of(result.moi_fence_candidates, &ConSanMoiFenceCandidate::eligible);
   if (!has_eligible)
     return;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI fence record patch does not support this architecture");
     return;
@@ -1234,8 +1234,8 @@ void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpt
       }
     }
   }
-  if (instrumentation::is_admitted_arch(state.arch) &&
-      options.automatic_moi_partial_exec_save_sgprs && options.moi_exec_save_sgpr) {
+  if (consan_is_capability_arch(state.arch) && options.automatic_moi_partial_exec_save_sgprs &&
+      options.moi_exec_save_sgpr) {
     const uint16_t exec_base = *options.moi_exec_save_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(options, state.arch);
     for (ConSanCandidateResourcePlan &plan : result.resource_plans) {

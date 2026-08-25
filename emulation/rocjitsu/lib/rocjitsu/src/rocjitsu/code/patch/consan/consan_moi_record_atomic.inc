@@ -4,7 +4,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   if (options.moi_engine != ConSanMoiEngine::RecordReplay)
     return;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI atomic record patch does not support this architecture");
     return;

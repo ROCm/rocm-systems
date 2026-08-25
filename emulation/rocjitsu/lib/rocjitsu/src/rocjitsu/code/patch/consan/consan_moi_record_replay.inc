@@ -8,7 +8,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back("ConSan MOI first-light probe does not support this architecture");
     return;
   }
@@ -224,7 +224,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   // facts needed by dense relay selection. Re-decoding the whole code object
   // here (and a third time for component-local scalar assignments) is both
   // redundant and dominant on multi-thousand-kernel generated libraries.
-  if (instrumentation::is_admitted_arch(arch) && use_indirect_appended && local_entry_islands) {
+  if (consan_is_capability_arch(arch) && use_indirect_appended && local_entry_islands) {
     const auto merge_ranges = [](std::vector<std::pair<uint64_t, uint64_t>> &ranges) {
       std::ranges::sort(ranges);
       size_t merged_range_count = 0u;

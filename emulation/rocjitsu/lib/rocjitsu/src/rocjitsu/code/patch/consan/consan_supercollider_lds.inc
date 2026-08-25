@@ -1,6 +1,6 @@
 void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                          const ConSanOptions &options, ConSanResult &result) {
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back("ConSan LDS check/trap proof has unsupported architecture");
     return;
   }
@@ -1029,8 +1029,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                  (2u + *action_words) * *required_vgprs + 1u;
       if (gfx1250_two_address)
         requested_words += gfx1250_two_address->total_additional_word_count();
-      if (site.dst_accvgpr &&
-          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4))
+      if (site.dst_accvgpr && (consan_uses_gfx9_cdna_encoding(arch)))
         requested_words += 2u * *required_vgprs;
       if (spill_vcc_save_to_vgpr)
         requested_words += 4u;
@@ -1117,7 +1116,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           }
           const auto spill_scratch =
               choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
-          const auto private_limit = address_free_scratch_private_limit(arch);
+          const auto private_limit = consan_address_free_private_limit(arch);
           if (spill_scratch && private_limit && saved_frame_base_sgpr && saved_scc_sgpr) {
             scratch_vgpr = *spill_scratch;
             auto spill = build_dynamic_stack_vgpr_spill_sequence(
@@ -1129,7 +1128,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                 static_cast<uint64_t>(scratch_vgprs) * SpillManager::kSlotBytes;
             const auto required_private_bytes =
                 requested_private_bytes <= std::numeric_limits<uint32_t>::max()
-                    ? normalize_address_free_scratch_private_size(
+                    ? consan_normalize_address_free_private_size(
                           arch, static_cast<uint32_t>(requested_private_bytes))
                     : std::nullopt;
             if (spill && required_private_bytes && *required_private_bytes <= *private_limit) {
@@ -1157,7 +1156,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         } else {
           const auto spill_scratch =
               choose_spill_scratch_vgpr(site, *max_auto_scratch_vgpr, scratch_vgprs, arch);
-          const auto private_limit = address_free_scratch_private_limit(arch);
+          const auto private_limit = consan_address_free_private_limit(arch);
           if (spill_scratch && private_limit) {
             scratch_vgpr = *spill_scratch;
             SpillManager preview_manager(site_context.max_owner_private_segment_size,
@@ -1523,7 +1522,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           static_cast<uint64_t>(plan->second.vgpr_count) * SpillManager::kSlotBytes;
       const auto required_private_bytes =
           requested_private_bytes <= std::numeric_limits<uint32_t>::max()
-              ? normalize_address_free_scratch_private_size(
+              ? consan_normalize_address_free_private_size(
                     arch, static_cast<uint32_t>(requested_private_bytes))
               : std::nullopt;
       if (!sequence || !required_private_bytes ||

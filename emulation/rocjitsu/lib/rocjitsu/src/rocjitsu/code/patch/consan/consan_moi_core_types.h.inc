@@ -42,12 +42,8 @@ consan_moi_prefer_generation_tagged_workgroup_shadow(uint32_t guest_lds_bytes,
 }
 
 [[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(rj_code_arch_t arch) {
-  // gfx1250 follows the simulator configuration rather than duplicating a
-  // provisional architectural limit in ConSan. Earlier targets retain the
-  // 64 KiB limit used by the original planner.
-  return arch == ROCJITSU_CODE_ARCH_CDNA5
-             ? static_cast<uint32_t>(ROCJITSU_GFX1250_LDS_SIZE_KB) * 1024u
-             : 64u * 1024u;
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile ? profile->max_group_segment_bytes : 64u * 1024u;
 }
 
 [[nodiscard]] constexpr uint32_t consan_moi_max_workgroup_lds_bytes(const ConSanOptions &options,
@@ -313,9 +309,9 @@ classify_consan_moi_inline_atomic_support(const ConSanAtomicSite &site,
   (void)event_kind;
   if (site.width_bits != 32)
     return ConSanMoiInlineAtomicSupport::UnsupportedWidth;
-  const bool is_cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-  const bool is_rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
-  const bool is_gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool is_cdna = consan_uses_gfx9_cdna_encoding(arch);
+  const bool is_rdna3 = consan_uses_gfx11_encoding(arch);
+  const bool is_gfx12 = consan_uses_gfx12_encoding(arch);
   const bool gfx12_flat_saddr =
       site.raw_saddr &&
       (*site.raw_saddr == 0x7cu || (site.saddr_sgpr && *site.raw_saddr == *site.saddr_sgpr &&

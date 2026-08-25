@@ -164,7 +164,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   const auto restore_label = sequence.make_label();
   const auto fast_return_label = sequence.make_label();
   const auto matched_window_label = sequence.make_label();
-  const bool control_gfx1250_vgpr_bank = arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const bool control_gfx1250_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch);
   const bool restore_guest_vgpr_bank =
       control_gfx1250_vgpr_bank && gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   // A patched s_call_i64 can be immediately followed by the guest's next
@@ -673,7 +673,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                           ConSanResult &result) {
   if (!options.moi_track_barriers || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
-  if (!options.moi_report_buffer_address || !instrumentation::is_admitted_arch(arch)) {
+  if (!options.moi_report_buffer_address || !consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI sampled barrier sync requires a supported report-buffer target");
     return;
@@ -1225,8 +1225,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                  new_text.size())
           .has_value();
   const bool has_stranded_barrier =
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-       arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+      (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA4) &&
       std::ranges::any_of(std::views::iota(size_t{0}, selected.size()), [&](size_t index) {
         const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
         const uint64_t reserved_island =
@@ -1375,10 +1374,11 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       const bool derive_key_at_entry = spill_backed_router && !use_gfx1250_clone_local_routes;
       const bool key_encodes_scc = derive_key_at_entry && key_sgpr == saved_scc_sgpr;
       const auto build_direct_call = [&](int16_t simm16) -> std::optional<uint32_t> {
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+        if (consan_arch_has_s_call_i64(arch))
           return instrumentation::build_s_call_i64(call_return_sgpr, simm16, arch);
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-            arch == ROCJITSU_CODE_ARCH_CDNA4)
+        if (consan_arch_has_s_call_b64(arch) &&
+            (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+             arch == ROCJITSU_CODE_ARCH_CDNA4))
           return build_s_call_b64(call_return_sgpr, simm16, arch);
         return std::nullopt;
       };
@@ -1697,7 +1697,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                          ConSanResult &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
-  if (!options.moi_report_buffer_address || !instrumentation::is_admitted_arch(arch)) {
+  if (!options.moi_report_buffer_address || !consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI sampled atomic sync requires a supported report-buffer target");
     return;
@@ -2422,7 +2422,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   // body. CDNA atomic instructions have enough anchor space for a scalar
   // call, so share the same liveness-proven, call-return-keyed relay model as
   // far barriers instead of silently dropping the causal edge.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (consan_uses_gfx9_cdna_encoding(arch)) {
     using ContainerGroup = std::pair<std::string, std::vector<size_t>>;
     std::map<std::string, std::vector<size_t>> owner_groups;
     for (size_t index = 0u; index < selected.size(); ++index) {
@@ -3205,7 +3205,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     errors.emplace_back("ConSan MOI fence record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
-  const bool requires_raw_th = arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4;
+  const bool requires_raw_th = !consan_uses_gfx9_cdna_encoding(arch);
   if (!address_plan.supported() || !candidate.fence.raw_scope ||
       (requires_raw_th && !candidate.communication_site.raw_th) ||
       candidate.fence.communication_event_identity.empty()) {

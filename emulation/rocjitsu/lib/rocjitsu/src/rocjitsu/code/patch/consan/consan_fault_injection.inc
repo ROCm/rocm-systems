@@ -2133,10 +2133,12 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
         site.mnemonic != "ds_read2st64_b64")
       return false;
     if (site.dst_accvgpr) {
-      return (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      const ConSanTargetProfile *profile = consan_target_profile(arch);
+      return profile &&
+             profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned &&
              static_cast<uint32_t>(*site.dst_accvgpr) + *dword_count <= 256u;
     }
-    const uint32_t register_limit = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1024u : 256u;
+    const uint32_t register_limit = consan_arch_has_selectable_vgpr_bank(arch) ? 1024u : 256u;
     return site.dst_vgpr.has_value() &&
            static_cast<uint32_t>(*site.dst_vgpr) + *dword_count <= register_limit;
   }
@@ -2430,7 +2432,7 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
     words[1] = (words[1] & ~0xffu & ~kGfx1250FlatVsrcMask) | vdst;
     return words;
   }
-  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+  if (!consan_uses_gfx9_cdna_encoding(arch))
     return std::nullopt;
   uint32_t load_op = 0;
   switch (width_bits) {
@@ -2472,11 +2474,11 @@ build_flat_load_from_flat_store(std::array<uint32_t, 3> words, uint32_t width_bi
                                                               rj_code_arch_t arch,
                                                               uint16_t gfx1250_vgpr_msb_mode) {
   if (site.kind == ConSanLdsAccessKind::Read) {
-    const uint32_t dst_bank = arch == ROCJITSU_CODE_ARCH_CDNA5
+    const uint32_t dst_bank = consan_arch_has_selectable_vgpr_bank(arch)
                                   ? static_cast<uint32_t>((gfx1250_vgpr_msb_mode >> 6u) & 0x3u)
                                   : 0u;
     const uint32_t physical_vgpr = dst_bank * 256u + site.dst_vgpr.value_or(0u) + chunk_index;
-    const uint32_t register_limit = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1024u : 256u;
+    const uint32_t register_limit = consan_arch_has_selectable_vgpr_bank(arch) ? 1024u : 256u;
     return site.dst_vgpr && physical_vgpr < register_limit
                ? std::optional<uint16_t>(static_cast<uint16_t>(physical_vgpr))
                : std::nullopt;

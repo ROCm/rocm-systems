@@ -201,7 +201,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                      const ConSanOptions &options, ConSanResult &result,
                                      std::span<const ByteRange> initial_reserved_ranges = {}) {
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back("ConSan flat check/trap proof has unsupported architecture");
     return;
   }
@@ -544,7 +544,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
               static_cast<uint16_t>(*scratch + instrumentation_scratch_vgprs),
               original_private_segment_size, arch);
         } else if (scratch) {
-          const auto private_limit = address_free_scratch_private_limit(arch);
+          const auto private_limit = consan_address_free_private_limit(arch);
           if (private_limit) {
             SpillManager manager(original_private_segment_size, *private_limit);
             vgpr_spill = build_vgpr_spill_sequence(manager, *scratch, scratch_vgprs, arch);
@@ -689,8 +689,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
               site.text_offset <= entry_block->end_offset() &&
               displaced_size <= entry_block->end_offset() - site.text_offset;
           if (displaced_words.size() >= kLdsCheckTrapIndirectJumpWords &&
-              displaced_size <= std::numeric_limits<uint32_t>::max() &&
-              single_entry_window) {
+              displaced_size <= std::numeric_limits<uint32_t>::max() && single_entry_window) {
             FlatCheckTrapCandidate direct =
                 make_candidate(&site, nullptr, nullptr, *scratch, requested_words,
                                /*use_local_cave=*/false, /*use_appended_cave=*/true, scalar_scratch,
@@ -1273,7 +1272,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     std::vector<uint32_t> displaced_tail_words;
   };
 
-  const auto wait_flat = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
+  const auto wait_flat = consan_uses_gfx9_cdna_encoding(arch)
                              ? instrumentation::build_s_wait_flat_load_lds0(arch)
                              : build_s_wait_dscnt_word(0, arch);
   if (!wait_flat) {

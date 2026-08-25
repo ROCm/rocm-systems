@@ -547,9 +547,8 @@
   const uint16_t diagnostic_tuple_candidate =
       static_cast<uint16_t>(*options.scratch_vgpr + diagnostic_tuple_offset);
   const uint16_t cdna_slot_vgpr = static_cast<uint16_t>(diagnostic_tuple_candidate & ~1u);
-  const uint16_t slot_vgpr = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-                                 ? cdna_slot_vgpr
-                                 : diagnostic_tuple_candidate;
+  const uint16_t slot_vgpr =
+      consan_uses_gfx9_cdna_encoding(arch) ? cdna_slot_vgpr : diagnostic_tuple_candidate;
   const auto save_conflict_exec = instrumentation::build_s_mov_b64(
       static_cast<uint16_t>(*options.moi_exec_save_sgpr + 2u), kRdna4ExecLo, arch);
   const auto mbcnt_lo = instrumentation::build_v_mbcnt_lo_u32_b32(
@@ -1312,7 +1311,7 @@
     // coherent device-scope value directly into the next retry rather than
     // discarding it and beginning with another potentially stale flat load.
     restore_slot_address();
-    if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (consan_uses_gfx9_cdna_encoding(arch)) {
       const auto invalidate = arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_buffer_inv_sc1(arch)
                                                                : build_cdna4_buffer_inv_sc1(arch);
       if (!invalidate)
@@ -2034,8 +2033,7 @@
     return true;
   if (consan_moi_generation_tagged_workgroup_shadow(workgroup_shadow))
     return true;
-  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
-      !options.scratch_vgpr || !options.moi_exec_save_sgpr ||
+  if ((!consan_uses_gfx12_encoding(arch)) || !options.scratch_vgpr || !options.moi_exec_save_sgpr ||
       workgroup_shadow.validity_size == 0u) {
     errors.emplace_back("ConSan MOI lazy local shadow requires gfx12 packed validity state");
     return false;
@@ -2505,15 +2503,14 @@
            source < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count;
   };
   const std::optional<uint16_t> spill_backed_lds_byte_offset_source =
-      spill != nullptr && !materialize_flat_address &&
-              (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+      spill != nullptr && !materialize_flat_address && (consan_uses_gfx9_cdna_encoding(arch)) &&
               source_is_spilled(*lds_byte_offset_vgpr)
           ? lds_byte_offset_vgpr
           : std::nullopt;
   const bool compact_spill_keeps_disjoint_clobbered_address =
       spill != nullptr && scratch_count == spill_scratch_count &&
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      moi_load_clobbers_address(candidate) && !source_is_spilled(*lds_byte_offset_vgpr);
+      (consan_uses_gfx9_cdna_encoding(arch)) && moi_load_clobbers_address(candidate) &&
+      !source_is_spilled(*lds_byte_offset_vgpr);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
   if (candidate.direct_to_lds) {
     saved_lds_byte_offset_vgpr =
@@ -2832,9 +2829,8 @@
   // tuples remain even. The workgroup-local B64 DS exchange instead requires
   // an even return tuple, so rotate only that local result to the unused +6
   // pair on CDNA3/4.
-  const uint16_t local_old_value_vgpr = static_cast<uint16_t>(
-      old_value_vgpr +
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 1u : 0u));
+  const uint16_t local_old_value_vgpr =
+      static_cast<uint16_t>(old_value_vgpr + (consan_uses_gfx9_cdna_encoding(arch) ? 1u : 0u));
 
   for (const ConSanMoiAccessRange &range : *access_ranges) {
     ConSanMoiLdsCellRange cell_range;

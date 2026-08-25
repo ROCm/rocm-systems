@@ -2572,7 +2572,7 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
            source == ConSanRegisterAllocationSource::DescriptorGrowth ||
            source == ConSanRegisterAllocationSource::SpillRequired;
   };
-  if (!instrumentation::is_admitted_arch(arch))
+  if (!consan_is_capability_arch(arch))
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedArchitecture);
   if (!usable_resource_source(resource_source))
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedResourcePlan);
@@ -2663,8 +2663,7 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
   // guest VGPRs. Other widths still need an explicit operand-layout proof.
   if (site.width_bits != 32u && site.width_bits != 64u)
     return reject(ConSanMoiAtomicAddressSupport::UnsupportedWidth);
-  const bool cdna_flat_encoding =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  const bool cdna_flat_encoding = consan_uses_gfx9_cdna_encoding(arch);
   const bool rdna3_flat_encoding = arch == ROCJITSU_CODE_ARCH_RDNA3;
   const bool two_word_flat_encoding = cdna_flat_encoding || rdna3_flat_encoding;
   const uint32_t expected_size =
@@ -2711,8 +2710,8 @@ plan_consan_moi_atomic_address(const ConSanAtomicSite &site, uint16_t scratch_vg
       // Reuse the already shared scalar/vector materialization contract used
       // by VGLOBAL: both targets calculate saddr + zero_extend(vaddr) +
       // signed24(ioffset), with CDNA5's optional access-width scale.
-      if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
-          !site.saddr_sgpr || *site.raw_saddr != *site.saddr_sgpr || *site.saddr_sgpr > 104u ||
+      if ((!consan_uses_gfx12_encoding(arch)) || !site.saddr_sgpr ||
+          *site.raw_saddr != *site.saddr_sgpr || *site.saddr_sgpr > 104u ||
           (*site.saddr_sgpr & 1u) != 0u)
         return reject(ConSanMoiAtomicAddressSupport::UnsupportedEncoding);
       if (*site.raw_ioffset < kSigned24Min || *site.raw_ioffset > kSigned24Max)
@@ -2897,7 +2896,7 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     return words;
   }
   const bool legacy_address_materialization =
-      (instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
+      (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
       (plan.kind == ConSanMoiAtomicAddressKind::FlatGuestPairMaterialized ||
        plan.kind == ConSanMoiAtomicAddressKind::VglobalGuestPairMaterialized ||
        plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized);
@@ -2971,7 +2970,7 @@ build_consan_moi_atomic_address_materialization(const ConSanMoiAtomicAddressPlan
     words.push_back(build_v_mov_b32_e32(static_cast<uint16_t>(plan.result_address_vgpr + 1u),
                                         static_cast<uint16_t>(*plan.scalar_base_sgpr + 1u), arch));
     std::optional<std::vector<uint32_t>> add_vaddr;
-    if (instrumentation::is_cdna_family_arch(arch) &&
+    if (consan_uses_gfx9_cdna_encoding(arch) &&
         plan.kind == ConSanMoiAtomicAddressKind::VglobalMaterialized) {
       // The sign scratch needs two scratch words before the result pair. Keep
       // a defensive check for externally constructed plans.

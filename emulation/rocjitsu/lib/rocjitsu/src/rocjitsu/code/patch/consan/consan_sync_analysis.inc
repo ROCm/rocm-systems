@@ -8,20 +8,19 @@ enum class AtomicFaultEncoding : uint8_t {
 
 [[nodiscard]] AtomicFaultEncoding atomic_fault_encoding(std::string_view mnemonic, uint32_t size,
                                                         rj_code_arch_t arch) {
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  if (consan_uses_gfx9_cdna_encoding(arch) &&
       ((mnemonic.starts_with("flat_atomic") && size == sizeof(cdna4::FlatMachineInst)) ||
        (mnemonic.starts_with("global_atomic") && size == sizeof(cdna4::FlatGlblMachineInst))))
     return AtomicFaultEncoding::CdnaFlat;
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+  if (consan_uses_gfx12_encoding(arch) &&
       (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       size == sizeof(rdna4::VflatMachineInst))
     return AtomicFaultEncoding::FlatLike;
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
-      mnemonic.starts_with("buffer_atomic") && size == sizeof(rdna4::VbufferMachineInst))
+  if (consan_uses_gfx12_encoding(arch) && mnemonic.starts_with("buffer_atomic") &&
+      size == sizeof(rdna4::VbufferMachineInst))
     return AtomicFaultEncoding::Buffer;
-  if ((arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
-      mnemonic.starts_with("ds_") && is_ds_atomic(mnemonic) && lds_width_bits(mnemonic) == 32u &&
-      size == sizeof(rdna4::VdsMachineInst))
+  if (consan_uses_gfx12_encoding(arch) && mnemonic.starts_with("ds_") && is_ds_atomic(mnemonic) &&
+      lds_width_bits(mnemonic) == 32u && size == sizeof(rdna4::VdsMachineInst))
     return AtomicFaultEncoding::Ds;
   return AtomicFaultEncoding::Unsupported;
 }
@@ -41,8 +40,7 @@ enum class AtomicFaultEncoding : uint8_t {
 }
 
 [[nodiscard]] bool lds_address_fault_arch_supported(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  return consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx12_encoding(arch);
 }
 
 [[nodiscard]] bool lds_address_fault_site_supported(const ConSanLdsSite &site,
@@ -1478,8 +1476,7 @@ template <typename Container>
       site->operation != ConSanOrdinaryMemoryOperation::Load ||
       site->flat_address_space_hint != ConSanFlatAddressSpaceHint::Group)
     return false;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) {
     // Language acquire is SC0/GLC without SC1/SLC. The latter bit appears on
     // volatile observations but does not create a language happens-before.
     return site->raw_th && *site->raw_th == 1u;
@@ -2567,8 +2564,7 @@ void associate_ordinary_acquire_sync_sequences(
   // VMEM/LDS zero wait. CDNA5's group-aperture form needs only the exact
   // combined zero wait: LDS has no cache invalidate operation. Keep this
   // fallback separate from RDNA's cache-associated acquire paths above.
-  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
-      arch != ROCJITSU_CODE_ARCH_CDNA5)
+  if (!consan_uses_gfx9_cdna_encoding(arch) && arch != ROCJITSU_CODE_ARCH_CDNA5)
     return;
   for (ConSanSyncSequence &sequence : result.sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||

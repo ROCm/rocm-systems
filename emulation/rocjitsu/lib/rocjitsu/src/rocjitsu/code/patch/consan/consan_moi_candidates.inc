@@ -46,7 +46,7 @@ inline constexpr uint32_t kRdna4VectorFlatNoSaddr = static_cast<uint32_t>(rdna4:
 inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna5::OPR_SREG_NULL);
 
 [[nodiscard]] constexpr uint32_t vector_flat_no_saddr(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (consan_uses_gfx9_cdna_encoding(arch))
     return 0;
   if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return kGfx1250VectorFlatNoSaddr;
@@ -91,7 +91,7 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna
     return false;
   // Returning global atomics have both a result dependency and a memory-side
   // effect on gfx12. CDNA's unified VM counter drains both sides.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (consan_uses_gfx9_cdna_encoding(arch))
     return true;
   return append_moi_global_store_wait(words, arch);
 }
@@ -308,7 +308,7 @@ two_address_native_lds_offset_scale(std::string_view mnemonic);
       ((arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         equals_any(site.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
                                    "ds_cmpstore_rtn_b32"})) ||
-       ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+       ((consan_uses_gfx9_cdna_encoding(arch)) &&
         equals_any(site.mnemonic,
                    {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64", "ds_cmpst_rtn_b32"})));
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
@@ -790,11 +790,11 @@ void append_moi_candidates(const ConSanFunctionInfo &function, ConSanFlatProvena
        is_rdna4_family_arch(arch)) &&
       equals_any(mnemonic, {"ds_load_b96", "ds_store_b96"}))
     return true;
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  if ((consan_uses_gfx9_cdna_encoding(arch)) &&
       equals_any(mnemonic, {"ds_read_b96", "ds_write_b96"}))
     return true;
   return is_unconditionally_single_range_native_lds_mnemonic(mnemonic) ||
-         ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+         ((consan_uses_gfx9_cdna_encoding(arch)) &&
           equals_any(mnemonic,
                      {"ds_read_i8", "ds_read_u8_d16", "ds_read_u8_d16_hi", "ds_read_i8_d16",
                       "ds_read_i8_d16_hi", "ds_read_u16_d16", "ds_read_u16_d16_hi",
@@ -835,8 +835,7 @@ candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate
       // VDS encodes a 16-bit single-address immediate. CDNA3/4 DS atomics use
       // only the eight-bit offset0 field; offset1 is not part of their address.
       const uint32_t static_byte_offset =
-          (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-                  candidate.kind == ConSanLdsAccessKind::Atomic
+          (consan_uses_gfx9_cdna_encoding(arch)) && candidate.kind == ConSanLdsAccessKind::Atomic
               ? *word0 & 0xffu
               : *word0 & 0xffffu;
       return std::vector<ConSanMoiAccessRange>{{static_byte_offset, *byte_count}};

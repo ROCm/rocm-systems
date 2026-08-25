@@ -28,8 +28,8 @@ struct MoiEntryScalarBackup {
                                                   const MoiEntryScalarBackup &backup, bool restore,
                                                   rj_code_arch_t arch,
                                                   std::vector<std::string> &errors) {
-  if (!instrumentation::is_admitted_arch(arch) || backup.vgpr >= kMaxVgprs ||
-      backup.sgpr_count == 0u || backup.sgpr_count > 64u ||
+  if (!consan_is_capability_arch(arch) || backup.vgpr >= kMaxVgprs || backup.sgpr_count == 0u ||
+      backup.sgpr_count > 64u ||
       static_cast<uint32_t>(backup.sgpr_base) + backup.sgpr_count > moi_ordinary_sgpr_limit(arch)) {
     errors.emplace_back("ConSan MOI entry scalar backup has an invalid register layout");
     return false;
@@ -1598,7 +1598,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
     const bool exact_cdna_workgroup_capture =
         patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
         patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
-    if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+    if ((consan_uses_gfx9_cdna_encoding(arch)) &&
         (!exact_cdna_workgroup_capture ||
          (!result.resolved_moi_record_replay_workgroup_sgprs.complete() &&
           !patch.persistent_record_replay_workgroup_vgprs.complete() &&
@@ -1979,7 +1979,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
             access_patch->persistent_record_replay_workgroup_private_offsets,
         .ephemeral_base = access_patch->persistent_private_state_end.value_or(persistent_end)};
 
-    const auto private_limit = address_free_scratch_private_limit(arch);
+    const auto private_limit = consan_address_free_private_limit(arch);
     if (!private_limit) {
       result.warnings.emplace_back(
           "ConSan MOI private-epoch prologue has no address-free scratch support");
@@ -2359,7 +2359,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                                           ConSanResult &result) {
   if (!options.moi_init_owner_epoch)
     return;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI owner/epoch prologue does not support this architecture");
     return;
@@ -2637,8 +2637,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         kernel_options.moi_owner_source == ConSanMoiOwnerSource::HwId &&
         kernel_options.moi_owner_sgpr.has_value();
     if (needs_full_entry_scalar_backup || needs_automatic_owner_scalar_backup) {
-      const bool entry_backup_arch_supported =
-          instrumentation::is_admitted_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5;
+      const bool entry_backup_arch_supported = consan_is_capability_arch(arch);
       const bool has_scalar_spill_contract = kernel_options.automatic_moi_inline_sgpr_spill ||
                                              kernel_options.automatic_moi_record_replay_sgpr_spill;
       if (!entry_backup_arch_supported || !kernel_options.moi_exec_save_sgpr ||

@@ -3,7 +3,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                             ConSanResult &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::InlineShadow)
     return;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI inline atomic patch does not support this architecture");
     return;
@@ -363,7 +363,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   // reach of both the pristine-end island bank and every appended body.  A
   // liveness-proven relocated host supplies one shared in-kernel island.  Its
   // scalar key identifies the normal host path or one of the atomic bodies.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (consan_uses_gfx9_cdna_encoding(arch)) {
     std::map<std::string, std::vector<size_t>> owner_groups;
     for (size_t index = 0; index < planned_candidates.size(); ++index) {
       const PlannedInlineAtomic &planned = planned_candidates[index];

@@ -38,7 +38,7 @@ int main() {
   std::cout << "<!-- BEGIN GENERATED CONSAN CAPABILITY CONTRACT -->\n"
                "| Target | Engine | Access | Barrier | Atomic | Fence |\n"
                "| --- | --- | --- | --- | --- | --- |\n";
-  for (const ConSanCapabilityTarget &target : kConSanCapabilityTargets) {
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
     for (ConSanCapabilityEngine engine : kConSanCapabilityEngines) {
       std::cout << "| `" << rj_code_target_name(target.target) << "` | "
                 << consan_capability_engine_name(engine);

@@ -12,32 +12,17 @@ decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
   return std::move(decoded).value();
 }
 
-[[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-}
-
-[[nodiscard]] bool is_rdna_arch(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-}
-
 [[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
                                                                  uint32_t wavefront_size) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
-    return 4;
-  if (is_cdna_arch(arch))
-    return 8;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
-    return wavefront_size == 32 ? 16 : 8;
-  if (is_rdna_arch(arch))
-    return wavefront_size == 32 ? 8 : 4;
-  return 1;
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  const auto kernel_profile =
+      profile ? consan_kernel_target_profile(*profile, wavefront_size) : std::nullopt;
+  return kernel_profile ? kernel_profile->vgpr_allocation_granularity : 0u;
 }
 
 [[nodiscard]] uint32_t descriptor_wavefront_size(rj_code_arch_t arch, const KD &desc) {
-  if (is_rdna_arch(arch)) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  if (profile && profile->supports_wave32) {
     const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
                                         kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
     return wave32 ? 32 : 64;
@@ -62,10 +47,10 @@ decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
 [[nodiscard]] uint16_t descriptor_ordinary_vgpr_allocation_count(const KD &desc,
                                                                  rj_code_arch_t arch) {
   const uint16_t unified_count = descriptor_vgpr_allocation_count(desc, arch);
-  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  if (!profile || profile->accumulator_model != ConSanAccumulatorModel::DescriptorPartitioned)
     return unified_count;
 
-  constexpr uint32_t kAccvgprOffsetGranularity = 4u;
   const uint32_t encoded_accum_offset =
       AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
   // Zero is the descriptor default for kernels without an accumulator bank.
@@ -74,7 +59,8 @@ decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
   // truncating ordinary-only kernels to four registers.
   if (encoded_accum_offset == 0u)
     return unified_count;
-  const uint32_t accvgpr_base = (encoded_accum_offset + 1u) * kAccvgprOffsetGranularity;
+  const uint32_t accvgpr_base =
+      (encoded_accum_offset + 1u) * profile->accumulator_offset_granularity;
   return unified_count > accvgpr_base
              ? static_cast<uint16_t>(std::min<uint32_t>(accvgpr_base, REGISTER_SET_MAX_VGPRS))
              : unified_count;
@@ -110,12 +96,14 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
 
 [[nodiscard]] bool grow_descriptor_sgpr_allocation(KD &desc, uint16_t required_count,
                                                    rj_code_arch_t arch) {
-  constexpr uint32_t kSgprGranularity = 8u;
   constexpr uint32_t kCdnaAllocationTailSgprs = 6u;
-  constexpr uint32_t kMaxRdnaOrdinarySgprs = 106u;
-  constexpr uint32_t kMaxCdnaOrdinarySgprs = 102u;
-  const uint32_t max_ordinary_sgprs =
-      is_cdna_arch(arch) ? kMaxCdnaOrdinarySgprs : kMaxRdnaOrdinarySgprs;
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  if (!profile)
+    return false;
+  const uint32_t sgpr_granularity = profile->sgpr_allocation_granularity;
+  const uint32_t max_ordinary_sgprs = profile->ordinary_sgpr_limit;
+  const bool descriptor_has_allocation_tail =
+      profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned;
   if (required_count == 0 || required_count > max_ordinary_sgprs)
     return false;
 
@@ -125,17 +113,18 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
   // Grow far enough to keep the complete tail above the highest new ordinary
   // SGPR. RDNA's special registers have fixed architectural indices.
   const uint32_t required_allocation =
-      static_cast<uint32_t>(required_count) + (is_cdna_arch(arch) ? kCdnaAllocationTailSgprs : 0u);
+      static_cast<uint32_t>(required_count) +
+      (descriptor_has_allocation_tail ? kCdnaAllocationTailSgprs : 0u);
   if (required_allocation <= descriptor_sgpr_allocation_count(desc, arch))
     return true;
   const uint32_t rounded =
-      (required_allocation + kSgprGranularity - 1u) / kSgprGranularity * kSgprGranularity;
+      (required_allocation + sgpr_granularity - 1u) / sgpr_granularity * sgpr_granularity;
   const uint32_t max_allocation =
-      max_ordinary_sgprs + (is_cdna_arch(arch) ? kCdnaAllocationTailSgprs : 0u);
-  if (rounded > (max_allocation + kSgprGranularity - 1u) / kSgprGranularity * kSgprGranularity)
+      max_ordinary_sgprs + (descriptor_has_allocation_tail ? kCdnaAllocationTailSgprs : 0u);
+  if (rounded > (max_allocation + sgpr_granularity - 1u) / sgpr_granularity * sgpr_granularity)
     return false;
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  (rounded / kSgprGranularity - 1u));
+                  (rounded / sgpr_granularity - 1u));
   return true;
 }
 
@@ -143,7 +132,8 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
                                                    rj_code_arch_t arch) {
   if (required_count > REGISTER_SET_MAX_VGPRS)
     return false;
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  if (profile && profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned &&
       required_count > descriptor_ordinary_vgpr_allocation_count(desc, arch)) {
     const uint16_t unified_count = descriptor_vgpr_allocation_count(desc, arch);
     const uint16_t ordinary_count = descriptor_ordinary_vgpr_allocation_count(desc, arch);
@@ -878,7 +868,7 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
   uint32_t vsrc = 0;
   uint32_t saddr = 0;
   uint32_t ioffset = 0;
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  if ((consan_uses_gfx9_cdna_encoding(arch)) &&
       instruction_bytes.size() == sizeof(cdna4::FlatScratchMachineInst)) {
     // CDNA3 and CDNA4 share the VFLAT scratch encoding.
     cdna4::FlatScratchMachineInst raw{};
@@ -914,9 +904,8 @@ void invalidate_scratch_components_for_scalar_writes(const Instruction &inst,
   }
   // A vector address makes the effective slot lane-dependent and prevents an
   // exact store/load match. Fail closed instead of aliasing such traffic.
-  const bool valid_encoding = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
-                                  ? encoding == 0x37u
-                                  : encoding == 0xedu;
+  const bool valid_encoding =
+      consan_uses_gfx9_cdna_encoding(arch) ? encoding == 0x37u : encoding == 0xedu;
   if (!valid_encoding || vaddr != 0u)
     return false;
 
@@ -976,7 +965,7 @@ private_component_key(const FlatPointerTracker &tracker, uint16_t address_vgpr,
   uint32_t address_vgpr = 0;
   uint32_t data_vgpr = 0;
   uint32_t ioffset = 0;
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  if ((consan_uses_gfx9_cdna_encoding(arch)) &&
       instruction_bytes.size() == sizeof(cdna4::FlatMachineInst)) {
     cdna4::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
@@ -1052,7 +1041,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
       rdna4::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
       lane_selector = static_cast<uint32_t>(raw.src1);
-    } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+    } else if ((consan_uses_gfx9_cdna_encoding(arch)) &&
                instruction_bytes.size() == sizeof(cdna4::Vop3MachineInst)) {
       cdna4::Vop3MachineInst raw{};
       std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
@@ -1113,7 +1102,7 @@ void update_flat_pointer_tracker(const Instruction &inst, FlatPointerTracker &tr
   if (mnemonic == "v_accvgpr_write" || mnemonic == "v_accvgpr_read") {
     std::optional<RegisterRef> dst = register_ref(inst.dst_operand(0));
     std::optional<RegisterRef> source = register_ref(inst.src_operand(0));
-    if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+    if ((consan_uses_gfx9_cdna_encoding(arch)) &&
         instruction_bytes.size() == sizeof(cdna4::Vop3MachineInst)) {
       // V_ACCVGPR_READ/WRITE encode their AccVGPR operand as a raw bank
       // selector rather than the normalized operand-selector range used by
@@ -1717,8 +1706,8 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
   const bool is_supported_load =
       mnemonic == "buffer_load_dword" || mnemonic == "buffer_load_dwordx2" ||
       mnemonic == "buffer_load_dwordx3" || mnemonic == "buffer_load_dwordx4";
-  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
-      !is_supported_load || instruction_bytes.size() != sizeof(cdna4::MubufMachineInst)) {
+  if ((!consan_uses_gfx9_cdna_encoding(arch)) || !is_supported_load ||
+      instruction_bytes.size() != sizeof(cdna4::MubufMachineInst)) {
     return std::nullopt;
   }
 
@@ -1862,7 +1851,9 @@ void record_barrier_site(const Instruction &inst, ConSanKernelInfo &kernel,
   // LLVM lowers a uniform named-barrier init count into M0[21:16] and the
   // barrier ID into M0[5:0]. Only accept the immediately preceding literal
   // s_mov_b32 m0 materialization: arbitrary M0 dataflow is not proof.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && site.operation == ConSanBarrierSite::Operation::Init &&
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  if (profile && profile->has_cluster_facilities &&
+      site.operation == ConSanBarrierSite::Operation::Init &&
       site.operand_source == ConSanBarrierSite::OperandSource::DynamicM0 &&
       previous_instruction_bytes.size() == 2u * sizeof(uint32_t)) {
     uint32_t setup_word = 0;
@@ -1918,8 +1909,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = lds_width_bits(mnemonic);
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-       arch == ROCJITSU_CODE_ARCH_RDNA3) &&
+  if ((consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
       mnemonic.starts_with("flat_atomic") && site.width_bits == 0u) {
     site.width_bits = 32u;
   }
@@ -1951,7 +1941,7 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
       site.address_space_hint = ConSanFlatAddressSpaceHint::Private;
     else if (raw.seg == 2u)
       site.address_space_hint = ConSanFlatAddressSpaceHint::Global;
-  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+  } else if ((consan_uses_gfx9_cdna_encoding(arch)) &&
              instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
     // CDNA3 and CDNA4 use an identical FLAT bit layout.
     cdna4::FlatMachineInst raw{};
@@ -2178,8 +2168,7 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
   }
 
   bool well_formed = false;
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      mnemonic.starts_with("flat_")) {
+  if ((consan_uses_gfx9_cdna_encoding(arch)) && mnemonic.starts_with("flat_")) {
     if (instruction_bytes.size() != sizeof(cdna4::FlatMachineInst)) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
     } else {
@@ -2228,8 +2217,7 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
                                 ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
                                 : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
     }
-  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-             mnemonic.starts_with("global_")) {
+  } else if ((consan_uses_gfx9_cdna_encoding(arch)) && mnemonic.starts_with("global_")) {
     if (instruction_bytes.size() != sizeof(cdna4::FlatGlblMachineInst)) {
       site.support_reason = ConSanOrdinaryMemorySupportReason::UnsupportedEncodingSize;
     } else {
@@ -2253,7 +2241,7 @@ void record_ordinary_memory_site(const Instruction &inst, const FlatPointerTrack
                                 ? ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly
                                 : ConSanOrdinaryMemorySupportReason::MalformedEncoding;
     }
-  } else if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  } else if (consan_uses_gfx12_encoding(arch)) {
     const size_t expected_size =
         mnemonic.starts_with("flat_")
             ? (arch == ROCJITSU_CODE_ARCH_RDNA4 ? sizeof(rdna4::VflatMachineInst)
@@ -2318,8 +2306,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   site.file_offset = kernel.text_file_offset + instruction_text_offset;
   site.size = static_cast<uint32_t>(inst.size());
   site.width_bits = lds_width_bits(mnemonic);
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-       arch == ROCJITSU_CODE_ARCH_RDNA3) &&
+  if ((consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3) &&
       (mnemonic.starts_with("flat_atomic") || mnemonic.starts_with("global_atomic")) &&
       site.width_bits == 0u) {
     site.width_bits = 32u;
@@ -2345,15 +2332,13 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
     rdna3::FlatGlobalMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     fill_rdna3_flat_like_atomic_raw(site, raw);
-  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-             mnemonic.starts_with("flat_atomic") &&
+  } else if ((consan_uses_gfx9_cdna_encoding(arch)) && mnemonic.starts_with("flat_atomic") &&
              instruction_bytes.size() >= sizeof(cdna4::FlatMachineInst)) {
     // CDNA3 and CDNA4 use identical FLAT bit layouts.
     cdna4::FlatMachineInst raw{};
     std::memcpy(&raw, instruction_bytes.data(), sizeof(raw));
     fill_cdna_flat_atomic_raw(site, raw);
-  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-             mnemonic.starts_with("global_atomic") &&
+  } else if ((consan_uses_gfx9_cdna_encoding(arch)) && mnemonic.starts_with("global_atomic") &&
              instruction_bytes.size() >= sizeof(cdna4::FlatGlblMachineInst)) {
     // CDNA3 and CDNA4 also share VGLOBAL's signed 13-bit-offset layout.
     cdna4::FlatGlblMachineInst raw{};
@@ -2425,10 +2410,9 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
   // Some decoder revisions expose VGLOBAL's scalar address only through the
   // raw instruction field. Normalize that equivalent register selector so
   // downstream address consumers do not depend on operand-list presentation.
-  const bool cdna_global_no_saddr =
-      (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-      mnemonic.starts_with("global_atomic") && site.raw_saddr &&
-      *site.raw_saddr == kCdnaGlobalNoSaddrEncoding;
+  const bool cdna_global_no_saddr = (consan_uses_gfx9_cdna_encoding(arch)) &&
+                                    mnemonic.starts_with("global_atomic") && site.raw_saddr &&
+                                    *site.raw_saddr == kCdnaGlobalNoSaddrEncoding;
   const bool rdna3_global_no_saddr = arch == ROCJITSU_CODE_ARCH_RDNA3 &&
                                      mnemonic.starts_with("global_atomic") && site.raw_saddr &&
                                      *site.raw_saddr == kRdna3GlobalNoSaddrEncoding;
@@ -2543,7 +2527,8 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     }
 
     ++kernel.stats.instruction_count;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    const ConSanTargetProfile *profile = consan_target_profile(arch);
+    if (profile && profile->has_cluster_facilities) {
       for (int operand_index = 0; operand_index < inst->num_src_operands(); ++operand_index) {
         const Operand *operand = inst->src_operand(operand_index);
         // TTMPs are deliberately outside liveness's allocatable register

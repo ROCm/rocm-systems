@@ -170,7 +170,7 @@ void publish_sc_access_coverage_support(ConSanResult &result, ConSanScAccessCove
 }
 
 [[nodiscard]] uint16_t sc_vcc_save_sgpr_width(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u : 1u;
+  return consan_uses_gfx9_cdna_encoding(arch) ? 2u : 1u;
 }
 
 [[nodiscard]] std::optional<uint16_t> choose_sc_borrowed_scalar_sgpr(uint16_t allocated_sgpr_count,
@@ -211,7 +211,7 @@ void publish_sc_access_coverage_support(ConSanResult &result, ConSanScAccessCove
     return std::nullopt;
   };
   const uint16_t allocated_limit = std::min(allocated_sgpr_count, limit);
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+  if (consan_uses_gfx9_cdna_encoding(arch)) {
     // CDNA SGPR allocation participates in occupancy. Reuse an all-owner dead
     // hole inside the current allocation before growing every descriptor.
     if (auto existing = find_free(0, allocated_limit))
@@ -396,8 +396,7 @@ lds_check_trap_extra_scratch_vgprs(const ConSanLdsSite &site,
 
 [[nodiscard]] std::optional<std::array<uint32_t, 2>>
 build_cdna_accvgpr_read_b32(uint16_t dst_vgpr, uint16_t src_accvgpr, rj_code_arch_t arch) {
-  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) || dst_vgpr > 255u ||
-      src_accvgpr > 255u)
+  if ((!consan_uses_gfx9_cdna_encoding(arch)) || dst_vgpr > 255u || src_accvgpr > 255u)
     return std::nullopt;
   if (arch == ROCJITSU_CODE_ARCH_CDNA3) {
     return cdna3::build_vop3p(cdna3::kVAccvgprReadVop3p,
@@ -672,7 +671,7 @@ build_v_mov_b32_e32_vgpr_word(uint16_t vdst, uint16_t src_vgpr, rj_code_arch_t a
                                                                  std::string_view context) {
   if (!options.report_buffer_address)
     return 1u;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     errors.emplace_back(std::string(context) + " report-buffer action has unsupported target");
     return std::nullopt;
   }
@@ -817,7 +816,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
       report_scratch_vgpr + static_cast<uint16_t>(report_action_scratch_vgprs(options)));
   const uint16_t saved_address_vgpr = std::max(core_scratch_end, report_scratch_end);
   if (site.kind == ConSanLdsAccessKind::Read) {
-    if (site.dst_accvgpr && (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4))
+    if (site.dst_accvgpr && consan_arch_has_descriptor_partitioned_accumulators(arch))
       duplicate_load[0] &= ~(uint32_t{1} << 25u);
     duplicate_load[1] =
         (duplicate_load[1] & 0x00FFFFFFu) | (static_cast<uint32_t>(scratch_vgpr) << 24u);
@@ -847,7 +846,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
 
   auto wait_dscnt = build_s_wait_dscnt_word(0, arch);
   auto first_compare_vgpr =
-      site.dst_accvgpr && (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+      site.dst_accvgpr && consan_arch_has_descriptor_partitioned_accumulators(arch)
           ? std::optional<uint16_t>(compare_scratch_vgpr)
           : check_trap_compare_vgpr(site, 0u, arch, gfx1250_vgpr_msb_mode);
   if (!first_compare_vgpr) {
@@ -865,11 +864,11 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
   auto skip_action = build_s_cbranch_vccz_word(static_cast<int16_t>(mismatch_action->size()), arch);
   constexpr uint16_t kRdna4VccLo = 106;
   const std::optional<uint32_t> save_vcc =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
+      consan_uses_gfx9_cdna_encoding(arch)
           ? instrumentation::build_s_mov_b64(vcc_save_sgpr, kRdna4VccLo, arch)
           : std::optional<uint32_t>(build_s_mov_b32(vcc_save_sgpr, kRdna4VccLo, arch));
   const std::optional<uint32_t> restore_vcc =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4
+      consan_uses_gfx9_cdna_encoding(arch)
           ? instrumentation::build_s_mov_b64(kRdna4VccLo, vcc_save_sgpr, arch)
           : std::optional<uint32_t>(build_s_mov_b32(kRdna4VccLo, vcc_save_sgpr, arch));
   if (!wait_dscnt || !skip_action || !save_vcc || !restore_vcc) {
@@ -988,8 +987,7 @@ build_mismatch_action_words(const ConSanOptions &options, rj_code_arch_t arch,
   words.push_back(*save_vcc);
   for (uint16_t i = 0; i < *required_vgprs; ++i) {
     auto compare_vgpr = check_trap_compare_vgpr(site, i, arch, gfx1250_vgpr_msb_mode);
-    if (site.dst_accvgpr &&
-        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+    if (site.dst_accvgpr && (consan_uses_gfx9_cdna_encoding(arch))) {
       const auto acc_read = build_cdna_accvgpr_read_b32(
           compare_scratch_vgpr, static_cast<uint16_t>(*site.dst_accvgpr + i), arch);
       if (!acc_read) {

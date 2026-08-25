@@ -22,11 +22,11 @@ struct MoiResidentWaveHwreg {
 
 [[nodiscard]] constexpr std::optional<MoiResidentWaveHwreg>
 moi_resident_wave_hwreg(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (consan_uses_gfx9_cdna_encoding(arch))
     return MoiResidentWaveHwreg{.id = kLegacyHwRegHwId, .bits = kLegacyHwIdResidentWaveBits};
   if (arch == ROCJITSU_CODE_ARCH_RDNA3)
     return MoiResidentWaveHwreg{.id = kGfx11HwRegHwId1, .bits = kGfx11HwIdResidentWaveBits};
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
+  if (consan_uses_gfx12_encoding(arch))
     return MoiResidentWaveHwreg{.id = kGfx12HwRegHwId1, .bits = kGfx12HwIdResidentWaveBits};
   return std::nullopt;
 }
@@ -229,7 +229,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     // mirror establishes the same validity invariant without that tag. RDNA4
     // can instead use its packed first-use bitmap. If either full layout does
     // not fit, the caller uses the semantically equivalent external table.
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (consan_uses_gfx12_encoding(arch)) {
       if (auto lazy_layout = plan_consan_moi_lazy_workgroup_shadow(
               descriptor.group_segment_fixed_size, max_workgroup_lds_bytes)) {
         layout = lazy_layout;
@@ -299,7 +299,7 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
   std::optional<std::array<uint64_t, 4>> record_replay_workgroup_offset_values;
   if (include_record_replay_workgroup) {
     const bool include_cluster_workgroup_id =
-        arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        consan_arch_has_cluster_facilities(arch) &&
         std::ranges::any_of(
             resources.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
               const ConSanKernelInfo *kernel = kernel_for_descriptor(result, descriptor_offset);
@@ -313,7 +313,7 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
     };
     persistent_end += (include_cluster_workgroup_id ? 4u : 3u) * SpillManager::kSlotBytes;
   }
-  const auto private_limit = address_free_scratch_private_limit(arch);
+  const auto private_limit = consan_address_free_private_limit(arch);
   if (!private_limit) {
     warnings.emplace_back(
         "ConSan MOI private epoch has no address-free scratch support for this architecture");
@@ -335,7 +335,7 @@ build_moi_private_epoch_layout(const ConSanResult &result, const ResolvedMoiScra
     };
   }
   const auto ephemeral_base =
-      normalize_address_free_scratch_private_size(arch, static_cast<uint32_t>(persistent_end));
+      consan_normalize_address_free_private_size(arch, static_cast<uint32_t>(persistent_end));
   if (!ephemeral_base) {
     warnings.emplace_back("ConSan MOI private epoch exceeds address-free scratch capacity");
     return std::nullopt;
@@ -406,7 +406,7 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
     warnings.emplace_back("ConSan MOI spill requires an owning kernel descriptor");
     return std::nullopt;
   }
-  const auto private_limit = address_free_scratch_private_limit(arch);
+  const auto private_limit = consan_address_free_private_limit(arch);
   if (!private_limit) {
     warnings.emplace_back(
         "ConSan MOI spill has no address-free scratch support for this architecture");
@@ -500,7 +500,7 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
         static_cast<uint64_t>(resources.count) * SpillManager::kSlotBytes + additional_frame_bytes;
     const auto required_private_bytes =
         requested_private_bytes <= std::numeric_limits<uint32_t>::max()
-            ? normalize_address_free_scratch_private_size(
+            ? consan_normalize_address_free_private_size(
                   arch, static_cast<uint32_t>(requested_private_bytes))
             : std::nullopt;
     if (!spill || !required_private_bytes) {

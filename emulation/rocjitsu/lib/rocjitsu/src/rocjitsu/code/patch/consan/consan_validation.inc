@@ -538,9 +538,7 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
     const uint16_t vcc_save = *body->indirect_saved_vcc_sgpr;
     const bool is_flat_body = body->kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap ||
                               body->kind == ConSanPatchKind::LocalCaveFlatStoreCheckTrap;
-    const uint16_t vcc_save_width =
-        is_flat_body || arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 2u
-                                                                                             : 1u;
+    const uint16_t vcc_save_width = is_flat_body || consan_uses_gfx9_cdna_encoding(arch) ? 2u : 1u;
     const auto ranges_overlap = [](uint16_t lhs_base, uint16_t lhs_width, uint16_t rhs_base,
                                    uint16_t rhs_width) {
       return static_cast<uint32_t>(lhs_base) < static_cast<uint32_t>(rhs_base) + rhs_width &&
@@ -3360,7 +3358,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       const size_t minimum_backward_loop_count =
           (bitmap_backed_lazy_shadow ? decoded_local_exchange_cell_count : 0u) +
           (needs_compact_loop ? 1u : 0u);
-      const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+      const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
       const uint16_t old_value_offset = cdna ? 6u : 5u;
       const auto expected_local_exchange_b32 = instrumentation::build_ds_storexchg_rtn_b32(
           static_cast<uint16_t>(scratch + old_value_offset), scratch,
@@ -3687,7 +3685,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       return result_positions;
     };
     const uint16_t scratch = *patch.scratch_vgpr;
-    const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
     const uint16_t snapshot_address = static_cast<uint16_t>(scratch + (cdna ? 6u : 5u));
     const uint16_t temporary = static_cast<uint16_t>(scratch + 20u);
     const uint16_t version_cas_value = static_cast<uint16_t>(scratch + (cdna ? 4u : 5u));
@@ -4215,7 +4213,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
           std::max(requirement.required_private_bytes, unscoped_required_private_bytes);
     }
     KernelDescriptor normalized = replacement_descriptor;
-    const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    const bool cdna = consan_uses_gfx9_cdna_encoding(arch);
     const bool requires_full_workgroup_id =
         requirement.require_full_workgroup_id &&
         (!cdna || std::ranges::binary_search(result.moi_full_workgroup_id_descriptor_offsets,
@@ -4360,7 +4358,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     if (requirement.allow_resource_delta || has_unscoped_resource_growth) {
       normalized.compute_pgm_rsrc1 = original_descriptor.compute_pgm_rsrc1;
       normalized.compute_pgm_rsrc2 = original_descriptor.compute_pgm_rsrc2;
-      if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      if (consan_uses_gfx9_cdna_encoding(arch)) {
         AMDHSA_BITS_SET(normalized.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
                         AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
                                         kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));

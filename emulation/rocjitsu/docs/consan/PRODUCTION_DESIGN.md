@@ -1846,6 +1846,25 @@ The frozen Slice 0 artifact is
 
 ### Slice 1: centralize `TargetProfile`
 
+**Implementation status (2026-08-25): complete.** The immutable five-target
+table and its pure code-object/per-kernel lookups live in
+`consan_capability_contract.h`. Target admission, semantic-form availability,
+wave and EXEC rules, descriptor allocation and accumulator models, dispatch
+and workgroup identity facilities, scratch and group limits, branch/call
+facilities, wait families, and bank/cluster facilities now share that source.
+The profile does not select an engine or encode instructions. ConSan callers
+no longer use `instrumentation_builder.h`'s encoding-routing predicates as
+product admission policy; the generic builder keeps those predicates for its
+non-ConSan consumers.
+
+The five-row host matrix cross-checks generic scratch encodings and branch/call
+boundaries as well as the profile itself. The generated capability manifest,
+the complete ConSan host suite, and a correct/incorrect simulator pair on each
+supported target form the completed cutover gate. The deletion audit has one
+profile table and no remaining ConSan references to the generic admission/
+family predicates or duplicated `CDNA3 || CDNA4` / `RDNA4 || CDNA5` family
+tests; exact single-target branches remain in classifiers and lowerers.
+
 - **Current responsibility:** Architecture predicates and constants are spread
   through analysis, resource planning, prologues, access/synchronization lowerers,
   validation, and `instrumentation_builder.h`, the current file that routes

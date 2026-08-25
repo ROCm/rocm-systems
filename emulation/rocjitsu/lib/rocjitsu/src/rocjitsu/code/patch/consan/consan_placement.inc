@@ -306,8 +306,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
 }
 
 [[nodiscard]] std::optional<uint32_t> build_s_wait_dscnt_word(uint16_t count, rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA3)
+  if (consan_uses_gfx9_cdna_encoding(arch) || arch == ROCJITSU_CODE_ARCH_RDNA3)
     return count == 0 ? instrumentation::build_s_wait_lds0(arch) : std::nullopt;
   if (!is_rdna4_family_arch(arch))
     return std::nullopt;
@@ -399,7 +398,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
                                                                          bool two_address,
                                                                          rj_code_arch_t arch) {
   uint32_t base = 0;
-  if (instrumentation::is_rdna_family_arch(arch)) {
+  if (consan_uses_gfx11_or_gfx12_encoding(arch)) {
     if (two_address) {
       switch (word0 & 0xFFFF0000u) {
       case 0xD8380000u:
@@ -442,8 +441,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     default:
       return std::nullopt;
     }
-  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-             !two_address) {
+  } else if ((consan_uses_gfx9_cdna_encoding(arch)) && !two_address) {
     switch (width_bits) {
     case 8:
       base = 0xD8E80000u;
@@ -466,8 +464,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
     default:
       return std::nullopt;
     }
-  } else if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) &&
-             two_address) {
+  } else if ((consan_uses_gfx9_cdna_encoding(arch)) && two_address) {
     switch (word0 & 0xFFFF0000u) {
     case 0xD81C0000u:
       base = 0xD86E0000u;
@@ -595,7 +592,8 @@ two_address_lds_byte_offsets(const ConSanLdsSite &site, uint32_t word0) {
 /// these four architecture families, so this captures the complete target
 /// distinction used by its scratch planners.
 [[nodiscard]] constexpr bool consan_arch_requires_even_vgpr_tuples(rj_code_arch_t arch) {
-  return instrumentation::is_cdna_family_arch(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && profile->requires_even_vgpr_tuples;
 }
 
 [[nodiscard]] bool lds_scratch_tuple_base_is_valid(const ConSanLdsSite &site, rj_code_arch_t arch,

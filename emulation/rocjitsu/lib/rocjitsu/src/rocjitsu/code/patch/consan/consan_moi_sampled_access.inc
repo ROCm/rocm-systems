@@ -94,7 +94,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back("ConSan MOI sampled probe does not support this architecture");
     return;
   }
@@ -736,7 +736,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         if (displaced_words.size() >= candidate_entry_island_words &&
             displaced_size <= std::numeric_limits<uint32_t>::max() &&
             moi_entry_window_is_single_entry(resource_state.block_index, candidate.text_offset,
-                                              displaced_size)) {
+                                             displaced_size)) {
           const size_t candidate_words = candidate.size / sizeof(uint32_t);
           if (candidate_words <= displaced_words.size()) {
             displaced_tail_words.assign(displaced_words.begin() + candidate_words,

@@ -636,7 +636,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   constexpr size_t kCompactRecordReplayBarrierMemberLimit = 32u;
   effective_options.moi_record_replay_dense_barrier_router =
       effective_options.moi_record_replay_dense_barrier_router ||
-      (instrumentation::is_admitted_arch(arch) &&
+      (consan_is_capability_arch(arch) &&
        effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
        (supported_barrier_members > kCompactRecordReplayBarrierMemberLimit ||
         has_stranded_record_replay_barrier));

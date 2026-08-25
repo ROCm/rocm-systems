@@ -22,12 +22,12 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanResult &result,
        !options.automatic_moi_record_replay_sgpr_spill) ||
       !options.moi_exec_save_sgpr)
     return std::nullopt;
-  if (!instrumentation::is_admitted_arch(arch) || resources.owner_descriptor_file_offsets.empty()) {
+  if (!consan_is_capability_arch(arch) || resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back(
         "ConSan MOI spill-backed scalar state requires at least one supported kernel owner");
     return std::nullopt;
   }
-  const auto private_limit = address_free_scratch_private_limit(arch);
+  const auto private_limit = consan_address_free_private_limit(arch);
   if (!private_limit) {
     warnings.emplace_back("ConSan MOI spill-backed Inline scalar state has no private capacity");
     return std::nullopt;
@@ -73,7 +73,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                    ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
-  if (!instrumentation::is_admitted_arch(arch)) {
+  if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI inline-shadow probe does not support this architecture");
     return;
@@ -281,8 +281,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   // unrelated code object. Retain the planning state's pristine CFG and
   // liveness facts so a relocated relay host cannot clobber transient state.
   const auto &dense_host_blocks = resource_state.blocks;
-  if ((arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-       is_rdna4_family_arch(arch)) &&
+  if ((consan_uses_gfx9_cdna_encoding(arch) || is_rdna4_family_arch(arch)) &&
       use_indirect_appended && local_entry_islands) {
     struct DenseGroup {
       std::vector<const ConSanMoiCandidate *> candidates;
@@ -304,8 +303,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         // indirect-PC pair.  Its dense route encodes both the route ordinal
         // and the incoming SCC in that scalar, using one inline-constant bit
         // for each.  Keep every such group within the 0..63 inline range.
-        const size_t max_group_size =
-            arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ? 31u : 64u;
+        const size_t max_group_size = consan_uses_gfx9_cdna_encoding(arch) ? 31u : 64u;
         if (groups.empty() || groups.back().first != key ||
             (arch != ROCJITSU_CODE_ARCH_CDNA5 &&
              groups.back().second.candidates.size() == max_group_size) ||
@@ -2710,7 +2708,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   if (relocate_instruction) {
     const bool capture_high_bank_address =
         moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
-    const bool select_guest_vgpr_bank = arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+    const bool select_guest_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch) &&
                                         candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u &&
                                         !capture_high_bank_address;
     if (select_guest_vgpr_bank)
@@ -3275,8 +3273,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   }
 
   std::vector<uint32_t> words;
-  const bool select_guest_vgpr_bank =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+  const bool select_guest_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch) &&
+                                      candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   const bool capture_high_bank_address =
       moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
   const bool spill_backed_operand_recovery = options.moi_sampled_spill_backed_operand_recovery;
