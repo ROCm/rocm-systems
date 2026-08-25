@@ -606,11 +606,14 @@ TEST(perfetto_engine_cached, stop_calls_finalize_even_when_drain_throws)
 {
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
-    throwing_sink target{ { 42 } };  // throws on pid 42
+
+    const std::vector<int> throwing_pids{ 42 };
+
+    throwing_sink target{ throwing_pids };  // throws on pid 42
 
     engine.start(target);
-    engine.preregister_pids({ 42 });
-    simulate_interceptor_emit(engine, 42, std::vector<char>{ 'x' });
+    engine.preregister_pids(throwing_pids);
+    simulate_interceptor_emit(engine, throwing_pids.at(0), std::vector<char>{ 'x' });
 
     EXPECT_THROW(engine.stop(), std::runtime_error);
     EXPECT_EQ(target.throw_count(), 1);
@@ -622,13 +625,17 @@ TEST(perfetto_engine_cached, stop_rethrows_first_drain_exception_after_finalize)
 {
     rocprofsys::core::cached_perfetto_engine engine{ make_test_config() };
     engine.init_sdk();
-    throwing_sink target{ { 101, 202 } };  // both throw
+    constexpr int first_throwing_pid  = 101;
+    constexpr int second_throwing_pid = 202;
+    constexpr int non_throwing_pid    = 303;
+    throwing_sink target{ { first_throwing_pid, second_throwing_pid } };
 
     engine.start(target);
-    engine.preregister_pids({ 101, 202, 303 });  // 303 won't throw
-    simulate_interceptor_emit(engine, 101, std::vector<char>{ 'a' });
-    simulate_interceptor_emit(engine, 202, std::vector<char>{ 'b' });
-    simulate_interceptor_emit(engine, 303, std::vector<char>{ 'c' });
+    engine.preregister_pids(
+        { first_throwing_pid, second_throwing_pid, non_throwing_pid });
+    simulate_interceptor_emit(engine, first_throwing_pid, std::vector<char>{ 'a' });
+    simulate_interceptor_emit(engine, second_throwing_pid, std::vector<char>{ 'b' });
+    simulate_interceptor_emit(engine, non_throwing_pid, std::vector<char>{ 'c' });
 
     EXPECT_THROW(engine.stop(), std::runtime_error);
     EXPECT_EQ(target.drained_count(), 3)
@@ -636,7 +643,7 @@ TEST(perfetto_engine_cached, stop_rethrows_first_drain_exception_after_finalize)
     EXPECT_EQ(target.throw_count(), 2);
     EXPECT_EQ(target.finalize_count(), 1);
     ASSERT_EQ(target.kept().size(), 1u) << "only the non-throwing source's bytes kept";
-    EXPECT_EQ(target.kept()[0].first, 303);
+    EXPECT_EQ(target.kept()[0].first, non_throwing_pid);
 }
 
 TEST(perfetto_engine_cached, concurrent_collect_packet_bytes_no_loss_or_bleed)
