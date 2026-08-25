@@ -56,7 +56,6 @@ class webui_analysis(OmniAnalyze_Base):
 
         # define any elements which will have full width
         self.__full_width_elements: set[int] = {1801}
-        self.__roofline_data_type = args.roofline_data_type
 
     @demarcate
     def build_layout(
@@ -245,7 +244,6 @@ class webui_analysis(OmniAnalyze_Base):
                             "sort_type": str(args.sort),
                             "mem_level": args.mem_level,
                             "include_kernel_names": True,
-                            "roofline_data_type": self.__roofline_data_type,
                             # WebUI handles kernel filtering
                             # client-side via Dash/Plotly
                             "kernel_filter": False,
@@ -271,6 +269,7 @@ class webui_analysis(OmniAnalyze_Base):
 
                     ops_fig, flops_fig, _, _ = roof_obj.construct_plotly_figures(
                         ai_data=ai_data,
+                        datatypes=None,
                     )
                     roofline_section = roof_obj.generate_html_section(
                         ops_fig,

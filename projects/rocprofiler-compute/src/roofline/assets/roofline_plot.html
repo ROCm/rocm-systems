@@ -16,6 +16,11 @@ if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").match
 <body>
 <div class="roofline-app">
   <div class="roofline-toolbar">
+    <label class="roofline-control" for="roofline-precision-select">Precision
+      <select id="roofline-precision-select"
+              aria-label="Arithmetic precision to display">
+      </select>
+    </label>
     <label class="roofline-control" id="roofline-peak-control"
            for="roofline-peak-select"
            title="${PEAK_TITLE}">AI axis

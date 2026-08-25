@@ -81,9 +81,10 @@ application's profiling data:
 #. Memory Chart Analysis
 #. Empirical Roofline Analysis
 
-   Use ``--roofline-data-type`` option to specify which data type(s) you would like displayed on the roofline HTMLs in the standalone analysis GUI.
-   Data types can be stacked- for example, "--roofline-data-type FP32 FP64 I32" would display one HTML with FP32 and FP64 stacked, and one HTML with INT32.
-   Default roofline data type plotted is FP32.
+   The standalone GUI renders roofline graphs for every datatype supported by
+   the profiled GPU that has usable benchmark data. It does not use
+   ``--roofline-data-type``; that option selects the single terminal roofline
+   chart and the datatype set embedded in the standalone HTML output.
 
 #. Top Stats (Top Kernel Statistics)
 #. System Info
