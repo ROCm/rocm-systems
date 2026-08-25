@@ -53,6 +53,31 @@ reference; (3) the replay run. Compare (1) vs (3) for application correctness an
 counter agreement. Three repetitions of each; report medians and spreads, because §1.4 predicts
 pass-dependent bias that will look like noise if you only run once.
 
+## 7.0b Preflight: two checks that decide whether any result is meaningful
+
+Run these before anything else. Both are one-liners and either can invalidate an entire day of
+measurements.
+
+**P1 — Which allocator does the application actually use?** For Kokkos codes this is decisive
+(§4.1): on HIP < 7.0.0, `KOKKOS_ENABLE_IMPL_HIP_MALLOC_ASYNC` defaults **on**, every `View` is a
+stream-ordered allocation, and replay is silently unsound. Check the Kokkos configuration dump that
+every Kokkos application prints, or grep the build:
+
+```bash
+grep -r KOKKOS_ENABLE_IMPL_HIP_MALLOC_ASYNC "$KOKKOS_BUILD/KokkosCore_config.h"
+hipconfig --version   # < 7.0.0 means the default is ON
+```
+
+If it is on, either rebuild with `-DKokkos_ENABLE_IMPL_HIP_MALLOC_ASYNC=OFF` or reclassify
+experiments 2.1–2.3 from Tier 2 to Tier 3 negative controls. For PyTorch the equivalent is
+`PYTORCH_HIP_ALLOC_CONF`; for JAX, `XLA_PYTHON_CLIENT_PREALLOCATE`; for RAPIDS, the RMM mode.
+
+**P2 — What is $B$ on this machine?** Every cost figure in §1 and §4 scales inversely with it, the
+in-tree floor is 4 GB/s, and the only public AMD measurements of the same operation on real workloads
+are 1.3–1.7 GB/s (§11.2). Take the number from experiment 0.1 and use it, rather than the study's,
+for every break-even estimate. If it is below 2 GB/s, the Tier 2 wall-times in this matrix are
+underestimates by 2–3×.
+
 ## 7.1 Tier 0 — mechanism validation (run first, ~30 min)
 
 These use the in-tree tests and synthetic cases and answer "does the mechanism behave as documented
@@ -84,7 +109,7 @@ against a clean run.
 
 | # | Workload | Command sketch | Expected | What it tests |
 |---|---|---|---|---|
-| 2.1 | LAMMPS, Lennard-Jones, KOKKOS on one GPU | `rocprofv3 --kernel-replay-beta-enabled --kokkos-trace --pmc "SQ_WAVES SQ_INSTS_VALU" --pmc "SQ_WAVES TCC_MISS_sum" --kernel-include-regex "<pair kernel regex>" --kernel-iteration-range 5-6 -d out -o lmp -- lmp -k on g 1 -sf kk -pk kokkos newton on neigh half -in in.lj` | A | the canonical Kokkos case: `hipMalloc` provenance, single stream, per-atom arrays; `--kernel-iteration-range` keeps $K$ small so §1.3.2 stays favourable |
+| 2.1 | LAMMPS, Lennard-Jones, KOKKOS on one GPU | `rocprofv3 --kernel-replay-beta-enabled --kokkos-trace --pmc "SQ_WAVES SQ_INSTS_VALU" --pmc "SQ_WAVES TCC_MISS_sum" --kernel-include-regex "<pair kernel regex>" --kernel-iteration-range 5-6 -d out -o lmp -- lmp -k on g 1 -sf kk -pk kokkos newton on neigh half -in in.lj` | A **only if preflight P1 passes** | the canonical Kokkos case — *provided* Kokkos was built without `hipMallocAsync`. On a stock ROCm 6.x build this is a Tier 3 silent-corruption control, not a Tier 2 success case (§4.1) |
 | 2.2 | LAMMPS EAM (metal) | same, `-in in.eam` | A | larger per-atom footprint; compare snap region count and wall time against 2.1 to measure the $F$ scaling directly |
 | 2.3 | LULESH | `--kernel-include-regex "Calc.*"` on `lulesh -s 45 -i 100` | A | multi-kernel timestep; verify final origin energy against the clean run (LULESH prints it, which makes this the cleanest numerical oracle in the whole matrix) |
 | 2.4 | PyTorch eager forward+backward (ResNet-50 or a small transformer) | `PYTORCH_HIP_ALLOC_CONF=expandable_segments:False rocprofv3 --kernel-replay-beta-enabled --pmc ... --kernel-include-regex "Cijk.*" -- python train_step.py --steps 3` | A **only with the allocator pinned to the segment allocator** | tests §2.2 directly: run it again with `expandable_segments:True` and it becomes 3.5 below |
@@ -111,6 +136,11 @@ way; the value is confirming the failure mode is the predicted one.
 | 3.10 | Large pre-reserved arena | any framework that pre-reserves most of HBM (arena/pool allocators, XLA's BFC-style allocator) | **B** — enormous snapshot, or `snapshot capture failed` and silently no data | §1.3.3 and R6; measure the wall time per dispatch and compare to the §1.3 prediction |
 | 3.11 | Peer-accessible buffer, 2 GPUs, one process | enable peer access, have agent B write agent A's buffer while A replays | **C** | the $U_{peer}$ hole in §3.1b |
 | 3.12 | Reentrant submission from a tool callback | custom tool whose `PASS` callback launches a kernel on the replaying agent | **hang, no timeout** | §6.4 L2 and R3; needs an external watchdog to run safely |
+| 3.13 | **Kokkos on ROCm 6.x defaults** | build Kokkos LULESH or LAMMPS-KOKKOS with stock ROCm 6.x (`KOKKOS_ENABLE_IMPL_HIP_MALLOC_ASYNC` on), replay a `Calc*` kernel | **C** — replay proceeds, snapshot region count near zero, LULESH's printed final origin energy differs from a clean run | the highest-priority experiment in the matrix. LULESH prints a numerical result, so this is a *self-checking* demonstration of §4.1 and the whole justification for R0 |
+| 3.14 | Monte Carlo with the accumulator moved to a pool | FinanceBench Monte Carlo (or the Tier 1.4 sample) with the result buffer switched to `hipMallocAsync` | **C** — printed option price wrong by roughly a factor of $P$ | a one-line, five-minute, numerically obvious reproduction of the central blind spot. Best candidate to attach to the PR |
+| 3.15 | AutoDock-GPU `MAPPED_COPY` build | build with `MAPPED_COPY` so `pMem_gpu_evals_of_runs` is managed, replay the generate-and-evaluate kernel | **C** — evaluation count multiplied by $P$, GA terminates early, docking score changes | a real production code where one `#define` separates a correct replay from a corrupted scientific result (§4.4) |
+| 3.16 | JAX/XLA default preallocation | any JAX workload without `XLA_PYTHON_CLIENT_PREALLOCATE=false` | **B** — ~75% of HBM in one region; snapshot either fails or takes tens of seconds per dispatch | 3.10 with a specific, extremely common trigger; rerun with preallocation disabled to show the fix (§4.7) |
+| 3.17 | CPX partition mode | put an MI300X in CPX, run two workloads on two partitions, replay on one | **C** and contaminated counters | §3.1c and R7; eight HSA agents share one HBM and cache hierarchy, so the per-agent lock admits eight writers |
 
 ## 7.5 What to measure across the matrix, and how to present it
 

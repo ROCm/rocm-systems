@@ -50,19 +50,34 @@ The mapping that matters:
 
 | Allocation path | Tracked? | Consequence |
 |---|---|---|
-| `hipMalloc` (→ coarse-grained device pool allocate) | **yes** | the good case; restore works |
+| `hipMalloc`, default flags | **yes** | the good case; restore works |
+| `hipExtMallocWithFlags(hipDeviceMallocFinegrained)` | no | routes to a fine-grained *device* pool |
 | `hsa_amd_memory_pool_allocate` directly (HSA apps, RCCL, some libraries) | **yes**, unless the executable flag is set | good case |
 | `hipHostMalloc` / pinned host | no | writes accumulate |
 | `hipMallocManaged` / unified memory (XNACK) | no | writes accumulate |
-| `hipMallocAsync` / stream-ordered memory pools | no | writes accumulate |
-| `hipMemAddressReserve` + `hipMemMap` (VMM) | no | writes accumulate |
+| `hipMallocAsync` / stream-ordered memory pools | no | writes accumulate; **Kokkos default on ROCm 6.x** |
+| `hipMemAddressReserve` + `hipMemMap` (VMM) | no | writes accumulate; PyTorch `expandable_segments:True` |
 | coarse VRAM with `HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG` | no (side inventory) | writes accumulate |
 | memory owned by another agent (peer, P2P) | no | writes accumulate; also breaks isolation |
 | IPC-attached memory from another process | no | writes accumulate; also cross-process corruption |
 | fine-grained device memory | no | writes accumulate |
 | MI300A APU shared HBM, host-coherent | effectively no | the tracked/untracked distinction largely dissolves |
 
-Two implications worth stating plainly:
+The first row deserves a caveat, because "`hipMalloc` is always coarse-grained" is false.
+`Device::deviceLocalAlloc` selects `gpu_ext_fine_grained_segment_` when `pseudo_fine_grain_` is set,
+`gpu_fine_grained_segment_` when `atomics_` is set, and only otherwise `gpuvm_segment_`
+([`rocdevice.cpp`](https://github.com/ROCm/rocm-systems/blob/develop/projects/clr/rocclr/device/rocm/rocdevice.cpp)).
+The dominant path is the coarse-grained one, but the flag-dependent exits are real.
+
+Symmetrically, the `hipMallocAsync` row is worse than "stream-ordered pools are untracked" suggests:
+`HIP_MEM_POOL_USE_VM` defaults to true in
+[`flags.hpp`](https://github.com/ROCm/rocm-systems/blob/develop/projects/clr/rocclr/utils/flags.hpp),
+so the default pool is backed by `VmHeap` → `hsa_amd_vmem_handle_create`/`hsa_amd_vmem_map`. A
+stream-ordered allocation is therefore untracked *twice over*, and neither entry point is wrapped.
+(Note also that the public docs give `HIP_MEM_POOL_SUPPORT` a default of 0 while the source says
+true — query `hipDeviceAttributeMemoryPoolsSupported` at runtime rather than trusting either.)
+
+Three implications worth stating plainly:
 
 1. **A framework's default allocator decides whether its kernels are replayable, and users can change
    that default with an environment variable.** A workload that is Outcome A today becomes Outcome C
@@ -77,6 +92,12 @@ Two implications worth stating plainly:
    same pattern. A per-run "tracked N bytes across M regions; observed K bytes of untracked
    device-visible allocations" line converts the central unverified assumption into a number the user
    can act on.
+3. **The soundness of a given application can change with the ROCm version, in the unsafe direction
+   for older versions.** Kokkos enables `hipMallocAsync` by default for HIP < 7.0.0 and disables it
+   at ≥ 7.0.0 (§4.1). So the same LAMMPS binary, same input deck, same GPU, is Outcome A on ROCm 7
+   and Outcome C on ROCm 6.4 — and the tool cannot tell the difference from anything it currently
+   inspects. This is the strongest available argument for R-new-1 (decline when live VMM mappings or
+   stream-ordered pools are detected) over any amount of documentation.
 
 ## 2.3 Outcome classes, and what each one deserves from the tool
 

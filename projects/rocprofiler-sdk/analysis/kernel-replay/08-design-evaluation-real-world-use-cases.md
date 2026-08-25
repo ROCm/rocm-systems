@@ -113,6 +113,19 @@ variance across replay passes. *Why it matters:* this is the single biggest thre
 proposition for HPC. If multiplexing is equivalent for C1, then replay's justified scope narrows to
 C3/C4/C6 — which is a defensible and much clearer story, and it changes which optimizations matter.
 
+The competitor's terms are now precisely known, which sharpens the question rather than settling it.
+`rocprof-compute --iteration-multiplexing` needs roughly 50 dispatches per kernel to cover its ~15
+counter subsets, keys kernel identity by name (optionally plus launch parameters), and **imputes**
+values where coverage is short. So the boundary is quantitative: replay wins where a kernel of
+interest executes fewer than ~50 times, or where kernel names are not stable across dispatches
+(large AI models dispatching per layer break the identity key — AMD documents this). It also wins
+where same-dispatch counter *correlation* is the point rather than aggregate rates. Everywhere else —
+iterative HPC codes launching the same kernel thousands of times, which is most of C1 —
+multiplexing is cheaper, MPI-safe, and, because it never touches memory, **sound under exactly the
+allocators that make replay silently wrong** (§4.1). That last point is the strongest form of this
+threat and it was not visible before §4: multiplexing is not merely a cheaper alternative for C1, it
+is the *correct* one for Kokkos-on-ROCm-6.x, where replay produces wrong numbers.
+
 **RQ5 — How often do real applications allocate kernel outputs outside the tracked set?**
 *Evidence:* wrap the managed, stream-ordered and virtual-memory allocation entry points and report
 untracked device-visible bytes per run, alongside tracked bytes, across the §7 suite and across

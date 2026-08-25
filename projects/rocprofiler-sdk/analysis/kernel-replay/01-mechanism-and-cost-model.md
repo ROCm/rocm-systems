@@ -113,6 +113,16 @@ in-tree test's 4 GB/s floor and its "conservative host-link floor … intentiona
 consistent with that. The practical consequence: the cost model should be evaluated at single-digit
 GB/s, not at the 25–50 GB/s a pinned PCIe Gen4/Gen5 x16 transfer achieves.
 
+The ROCr path confirms the mechanism. An unpinned host destination takes `hsa_memory_copy`'s
+`locked_copy` route: pin and IOMMU-map the host range, issue a *blocking* DMA copy, unmap, once per
+region per direction. So the per-region cost is pin + map + DMA + unmap, not DMA alone.
+
+**The only public AMD measurements on real workloads land below even the 4 GB/s floor.** Kerncap
+(§11.2), which does the same HSA-level capture, reports roughly 1.3–1.7 GB/s effective — an 8.4 GB
+LAMMPS snapshot in about 1.5 s. That is a third of the number this study's cost model uses. Treat
+4 GB/s as an upper bound on a good day, treat every figure derived from it as optimistic, and
+**measure $B$ on the target machine before trusting any break-even estimate** (§7.0.2).
+
 Three separate inefficiencies compound here, all fixable and all quantified in section 9:
 
 1. unpinned destination (staging or CPU copy instead of DMA);
@@ -212,3 +222,19 @@ and the tool publishes `tl_current_replay_pass` so each buffered counter record 
   gets a large $P$, and by §1.3.2 the cost is linear in $P \cdot F$. `rocprof-compute`-style full
   profiles imply large $P$; combining them with a large-footprint application is the worst case for
   this feature and should be refused rather than attempted.
+
+The floor on $P$ is set by hardware and is not negotiable. `aqlprofile` fixes the number of counters
+simultaneously enabled per block — SQ = 8, SPI = 6, TCC = 4, TCP = 4, TA = 2, TD = 2, GRBM = 2,
+CPC/CPF = 2 — and these are **identical across CDNA2, CDNA3 and CDNA4**; the per-architecture
+factories change instance counts and event-ID ranges, not counter-register counts, and `Mi350Factory`
+is literally a subclass of `Mi300Factory`
+([`gfx9_block_info.h`](https://github.com/ROCm/rocm-systems/blob/develop/projects/aqlprofile/gfxip/gfx9/gfx9_block_info.h),
+[`gfx940_factory.cpp`](https://github.com/ROCm/rocm-systems/blob/develop/projects/aqlprofile/src/core/gfx940_factory.cpp)).
+Exceeding a block's limit is a hard error — `"Event is out of block counter registers number limit"`
+— not a degradation, which is why `rocprofv3` fails a `--pmc` group rather than splitting it.
+
+For calibration, a `rocprof-compute` default full profile is 13 application runs on MI325X
+(AMD-documented), and counting the checked-in reference workloads gives 12 on MI100, 13 on MI200,
+18 on MI300X via the legacy backend, and 20 on MI350. So $P$ in the 13–20 range is the realistic
+"full profile" case, and §1.3.2 evaluated at $P = 20$ with an AI-scale footprint is the scenario the
+feature must be able to *refuse*.

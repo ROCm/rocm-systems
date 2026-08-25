@@ -5,6 +5,22 @@ Each item states the change, why it matters, and where it lands in the code. The
 
 ## P0 — correctness and containment (small changes, large risk reduction)
 
+**R0. Detect untracked device-visible allocations and decline.**
+This is now the first recommendation rather than a refinement of R5, because §4.1 shows the exposure
+is far wider than the carveout list suggests: Kokkos enables `hipMallocAsync` by default on every
+ROCm before 7.0.0, and ROCm's stream-ordered pool is VM-heap backed by default
+(`HIP_MEM_POOL_USE_VM = true`), so an ordinary LAMMPS-KOKKOS or LULESH run on ROCm 6.x has
+*essentially its entire dataset* outside the snapshot. `snap()` returns `ok = true`, replay proceeds,
+and every pass after the first computes on mutated inputs with no diagnostic. PyTorch's
+`expandable_segments:True` — the setting its own OOM message recommends — is the same failure.
+
+Wrap the untracked entry points (`hsa_amd_vmem_handle_create`/`vmem_map`, the managed and
+stream-ordered pool paths) purely to *count* bytes, and gate replay on the result: if any untracked
+device-visible mapping is live on the agent, decline with a diagnostic naming the allocator. Cheap,
+because it needs no restore capability for those regions — only knowledge that they exist. Without
+it, the feature's soundness depends on a build-time macro in a third-party library that neither the
+user nor the tool inspects.
+
 **R1. Add a generation counter to the allocation inventory.**
 `with_inventory_check` validates `(base address, size ≥ recorded)`, which cannot distinguish "the
 same allocation" from "a different allocation that reused the address". The allocation wrappers are
@@ -153,6 +169,14 @@ completes before the window opens or waits until it closes. This closes the larg
 isolation hole that is actually inside the process's control (§6.3 O3); RDMA and other-process
 writers remain out of reach and should be documented as such.
 
+**R18. Add metric distribution across ranks as an alternative to replay.**
+Nsight Compute's Metric Distributor collects different counter groups on different ranks of one MPI
+run: zero extra passes, no snapshot, no drain, at the cost of assuming ranks are statistically
+comparable — which for SPMD bulk-synchronous codes they generally are (§10.3, §10.6). For the
+multi-rank HPC workloads that motivate much of the demand for cheaper counter collection, this
+dominates replay on every axis, and it is far less invasive than the cross-rank rendezvous of §3.3.
+It is P3 only because it is a separate feature rather than a fix to this one.
+
 ## What to do first, if only three things happen
 
 1. **R9 (verify mode) + R8 (canary).** Everything else in this study is an argument about whether the
@@ -161,5 +185,11 @@ writers remain out of reach and should be documented as such.
 2. **R12 + R14 (reachable set + device-resident snapshot).** Together they move the cost model from
    "$P$ × whole footprint over a slow host link" to "$P$ × operands at HBM bandwidth", which is what
    makes the feature applicable to anything with a large resident footprint — i.e. to AI at all.
-3. **R2 + R4 (decline instead of abort, and detect collectives).** A profiler that can kill a
-   multi-hour distributed job when it meets an unsupported kernel will not be turned on twice.
+3. **R0 + R2 (detect untracked allocators; decline instead of abort).** These are the two failure
+   modes that damage users rather than merely disappointing them: R0 prevents a wrong scientific
+   result from a correct-looking run, and R2 prevents a profiling request from killing a multi-hour
+   distributed job. A profiler that can do either will not be turned on twice.
+
+If the list is one item long, it is **R0**. Every other recommendation improves a feature that works;
+R0 is the difference between a feature that declines on Kokkos-on-ROCm-6.x and one that silently
+returns wrong numbers on a large fraction of the HPC portfolio it was justified by.

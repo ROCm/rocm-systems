@@ -1,0 +1,183 @@
+<h1>11. Prior art</h1>
+<p>The relevant question is not whether kernel replay is novel — it is not, NVIDIA has shipped it since
+Nsight Compute 2019.x — but <em>where in the established design space this implementation sits</em>. The
+answer is consistent across every axis: <strong>at the most conservative and most expensive end.</strong></p>
+<h2>11.1 The comparison</h2>
+<table>
+<thead>
+<tr>
+<th>Axis</th>
+<th>Nsight Compute / CUPTI</th>
+<th>AMD kernel replay</th>
+<th>Gap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Replay granularity</td>
+<td>kernel, range, application, application-range</td>
+<td>kernel only</td>
+<td>§5</td>
+</tr>
+<tr>
+<td>What is restored</td>
+<td>dirty blocks only (<code>CUPTI_CHECKPOINT_OPT_TRANSFER</code>)</td>
+<td>entire tracked footprint, unconditionally</td>
+<td>§9 R13</td>
+</tr>
+<tr>
+<td>Snapshot residence</td>
+<td>device → host → filesystem, tool-tunable</td>
+<td>unpinned host <code>std::vector</code> only</td>
+<td>§9 R14</td>
+</tr>
+<tr>
+<td>Host/pinned memory</td>
+<td>saved and restored</td>
+<td>excluded</td>
+<td>carveout</td>
+</tr>
+<tr>
+<td>Cache state</td>
+<td>flushed before each pass by default</td>
+<td>untouched</td>
+<td>§9 R10</td>
+</tr>
+<tr>
+<td>Clocks</td>
+<td>lockable (<code>--clock-control base</code>)</td>
+<td>untouched</td>
+<td>§9 R10</td>
+</tr>
+<tr>
+<td>Cross-process replay</td>
+<td><code>--lockstep-kernel-launch</code>, TCP/shmem communicator</td>
+<td>none</td>
+<td>§3.3</td>
+</tr>
+<tr>
+<td>Counter distribution across ranks</td>
+<td>Metric Distributor</td>
+<td>none</td>
+<td>§10.5</td>
+</tr>
+<tr>
+<td>Failure on unsupported input</td>
+<td>documented undefined behaviour, warnings</td>
+<td><code>ROCP_FATAL</code> abort after 60 s</td>
+<td>§9 R2</td>
+</tr>
+<tr>
+<td>Restore correctness self-check</td>
+<td>none published</td>
+<td>none</td>
+<td>§9 R9</td>
+</tr>
+</tbody>
+</table>
+<p>Nsight Compute's documentation is candid about the same hazards this study derives from first
+principles — host-allocation instability under range replay, undefined behaviour for kernels
+depending on host or peer state — which is corroborating evidence that §6's proof obligations are the
+right ones rather than an artifact of reading one implementation.</p>
+<h2>11.2 AMD's own prior art, which is closer than the NVIDIA comparison</h2>
+<p>Two in-house precedents matter more than they appear to have been used.</p>
+<p><strong>HIP Record &amp; Replay (HRR)</strong>, in <code>clr</code>, records HIP API calls and replays them, and — crucially —
+already contains a <em>validation</em> mechanism: it copies device buffers back to the host after replay and
+compares against recorded values with a tolerance. That is §9 R9's verify mode, already implemented
+once in the same organization for an adjacent problem. Whatever its limitations, the design question
+"how do you know restore worked?" has a local answer that was not reused.</p>
+<p><strong>Kerncap</strong> is the closest analogue: HSA-level dispatch interception with VA-faithful capture — it
+replays a single kernel into the <em>same virtual addresses</em>, which sidesteps the address-remapping
+component of the refinement map in §6 entirely. It also supplies the only public AMD measurements of
+snapshot cost on real workloads: on the order of 1.3–1.7 GB/s effective, with an 8.4 GB LAMMPS
+snapshot taking ~1.5 s and a vLLM capture around 30 GB. <strong>Those numbers are below the ~4 GB/s floor
+§1.3.1 derives from the in-tree microbenchmark, which means the cost model in §1 is optimistic, not
+pessimistic.</strong> Any experiment should measure B rather than assume it (§7.0.2).</p>
+<p><strong><code>rocprofv3</code> multipass</strong> is the incumbent baseline and it is application replay: "Each pass runs the
+application from start to finish," incompatible with <code>--pid</code> and <code>--collection-period</code>. Every claim
+about kernel replay's value is implicitly a claim relative to this.</p>
+<p><strong><code>rocprof-compute --iteration-multiplexing</code></strong> is the incumbent <em>competitor</em>, and it is the more
+serious one. It divides counters across successive dispatches of the same kernel, requires no
+snapshot, no drain, and no restore, and works under MPI — where kernel replay does not. AMD's own
+documentation states the terms honestly: roughly 15 counter subsets, ~50 dispatches per kernel
+recommended for coverage, kernel identity keyed by name (optionally plus launch parameters), and
+values <strong>imputed</strong> rather than measured where coverage is short. So the real comparison is:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Multiplexing</th>
+<th>Kernel replay</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Requires many dispatches of the same kernel</td>
+<td>yes (~50)</td>
+<td>no</td>
+</tr>
+<tr>
+<td>Counters from the <em>same</em> dispatch</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Works under MPI / collectives</td>
+<td>yes</td>
+<td>no</td>
+</tr>
+<tr>
+<td>Memory cost</td>
+<td>none</td>
+<td>P × footprint</td>
+</tr>
+<tr>
+<td>Correct for one-shot kernels</td>
+<td>no</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Sound under managed/async allocators</td>
+<td>yes</td>
+<td><strong>no</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Kernel replay's defensible niche is therefore narrow and specific: <strong>kernels that execute few times
+(so multiplexing has no samples), on tracked allocations, in a single-process context, where
+same-dispatch counter correlation matters.</strong> That niche is real — it is exactly §4.8's long-setup
+short-kernel case — but it is much smaller than "profiling on AMD GPUs," and the study should say so.</p>
+<h2>11.3 Academic precedent worth borrowing</h2>
+<ul>
+<li><strong>Record-and-replay for GPUs</strong> (GPUReplay, RTR, and the CUDA-level record/replay literature) has
+  converged on capturing at the <em>driver command</em> level rather than the API level, for the same reason
+  this design intercepts AQL packets: it is the only place where the semantics are unambiguous.</li>
+<li><strong>Deterministic replay under nondeterminism</strong> distinguishes value determinism from execution
+  determinism. §4.4's OpenMM case is exactly this: replay guarantees identical inputs, not identical
+  execution, and conflating the two produces false alarms in validation. The canary counter (§9 R8)
+  is the standard resolution.</li>
+<li><strong>Checkpoint/restart</strong> (BLCR, DMTCP, CRIU, and GPU-aware CRAC/CRUM) has established that
+  incremental and dirty-page checkpointing is not an optimization but the difference between viable
+  and non-viable at scale. Every mature system in this lineage does write-set tracking. This design
+  does not, yet.</li>
+<li><strong>Linux <code>perf</code> event multiplexing</strong> is the CPU world's settled answer and it chose <em>scaling with
+  error bars</em> over re-execution. Notably, <code>perf</code> reports the multiplexing fraction so the user can
+  judge the error. Neither AMD tool reports an analogous confidence signal for imputed multiplexed
+  values, which is a smaller and cheaper gap than any replay feature.</li>
+</ul>
+<h2>11.4 The uncomfortable synthesis</h2>
+<p>Three facts, taken together, define the strategic position:</p>
+<ol>
+<li>Every capability AMD's design lacks (write-set restore, tiered storage, cache/clock control,
+   cross-process lockstep, range replay) is <strong>already shipping</strong> in the NVIDIA stack, so none of them
+   are research problems.</li>
+<li>The incumbent AMD alternative (iteration multiplexing) is cheaper, MPI-safe, and — because it
+   never touches memory — <strong>sound under exactly the allocators that make kernel replay silently
+   wrong</strong> (§4.1, §4.3).</li>
+<li>The workloads where replay is uniquely valuable are dominated by graph-captured launches
+   (ineligible), collectives (fatal), or preallocating allocators (unaffordable).</li>
+</ol>
+<p>None of that argues against the feature. It argues that its value is concentrated in a narrow,
+nameable niche, and that the highest-return next steps are the ones that widen the niche
+(write-set restore, graph replay, decline-not-abort) rather than the ones that deepen the existing
+mechanism.</p>

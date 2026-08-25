@@ -129,6 +129,27 @@ handler is itself blocked — turns a profiling request into a process abort. Fo
 training run under a scheduler, killing the job is a worse outcome than declining to profile. This
 should be a decline-and-continue path with an error record, not a `FATAL`.
 
+The uncomfortable part is that the workloads L1 kills are not doing anything wrong. The HSA
+specification's full-profile requirement is that an agent must be able to make forward progress on
+multiple queues concurrently, which is precisely what licenses an application to have two
+co-dependent kernels resident on the same agent. An agent-wide drain assumes the opposite. AMD's own
+documentation already concedes the consequence for the adjacent feature — "for applications requiring
+two kernels to execute on the same device simultaneously (co-dependent kernels), kernel serialization
+leads to deadlock in dispatch counter collection mode"
+([counter collection services](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/api-reference/counter_collection_services.html)).
+So L1 is not an exotic corner: it is the intersection of a spec-sanctioned application pattern with a
+tool-imposed serialization requirement, and the only defensible response is to decline rather than to
+abort.
+
+Two related spec facts constrain what a drain can even observe. First, `read_index` advancing does
+not mean the work finished — the spec explicitly permits a packet processor to release a slot before
+the task completes and warns that "agents should not rely on the `read_index` value to imply any
+state of a task," so only completion signals are sound drain evidence. Second, the barrier bit orders
+only "preceding packets **in the queue**"; there is no in-band cross-queue ordering primitive, and
+barrier-AND carries at most five dependent signals. Cross-queue quiescence must therefore be built
+from signals, per queue, which is what the implementation does — and which is why it cannot cover
+writers that never appear on a queue at all (§3.3).
+
 **L2 — Reentrancy deadlocks with no timeout.** `std::shared_mutex` is not recursive. While the
 window holds the unique lock, any attempt on *any* thread to submit a dispatch on the same agent
 blocks on the shared lock — including the replaying thread itself. So if a tool's `CONFIG`/`PASS`

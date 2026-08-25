@@ -25,14 +25,26 @@ footprints. There is no global admission control, so nothing prevents eight agen
 simultaneously deciding to snapshot 150 GB each. The natural fix is a process-wide byte budget for
 in-flight snapshots, with windows queueing (or declining) when the budget is exhausted.
 
-**(b) Agent-scoped isolation is not isolation once P2P is enabled.** `hsa_amd_agents_allow_access`
-makes a buffer allocated on agent A writable by kernels running on agent B. Agent B's dispatches
-take *B's* mutex, which does not exclude A's window, and B's queues are not polled by A's
-agent-wide drain (it filters on `sibling->get_agent().get_hsa_agent().handle == agent.handle`). So
-on any node with XGMI peer access enabled — which is the default configuration for MI250/MI300
-multi-GPU systems — the isolation obligation O3 is violated by construction whenever the profiled
-process has cross-GPU buffers in play. The mechanism cannot even detect this today, because nothing
-records which tracked allocations have been made peer-accessible.
+**(b) Agent-scoped isolation is not isolation once P2P is enabled — and P2P exposure is the runtime
+default, not an opt-in.** `hsa_amd_agents_allow_access` makes a buffer allocated on agent A writable
+by kernels running on agent B. Agent B's dispatches take *B's* mutex, which does not exclude A's
+window, and B's queues are not polled by A's agent-wide drain (it filters on
+`sibling->get_agent().get_hsa_agent().handle == agent.handle`). So obligation O3 is violated by
+construction whenever the profiled process has peer-exposed buffers in play.
+
+This is worse than "whenever the application enables peer access," because the HIP runtime enables it
+for you. `Device::deviceLocalAlloc` is called with `allowAllAgentsAccess` and, when P2P is enabled,
+calls `deviceAllowAccess`, which invokes `hsa_amd_agents_allow_access` over **all** `p2pAgents()`;
+`hostAlloc` is broader still, covering all `gpu_agents_`
+([`rocdevice.cpp`](https://github.com/ROCm/rocm-systems/blob/develop/projects/clr/rocclr/device/rocm/rocdevice.cpp)).
+So on a fully-meshed 8-GPU MI300X node, **every ordinary `hipMalloc` on agent A is already writable by
+all seven peers** at roughly 48 GB/s of realized XGMI bandwidth per link, whether or not the
+application ever asked for it. There is no HIP-level API to opt out. The mechanism cannot detect the
+condition either, because nothing records peer exposure in the inventory.
+
+The practical consequence is that on any multi-GPU node the isolation argument rests entirely on "no
+peer kernel happens to write this buffer during the window," which is an assumption about application
+behaviour, not a property the tool enforces.
 
 Two implementable responses, in increasing order of ambition:
 
@@ -46,10 +58,16 @@ Two implementable responses, in increasing order of ambition:
   fully-connected MI300X node that is 8 × 150 GB. Viable only in combination with the write-set and
   device-resident-snapshot optimizations of §9.
 
-**(c) Partitioned GPUs may break the agent abstraction.** On MI300X, compute partitioning (SPX
-through CPX) exposes a single physical GPU as multiple HSA agents that nonetheless share HBM stacks,
-the memory fabric, and last-level cache. A per-*agent* writer lock does not exclude work on the
-*sibling partitions of the same die*, so in CPX-style modes a replay window on one partition is not
+**(c) Partitioned GPUs break the agent abstraction, with numbers.** On MI300X the compute-partition
+modes are SPX = 1 logical GPU (8 XCCs, 304 CUs, 192 GB), DPX = 2, QPX = 4, and **CPX = 8** logical
+GPUs (1 XCC, 38 CUs, 24 GB each); an 8×MI300X node in CPX reports 64 devices to `amd-smi`
+([partitioning concepts](https://rocm.docs.amd.com/projects/amdsmi/en/develop/conceptual/partition.html)).
+Each XCD has its own L2, but in NPS1 "the entire memory is accessible to all XCDs," and even NPS4
+permits cross-quadrant access — NPS4 changes interleaving, not reachability. So in CPX one physical
+GPU presents as eight HSA agents sharing one HBM stack set, the Infinity Cache, and the IOD fabric.
+A per-*agent* writer lock therefore admits **eight concurrent writers to the same physical memory**,
+and AMD's own measurements show per-XCD throughput falling measurably as concurrent XCD count rises
+from 1 to 8, so the counters are contaminated as well. A replay window on one partition is not
 isolated from concurrent work on the other partitions of the same physical device — and the counters
 it collects are contaminated by that work in any block whose counters are physically shared. The
 correct lock granularity is the physical device (or, more precisely, the smallest unit that owns the
@@ -113,7 +131,13 @@ timeout — provided:
 **GPU-aware MPI is an unmodelled writer.** When MPI is built GPU-aware, the transport writes device
 memory directly: RDMA from the NIC into a registered device buffer, or an SDMA copy between device
 and staging memory. Neither path goes through an AQL queue, so neither the writer lock nor the
-agent-wide drain sees it. Two distinct failures:
+agent-wide drain sees it. Both halves of that are documented rather than inferred. On the RDMA side,
+"the AMD kernel driver exposes remote direct memory access (RDMA) through PeerDirect interfaces. This
+allows network interface cards (NICs) to directly read and write to RDMA-capable GPU device memory"
+([GPU-enabled MPI](https://rocm.docs.amd.com/en/develop/how-to/gpu-enabled-mpi.html)). On the SDMA
+side, the HIP runtime allocates copy engines through a dedicated `Device::SdmaEngineAllocator` that
+queries `hsa_amd_memory_copy_engine_status` and issues H2D/D2H/P2P as DMA batches entirely outside
+the AQL ring — MI300 has 16 such engines (4 per AID × 4 AIDs), MI200 has 5. Two distinct failures:
 
 * *Restore clobbers an in-flight receive.* A neighbour's halo data lands in a tracked buffer during
   the window, `restore()` reverts it, and the application proceeds with stale halos. Silent, and it
@@ -136,6 +160,16 @@ it is worth comparing honestly against the alternative in §5: if the *applicati
 loop, the application's own `MPI_Barrier` provides the rendezvous for free, and the deterministic
 dispatch identity problem disappears entirely. **User-driven range replay is a far cheaper route to
 multi-rank profiling than coordinated kernel replay.**
+
+Neither of these is speculative design work; both exist on the other side of the fence. Nsight
+Compute 2025.3 ships `--lockstep-kernel-launch`, which synchronizes replay across processes over a
+TCP or shared-memory communicator and was added specifically for NCCL-style collectives — the
+rendezvous described above, already built. And Nsight Compute's **Metric Distributor** takes the
+opposite approach: split one metric set across N processes or GPUs so different ranks collect
+different counters in a *single* run, at zero extra passes, in exchange for assuming ranks are
+statistically comparable. For SPMD bulk-synchronous codes that assumption usually holds, which makes
+metric distribution a strictly cheaper answer for multi-rank MPI than any form of replay. It belongs
+on the roadmap alongside range replay (§10.6).
 
 **Practical guidance for today.** Until any of the above exists, the only defensible multi-rank
 recipe is: pick one rank, restrict replay to a named compute kernel with no communication
