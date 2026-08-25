@@ -263,6 +263,10 @@
             },
             "only_pow2": { "type": "boolean" }
           }
+        },
+        "serial_only": {
+          "type": "boolean",
+          "description": "When true, entries never co-tenant under --jobs>1 and always run serially. Set on contention-prone tests (NET/IB fabric, SMI monitoring, perf bandwidth). Inherited configuration -> suite -> test; a test may override its suite/config."
         }
       }
     },
@@ -294,6 +298,7 @@
         "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
         "perf_sensitive": { "$ref": "#/$defs/test_defaults/properties/perf_sensitive" },
         "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
+        "serial_only":  { "$ref": "#/$defs/test_defaults/properties/serial_only" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Environment variables applied to every test in this configuration (merged on top of global env_variables)"
@@ -368,6 +373,7 @@
         "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
         "perf_sensitive": { "$ref": "#/$defs/test_defaults/properties/perf_sensitive" },
         "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
+        "serial_only":  { "$ref": "#/$defs/test_defaults/properties/serial_only" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Test-specific environment variables (highest priority, merged on top of all other levels)"
@@ -420,6 +426,7 @@
         "warmup_profile": { "$ref": "#/$defs/test_defaults/properties/warmup_profile" },
         "perf_sensitive": { "$ref": "#/$defs/test_defaults/properties/perf_sensitive" },
         "fork_expand":    { "$ref": "#/$defs/test_defaults/properties/fork_expand" },
+        "serial_only":  { "$ref": "#/$defs/test_defaults/properties/serial_only" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Suite-level environment variable overrides (between configuration-level and test-level in priority)"

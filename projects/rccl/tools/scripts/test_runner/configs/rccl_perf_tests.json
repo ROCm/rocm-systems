@@ -24,6 +24,7 @@
   "test_configurations": {
     "perf_base": {
       "is_gtest": false,
+      "serial_only": true,
       "num_ranks": 8,
       "num_nodes": 1,
       "timeout": 300,

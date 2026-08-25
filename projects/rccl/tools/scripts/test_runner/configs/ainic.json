@@ -34,6 +34,7 @@
 
     "a_base": {
       "is_gtest": true,
+      "serial_only": true,
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,
       "num_nodes": 2,
@@ -223,6 +224,7 @@
 
     "a_socket_poll_bootstrap": {
       "is_gtest": true,
+      "serial_only": true,
       "binary": "rccl-UnitTestsFixturesDebug",
       "num_ranks": 1,
       "num_nodes": 1,
@@ -241,6 +243,7 @@
     "b_base": {
       "description": "Sweep base: derived suites run the full 1024-16G range for both allreduce and alltoall. Sets NO shared env_variables so each sweep runs against stock defaults plus its own per-suite knobs, and NO group-level command_args by design - every test sets its own explicit, complete command_args so nothing is silently concatenated/duplicated.",
       "is_gtest": false,
+      "serial_only": true,
       "num_ranks": 16,
       "num_nodes": 2,
       "num_gpus": 8,
@@ -261,6 +264,7 @@
 
     "b_alltoall_cast_full": {
       "is_gtest": false,
+      "serial_only": true,
       "num_ranks": 16,
       "num_nodes": 2,
       "num_gpus": 8,
@@ -421,6 +425,7 @@
 
     "c_counters": {
       "is_gtest": false,
+      "serial_only": true,
       "num_ranks": 16,
       "num_nodes": 2,
       "num_gpus": 8,

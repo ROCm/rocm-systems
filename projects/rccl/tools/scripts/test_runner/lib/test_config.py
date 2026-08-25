@@ -334,6 +334,7 @@ class TestConfigProcessor:
             "is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout",
             "is_pytest", "test_dir", "python_bin", "setup_venv", "venv_dir", "requirements",
             "warmup_profile", "perf_sensitive", "fork_expand",
+            "serial_only",
         ]
 
         processed_tests = []
@@ -399,6 +400,7 @@ class TestConfigProcessor:
                 "warmup_profile": combined_config.get("warmup_profile"),
                 "perf_sensitive": combined_config.get("perf_sensitive"),
                 "fork_expand": combined_config.get("fork_expand"),
+                "serial_only": combined_config.get("serial_only"),
             }
             # Remove None values
             config_defaults = {k: v for k, v in config_defaults.items() if v is not None}
@@ -420,6 +422,7 @@ class TestConfigProcessor:
                 "warmup_profile": suite.get("warmup_profile"),
                 "perf_sensitive": suite.get("perf_sensitive"),
                 "fork_expand": suite.get("fork_expand"),
+                "serial_only": suite.get("serial_only"),
             }
             # Remove None values
             suite_defaults = {k: v for k, v in suite_defaults.items() if v is not None}

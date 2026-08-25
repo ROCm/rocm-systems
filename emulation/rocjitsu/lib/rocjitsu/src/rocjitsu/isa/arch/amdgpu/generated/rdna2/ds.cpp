@@ -1486,7 +1486,7 @@ DecodeResult decodeDsRead2st64B32Ds(const MachineInst *opcode,
 DsReadI8Ds::DsReadI8Ds(const MachineInst *inst)
     : Ds("ds_read_i8", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadI8Ds)),
-      vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -1508,16 +1508,10 @@ DecodeResult decodeDsReadI8Ds(const MachineInst *opcode, const DecodeErrorEmitte
 }
 } // namespace detail
 
-void DsReadI8Ds::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 DsReadU8Ds::DsReadU8Ds(const MachineInst *inst)
     : Ds("ds_read_u8", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU8Ds)),
-      vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -1539,16 +1533,10 @@ DecodeResult decodeDsReadU8Ds(const MachineInst *opcode, const DecodeErrorEmitte
 }
 } // namespace detail
 
-void DsReadU8Ds::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 DsReadI16Ds::DsReadI16Ds(const MachineInst *inst)
     : Ds("ds_read_i16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadI16Ds)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -1570,16 +1558,10 @@ DecodeResult decodeDsReadI16Ds(const MachineInst *opcode, const DecodeErrorEmitt
 }
 } // namespace detail
 
-void DsReadI16Ds::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
-
 DsReadU16Ds::DsReadU16Ds(const MachineInst *inst)
     : Ds("ds_read_u16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU16Ds)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -1600,12 +1582,6 @@ DecodeResult decodeDsReadU16Ds(const MachineInst *opcode, const DecodeErrorEmitt
   return std::make_unique<DsReadU16Ds>(opcode);
 }
 } // namespace detail
-
-void DsReadU16Ds::implicit_uses(RegisterSet &uses) const {
-  Ds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
-}
 
 DsConsumeDs::DsConsumeDs(const MachineInst *inst)
     : Ds("ds_consume", reinterpret_cast<const OpEncoding *>(inst),
@@ -1662,12 +1638,17 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
          selected_exec_fn(InstructionExecutionId::DsOrderedCountDs)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
-  src_operands_[1] = &m0;
-  num_src_ = 2;
-  num_dst_ = 1;
+  dst_operands_[1] = &dsmem;
+  src_operands_[1] = &dsmem_in;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
+  num_dst_ = 2;
+  dsmem.apply_fieldless_caps(false, false, false);
+  dsmem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
 }
 
@@ -2962,7 +2943,7 @@ DsWriteB8D16HiDs::DsWriteB8D16HiDs(const MachineInst *inst)
     : Ds("ds_write_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB8D16HiDs)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2988,7 +2969,7 @@ DsWriteB16D16HiDs::DsWriteB16D16HiDs(const MachineInst *inst)
     : Ds("ds_write_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsWriteB16D16HiDs)),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3013,7 +2994,7 @@ DecodeResult decodeDsWriteB16D16HiDs(const MachineInst *opcode,
 DsReadU8D16Ds::DsReadU8D16Ds(const MachineInst *inst)
     : Ds("ds_read_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU8D16Ds)),
-      vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -3044,7 +3025,7 @@ void DsReadU8D16Ds::implicit_uses(RegisterSet &uses) const {
 DsReadU8D16HiDs::DsReadU8D16HiDs(const MachineInst *inst)
     : Ds("ds_read_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU8D16HiDs)),
-      vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -3076,7 +3057,7 @@ void DsReadU8D16HiDs::implicit_uses(RegisterSet &uses) const {
 DsReadI8D16Ds::DsReadI8D16Ds(const MachineInst *inst)
     : Ds("ds_read_i8_d16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadI8D16Ds)),
-      vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -3107,7 +3088,7 @@ void DsReadI8D16Ds::implicit_uses(RegisterSet &uses) const {
 DsReadI8D16HiDs::DsReadI8D16HiDs(const MachineInst *inst)
     : Ds("ds_read_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadI8D16HiDs)),
-      vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -3139,7 +3120,7 @@ void DsReadI8D16HiDs::implicit_uses(RegisterSet &uses) const {
 DsReadU16D16Ds::DsReadU16D16Ds(const MachineInst *inst)
     : Ds("ds_read_u16_d16", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU16D16Ds)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
@@ -3170,7 +3151,7 @@ void DsReadU16D16Ds::implicit_uses(RegisterSet &uses) const {
 DsReadU16D16HiDs::DsReadU16D16HiDs(const MachineInst *inst)
     : Ds("ds_read_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsReadU16D16HiDs)),
-      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
