@@ -960,6 +960,11 @@ WriteInterceptor(const void* packets,
 
             // Drain barrier: fence the CPU against all prior in-flight GPU work on this queue so
             // device memory is stable before snapshotting.
+            //
+            // The return value is intentionally unused and there is no status to check: with
+            // use_pool=false, create_signal aborts via ROCP_FATAL_IF if hsa_amd_signal_create
+            // fails, and returns nullptr on the path that reaches here. It therefore cannot hand
+            // back an unset drain_signal, so the wait below always gets a valid handle.
             hsa_signal_t drain_signal = null_hsa_signal;
             Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
             {
