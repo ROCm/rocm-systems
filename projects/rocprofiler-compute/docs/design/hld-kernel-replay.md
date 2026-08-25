@@ -248,8 +248,6 @@ flowchart TD
     subgraph ComputeSetup["rocprof-compute · setup"]
         direction TB
         Buckets["N counter buckets"]
-        Adapter["Kernel-replay adapter"]
-        Buckets --> Adapter
     end
 
     subgraph NativeTool["Native tool"]
@@ -275,7 +273,7 @@ flowchart TD
         Normalize --> Output --> Analysis
     end
 
-    Adapter -- "ROCPROF_COUNTERS groups<br/>and native replay setup" --> Profiles
+    Buckets -- "ROCPROF_COUNTERS groups<br/>and native replay setup" --> Profiles
     Profiles -. "register pass_count_cb" .-> Replay
     Replay -- "invoke pass_count_cb" --> Profiles
     Profiles -- "admitted: vector size<br/>filtered: 1" --> Replay
@@ -289,42 +287,41 @@ flowchart TD
 
 ### The pass-count decision
 
-Counter-group parsing creates one profile-vector entry per group, per agent. Before replay setup, a
-zero-bucket request bypasses the replay counter adapter and follows the existing non-counter path.
-For a counter request, `pass_count_cb` is the single decision point for admission and pass count,
-because it runs exactly once for each dispatch that reaches the replay gate and before any replay
-pass. It consults the existing 1-based, per-kernel logical-occurrence index; it does not create a
-second replay-only index sequence.
+Kernel and dispatch filters establish whether the dispatch is admitted before counter-bucket
+availability is considered. An admitted zero-bucket request bypasses kernel replay and
+follows the existing path. For an admitted counter request, `pass_count_cb` determines the
+pass count exactly once before any replay pass.
 
 ```mermaid
 flowchart TD
+    Observe["Dispatch-counting service assigns<br/>per-kernel logical occurrence once"]
+    Kernel{"Kernel admitted by<br/>the kernel filter?"}
+    Range{"Per-kernel occurrence admitted by<br/>the dispatch range?"}
+    Filtered["Return 1 as filtered<br/>select no counter profile"]
     Request{"Counter request has<br/>at least one bucket?"}
     Zero["Bypass replay counter adapter<br/>use existing non-counter path"]
-    Observe["Dispatch-counting service assigns<br/>per-kernel logical occurrence once"]
     Gate{"Dispatch reaches<br/>the replay gate?"}
     Ordinary["Execute once outside replay<br/>retain ordinary dispatch handling"]
     Start["pass_count_cb runs once"]
     Vector{"Agent has the expected<br/>non-empty profile vector?"}
     Fatal["Fatal: agent/profile mismatch<br/>reject the whole profile"]
-    Kernel{"Kernel admitted by<br/>the kernel filter?"}
-    Range{"Per-kernel occurrence admitted by<br/>the dispatch range?"}
-    Filtered["Return 1 as filtered<br/>select no counter profile"]
     Size{"Profile-vector size?"}
     Single["Return 1 as admitted<br/>select the sole profile"]
     PC{"PC sampling selected?"}
     N["Return N<br/>one counter bucket per pass"]
     NPlus["Return N+1<br/>N counter passes, then one<br/>counter-disabled PC sampling pass"]
 
-    Request -- no --> Zero
-    Request -- yes --> Observe --> Gate
-    Gate -- no --> Ordinary
-    Gate -- yes --> Start --> Vector
-    Vector -- no --> Fatal
-    Vector -- yes --> Kernel
+    Observe --> Kernel
     Kernel -- no --> Filtered
     Kernel -- yes --> Range
     Range -- no --> Filtered
-    Range -- yes --> PC
+    Range -- yes --> Request
+    Request -- no --> Zero
+    Request -- yes --> Gate
+    Gate -- no --> Ordinary
+    Gate -- yes --> Start --> Vector
+    Vector -- no --> Fatal
+    Vector -- yes --> PC
     PC -- yes --> NPlus
     PC -- no --> Size
     Size -- one --> Single
@@ -337,13 +334,16 @@ flowchart TD
 | `1` — admitted | The dispatch is admitted and its agent's profile vector contains exactly one bucket. | The ordinary execution selects the sole profile. This is a complete one-bucket result, not a filter outcome. |
 | *N*, where *N* > 1 | Admitted, no PC sampling. *N* is the size of the profile vector for this dispatch's agent. | Pass *i* selects entry *i* of that vector. |
 | *N*+1 | Admitted, PC sampling selected. *N* is the non-zero size of the profile vector. | Passes 0 through *N*−1 map one-to-one onto the vector. Pass *N* selects no counter profile and runs counter-disabled. |
-| *(fatal)* | Counters were requested, but the agent is missing or its expected profile vector is empty. | Nothing. Diagnose the agent/profile mismatch and fail the whole profile. |
+| *(fatal)* | The dispatch passed both filters and requested counters, but the agent is missing or its expected profile vector is empty. | Nothing. Diagnose the agent/profile mismatch and fail the whole profile. |
 
 Three consequences worth stating plainly:
 
 - **Admission is state, not a numeric inference.** Both a filtered dispatch and an admitted
   single-bucket dispatch return `1`, but only the admitted case selects a profile and participates in
   completeness checking. The adapter records that distinction explicitly.
+- **Filters run before counter admission.** A kernel or dispatch-range miss returns `1` as filtered
+  before the bucket and profile-vector checks. Missing profile state is fatal only for a dispatch that
+  passed both filters and requested counters.
 - **`1` is never a fallback for a missing expected profile.** Returning it for an agent/profile
   mismatch would execute the dispatch once, collect at most one bucket, and present incomplete data
   as a success.
@@ -352,9 +352,9 @@ Three consequences worth stating plainly:
   cannot replay. `pass_count_cb` only reads that stable index, and replay passes never consume another
   occurrence.
 
-Completeness checks apply only to admitted dispatches. A dispatch excluded on purpose produces no
-counter set, and that is not an incomplete replay result. A zero-bucket request bypasses the adapter
-before dispatch admission, so it is likewise not a missing or incomplete replay result.
+Completeness checks apply only to admitted counter requests. A dispatch excluded on purpose produces
+no counter set, and that is not an incomplete replay result. After both filters admit a dispatch, a
+zero-bucket request bypasses the adapter and is likewise not a missing or incomplete replay result.
 
 ### Output and dispatch identity
 
