@@ -1336,8 +1336,8 @@ int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set, void* addr, size_t size, i
   if (!mr) return -1;
 
   *out_mr = mr;
-  *out_lkey = mr->lkey;
-  *out_rkey = mr->rkey;
+  *out_lkey = QueuePair::to_provider_endianness(mr->lkey);
+  *out_rkey = QueuePair::to_provider_endianness(mr->rkey);
   return 0;
 }
 
@@ -1393,8 +1393,8 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set, void* addr, size_t siz
   if (!mr) return -1;
 
   *out_mr = mr;
-  *out_lkey = mr->lkey;
-  *out_rkey = mr->rkey;
+  *out_lkey = QueuePair::to_provider_endianness(mr->lkey);
+  *out_rkey = QueuePair::to_provider_endianness(mr->rkey);
   return 0;
 }
 
