@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -56,6 +57,11 @@ struct mem_block_t
     // distinguishes "the same allocation" from "a different allocation that reused the address".
     // Unused when from_tracker is false.
     uint64_t generation = 0;
+    // Executable that owns this region, for module-scope variables only (from_tracker == false). A
+    // module variable's address is valid only while its executable is loaded, and the replay window
+    // gates dispatches rather than code-object loading, so another thread can unload one
+    // mid-window.
+    hsa_executable_t executable{};
 };
 
 // A captured set of device allocations (host-side copies) for a single agent.
@@ -119,6 +125,19 @@ region_is_restorable(const memory_tracker::tracked_map_t& inventory,
                      void*                                gpu_addr,
                      size_t                               size,
                      uint64_t                             generation);
+
+// The same question for a module-scope region, whose liveness is its executable's liveness rather
+// than an entry in the tracker.
+//
+// `loaded` empty means "could not enumerate", not "nothing is loaded". The code-object module
+// returns an empty set once it has shut down, and refusing every module variable then would quietly
+// stop reverting globals between passes -- a silent accuracy loss in exchange for nothing. A
+// snapshot holding module variables is itself proof that an executable was loaded, so an empty set
+// is a failure to enumerate and the region is admitted; the copy still reports a fault if the
+// address really is gone.
+bool
+module_region_is_restorable(const std::unordered_set<uint64_t>& loaded_executables,
+                            hsa_executable_t                    executable);
 }  // namespace memory_snapshot
 }  // namespace kernel_replay
 }  // namespace rocprofiler

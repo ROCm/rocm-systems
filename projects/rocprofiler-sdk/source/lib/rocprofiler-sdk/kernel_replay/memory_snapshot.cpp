@@ -31,10 +31,12 @@
 #include <fmt/format.h>
 #include <hsa/hsa.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <new>
 #include <optional>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -74,15 +76,19 @@ with_inventory_check(void* gpu_addr, size_t size, uint64_t generation, CopyFn&& 
 // A module-scope variable (__device__ / __constant__ global) discovered in a loaded executable.
 struct module_variable_t
 {
-    void*  gpu_addr = nullptr;
-    size_t size     = 0;
+    void*            gpu_addr = nullptr;
+    size_t           size     = 0;
+    hsa_executable_t executable{};  // owner; its liveness is this address's liveness
 };
 
 // hsa_executable_iterate_agent_symbols callback: collect HSA_SYMBOL_KIND_VARIABLE symbols
 // (device address + size) into the vector passed via `data`. The HSA callback cannot capture, so
 // state is threaded through the void* argument.
 hsa_status_t
-collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t symbol, void* data)
+collect_module_variable(hsa_executable_t executable,
+                        hsa_agent_t,
+                        hsa_executable_symbol_t symbol,
+                        void*                   data)
 {
     auto* out  = static_cast<std::vector<module_variable_t>*>(data);
     auto* core = hsa::get_core_table();
@@ -107,8 +113,20 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 
     // HSA reports the variable's device address as an integer; converting to a pointer is required.
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    out->push_back(module_variable_t{reinterpret_cast<void*>(addr), size});
+    out->push_back(module_variable_t{reinterpret_cast<void*>(addr), size, executable});
     return HSA_STATUS_SUCCESS;
+}
+
+// Handles of the executables the SDK currently tracks as loaded. Taken once per restore so each
+// module-scope region can be checked without a walk of its own. The code-object module drops an
+// executable from this set when it is destroyed, which is what makes the check meaningful.
+std::unordered_set<uint64_t>
+loaded_executable_handles()
+{
+    auto out = std::unordered_set<uint64_t>{};
+    code_object::iterate_loaded_code_objects(
+        [&](const code_object::hsa::code_object& co) { out.emplace(co.hsa_executable.handle); });
+    return out;
 }
 
 // Enumerate module-scope variables visible to `agent` across all loaded executables. They live in
@@ -149,6 +167,14 @@ region_is_restorable(const memory_tracker::tracked_map_t& inventory,
     // A caller that supplied a generation is asserting an exact identity, so a mismatch is a reused
     // address and not the region that was captured.
     return generation == 0 || itr->second.generation == generation;
+}
+
+bool
+module_region_is_restorable(const std::unordered_set<uint64_t>& loaded_executables,
+                            hsa_executable_t                    executable)
+{
+    if(loaded_executables.empty()) return true;
+    return loaded_executables.count(executable.handle) > 0;
 }
 
 device_snapshot_t
@@ -197,13 +223,15 @@ snap(hsa_agent_t agent)
                        size_t           size,
                        uint64_t         generation,
                        std::string_view what,
-                       bool             from_tracker) -> bool {
+                       bool             from_tracker,
+                       hsa_executable_t executable) -> bool {
         if(size == 0) return true;
 
         mem_block_t blk;
         blk.gpu_addr     = gpu_addr;
         blk.from_tracker = from_tracker;
         blk.generation   = generation;
+        blk.executable   = executable;
         try
         {
             blk.host_copy.resize(size);
@@ -260,7 +288,7 @@ snap(hsa_agent_t agent)
 
     for(const auto& [ptr, info] : inventory)
     {
-        if(!capture(ptr, info.size, info.generation, "region", /*from_tracker=*/true))
+        if(!capture(ptr, info.size, info.generation, "region", /*from_tracker=*/true, {}))
         {
             out.ok = false;
             return out;
@@ -270,9 +298,25 @@ snap(hsa_agent_t agent)
     // Module-scope variables (__device__ / __constant__ globals) live in the loaded executable's
     // data segment, not in the allocation tracker, so capture them here too. Restored via the same
     // per-block host->device copy as tracked allocations (see restore()).
+    //
+    // The liveness re-check is the read-direction counterpart of the one in restore(): an unload
+    // between discover_module_variables() and the copy would have us read a segment the loader has
+    // already released. Dropping such a variable is not a capture failure -- restore() would refuse
+    // it for the same reason -- so replay proceeds without reverting that one global.
+    const auto loaded_at_snap =
+        module_vars.empty() ? std::unordered_set<uint64_t>{} : loaded_executable_handles();
     for(const auto& var : module_vars)
     {
-        if(!capture(var.gpu_addr, var.size, /*generation=*/0, "module variable", false))
+        if(!module_region_is_restorable(loaded_at_snap, var.executable))
+        {
+            ROCP_INFO << fmt::format("kernel-replay snapshot: module variable {} ({}B) lost its "
+                                     "executable before capture, dropping from snapshot",
+                                     var.gpu_addr,
+                                     var.size);
+            continue;
+        }
+        if(!capture(
+               var.gpu_addr, var.size, /*generation=*/0, "module variable", false, var.executable))
         {
             out.ok = false;
             return out;
@@ -289,6 +333,15 @@ snap(hsa_agent_t agent)
 bool
 restore(const device_snapshot_t& snapshot)
 {
+    // Enumerated once, and only when the snapshot actually holds module-scope regions, so a
+    // snapshot of tracked allocations alone does not pay for an executable walk.
+    const bool has_module_regions =
+        std::any_of(snapshot.blocks.begin(), snapshot.blocks.end(), [](const mem_block_t& blk) {
+            return !blk.from_tracker;
+        });
+    const auto loaded_executables =
+        has_module_regions ? loaded_executable_handles() : std::unordered_set<uint64_t>{};
+
     size_t restored = 0;
     for(const auto& blk : snapshot.blocks)
     {
@@ -321,7 +374,20 @@ restore(const device_snapshot_t& snapshot)
         }
         else
         {
-            // Module variable: lives in the loaded executable, always present, so restore directly.
+            // Module variable: it lives in its executable's data segment, so the executable being
+            // loaded is what makes the address valid. The replay window serializes dispatches on
+            // the agent, not code-object loading, so another thread can unload one between snap and
+            // restore -- writing then would fault on memory the loader has already returned.
+            if(!module_region_is_restorable(loaded_executables, blk.executable))
+            {
+                ROCP_WARNING << fmt::format(
+                    "kernel-replay restore: skipping module variable {} ({}B); the executable that "
+                    "owns it was unloaded since snap time. A kernel reading that global will not "
+                    "see identical inputs on later passes",
+                    blk.gpu_addr,
+                    blk.host_copy.size());
+                continue;
+            }
             status = dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
         }
 

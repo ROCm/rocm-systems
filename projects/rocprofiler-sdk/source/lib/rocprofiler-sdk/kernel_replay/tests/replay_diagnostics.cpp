@@ -44,8 +44,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1018,4 +1020,84 @@ TEST(kernel_replay_restore_gate, every_ambiguous_case_answers_false)
     // ...and the one case that must answer true, so the test cannot pass by always refusing.
     EXPECT_TRUE(memory_snapshot::region_is_restorable(
         inventory_with(ptr, captured_size, captured_gen), ptr, captured_size, captured_gen));
+}
+
+// ------------------------- module-variable liveness gate -------------------------
+//
+// A __device__ / __constant__ global is not in the tracker, so the gate above says nothing about
+// it. Its address is valid exactly as long as the executable holding its data segment is loaded,
+// and the replay window serializes dispatches on an agent rather than code-object loading -- so a
+// host thread is free to dlclose a module (or a framework to unload a JIT'd kernel) between snap
+// and restore. module_region_is_restorable() is the check that stops us writing into a segment the
+// loader has already released.
+//
+// The polarity here is the opposite of the ABA gate's. An address that no longer belongs to us is
+// still the dangerous case, but an *empty* set of loaded executables means enumeration failed, not
+// that nothing is loaded: the code-object module returns nothing once it has shut down. Refusing
+// every module variable then would stop reverting globals between passes for no safety gain, so an
+// empty set is admitted.
+
+namespace
+{
+std::unordered_set<uint64_t>
+loaded(std::initializer_list<uint64_t> handles)
+{
+    return std::unordered_set<uint64_t>{handles};
+}
+
+hsa_executable_t
+exec(uint64_t handle)
+{
+    return hsa_executable_t{.handle = handle};
+}
+}  // namespace
+
+TEST(kernel_replay_module_gate, a_variable_in_a_loaded_executable_is_restorable)
+{
+    EXPECT_TRUE(memory_snapshot::module_region_is_restorable(loaded({11, 22, 33}), exec(22)));
+}
+
+// The case the check exists for: the snapshot names an executable that is no longer loaded.
+TEST(kernel_replay_module_gate, a_variable_whose_executable_was_unloaded_is_not_restorable)
+{
+    EXPECT_FALSE(memory_snapshot::module_region_is_restorable(loaded({11, 33}), exec(22)))
+        << "restoring here would write into a data segment the loader has released";
+}
+
+// Everything unloaded but the enumeration still succeeded is reported as a non-empty set in
+// practice; the degenerate "one executable left, not ours" spelling is the same refusal.
+TEST(kernel_replay_module_gate, only_the_owning_handle_admits_the_variable)
+{
+    EXPECT_FALSE(memory_snapshot::module_region_is_restorable(loaded({1}), exec(2)));
+    EXPECT_TRUE(memory_snapshot::module_region_is_restorable(loaded({1}), exec(1)));
+}
+
+// An empty set means "could not enumerate", so it admits. Asserted on its own because it is the one
+// place this predicate deliberately answers true for an unverifiable region, and a future change
+// that "hardens" it to false would silently stop reverting globals between passes.
+TEST(kernel_replay_module_gate, an_unenumerable_executable_set_admits_rather_than_refuses)
+{
+    EXPECT_TRUE(
+        memory_snapshot::module_region_is_restorable(std::unordered_set<uint64_t>{}, exec(22)))
+        << "an empty set is a failed enumeration, not an empty process";
+}
+
+// A zero handle is what a mem_block_t carries when it came from the tracker rather than an
+// executable. restore() never asks about those -- it branches on from_tracker first -- but the
+// predicate must not accidentally treat 0 as a wildcard that matches any loaded set.
+TEST(kernel_replay_module_gate, a_zero_handle_is_not_a_wildcard)
+{
+    EXPECT_FALSE(memory_snapshot::module_region_is_restorable(loaded({11, 22}), exec(0)));
+    EXPECT_TRUE(memory_snapshot::module_region_is_restorable(loaded({0, 11}), exec(0)))
+        << "0 is matched by handle like any other, not specially";
+}
+
+// Handles are not reissued for a different executable within a process lifetime, but the predicate
+// makes no such assumption: it compares handles, so a reload that happened to land on the same
+// handle is admitted and one that did not is refused. This documents that the module gate is
+// coarser than the ABA gate on purpose -- there is no generation stamp for executables.
+TEST(kernel_replay_module_gate, the_check_is_handle_identity_and_nothing_more)
+{
+    EXPECT_TRUE(memory_snapshot::module_region_is_restorable(loaded({22}), exec(22)));
+    EXPECT_FALSE(memory_snapshot::module_region_is_restorable(loaded({23}), exec(22)));
 }

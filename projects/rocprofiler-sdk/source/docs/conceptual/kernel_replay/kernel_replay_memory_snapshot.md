@@ -119,8 +119,10 @@ successfully restored. The two categories are handled differently:
   happen together under the inventory read lock, so a concurrent free cannot race between the check
   and the write. A region that fails the check is skipped with a warning rather than written to
   memory that no longer belongs to it.
-- **Module-scope variables** live in the loaded executable and are always present, so they are
-  restored directly.
+- **Module-scope variables** are not in the tracker, so `region_is_restorable()` says nothing about
+  them. Their liveness is instead their executable's liveness, checked by
+  `module_region_is_restorable()` — see [Module-scope variables and executable
+  liveness](#module-scope-variables-and-executable-liveness) below.
 
 ### Why an address is not an identity
 
@@ -149,6 +151,32 @@ A failed host-to-device copy on a live region is different from a skip: the snap
 partially applied, some regions hold pre-kernel bytes and others post-kernel bytes, and nothing can
 put that back. `restore()` returns false and the replay window aborts rather than hand the
 application a mixture it cannot detect.
+
+### Module-scope variables and executable liveness
+
+A `__device__` global's address is valid exactly as long as the executable holding its data segment
+is loaded. The replay window serializes *dispatches* on an agent; it does not gate code-object
+loading. So a host thread is free to destroy an executable between `snap()` and `restore()` — by
+`dlclose` of a module, or by a framework unloading a JIT-compiled kernel it no longer needs — and the
+recorded address then names a segment the loader has released.
+
+Both directions are guarded by `module_region_is_restorable()`, against the set of executable handles
+the SDK currently tracks as loaded. `snap()` checks before reading a variable (a dropped variable is
+not a capture failure; replay proceeds without reverting that one global) and `restore()` checks
+before writing one. The set is enumerated once per call, and only when the snapshot actually holds
+module-scope regions, so a snapshot of tracked allocations alone pays nothing for it.
+
+The polarity is the opposite of the ABA gate's. An *empty* set means enumeration failed, not that
+nothing is loaded: the code-object module reports nothing once it has shut down. Refusing every
+module variable then would stop reverting globals between passes with no safety gained, so an empty
+set admits.
+
+The check is handle identity and nothing more. There is no generation stamp for executables, so this
+gate is deliberately coarser than the one for tracked allocations. It is also conservative in the
+right direction at the edges: the code-object module drops an executable from its records *before*
+calling the underlying `hsa_executable_destroy`, so a variable can be refused while its memory is
+still technically valid. That costs one global's revert, which is a measurement inaccuracy; the
+alternative — writing after the destroy lands — is a fault.
 
 ## HIP graphs
 
@@ -186,6 +214,10 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
   [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#what-is-not-isolated).
 - **Coarse-grained device memory only.** Kernarg, host, fine-grained and executable allocations are
   excluded by design, as is unified and managed memory.
+- **A module-scope variable is not reverted if its executable is unloaded mid-window.** The window
+  gates dispatches, not code-object loading, so this is possible and is handled by skipping the
+  variable rather than faulting; see [Module-scope variables and executable
+  liveness](#module-scope-variables-and-executable-liveness).
 - **HIP graph launches are not replayed** (warn once, run once), as described above.
 - **Only single-packet, single-dispatch submissions are replayed.** The replay gate requires exactly
   one packet in the batch and exactly one dispatch packet in it; anything else takes the normal path.
@@ -206,6 +238,7 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Module-variable discovery | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `discover_module_variables()`, `collect_module_variable()` |
 | Restore | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `restore()` |
 | Restore identity gate | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `region_is_restorable()` |
+| Executable liveness gate | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `module_region_is_restorable()`, `loaded_executable_handles()` |
 | Footprint estimate | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `estimate_footprint()` |
 | Snapshot types | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp` | `device_snapshot_t`, `mem_block_t` |
 | Allocation generation stamp | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp` | `alloc_info_t::generation` |
