@@ -40,19 +40,22 @@ namespace queue_hooks
 // enum class: unscoped keeps the implicit conversion to ClientID, so the emplace
 // sites need no cast, while still grouping the values under one type.
 //
-// These values numerically overlap the per-queue registry's auto-incrementing
-// ClientID, which also starts at 1 and is still in use by the services that have
-// not been migrated yet. That is inert only because no consumer routes on the tag:
-// counters' completed_cb and thread trace's post_kernel_call both identify their
-// own packets by pointer lookup or dynamic_cast. Before adding a consumer that
-// dispatches on these values, either finish migrating the remaining services off
-// the registry or move this enum to a range the registry cannot produce.
+// inst_pkt_t mixes tags from two producers: the per-queue callback registry stores the
+// ClientID it handed out to the callback, and the hooks store one of the values below.
+// The registry's ids are assigned by an atomic counter starting at 1, so the tags here
+// are offset past anything it can produce. Overlapping them would not misroute a packet,
+// because every tag check is a conservative gate in front of a slow path that identifies
+// its own packets by pointer lookup or dynamic_cast, but it would let a registry packet
+// pass a hook's gate and defeat the fast path that gate exists to provide. Keeping the
+// two spaces disjoint means a tag test answers "which producer" exactly.
+constexpr int64_t HOOK_CLIENT_ID_BASE = int64_t{1} << 32;
+
 enum client_id : int64_t
 {
-    COUNTERS_CLIENT_ID     = 1,
-    THREAD_TRACE_CLIENT_ID = 2,
-    PC_SAMPLING_CLIENT_ID  = 3,
-    SPM_CLIENT_ID          = 4,
+    COUNTERS_CLIENT_ID     = HOOK_CLIENT_ID_BASE + 1,
+    THREAD_TRACE_CLIENT_ID = HOOK_CLIENT_ID_BASE + 2,
+    PC_SAMPLING_CLIENT_ID  = HOOK_CLIENT_ID_BASE + 3,
+    SPM_CLIENT_ID          = HOOK_CLIENT_ID_BASE + 4,
 };
 }  // namespace queue_hooks
 }  // namespace hsa
