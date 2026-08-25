@@ -135,7 +135,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Run AINIC test suite (sbatch)
         id: run_tests
@@ -304,7 +304,7 @@ jobs:
 
       - name: Upload run log and reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ainic-test-report
           path: |
