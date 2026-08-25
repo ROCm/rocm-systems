@@ -66,12 +66,22 @@ def test_replay_with_counter_groups_is_accepted(rocprofv3):
 
 # One dispatch executed N times under a single dispatch id: a consumer of these modes' output has no
 # way to separate the executions, so the run is rejected rather than allowed to produce it.
+#
+# The sibling options are here for a reason. Each of these modes turns on from any member of its
+# option group -- rocprofv3 keys SPM off `spm or spm_sample_interval or spm_sample_interval_unit`,
+# and PC sampling off the union of its unit/method/interval -- so a check written against the
+# headline flag alone would pass this suite for `--spm` and still let `--spm-sample-interval`
+# through.
 @pytest.mark.parametrize(
     "extra_argv",
     [
         pytest.param(["--att"], id="advanced-thread-trace"),
+        pytest.param(["--att-no-intercept"], id="advanced-thread-trace-no-intercept"),
         pytest.param(["--pc-sampling-method", "stochastic"], id="pc-sampling"),
+        pytest.param(["--pc-sampling-unit", "cycles"], id="pc-sampling-unit-only"),
+        pytest.param(["--pc-sampling-interval", "1000"], id="pc-sampling-interval-only"),
         pytest.param(["--spm", "SQ_WAVES"], id="spm"),
+        pytest.param(["--spm-sample-interval", "100"], id="spm-interval-only"),
     ],
 )
 def test_replay_rejects_per_dispatch_modes(rocprofv3, extra_argv):
@@ -149,3 +159,53 @@ def test_replay_merges_every_counter_group_into_one_run(rocprofv3):
         "three --pmc flags must parse as three groups; if they collapse, replay would run one "
         "pass and report a single group as if it were all of them"
     )
+
+
+# pmc_groups comes from an input file rather than the command line, so it is simply absent from a
+# namespace built by parse_arguments. A check that reads the attribute directly raises
+# AttributeError here instead of validating.
+def test_replay_accepts_counter_groups_from_an_input_file(rocprofv3):
+    args = _parse(rocprofv3, ["--kernel-replay-beta-enabled", "--", "./app"])
+    args.pmc_groups = [["SQ_WAVES"], ["GRBM_COUNT"]]
+
+    rocprofv3.validate_kernel_replay_args(args)
+
+
+# Kernel filtering is the documented remediation for a footprint too large to snapshot, so it has to
+# combine with replay rather than be caught by a broad "no other options" rule.
+@pytest.mark.parametrize(
+    "extra_argv",
+    [
+        pytest.param(["--kernel-include-regex", "gemm.*"], id="include-regex"),
+        pytest.param(["--kernel-exclude-regex", "memset.*"], id="exclude-regex"),
+    ],
+)
+def test_replay_allows_kernel_filtering(rocprofv3, extra_argv, capsys):
+    args = _parse(
+        rocprofv3,
+        ["--kernel-replay-beta-enabled", "--pmc", "SQ_WAVES"]
+        + extra_argv
+        + ["--", "./app"],
+    )
+
+    rocprofv3.validate_kernel_replay_args(args)
+    assert capsys.readouterr().err == ""
+
+
+# API tracing does not attribute anything per dispatch, so it neither blocks replay nor inflates a
+# count. It must stay silent, or the warning stops carrying information.
+def test_replay_allows_api_tracing_without_warning(rocprofv3, capsys):
+    args = _parse(
+        rocprofv3,
+        [
+            "--kernel-replay-beta-enabled",
+            "--pmc",
+            "SQ_WAVES",
+            "--hip-trace",
+            "--",
+            "./app",
+        ],
+    )
+
+    rocprofv3.validate_kernel_replay_args(args)
+    assert capsys.readouterr().err == ""
