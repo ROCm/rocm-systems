@@ -2837,6 +2837,31 @@ def test_single_isa_skips_dbt_generation(tmp_path, capsys):
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize('gen_isas', [False, True])
+def test_encoding_translator_uses_selected_generated_include_tree(tmp_path, gen_isas):
+    include_root = tmp_path / 'include'
+    isa_output = include_root / 'custom' / 'generated'
+    dbt_output = tmp_path / 'dbt'
+    args = SimpleNamespace(
+        isafiles=[
+            f'cdna4:{_mrisa_dir() / "amdgpu_isa_cdna4.xml"}',
+            f'rdna4:{_mrisa_dir() / "amdgpu_isa_rdna4.xml"}',
+        ],
+        gen_isas=gen_isas,
+        gen_dbt=True,
+        isa_output=str(isa_output),
+        include_root=str(include_root),
+        dbt_output=str(dbt_output),
+    )
+
+    _run(args)
+
+    header = (dbt_output / 'encoding_cdna4_to_rdna4.h').read_text()
+    assert '#include "custom/generated/cdna4/machine_insts.h"' in header
+    assert '#include "custom/generated/rdna4/builders.h"' in header
+    assert '#include "custom/generated/rdna4/machine_insts.h"' in header
+
+
 def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
     spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
     semantics = derive_all_semantics(spec)

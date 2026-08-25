@@ -217,15 +217,15 @@ def _run(args) -> None:
         f'{plan.total_exclusive} exclusive',
         file=sys.stderr,
     )
+    config = _codegen_config(
+        args.isa_output, include_root=getattr(args, 'include_root', None)
+    )
 
     # Generate per-ISA files, accumulating shared execute bodies.
     if args.gen_isas:
         emit_isa_properties(args.isa_output, specs)
         body_variants = _collect_shared_execute_body_variants(specs, plan)
         unshared_keys = _unshared_execute_keys_from_variants(body_variants)
-        config = _codegen_config(
-            args.isa_output, include_root=getattr(args, 'include_root', None)
-        )
         config.unshared_execute_keys = unshared_keys
         if unshared_keys:
             print(
@@ -294,7 +294,12 @@ def _run(args) -> None:
                 src_spec, _ = spec_map[src_n]
                 dst_spec, _ = spec_map[dst_n]
                 generate_encoding_translators(
-                    src_spec, dst_spec, src_n, dst_n, dbt_output
+                    src_spec,
+                    dst_spec,
+                    src_n,
+                    dst_n,
+                    dbt_output,
+                    config=config,
                 )
 
 
