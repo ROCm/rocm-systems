@@ -212,7 +212,9 @@ def _run(args) -> None:
         file=sys.stderr,
     )
     config = _codegen_config(
-        args.isa_output, include_root=getattr(args, 'include_root', None)
+        args.isa_output,
+        include_root=getattr(args, 'include_root', None),
+        use_shared_execute_helpers=len(specs) > 1,
     )
 
     # Generate per-ISA files, accumulating shared execute bodies.

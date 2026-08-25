@@ -3500,10 +3500,15 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
 
     _run(args)
 
+    shared_root = generated_root / 'shared'
+    assert (shared_root / 'isa_properties.h').is_file()
+    assert not (shared_root / 'execute_shared.h').exists()
+
     simd_glue_include = '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"'
     for source_name in ('vop3_exec.cpp', 'vop3p_exec.cpp'):
         source = (generated_root / 'cdna1' / source_name).read_text()
         assert source.count(simd_glue_include) == 1
+        assert 'shared/execute_shared.h' not in source
 
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
