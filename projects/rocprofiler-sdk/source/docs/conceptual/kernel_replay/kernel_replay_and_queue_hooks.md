@@ -1,8 +1,8 @@
 # Kernel Replay and the Queue Callback Removal
 
-How the four queue-callback-removal PRs relate to kernel replay: what the per-queue callback registry
-made impossible, what each service's migration changes, how per-pass service control is expressed on
-top of the migrated hooks, and which engineering tradeoffs each PR makes.
+How the four queue-callback-removal PRs relate to kernel replay: what the per-queue callback
+registry made impossible, what each service's migration changes, how per-pass service control is
+expressed on top of the migrated hooks, and which engineering tradeoffs each PR makes.
 
 This is a design document rather than user documentation. For current behavior of kernel replay,
 read the pages listed in the kernel replay conceptual index. For the mechanics of the migration
@@ -15,8 +15,8 @@ from any one diff.
 
 Nothing described here is on `develop`. The pieces live on separate branches, and two of them have
 **diverged**, which matters enough that the divergence is called out explicitly in
-[Localized context control](#5-localized-context-control-the-integration-point) rather than smoothed
-over.
+[Localized context control](#5-localized-context-control-the-integration-point) rather than
+smoothed over.
 
 | Piece | Where it lives | State (2026-08-25) |
 |---|---|---|
@@ -40,9 +40,9 @@ A service that wants to see every dispatch subscribes at `start_context()` by ca
 dispatch the write interceptor and the async signal handler walk that map and invoke whatever they
 find.
 
-Kernel replay needs something that mechanism cannot express: **turn an individual service off for one
-pass of one dispatch, on one thread, and back on for the next pass.** A tool collecting four counter
-groups replays each dispatch four times and wants a different group armed each time.
+Kernel replay needs something that mechanism cannot express: **turn an individual service off for
+one pass of one dispatch, on one thread, and back on for the next pass.** A tool collecting four
+counter groups replays each dispatch four times and wants a different group armed each time.
 
 Against the registry there are three available handles, and all three are wrong:
 
@@ -91,22 +91,23 @@ flowchart TB
   after ==>|"gives replay a named place<br/>to ask 'am I on for this pass?'"| replay["kernel_replay::local_context_override()<br/>consulted inside each service handler"]
 ```
 
-The architecture doc states the relationship as a soft prerequisite, and the replay design doc agrees
-from its side:
+The architecture doc states the relationship as a soft prerequisite, and the replay design doc
+agrees from its side:
 
 > Kernel replay is **not** gated on removing the queue callback registration mechanism. That removal
 > would make per-pass enable/disable cleaner and is a planned improvement, but the feature works
 > without it.
 
-That is accurate and worth preserving: replay does not block on the migration. But the *shape* of the
-per-pass mechanism is determined by it, and the cost of building it without the migration is that
-every service handler needs a conditional that has no natural home.
+That is accurate and worth preserving: replay does not block on the migration. But the *shape* of
+the per-pass mechanism is determined by it, and the cost of building it without the migration is
+that every service handler needs a conditional that has no natural home.
 
 ## 2. The shared convention
 
-All four PRs follow one convention, introduced by [#8891](https://github.com/ROCm/rocm-systems/pull/8891)
-along with the shared `hsa/queue_hooks/` infrastructure. Each service exposes a trio in its own
-`<service>/queue_hooks.{hpp,cpp}`: an enter hook, an exit hook, and an activity predicate.
+All four PRs follow one convention, introduced by
+[#8891](https://github.com/ROCm/rocm-systems/pull/8891) along with the shared `hsa/queue_hooks/`
+infrastructure. Each service exposes a trio in its own `<service>/queue_hooks.{hpp,cpp}`: an enter
+hook, an exit hook, and an activity predicate.
 
 **The two phases use different context sets.** This is the central design point and the one place
 where a plausible-looking simplification is a silent data-loss bug:
@@ -117,9 +118,9 @@ where a plausible-looking simplification is a silent data-loss bug:
   the GPU must still be able to deliver its record after its context has stopped.
 
 Routing the exit hook over *active* contexts loses every dispatch in flight when its context stops:
-`completed_cb` never runs, the record is never delivered, and the `packet_return_map` entry leaks the
-AQL packet and its profile allocation. Because pause and resume are implemented as `stop_context` and
-`start_context`, this surfaces as counter records missing around every pause.
+`completed_cb` never runs, the record is never delivered, and the `packet_return_map` entry leaks
+the AQL packet and its profile allocation. Because pause and resume are implemented as
+`stop_context` and `start_context`, this surfaces as counter records missing around every pause.
 
 **Provenance versus liveness.** Underneath the convention is a routing question: when a completion
 signal fires, who owns it? *Liveness* answers "whoever is active now" — one cheap query, and wrong
@@ -128,8 +129,8 @@ requires the packet to carry its own origin.
 
 The registry had provenance for free: the callback pair captured at enqueue *was* the routing
 decision. Removing the registry means reimplementing that property explicitly, per service, which is
-the real cost of this refactor and is not visible in any individual diff. `hsa/queue_hooks/client_ids.hpp`
-supplies the tags that make it possible:
+the real cost of this refactor and is not visible in any individual diff.
+`hsa/queue_hooks/client_ids.hpp` supplies the tags that make it possible:
 
 ```cpp
 enum client_id : int64_t
@@ -143,11 +144,11 @@ enum client_id : int64_t
 
 The values deliberately overlap the registry's auto-incrementing `ClientID`, which also starts at 1
 and stays in use by services that have not migrated. That is inert only because no consumer
-*dispatches* on the tag — each service identifies its own packets by pointer lookup or `dynamic_cast`
-— and it stops being inert the moment something routes on these values.
+*dispatches* on the tag — each service identifies its own packets by pointer lookup or
+`dynamic_cast` — and it stops being inert the moment something routes on these values.
 
-The first version of this stack chose liveness, which is why the same root cause blocks two PRs:
-Ben Welton's `CHANGES_REQUESTED` on [#8891](https://github.com/ROCm/rocm-systems/pull/8891) and
+The first version of this stack chose liveness, which is why the same root cause blocks two PRs: Ben
+Welton's `CHANGES_REQUESTED` on [#8891](https://github.com/ROCm/rocm-systems/pull/8891) and
 [#8887](https://github.com/ROCm/rocm-systems/pull/8887) both identify completion routing regressing
 from provenance to liveness, made reachable by `context::stop_context` nulling the active slot
 *before* it calls the service's own `stop_context`. The fixes landed as
@@ -156,8 +157,8 @@ from provenance to liveness, made reachable by `context::stop_context` nulling t
 branch tips.
 
 **Why the drain is kept.** Provenance routing guarantees a completion that *arrives* is delivered;
-the `hsa::queue_controller_sync()` drain bounds *when completions arrive at all*. Teardown depends on
-the second: it is what makes "the callback thread and the `counter_callback_info` objects outlive
+the `hsa::queue_controller_sync()` drain bounds *when completions arrive at all*. Teardown depends
+on the second: it is what makes "the callback thread and the `counter_callback_info` objects outlive
 every in-flight dispatch" literally true rather than true by argument. The two answer different
 questions, so neither replaces the other — which is the open question on
 [#8887](https://github.com/ROCm/rocm-systems/pull/8887#discussion_r3677282155), where SrirakshaNag
@@ -175,13 +176,14 @@ other three build on: `hsa/queue_hooks/client_ids.hpp`, the enter/exit conventio
 architecture document itself.
 
 **Migration mechanics.** `counters::kernel_dispatch_phase_enter_hook` iterates active contexts
-filtered to those with a `dispatch_counter_collection` service, then narrows to the dispatching agent
-via `collects_on(agent_id)`. `counters::kernel_dispatch_phase_exit_hook` early-outs unless `inst_pkt`
-carries `COUNTERS_CLIENT_ID`, then iterates *registered* contexts; ownership is resolved inside
-`completed_cb` by looking the packet up in that context's `packet_return_map`. `counters::is_any_active()`
-feeds both the `no_real_consumers` gate and the `should_batch_packets` guard in `hsa/queue.cpp`.
-`start_context()` no longer calls `add_callback()`. The stop path is ordered: clear `enabled`,
-`queue_controller_sync()`, `disable_serialization()`, `callback_thread_stop()`.
+filtered to those with a `dispatch_counter_collection` service, then narrows to the dispatching
+agent via `collects_on(agent_id)`. `counters::kernel_dispatch_phase_exit_hook` early-outs unless
+`inst_pkt` carries `COUNTERS_CLIENT_ID`, then iterates *registered* contexts; ownership is resolved
+inside `completed_cb` by looking the packet up in that context's `packet_return_map`.
+`counters::is_any_active()` feeds both the `no_real_consumers` gate and the `should_batch_packets`
+guard in `hsa/queue.cpp`. `start_context()` no longer calls `add_callback()`. The stop path is
+ordered: clear `enabled`, `queue_controller_sync()`, `disable_serialization()`,
+`callback_thread_stop()`.
 
 **Replay integration.** Counters is the service replay actually exists for, and the only one wired
 into per-pass control on every branch. Its dispatch handler folds the override into the enabled
@@ -206,13 +208,13 @@ not. Per-agent scoping exists (`collects_on`, `intersects`, and a runtime
 `rocprofiler_dispatch_counting_service_set_agents`) and does not yet reach the gate.
 
 **Open review items.** Ben Welton's `CHANGES_REQUESTED` (2026-07-23) is answered by
-[#9586](https://github.com/ROCm/rocm-systems/pull/9586), merged into the branch tip, but has not been
-re-reviewed. A second `CHANGES_REQUESTED` from bgopesh (2026-08-25) is a direct consequence of that
-fix: `get_registered_contexts()` is now walked unsynchronized from the HSA async signal handler while
-`register_context` can emplace concurrently. Fixing "completions are dropped" produced "completions
-are routed through an unlocked container read", which is the honest shape of refactoring a chokepoint.
-bgopesh separately flags a mutex held across the GPU drain, serializing all context lifecycle
-operations behind one context's teardown.
+[#9586](https://github.com/ROCm/rocm-systems/pull/9586), merged into the branch tip, but has not
+been re-reviewed. A second `CHANGES_REQUESTED` from bgopesh (2026-08-25) is a direct consequence of
+that fix: `get_registered_contexts()` is now walked unsynchronized from the HSA async signal handler
+while `register_context` can emplace concurrently. Fixing "completions are dropped" produced
+"completions are routed through an unlocked container read", which is the honest shape of
+refactoring a chokepoint. bgopesh separately flags a mutex held across the GPU drain, serializing
+all context lifecycle operations behind one context's teardown.
 
 ### 3.2 Thread trace — [#8790](https://github.com/ROCm/rocm-systems/pull/8790)
 
@@ -222,9 +224,9 @@ operations behind one context's teardown.
 following the enter-active / exit-registered convention. The distinguishing choice is routing:
 instead of a return map, `post_kernel_call` filters on `THREAD_TRACE_CLIENT_ID` and then
 `dynamic_cast<TraceControlAQLPacket*>` on the packet, because ATT's instrumentation packet is a
-distinct type and the cast is the natural discriminator. Agents come from the service's configure-time
-`params` map through `DispatchThreadTracer::collects_on()`; there is no runtime `set_agents`
-equivalent.
+distinct type and the cast is the natural discriminator. Agents come from the service's
+configure-time `params` map through `DispatchThreadTracer::collects_on()`; there is no runtime
+`set_agents` equivalent.
 
 **Replay integration.** ATT honors the override, but asymmetrically — it skips only when *forced
 off*, and deliberately keeps serialization even then:
@@ -246,17 +248,18 @@ not share an agent-scoping API. ATT carries the same global `is_any_active()` ba
 counters and SPM.
 
 **Open review items.** No outstanding changes-requested. Two follow-ups were accepted rather than
-blocked: an unused `client` global in `thread_trace/core.cpp`, and multi-context ATT ownership, where
-a second concurrent `dispatch_thread_trace` context could cross-talk — resolved by documenting a
-single-context invariant plus a conflict guard. One documentation defect should be fixed before merge:
-the exit hook's declaration comment in `thread_trace/queue_hooks.hpp` says it iterates *active*
-contexts, while the implementation correctly iterates registered ones. The code is right and the
-comment is stale, which is the more dangerous direction for a convention this easy to get wrong.
+blocked: an unused `client` global in `thread_trace/core.cpp`, and multi-context ATT ownership,
+where a second concurrent `dispatch_thread_trace` context could cross-talk — resolved by documenting
+a single-context invariant plus a conflict guard. One documentation defect should be fixed before
+merge: the exit hook's declaration comment in `thread_trace/queue_hooks.hpp` says it iterates
+*active* contexts, while the implementation correctly iterates registered ones. The code is right
+and the comment is stale, which is the more dangerous direction for a convention this easy to get
+wrong.
 
 ### 3.3 PC sampling — [#8895](https://github.com/ROCm/rocm-systems/pull/8895)
 
-9 files, +205/−31. An order of magnitude smaller than the others, and the outlier in every dimension.
-Approved by vlaindic.
+9 files, +205/−31. An order of magnitude smaller than the others, and the outlier in every
+dimension. Approved by vlaindic.
 
 **Migration mechanics.** Completion path only. There is **no enter hook**: marker packet injection
 stays inline in the write interceptor, gated on `pc_sampling::is_pc_sample_service_configured()`.
@@ -266,10 +269,10 @@ contexts, needs no provenance because it contributes nothing to `inst_pkt`, and 
 `is_any_active()`. Its gate is `is_configured_on_agent(agent_id)` — the only **per-agent** gate of
 the four. `queue_id` is dropped from the PC sampling types.
 
-**Replay integration.** PC sampling does **not** consult `local_context_override()`. A local start or
-stop naming a PC sampling context returns `ROCPROFILER_STATUS_SUCCESS` and changes nothing, because
-the override map is service-agnostic and the sampler is agent-wide rather than per-dispatch. Its own
-unit test enshrines this as intended:
+**Replay integration.** PC sampling does **not** consult `local_context_override()`. A local start
+or stop naming a PC sampling context returns `ROCPROFILER_STATUS_SUCCESS` and changes nothing,
+because the override map is service-agnostic and the sampler is agent-wide rather than per-dispatch.
+Its own unit test enshrines this as intended:
 
 ```cpp
 // PC sampling is agent-wide and does not consult local_context_override(). A recorded
@@ -277,12 +280,12 @@ unit test enshrines this as intended:
 // sampler's enabled flag.
 ```
 
-**Engineering tradeoffs.** The service is agent-wide and continuous, so there is nothing per-dispatch
-to arm or disarm — the per-agent gate is the correct granularity and the absence of an enter hook is
-not an omission. The costs are two. First, the marker is injected whenever the service is
-*configured* on an agent, even while it is stopped, so a configured-but-inactive sampler still forces
-interception. Second, a tool cannot express "sample on pass 0 only", and gets no diagnostic saying
-so — the call succeeds. That silence is the sharpest edge in the whole per-pass design and is
+**Engineering tradeoffs.** The service is agent-wide and continuous, so there is nothing
+per-dispatch to arm or disarm — the per-agent gate is the correct granularity and the absence of an
+enter hook is not an omission. The costs are two. First, the marker is injected whenever the service
+is *configured* on an agent, even while it is stopped, so a configured-but-inactive sampler still
+forces interception. Second, a tool cannot express "sample on pass 0 only", and gets no diagnostic
+saying so — the call succeeds. That silence is the sharpest edge in the whole per-pass design and is
 discussed in section 5.
 
 The symmetry is worth naming: PC sampling is the outlier in the migration *and* in replay
@@ -290,9 +293,9 @@ integration, for the same underlying reason. It is a sampler, not a per-dispatch
 refactors surface the same fault line.
 
 **Open review items.** vlaindic asked for validation on MI300A, which has not run for want of
-hardware and remains recommended before merge. A suggestion for a single "master hook" dispatching to
-per-service hooks was left open as a design note rather than adopted; the composed branch calls the
-four hooks explicitly.
+hardware and remains recommended before merge. A suggestion for a single "master hook" dispatching
+to per-service hooks was left open as a design note rather than adopted; the composed branch calls
+the four hooks explicitly.
 
 ### 3.4 SPM — [#8887](https://github.com/ROCm/rocm-systems/pull/8887)
 
@@ -319,17 +322,17 @@ making the *gate* agent-aware did not.
 **Open review items.** Ben Welton's `CHANGES_REQUESTED` (2026-07-23) raised two issues. The first,
 in-flight completions dropped at stop, is addressed by
 [#10098](https://github.com/ROCm/rocm-systems/pull/10098), merged into the branch tip. The second is
-narrower and appears unresolved: a **serialization gap during the stop drain**. `write_hook` gates on
-active contexts, which empties before `disable_serialization()` runs, so dispatches submitted during
-the drain window bypass SPM serialization. The suggested fix is a "draining" state keeping SPM
-visible to the enter hook until sync and disable both complete. Neither review has been revisited
-since the fixes landed.
+narrower and appears unresolved: a **serialization gap during the stop drain**. `write_hook` gates
+on active contexts, which empties before `disable_serialization()` runs, so dispatches submitted
+during the drain window bypass SPM serialization. The suggested fix is a "draining" state keeping
+SPM visible to the enter hook until sync and disable both complete. Neither review has been
+revisited since the fixes landed.
 
 ## 4. How replay drives the migrated hooks
 
 The replay window lives in the write interceptor. There is no replay worker thread: a replayed
-dispatch expands synchronously, on the submitting thread, into a drain, a device memory snapshot, and
-a loop of passes with a restore between them.
+dispatch expands synchronously, on the submitting thread, into a drain, a device memory snapshot,
+and a loop of passes with a restore between them.
 
 ```mermaid
 flowchart TB
@@ -361,12 +364,13 @@ Three properties of that loop matter for the migrated hooks.
 `process_packet_batch`, and each pass is a separate submit. So a four-pass dispatch runs
 `counters::kernel_dispatch_phase_enter_hook` four times, creates four instrumentation packets, and
 produces four `packet_return_map` entries. This is what raises the stakes on the enter/exit
-convention from section 2: a dropped completion costs one record without replay, and N leaked packets
-plus a silently missing counter group with it. The replay loop's drain waits then escalate the
-failure rather than absorbing it: `replay_wait_or_fatal` warns each ~5 second slice and aborts the
-process after ~60 seconds, so a stall on the completion path becomes a hard failure instead of silent
-data loss. That is the deliberate beta convention — abort rather than proceed on questionable state —
-and it means a routing regression in any of the four exit hooks surfaces as a killed application.
+convention from section 2: a dropped completion costs one record without replay, and N leaked
+packets plus a silently missing counter group with it. The replay loop's drain waits then escalate
+the failure rather than absorbing it: `replay_wait_or_fatal` warns each ~5 second slice and aborts
+the process after ~60 seconds, so a stall on the completion path becomes a hard failure instead of
+silent data loss. That is the deliberate beta convention — abort rather than proceed on questionable
+state — and it means a routing regression in any of the four exit hooks surfaces as a killed
+application.
 
 **One logical dispatch keeps one identity.** A single `reserved_dispatch_id` is minted before the
 CONFIG callback and threaded through every pass, so CONFIG, all N passes, and every record share one
@@ -376,12 +380,12 @@ view: one dispatch, one completion. From the tool's: N record sets distinguished
 with no cross-run join key needed.
 
 **The per-agent lock and service serialization are different mechanisms.** `agent_replay_mutex()`
-returns a `std::shared_mutex` per agent. The replaying thread holds it in write mode across the whole
-drain-snapshot-passes-restore-completion window; non-replay dispatches take it shared. That protects
-*memory snapshot isolation*. The `enable_serialization()` that counters, SPM and ATT call at context
-start governs *packet ordering on the queue*. They compose rather than overlap, and the replayed
-measurement is taken under both — which is why counters collected under replay are measured with
-concurrent kernel execution suppressed, and are not directly comparable to a natural run for
+returns a `std::shared_mutex` per agent. The replaying thread holds it in write mode across the
+whole drain-snapshot-passes-restore-completion window; non-replay dispatches take it shared. That
+protects *memory snapshot isolation*. The `enable_serialization()` that counters, SPM and ATT call
+at context start governs *packet ordering on the queue*. They compose rather than overlap, and the
+replayed measurement is taken under both — which is why counters collected under replay are measured
+with concurrent kernel execution suppressed, and are not directly comparable to a natural run for
 occupancy or cache-contention metrics.
 
 ## 5. Localized context control: the integration point
@@ -389,8 +393,8 @@ occupancy or cache-contention metrics.
 Per-pass control is a thread-local override map, not a mutation of context state. Two nested scopes:
 
 - **Loop scope** — `scoped_local_context_control` installs the map for the duration of one replay
-  loop, so services can query it while a pass dispatches. Overrides are *sticky*: set on pass 0, they
-  persist through pass 3 unless changed.
+  loop, so services can query it while a pass dispatches. Overrides are *sticky*: set on pass 0,
+  they persist through pass 3 unless changed.
 - **Arm window** — `set_toggles_armed()` makes `replay_local_start_context` and
   `replay_local_stop_context` legal only while the tool's PASS_ENTER callback is running. A stray
   call outside either scope fails and records nothing.
@@ -398,13 +402,13 @@ Per-pass control is a thread-local override map, not a mutation of context state
 Two consequences deserve to be stated plainly, because both are load-bearing and neither is obvious
 from the code.
 
-**`get_active_contexts()` is never modified.** Global context state is immutable for the whole replay
-window, which is exactly what keeps other threads unaffected — the property the registry could not
-provide. Filtering happens *inside* the consumer.
+**`get_active_contexts()` is never modified.** Global context state is immutable for the whole
+replay window, which is exactly what keeps other threads unaffected — the property the registry
+could not provide. Filtering happens *inside* the consumer.
 
-**Therefore every consumer must individually opt in.** Filtering at the consumer is safe but requires
-all N consumers to be updated; filtering at the dispatcher would be uniform but global. This design
-chose the former, and the cost is precisely measurable as the table below.
+**Therefore every consumer must individually opt in.** Filtering at the consumer is safe but
+requires all N consumers to be updated; filtering at the dispatcher would be uniform but global.
+This design chose the former, and the cost is precisely measurable as the table below.
 
 ### Which services honor the override
 
@@ -422,9 +426,9 @@ chose the former, and the cost is precisely measurable as the table below.
 Two things changed on [#7960](https://github.com/ROCm/rocm-systems/pull/7960) after
 [#10193](https://github.com/ROCm/rocm-systems/pull/10193)'s replay layer was derived:
 
-1. **SPM was wired up**, with `spm/tests/local_context.cpp` alongside equivalents for counters, thread
-   trace and PC sampling. [#10193](https://github.com/ROCm/rocm-systems/pull/10193) carries only
-   `kernel_replay/tests/local_context_test.cpp`.
+1. **SPM was wired up**, with `spm/tests/local_context.cpp` alongside equivalents for counters,
+   thread trace and PC sampling. [#10193](https://github.com/ROCm/rocm-systems/pull/10193) carries
+   only `kernel_replay/tests/local_context_test.cpp`.
 2. **A local start can no longer promote a globally stopped context.** On
    [#10193](https://github.com/ROCm/rocm-systems/pull/10193) counters assigns `enabled = *ov`, so a
    local start turns on a context the tool had globally stopped — whose callback thread may already
@@ -474,8 +478,8 @@ because the current failure mode is a tool silently collecting the wrong thing.
 
 ### Merge order
 
-The four PRs are all based on `develop` and conflict only in `hsa/queue.cpp` and `client_ids.hpp`, at
-four textual sites: the include block, the completion block in `AsyncSignalHandler`, the
+The four PRs are all based on `develop` and conflict only in `hsa/queue.cpp` and `client_ids.hpp`,
+at four textual sites: the include block, the completion block in `AsyncSignalHandler`, the
 `no_real_consumers` gate, and the `should_batch_packets` guard. `client_ids.hpp` is byte-identical
 across the copies and merges silently. The suggested order is
 **[#8895](https://github.com/ROCm/rocm-systems/pull/8895) →
@@ -485,8 +489,8 @@ across the copies and merges silently. The suggested order is
 
 The one asymmetry a reviewer of the composed gate should expect is that `no_real_consumers` becomes
 an AND of three global negations and one per-agent negation, because PC sampling's predicate is
-per-agent. That is not an inconsistency to normalize away — it reflects a real difference in what the
-services are.
+per-agent. That is not an inconsistency to normalize away — it reflects a real difference in what
+the services are.
 
 ### Consolidation worth doing
 
