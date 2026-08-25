@@ -152,6 +152,11 @@ private:
     void               notify_pause(scope event_scope);
     void               notify_resume(scope event_scope);
 
+    [[nodiscard]] std::vector<std::function<void()>> collect_pause_callbacks(
+        scope event_scope);
+    [[nodiscard]] std::vector<std::function<void()>> collect_resume_callbacks(
+        scope event_scope);
+
     /// Applies @p mutate to the scoped action map under lock, recomputes
     /// that scope's active state, and broadcasts if it changed. Shared by
     /// register_trigger(), unregister_trigger(), and set_action().
