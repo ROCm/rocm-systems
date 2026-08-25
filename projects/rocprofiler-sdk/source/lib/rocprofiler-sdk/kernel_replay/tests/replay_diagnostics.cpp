@@ -39,6 +39,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -517,22 +519,19 @@ TEST(kernel_replay_diagnostics, replay_window_marker_tracks_enter_and_exit)
 
     enter_replay_window(agent_a);
     EXPECT_TRUE(in_replay_window(agent_a));
-    EXPECT_FALSE(replay_reentrancy_observed()) << "entering must clear the previous window's flag";
+    EXPECT_FALSE(replay_reentrancy_observed(agent_a)) << "a new window starts clean";
 
-    note_replay_reentrancy();
-    EXPECT_TRUE(replay_reentrancy_observed());
+    note_replay_reentrancy(agent_a);
+    EXPECT_TRUE(replay_reentrancy_observed(agent_a));
 
-    exit_replay_window();
+    exit_replay_window(agent_a);
     EXPECT_FALSE(in_replay_window(agent_a));
 
-    // The flag survives the exit so the outcome record, written after the window closes, can still
-    // report it.
-    EXPECT_TRUE(replay_reentrancy_observed());
-
-    // ...and a new window starts clean, so one dispatch's reentrancy is not attributed to the next.
+    // A later window on the same agent starts clean, so one dispatch's reentrancy is not attributed
+    // to the next.
     enter_replay_window(agent_a);
-    EXPECT_FALSE(replay_reentrancy_observed());
-    exit_replay_window();
+    EXPECT_FALSE(replay_reentrancy_observed(agent_a));
+    exit_replay_window(agent_a);
 }
 
 // The marker is agent-scoped, and this is load-bearing rather than cosmetic. A tool callback that
@@ -548,7 +547,97 @@ TEST(kernel_replay_diagnostics, replay_window_marker_is_agent_scoped)
     EXPECT_FALSE(in_replay_window(agent_b))
         << "a window on one agent must not suppress locking on another agent";
 
-    exit_replay_window();
+    exit_replay_window(agent_a);
+    EXPECT_FALSE(in_replay_window(agent_a));
+}
+
+// Windows nest across agents, and closing the inner one must not close the outer one. A callback
+// running inside agent A's window may launch on agent B; a replay request there is *not* declined
+// (it contends for a different mutex), so a second window opens on this same thread. If the marker
+// held one value, exiting B's window would erase this thread's record of A's, and the next dispatch
+// on A would take the reader lock while this thread still holds A's writer lock -- an untimed,
+// unkillable block. Only reachable on multi-GPU runs, so it is asserted here rather than found
+// there.
+TEST(kernel_replay_diagnostics, an_inner_window_on_another_agent_does_not_close_the_outer_one)
+{
+    enter_replay_window(agent_a);
+    ASSERT_TRUE(in_replay_window(agent_a));
+
+    enter_replay_window(agent_b);
+    EXPECT_TRUE(in_replay_window(agent_b));
+    EXPECT_TRUE(in_replay_window(agent_a)) << "the enclosing window must remain visible";
+
+    exit_replay_window(agent_b);
+    EXPECT_FALSE(in_replay_window(agent_b));
+    EXPECT_TRUE(in_replay_window(agent_a))
+        << "closing the inner window must leave the enclosing one open; otherwise the next "
+           "dispatch "
+           "on the outer agent blocks forever on a lock this thread already holds";
+
+    exit_replay_window(agent_a);
+    EXPECT_FALSE(in_replay_window(agent_a));
+}
+
+// Reentrancy is attributed to the window it happened in. Agent B's window completing cleanly must
+// not clear the flag that says agent A's counters are untrustworthy, and must not inherit it either
+// -- each dispatch's outcome line has to describe that dispatch.
+TEST(kernel_replay_diagnostics, reentrancy_is_recorded_against_the_window_it_happened_in)
+{
+    enter_replay_window(agent_a);
+    note_replay_reentrancy(agent_a);
+
+    enter_replay_window(agent_b);
+    EXPECT_FALSE(replay_reentrancy_observed(agent_b))
+        << "an inner window must not inherit the enclosing window's reentrancy";
+    EXPECT_TRUE(replay_reentrancy_observed(agent_a));
+
+    exit_replay_window(agent_b);
+    EXPECT_TRUE(replay_reentrancy_observed(agent_a))
+        << "an inner window closing must not clear the enclosing window's reentrancy";
+
+    exit_replay_window(agent_a);
+}
+
+// Nesting is bounded by the agent count rather than fixed at two, so the same invariants have to
+// hold at depth. Every enclosing window stays visible until it is closed, innermost first.
+TEST(kernel_replay_diagnostics, windows_nest_to_the_depth_of_the_agent_count)
+{
+    constexpr auto agents = std::array<rocprofiler_agent_id_t, 4>{
+        rocprofiler_agent_id_t{.handle = 101},
+        rocprofiler_agent_id_t{.handle = 102},
+        rocprofiler_agent_id_t{.handle = 103},
+        rocprofiler_agent_id_t{.handle = 104},
+    };
+
+    for(size_t i = 0; i < agents.size(); ++i)
+    {
+        enter_replay_window(agents.at(i));
+        for(size_t j = 0; j <= i; ++j)
+            EXPECT_TRUE(in_replay_window(agents.at(j))) << "depth " << i << ", agent index " << j;
+    }
+
+    for(size_t i = agents.size(); i-- > 0;)
+    {
+        exit_replay_window(agents.at(i));
+        EXPECT_FALSE(in_replay_window(agents.at(i)));
+        for(size_t j = 0; j < i; ++j)
+            EXPECT_TRUE(in_replay_window(agents.at(j))) << "unwinding at " << i << ", agent " << j;
+    }
+}
+
+// Closing a window that was never opened must not corrupt the stack. Reachable if a guard is
+// destroyed after finalization has already torn the thread's state down.
+TEST(kernel_replay_diagnostics, exiting_without_a_matching_window_is_harmless)
+{
+    ASSERT_FALSE(in_replay_window(agent_a));
+
+    EXPECT_NO_THROW(exit_replay_window(agent_a));
+    EXPECT_FALSE(in_replay_window(agent_a));
+
+    // ...and the marker still works afterwards.
+    enter_replay_window(agent_a);
+    EXPECT_TRUE(in_replay_window(agent_a));
+    exit_replay_window(agent_a);
     EXPECT_FALSE(in_replay_window(agent_a));
 }
 
@@ -563,7 +652,7 @@ TEST(kernel_replay_diagnostics, replay_window_marker_handles_a_zero_agent_handle
     EXPECT_TRUE(in_replay_window(agent_zero));
     EXPECT_FALSE(in_replay_window(agent_a));
 
-    exit_replay_window();
+    exit_replay_window(agent_zero);
     EXPECT_FALSE(in_replay_window(agent_zero));
 }
 
@@ -582,7 +671,40 @@ TEST(kernel_replay_diagnostics, replay_window_marker_is_thread_scoped)
         << "a replay window on one thread must not be visible to another; that thread's dispatches "
            "would skip the per-agent replay lock and write into the snapshot window";
 
-    exit_replay_window();
+    exit_replay_window(agent_a);
+}
+
+// Two threads replaying two agents concurrently is the normal multi-GPU case. Each thread's stack
+// has to be its own, or one thread's exit would make the other's dispatches take a lock it holds.
+TEST(kernel_replay_diagnostics, concurrent_windows_on_separate_threads_do_not_interfere)
+{
+    constexpr int    thread_count = 8;
+    std::atomic<int> failures{0};
+
+    auto worker = [&](uint64_t handle) {
+        const auto mine  = rocprofiler_agent_id_t{.handle = handle};
+        const auto other = rocprofiler_agent_id_t{.handle = handle + thread_count};
+
+        for(int iter = 0; iter < 200; ++iter)
+        {
+            enter_replay_window(mine);
+            if(!in_replay_window(mine)) ++failures;
+            if(in_replay_window(other)) ++failures;
+            note_replay_reentrancy(mine);
+            if(!replay_reentrancy_observed(mine)) ++failures;
+            exit_replay_window(mine);
+            if(in_replay_window(mine)) ++failures;
+        }
+    };
+
+    auto threads = std::vector<std::thread>{};
+    threads.reserve(thread_count);
+    for(int i = 0; i < thread_count; ++i)
+        threads.emplace_back(worker, static_cast<uint64_t>(1000 + i));
+    for(auto& thr : threads)
+        thr.join();
+
+    EXPECT_EQ(failures.load(), 0);
 }
 
 // The explanatory message is long, and a tool that launches a kernel from a PASS callback launches
@@ -716,4 +838,184 @@ TEST(kernel_replay_vmem_accounting, a_live_mapping_declines_under_the_default_po
     EXPECT_EQ(
         check_untracked(memory_tracker::untracked_device_memory(vmem_agent), replay_policy_t{}),
         decline_reason::none);
+}
+
+// ------------------------- restore identity gate -------------------------
+//
+// region_is_restorable() decides whether restore() may write a captured region back. It is the one
+// predicate in kernel replay whose failure mode is corrupting the profiled application rather than
+// producing a bad measurement, and it takes the inventory by reference, so every case below is
+// reachable without a GPU: build the map the racing thread would have left behind and ask.
+//
+// The asymmetry to preserve: refusing to restore a region that was in fact still ours costs
+// accuracy on later passes, and is reported. Restoring into an allocation that is *not* ours writes
+// stale bytes into live application data and is reported nowhere. So every ambiguous case must
+// answer false.
+
+namespace
+{
+constexpr auto snap_agent = hsa_agent_t{.handle = 0xF00D3};
+
+void*
+region_addr(uintptr_t offset)
+{
+    return reinterpret_cast<void*>(uintptr_t{0x200000000} + offset);
+}
+
+memory_tracker::tracked_map_t
+inventory_with(void* ptr, size_t size, uint64_t generation)
+{
+    auto map = memory_tracker::tracked_map_t{};
+    map.emplace(ptr, memory_tracker::alloc_info_t{size, snap_agent, generation});
+    return map;
+}
+}  // namespace
+
+TEST(kernel_replay_restore_gate, the_captured_allocation_is_restorable)
+{
+    auto*      ptr = region_addr(0x0);
+    const auto map = inventory_with(ptr, 4 * kMiB, 7);
+
+    EXPECT_TRUE(memory_snapshot::region_is_restorable(map, ptr, 4 * kMiB, 7));
+}
+
+// The allocation was freed during the window and nothing took its place. Writing to it would touch
+// retired device memory.
+TEST(kernel_replay_restore_gate, a_freed_allocation_is_not_restorable)
+{
+    auto*      ptr = region_addr(0x1000);
+    const auto map = memory_tracker::tracked_map_t{};
+
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(map, ptr, 4 * kMiB, 7));
+}
+
+// The load-bearing case. The allocation was freed and a *different* one was handed back at the same
+// base address, which is the normal behaviour of a caching or pooling allocator rather than an
+// exotic race. Base and size both still match, so only the generation separates them.
+TEST(kernel_replay_restore_gate, an_address_reused_by_a_different_allocation_is_not_restorable)
+{
+    auto* ptr = region_addr(0x2000);
+
+    // Same base, same size, later generation: a new allocation wearing the old one's address.
+    const auto map = inventory_with(ptr, 4 * kMiB, 8);
+
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(map, ptr, 4 * kMiB, 7))
+        << "restoring here would write a dead buffer's bytes over live application data";
+}
+
+// A generation is monotonic, never reissued, so a *lower* generation at the same address is equally
+// not the region that was captured. Asserted separately because an ordering comparison would pass
+// the reuse test above and fail this one.
+TEST(kernel_replay_restore_gate, a_lower_generation_at_the_same_address_is_not_restorable)
+{
+    auto*      ptr = region_addr(0x2800);
+    const auto map = inventory_with(ptr, 4 * kMiB, 6);
+
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(map, ptr, 4 * kMiB, 7));
+}
+
+// Reallocated smaller at the same base. The snapshot holds more bytes than the allocation now has,
+// so copying it back would run past the end.
+TEST(kernel_replay_restore_gate, a_shrunk_allocation_is_not_restorable)
+{
+    auto*      ptr = region_addr(0x3000);
+    const auto map = inventory_with(ptr, kMiB, 7);
+
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(map, ptr, 4 * kMiB, 7));
+}
+
+// Grown at the same base. The size check alone would admit this -- the recorded bytes do fit -- so
+// the generation is what rejects it. A grown allocation is a new allocation.
+TEST(kernel_replay_restore_gate, an_allocation_grown_at_the_same_base_is_not_restorable)
+{
+    auto*      ptr = region_addr(0x4000);
+    const auto map = inventory_with(ptr, 16 * kMiB, 9);
+
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(map, ptr, 4 * kMiB, 7))
+        << "the recorded bytes would fit, so only the generation stamp rejects this";
+}
+
+// Generation 0 means "any live allocation of at least this size", which is how module-scope
+// variables are handled: they live in the loaded executable and the tracker never stamps them.
+TEST(kernel_replay_restore_gate, generation_zero_accepts_any_live_allocation_of_that_size)
+{
+    auto*      ptr = region_addr(0x5000);
+    const auto map = inventory_with(ptr, 4 * kMiB, 123);
+
+    EXPECT_TRUE(memory_snapshot::region_is_restorable(map, ptr, 4 * kMiB, 0));
+    EXPECT_TRUE(memory_snapshot::region_is_restorable(map, ptr, kMiB, 0))
+        << "a prefix of a larger live allocation is still within it";
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(map, ptr, 8 * kMiB, 0))
+        << "the size check still applies without a generation";
+}
+
+// A tracked allocation is never stamped 0, so a tracked region cannot silently fall through to the
+// weaker generation-0 check. This is what keeps the module-variable escape hatch from becoming a
+// hole in the ABA gate.
+TEST(kernel_replay_restore_gate, a_tracked_allocation_is_never_stamped_zero)
+{
+    auto*      ptr = region_addr(0x6000);
+    const auto map = inventory_with(ptr, 4 * kMiB, 0);
+
+    // If a generation of 0 ever reached the map, this is the check that would misfire: a region
+    // captured at generation 7 would match an unstamped record.
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(map, ptr, 4 * kMiB, 7));
+}
+
+// Interior pointers are not restorable: the inventory is keyed on the allocation base, and an
+// address partway into a region names no record. restore() only ever asks about bases it captured,
+// so this asserts the lookup is exact rather than nearest.
+TEST(kernel_replay_restore_gate, an_interior_pointer_names_no_region)
+{
+    auto* base = region_addr(0x7000);
+    auto* mid  = static_cast<void*>(static_cast<char*>(base) + kMiB);
+
+    const auto map = inventory_with(base, 4 * kMiB, 7);
+
+    EXPECT_TRUE(memory_snapshot::region_is_restorable(map, base, 4 * kMiB, 7));
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(map, mid, kMiB, 7));
+}
+
+// A zero-length request is admitted for a live matching region (snap() drops empty regions before
+// this point, so the answer only has to be harmless, not meaningful) but still rejected once the
+// allocation is gone.
+TEST(kernel_replay_restore_gate, a_zero_length_region_follows_the_liveness_of_its_base)
+{
+    auto* ptr = region_addr(0x8000);
+
+    EXPECT_TRUE(memory_snapshot::region_is_restorable(inventory_with(ptr, 4 * kMiB, 7), ptr, 0, 7));
+    EXPECT_FALSE(memory_snapshot::region_is_restorable(memory_tracker::tracked_map_t{}, ptr, 0, 7));
+}
+
+// Every distinct way an address can stop naming the captured allocation, in one place, so a future
+// change to the predicate has to keep answering false for all of them.
+TEST(kernel_replay_restore_gate, every_ambiguous_case_answers_false)
+{
+    auto*          ptr           = region_addr(0x9000);
+    constexpr auto captured_size = 4 * kMiB;
+    constexpr auto captured_gen  = uint64_t{42};
+
+    struct case_t
+    {
+        const char*                   what;
+        memory_tracker::tracked_map_t map;
+    };
+
+    auto cases = std::vector<case_t>{};
+    cases.push_back({"freed", memory_tracker::tracked_map_t{}});
+    cases.push_back({"reused at the same size", inventory_with(ptr, captured_size, 43)});
+    cases.push_back({"reused at a smaller size", inventory_with(ptr, kMiB, 43)});
+    cases.push_back({"reused at a larger size", inventory_with(ptr, 16 * kMiB, 43)});
+    cases.push_back({"shrunk in place", inventory_with(ptr, kMiB, captured_gen)});
+    cases.push_back({"unstamped", inventory_with(ptr, captured_size, 0)});
+    cases.push_back({"a different address entirely",
+                     inventory_with(region_addr(0xA000), captured_size, captured_gen)});
+
+    for(const auto& c : cases)
+        EXPECT_FALSE(memory_snapshot::region_is_restorable(c.map, ptr, captured_size, captured_gen))
+            << c.what;
+
+    // ...and the one case that must answer true, so the test cannot pass by always refusing.
+    EXPECT_TRUE(memory_snapshot::region_is_restorable(
+        inventory_with(ptr, captured_size, captured_gen), ptr, captured_size, captured_gen));
 }
