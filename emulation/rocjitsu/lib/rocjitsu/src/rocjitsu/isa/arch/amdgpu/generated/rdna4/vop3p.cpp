@@ -2074,12 +2074,11 @@ VSwmmacF3216x16x32F16Vop3p::VSwmmacF3216x16x32F16Vop3p(const MachineInst *inst)
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2112,12 +2111,11 @@ VSwmmacF3216x16x32Bf16Vop3p::VSwmmacF3216x16x32Bf16Vop3p(const MachineInst *inst
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2150,12 +2148,11 @@ VSwmmacF1616x16x32F16Vop3p::VSwmmacF1616x16x32F16Vop3p(const MachineInst *inst)
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2188,12 +2185,11 @@ VSwmmacBf1616x16x32Bf16Vop3p::VSwmmacBf1616x16x32Bf16Vop3p(const MachineInst *in
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2226,12 +2222,11 @@ VSwmmacI3216x16x32Iu8Vop3p::VSwmmacI3216x16x32Iu8Vop3p(const MachineInst *inst)
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2264,12 +2259,11 @@ VSwmmacI3216x16x32Iu4Vop3p::VSwmmacI3216x16x32Iu4Vop3p(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2302,12 +2296,11 @@ VSwmmacI3216x16x64Iu4Vop3p::VSwmmacI3216x16x64Iu4Vop3p(const MachineInst *inst)
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2340,12 +2333,11 @@ VSwmmacF3216x16x32Fp8Fp8Vop3p::VSwmmacF3216x16x32Fp8Fp8Vop3p(const MachineInst *
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2378,12 +2370,11 @@ VSwmmacF3216x16x32Fp8Bf8Vop3p::VSwmmacF3216x16x32Fp8Bf8Vop3p(const MachineInst *
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2416,12 +2407,11 @@ VSwmmacF3216x16x32Bf8Fp8Vop3p::VSwmmacF3216x16x32Bf8Fp8Vop3p(const MachineInst *
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2454,12 +2444,11 @@ VSwmmacF3216x16x32Bf8Bf8Vop3p::VSwmmacF3216x16x32Bf8Bf8Vop3p(const MachineInst *
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 

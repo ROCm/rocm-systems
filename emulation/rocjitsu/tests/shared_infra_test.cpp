@@ -3089,7 +3089,7 @@ struct Gfx1250DppTraits {
   static void set_aligned_vop3p_opsel(Vop3pVopDpp16MachineInst &raw) {
     raw.opsel = 0;
     raw.opsel_hi = 0x3;
-    raw.pad_14 = 1;
+    raw.opsel_hi_2 = 1;
   }
 };
 
