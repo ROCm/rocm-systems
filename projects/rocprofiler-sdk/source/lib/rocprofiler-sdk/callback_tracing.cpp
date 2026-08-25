@@ -165,6 +165,14 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     // context may own it process-wide. Reject a second subscriber instead of silently sharing the
     // planner -- otherwise pass_count_cb is last-writer-wins and one tool's user_data is delivered
     // to another. Checked before mutating ctx so a rejection leaves it unconfigured.
+    //
+    // This check and the set_replay_service_configured() below are deliberately not atomic with
+    // respect to each other. They do not need to be: the get_init_status() > -1 guard at the top of
+    // this function restricts every configure call to the single-threaded tool configuration phase,
+    // before rocprofiler_initialize() returns. Two threads cannot both pass this check, because
+    // there is only one thread here. If configuration ever becomes callable concurrently, this pair
+    // has to become a compare-exchange on a dedicated owner handle -- the registry walk below is
+    // not something a CAS can cover on its own.
     if(kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY &&
        rocprofiler::kernel_replay::has_registered_replay_context())
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
