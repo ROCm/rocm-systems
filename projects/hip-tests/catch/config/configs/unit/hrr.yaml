@@ -192,7 +192,7 @@ hrr:
   Unit_HRR_ZeroInitRoundtrip:
     <<: *level_2
     # Enabled only on gfx950; skipped on other compile-time arches/platforms.
-    disabled: [gfx900, gfx906, gfx908, gfx90a, gfx942, gfx1010, gfx1011, gfx1012, gfx1030, gfx1031, gfx1032, gfx1035, gfx1036, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201, gfx1202, gfx1250, amdgcnspirv, windows, linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    disabled: [amd_windows, amd_linux, amd_wsl]
     tags: [capture, playback, roundtrip, repro]
   Unit_HRR_DivergenceAbortRoundtrip:
     <<: *level_2
