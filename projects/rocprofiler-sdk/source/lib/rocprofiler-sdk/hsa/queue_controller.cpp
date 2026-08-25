@@ -486,8 +486,7 @@ QueueController::update_serialization(const agent_handle_set_t& agents, bool ena
                     auto itr = was_enabled.find(agent_id);
                     if(itr == was_enabled.end()) continue;
                     bool now_enabled = state.enabled(agent_id);
-                    if(itr->second != now_enabled)
-                        transitioned.emplace_back(agent_id, now_enabled);
+                    if(itr->second != now_enabled) transitioned.emplace_back(agent_id, now_enabled);
                 }
             });
 
