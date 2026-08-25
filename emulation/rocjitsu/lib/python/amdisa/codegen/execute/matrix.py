@@ -307,6 +307,10 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     uses_supported_swmmac_layout = swmmac_layout is not SwmmacLayout.NONE
     uses_fixed_wave_swmmac_layout = swmmac_layout is SwmmacLayout.FIXED_WAVE
     uses_runtime_wave_swmmac_layout = swmmac_layout is SwmmacLayout.RUNTIME_WAVE
+    # Fixed-wave OPSEL bits are matrix-reuse hints, not sparse index selectors.
+    swmmac_index_key_expr = (
+        '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x1u'
+    )
     uses_fixed_wave32_split_k_dense_layout = (
         matrix_layout is MatrixLayout.WMMA_SPLIT_K
         and ctx.profile.wave_size == 32
@@ -350,12 +354,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(f'  if (!index_off)')
             L.append(f'    throw util::UnimplementedInst(mnemonic());')
             L.append(f'  uint32_t index_base = vb + *index_off;')
-            if uses_fixed_wave_swmmac_layout:
-                # CDNA5 OPSEL bits are RA/RB matrix-reuse hints, not sparse
-                # index-set selectors. The K128 index payload contains one set.
-                L.append(f'  uint32_t index_key = 0u;')
-            else:
-                L.append(f'  uint32_t index_key = inst_.opsel & 0x1u;')
+            L.append(f'  uint32_t index_key = {swmmac_index_key_expr};')
             index_base_expr = 'index_base'
             index_key_expr = 'index_key'
         else:
@@ -398,7 +397,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             L.append(
                 f'  uint32_t index_base = amdgpu::src_base(vb, {s2}.encoding_value_);'
             )
-            L.append(f'  uint32_t index_key = inst_.opsel & 0x1u;')
+            L.append(f'  uint32_t index_key = {swmmac_index_key_expr};')
             index_base_expr = 'index_base'
             index_key_expr = 'index_key'
         else:

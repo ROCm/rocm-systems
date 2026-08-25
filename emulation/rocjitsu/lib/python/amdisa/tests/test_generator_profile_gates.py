@@ -1983,14 +1983,17 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
         ('V_SWMMAC_F32_16X16X32_F16', 'exec_swmmac_f32'),
     ],
 )
+@pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
 def test_fixed_wave_swmmac_layout_selects_sparse_executor_without_arch_name(
     mnemonic,
     callee,
+    uses_vgpr_msb_indexing,
 ):
     body = _gen_mfma(
         Instruction(mnemonic, 'ENC_VOP3P', 0, []),
         'renamed_fixed_wave_arch',
         _matrix_profile(
+            uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
             swmmac_layout=SwmmacLayout.FIXED_WAVE,
             matrix_layout=MatrixLayout.WMMA_SPLIT_K,
             wave_size=32,
@@ -2000,7 +2003,8 @@ def test_fixed_wave_swmmac_layout_selects_sparse_executor_without_arch_name(
     call = _generated_matrix_call(body, callee)
 
     assert ('dst, src0_base, src1_base, s2, index_base,') in call
-    assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
+    assert 'uint32_t index_key = 0u;' in body
+    assert 'uint32_t index_key = inst_.opsel & 0x1u;' not in body
     assert 'wf.wf_size()' not in call
 
 
@@ -2059,11 +2063,15 @@ def test_runtime_wave_split_k_dense_layout_does_not_depend_on_arch_name():
     assert 'wf.wf_size()' in _generated_matrix_call(body, 'exec_wmma_f32')
 
 
-def test_runtime_wave_swmmac_destination_does_not_depend_on_arch_name():
+@pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
+def test_runtime_wave_swmmac_layout_does_not_depend_on_arch_name(
+    uses_vgpr_msb_indexing,
+):
     body = _gen_mfma(
         Instruction('V_SWMMAC_F32_16X16X32_F16', 'ENC_VOP3P', 0, []),
         'renamed_runtime_wave_split_k_arch',
         _matrix_profile(
+            uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
             swmmac_layout=SwmmacLayout.RUNTIME_WAVE,
             matrix_layout=MatrixLayout.WMMA_SPLIT_K,
             wave_size=32,
@@ -2071,7 +2079,14 @@ def test_runtime_wave_swmmac_destination_does_not_depend_on_arch_name():
         ),
     )
 
-    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    if uses_vgpr_msb_indexing:
+        assert (
+            'uint32_t dst = vb + *Isa::resolved_vgpr_offset('
+            'wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());'
+        ) in body
+    else:
+        assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
     assert 'amdgpu::exec_swmmac_f32(' in body
 
 
