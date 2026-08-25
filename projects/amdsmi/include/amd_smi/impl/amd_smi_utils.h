@@ -51,13 +51,6 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, uint
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq);
-// Parse a pp_od_clk_voltage stream for one clock domain's user-defined min/max.
-// Returns true (writing *max_freq/*min_freq) when the domain's section exists
-// and yields a nonzero max; false when the section is absent -- e.g. MI45x omits
-// OD_FCLK -- or reports only zero levels, so the caller falls back to pp_dpm_*.
-// Pure over a stream to keep the fallback path unit-testable.
-bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t domain,
-                                   unsigned int* max_freq, unsigned int* min_freq);
 amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
                                               uint64_t* enabled_blocks);
 amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, uint32_t* num_pages,

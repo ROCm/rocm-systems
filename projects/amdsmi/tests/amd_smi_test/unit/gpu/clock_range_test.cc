@@ -32,7 +32,7 @@
 #include <sstream>
 
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/amd_smi_utils.h"
+#include "amd_smi/impl/amd_smi_clk_testing.h"
 
 namespace {
 
@@ -82,6 +82,36 @@ constexpr char kOdFclkGarbageLine[] =
     "0: 1000Mhz\n"
     "not-a-level\n"
     "1: 1100Mhz\n";
+
+// "Old Format" layout: OD_FCLK is immediately followed by OD_VDDC_CURVE, whose
+// "idx: freq volt" lines resemble level lines and must not fold into the range.
+constexpr char kOdFclkThenCurve[] =
+    "OD_SCLK:\n"
+    "0: 500Mhz\n"
+    "1: 2100Mhz\n"
+    "OD_FCLK:\n"
+    "0: 1000Mhz\n"
+    "1: 1100Mhz\n"
+    "OD_VDDC_CURVE:\n"
+    "0: 500Mhz 700mV\n"
+    "1: 1354Mhz 860mV\n"
+    "2: 2000Mhz 1150mV\n";
+
+// Two OD_FCLK sections: levels from every occurrence merge into one range.
+constexpr char kOdFclkDuplicate[] =
+    "OD_FCLK:\n"
+    "0: 1000Mhz\n"
+    "1: 1100Mhz\n"
+    "OD_SCLK:\n"
+    "0: 500Mhz\n"
+    "OD_FCLK:\n"
+    "0: 900Mhz\n"
+    "1: 2000Mhz\n";
+
+// A single-level (locked-clock) section: min == max.
+constexpr char kOdFclkSingleLevel[] =
+    "OD_FCLK:\n"
+    "0: 1500Mhz\n";
 
 TEST(GpuUnit, OdClkRangeReadsSclkSection) {
   std::istringstream od(kOdNoFclk);
@@ -183,6 +213,38 @@ TEST(GpuUnit, OdClkRangeSkipsMalformedLineWithinSection) {
   EXPECT_TRUE(smi_amdgpu_parse_od_clk_range(od, AMDSMI_CLK_TYPE_DF, &max, &min));
   EXPECT_EQ(max, 1100u);
   EXPECT_EQ(min, 1000u);
+}
+
+// An unrecognized section header (OD_VDDC_CURVE) ends FCLK parsing, so its curve
+// lines are not mistaken for FCLK levels and do not inflate the max.
+TEST(GpuUnit, OdClkRangeStopsAtUnrecognizedSectionHeader) {
+  std::istringstream od(kOdFclkThenCurve);
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  EXPECT_TRUE(smi_amdgpu_parse_od_clk_range(od, AMDSMI_CLK_TYPE_DF, &max, &min));
+  EXPECT_EQ(max, 1100u);
+  EXPECT_EQ(min, 1000u);
+}
+
+// Repeated section headers merge: levels from every OD_FCLK occurrence feed one
+// range. No live sysfs file repeats a header; this pins the contract.
+TEST(GpuUnit, OdClkRangeMergesRepeatedSectionHeaders) {
+  std::istringstream od(kOdFclkDuplicate);
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  EXPECT_TRUE(smi_amdgpu_parse_od_clk_range(od, AMDSMI_CLK_TYPE_DF, &max, &min));
+  EXPECT_EQ(max, 2000u);
+  EXPECT_EQ(min, 900u);
+}
+
+// A single-level (locked-clock) section reports min == max.
+TEST(GpuUnit, OdClkRangeReadsSingleLevelSection) {
+  std::istringstream od(kOdFclkSingleLevel);
+  unsigned int max = 0;
+  unsigned int min = UINT_MAX;
+  EXPECT_TRUE(smi_amdgpu_parse_od_clk_range(od, AMDSMI_CLK_TYPE_DF, &max, &min));
+  EXPECT_EQ(max, 1500u);
+  EXPECT_EQ(min, 1500u);
 }
 
 }  // namespace
