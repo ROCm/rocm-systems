@@ -34,11 +34,17 @@
 namespace rocprofsys::backends::hipfile
 {
 
+namespace
+{
+constexpr unsigned long k_version_major_factor = 1000000UL;
+constexpr unsigned long k_version_minor_factor = 1000UL;
+}  // namespace
+
 /// @brief Collapse a version triple into one comparable number.
 [[nodiscard]] constexpr unsigned long
 version_ordinal(unsigned major, unsigned minor, unsigned patch) noexcept
 {
-    return (major * 1000000UL) + (minor * 1000UL) + patch;
+    return (major * k_version_major_factor) + (minor * k_version_minor_factor) + patch;
 }
 
 /// @brief First hipFile release exposing the per-GPU stats API this backend needs.

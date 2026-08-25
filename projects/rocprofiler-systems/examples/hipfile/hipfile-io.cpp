@@ -33,6 +33,11 @@
 
 namespace
 {
+constexpr int          k_default_gpu_id       = 0;
+constexpr int          k_default_duration_sec = 5;
+constexpr int          k_loop_sleep_ms        = 20;
+constexpr std::uint8_t k_buffer_fill_byte     = 0xAB;
+
 void
 print_usage(const char* program)
 {
@@ -97,8 +102,8 @@ int
 main(int argc, char** argv)
 {
     const char* path    = (argc > 1) ? argv[1] : "hipfile-io.bin";
-    int         gpu_id  = 0;
-    int         seconds = 5;
+    int         gpu_id  = k_default_gpu_id;
+    int         seconds = k_default_duration_sec;
 
     if(argc > 2 && !parse_int(argv[2], 0, gpu_id))
     {
@@ -131,7 +136,7 @@ main(int argc, char** argv)
         fprintf(stderr, "hipMalloc failed\n");
         return EXIT_FAILURE;
     }
-    (void) hipMemset(devbuf, 0xAB, bytes);
+    (void) hipMemset(devbuf, k_buffer_fill_byte, bytes);
 
     hipFileError_t err = hipFileBufRegister(devbuf, bytes, 0);
     if(err.err != hipFileSuccess)
@@ -190,7 +195,7 @@ main(int argc, char** argv)
             break;
         }
         ++iters;
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::this_thread::sleep_for(std::chrono::milliseconds(k_loop_sleep_ms));
     }
 
     printf("hipfile-io: completed %llu write+read iterations\n",

@@ -316,7 +316,7 @@ struct sample_processor_t
         }
     }
 
-    ROCPROFSYS_INLINE bool is_empty() const noexcept
+    [[nodiscard]] ROCPROFSYS_INLINE bool is_empty() const noexcept
     {
         return m_processor_view_list.empty();
     }

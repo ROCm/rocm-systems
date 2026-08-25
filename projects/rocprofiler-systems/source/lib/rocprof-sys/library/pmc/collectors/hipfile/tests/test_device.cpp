@@ -21,6 +21,60 @@ constexpr std::uint64_t TS_1       = 1 * NS_PER_SEC;
 constexpr std::uint64_t TS_2       = 2 * NS_PER_SEC;
 constexpr std::uint64_t TS_3       = 3 * NS_PER_SEC;
 
+namespace slot_bytes
+{
+constexpr std::uint64_t slot0 = 111;
+constexpr std::uint64_t slot4 = 999;
+constexpr std::uint64_t kb1   = 1000;
+constexpr std::uint64_t kb2p5 = 2500;
+constexpr std::uint64_t kb1p5 = 1500;
+constexpr std::uint64_t kb5   = 5000;
+constexpr std::uint64_t b100  = 100;
+constexpr std::uint64_t b200  = 200;
+constexpr std::uint64_t b300  = 300;
+constexpr std::uint64_t kb4   = 4096;
+constexpr std::uint64_t mb1   = 1'000'000;
+constexpr std::uint64_t kb2   = 2000;
+constexpr std::uint64_t mb2   = 2'000'000;
+constexpr std::uint64_t kb9   = 9'000;
+constexpr std::uint64_t kb4w  = 4'000;
+constexpr std::uint64_t b500  = 500;
+constexpr std::uint64_t kb10  = 10'000;
+}  // namespace slot_bytes
+
+namespace counter_values
+{
+constexpr std::uint64_t read_bytes       = 11;
+constexpr std::uint64_t write_bytes      = 22;
+constexpr std::uint64_t read_ops         = 33;
+constexpr std::uint64_t write_ops        = 44;
+constexpr std::uint64_t fastpath_reads   = 55;
+constexpr std::uint64_t fastpath_writes  = 66;
+constexpr std::uint64_t fallback_reads   = 77;
+constexpr std::uint64_t fallback_writes  = 88;
+constexpr std::uint64_t unaligned_reads  = 99;
+constexpr std::uint64_t unaligned_writes = 110;
+constexpr std::uint64_t read_errors      = 121;
+constexpr std::uint64_t write_errors     = 132;
+}  // namespace counter_values
+
+namespace attribution
+{
+constexpr std::uint64_t read_ops         = 100;
+constexpr std::uint64_t fastpath_reads   = 70;
+constexpr std::uint64_t fallback_reads   = 30;
+constexpr std::uint64_t read_ops_compat  = 40;
+constexpr std::uint64_t write_ops_compat = 20;
+}  // namespace attribution
+
+constexpr std::uint32_t k_remapped_profiler_index = 4;
+constexpr double        k_one_second_bandwidth    = 1000.0;
+constexpr double        k_half_second_bandwidth   = 500.0;
+constexpr double        k_two_megabyte_bandwidth  = 2'000'000.0;
+constexpr double        k_nine_kilobyte_bandwidth = 9'000.0;
+constexpr double        k_four_kilobyte_bandwidth = 4'000.0;
+constexpr double        k_five_kilobyte_bandwidth = 5000.0;
+
 class HipFileDeviceTest : public ::testing::Test
 {
 protected:
@@ -68,12 +122,12 @@ TEST_F(HipFileDeviceTest, all_metrics_supported_for_valid_ordinal)
 
 TEST_F(HipFileDeviceTest, metrics_are_read_from_the_hipfile_slot_not_the_profiler_index)
 {
-    m_backend->gpu(0).read_bytes = 111;
-    m_backend->gpu(4).read_bytes = 999;
+    m_backend->gpu(0).read_bytes = slot_bytes::slot0;
+    m_backend->gpu(4).read_bytes = slot_bytes::slot4;
 
-    device_t remapped{ m_backend, 0, 4 };
+    device_t remapped{ m_backend, 0, k_remapped_profiler_index };
 
-    EXPECT_EQ(remapped.get_metrics(m_enabled, TS_1).read_bytes, 111U);
+    EXPECT_EQ(remapped.get_metrics(m_enabled, TS_1).read_bytes, slot_bytes::slot0);
 }
 
 TEST_F(HipFileDeviceTest, ordinal_beyond_snapshot_supports_nothing)
@@ -90,74 +144,74 @@ TEST_F(HipFileDeviceTest, ordinal_beyond_snapshot_supports_nothing)
 
 TEST_F(HipFileDeviceTest, counters_are_cumulative_not_deltas)
 {
-    m_backend->gpu(0).read_bytes = 1000;
-    EXPECT_EQ(sample(TS_1).read_bytes, 1000U);
+    m_backend->gpu(0).read_bytes = slot_bytes::kb1;
+    EXPECT_EQ(sample(TS_1).read_bytes, slot_bytes::kb1);
 
-    m_backend->gpu(0).read_bytes = 2500;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb2p5;
     const auto second            = sample(TS_2);
 
     // The delta over this interval is 1500. Publishing that instead of the running
     // total is what this test exists to prevent: every other byte counter the profiler
     // ships (PCIe accumulator, XGMI, NIC) reports cumulative under ABSOLUTE.
-    EXPECT_EQ(second.read_bytes, 2500U);
-    EXPECT_NE(second.read_bytes, 1500U);
+    EXPECT_EQ(second.read_bytes, slot_bytes::kb2p5);
+    EXPECT_NE(second.read_bytes, slot_bytes::kb1p5);
 }
 
 TEST_F(HipFileDeviceTest, all_counters_pass_through_unmodified)
 {
     auto& stats            = m_backend->gpu(0);
-    stats.read_bytes       = 11;
-    stats.write_bytes      = 22;
-    stats.read_ops         = 33;
-    stats.write_ops        = 44;
-    stats.fastpath_reads   = 55;
-    stats.fastpath_writes  = 66;
-    stats.fallback_reads   = 77;
-    stats.fallback_writes  = 88;
-    stats.unaligned_reads  = 99;
-    stats.unaligned_writes = 110;
-    stats.read_errors      = 121;
-    stats.write_errors     = 132;
+    stats.read_bytes       = counter_values::read_bytes;
+    stats.write_bytes      = counter_values::write_bytes;
+    stats.read_ops         = counter_values::read_ops;
+    stats.write_ops        = counter_values::write_ops;
+    stats.fastpath_reads   = counter_values::fastpath_reads;
+    stats.fastpath_writes  = counter_values::fastpath_writes;
+    stats.fallback_reads   = counter_values::fallback_reads;
+    stats.fallback_writes  = counter_values::fallback_writes;
+    stats.unaligned_reads  = counter_values::unaligned_reads;
+    stats.unaligned_writes = counter_values::unaligned_writes;
+    stats.read_errors      = counter_values::read_errors;
+    stats.write_errors     = counter_values::write_errors;
 
     const auto out = sample(TS_1);
 
-    EXPECT_EQ(out.read_bytes, 11U);
-    EXPECT_EQ(out.write_bytes, 22U);
-    EXPECT_EQ(out.read_ops, 33U);
-    EXPECT_EQ(out.write_ops, 44U);
-    EXPECT_EQ(out.fastpath_reads, 55U);
-    EXPECT_EQ(out.fastpath_writes, 66U);
-    EXPECT_EQ(out.fallback_reads, 77U);
-    EXPECT_EQ(out.fallback_writes, 88U);
-    EXPECT_EQ(out.unaligned_reads, 99U);
-    EXPECT_EQ(out.unaligned_writes, 110U);
-    EXPECT_EQ(out.read_errors, 121U);
-    EXPECT_EQ(out.write_errors, 132U);
+    EXPECT_EQ(out.read_bytes, counter_values::read_bytes);
+    EXPECT_EQ(out.write_bytes, counter_values::write_bytes);
+    EXPECT_EQ(out.read_ops, counter_values::read_ops);
+    EXPECT_EQ(out.write_ops, counter_values::write_ops);
+    EXPECT_EQ(out.fastpath_reads, counter_values::fastpath_reads);
+    EXPECT_EQ(out.fastpath_writes, counter_values::fastpath_writes);
+    EXPECT_EQ(out.fallback_reads, counter_values::fallback_reads);
+    EXPECT_EQ(out.fallback_writes, counter_values::fallback_writes);
+    EXPECT_EQ(out.unaligned_reads, counter_values::unaligned_reads);
+    EXPECT_EQ(out.unaligned_writes, counter_values::unaligned_writes);
+    EXPECT_EQ(out.read_errors, counter_values::read_errors);
+    EXPECT_EQ(out.write_errors, counter_values::write_errors);
 }
 
 TEST_F(HipFileDeviceTest, counter_reset_is_not_clamped)
 {
-    m_backend->gpu(0).read_bytes = 5000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb5;
     sample(TS_1);
 
     // hipFile reset its stats. The counter reports what hipFile reports; only the
     // derived bandwidth needs to defend against the backwards step.
-    m_backend->gpu(0).read_bytes = 100;
-    EXPECT_EQ(sample(TS_2).read_bytes, 100U);
+    m_backend->gpu(0).read_bytes = slot_bytes::b100;
+    EXPECT_EQ(sample(TS_2).read_bytes, slot_bytes::b100);
 }
 
 // ── Fastpath / fallback attribution ─────────────────────────────────────────
 
 TEST_F(HipFileDeviceTest, fastpath_and_fallback_reads_are_distinct)
 {
-    m_backend->gpu(0).read_ops       = 100;
-    m_backend->gpu(0).fastpath_reads = 70;
-    m_backend->gpu(0).fallback_reads = 30;
+    m_backend->gpu(0).read_ops       = attribution::read_ops;
+    m_backend->gpu(0).fastpath_reads = attribution::fastpath_reads;
+    m_backend->gpu(0).fallback_reads = attribution::fallback_reads;
 
     const auto out = sample(TS_1);
 
-    EXPECT_EQ(out.fastpath_reads, 70U);
-    EXPECT_EQ(out.fallback_reads, 30U);
+    EXPECT_EQ(out.fastpath_reads, attribution::fastpath_reads);
+    EXPECT_EQ(out.fallback_reads, attribution::fallback_reads);
     EXPECT_EQ(out.fastpath_reads + out.fallback_reads, out.read_ops);
 }
 
@@ -165,15 +219,15 @@ TEST_F(HipFileDeviceTest, compat_mode_reports_only_fallback)
 {
     // What HIPFILE_FORCE_COMPAT_MODE looks like from the collector's side: every
     // operation goes through POSIX, so the fastpath tracks must stay flat at zero.
-    m_backend->gpu(0).read_ops        = 40;
-    m_backend->gpu(0).fallback_reads  = 40;
-    m_backend->gpu(0).write_ops       = 20;
-    m_backend->gpu(0).fallback_writes = 20;
+    m_backend->gpu(0).read_ops        = attribution::read_ops_compat;
+    m_backend->gpu(0).fallback_reads  = attribution::read_ops_compat;
+    m_backend->gpu(0).write_ops       = attribution::write_ops_compat;
+    m_backend->gpu(0).fallback_writes = attribution::write_ops_compat;
 
     const auto out = sample(TS_1);
 
-    EXPECT_EQ(out.fallback_reads, 40U);
-    EXPECT_EQ(out.fallback_writes, 20U);
+    EXPECT_EQ(out.fallback_reads, attribution::read_ops_compat);
+    EXPECT_EQ(out.fallback_writes, attribution::write_ops_compat);
     EXPECT_EQ(out.fastpath_reads, 0U);
     EXPECT_EQ(out.fastpath_writes, 0U);
 }
@@ -182,7 +236,7 @@ TEST_F(HipFileDeviceTest, compat_mode_reports_only_fallback)
 
 TEST_F(HipFileDeviceTest, bandwidth_first_sample_is_zero)
 {
-    m_backend->gpu(0).read_bytes = 1'000'000;
+    m_backend->gpu(0).read_bytes = slot_bytes::mb1;
 
     // No interval has elapsed yet, so there is no rate to report. Dividing the lifetime
     // total by nothing would open every trace with a spike that never happened.
@@ -191,13 +245,13 @@ TEST_F(HipFileDeviceTest, bandwidth_first_sample_is_zero)
 
 TEST_F(HipFileDeviceTest, bandwidth_normalised_to_wall_clock)
 {
-    m_backend->gpu(0).read_bytes = 1000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb1;
     sample(TS_1);
 
     // 1000 more bytes across a one-second interval.
-    m_backend->gpu(0).read_bytes = 2000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb2;
 
-    EXPECT_DOUBLE_EQ(sample(TS_2).read_bandwidth, 1000.0);
+    EXPECT_DOUBLE_EQ(sample(TS_2).read_bandwidth, k_one_second_bandwidth);
 }
 
 TEST_F(HipFileDeviceTest, bandwidth_halves_when_interval_doubles)
@@ -205,21 +259,22 @@ TEST_F(HipFileDeviceTest, bandwidth_halves_when_interval_doubles)
     m_backend->gpu(0).read_bytes = 0;
     sample(TS_1);
 
-    m_backend->gpu(0).read_bytes = 1000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb1;
     const auto one_second        = sample(TS_2).read_bandwidth;
 
-    m_backend->gpu(0).read_bytes = 2000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb2;
     const auto also_one_second   = sample(TS_3).read_bandwidth;
 
-    EXPECT_DOUBLE_EQ(one_second, 1000.0);
-    EXPECT_DOUBLE_EQ(also_one_second, 1000.0);
+    EXPECT_DOUBLE_EQ(one_second, k_one_second_bandwidth);
+    EXPECT_DOUBLE_EQ(also_one_second, k_one_second_bandwidth);
 
     // Same bytes over a two-second interval must read half the rate.
     device_t slow{ m_backend, 0 };
     m_backend->gpu(0).read_bytes = 0;
     slow.get_metrics(m_enabled, TS_1);
-    m_backend->gpu(0).read_bytes = 1000;
-    EXPECT_DOUBLE_EQ(slow.get_metrics(m_enabled, TS_3).read_bandwidth, 500.0);
+    m_backend->gpu(0).read_bytes = slot_bytes::kb1;
+    EXPECT_DOUBLE_EQ(slow.get_metrics(m_enabled, TS_3).read_bandwidth,
+                     k_half_second_bandwidth);
 }
 
 TEST_F(HipFileDeviceTest, write_bandwidth_uses_write_bytes)
@@ -228,19 +283,19 @@ TEST_F(HipFileDeviceTest, write_bandwidth_uses_write_bytes)
     m_backend->gpu(0).write_bytes = 0;
     sample(TS_1);
 
-    m_backend->gpu(0).read_bytes  = 9'000;
-    m_backend->gpu(0).write_bytes = 4'000;
+    m_backend->gpu(0).read_bytes  = slot_bytes::kb9;
+    m_backend->gpu(0).write_bytes = slot_bytes::kb4w;
 
     const auto out = sample(TS_2);
 
     // Distinct values so a read/write transposition in the bandwidth path cannot pass.
-    EXPECT_DOUBLE_EQ(out.read_bandwidth, 9'000.0);
-    EXPECT_DOUBLE_EQ(out.write_bandwidth, 4'000.0);
+    EXPECT_DOUBLE_EQ(out.read_bandwidth, k_nine_kilobyte_bandwidth);
+    EXPECT_DOUBLE_EQ(out.write_bandwidth, k_four_kilobyte_bandwidth);
 }
 
 TEST_F(HipFileDeviceTest, bandwidth_is_zero_when_no_io_occurred)
 {
-    m_backend->gpu(0).read_bytes = 4096;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb4;
     sample(TS_1);
 
     // Bytes unchanged: an idle interval reads as zero bandwidth, not as a repeat of
@@ -250,10 +305,10 @@ TEST_F(HipFileDeviceTest, bandwidth_is_zero_when_no_io_occurred)
 
 TEST_F(HipFileDeviceTest, bandwidth_zero_elapsed_returns_zero)
 {
-    m_backend->gpu(0).read_bytes = 1000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb1;
     sample(TS_1);
 
-    m_backend->gpu(0).read_bytes = 2000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb2;
 
     // Two samples at the same timestamp would divide by zero.
     EXPECT_DOUBLE_EQ(sample(TS_1).read_bandwidth, 0.0);
@@ -261,10 +316,10 @@ TEST_F(HipFileDeviceTest, bandwidth_zero_elapsed_returns_zero)
 
 TEST_F(HipFileDeviceTest, bandwidth_survives_counter_reset)
 {
-    m_backend->gpu(0).read_bytes = 10'000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb10;
     sample(TS_1);
 
-    m_backend->gpu(0).read_bytes = 500;
+    m_backend->gpu(0).read_bytes = slot_bytes::b500;
 
     // A backwards counter means an unmeasurable interval, not a negative rate.
     EXPECT_DOUBLE_EQ(sample(TS_2).read_bandwidth, 0.0);
@@ -279,16 +334,16 @@ TEST_F(HipFileDeviceTest, bandwidth_ignores_io_duration)
     m_backend->gpu(0).read_bytes = 0;
     sample(TS_1);
 
-    m_backend->gpu(0).read_bytes = 2'000'000;
+    m_backend->gpu(0).read_bytes = slot_bytes::mb2;
 
-    EXPECT_DOUBLE_EQ(sample(TS_2).read_bandwidth, 2'000'000.0);
+    EXPECT_DOUBLE_EQ(sample(TS_2).read_bandwidth, k_two_megabyte_bandwidth);
 }
 
 // ── Availability ────────────────────────────────────────────────────────────
 
 TEST_F(HipFileDeviceTest, unavailable_backend_marks_query_failed)
 {
-    m_backend->gpu(0).read_bytes = 4096;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb4;
     m_backend->available         = false;
 
     const auto out = sample(TS_1);
@@ -316,16 +371,16 @@ TEST_F(HipFileDeviceTest, default_constructed_metrics_are_not_a_failed_query)
 
 TEST_F(HipFileDeviceTest, devices_read_their_own_ordinal)
 {
-    m_backend->gpu(0).read_bytes = 100;
-    m_backend->gpu(1).read_bytes = 200;
-    m_backend->gpu(2).read_bytes = 300;
+    m_backend->gpu(0).read_bytes = slot_bytes::b100;
+    m_backend->gpu(1).read_bytes = slot_bytes::b200;
+    m_backend->gpu(2).read_bytes = slot_bytes::b300;
 
     device_t gpu1{ m_backend, 1 };
     device_t gpu2{ m_backend, 2 };
 
-    EXPECT_EQ(sample(TS_1).read_bytes, 100U);
-    EXPECT_EQ(gpu1.get_metrics(m_enabled, TS_1).read_bytes, 200U);
-    EXPECT_EQ(gpu2.get_metrics(m_enabled, TS_1).read_bytes, 300U);
+    EXPECT_EQ(sample(TS_1).read_bytes, slot_bytes::b100);
+    EXPECT_EQ(gpu1.get_metrics(m_enabled, TS_1).read_bytes, slot_bytes::b200);
+    EXPECT_EQ(gpu2.get_metrics(m_enabled, TS_1).read_bytes, slot_bytes::b300);
 }
 
 TEST_F(HipFileDeviceTest, bandwidth_state_is_per_device)
@@ -337,16 +392,17 @@ TEST_F(HipFileDeviceTest, bandwidth_state_is_per_device)
     sample(TS_1);
     gpu1.get_metrics(m_enabled, TS_1);
 
-    m_backend->gpu(0).read_bytes = 1000;
-    m_backend->gpu(1).read_bytes = 5000;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb1;
+    m_backend->gpu(1).read_bytes = slot_bytes::kb5;
 
-    EXPECT_DOUBLE_EQ(sample(TS_2).read_bandwidth, 1000.0);
-    EXPECT_DOUBLE_EQ(gpu1.get_metrics(m_enabled, TS_2).read_bandwidth, 5000.0);
+    EXPECT_DOUBLE_EQ(sample(TS_2).read_bandwidth, k_one_second_bandwidth);
+    EXPECT_DOUBLE_EQ(gpu1.get_metrics(m_enabled, TS_2).read_bandwidth,
+                     k_five_kilobyte_bandwidth);
 }
 
 TEST_F(HipFileDeviceTest, inactive_gpu_reports_zeros)
 {
-    m_backend->gpu(0).read_bytes = 4096;
+    m_backend->gpu(0).read_bytes = slot_bytes::kb4;
 
     device_t   idle{ m_backend, 5 };
     const auto out = idle.get_metrics(m_enabled, TS_1);
