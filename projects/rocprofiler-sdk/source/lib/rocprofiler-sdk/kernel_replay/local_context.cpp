@@ -29,8 +29,8 @@ namespace kernel_replay
 namespace
 {
 // The current replay loop's override map for this thread, or null when no loop is active. Points at
-// a caller-owned local_context_control_t (a stack local in the WriteInterceptor replay loop); the
-// scope guards below manage this pointer, so it is always valid while non-null.
+// a caller-owned local_context_control_t (a stack local in the WriteInterceptor replay loop) that
+// open/close_local_context_control bracket, so it is always valid while non-null.
 thread_local local_context_control_t* tl_control = nullptr;
 
 // Whether the tool-facing toggle callbacks are currently legal (true only during the tool's PASS
@@ -53,15 +53,20 @@ record_override(rocprofiler_context_id_t context_id, bool active)
 }
 }  // namespace
 
-scoped_local_context_control::scoped_local_context_control(
-    const context::context_array_t& active_contexts)
+void
+open_local_context_control(local_context_control_t&        control,
+                           const context::context_array_t& active_contexts)
 {
     for(const auto* ctx : active_contexts)
-        if(ctx != nullptr) m_control.pre_active.emplace(ctx->context_idx);
-    tl_control = &m_control;
+        if(ctx != nullptr) control.pre_active.emplace(ctx->context_idx);
+    tl_control = &control;
 }
 
-scoped_local_context_control::~scoped_local_context_control() { tl_control = nullptr; }
+void
+close_local_context_control()
+{
+    tl_control = nullptr;
+}
 
 void
 set_toggles_armed(bool armed)

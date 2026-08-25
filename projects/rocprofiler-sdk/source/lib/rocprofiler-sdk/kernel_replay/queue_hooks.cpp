@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/kernel_replay/queue_hooks.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -143,25 +144,15 @@ replay_drain_agent_or_decline(hsa_agent_t agent)
     }
 }
 
-// RAII marker for "this thread is inside a replay window on this agent", read by both dispatch
-// paths to avoid a non-recursive deadlock. State and predicates live in replay_diagnostics.hpp.
-struct replay_window_scope
+// Open the "this thread is inside a replay window on this agent" marker and return a guard that
+// closes it, so both dispatch paths avoid a non-recursive deadlock on every exit path. State and
+// predicates live in replay_diagnostics.hpp.
+[[nodiscard]] common::scope_destructor
+scoped_replay_window(rocprofiler_agent_id_t agent)
 {
-    explicit replay_window_scope(rocprofiler_agent_id_t agent)
-    : m_agent{agent}
-    {
-        enter_replay_window(m_agent);
-    }
-    ~replay_window_scope() { exit_replay_window(m_agent); }
-
-    replay_window_scope(const replay_window_scope&)     = delete;
-    replay_window_scope(replay_window_scope&&) noexcept = delete;
-    replay_window_scope& operator=(const replay_window_scope&) = delete;
-    replay_window_scope& operator=(replay_window_scope&&) noexcept = delete;
-
-private:
-    rocprofiler_agent_id_t m_agent;
-};
+    return common::scope_destructor{[agent]() { exit_replay_window(agent); },
+                                    [agent]() { enter_replay_window(agent); }};
+}
 }  // namespace
 
 bool
@@ -251,7 +242,7 @@ run_replay_window(const replay_dispatch_t& dispatch)
         std::unique_lock<std::shared_mutex>{agent_replay_mutex(replay_agent_id)};
     // Must be constructed after the writer lock: it marks the interval in which a nested dispatch
     // on this thread would deadlock on this agent's replay lock.
-    const auto window_scope = replay_window_scope{replay_agent_id};
+    const auto window_scope = scoped_replay_window(replay_agent_id);
 
     // Admission control, before any device->host traffic. Two independent questions: whether the
     // snapshot would actually cover the application's data, and whether it would fit and finish in
@@ -338,14 +329,17 @@ run_replay_window(const replay_dispatch_t& dispatch)
         return true;
     }
 
-    // Localized context control for this replay loop. This guard installs the thread-local routing
+    // Localized context control for this replay loop. Opening it installs the thread-local routing
     // that connects the tool's PASS toggle callbacks (writers, via replay_local_start/stop_context)
-    // to the services that read it at dispatch (via local_context_override). It lives for the whole
-    // loop and is torn down when the guard exits; global context state is never touched. It
-    // captures the contexts active now (loop start) as the toggle mask, so a tool may only
-    // enable/disable one of those and a local start cannot promote a globally-stopped context
-    // (local_context.hpp).
-    auto local_ctx_tls_guard = scoped_local_context_control{context::get_active_contexts()};
+    // to the services that read it at dispatch (via local_context_override). The map lives on this
+    // frame for the whole loop and the routing is cleared on the way out; global context state is
+    // never touched. It captures the contexts active now (loop start) as the toggle mask, so a tool
+    // may only enable/disable one of those and a local start cannot promote a globally-stopped
+    // context (local_context.hpp).
+    auto local_ctx = local_context_control_t{};
+    open_local_context_control(local_ctx, context::get_active_contexts());
+    const auto local_ctx_tls_guard =
+        common::scope_destructor{[]() { close_local_context_control(); }};
 
     // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask the tool
     // whether to continue -> restore device memory before the next pass.

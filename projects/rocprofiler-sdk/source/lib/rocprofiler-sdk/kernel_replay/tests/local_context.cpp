@@ -55,6 +55,26 @@ struct fake_active_contexts
         }
     }
 };
+
+// Scope guard over open/close_local_context_control, which own no storage themselves. The
+// production caller uses common::scope_destructor over a stack-local map; a named type here keeps
+// the call sites below reading as a scope, and owning the map is what makes each test's loop
+// independent.
+struct scoped_loop
+{
+    lc::local_context_control_t control{};
+
+    explicit scoped_loop(const rocprofiler::context::context_array_t& active_contexts)
+    {
+        lc::open_local_context_control(control, active_contexts);
+    }
+    ~scoped_loop() { lc::close_local_context_control(); }
+
+    scoped_loop(const scoped_loop&) = delete;
+    scoped_loop& operator=(const scoped_loop&) = delete;
+    scoped_loop(scoped_loop&&)                 = delete;
+    scoped_loop& operator=(scoped_loop&&) = delete;
+};
 }  // namespace
 
 // Outside any replay loop the query yields nothing and the toggles are illegal (not attached).
@@ -67,11 +87,58 @@ TEST(kernel_replay_local_context, inactive_outside_loop)
     EXPECT_FALSE(lc::local_context_has_overrides());  // no active loop on this thread
 }
 
+// open/close are separate calls rather than a constructor and destructor, so a close with no
+// matching open is reachable -- from a guard destroyed after teardown, or from a mis-edited caller.
+// It must clear the routing and leave the mechanism usable, not corrupt it.
+TEST(kernel_replay_local_context, close_without_open_is_harmless)
+{
+    lc::close_local_context_control();
+
+    EXPECT_FALSE(lc::local_context_has_overrides());
+    EXPECT_FALSE(lc::local_context_override({1}).has_value());
+
+    fake_active_contexts active{1};
+    scoped_loop          loop{active.array};
+
+    lc::set_toggles_armed(true);
+    EXPECT_EQ(lc::replay_local_start_context({1}), ROCPROFILER_STATUS_SUCCESS);
+    lc::set_toggles_armed(false);
+    EXPECT_TRUE(lc::local_context_has_overrides());
+}
+
+// The map is caller-owned, so a second open must route to the new one and leave nothing of the
+// previous loop behind. The RAII form could not express this -- its map was a private member -- but
+// with the storage in the caller's frame it is the caller's job to get right, so it is asserted.
+TEST(kernel_replay_local_context, opening_a_second_control_routes_to_it)
+{
+    fake_active_contexts active{5};
+
+    auto first = lc::local_context_control_t{};
+    lc::open_local_context_control(first, active.array);
+
+    lc::set_toggles_armed(true);
+    ASSERT_EQ(lc::replay_local_stop_context({5}), ROCPROFILER_STATUS_SUCCESS);
+    lc::set_toggles_armed(false);
+    ASSERT_TRUE(lc::local_context_override({5}).has_value());
+
+    auto second = lc::local_context_control_t{};
+    lc::open_local_context_control(second, active.array);
+
+    EXPECT_FALSE(lc::local_context_override({5}).has_value())
+        << "the new loop must not inherit the previous loop's overrides";
+    EXPECT_FALSE(lc::local_context_has_overrides());
+
+    // ...and the first loop's record is still in its own storage, untouched.
+    EXPECT_EQ(first.overrides.count(5), 1U);
+
+    lc::close_local_context_control();
+}
+
 // Inside a loop but before the PASS-enter arm window, toggles still fail and nothing is recorded.
 TEST(kernel_replay_local_context, loop_without_arm_rejects_toggles)
 {
-    fake_active_contexts             active{7};
-    lc::scoped_local_context_control loop{active.array};
+    fake_active_contexts active{7};
+    scoped_loop          loop{active.array};
 
     EXPECT_EQ(lc::replay_local_start_context({7}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
     EXPECT_FALSE(lc::local_context_override({7}).has_value());
@@ -82,8 +149,8 @@ TEST(kernel_replay_local_context, loop_without_arm_rejects_toggles)
 // past the arm window (sticky) while further toggles outside the window fail.
 TEST(kernel_replay_local_context, armed_toggles_record_and_stick)
 {
-    fake_active_contexts             active{3};
-    lc::scoped_local_context_control loop{active.array};
+    fake_active_contexts active{3};
+    scoped_loop          loop{active.array};
 
     lc::set_toggles_armed(true);
     EXPECT_EQ(lc::replay_local_start_context({3}), ROCPROFILER_STATUS_SUCCESS);
@@ -105,8 +172,8 @@ TEST(kernel_replay_local_context, armed_toggles_record_and_stick)
 // Each context carries an independent override; untouched contexts stay unset.
 TEST(kernel_replay_local_context, per_context_independent)
 {
-    fake_active_contexts             active{1, 2};
-    lc::scoped_local_context_control loop{active.array};
+    fake_active_contexts active{1, 2};
+    scoped_loop          loop{active.array};
 
     lc::set_toggles_armed(true);
     EXPECT_EQ(lc::replay_local_start_context({1}), ROCPROFILER_STATUS_SUCCESS);
@@ -122,8 +189,8 @@ TEST(kernel_replay_local_context, per_context_independent)
 TEST(kernel_replay_local_context, override_cleared_after_loop)
 {
     {
-        fake_active_contexts             active{5};
-        lc::scoped_local_context_control loop{active.array};
+        fake_active_contexts active{5};
+        scoped_loop          loop{active.array};
         lc::set_toggles_armed(true);
         EXPECT_EQ(lc::replay_local_start_context({5}), ROCPROFILER_STATUS_SUCCESS);
         lc::set_toggles_armed(false);
@@ -155,8 +222,8 @@ TEST(kernel_replay_local_context, simulated_replay_loop_and_misbehaving_tool)
     std::vector<bool> timing_ran{};
 
     // SDK: one control object for the whole replay loop, seeded with the globally-active contexts.
-    fake_active_contexts             active{counters.handle, timing.handle};
-    lc::scoped_local_context_control loop{active.array};
+    fake_active_contexts active{counters.handle, timing.handle};
+    scoped_loop          loop{active.array};
 
     for(int pass = 0; pass < 4; ++pass)
     {
@@ -186,8 +253,8 @@ TEST(kernel_replay_local_context, simulated_replay_loop_and_misbehaving_tool)
 // CONTEXT_NOT_STARTED and records nothing.
 TEST(kernel_replay_local_context, toggle_rejects_context_inactive_pre_replay)
 {
-    fake_active_contexts             active{5};  // only context 5 was globally active pre-replay
-    lc::scoped_local_context_control loop{active.array};
+    fake_active_contexts active{5};  // only context 5 was globally active pre-replay
+    scoped_loop          loop{active.array};
     lc::set_toggles_armed(true);
 
     // 5 was active pre-replay: a local stop and a later re-start are both honored.
@@ -206,8 +273,8 @@ TEST(kernel_replay_local_context, toggle_rejects_context_inactive_pre_replay)
 // Last write in a single PASS-enter window wins: start then stop records inactive.
 TEST(kernel_replay_local_context, last_write_wins_in_arm_window)
 {
-    fake_active_contexts             active{9};
-    lc::scoped_local_context_control loop{active.array};
+    fake_active_contexts active{9};
+    scoped_loop          loop{active.array};
 
     lc::set_toggles_armed(true);
     EXPECT_EQ(lc::replay_local_start_context({9}), ROCPROFILER_STATUS_SUCCESS);
@@ -248,8 +315,8 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
     std::vector<bool> spm_ran{};
     std::vector<bool> pcs_ran{};
 
-    fake_active_contexts             active{counters.handle, att.handle, spm.handle, pcs.handle};
-    lc::scoped_local_context_control loop{active.array};
+    fake_active_contexts active{counters.handle, att.handle, spm.handle, pcs.handle};
+    scoped_loop          loop{active.array};
     for(int pass = 0; pass < 4; ++pass)
     {
         lc::set_toggles_armed(true);
@@ -285,8 +352,8 @@ TEST(kernel_replay_local_context, consumer_no_promotion_of_globally_stopped)
         return enabled;
     };
 
-    fake_active_contexts             active{counters.handle};
-    lc::scoped_local_context_control loop{active.array};
+    fake_active_contexts active{counters.handle};
+    scoped_loop          loop{active.array};
     lc::set_toggles_armed(true);
     EXPECT_EQ(lc::replay_local_start_context(counters), ROCPROFILER_STATUS_SUCCESS);
     lc::set_toggles_armed(false);

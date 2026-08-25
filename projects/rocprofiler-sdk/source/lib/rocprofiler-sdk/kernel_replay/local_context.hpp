@@ -31,9 +31,11 @@
 // it.
 //
 // Two thread-local scopes are involved, both managed by the SDK (never by the tool):
-//  - loop scope (scoped_local_context_control): the override map is live for the whole replay loop,
-//    so services can query it while a pass dispatches. The map persists across passes, which gives
-//    the "sticky" semantics (a toggle stays in effect until changed within the same loop).
+//  - loop scope (open_local_context_control / close_local_context_control): the override map is
+//  live
+//    for the whole replay loop, so services can query it while a pass dispatches. The map persists
+//    across passes, which gives the "sticky" semantics (a toggle stays in effect until changed
+//    within the same loop).
 //  - arm window (set_toggles_armed): the start/stop callbacks are only legal while the tool's PASS
 //    PHASE_ENTER callback runs; execute_pass_phase_enter() arms them around that callback and
 //    disarms after, so a call made outside that window fails.
@@ -54,8 +56,8 @@ namespace kernel_replay
 struct local_context_control_t
 {
     // context handle -> forced active (true) / inactive (false). An absent entry means "defer to
-    // global context state". Owned by scoped_local_context_control for one replay loop and pointed
-    // to by the thread-local routing while the loop runs.
+    // global context state". Owned by the caller for one replay loop and pointed to by the
+    // thread-local routing while the loop runs.
     std::unordered_map<uint64_t, bool> overrides{};
 
     // Handles of the contexts globally active when the replay loop began. A local start/stop is
@@ -64,28 +66,21 @@ struct local_context_control_t
     std::unordered_set<uint64_t> pre_active{};
 };
 
-// RAII: owns this replay loop's override map and installs it as the thread's active routing for the
-// guard's lifetime, clearing the routing on destruction; global context state is never touched.
-// Replays on one agent are serialized by the per-agent replay lock, so a loop never nests on a
-// thread -- the destructor just clears the routing. Real teardown that can fail (e.g. PC sampling
-// hardware) is done explicitly by the loop.
-class scoped_local_context_control
-{
-public:
-    // active_contexts = the contexts globally active when the replay loop begins (typically
-    // context::get_active_contexts()). Their handles become the pre-active mask: a local start/stop
-    // is only honored for one of these (see local_context_control_t::pre_active).
-    explicit scoped_local_context_control(const context::context_array_t& active_contexts);
-    ~scoped_local_context_control();
+// Install `control` as this thread's replay routing for the duration of one replay loop. Populates
+// its pre-active mask from `active_contexts` -- the contexts globally active when the loop begins,
+// typically context::get_active_contexts() -- so a local start/stop is only honored for one of
+// those and cannot promote a globally-stopped context. Global context state is never touched.
+//
+// The caller owns the storage and must keep it alive until close_local_context_control(); the
+// replay loop holds it as a stack local under a scope guard. Replays on one agent are serialized by
+// the per-agent replay lock, so a loop never nests on a thread and closing simply clears the
+// routing. Real teardown that can fail (e.g. PC sampling hardware) is done explicitly by the loop.
+void
+open_local_context_control(local_context_control_t&        control,
+                           const context::context_array_t& active_contexts);
 
-    scoped_local_context_control(const scoped_local_context_control&) = delete;
-    scoped_local_context_control& operator=(const scoped_local_context_control&) = delete;
-    scoped_local_context_control(scoped_local_context_control&&)                 = delete;
-    scoped_local_context_control& operator=(scoped_local_context_control&&) = delete;
-
-private:
-    local_context_control_t m_control{};  // this loop's overrides (owned)
-};
+void
+close_local_context_control();
 
 // Arm/disarm the tool-facing toggle callbacks. execute_pass_phase_enter() brackets the tool's PASS
 // PHASE_ENTER callback with set_toggles_armed(true)/(false); the callbacks below reject calls made

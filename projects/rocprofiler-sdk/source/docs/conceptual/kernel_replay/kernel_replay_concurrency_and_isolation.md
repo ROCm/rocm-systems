@@ -237,8 +237,9 @@ When a tool toggles contexts per pass, the decisions are recorded in a thread-lo
 that lives only for the duration of the replay loop; global context state is never modified. Two
 nested thread-local scopes are involved, both managed by the SDK:
 
-- **Loop scope** (`scoped_local_context_control`) owns the override map for the whole loop, which is
-  what gives toggles their sticky-across-passes semantics.
+- **Loop scope** (`open_local_context_control` / `close_local_context_control`) routes to an override
+  map that lives on the replay loop's frame for the whole loop, which is what gives toggles their
+  sticky-across-passes semantics.
 - **Arm window** (`set_toggles_armed`) makes the tool-facing start/stop callbacks legal only while
   the tool's PASS `PHASE_ENTER` callback is running. It is armed and disarmed through a scope guard,
   so a throwing tool callback cannot leak the armed state.
@@ -272,5 +273,5 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Admission control and outcome reporting | `source/lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.cpp` | `check_untracked()`, `check_admission()`, `log_replay_outcome()` |
 | Agent-scoped inventory | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `snap_inventory()` |
 | Untracked-memory accounting | `source/lib/rocprofiler-sdk/kernel_replay/memory_tracker.cpp` | `untracked_device_memory()` |
-| Localized context scopes | `source/lib/rocprofiler-sdk/kernel_replay/local_context.hpp` | `scoped_local_context_control`, `set_toggles_armed()` |
+| Localized context scopes | `source/lib/rocprofiler-sdk/kernel_replay/local_context.hpp` | `open_local_context_control()`, `close_local_context_control()`, `set_toggles_armed()` |
 | Localized context consumer | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `local_context_has_overrides()` call in `process_packet_batch` |

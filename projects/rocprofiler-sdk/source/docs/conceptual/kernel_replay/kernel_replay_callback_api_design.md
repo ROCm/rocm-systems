@@ -60,8 +60,8 @@ The pointers are **wired**. During PASS `PHASE_ENTER` the SDK populates
 - Sticky across passes (avoids reprogramming PC sampling hardware on every pass).
 - Scoped to the replay loop; global context state is never modified.
 
-Routing of the downcalls uses a thread-scoped override map (`scoped_local_context_control` +
-`set_toggles_armed`) installed around the replay loop. That is SDK-internal. If a tool-facing handle
+Routing of the downcalls uses a thread-scoped override map (`open_local_context_control` /
+`close_local_context_control` + `set_toggles_armed`) installed around the replay loop. That is SDK-internal. If a tool-facing handle
 parameter proves cleaner, the signature may gain one — that is the one shape decision still open.
 (`pass_count_cb` and `replay_continue_cb` are SDK→tool upcalls and need no such routing.)
 
