@@ -162,7 +162,6 @@ inline void execute_ds_load_addtid_b32_ds([[maybe_unused]] Inst &inst,
     d->exec_mask = exec;
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint32_t offset = (static_cast<uint32_t>(inst.inst_.offset1) << 8) | inst.inst_.offset0;
     uint32_t m0 = wf.m0();
     uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
