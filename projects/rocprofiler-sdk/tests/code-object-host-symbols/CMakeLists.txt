@@ -13,24 +13,14 @@ target_sources(code-object-host-symbols-client PRIVATE client.cpp)
 target_link_libraries(code-object-host-symbols-client
                       PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
-    set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:code-object-host-symbols-client>"
-        )
-else()
-    set(PRELOAD_ENV "$<TARGET_FILE:code-object-host-symbols-client>")
-endif()
-
-# Register the test with CTest
+# Register the test with CTest. The helper supplies the sanitizer preload, the
+# integration-tests label and LD_LIBRARY_PATH.
 rocprofiler_add_integration_execute_test(
     test-code-object-host-symbols
     COMMAND $<TARGET_FILE:vector-ops>
     DEPENDS code-object-host-symbols-client
     TIMEOUT 120
-    LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
-    ENVIRONMENT
-        "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    PRELOAD "$<TARGET_FILE:code-object-host-symbols-client>"
     PASS_REGULAR_EXPRESSION
         "Test PASSED: Successfully verified host function id assignment!"
     FAIL_REGULAR_EXPRESSION

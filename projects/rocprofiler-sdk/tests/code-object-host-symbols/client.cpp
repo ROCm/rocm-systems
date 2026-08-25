@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,10 +26,9 @@
  * @brief ROCProfiler tool that checks host function id assignment
  *
  * A host function id identifies a symbol, not a notification of that symbol, so
- * every subscribed context must be handed the same id for a given symbol and the
- * ids must remain dense. This tool subscribes two contexts to code object tracing
- * and verifies both properties, which is what consumers indexing a vector by host
- * function id rely on.
+ * every subscribed context must be handed the same id for a given symbol, and the
+ * ids must stay unique. This tool subscribes two contexts to code object tracing
+ * and verifies both properties.
  */
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -71,8 +70,16 @@ codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     const auto* data = static_cast<host_symbol_data_t*>(record.payload);
 
-    auto lock = std::lock_guard<std::mutex>{symbols_mutex};
-    symbols_by_context[record.context_id.handle].emplace(data->kernel_id, data->host_function_id);
+    auto  lock     = std::lock_guard<std::mutex>{symbols_mutex};
+    auto& symbols  = symbols_by_context[record.context_id.handle];
+    auto  existing = symbols.emplace(data->kernel_id, data->host_function_id);
+    if(!existing.second && existing.first->second != data->host_function_id)
+    {
+        std::cerr << "ERROR: Kernel " << data->kernel_id << " was registered with host function id "
+                  << existing.first->second << " and again with " << data->host_function_id
+                  << " in the same context\n";
+        std::abort();
+    }
 }
 
 void
@@ -111,7 +118,8 @@ tool_fini(void* /* tool_data */)
         }
     }
 
-    // ids must be unique per symbol and dense, so that indexing by id is in range
+    // ids must be unique per symbol; the public header promises uniqueness, not density, so
+    // the largest id is only required to be at least the number of symbols
     auto unique_ids = std::set<uint64_t>{};
     auto largest_id = uint64_t{0};
     for(const auto& [kernel_id, host_function_id] : reference)
@@ -131,12 +139,10 @@ tool_fini(void* /* tool_data */)
         std::abort();
     }
 
-    if(largest_id != reference.size())
+    if(largest_id < reference.size())
     {
-        std::cerr << "ERROR: Host function ids are not dense: largest id is " << largest_id
-                  << " for " << reference.size()
-                  << " symbols. Indexing a container by host function id would run out of "
-                     "range.\n";
+        std::cerr << "ERROR: Largest host function id is " << largest_id << " for "
+                  << reference.size() << " symbols, so ids are not unique\n";
         std::abort();
     }
 
