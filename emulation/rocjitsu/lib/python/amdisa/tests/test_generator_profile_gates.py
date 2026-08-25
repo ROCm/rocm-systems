@@ -399,7 +399,7 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
     [
         (Cdna4Profile(), 3),
         (Rdna4Profile(), 6),
-        (Cdna5Profile(), 3),
+        (Cdna5Profile(), 7),
     ],
 )
 def test_b8_transpose_aliases_share_profile_routing(profile, expected_kind) -> None:
@@ -468,7 +468,7 @@ def test_gfx1250_ds_b8_transpose_uses_profile_routing(
 ) -> None:
     vds = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
     body = _generated_method_body(vds, 'DsLoadTr8B64Vds', 'DsLoadB96Vds')
-    assert 'd->transpose = 3;' in body
+    assert 'd->transpose = 7;' in body
 
 
 @pytest.mark.parametrize(
