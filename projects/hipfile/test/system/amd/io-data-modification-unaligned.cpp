@@ -98,160 +98,85 @@ INSTANTIATE_TEST_SUITE_P(, HipFileVerifyUnaligned,
 //
 // NOTE: unaligned I/O only uses the fallback path.
 // ---------------------------------------------------------------------------
-namespace {
-
-// Determines the combination of size, offset into the device buffer, offset into the file, and initial length
-// of the file.
-struct ExtendScenarioParam {
-    ExtendCase  ext;
-    size_t      io_bytes;
-    hoff_t      buf_off;
-    std::string name;
-};
-
-constexpr hoff_t kBaseEmpty     = 0; // file length before the extending write
-constexpr hoff_t kBaseAligned   = kChunkOff;
-constexpr hoff_t kBaseUnaligned = kChunkOff + 1;
-constexpr hoff_t kGapAligned   = kFourKiBOff; // distance from EOF to the start of a write that creates a hole
-constexpr hoff_t kGapUnaligned = kFourKiBOff + 1;
-constexpr hoff_t kOverlap =
-    kFourKiBOff / 2; // the bytes from the file that a write that also extends the file will overlap
-constexpr size_t kSizeAligned    = 4_KiB; // io_bytes
-constexpr size_t kSizeUnaligned  = 4_KiB + 1;
-constexpr size_t kLargeAligned   = kChunkBytes + 4_KiB; // spans more than one chunk
-constexpr size_t kLargeUnaligned = kChunkBytes + 4_KiB + 1;
-constexpr hoff_t kBufAligned     = 0; // where the data starts within the device buffer
-constexpr hoff_t kBufUnaligned   = 1;
-
-HIPFILE_WARN_NO_EXIT_DTOR_OFF
-const std::array<ExtendScenarioParam, 16> extend_scenarios{{
-    // Append to empty file.
-    {appendFromEmpty(), kSizeAligned, kBufAligned, "empty_contiguous_aligned_size"},
-    {appendFromEmpty(), kSizeUnaligned, kBufAligned, "empty_contiguous_unaligned_size"},
-    // Contiguous append onto a non-empty file.
-    {appendAt(kBaseUnaligned), kSizeAligned, kBufAligned, "append_unaligned_base"},
-    {appendAt(kBaseAligned), kSizeUnaligned, kBufAligned, "append_aligned_base_unaligned_size"},
-    // Write past EOF, creating a hole from the existing EOF of the file to the start of the write.
-    {holeAfter(kBaseEmpty, kGapAligned), kSizeAligned, kBufAligned, "hole_from_empty_aligned_off"},
-    {holeAfter(kBaseEmpty, kGapUnaligned), kSizeAligned, kBufAligned, "hole_from_empty_unaligned_off"},
-    {holeAfter(kBaseUnaligned, kGapUnaligned), kSizeAligned, kBufAligned, "hole_from_unaligned_base"},
-    {holeAfter(kBaseAligned, kGapUnaligned), kSizeUnaligned, kBufAligned,
-     "hole_unaligned_off_unaligned_size"},
-    // Unaligned device buffer.
-    {appendAt(kBaseAligned), kSizeAligned, kBufUnaligned, "append_unaligned_buffer"},
-    {holeAfter(kBaseEmpty, kGapAligned), kSizeAligned, kBufUnaligned, "hole_unaligned_buffer"},
-    {appendAt(kBaseUnaligned), kSizeUnaligned, kBufUnaligned, "append_unaligned_base_unaligned_buffer"},
-    {holeAfter(kBaseUnaligned, kGapUnaligned), kSizeUnaligned, kBufUnaligned, "hole_all_unaligned"},
-    // Transfers larger than the fallback chunking size.
-    {holeAfter(kBaseEmpty, kGapAligned), kLargeAligned, kBufAligned, "large_hole_cross_chunk"},
-    {appendAt(kBaseUnaligned), kLargeUnaligned, kBufAligned, "large_append_unaligned_base"},
-    // Write before the existing EOF, but extend the length of the file with the same write.
-    {overwriteAppend(kBaseAligned, kOverlap), kSizeAligned, kBufAligned, "overwrite_append_aligned_base"},
-    {overwriteAppend(kBaseUnaligned, kOverlap), kSizeUnaligned, kBufUnaligned,
-     "overwrite_append_all_unaligned"},
-}};
-HIPFILE_WARN_NO_EXIT_DTOR_ON
-
-} // namespace
-
-struct HipFileExtendUnaligned : public testing::TestWithParam<ExtendScenarioParam> {
-
-    const size_t io_bytes{GetParam().io_bytes};     // bytes transferred using the hipFile API
-    const hoff_t base_len{GetParam().ext.base_len}; // file length before the extending write
-    const hoff_t file_off{GetParam().ext.file_off}; // file offset the write starts at
-    const hoff_t buf_off{GetParam().buf_off};       // (possibly unaligned) device buffer offset of the data
-    // Device layout (each sentinel region ~4_KiB, data io_bytes; data begins at
-    // buffer offset buf_off, which may be +1 unaligned within the head sentinel region):
-    // [head device sentinel region][data][tail device sentinel region]
-    const size_t buffer_bytes{io_bytes + 2 * 4_KiB}; // total device buffer size
-
-    Tmpfile         tmpfile;
-    hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr}; // allocated by SetUp
-    uint8_t        *buffer_start{nullptr};  // typed view of device_buffer
-
-    HipFileExtendUnaligned() : tmpfile{test_env.ais_capable_dir}
-    {
-    }
-
+struct HipFileExtendUnaligned : public DataModificationBase<ByteElementPolicy> {
     void SetUp() override
     {
-        // Fallback only.
-        Context<Configuration>::get()->fastpath(false);
-        Context<Configuration>::get()->fallback(true);
-
         // Every scenario must actually extend the file.
-        ASSERT_GT(file_off + static_cast<hoff_t>(io_bytes), base_len);
+        ASSERT_TRUE(GetParam().ext.has_value());
+        ASSERT_GT(GetParam().ext->file_off + static_cast<hoff_t>(io_bytes), GetParam().ext->base_len);
 
-        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(base_len)));
-
-        hipFileDescr_t descr{};
-        descr.type      = hipFileHandleTypeOpaqueFD;
-        descr.handle.fd = tmpfile.fd;
-        ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
-
-        ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
-        buffer_start = static_cast<uint8_t *>(device_buffer);
-        ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kByteDevSlack, buffer_bytes));
-    }
-
-    void TearDown() override
-    {
-        if (device_buffer) {
-            ASSERT_EQ(hipSuccess, hipFree(device_buffer));
-        }
-        hipFileHandleDeregister(tmpfile_handle);
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(GetParam().ext->base_len)));
+        DataModificationBase::SetUp();
     }
 };
 
 TEST_P(HipFileExtendUnaligned, Extends)
 {
-    const size_t     n       = io_bytes;
-    constexpr size_t kStride = 2;
-
-    const size_t data_start = static_cast<size_t>(buf_off);
-    ASSERT_EQ(hipSuccess, hipMemset(buffer_start + data_start, kByteEntry, n));
-
-    assertVerifyAndModifyBytes(buffer_start, buffer_bytes, data_start, n, defaultGrid(n),
-                               dim3(kDefaultWorkgroupSize), kStride);
-
-    // File layout after the write (preserved region is preserved_n ints, data is n ints, hole spans
-    // [base_len, file_off) and is empty when we append to the file):
-    // [preserved = -1][hole = 0][data = stride-modified i+1], when file_off >= base_len.
-    // [preserved = -1][data = stride-modified i+1], when file_off < base_len.
-    const hoff_t preserved_end = (file_off < base_len) ? file_off : base_len;
-    const size_t preserved_n   = static_cast<size_t>(preserved_end);
-    if (preserved_n > 0) {
-        seedFileBytesConstant(tmpfile.fd, 0, preserved_n, kByteFileSlack);
-    }
-
-    ASSERT_EQ(static_cast<ssize_t>(io_bytes),
-              hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
-
-    std::vector<uint8_t> body = readFileBytes(tmpfile.fd, file_off, n);
-    assertBytesModified(body.data(), n, kStride);
-
-    // Hole was zero-filled.
-    if (file_off > base_len) {
-        assertHoleZero(tmpfile.fd, base_len, file_off);
-    }
-
-    // Final size.
-    ASSERT_EQ(file_off + static_cast<hoff_t>(io_bytes), fileSize(tmpfile.fd));
-
-    // Existing data below the write is fully intact.
-    if (preserved_n > 0) {
-        std::vector<uint8_t> head = readFileBytes(tmpfile.fd, 0, preserved_n);
-        assertBytesConstant(head.data(), 0, preserved_n, kByteFileSlack);
-    }
+    ASSERT_NO_FATAL_FAILURE(runExtendTest(*this));
 }
 
-static std::string
-extendScenarioName(const testing::TestParamInfo<HipFileExtendUnaligned::ParamType> &info)
+// The axis values every scenario is built from. Each unaligned value is its aligned counterpart
+// pushed one byte past the boundary, so a scenario's name reads as the list of axes it misaligns.
+constexpr hoff_t kBaseEmpty     = 0; // file length before the extending write
+constexpr hoff_t kBaseAligned   = kChunkOff;
+constexpr hoff_t kBaseUnaligned = kChunkOff + 1;
+
+constexpr hoff_t kGapAligned   = kFourKiBOff; // distance from EOF to the start of a write that leaves a hole
+constexpr hoff_t kGapUnaligned = kFourKiBOff + 1;
+
+// The bytes from the file that a write that also extends the file will overlap.
+constexpr hoff_t kOverlap = kFourKiBOff / 2;
+
+constexpr size_t kSizeAligned    = 4_KiB; // io_bytes
+constexpr size_t kSizeUnaligned  = 4_KiB + 1;
+constexpr size_t kLargeAligned   = kChunkBytes + 4_KiB; // spans more than one chunk
+constexpr size_t kLargeUnaligned = kChunkBytes + 4_KiB + 1;
+
+constexpr hoff_t kBufAligned   = 0; // where the data starts within the device buffer
+constexpr hoff_t kBufUnaligned = 1;
+
+constexpr size_t kStride = 2; // every scenario modifies every other element
+
+static IoTestScenario
+extendScenario(const char *name, ExtendCase ext, size_t io_bytes = kSizeAligned, hoff_t buf_off = kBufAligned)
 {
-    return info.param.name;
+    return IoTestScenario{
+        .name = name, .io_bytes = io_bytes, .buf_off = buf_off, .stride = kStride, .ext = ext};
 }
 
-INSTANTIATE_TEST_SUITE_P(, HipFileExtendUnaligned, testing::ValuesIn(extend_scenarios), extendScenarioName);
+// These are hard to express using `testing::Combine` or `over`, so we use a helper function.
+HIPFILE_WARN_NO_EXIT_DTOR_OFF
+const std::array<IoTestScenario, 16> kExtendUnalignedScenarios{{
+    // Append to empty file.
+    extendScenario("empty_contiguous_aligned_size", appendFromEmpty()),
+    extendScenario("empty_contiguous_unaligned_size", appendFromEmpty(), kSizeUnaligned),
+    // Contiguous append onto a non-empty file.
+    extendScenario("append_unaligned_base", appendAt(kBaseUnaligned)),
+    extendScenario("append_aligned_base_unaligned_size", appendAt(kBaseAligned), kSizeUnaligned),
+    // Write past EOF, creating a hole from the existing EOF of the file to the start of the write.
+    extendScenario("hole_from_empty_aligned_off", holeAfter(kBaseEmpty, kGapAligned)),
+    extendScenario("hole_from_empty_unaligned_off", holeAfter(kBaseEmpty, kGapUnaligned)),
+    extendScenario("hole_from_unaligned_base", holeAfter(kBaseUnaligned, kGapUnaligned)),
+    extendScenario("hole_unaligned_off_unaligned_size", holeAfter(kBaseAligned, kGapUnaligned),
+                   kSizeUnaligned),
+    // Unaligned device buffer.
+    extendScenario("append_unaligned_buffer", appendAt(kBaseAligned), kSizeAligned, kBufUnaligned),
+    extendScenario("hole_unaligned_buffer", holeAfter(kBaseEmpty, kGapAligned), kSizeAligned, kBufUnaligned),
+    extendScenario("append_unaligned_base_unaligned_buffer", appendAt(kBaseUnaligned), kSizeUnaligned,
+                   kBufUnaligned),
+    extendScenario("hole_all_unaligned", holeAfter(kBaseUnaligned, kGapUnaligned), kSizeUnaligned,
+                   kBufUnaligned),
+    // Transfers larger than the fallback chunking size.
+    extendScenario("large_hole_cross_chunk", holeAfter(kBaseEmpty, kGapAligned), kLargeAligned),
+    extendScenario("large_append_unaligned_base", appendAt(kBaseUnaligned), kLargeUnaligned),
+    // Write before the existing EOF, but extend the length of the file with the same write.
+    extendScenario("overwrite_append_aligned_base", overwriteAppend(kBaseAligned, kOverlap)),
+    extendScenario("overwrite_append_all_unaligned", overwriteAppend(kBaseUnaligned, kOverlap),
+                   kSizeUnaligned, kBufUnaligned),
+}};
+HIPFILE_WARN_NO_EXIT_DTOR_ON
+
+INSTANTIATE_TEST_SUITE_P(, HipFileExtendUnaligned, testing::ValuesIn(kExtendUnalignedScenarios),
+                         ioTestScenarioName);
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
