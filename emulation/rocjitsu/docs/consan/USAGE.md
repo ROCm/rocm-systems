@@ -293,9 +293,15 @@ Sampled banks, saturation, undercoverage, overflow, and drops.
 | `RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS=0|1` | `0` | Record/Replay per-lane dynamic append. This is bounded expert tracing, not an exhaustive ordinary contract. |
 | `RJ_CONSAN_MOI_SAMPLE_STRIDE=N` | `1` | Sampled static site stride; this removes nonselected sites and therefore limits declared coverage. |
 | `RJ_CONSAN_MOI_SAMPLE_OFFSET=M` | `0` | Static residue, smaller than the static stride. |
-| `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=N` | `16,384` for Sampled | Expert power-of-two runtime stride in `1..16777216`; leaves all eligible static sites patched. |
+| `RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=N` | `65,536` for Record/Replay; `16,384` for Sampled | Expert power-of-two runtime stride in `1..16777216`; leaves all eligible static sites patched. |
 | `RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=M` | `0` | Expert runtime residue smaller than the runtime stride. |
 | `RJ_CONSAN_MOI_SAMPLED_CHECK=0|1` | `0` | Enable the lower-fidelity immediate adjacent-range GPU check in addition to host scanning. |
+
+Record/Replay runtime selection retains whole workgroups. It mixes the exact
+x/y/z workgroup coordinates and the gfx1250 cluster coordinate when present,
+but not dispatch identity; offset zero therefore always includes workgroup
+zero and selects the same workgroup coordinates across repeated launches.
+Dispatch identity remains part of each retained record and host-replay key.
 
 Sampled runtime selection mixes hardware dispatch identity, workgroup
 coordinates, wave owner, epoch, persistent per-wave sequence, static site, and

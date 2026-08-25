@@ -461,6 +461,71 @@ function(rj_add_consan_device_conformance_cases)
         )
     endforeach()
 
+    # Record/Replay samples whole workgroups. Offset zero must retain
+    # workgroup zero even at the production default stride, and sparse
+    # selection must preserve the exact identity of every selected
+    # workgroup. These paired reductions guard both halves of #10622: the
+    # correct member must remain diagnostic-free and the member missing its
+    # publication barrier must still produce a replay conflict.
+    foreach(
+        _sampling_profile
+        IN
+        ITEMS
+            "Default|65536"
+            "Sparse|4"
+    )
+        string(REPLACE "|" ";" _sampling_fields "${_sampling_profile}")
+        list(GET _sampling_fields 0 _sampling_name)
+        list(GET _sampling_fields 1 _sampling_stride)
+        foreach(_outcome IN ITEMS Correct Incorrect)
+            string(TOLOWER "${_outcome}" _outcome_label)
+            set(
+                _sampling_environment
+                "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_hooks>"
+                "RJ_CONSAN_MODE=record-replay"
+                "RJ_CONSAN_POLICY=strict"
+                "RJ_CONSAN_REQUIRE_PATCH=1"
+                "RJ_CONSAN_LOG=1"
+                "RJ_CONSAN_MOI_TRACK_BARRIERS=1"
+                "RJ_CONSAN_MOI_TRACK_ATOMICS=0"
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=${_sampling_stride}"
+                "RJ_CONSAN_MOI_RUNTIME_SAMPLE_OFFSET=0"
+                "RJ_CONSAN_MOI_REQUIRE_RECORDS=1"
+                "RJ_CONSAN_MOI_FORBID_OVERFLOW=1"
+            )
+            if(_outcome STREQUAL "Correct")
+                list(
+                    APPEND _sampling_environment
+                    "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS=1"
+                )
+            else()
+                list(
+                    APPEND _sampling_environment
+                    "RJ_CONSAN_MOI_REQUIRE_REPLAY_CONFLICT=1"
+                )
+            endif()
+            rj_add_consan_hip_case(
+                NAME
+                    "${_device_PREFIX}.RecordReplay${_sampling_name}SamplingReduction.${_outcome}"
+                TARGET
+                    hip_consan_device_record_replay_sampling_reduction_${_device_TARGET}_test
+                FILTER
+                    "ConSanDeviceRecordReplaySamplingReductionTest.${_sampling_name}${_outcome}"
+                ${_config_args}
+                ${_resource_lock_args}
+                TIMEOUT 60
+                PASS_REGEX "dispatch_tokens=[1-9][0-9]*/[1-9][0-9]*"
+                ENVIRONMENT ${_sampling_environment}
+                LABELS
+                    ${_labels}
+                    record-replay
+                    sampling
+                    "${_outcome_label}"
+                    regression-10622
+            )
+        endforeach()
+    endforeach()
+
     set(_device_workloads
         "OrderedTileHandoff|ordered_tile_handoff|ConSanDeviceOrderedTileHandoffTest"
         "Reduction|reduction|ConSanDeviceReductionTest"
@@ -1121,6 +1186,7 @@ function(rj_add_consan_device_fixture_targets target)
         "record_replay_long_range_full_pressure|cdna_record_replay_long_range_full_pressure_test.hip"
         "record_replay_sparse_dense_pipeline|record_replay_sparse_dense_pipeline_test.hip"
         "record_replay_sparse_spill_pressure|record_replay_sparse_spill_pressure_test.hip"
+        "record_replay_sampling_reduction|record_replay_sampling_reduction_test.hip"
         "record_replay_many_owner_pressure|record_replay_sparse_spill_pressure_test.hip"
         "supercollider_dense_threshold|cdna_supercollider_dense_threshold_test.hip"
         "sampled_independent_scalar_proofs|cdna_sampled_independent_scalar_proofs_test.hip"
@@ -1203,6 +1269,11 @@ function(rj_add_consan_device_fixture_targets target)
                 APPEND _workload_compile_definitions
                 RJ_CONSAN_DEVICE_FENCE_BARRIER_ONLY=1
             )
+        endif()
+        if(_workload_name STREQUAL "record_replay_sampling_reduction")
+            # Match the downstream reproducer's optimization level. Its small
+            # static reduction shape is materially different at -O2/-O3.
+            list(APPEND _workload_compile_options -O1 -g)
         endif()
         if(
             _workload_name STREQUAL "gfx950_large_lds_pipeline"

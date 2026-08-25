@@ -36,7 +36,7 @@ build-tree paths.
 
 | Location | Current role | How to extend it |
 | --- | --- | --- |
-| `tests/dbi/consan/device/` | The checked-in behavioral-conformance tier. Forty-six all-engine pairs cover portable workload abstractions on all five targets plus physical gfx950, including RCCL-style reusable partial barriers, FLAT-atomic publication, Stream-K and Top-K, runtime-indexed LDS aliasing, deterministic state replay, module and graph lifecycle, compiler-generated kernarg preloads, mixed private owners, large-text relay pressure, live-SCC subword traffic, clobbering LDS loads, full-low-bank Stream-K, and adjacent plus stride-64 dual-address B64 publication. Nine additional common pairs deliberately scope an implementation-independent contract to one applicable engine plus baseline: eight pressure/scale shapes and a Sharktank-derived cross-queue dispatch-identity pair. Family/target sources cover CDNA MFMA/AccVGPR/direct-to-LDS/transpose, RDNA WMMA/FP8, and gfx1250 clusters/TDM/high-bank LDS, sparse/scaled matrix pipelines, native K=32 FP16 WMMA with 32-byte fragments, 160-KiB LDS, native tensor-descriptor staging, and async transfer in both global-to-LDS and LDS-to-global directions. The gfx1250 cluster host fixture submits a real extended HSA dispatch packet rather than hiding cluster dimensions behind an ordinary HIP launch. | Add one descriptively named source per new semantic scenario. Prefer extending a scenario with another tightly related pair over creating broad clean/racy grab bags. |
+| `tests/dbi/consan/device/` | The checked-in behavioral-conformance tier. Forty-six all-engine pairs cover portable workload abstractions on all five targets plus physical gfx950, including RCCL-style reusable partial barriers, FLAT-atomic publication, Stream-K and Top-K, runtime-indexed LDS aliasing, deterministic state replay, module and graph lifecycle, compiler-generated kernarg preloads, mixed private owners, large-text relay pressure, live-SCC subword traffic, clobbering LDS loads, full-low-bank Stream-K, and adjacent plus stride-64 dual-address B64 publication. Ten additional common pairs deliberately scope an implementation-independent contract to one applicable engine plus baseline: eight pressure/scale shapes, a Sharktank-derived cross-queue dispatch-identity pair, and a multi-workgroup reduction run at both the Record/Replay default and a sparse intermediate stride. Family/target sources cover CDNA MFMA/AccVGPR/direct-to-LDS/transpose, RDNA WMMA/FP8, and gfx1250 clusters/TDM/high-bank LDS, sparse/scaled matrix pipelines, native K=32 FP16 WMMA with 32-byte fragments, 160-KiB LDS, native tensor-descriptor staging, and async transfer in both global-to-LDS and LDS-to-global directions. The gfx1250 cluster host fixture submits a real extended HSA dispatch packet rather than hiding cluster dimensions behind an ordinary HIP launch. | Add one descriptively named source per new semantic scenario. Prefer extending a scenario with another tightly related pair over creating broad clean/racy grab bags. |
 | `tests/dbi/consan/device/consan_device_test_support.h` | Small shared fixture utilities used by the paired HIP sources. | Put only genuinely reusable fixture mechanics here; keep scenario semantics and expected results local to each test source. |
 | `tests/dbi/consan/hip_consan_{lds,moi,moi_cdna,moi_rdna3,inline_shadow,spill_gfx950}_test.hip` and related support | Older target- or engine-specific device fixtures. They provide useful ISA and implementation test material but are not the common behavioral conformance tier. | Distill behaviorally justified idioms into the new paired suite. Keep implementation-specific assertions here when they remain useful, but do not count them as substitutes for portable correct/incorrect contracts. |
 | `tests/consan/CMakeLists.txt` | Builds target-specific HIP executables and registers every baseline/engine/backend row, labels, diagnostic requirements, simulator configuration, target-scoped physical resource lock, and health dependency. The shared registration path rejects any physical device row without a lock. It is included by `tests/CMakeLists.txt`. | Register every new pair here across the common matrix. As the table grows, move the declarative pair inventory and registration helpers into a focused `tests/consan/device_tests.cmake` included from this file rather than duplicating per-architecture blocks. |
@@ -500,12 +500,15 @@ contracts:
   regression keeps same-owner and incomplete-provenance conflicts fail-closed
   and suppresses only complete disjoint owner sets; the adjacent two-stream
   correct/incorrect device pair transports the behavior across every target;
-- Record/Replay recomputing the complete dispatch/workgroup sampling hash at
-  every access and synchronization probe, and therefore executing every probe
-  for an automatically assigned persistent VGPR tuple despite a sparse
-  runtime stride. The entry prologue now caches the exact selection predicate
-  after mixing x/y/z and gfx1250 cluster identity; a five-target host matrix
-  and the portable sparse-dense device pair retain that contract;
+- Record/Replay previously cached the workgroup sampling predicate by replacing
+  persistent workgroup X with a boolean. Sparse selection could therefore
+  collapse distinct selected workgroups to X=1 and make their private LDS
+  allocations alias during host replay. Record/Replay now preserves exact
+  x/y/z/cluster identity and uses a stable coordinate-only gate, so offset zero
+  always includes workgroup zero. A five-target host matrix and paired
+  reductions at stride 65,536 and stride 4 cover all simulator targets plus
+  physical gfx950; each correct member forbids diagnostics and each missing-
+  barrier member requires the expected replay conflict;
 - sparse Record/Replay borrowing a guest scalar window whose four access-body
   slots were saved locally while the earlier seven-slot workgroup hash at
   kernel entry was not. Tensile exposed zero results and a segmentation fault

@@ -3552,8 +3552,9 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
     rj_code_arch_t arch) {
   const std::optional<ConSanMoiWorkgroupSource> cached_selection =
       moi_runtime_workgroup_selection_source(options, arch);
+  const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
-      (!cached_selection && !options.moi_dispatch_id_sgpr &&
+      (!record_replay && !cached_selection && !options.moi_dispatch_id_sgpr &&
        !moi_permits_literal_dispatch_identity(options, arch)))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
@@ -3593,17 +3594,24 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
       return std::nullopt;
     words.push_back(*selected);
   } else {
-    const uint16_t dispatch_mix = options.moi_dispatch_id_sgpr.value_or(
-        scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) & 63u));
-    const auto mix_dispatch = instrumentation::build_s_sub_u32(
-        residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
-    if (!mix_dispatch)
-      return std::nullopt;
-    words.push_back(*mix_dispatch);
+    if (record_replay) {
+      // Record/Replay samples stable workgroup coordinates. Dispatch identity
+      // remains part of every record's attribution, but must not rotate the
+      // selected workgroup or make offset zero omit workgroup zero.
+      words.push_back(build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch));
+    } else {
+      const uint16_t dispatch_mix = options.moi_dispatch_id_sgpr.value_or(
+          scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) & 63u));
+      const auto mix_dispatch = instrumentation::build_s_sub_u32(
+          residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
+      if (!mix_dispatch)
+        return std::nullopt;
+      words.push_back(*mix_dispatch);
+    }
 
-    // Sample a dispatch/workgroup consistently at every site. Automatic
-    // entry state caches this exact predicate; explicit and spill-backed
-    // configurations retain the probe-local computation below.
+    // Sample one stable workgroup consistently at every site. Sampled also
+    // mixes dispatch identity above; Record/Replay keeps dispatch identity in
+    // its records instead of using it to rotate this workgroup predicate.
     if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
         !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
         !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||
@@ -3670,8 +3678,9 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
     rj_code_arch_t arch) {
   const std::optional<ConSanMoiWorkgroupSource> cached_selection =
       moi_runtime_workgroup_selection_source(options, arch);
+  const bool record_replay = options.moi_engine == ConSanMoiEngine::RecordReplay;
   if (!options.moi_exec_save_sgpr || options.moi_runtime_sample_stride <= 1u ||
-      (!cached_selection && !options.moi_dispatch_id_sgpr &&
+      (!record_replay && !cached_selection && !options.moi_dispatch_id_sgpr &&
        !moi_permits_literal_dispatch_identity(options, arch)))
     return std::nullopt;
   const uint16_t saved_scc = static_cast<uint16_t>(*options.moi_exec_save_sgpr + 4u);
@@ -3721,13 +3730,17 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
       return std::nullopt;
     words.push_back(*selected);
   } else {
-    const uint16_t dispatch_mix = options.moi_dispatch_id_sgpr.value_or(
-        scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) & 63u));
-    const auto mix_dispatch = instrumentation::build_s_sub_u32(
-        residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
-    if (!mix_dispatch)
-      return std::nullopt;
-    words.push_back(*mix_dispatch);
+    if (record_replay) {
+      words.push_back(build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch));
+    } else {
+      const uint16_t dispatch_mix = options.moi_dispatch_id_sgpr.value_or(
+          scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) & 63u));
+      const auto mix_dispatch = instrumentation::build_s_sub_u32(
+          residue, scalar_positive_inline_u32(0), dispatch_mix, arch);
+      if (!mix_dispatch)
+        return std::nullopt;
+      words.push_back(*mix_dispatch);
+    }
     if (!append_moi_runtime_workgroup_mix(words, workgroup_sources.x, quotient, residue, arch) ||
         !append_moi_runtime_workgroup_mix(words, workgroup_sources.y, quotient, residue, arch) ||
         !append_moi_runtime_workgroup_mix(words, workgroup_sources.z, quotient, residue, arch) ||

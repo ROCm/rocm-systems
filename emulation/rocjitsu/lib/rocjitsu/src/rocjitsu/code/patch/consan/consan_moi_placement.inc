@@ -3873,24 +3873,13 @@ static_assert(moi_architectural_sgpr_layout(ROCJITSU_CODE_ARCH_CDNA5).ordinary_l
 
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSource>
 moi_runtime_workgroup_selection_source(const ConSanOptions &options, rj_code_arch_t arch) {
-  // Record/Replay consumes the persistent workgroup tuple only to make this
-  // stable selection. Once the entry prologue has mixed all exact coordinates,
-  // it can retain the boolean in the tuple's x slot without increasing the
-  // persistent register footprint. Sampled still needs the original tuple for
-  // window-bank selection and therefore retains its probe-local computation.
-  const bool literal_dispatch_identity = moi_permits_literal_dispatch_identity(options, arch);
-  const bool has_dispatch_register = options.moi_dispatch_id_sgpr || options.moi_dispatch_id_vgpr;
-  const bool automatic_or_literal_dispatch = options.automatic_moi_dispatch_id_sgprs ||
-                                             options.automatic_moi_dispatch_id_vgprs ||
-                                             (!has_dispatch_register && literal_dispatch_identity);
-  if (options.moi_engine != ConSanMoiEngine::RecordReplay || !automatic_or_literal_dispatch ||
-      options.moi_runtime_sample_stride <= 1u) {
-    return std::nullopt;
-  }
-  if (options.moi_record_replay_workgroup_sgprs.complete())
-    return ConSanMoiWorkgroupSource::scalar(*options.moi_record_replay_workgroup_sgprs.x);
-  if (options.moi_record_replay_workgroup_vgprs.complete())
-    return ConSanMoiWorkgroupSource::vector(*options.moi_record_replay_workgroup_vgprs.x);
+  // A cached Record/Replay selection needs storage distinct from the exact
+  // workgroup tuple. In particular, replacing persistent X with the boolean
+  // collapses every selected workgroup to X=1 and makes their private LDS
+  // allocations alias during host replay. Until a dedicated cache slot is
+  // assigned, retain the tuple and compute the gate at each probe.
+  (void)options;
+  (void)arch;
   return std::nullopt;
 }
 
@@ -3898,9 +3887,15 @@ moi_runtime_workgroup_selection_source(const ConSanOptions &options, rj_code_arc
 moi_has_probe_entry_runtime_workgroup_gate(const ConSanOptions &options,
                                            const ConSanMoiWorkgroupSources &workgroup_sources,
                                            rj_code_arch_t arch) {
-  return moi_runtime_workgroup_selection_source(options, arch).has_value() ||
-         (workgroup_sources.x.scalar_src && workgroup_sources.y.scalar_src &&
-          workgroup_sources.z.scalar_src);
+  const auto register_backed = [](const ConSanMoiWorkgroupSource &source) {
+    return source.scalar_src.has_value() || source.vector_src.has_value();
+  };
+  const bool register_backed_tuple = register_backed(workgroup_sources.x) &&
+                                     register_backed(workgroup_sources.y) &&
+                                     register_backed(workgroup_sources.z) &&
+                                     (!workgroup_sources.cluster_workgroup_id.has_value() ||
+                                      register_backed(workgroup_sources.cluster_workgroup_id));
+  return moi_runtime_workgroup_selection_source(options, arch).has_value() || register_backed_tuple;
 }
 
 struct MoiSpecialStateSgprs {

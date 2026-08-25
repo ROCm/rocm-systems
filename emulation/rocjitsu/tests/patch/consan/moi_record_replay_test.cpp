@@ -1494,7 +1494,7 @@ TEST(ConSanMoi, RecordReplayRuntimeGateUsesPersistentWorkgroupTuple) {
   EXPECT_NE(literal_move.begin(), patched_words.end());
 }
 
-TEST(ConSanMoi, AutomaticRecordReplayCachesRuntimeWorkgroupSelectionAcrossTargets) {
+TEST(ConSanMoi, AutomaticRecordReplayPreservesRuntimeWorkgroupTupleAcrossTargets) {
   constexpr uint32_t kAccessCount = 9u;
   for (const rj_code_arch_t arch : {
            ROCJITSU_CODE_ARCH_CDNA3,
@@ -1572,9 +1572,9 @@ TEST(ConSanMoi, AutomaticRecordReplayCachesRuntimeWorkgroupSelectionAcrossTarget
     const bool scalar_selection = result.resolved_moi_record_replay_workgroup_sgprs.complete();
     const bool vector_selection = result.resolved_moi_record_replay_workgroup_vgprs.complete();
     ASSERT_NE(scalar_selection, vector_selection);
-    const uint16_t selection_register = scalar_selection
-                                            ? *result.resolved_moi_record_replay_workgroup_sgprs.x
-                                            : *result.resolved_moi_record_replay_workgroup_vgprs.x;
+    const uint16_t workgroup_x_register =
+        scalar_selection ? *result.resolved_moi_record_replay_workgroup_sgprs.x
+                         : *result.resolved_moi_record_replay_workgroup_vgprs.x;
     if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
       ASSERT_EQ(result.kernels.size(), 1u);
       EXPECT_TRUE(result.kernels.front().uses_gfx1250_cluster_workgroup_id);
@@ -1587,35 +1587,30 @@ TEST(ConSanMoi, AutomaticRecordReplayCachesRuntimeWorkgroupSelectionAcrossTarget
     const std::vector<uint32_t> patched_words =
         text_words_at_offset(patched, /*text_offset=*/0u,
                              static_cast<uint32_t>(patched.text_sections().front()->size()));
-    const uint16_t residue = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 6u);
-    const uint16_t dispatch_scalar = result.resolved_moi_dispatch_id_sgpr.value_or(
-        result.resolved_moi_dispatch_id_vgpr
-            ? static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 5u)
-            : scalar_positive_inline_u32(static_cast<uint32_t>(options.moi_report_dispatch_id) &
-                                         63u));
-    const auto initialize_once = instrumentation::build_s_sub_u32(
-        residue, scalar_positive_inline_u32(0u), dispatch_scalar, arch);
-    ASSERT_TRUE(initialize_once);
-    EXPECT_EQ(std::ranges::count(patched_words, *initialize_once), 1u);
-    if (result.resolved_moi_dispatch_id_vgpr) {
-      const auto read_dispatch = instrumentation::build_v_readfirstlane_b32(
-          dispatch_scalar, *result.resolved_moi_dispatch_id_vgpr, arch);
-      ASSERT_TRUE(read_dispatch);
-      EXPECT_EQ(std::ranges::count(patched_words, *read_dispatch), 1u);
-    }
+    const uint16_t residue = arch == ROCJITSU_CODE_ARCH_CDNA5
+                                 ? *result.resolved_moi_exec_save_sgpr
+                                 : static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 6u);
+    const uint32_t initialize_workgroup_hash =
+        build_s_mov_b32(residue, scalar_positive_inline_u32(0u), arch);
+    EXPECT_GE(std::ranges::count(patched_words, initialize_workgroup_hash), kAccessCount);
+    const auto overwrite_workgroup_x = instrumentation::build_s_cselect_b32(
+        workgroup_x_register, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u), arch);
+    ASSERT_TRUE(overwrite_workgroup_x);
+    EXPECT_EQ(std::ranges::count(patched_words, *overwrite_workgroup_x), 0u)
+        << "the sampling predicate must not replace exact workgroup X";
 
-    uint16_t selected_scalar = selection_register;
+    uint16_t selected_scalar = workgroup_x_register;
     if (vector_selection) {
       selected_scalar = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 5u);
       const auto read =
-          instrumentation::build_v_readfirstlane_b32(selected_scalar, selection_register, arch);
+          instrumentation::build_v_readfirstlane_b32(selected_scalar, workgroup_x_register, arch);
       ASSERT_TRUE(read);
       EXPECT_GE(std::ranges::count(patched_words, *read), kAccessCount);
     }
-    const auto selected =
-        instrumentation::build_s_cmp_lg_u32(selected_scalar, scalar_positive_inline_u32(0u), arch);
-    ASSERT_TRUE(selected);
-    EXPECT_GE(std::ranges::count(patched_words, *selected), kAccessCount);
+    const auto mix_workgroup_x =
+        instrumentation::build_s_sub_u32(residue, residue, selected_scalar, arch);
+    ASSERT_TRUE(mix_workgroup_x);
+    EXPECT_GE(std::ranges::count(patched_words, *mix_workgroup_x), kAccessCount);
   }
 }
 
@@ -10491,10 +10486,12 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
       words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
     }
     words.insert(words.end(), {
-                                  0xC4050018u, 0x40883804u,
+                                  0xC4050018u,
+                                  0x40883804u,
                                   0x00000005u, // buffer_load_b32 v4, v5, device
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC07Cu, 0x00080000u,
+                                  0xEE0AC07Cu,
+                                  0x00080000u,
                                   0x00000000u, // global_inv scope:device
                                   0xBFC00000u, // s_wait_loadcnt 0
                                   0xBE804EC1u, // s_barrier_signal -1
@@ -10632,19 +10629,15 @@ TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
   const auto save_scc = instrumentation::build_s_cselect_b32(
       /*sdst=*/kExecSaveSgpr + 4u, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u),
       ROCJITSU_CODE_ARCH_CDNA5);
-  const auto initialize_residue = instrumentation::build_s_sub_u32(
-      /*sdst=*/kExecSaveSgpr, scalar_positive_inline_u32(0u), kDispatchIdSgpr,
-      ROCJITSU_CODE_ARCH_CDNA5);
-  const auto clobber_call_return = instrumentation::build_s_sub_u32(
-      /*sdst=*/kCallReturnSgpr, scalar_positive_inline_u32(0u), kDispatchIdSgpr,
-      ROCJITSU_CODE_ARCH_CDNA5);
+  const uint32_t initialize_residue = build_s_mov_b32(
+      /*sdst=*/kExecSaveSgpr, scalar_positive_inline_u32(0u), ROCJITSU_CODE_ARCH_CDNA5);
+  const uint32_t clobber_call_return = build_s_mov_b32(
+      /*sdst=*/kCallReturnSgpr, scalar_positive_inline_u32(0u), ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(save_scc);
-  ASSERT_TRUE(initialize_residue);
-  ASSERT_TRUE(clobber_call_return);
   ASSERT_GE(words.size(), 2u);
   EXPECT_EQ(words[0], *save_scc);
-  EXPECT_EQ(words[1], *initialize_residue);
-  EXPECT_EQ(std::ranges::find(words, *clobber_call_return), words.end());
+  EXPECT_EQ(words[1], initialize_residue);
+  EXPECT_EQ(std::ranges::find(words, clobber_call_return), words.end());
   EXPECT_NE(std::ranges::find(words, build_s_setpc_b64(kCallReturnSgpr, ROCJITSU_CODE_ARCH_CDNA5)),
             words.end());
 }
@@ -11731,7 +11724,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   constexpr uint8_t kGuestVgprMsbMode = 0x01u;
   constexpr uint16_t kEncodedAddressVgpr = 30u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
+      0xDBFC0000u,
       0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
   };
   // Even when an inline body would fit in nearby padding, capturing an
