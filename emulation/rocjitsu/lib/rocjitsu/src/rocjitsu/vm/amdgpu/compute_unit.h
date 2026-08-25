@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -242,7 +243,18 @@ public:
   }
   using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
   void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
-  void set_debug_active(bool active) { debug_active_.store(active, std::memory_order_relaxed); }
+  /// @brief Mark a debug session as attached to or detached from this CU.
+  /// @details Every transition publishes an I$ invalidation. A debugger writes
+  /// breakpoints straight into code memory with none of the maintenance that
+  /// invalidates the I$, and it can do so without any wave on this CU issuing
+  /// during the session -- attach, plant a breakpoint on a stopped wave, detach.
+  /// The invalidation is only published here, not applied: this runs on the
+  /// ioctl thread, and the I$ is lock-free precisely because the CU's own thread
+  /// is its sole accessor. That thread consumes it at its next fetch.
+  void set_debug_active(bool active) {
+    if (debug_active_.exchange(active, std::memory_order_relaxed) != active)
+      inst_cache_debug_epoch_.fetch_add(1, std::memory_order_release);
+  }
   bool debug_active() const { return debug_active_.load(std::memory_order_relaxed); }
 
   /// @brief Set the command processor for WG completion notification.
@@ -345,6 +357,9 @@ public:
   /// @brief Return the L1 Vector Cache (V$).
   L1VectorCache &l1_vector() { return l1_vector_; }
 
+  /// @brief Return the per-CU instruction cache (I$).
+  InstructionCache &instruction_cache() { return inst_cache_; }
+
   /// @brief Return the shared L2 cache.
   L2Cache *l2() const { return l2_; }
 
@@ -398,6 +413,7 @@ public:
     });
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
+    inst_cache_.invalidate_all();
     l2_->flush_all(vmid);
   }
 
@@ -405,6 +421,7 @@ public:
     (void)vmid;
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
+    inst_cache_.invalidate_all();
   }
 
   /// @brief Set (or replace) the shared GPU memory pointer.
@@ -749,6 +766,17 @@ protected:
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
 
+  /// @brief Apply any I$ invalidation a debug attach or detach published.
+  /// @details Runs on this CU's own thread, which is the I$'s sole accessor.
+  /// See set_debug_active() for why the transition cannot invalidate directly.
+  void sync_inst_cache_debug_epoch() {
+    const uint64_t epoch = inst_cache_debug_epoch_.load(std::memory_order_acquire);
+    if (epoch == inst_cache_debug_epoch_seen_)
+      return;
+    inst_cache_.invalidate_all();
+    inst_cache_debug_epoch_seen_ = epoch;
+  }
+
   /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
 
@@ -815,6 +843,16 @@ protected:
   L2Cache *l2_;
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
+  InstructionCache inst_cache_;
+  /// @brief Debug attach/detach transitions seen by set_debug_active().
+  std::atomic<uint64_t> inst_cache_debug_epoch_{0};
+  /// @brief The epoch this CU's thread has already invalidated the I$ for.
+  uint64_t inst_cache_debug_epoch_seen_ = 0;
+  /// @brief Dispatch whose launch invalidation the I$ has already taken.
+  /// @details Held as 64 bits so the initial value is outside the 32-bit
+  /// dispatch-ID space and the first dispatch, including ID 0, still
+  /// invalidates.
+  uint64_t inst_cache_dispatch_id_ = ~uint64_t{0};
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
@@ -871,6 +909,9 @@ protected:
   friend class CommandProcessor;
 };
 
+inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
+  return raw_cu().instruction_cache();
+}
 inline L1ScalarCache &InstructionComputeUnitView::l1_scalar() { return raw_cu().l1_scalar(); }
 inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().l1_vector(); }
 inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }

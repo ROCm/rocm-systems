@@ -162,7 +162,6 @@ inline void execute_ds_load_addtid_b32_ds([[maybe_unused]] Inst &inst,
     d->exec_mask = exec;
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint32_t offset = (static_cast<uint32_t>(inst.inst_.offset1) << 8) | inst.inst_.offset0;
     uint32_t m0 = wf.m0();
     uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
@@ -418,6 +417,21 @@ inline void execute_s_addc_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
     return static_cast<uint32_t>(w);
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
+}
+
+template <typename Inst>
+inline void execute_s_addk_co_i32_sopk([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
+      amdgpu::RegisterAccess(wf).read_scalar(inst.sdst),
+      static_cast<uint32_t>(static_cast<int32_t>(
+          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.simm16) << 16) >> 16))));
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst,
+      (amdgpu::RegisterAccess(wf).read_scalar(inst.sdst) +
+       static_cast<uint32_t>(static_cast<int32_t>(
+           static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.simm16) << 16) >>
+           16))));
 }
 
 template <typename Inst>
@@ -1742,7 +1756,7 @@ inline void execute_s_gl1_inv_smem([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_s_icache_inv_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-
+  wf.cu().instruction_cache().invalidate_all();
 }
 
 template <typename Inst>
@@ -2546,6 +2560,10 @@ inline void execute_s_set_gpr_idx_on_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_set_inst_prefetch_distance_sopp([[maybe_unused]] Inst &inst,
                                                       [[maybe_unused]] Wavefront &wf) {}
+
+template <typename Inst>
+inline void execute_s_set_valu_coexec_mode_sopp([[maybe_unused]] Inst &inst,
+                                                [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
 inline void execute_s_sethalt_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}

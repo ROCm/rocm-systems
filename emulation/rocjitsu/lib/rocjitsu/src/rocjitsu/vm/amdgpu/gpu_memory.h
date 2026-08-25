@@ -245,9 +245,12 @@ public:
 
   /// @brief Read a contiguous range from simulated GPU memory.
   /// @details Handles each page through mapped host memory, client memory, or
-  /// sparse backing memory. A mapped access clipped by a host extent remains
-  /// zero-filled and emits a VM diagnostic so a future strict-fault mode can
-  /// reuse the same boundary detection.
+  /// sparse backing memory. Every path resolves a whole page chunk at a time,
+  /// so a read costs one page-table walk and one page-stripe lock per page it
+  /// touches rather than one per byte -- which is what makes this cheap enough
+  /// for the I$ to fill a line through. A mapped access clipped by a host
+  /// extent remains zero-filled and emits a VM diagnostic so a future
+  /// strict-fault mode can reuse the same boundary detection.
   void read_block(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid = 0) const {
     for_each_page_chunk(addr, dst.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
       auto out = dst.subspan(offset, chunk);
@@ -255,8 +258,8 @@ public:
         return;
       if (vmid > 0 && read_client_memory(ea, out.data(), chunk, vmid))
         return;
-      for (size_t i = 0; i < chunk; ++i)
-        out[i] = simdojo::SparseMemory::read8(ea + i);
+      // The chunk is within one page, so this is a single sparse-page lock.
+      simdojo::SparseMemory::read_block(ea, out);
     });
   }
 

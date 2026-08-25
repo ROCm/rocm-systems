@@ -8,7 +8,7 @@ import pytest
 
 from amdisa.codegen import CodeGenerator
 from amdisa.gpuisa import Instruction
-from amdisa.isa_profile import Cdna4Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna4Profile, CdnaProfile, Rdna4Profile
 from amdisa.parser import Parser
 
 
@@ -62,6 +62,14 @@ def test_cdna4_distinguishes_vop1_instructions_with_and_without_sdwa():
     generator = CodeGenerator(spec, '')
     assert generator._instruction_supports_sdwa(supported, 'ENC_VOP1')
     assert not generator._instruction_supports_sdwa(unsupported, 'ENC_VOP1')
+
+
+def test_cdna_profile_restores_manual_sdwa_opcode_missing_from_xml():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna3.xml'), CdnaProfile()).parse()
+    inst = _find_instruction(spec, 'ENC_VOP2', 'V_PK_FMAC_F16')
+
+    assert 'VOP2_VOP_SDWA' not in inst.available_encodings
+    assert CodeGenerator(spec, '')._instruction_supports_sdwa(inst, 'ENC_VOP2')
 
 
 def test_modifier_availability_requires_explicit_encoding_provenance():
