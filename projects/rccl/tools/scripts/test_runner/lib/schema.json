@@ -246,6 +246,10 @@
         },
         "is_gtest":    { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
         "binary":      { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "test_binary_dir": {
+          "type": "string",
+          "description": "Directory in which the test binary is looked up for every test in this configuration (inherited via 'extends' and applied as a per-test default). Overrides paths.test_binary_dir. Supports ~ and $VAR expansion."
+        },
         "num_ranks":   { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
         "num_nodes":   { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
         "num_gpus":    { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
@@ -343,14 +347,14 @@
     },
 
     "test_suite": {
-      "description": "A suite entry that binds a test_configuration to a named run with optional overrides",
+      "description": "A suite entry that binds a test_configuration to a run with optional overrides",
       "type": "object",
-      "required": ["name", "config"],
+      "required": ["config"],
       "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string",
-          "description": "Human-readable suite name used for --suite-name filtering"
+          "description": "Optional human-readable suite name used for --suite-name filtering. When omitted the 'config' name is used as the suite identifier."
         },
         "description": {
           "type": "string",
@@ -358,14 +362,22 @@
         },
         "config": {
           "type": "string",
-          "description": "Name of the test_configuration to use for this suite"
+          "description": "Name of the test_configuration to use for this suite (also used as the suite identifier when 'name' is omitted)"
         },
         "enabled": {
           "type": "boolean",
-          "description": "When false the suite is skipped unless targeted by --suite-name. Default: true."
+          "description": "When false the suite is always skipped. Default: true."
+        },
+        "smoke": {
+          "type": "boolean",
+          "description": "When true this suite is part of the fast smoke subset selected by --scope smoke (e.g. the label-gated PR run). Default: false. With --scope nightly (or no --scope) all enabled suites run regardless of this flag."
         },
         "is_gtest":  { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
         "binary":    { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "test_binary_dir": {
+          "type": "string",
+          "description": "Suite-level override of the directory in which test binaries are looked up for this suite (takes priority over the configuration-level test_binary_dir and paths.test_binary_dir). Supports ~ and $VAR expansion."
+        },
         "num_ranks": { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
         "num_nodes": { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
         "num_gpus":  { "$ref": "#/$defs/test_defaults/properties/num_gpus" },

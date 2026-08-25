@@ -151,8 +151,8 @@ rocprofiler_add_integration_validate_test(
          --iteration-config
          ${CMAKE_CURRENT_BINARY_DIR}/input.yml
     TIMEOUT 120
-    LABELS "integration-tests" FIXTURES
-           rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
+    LABELS "integration-tests"
+    FIXTURES_REQUIRED rocprofv3-test-counter-collection-kernel-filtering-input-yaml)
 
 # CLI filter coverage: --kernel-include-regex / --kernel-exclude-regex /
 # --kernel-iteration-range on the command line, plus edge cases.

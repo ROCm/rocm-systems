@@ -126,6 +126,49 @@ def _profile_for_arch(arch_name: str):
     return profile_types[arch_name]()
 
 
+@pytest.mark.parametrize(
+    'arch_name',
+    (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+    ),
+)
+def test_shared_scalar_pair_selector_contract_matches_in_tree_isas(
+    arch_name: str,
+) -> None:
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+
+    CodeGenerator(spec, '')._validate_shared_scalar_pair_selector_contract()
+
+
+def test_shared_scalar_pair_selector_contract_rejects_value_drift() -> None:
+    arch_name = 'cdna4'
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    selector = next(
+        item for item in spec.opnd_selectors if item.operand_type == 'OPR_SSRC'
+    )
+    selector.op_sel_vals = [
+        (name, '105' if name == 'OPR_SSRC_VCC_LO' else value)
+        for name, value in selector.op_sel_vals
+    ]
+
+    with pytest.raises(ValueError, match=r'OPR_SSRC_VCC_LO=106'):
+        CodeGenerator(spec, '')._validate_shared_scalar_pair_selector_contract()
+
+
 def gen_mfma(
     inst: Instruction,
     dst: list[str],
@@ -133,6 +176,7 @@ def gen_mfma(
     arch_name: str,
     *,
     supports_gpr_idx: bool | None = None,
+    op_sel_hi_2_expr: str = 'inst_.op_sel_hi_2',
 ) -> str:
     """Call the matrix emitter with the selected ISA profile capability."""
     if supports_gpr_idx is None:
@@ -143,6 +187,7 @@ def gen_mfma(
         src,
         arch_name,
         supports_gpr_idx=supports_gpr_idx,
+        op_sel_hi_2_expr=op_sel_hi_2_expr,
     )
 
 
@@ -251,6 +296,83 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
     assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write'
     for name in names[1:]:
         assert rdna4[name].semantic_class == 'ds_atomic'
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected_kind'),
+    [
+        (Cdna4Profile(), 3),
+        (Rdna4Profile(), 6),
+        (Cdna5Profile(), 3),
+    ],
+)
+def test_b8_transpose_aliases_share_profile_routing(profile, expected_kind) -> None:
+    names = ('DS_LOAD_TR8_B64', 'DS_LOAD_B64_TR_B8', 'DS_LOAD_TR_B64')
+    spec = SimpleNamespace(
+        profile=profile,
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name='ENC_VDS',
+                insts=[SimpleNamespace(name=name) for name in names],
+            )
+        ],
+    )
+
+    semantics = derive_all_semantics(spec)
+
+    assert {semantics[name].transpose_kind for name in names} == {expected_kind}
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected_kind'),
+    [
+        (Cdna4Profile(), 6),
+        (Rdna4Profile(), 6),
+        (Cdna5Profile(), 6),
+    ],
+)
+def test_global_b8_transpose_aliases_share_profile_routing(
+    profile, expected_kind
+) -> None:
+    names = (
+        'GLOBAL_LOAD_TR8_B64',
+        'GLOBAL_LOAD_B64_TR_B8',
+        'GLOBAL_LOAD_TR_B64',
+    )
+    spec = SimpleNamespace(
+        profile=profile,
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name='ENC_VGLOBAL',
+                insts=[SimpleNamespace(name=name) for name in names],
+            )
+        ],
+    )
+
+    semantics = derive_all_semantics(spec)
+
+    assert profile.global_b8_transpose_kind == expected_kind
+    assert {semantics[name].transpose_kind for name in names} == {expected_kind}
+
+
+def test_global_b8_transpose_kind_can_be_overridden_by_profile() -> None:
+    class GlobalB8Kind3Profile(Cdna5Profile):
+        @property
+        def global_b8_transpose_kind(self) -> int:
+            return 3
+
+    sem = derive_semantics('GLOBAL_LOAD_TR8_B64', 'ENC_VGLOBAL', GlobalB8Kind3Profile())
+
+    assert sem is not None
+    assert sem.transpose_kind == 3
+
+
+def test_gfx1250_ds_b8_transpose_uses_profile_routing(
+    gfx1250_generated_root: Path,
+) -> None:
+    vds = (gfx1250_generated_root / 'vds_exec.cpp').read_text()
+    body = _generated_method_body(vds, 'DsLoadTr8B64Vds', 'DsLoadB96Vds')
+    assert 'd->transpose = 3;' in body
 
 
 @pytest.mark.parametrize(
@@ -876,7 +998,11 @@ def test_rdna4_parser_injects_s_waitcnt_compat():
     ).parse()
 
     sopp = spec.encoding_map['ENC_SOPP']
-    assert any(inst.name == 'S_WAITCNT' and inst.opcode == 9 for inst in sopp.insts)
+    waitcnt = next(
+        inst for inst in sopp.insts if inst.name == 'S_WAITCNT' and inst.opcode == 9
+    )
+    assert waitcnt.available_encodings == frozenset({'ENC_SOPP'})
+    assert 'OPR_WAITCNT' in spec.operand_types
 
     dt_ptr = sopp.primary_dt_ptrs[9]
     dte = spec.primary_decode_table[dt_ptr]
@@ -924,6 +1050,7 @@ def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | No
         arch_name=arch_name,
         encoding_map=encoding_map,
         primary_decode_table=[dte],
+        operand_types=[],
     )
     return parser, sopp, dte
 
@@ -1201,6 +1328,30 @@ def test_rdna4_s_waitcnt_rejects_missing_route_invariants(encoding_map, message)
 
     with pytest.raises(ValueError, match=message):
         parser._inject_s_waitcnt_compat()
+
+
+def test_rdna4_s_waitcnt_rejects_ambiguous_primary_routes_before_mutation():
+    parser, sopp, first_dte = _fake_sopp_parser('rdna4', sub_decode_funcs=[None] * 16)
+    first_dte.enc = sopp
+    second_dte = SimpleNamespace(
+        enc=sopp,
+        sub_decode_funcs=[None] * 16,
+        decode_func=None,
+        inst_name=None,
+    )
+    parser.isa_spec.primary_decode_table.append(second_dte)
+    sopp.primary_dt_ptrs[0] = 0
+    sopp.primary_dt_ptrs[1] = 1
+    sopp.primary_dt_ptrs[9] = -1
+    before = _s_waitcnt_state(sopp, first_dte)
+
+    with pytest.raises(
+        ValueError,
+        match='requires exactly one unique ENC_SOPP primary decode route',
+    ):
+        parser._inject_s_waitcnt_compat()
+
+    assert _s_waitcnt_state(sopp, first_dte) == before
 
 
 @pytest.mark.parametrize(
@@ -1621,6 +1772,20 @@ def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
 
     assert 'amdgpu::exec_wmma_f32_16x16x32_f16(' in body
     assert 'amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi)' in body
+
+
+def test_gfx1250_mixed_wmma_uses_public_opsel_hi_2_field():
+    inst = Instruction('V_WMMA_F32_16X16X128_F8F6F4', 'ENC_VOP3P', 0, [])
+    body = gen_mfma(
+        inst,
+        ['vdst'],
+        ['src0', 'src1', 'src2'],
+        'cdna5',
+        op_sel_hi_2_expr='inst_.opsel_hi_2',
+    )
+
+    assert '(inst_.opsel_hi_2 << 2) | inst_.opsel_hi' in body
+    assert 'pad_14' not in body
 
 
 @pytest.mark.parametrize(
@@ -2314,6 +2479,20 @@ def test_gfx1250_generated_vop2_fmac_f16_reads_packed_vdst(
     )
 
 
+def test_cdna3_generated_pk_fmac_f16_preserves_accumulator_source_order(
+    amdgpu_generated_root: Path,
+):
+    vop2_cpp = (amdgpu_generated_root / 'cdna3' / 'vop2.cpp').read_text()
+    ctor = _generated_constructor_body(vop2_cpp, 'VPkFmacF16Vop2')
+
+    assert ctor.index('src_operands_[0] = &vdst;') < ctor.index(
+        'src_operands_[1] = &src0;'
+    )
+    assert ctor.index('src_operands_[1] = &src0;') < ctor.index(
+        'src_operands_[2] = &vsrc1;'
+    )
+
+
 def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     amdgpu_generated_root: Path,
     gfx1250_generated_root: Path,
@@ -2711,6 +2890,23 @@ def test_single_isa_cdna1_sources_include_simd_glue_once(tmp_path):
     for source_name in ('vop3_exec.cpp', 'vop3p_exec.cpp'):
         source = (tmp_path / 'cdna1' / source_name).read_text()
         assert source.count(simd_glue_include) == 1
+
+
+def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    vop3 = next(
+        encoding for encoding in spec.inst_encodings if encoding.enc_name == 'ENC_VOP3'
+    )
+    cndmask = next(inst for inst in vop3.insts if inst.name == 'V_CNDMASK_B32')
+
+    body = generator._gen_execute_body(
+        cndmask, semantics.instructions[cndmask.name], vop3.enc_name
+    )
+
+    assert body.count('amdgpu::apply_vop3_b32_src_mod(') == 2
+    assert re.search(r'(?<!amdgpu::)apply_vop3_b32_src_mod\(', body) is None
 
 
 def test_rdna4_64bit_literal_widening_is_format_specific(tmp_path):
@@ -3234,6 +3430,26 @@ def test_generated_sdwa_uses_shared_source_staging(
     assert checked_sdwa_files > 0
 
 
+def test_cdna3_generated_disassembly_preserves_ds_and_flat_offsets(
+    amdgpu_generated_root: Path,
+) -> None:
+    encodings_cpp = (amdgpu_generated_root / 'cdna3' / 'encodings.cpp').read_text()
+
+    ds_start = encodings_cpp.index('void Ds::build_modifiers')
+    ds_modifiers = encodings_cpp[ds_start : ds_start + 1000]
+    assert 'uses_split_ds_offsets()' in ds_modifiers
+    assert 'out += " offset0:"' in ds_modifiers
+    assert 'out += " offset1:"' in ds_modifiers
+    assert 'inst->offset0 | (inst->offset1 << 8)' in ds_modifiers
+    assert 'out += " gds"' in ds_modifiers
+
+    flat_start = encodings_cpp.index('void Flat::build_modifiers')
+    flat_modifiers = encodings_cpp[flat_start : flat_start + 1000]
+    assert 'if (inst->seg == 0)' in flat_modifiers
+    assert 'flat_offset & 0x1000' in flat_modifiers
+    assert 'flat_offset -= 0x2000' in flat_modifiers
+
+
 def test_generated_sdwa_uses_source_specific_modifier_formats(
     cdna4_generated_root: Path,
 ) -> None:
@@ -3255,6 +3471,12 @@ def test_generated_sdwa_uses_source_specific_modifier_formats(
 
     add_f16 = _generated_method_body(vop2, 'VAddF16Vop2', 'VSubF16Vop2')
     assert add_f16.count('SourceModifierFormat::F16') == 2
+
+    pk_fmac_f16 = _generated_method_body(vop2, 'VPkFmacF16Vop2', 'VXnorB32Vop2')
+    assert pk_fmac_f16.count('SourceModifierFormat::NONE') == 2
+    assert 'stage_source(src0,' in pk_fmac_f16
+    assert 'stage_source(vsrc1,' in pk_fmac_f16
+    assert 'stage_source(vdst,' not in pk_fmac_f16
 
     ldexp_f16 = _generated_method_body(vop2, 'VLdexpF16Vop2', 'VAddU32Vop2')
     assert 'SourceModifierFormat::F16' in ldexp_f16
@@ -3604,8 +3826,18 @@ def test_gfx1250_packed_f32_execute_uses_local_simd_probe(
         assert 'amdgpu::execute_v_pk_' not in body
 
     assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS' in fma_body
-    assert 'inst_.opsel, inst_.opsel_hi, inst_.pad_14' in fma_body
+    assert 'inst_.opsel, inst_.opsel_hi, inst_.opsel_hi_2' in fma_body
     assert fma_body.index('ROCJITSU_TRY_SIMD') < fma_body.index('for (uint32_t lane')
+
+
+def test_gfx1250_matrix_codegen_uses_public_opsel_hi_2_field(
+    gfx1250_generated_root: Path,
+):
+    source = (gfx1250_generated_root / 'vop3p.cpp').read_text()
+
+    assert 'pad_14' not in source
+    assert 'inst_.opsel_hi_2' in source
+    assert 'scale_inst_.opsel_hi_2' in source
 
 
 def test_gfx1250_vop3p_rejects_unencoded_literal64_selectors(
@@ -4134,7 +4366,7 @@ def test_generated_rdna4_rejects_opcode_illegal_dpp(
 
 @pytest.mark.parametrize(
     ('arch', 'opsel_hi_2_field'),
-    [('rdna4', 'opsel_hi_2'), ('gfx1250', 'pad_14')],
+    [('rdna4', 'opsel_hi_2'), ('gfx1250', 'opsel_hi_2')],
 )
 def test_generated_modern_rdna_validates_dpp_opsel_alignment(
     amdgpu_generated_root: Path,
@@ -4636,6 +4868,12 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     codegen.isa_spec = SimpleNamespace(
         arch_name='cdna5',
         profile=Cdna5Profile(),
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name='ENC_VOP3P',
+                ucode_fields=[SimpleNamespace(bit_offset=14, name='opsel_hi_2')],
+            )
+        ],
     )
 
     assert codegen._supports_cdna5_scaled_wmma_vop3px2()
@@ -4664,6 +4902,8 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     assert 'isGfx1250WmmaScaleSource' in helpers
     assert 'isGfx1250WmmaScaleFormatPairLegal' in helpers
     assert 'isGfx1250WmmaScalePairValid' in helpers
+    assert 'matrix->opsel_hi_2' in helpers
+    assert 'matrix->pad_14' not in helpers
     assert 'isWmmaScaleF32Vop3px2' not in helpers
 
     execution_impl = impls.execution[0]
@@ -5791,6 +6031,10 @@ def test_generated_flat_saddr_null_selector_follows_encoding(
     rdna3_flat = (amdgpu_generated_root / 'rdna3' / 'flat.cpp').read_text()
     assert 'inst_.saddr != 0x7F' in rdna3_flat
     assert 'inst_.saddr != OPR_SREG_NULL' not in rdna3_flat
+    assert (
+        'if (inst_.seg != 2)\n'
+        '    src_operands_[num_src_++] = &flat_scratch;' in rdna3_flat
+    )
 
     gfx1250_root = amdgpu_generated_root / _generated_dir_name('cdna5')
     gfx1250_vflat = (gfx1250_root / 'vflat.cpp').read_text()

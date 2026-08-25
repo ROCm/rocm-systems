@@ -11,8 +11,8 @@
 /// cross-lane shuffle to produce the transposed matrix layout expected by
 /// matrix instructions.
 ///
-/// B64_TR_B8 is the CDNA4 MFMA byte transpose with groups of 4 consecutive
-/// lanes. WMMA_TR_B8 is the CDNA5/RDNA4 16x16 byte-matrix transpose.
+/// B64_TR_B8 is the CDNA4 MFMA and CDNA5 DS byte transpose within 16-lane
+/// groups. WMMA_TR_B8 is used by RDNA4 and CDNA5 global loads.
 /// TR16_B128 (gfx1250 ds/global_load_tr16_b128, RDNA4 global_load_tr_b128)
 /// transposes 16-bit elements within groups of 8 consecutive lanes.
 /// B64_TR_B16 (CDNA4 ds_read_b64_tr_b16) is a 4x16-lane halfword transpose
@@ -20,6 +20,7 @@
 
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -37,51 +38,34 @@ enum class TransposeKind : uint8_t {
   WMMA_TR_B8 = 6,
 };
 
-/// @brief CDNA4 B64 byte-level MFMA transpose (B64_TR_B8 only).
+/// @brief CDNA4 MFMA / CDNA5 DS B64 byte-level transpose (B64_TR_B8 only).
 ///
-/// Groups of 4 source lanes, 8 byte iterations per group.
-/// Each iteration packs one byte from each of 4 source lanes into a dword
-/// and writes to a cross-lane destination computed by compact formula.
+/// Within each 16-lane group, destination lane `l` byte `n` comes from source
+/// lane `((l & ~0xf) | ((l >> 3) & 1)) + 2 * n`, byte `l & 7`.
+/// B64_TR_B8 always carries exactly two dwords (eight bytes) per lane.
 inline void transpose_b64_tr_b8(std::vector<uint8_t> &response_data, uint32_t num_elems,
                                 uint32_t wf_size) {
-  constexpr uint32_t lanes_per_half = 32;
-  constexpr uint32_t source_group_size = 4;
-  constexpr uint32_t bytes_per_lane = 8;
-
+  assert(num_elems == 2 && "B64_TR_B8 requires an eight-byte lane payload");
   const uint32_t bytes_per_lane_total = num_elems * 4;
-  const uint32_t num_halves = (wf_size > lanes_per_half) ? 2u : 1u;
 
   std::vector<uint8_t> output(response_data.size(), 0);
 
-  for (uint32_t half_index = 0; half_index < num_halves; ++half_index) {
-    const uint32_t lane_base = half_index * lanes_per_half;
-
-    for (uint32_t group_start = 0; group_start < lanes_per_half; group_start += source_group_size) {
-      for (uint32_t byte_index = 0; byte_index < bytes_per_lane; ++byte_index) {
-        uint32_t packed_dword = 0;
-        for (uint32_t lane_in_group = 0; lane_in_group < source_group_size; ++lane_in_group) {
-          uint32_t source_lane = lane_base + group_start + lane_in_group;
-          uint32_t source_offset = source_lane * bytes_per_lane_total + byte_index;
-          uint8_t source_byte =
-              (source_offset < response_data.size()) ? response_data[source_offset] : 0;
-          packed_dword |= static_cast<uint32_t>(source_byte) << (lane_in_group * 8);
-        }
-
-        uint32_t dest_vgpr_index = (group_start % 16) / 8;
-        uint32_t dest_lane = lane_base + (group_start / 16) * 16 +
-                             ((group_start / source_group_size) % 2) * bytes_per_lane + byte_index;
-        uint32_t dest_offset = dest_lane * bytes_per_lane_total + dest_vgpr_index * 4;
-
-        if (dest_offset + 4 <= output.size())
-          std::memcpy(&output[dest_offset], &packed_dword, 4);
-      }
+  for (uint32_t dest_lane = 0; dest_lane < wf_size; ++dest_lane) {
+    const uint32_t source_byte = dest_lane & 7u;
+    const uint32_t source_base = (dest_lane & ~0xfu) | ((dest_lane >> 3) & 1u);
+    for (uint32_t dest_byte = 0; dest_byte < bytes_per_lane_total; ++dest_byte) {
+      const uint32_t source_lane = source_base + 2u * dest_byte;
+      const uint32_t source_offset = source_lane * bytes_per_lane_total + source_byte;
+      const uint32_t dest_offset = dest_lane * bytes_per_lane_total + dest_byte;
+      if (source_offset < response_data.size() && dest_offset < output.size())
+        output[dest_offset] = response_data[source_offset];
     }
   }
 
   response_data = std::move(output);
 }
 
-/// @brief CDNA5/RDNA4 16x16 8-bit WMMA transpose-load layout.
+/// @brief RDNA4 and CDNA5 global-load 16x16 8-bit WMMA transpose layout.
 ///
 /// Each of source lanes 0..31 reads eight adjacent matrix rows for one K
 /// coordinate. Wave32 writes two VGPRs per lane. RDNA4 Wave64 consumes the
