@@ -86,20 +86,80 @@ namespace RcclUnitTesting
   // Force a lightweight NET loopback for P2P+SHM-disabled tests. IB-CAST on this path treats
   // each GPU as its own node and ibv_create_qp fails (EAGAIN); GIN still opens IB QPs even when
   // NCCL_NET=Socket. Socket + GIN off still goes through net.cc staging-buffer allocation.
+  struct NetLoopbackEnvBackup {
+    bool        hadNet           = false;
+    bool        hadGinEnable     = false;
+    bool        hadMinNchannels  = false;
+    bool        hadMaxNchannels  = false;
+    std::string net;
+    std::string ginEnable;
+    std::string minNchannels;
+    std::string maxNchannels;
+  };
+
+  static NetLoopbackEnvBackup netLoopbackEnvBackup;
+
   static void PinNetLoopbackTransport()
   {
-    setenv("NCCL_NET", "Socket", 1);
-    setenv("NCCL_GIN_ENABLE", "0", 1);
-    setenv("NCCL_MIN_NCHANNELS", "1", 1);
-    setenv("NCCL_MAX_NCHANNELS", "2", 1);
+    if (const char* v = ::getenv("NCCL_NET")) {
+      netLoopbackEnvBackup.hadNet = true;
+      netLoopbackEnvBackup.net    = v;
+    } else {
+      netLoopbackEnvBackup.hadNet = false;
+      netLoopbackEnvBackup.net.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_GIN_ENABLE")) {
+      netLoopbackEnvBackup.hadGinEnable = true;
+      netLoopbackEnvBackup.ginEnable    = v;
+    } else {
+      netLoopbackEnvBackup.hadGinEnable = false;
+      netLoopbackEnvBackup.ginEnable.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_MIN_NCHANNELS")) {
+      netLoopbackEnvBackup.hadMinNchannels = true;
+      netLoopbackEnvBackup.minNchannels    = v;
+    } else {
+      netLoopbackEnvBackup.hadMinNchannels = false;
+      netLoopbackEnvBackup.minNchannels.clear();
+    }
+
+    if (const char* v = ::getenv("NCCL_MAX_NCHANNELS")) {
+      netLoopbackEnvBackup.hadMaxNchannels = true;
+      netLoopbackEnvBackup.maxNchannels    = v;
+    } else {
+      netLoopbackEnvBackup.hadMaxNchannels = false;
+      netLoopbackEnvBackup.maxNchannels.clear();
+    }
+
+    ::setenv("NCCL_NET", "Socket", 1);
+    ::setenv("NCCL_GIN_ENABLE", "0", 1);
+    ::setenv("NCCL_MIN_NCHANNELS", "1", 1);
+    ::setenv("NCCL_MAX_NCHANNELS", "2", 1);
   }
 
   static void UnpinNetLoopbackTransport()
   {
-    unsetenv("NCCL_MAX_NCHANNELS");
-    unsetenv("NCCL_MIN_NCHANNELS");
-    unsetenv("NCCL_GIN_ENABLE");
-    unsetenv("NCCL_NET");
+    if (netLoopbackEnvBackup.hadMaxNchannels)
+      ::setenv("NCCL_MAX_NCHANNELS", netLoopbackEnvBackup.maxNchannels.c_str(), 1);
+    else
+      ::unsetenv("NCCL_MAX_NCHANNELS");
+
+    if (netLoopbackEnvBackup.hadMinNchannels)
+      ::setenv("NCCL_MIN_NCHANNELS", netLoopbackEnvBackup.minNchannels.c_str(), 1);
+    else
+      ::unsetenv("NCCL_MIN_NCHANNELS");
+
+    if (netLoopbackEnvBackup.hadGinEnable)
+      ::setenv("NCCL_GIN_ENABLE", netLoopbackEnvBackup.ginEnable.c_str(), 1);
+    else
+      ::unsetenv("NCCL_GIN_ENABLE");
+
+    if (netLoopbackEnvBackup.hadNet)
+      ::setenv("NCCL_NET", netLoopbackEnvBackup.net.c_str(), 1);
+    else
+      ::unsetenv("NCCL_NET");
   }
 
   TEST(SendRecv, SinglePairs)
