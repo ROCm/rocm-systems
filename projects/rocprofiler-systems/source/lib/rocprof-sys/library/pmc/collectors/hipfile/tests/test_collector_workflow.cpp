@@ -297,15 +297,20 @@ TEST(HipFileMetricGroups, groups_partition_the_metric_table)
     EXPECT_EQ(bits, static_cast<int>(HIPFILE_METRICS_COUNT));
 }
 
-TEST(HipFileMetricGroups, default_selection_is_fastpath_fallback_and_bandwidth)
+TEST(HipFileMetricGroups,
+     default_selection_includes_fastpath_fallback_bandwidth_bytes_and_errors)
 {
     // Mirrors the default registered for ROCPROFSYS_HIPFILE_METRICS in config.cpp.
     const auto defaults = metric_group_mask("fastpath") | metric_group_mask("fallback") |
-                          metric_group_mask("bandwidth");
+                          metric_group_mask("bandwidth") | metric_group_mask("bytes") |
+                          metric_group_mask("errors");
 
-    EXPECT_EQ(std::popcount(defaults), 6);
+    EXPECT_EQ(std::popcount(defaults), 10);
     EXPECT_NE(defaults & metric_group_mask("bandwidth"), 0U);
-    EXPECT_EQ(defaults & metric_group_mask("bytes"), 0U);
+    EXPECT_NE(defaults & metric_group_mask("bytes"), 0U);
+    EXPECT_NE(defaults & metric_group_mask("errors"), 0U);
+    EXPECT_EQ(defaults & metric_group_mask("ops"), 0U);
+    EXPECT_EQ(defaults & metric_group_mask("unaligned"), 0U);
 }
 
 TEST(HipFileMetricGroups, unknown_group_selects_nothing)
@@ -324,6 +329,7 @@ TEST_F(HipFileCollectorTest, no_metrics_enabled_emits_nothing)
     m_collector->sample(static_cast<std::int64_t>(TS_1));
 
     EXPECT_TRUE(stub_cache::samples.empty());
+    EXPECT_EQ(backend().call_count, 0U);
 }
 
 // ── Values through the full path ────────────────────────────────────────────

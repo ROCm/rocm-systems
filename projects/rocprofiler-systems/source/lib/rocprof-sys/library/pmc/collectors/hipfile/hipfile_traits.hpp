@@ -111,6 +111,12 @@ struct hipfile_traits
     {
         std::vector<device_entry> entries;
 
+        if(get_enabled_metrics<Settings>().value == 0)
+        {
+            LOG_DEBUG("{} sampling skipped: no metrics enabled", device_name);
+            return entries;
+        }
+
         const auto filter = get_device_filter<Settings>();
         if(filter.mode == device_selection_mode::NONE)
         {
