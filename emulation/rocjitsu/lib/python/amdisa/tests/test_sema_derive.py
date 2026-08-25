@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from amdisa.isa_profile import Cdna5Profile
 from amdisa.semantics import derive_semantics
 from amdisa.sema_ast import (
     ExecModel,
@@ -2031,14 +2032,15 @@ class TestDeriveFlatLoad:
         [
             ('GLOBAL_LOAD_TR4_B64', 2, 1),
             ('GLOBAL_LOAD_TR6_B96', 3, 2),
-            ('GLOBAL_LOAD_TR8_B64', 2, 3),
-            ('GLOBAL_LOAD_TR_B64', 2, 3),
+            ('GLOBAL_LOAD_TR8_B64', 2, 6),
+            ('GLOBAL_LOAD_B64_TR_B8', 2, 6),
+            ('GLOBAL_LOAD_TR_B64', 2, 6),
             ('GLOBAL_LOAD_TR16_B128', 4, 4),
             ('GLOBAL_LOAD_TR_B128', 4, 4),
         ],
     )
     def test_gfx1250_global_transpose_loads(self, name, num_elems, transpose_kind):
-        sem = derive_semantics(name, 'ENC_VGLOBAL')
+        sem = derive_semantics(name, 'ENC_VGLOBAL', Cdna5Profile())
         assert sem is not None
         assert sem.semantic_class == 'flat_load'
         assert sem.elem_size == 4
@@ -2244,7 +2246,7 @@ class TestDeriveDsRead:
     def test_gfx1250_ds_transpose_loads(
         self, name, semantic_class, num_elems, transpose_kind
     ):
-        sem = derive_semantics(name, 'ENC_DS')
+        sem = derive_semantics(name, 'ENC_DS', Cdna5Profile())
         assert sem is not None
         assert sem.semantic_class == semantic_class
         assert sem.elem_size == 4

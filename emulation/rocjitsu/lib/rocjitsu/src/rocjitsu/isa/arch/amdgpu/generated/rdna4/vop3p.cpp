@@ -776,23 +776,6 @@ VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
-    auto *dp8 = reinterpret_cast<const Vop3pVopDpp8MachineInst *>(inst);
-    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
-    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
-                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
-                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
-    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
-    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
-    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
-    dpp_ctrl_ = dp->dpp_ctrl;
-    dpp_row_mask_ = dp->row_mask;
-    dpp_bank_mask_ = dp->bank_mask;
-    dpp_bound_ctrl_ = dp->bound_ctrl;
-    dpp_fi_ = dp->fi;
-  }
 }
 
 namespace detail {
@@ -806,6 +789,10 @@ DecodeResult decodeVDot2F32F16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
+      [[unlikely]]
+    return emit_error.emit() << "V_DOT2_F32_F16 does not support DPP";
   return std::make_unique<VDot2F32F16Vop3p>(opcode);
 }
 } // namespace detail
@@ -1034,23 +1021,6 @@ VDot2F32Bf16Vop3p::VDot2F32Bf16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
-    auto *dp8 = reinterpret_cast<const Vop3pVopDpp8MachineInst *>(inst);
-    src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
-    dpp8_lane_sel_ = (dp8->lane_sel_0 << 0) | (dp8->lane_sel_1 << 3) | (dp8->lane_sel_2 << 6) |
-                     (dp8->lane_sel_3 << 9) | (dp8->lane_sel_4 << 12) | (dp8->lane_sel_5 << 15) |
-                     (dp8->lane_sel_6 << 18) | (dp8->lane_sel_7 << 21);
-    dpp_fi_ = amdgpu::dpp::src_dpp8_fi(reinterpret_cast<const OpEncoding *>(inst)->src0);
-  }
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
-    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
-    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
-    dpp_ctrl_ = dp->dpp_ctrl;
-    dpp_row_mask_ = dp->row_mask;
-    dpp_bank_mask_ = dp->bank_mask;
-    dpp_bound_ctrl_ = dp->bound_ctrl;
-    dpp_fi_ = dp->fi;
-  }
 }
 
 namespace detail {
@@ -1064,6 +1034,10 @@ DecodeResult decodeVDot2F32Bf16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))
+      [[unlikely]]
+    return emit_error.emit() << "V_DOT2_F32_BF16 does not support DPP";
   return std::make_unique<VDot2F32Bf16Vop3p>(opcode);
 }
 } // namespace detail
@@ -1298,6 +1272,18 @@ DecodeResult decodeVFmaMixF32Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mix_f32: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mix_f32: reserved DPP control";
+  }
   return std::make_unique<VFmaMixF32Vop3p>(opcode);
 }
 } // namespace detail
@@ -1361,6 +1347,18 @@ DecodeResult decodeVFmaMixloF16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixlo_f16: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixlo_f16: reserved DPP control";
+  }
   return std::make_unique<VFmaMixloF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -1430,6 +1428,18 @@ DecodeResult decodeVFmaMixhiF16Vop3p(const MachineInst *opcode,
       reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if ((reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0))) {
+    auto *op = reinterpret_cast<const Vop3p::OpEncoding *>(inst);
+    uint32_t opsel_hi = op->opsel_hi | ((op->opsel_hi_2 & 1u) << 2);
+    if (op->opsel != 0 || opsel_hi != 0x7) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixhi_f16: DPP requires low/low and high/high OPSEL";
+  }
+  if (reinterpret_cast<const Vop3p::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
+    auto *dp = reinterpret_cast<const Vop3pVopDpp16MachineInst *>(inst);
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+      return emit_error.emit() << "v_fma_mixhi_f16: reserved DPP control";
+  }
   return std::make_unique<VFmaMixhiF16Vop3p>(opcode);
 }
 } // namespace detail
@@ -2064,12 +2074,11 @@ VSwmmacF3216x16x32F16Vop3p::VSwmmacF3216x16x32F16Vop3p(const MachineInst *inst)
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2102,12 +2111,11 @@ VSwmmacF3216x16x32Bf16Vop3p::VSwmmacF3216x16x32Bf16Vop3p(const MachineInst *inst
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2140,12 +2148,11 @@ VSwmmacF1616x16x32F16Vop3p::VSwmmacF1616x16x32F16Vop3p(const MachineInst *inst)
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2178,12 +2185,11 @@ VSwmmacBf1616x16x32Bf16Vop3p::VSwmmacBf1616x16x32Bf16Vop3p(const MachineInst *in
       src0(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(256, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2216,12 +2222,11 @@ VSwmmacI3216x16x32Iu8Vop3p::VSwmmacI3216x16x32Iu8Vop3p(const MachineInst *inst)
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2254,12 +2259,11 @@ VSwmmacI3216x16x32Iu4Vop3p::VSwmmacI3216x16x32Iu4Vop3p(const MachineInst *inst)
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2292,12 +2296,11 @@ VSwmmacI3216x16x64Iu4Vop3p::VSwmmacI3216x16x64Iu4Vop3p(const MachineInst *inst)
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2330,12 +2333,11 @@ VSwmmacF3216x16x32Fp8Fp8Vop3p::VSwmmacF3216x16x32Fp8Fp8Vop3p(const MachineInst *
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2368,12 +2370,11 @@ VSwmmacF3216x16x32Fp8Bf8Vop3p::VSwmmacF3216x16x32Fp8Bf8Vop3p(const MachineInst *
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2406,12 +2407,11 @@ VSwmmacF3216x16x32Bf8Fp8Vop3p::VSwmmacF3216x16x32Bf8Fp8Vop3p(const MachineInst *
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 
@@ -2444,12 +2444,11 @@ VSwmmacF3216x16x32Bf8Bf8Vop3p::VSwmmacF3216x16x32Bf8Bf8Vop3p(const MachineInst *
       src0(64, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(128, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  src_operands_[3] = &src2;
-  num_src_ = 4;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src2;
+  num_src_ = 3;
   num_dst_ = 1;
 }
 

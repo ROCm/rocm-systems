@@ -64,7 +64,6 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  d.cu_path = wf.cu().full_path();
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);
   auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);

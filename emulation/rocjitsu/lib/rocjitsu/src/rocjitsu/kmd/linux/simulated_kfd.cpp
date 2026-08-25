@@ -3406,7 +3406,7 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
     wave.set_trap_saved_exec(state.exec);
   else
     wave.set_exec(state.exec);
-  wave.set_vcc(state.vcc);
+  wave.set_vcc_raw(state.vcc);
   wave.set_m0(state.m0);
   // STATUS shadows the same way EXEC does, and the cost of getting it wrong is
   // higher: the ROCr handler raises STATUS.HALT and only then returns, so a

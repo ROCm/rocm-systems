@@ -14,12 +14,18 @@
 #include "ce_coll.h"
 #include "comm.h"
 #include "common/ErrCode.hpp"
+#include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
+#include "enqueue.h"
+#include "graph.h"
 #include "graph/topo.h"
 #include "net.h"
+#include "plugin/nccl_tuner.h"
 #include "rccl_common.h"
 #include "rocmwrap.h"
+
+#include <algorithm>
 
 namespace RcclUnitTesting
 {
@@ -89,55 +95,8 @@ ncclResult_t testStaticExposeCheck()
     return ncclSuccess;
 }
 
-// Helper function to create and initialize mock communicator
-static void CreateMockComm(
-    ncclComm_t&            mockComm,
-    struct ncclTopoSystem& mockTopo,
-    struct ncclTopoNode&   mockGpuNode,
-    const char*            arch,
-    int                    nRanks
-)
-{
-    // Allocate memory for the communicator
-    mockComm = new ncclComm();
-    memset(mockComm, 0, sizeof(ncclComm));
-
-    // Initialize basic communicator fields
-    mockComm->nRanks = nRanks;
-    mockComm->nNodes = 1; // Default to single node for P2P tests
-    mockComm->rank   = 0; // Default rank
-
-    mockComm->pxnDisable      = RCCL_VALUE_UNSET;
-    mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
-
-    // Initialize topology
-    memset(&mockTopo, 0, sizeof(mockTopo));
-    mockComm->topo = &mockTopo;
-
-    // Initialize GPU node
-    mockTopo.nodes[GPU].count = 1;
-    memset(&mockGpuNode, 0, sizeof(mockGpuNode));
-
-    // Set GPU architecture
-    strncpy(mockGpuNode.gpu.gcn, arch, sizeof(mockGpuNode.gpu.gcn) - 1);
-    mockGpuNode.gpu.gcn[sizeof(mockGpuNode.gpu.gcn) - 1] = '\0';
-
-    // Copy the node into the topology array
-    mockTopo.nodes[GPU].nodes[0] = mockGpuNode;
-
-    // Initialize other required fields for tests
-    memset(mockComm->minMaxLLRange, 0, sizeof(mockComm->minMaxLLRange));
-}
-
-// Helper function to cleanup mock communicator
-static void CleanupMockComm(ncclComm_t& mockComm)
-{
-    if(mockComm)
-    {
-        delete mockComm;
-        mockComm = nullptr;
-    }
-}
+// CreateMockComm / CleanupMockComm moved to common/MockComm.hpp so other fixtures
+// can reuse them.
 
 // Helper function to determine if rcclSetPipelining test should be skipped
 static bool ShouldSkipRcclSetPipeliningTests()
@@ -1762,6 +1721,174 @@ TEST(Rcclwrap, RcclHierarchicalAlgoInfoTests)
 }
 
 // ===========================================================================
+// Direct ReduceScatter getAlgoInfo host-side guard (AICOMRCCL-1819).
+// When enableDirectReduceScatter is set, getAlgoInfo must force Ring/Simple
+// even if the tuner or RCCL_OVERRIDE_* env picks LL.
+// ===========================================================================
+
+namespace
+{
+
+constexpr uint64_t kDirectRsTestCount = 65536;
+
+ncclResult_t mockRingLlTunerGetCollInfo(void* /*context*/, ncclFunc_t /*collType*/, size_t /*nBytes*/,
+                                        int /*numPipeOps*/, float** collCostTable, int numAlgo, int numProto,
+                                        int /*regBuff*/, int* nChannels)
+{
+    float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+    for(int a = 0; a < numAlgo; ++a)
+    {
+        for(int p = 0; p < numProto; ++p)
+        {
+            table[a][p] = NCCL_ALGO_PROTO_IGNORE;
+        }
+    }
+    table[NCCL_ALGO_RING][NCCL_PROTO_LL] = 0.0;
+    if(nChannels)
+    {
+        *nChannels = 0;
+    }
+    return ncclSuccess;
+}
+
+ncclTuner_t g_mockRingLlTuner = {
+  .name         = "MockRingLlTuner",
+  .init         = nullptr,
+  .getCollInfo  = mockRingLlTunerGetCollInfo,
+  .finalize     = nullptr,
+  .getChunkSize = nullptr,
+};
+
+void InitGetAlgoInfoMockComm(ncclComm_t&           comm,
+                             struct ncclTopoSystem& topo,
+                             const char*            arch,
+                             int                    nRanks,
+                             int                    nNodes)
+{
+    struct ncclTopoNode gpuNode{};
+    CreateMockComm(comm, topo, gpuNode, arch, nRanks);
+    comm->nNodes        = nNodes;
+    comm->nChannels     = 4;
+    comm->collChannels  = 4;
+    comm->nvlsChannels  = 4;
+    comm->WarpSize      = 64;
+    comm->maxLocalRanks = std::max(1, nRanks / std::max(1, nNodes));
+    comm->topo->tuning  = rcclGetTuningIndexForArch(arch);
+    comm->topo->type |= RCCL_TOPO_XGMI_ALL;
+
+    for(int a = 0; a < NCCL_NUM_ALGORITHMS; ++a)
+    {
+        for(int p = 0; p < NCCL_NUM_PROTOCOLS; ++p)
+        {
+            comm->maxThreads[a][p]                      = 256;
+            comm->threadThresholds[a][p]                 = 8192;
+            comm->bandwidths[ncclFuncReduceScatter][a][p] = 100.0f;
+            comm->latencies[ncclFuncReduceScatter][a][p]  = 1.0f;
+        }
+    }
+}
+
+ncclTaskColl MakeReduceScatterTask(uint64_t count = kDirectRsTestCount, ncclDataType_t dt = ncclFloat32)
+{
+    ncclTaskColl task{};
+    task.func     = ncclFuncReduceScatter;
+    task.count    = count;
+    task.datatype = dt;
+    return task;
+}
+
+void ExpectGetAlgoInfoSelection(ncclComm_t comm, ncclTaskColl& task, int algo, int proto)
+{
+    ASSERT_EQ(ncclGetAlgoInfo(comm, &task, 0, 0, 1, nullptr), ncclSuccess);
+    EXPECT_EQ(task.algorithm, algo);
+    EXPECT_EQ(task.protocol, proto);
+}
+
+} // namespace
+
+// Tuner picks Ring+LL; Direct RS host guard must override to Ring/Simple.
+TEST(Rcclwrap, GetAlgoInfo_DirectRsOverridesMockTunerRingLl)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_DirectRsOverridesMockTunerRingLl",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = true;
+            comm->tuner                     = &g_mockRingLlTuner;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// Same tuner pick without Direct RS: selection must stay Ring+LL.
+TEST(Rcclwrap, GetAlgoInfo_MockTunerRingLlPreservedWithoutDirectRs)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_MockTunerRingLlPreservedWithoutDirectRs",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = false;
+            comm->tuner                     = &g_mockRingLlTuner;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_LL);
+            CleanupMockComm(comm);
+        },
+        {}
+    );
+}
+
+// RCCL_OVERRIDE_PROTO=LL forces LL; Direct RS host guard must still pick Ring/Simple.
+TEST(Rcclwrap, GetAlgoInfo_DirectRsForcesSimpleDespiteLlOverride)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_DirectRsForcesSimpleDespiteLlOverride",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = true;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_OVERRIDE_PROTO", "LL"}, {"RCCL_OVERRIDE_ALGO", "Ring"}}
+    );
+}
+
+// Same env override without Direct RS: selection must stay Ring+LL.
+TEST(Rcclwrap, GetAlgoInfo_LlOverridePreservedWithoutDirectRs)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "GetAlgoInfo_LlOverridePreservedWithoutDirectRs",
+        []()
+        {
+            ncclComm_t          comm = nullptr;
+            auto                topo = std::make_unique<ncclTopoSystem>();
+            InitGetAlgoInfoMockComm(comm, *topo, "gfx950", 8, 2);
+            comm->enableDirectReduceScatter = false;
+
+            ncclTaskColl task = MakeReduceScatterTask();
+            ExpectGetAlgoInfoSelection(comm, task, NCCL_ALGO_RING, NCCL_PROTO_LL);
+            CleanupMockComm(comm);
+        },
+        {{"RCCL_OVERRIDE_PROTO", "LL"}, {"RCCL_OVERRIDE_ALGO", "Ring"}}
+    );
+}
+
+// ===========================================================================
 // CE AllReduce graph latch state machine (rccl_wrap.cc). Regression coverage
 // for the capture-vs-eager ordering bug: the latch must stay set for the
 // entire lifetime of a captured plan and must never clear mid-capture.
@@ -2455,6 +2582,47 @@ TEST(RcclAllReduceDdaDecision, SymEligible_YieldsToSymmetricKernel)
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
                                                 /*symEligible=*/true, /*ceAllReduceAllowed=*/true));
+}
+
+// ---------------------------------------------------------------------------
+// Tests for skipPresetTopoMatching: gfx1250 skips Rome model matching.
+// Runs on real GPU, initializes a communicator, and checks internal state.
+// ---------------------------------------------------------------------------
+
+TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
+{
+    RUN_ISOLATED_TEST("Gfx1250_SkipsRomeModelMatching", []()
+    {
+        int numDevices = 0;
+        ASSERT_EQ(hipGetDeviceCount(&numDevices), hipSuccess);
+        if (numDevices < 1) {
+            GTEST_SKIP() << "No devices available.";
+        }
+
+        // Check if this is gfx1250
+        hipDeviceProp_t prop{};
+        ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+        bool isGfx1250 = (strncmp(prop.gcnArchName, "gfx1250", 7) == 0);
+        if (!isGfx1250) {
+            GTEST_SKIP() << "Test only applicable on gfx1250 hardware.";
+        }
+
+        ncclComm_t commHandle{};
+        ncclUniqueId id{};
+        ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        ASSERT_EQ(ncclCommInitRank(&commHandle, 1, id, 0), ncclSuccess);
+
+        // Cast to internal struct to access topo
+        ncclComm* comm = commHandle;
+
+        // gfx1250 should skip preset topo matching
+        EXPECT_TRUE(comm->topo->skipPresetTopoMatching);
+        // Rome model index should be NONE (no preset matched)
+        EXPECT_EQ(comm->topo->romeTopoModelIdx, RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE);
+
+        ASSERT_EQ(ncclCommDestroy(commHandle), ncclSuccess);
+    });
 }
 
 } // namespace RcclUnitTesting

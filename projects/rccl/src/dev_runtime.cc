@@ -383,8 +383,7 @@ static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, 
   uintptr_t addr = base + r * devr->bigSize + bigOffset;
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + r * maxSegments + segment;
-    bool reuseLocal =
-      (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
+    bool reuseLocal = (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
     CUmemGenericAllocationHandle handle = reuseLocal ? memHandles[segment] : (CUmemGenericAllocationHandle)0ULL;
     NCCLCHECKGOTO(symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle,
                                                      reuseLocal),
@@ -1347,9 +1346,10 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
     CUmemAllocationProp prop;
     CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandles[segment]), ret, fail_locReg);
     if (!ncclSymIsHostSegment(prop.location.type) && prop.location.type != CU_MEM_LOCATION_TYPE_DEVICE) {
-      WARN("Segment %d has unsupported location type %d. Symmetric memory currently only supports "
-           "host (CU_MEM_LOCATION_TYPE_HOST_NUMA, or CU_MEM_LOCATION_TYPE_HOST on AMD) and CU_MEM_LOCATION_TYPE_DEVICE.",
-           segment, (int)prop.location.type);
+      WARN(
+        "Segment %d has unsupported location type %d. Symmetric memory currently only supports "
+        "host (CU_MEM_LOCATION_TYPE_HOST_NUMA, or CU_MEM_LOCATION_TYPE_HOST on AMD) and CU_MEM_LOCATION_TYPE_DEVICE.",
+        segment, (int)prop.location.type);
       ret = ncclInvalidArgument;
       goto fail_locReg;
     }
@@ -1801,8 +1801,8 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
   // Must use this devComm's own resource window (win->userPtr), not
   // devr->winSorted[0] which may belong to a different devComm (e.g. symk).
   if (devr->ginEnabled && ginSignalTotal > 0 && outDevComm->resourceWindow != nullptr) {
-    NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win->userPtr, ginAnvilNetSignalsOffset,
-                                                        nGinContextsTotal, ginSignalTotal),
+    NCCLCHECKGOTO(ncclGinAnvilBindResourceWindowSignals(comm, win->userPtr, ginAnvilNetSignalsOffset, nGinContextsTotal,
+                                                        ginSignalTotal),
                   ret, fail_stream_mem_win);
   }
 #endif

@@ -55,6 +55,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -94,7 +95,7 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
 TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
   EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 528u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
 }
 
 TEST(CodeArchApiTest, PreservesExistingPublicEnumValues) {
@@ -1001,6 +1002,34 @@ struct RdnaVopdExecutionCase {
 
 class RdnaVopdExecutionSmokeTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
 
+TEST_P(RdnaVopdExecutionSmokeTest, RejectsWave64Execution) {
+  const auto &tc = GetParam();
+  const auto words = make_vopdxy_pair(9, 8);
+
+  amdgpu::GpuMemory gpu_mem(std::string(tc.arch_name) + "_vopd_wave64_mem");
+  amdgpu::L2Cache l2(std::string(tc.arch_name) + "_vopd_wave64_l2");
+
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+
+  auto cu = amdgpu::ComputeUnitCore::create(std::string(tc.arch_name) + "_vopd_wave64", cfg,
+                                            &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 64);
+  ASSERT_NE(wf, nullptr);
+
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+
+  EXPECT_THROW(cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst);
+}
+
 TEST_P(RdnaVopdExecutionSmokeTest, PreservesFpRoundingAndDx9ZeroSemantics) {
   const auto &tc = GetParam();
   constexpr uint32_t kSrc0 = 0x3F800001u;
@@ -1453,12 +1482,61 @@ TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "ds_read2st64_b32");
-  EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243");
+  EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243 offset0:70 offset1:71");
 
   InstDefUse def_use(*inst);
   EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 62, 2}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 62, 2}));
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 243, 1}));
+}
+
+TEST(Cdna3DecodeTest, DsDisassemblyPreservesEncodedOffsets) {
+  struct Case {
+    uint32_t words[2];
+    const char *expected;
+  };
+  const Case cases[] = {
+      {{0xD83E0800u, 0x00000A45u}, "ds_write_b16 v69, v10 offset:2048"},
+      {{0xD8F00800u, 0x22000022u}, "ds_read2st64_b64 v[34:37], v34 offset1:8"},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  for (const Case &test : cases) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, test.words));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->disassemble(), test.expected);
+  }
+}
+
+TEST(Cdna3DecodeTest, GlobalDisassemblySignExtendsSegmentOffset) {
+  const uint32_t words[] = {
+      0xDC489000u,
+      0x567F0002u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(), "global_load_ushort v86, v[2:3] offset:-4096");
+}
+
+TEST(Cdna3DecodeTest, PkFmacF16AcceptsSdwaEncoding) {
+  const uint32_t words[] = {
+      0x796666F9u,
+      0x66666666u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_pk_fmac_f16_sdwa");
+  EXPECT_EQ(inst->size(), 8);
+  EXPECT_EQ(inst->disassemble(),
+            "v_pk_fmac_f16_sdwa v179, v179, v102, v51 clamp mul:2 dst_sel:DWORD "
+            "dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:DWORD");
 }
 
 TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {

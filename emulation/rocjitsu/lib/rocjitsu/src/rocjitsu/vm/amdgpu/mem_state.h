@@ -20,7 +20,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -158,9 +157,11 @@ struct VectorMemState : DynamicInstState {
   /// Empty means every element uses lane_mask; otherwise the container has
   /// exactly num_elems masks and lane_mask is their union.
   ElementLaneMasks element_lane_masks;
-  uint64_t exec_mask = 0; ///< Effective EXEC mask captured by address calculation.
-                          ///< Architecturally ignored accesses clear it; writeback
-                          ///< zeroes OOB lanes (exec_mask & ~lane_mask).
+  uint64_t exec_mask = 0; ///< Effective issue mask set by address calculation. This normally
+                          ///< snapshots EXEC, but ISA exceptions may replace it (for example,
+                          ///< CDNA5 DS transpose loads use an all-lanes mask), while
+                          ///< architecturally ignored accesses clear it. Writeback zeroes OOB
+                          ///< lanes (exec_mask & ~lane_mask).
   uint32_t wf_size = 64;  ///< Wavefront width (set from wavefront's wf_size()).
   uint32_t dst_reg_base = 0;
   uint32_t elem_size = 0;
@@ -189,8 +190,8 @@ struct VectorMemState : DynamicInstState {
   bool scratch_swizzle = false;
   uint64_t scratch_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
-  bool d16_hi = false;                 ///< D16_HI load: write to upper 16 bits, preserve lower 16.
-  bool d16_lo = false;                 ///< D16 load: write to lower 16 bits, preserve upper 16.
+  bool d16_hi = false; ///< D16_HI load: write upper 16 bits; preserve or zero lower per SRAM ECC.
+  bool d16_lo = false; ///< D16 load: write lower 16 bits; preserve or zero upper per SRAM ECC.
   AtomicOp atomic_op = AtomicOp::NONE; ///< Atomic RMW operation (NONE for regular loads/stores).
   bool lds_dst = false;                ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
@@ -204,9 +205,10 @@ struct VectorMemState : DynamicInstState {
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
   uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).
-  uint32_t wg_id = 0;              ///< Workgroup ID (for trace output).
-  uint32_t wf_id = 0;              ///< Wavefront ID within WG (for trace output).
-  std::string cu_path;             ///< CU full path (for trace output).
+  // Snapshot dispatch identity at issue time for deferred trace output. The CU
+  // is stable for the slot, so its path is materialized only inside log lambdas.
+  uint32_t wg_id = 0; ///< Workgroup ID (for trace output).
+  uint32_t wf_id = 0; ///< Wavefront ID within WG (for trace output).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;
   uint8_t transpose = 0; ///< Transpose-load kind (0=none, see ds_transpose.h).
