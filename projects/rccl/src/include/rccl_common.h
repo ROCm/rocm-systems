@@ -75,7 +75,8 @@ typedef enum {
 #endif
   RCCL_SYMMETRIC,       // symmetric-window kernel
   RCCL_CE_2SHOT,        // eager Copy-Engine 2-shot AllReduce (staging buffer)
-  RCCL_CE_REGISTERED,   // Copy-Engine via registered windows / CTA_POLICY_ZERO
+  RCCL_CE_REGISTERED,   // Copy-Engine via registered symmetric windows (CTAPolicy=ZERO)
+  RCCL_CE_SCRATCH,      // Copy-Engine via DDA scratch buffer (RCCL_FORCE_CE + unregistered)
   RCCL_DDA_FABRIC_LL,   // DDA fabric, LL protocol (small-message fast lane)
   RCCL_DDA_FABRIC_LL128,// DDA fabric, LL128 protocol (mid-message fast lane)
   RCCL_DDA_FABRIC_VMM,  // DDA fabric, VMM/Simple path

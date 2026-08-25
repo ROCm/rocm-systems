@@ -1737,14 +1737,110 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 // DDA arrays: [Broadcast=0, Reduce=1, AllGather=2, ReduceScatter=3, AllReduce=4,
 //              SendRecv=5, Send=6, Recv=7, AlltoAll=8]. 0 disables that tier.
 // AR/AG/A2A compare total message bytes; RS compares rsShardBytes (per-rank recv).
+
+// ---- gfx1250 per-size unroll breakpoints (AICOMRCCL-1756 placeholders) -------
+// Format: {maxBytes, unrollIdx}. First entry where maxBytes >= msgBytes wins.
+// NCCL_UNROLL_1=0, NCCL_UNROLL_2=1, NCCL_UNROLL_4=2, NCCL_UNROLL_8=3,
+// NCCL_UNROLL_16=4, NCCL_UNROLL_32=5. Terminal entry uses SIZE_MAX.
+// Default unroll on gfx1250 is UNROLL_32 (set by commSetUnrollFactor).
+static const rcclArchThresholds::rcclUnrollEntry kUnrollAR_gfx1250[] = {
+  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane, latency-bound)
+  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
+  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
+  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (Ring/CE, bandwidth-bound)
+};
+static const rcclArchThresholds::rcclUnrollEntry kUnrollAG_gfx1250[] = {
+  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane)
+  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
+  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
+  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (CE/Ring)
+};
+static const rcclArchThresholds::rcclUnrollEntry kUnrollRS_gfx1250[] = {
+  {     32ULL*1024,       0 },  // <= 32 KiB  : NCCL_UNROLL_1  (LL lane, per-rank shard)
+  {     32ULL*1024*1024,  1 },  // <= 32 MiB  : NCCL_UNROLL_2  (LL128 lane)
+  {    128ULL*1024*1024,  3 },  // <= 128 MiB : NCCL_UNROLL_8  (VMM lane)
+  { SIZE_MAX,             5 },  // >  128 MiB : NCCL_UNROLL_32 (Ring)
+};
+
 // gfx1250 placeholders -- validate against sweep data (AICOMRCCL-1756).
+// Index mapping: [Bcast=0, Reduce=1, AG=2, RS=3, AR=4, SR=5, Send=6, Recv=7, A2A=8]
 static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
-  .ddaLLMax    = {0, 0, 32ULL*1024,        32ULL*1024,        32ULL*1024,        0, 0, 0, 32ULL*1024},
-  .ddaLL128Max = {0, 0, 32ULL*1024*1024,   32ULL*1024*1024,   32ULL*1024*1024,   0, 0, 0, 32ULL*1024*1024},
-  .ddaVmmMax   = {0, 0, 128ULL*1024*1024,  128ULL*1024*1024,  128ULL*1024*1024,  0, 0, 0, 4ULL*1024*1024},
+  // ddaLLMax: DDA LL tier ceiling per collective (fabric gfx1250 only).
+  .ddaLLMax = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    32ULL*1024,          // [2] AllGather       -- 32 KiB
+    32ULL*1024,          // [3] ReduceScatter   -- 32 KiB per-rank shard
+    32ULL*1024,          // [4] AllReduce       -- 32 KiB
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    32ULL*1024,          // [8] AlltoAll        -- 32 KiB
+  },
+  // ddaLL128Max: DDA LL128 tier ceiling per collective.
+  // RCCL_PARAM(DdaLL128, ...) defaults to 0 (disabled); set RCCL_DDA_LL128=1 to enable.
+  .ddaLL128Max = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    32ULL*1024*1024,     // [2] AllGather       -- 32 MiB
+    32ULL*1024*1024,     // [3] ReduceScatter   -- 32 MiB per-rank shard
+    32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    32ULL*1024*1024,     // [8] AlltoAll        -- 32 MiB
+  },
+  // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
+  // Messages above this fall to Ring/CE (or sym kernel for R2).
+  .ddaVmmMax = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    128ULL*1024*1024,    // [2] AllGather       -- 128 MiB (placeholder, validate AICOMRCCL-1756)
+    128ULL*1024*1024,    // [3] ReduceScatter   -- 128 MiB per-rank shard (placeholder)
+    128ULL*1024*1024,    // [4] AllReduce       -- 128 MiB (CE 2-shot wins 4-256 MiB for R2)
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    4ULL*1024*1024,      // [8] AlltoAll        -- 4 MiB (legacy cap)
+  },
+  // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
+  // RS fires DDA even when symEligible=true on gfx1250 (!symEligible || ddaFabricArch).
+  // Lowering this for RS lets CE win at smaller sizes for registered buffers.
+  // 0 means use ddaVmmMax (no R2-specific override for that collective).
+  .ddaVmmMaxR2 = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    0,                   // [2] AllGather       -- R2 AG: symEligible blocks DDA, override unused
+    32ULL*1024*1024,     // [3] ReduceScatter   -- R2 RS: lower VMM to 32 MiB (placeholder)
+    0,                   // [4] AllReduce       -- R2 AR: symEligible blocks DDA, override unused
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,                   // [8] AlltoAll        -- no R2-specific override (use 4 MiB)
+  },
+  // ddaVmmMaxGraph: DDA VMM cap during graph capture (graphCapturingHint=true).
+  // CE AllReduce is blocked by graphModeSeen latch during graph captures.
+  // Extending DDA VMM for AR lets DDA fill the window CE would otherwise absorb.
+  // 0 means use ddaVmmMax (no graph-specific override for that collective).
+  .ddaVmmMaxGraph = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    0,                   // [2] AllGather       -- no graph-specific override (placeholder)
+    0,                   // [3] ReduceScatter   -- no graph-specific override (placeholder)
+    256ULL*1024*1024,    // [4] AllReduce       -- extend to 256 MiB in graph mode (CE blocked)
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,                   // [8] AlltoAll        -- no graph-specific override
+  },
   .ceArMin     = 4ULL   * 1024 * 1024,   // 4 MiB (stored; CE AR has no lower-bound gate)
   .ceArMax     = 256ULL * 1024 * 1024,   // 256 MiB
 
+  // Per-size unroll breakpoints for gfx1250 (validate from AICOMRCCL-1756).
+  .unrollMapAR  = kUnrollAR_gfx1250,
+  .unrollMapAG  = kUnrollAG_gfx1250,
+  .unrollMapRS  = kUnrollRS_gfx1250,
+  .unrollMapA2A = nullptr,               // AlltoAll unroll not yet tuned
 };
 
 // gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.

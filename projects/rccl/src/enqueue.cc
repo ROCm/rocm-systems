@@ -3921,8 +3921,25 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         }
         // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
         // AllReduce), so it never affects this AllReduce branch.
-      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) &&
-                  !hasSysmemSegment) ||
+      } else if (info->coll == ncclFuncAllGather && info->decisionValid) {
+        // AllGather's backend was chosen once by rcclSelectAllGather(); honor it
+        // here so decision and dispatch agree (mirrors the AllReduce block above).
+        // rcclSelectAllGather Branch #3 gates CE on (CTAPolicy & ZERO), matching
+        // the ceCollTaskAppend condition, so RCCL_CE_REGISTERED <=> that path fires.
+        // RCCL_CE_SCRATCH maps to the FORCE_CE + DDA-scratch path.
+        if (info->decision.algo == RCCL_CE_REGISTERED) {
+          INFO(NCCL_INIT, "Taking CE collective path for AllGather via registered windows");
+          NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
+                                     opDev));
+        } else if (info->decision.algo == RCCL_CE_SCRATCH) {
+          INFO(NCCL_TUNING, "Taking CE collective path for AllGather via DDA scratch, count=%zu", info->count);
+          NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
+                                     comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
+        } else {
+          INFO(NCCL_INIT, "Taking kernel-based collective path for AllGather");
+          NCCLCHECK(collTaskAppend(comm, info, opDev));
+        }
+      } else if (((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && (ceAvailable || hierCeAvailable) && !hasSysmemSegment) ||
                  ceArSymRegistered) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
