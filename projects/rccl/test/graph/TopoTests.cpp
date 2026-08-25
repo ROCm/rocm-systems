@@ -98,11 +98,11 @@ protected:
 
   // GPU-to-GPU link entry (tclass 0x03 -> GPU) connecting to a peer GPU.
   void addGpuLink(struct ncclXmlNode* holder, const char* targetBusId,
-                  int count) {
+                  int count, const char* targetClass = "0x03") {
     struct ncclXmlNode* link = nullptr;
     EXPECT_EQ(xmlAddNode(xml, holder, "xgmi", &link), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(link, "target", targetBusId), ncclSuccess);
-    EXPECT_EQ(xmlSetAttr(link, "tclass", "0x03"), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(link, "tclass", targetClass), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(link, "count", count), ncclSuccess);
   }
 
@@ -353,6 +353,61 @@ TEST_F(TopoTest, GetSystemFromXml_SingleSystem_BuildsLinks) {
   EXPECT_FLOAT_EQ(l10->bw, 8 * ncclTopoXGMISpeed("gfx942"));
 
   ncclTopoFree(built);
+}
+
+// Regression: AMD CPX exposes compute partitions as distinct PCI functions
+// (.0-.3). Those function bits are part of the real BDF and must not be
+// rejected or reused as synthetic MLOPart bits when mlopart is undefined.
+TEST_F(TopoTest, GetSystemFromXml_CpxFunctionsRemainDistinct) {
+  const uint64_t host = 0x29358;
+
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci0 = addGpuPci(cpu, "0000:03:00.0", "gfx950", 0, 0);
+  struct ncclXmlNode* pci1 = addGpuPci(cpu, "0000:03:00.1", "gfx950", 1, 1);
+  struct ncclXmlNode* pci2 = addGpuPci(cpu, "0000:03:00.2", "gfx950", 2, 2);
+  struct ncclXmlNode* pci3 = addGpuPci(cpu, "0000:03:00.3", "gfx950", 3, 3);
+  // Match MI350P CPX discovery: links targeting non-zero functions may carry
+  // the generic NVS class even when the target BDF is a known GPU partition.
+  addGpuLink(pci0, "0000:03:00.1", 8, "0x068000");
+  addGpuLink(pci1, "0000:03:00.0", 8, "0x120000");
+  addGpuLink(pci2, "0000:03:00.3", 8, "0x068000");
+  addGpuLink(pci3, "0000:03:00.2", 8, "0x068000");
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 4);
+  ASSERT_EQ(built->nodes[GPU].count, 4);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+  for (int function = 0; function < 4; function++) {
+    char busId[32];
+    snprintf(busId, sizeof(busId), "0000:03:00.%d", function);
+    int64_t bus = 0;
+    ASSERT_EQ(busIdToInt64(busId, &bus), ncclSuccess);
+    struct ncclTopoNode* devNode = nullptr;
+    ASSERT_EQ(ncclTopoGetNode(built, &devNode, DEV, NCCL_TOPO_ID(0, bus)),
+              ncclSuccess);
+    EXPECT_NE(devNode, nullptr) << "missing CPX function " << function;
+  }
+
+  ncclTopoFree(built);
+}
+
+// The CPX exception must not weaken genuine MLOPart collision detection:
+// synthetic MLOPart IDs still require the reserved low bus-id bits to be free.
+TEST_F(TopoTest, GetSystemFromXml_MloPartBusIdCollisionStillFails) {
+  const uint64_t host = 0x29359;
+
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci =
+      addGpuPci(cpu, "0000:03:00.1", "gfx950", 0, 0);
+  ASSERT_EQ(pci->nSubs, 1);
+  ASSERT_EQ(xmlSetAttrInt(pci->subs[0], "mlopart", 0), ncclSuccess);
+
+  struct ncclTopoSystem* built = nullptr;
+  EXPECT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclInternalError);
+  if (built != nullptr) ncclTopoFree(built);
 }
 
 // Under the 2.30 DEV model a direct XGMI GPU->GPU path is the 3-hop

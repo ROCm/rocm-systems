@@ -628,10 +628,10 @@ static ncclResult_t ncclTopoAddGpuSub(struct ncclXmlNode* xmlPci, struct ncclXml
                                       int64_t busId, float bw) {
   int mloPart = 0, sm = 0;
   int64_t devBusId = busId;
-  NCCLCHECK(ncclTopoCheckMloPartBusId(busId));
   NCCLCHECK(xmlGetAttrIntDefault(xmlGpu, "mlopart", &mloPart, NCCL_TOPO_UNDEF));
   NCCLCHECK(xmlGetAttrInt(xmlGpu, "sm", &sm));
   if (mloPart != NCCL_TOPO_UNDEF && ncclParamTopoSplitMlopart()) {
+    NCCLCHECK(ncclTopoCheckMloPartBusId(busId));
     if (mloPart >= NCCL_TOPO_MLOPART_DEV_MAX) {
       WARN("MLOPart index %d out of range (max %d)", mloPart, NCCL_TOPO_MLOPART_DEV_MAX - 1);
       return ncclInternalError;
@@ -655,14 +655,17 @@ static ncclResult_t ncclTopoAddGpuSub(struct ncclXmlNode* xmlPci, struct ncclXml
     NCCLCHECK(xmlGetAttrInt(xmlGpu, "gdr", &gpudeviceNode->dev.gdrSupport));
     NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, parent, LINK_PCI, bw));
     NCCLCHECK(ncclTopoConnectNodes(parent, gpudeviceNode, LINK_PCI, bw));
-    // add the local link with the existing uGPUs.
-    struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
-    int nSibDevs = 0;
-    NCCLCHECK(ncclTopoGetDevNodes(system, gpudeviceNode->id, sibDevs, &nSibDevs));
-    for (int s = 0; s < nSibDevs; s++) {
-      if (sibDevs[s] == gpudeviceNode) continue;
-      NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, sibDevs[s], LINK_LOC, MLOPART_LOC_BW));
-      NCCLCHECK(ncclTopoConnectNodes(sibDevs[s], gpudeviceNode, LINK_LOC, MLOPART_LOC_BW));
+    if (mloPart != NCCL_TOPO_UNDEF && ncclParamTopoSplitMlopart()) {
+      // Add the local link with the existing MLOPart uGPUs. Physical PCI
+      // functions, such as AMD CPX partitions, remain distinct DEV nodes.
+      struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
+      int nSibDevs = 0;
+      NCCLCHECK(ncclTopoGetDevNodes(system, gpudeviceNode->id, sibDevs, &nSibDevs));
+      for (int s = 0; s < nSibDevs; s++) {
+        if (sibDevs[s] == gpudeviceNode) continue;
+        NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, sibDevs[s], LINK_LOC, MLOPART_LOC_BW));
+        NCCLCHECK(ncclTopoConnectNodes(sibDevs[s], gpudeviceNode, LINK_LOC, MLOPART_LOC_BW));
+      }
     }
   }
 
@@ -846,11 +849,13 @@ static ncclResult_t ncclTopoGetGpuDevNode(struct ncclXmlNode* xmlGpu, const char
   int mloPart, sm;
   int64_t rawBusId;
   NCCLCHECK(busIdToInt64(busId, &rawBusId));
-  NCCLCHECK(ncclTopoCheckMloPartBusId(rawBusId));
   NCCLCHECK(xmlGetAttrIntDefault(xmlGpu, "mlopart", &mloPart, NCCL_TOPO_UNDEF));
   NCCLCHECK(xmlGetAttrInt(xmlGpu, "sm", &sm));
-  int64_t devBusId =
-    (mloPart != NCCL_TOPO_UNDEF && ncclParamTopoSplitMlopart()) ? NCCL_TOPO_MLOPART_BUSID(rawBusId, mloPart) : rawBusId;
+  int64_t devBusId = rawBusId;
+  if (mloPart != NCCL_TOPO_UNDEF && ncclParamTopoSplitMlopart()) {
+    NCCLCHECK(ncclTopoCheckMloPartBusId(rawBusId));
+    devBusId = NCCL_TOPO_MLOPART_BUSID(rawBusId, mloPart);
+  }
   NCCLCHECK(ncclTopoGetNode(system, devNode, DEV, NCCL_TOPO_ID(systemId, devBusId)));
   return ncclSuccess;
 }
@@ -903,17 +908,20 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     int targetType;
     NCCLCHECK(kvConvertToInt(targetClass, &targetType, kvDictPciClass));
     struct ncclTopoNode* remote = NULL;
-    if (targetType == GPU) {
-      // XGMI P2P connection to another GPU (between physical DEV nodes)
-      const char* target;
-      NCCLCHECK(xmlGetAttrStr(node, "target", &target));
-      int64_t busId;
-      NCCLCHECK(busIdToInt64(target, &busId));
-      NCCLCHECK(ncclTopoGetNode(system, &remote, DEV, NCCL_TOPO_ID(systemId, busId)));
+    const char* target;
+    NCCLCHECK(xmlGetAttrStr(node, "target", &target));
+    int64_t busId;
+    NCCLCHECK(busIdToInt64(target, &busId));
+    // CPX functions can report an NVS class for an XGMI target even though
+    // the target BDF belongs to another GPU DEV node. Prefer the topology's
+    // known DEV identity over the reported target class.
+    NCCLCHECK(ncclTopoGetNode(system, &remote, DEV, NCCL_TOPO_ID(systemId, busId)));
+    if (remote != NULL) {
+      targetType = GPU;
     } else if (targetType == CPU) {
       // XGMI connection to the local CPU
       NCCLCHECK(findLocalCpu(devNode, &remote, NULL));
-    } else {
+    } else if (targetType != GPU) {
       if (system->nodes[NVS].count == 0) {
         NCCLCHECK(ncclTopoCreateNode(system, &remote, NVS, 0));
       } else {
