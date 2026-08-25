@@ -63,8 +63,6 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
 | ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
 
-SR-IOV virtual functions
-========================
 
 .. note::
 
