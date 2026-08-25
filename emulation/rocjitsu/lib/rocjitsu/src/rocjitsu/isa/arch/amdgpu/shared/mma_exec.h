@@ -4250,30 +4250,14 @@ void exec_smfmac_f32_32x32x64_fp8(auto &cu, uint32_t dst, uint32_t s0, uint32_t 
     RegisterAccess(cu).write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
-/// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
-/// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
-/// forward; ~4B internal MACs). Kept as a dedicated specialization (rather
-/// than forwarding to generic exec_f32) because the compile-time M/N/K/B let
-/// the compiler fully unroll the 16-row x 32-K inner matmul into straight-line
-/// AVX-512 FMAs — a runtime-dimension loop is materially slower on this hot
-/// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
-/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA). Batched shapes
-/// stage every result on the stack and publish only after all operand reads,
-/// preserving destructive-overlap semantics without a heap-backed Result
-/// vector. VGPR access is batched through observed register-access regions
-/// (one view per operand, no per-element virtual read_vgpr/write_vgpr). Falls
-/// back to the generic exec_f32 when:
-///   - <experimental/simd> is unavailable
-///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
-///   - cbsz/blgp lane permutation is non-default
-///   - RJ_FORCE_SCALAR is set
 /// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
 /// specialization but the inputs are already f32, so there is no F16C convert —
 /// the hoist reads each operand word straight through observed register-access
 /// regions. BATCH covers the batched shapes (e.g. 32x32x1x2). Compile-time
 /// M/N/K/BATCH fully unroll the matmul; it loops over N in native-width chunks.
-/// Falls back to the generic exec_f32 without host SIMD, when N is not divisible
-/// by the native width, under force-scalar, or with cbsz/blgp.
+/// Falls back to the generic exec_f32 without host SIMD, when the native width
+/// is one or does not divide N, for non-wave64 execution, under force-scalar,
+/// or with cbsz/blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH>
 void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
@@ -4358,6 +4342,23 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
   }
 }
 
+/// Fast path for v_mfma_f32_16x16x32_f16. This single MFMA shape is the only
+/// MFMA variant fired by OPT-125M fp16 eager forward (488k invocations per
+/// forward; ~4B internal MACs). Kept as a dedicated specialization (rather
+/// than forwarding to generic exec_f32) because the compile-time M/N/K/B let
+/// the compiler fully unroll the 16-row x 32-K inner matmul into straight-line
+/// AVX-512 FMAs — a runtime-dimension loop is materially slower on this hot
+/// path. Hoists A and B into dense f32 buffers via extract_f16, runs the
+/// matmul as 16 zmm-wide f32 FMA rows (512 zmm FMAs per MFMA). Batched shapes
+/// stage every result on the stack and publish only after all operand reads,
+/// preserving destructive-overlap semantics without a heap-backed Result
+/// vector. VGPR access is batched through observed register-access regions
+/// (one view per operand, no per-element virtual read_vgpr/write_vgpr). Falls
+/// back to the generic exec_f32 when:
+///   - <experimental/simd> is unavailable
+///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
+///   - cbsz/blgp lane permutation is non-default
+///   - RJ_FORCE_SCALAR is set
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc, uint32_t cbsz, uint32_t abid, uint32_t blgp) {
