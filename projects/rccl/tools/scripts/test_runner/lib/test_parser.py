@@ -194,11 +194,12 @@ Examples:
         self.parser.add_argument(
             '-j', '--jobs',
             type=int,
-            default=1,
-            help="Number of test entries to run concurrently within a suite (default: 1 = "
-                 "serial, behavior unchanged). >1 dispatches entries through a bounded thread "
-                 "pool (each thread = one test process), overlapping their per-process init. "
-                 "Note: --rerun-failed is not supported with --jobs>1 (run reruns serially)."
+            default=4,
+            help="Number of test entries to run concurrently within a suite (default: 4). "
+                 ">1 dispatches entries through a bounded thread pool (each thread = one test "
+                 "process), overlapping their per-process init; the aggregate GPU budget in "
+                 "--max-parallel-gpus bounds how many actually share the node. Pass --jobs 1 "
+                 "for the serial path. Note: --rerun-failed requires --jobs 1."
         )
         self.parser.add_argument(
             '--max-parallel-gpus',
