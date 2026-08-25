@@ -574,8 +574,8 @@ class IsaProfile(ABC):
         """Cross-lane routing used by 8-bit B64 DS transpose loads.
 
         CDNA4 and older targets use the MFMA-oriented B64_TR_B8 routing.
-        Architectures with the 16x16 WMMA routing override this property so
-        opcode aliases cannot acquire different behavior from their spelling.
+        Architectures with target-specific DS B8 routing override this property
+        so opcode aliases cannot acquire different behavior from their spelling.
         """
         return 3
 
@@ -2315,9 +2315,9 @@ class Cdna5Profile(Rdna4Profile):
 
     @property
     def ds_b8_transpose_kind(self) -> int:
-        # gfx1250 opcode 0xfd retains the B64_TR_B8 routing. All of its
-        # mnemonic aliases must resolve through this one profile value.
-        return 3
+        # gfx1250 groups source lanes by four rows and two eight-column halves.
+        # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
+        return 7
 
     @property
     def semantic_overrides(self) -> dict[str, tuple[str, ...]]:

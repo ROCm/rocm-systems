@@ -594,6 +594,34 @@ TEST(TransposeLoadTest, Cdna4B64TrB8MatchesMfmaLaneLayout) {
   }
 }
 
+TEST(TransposeLoadTest, Cdna5DsTrB8MatchesMatrixLayout) {
+  amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
+  state.wf_size = 32;
+  state.num_elems = 2;
+  state.lane_mask = 0xFFFF'FFFFULL;
+  state.transpose = static_cast<uint8_t>(amdgpu::TransposeKind::CDNA5_DS_TR_B8);
+  state.response_data.resize(32 * 8);
+  for (uint32_t source_lane = 0; source_lane < 32; ++source_lane) {
+    const uint32_t row =
+        8u * (source_lane >> 4) + (source_lane & 3u) + 4u * ((source_lane >> 3) & 1u);
+    const uint32_t col_base = 8u * ((source_lane >> 2) & 1u);
+    for (uint32_t byte = 0; byte < 8; ++byte)
+      state.response_data[source_lane * 8 + byte] =
+          static_cast<uint8_t>(row * 16 + col_base + byte);
+  }
+
+  amdgpu::transpose_response(state);
+
+  ASSERT_EQ(state.num_elems, 2u);
+  for (uint32_t dest_lane = 0; dest_lane < 32; ++dest_lane) {
+    const uint32_t row_base = 8u * (dest_lane >> 4);
+    const uint32_t col = dest_lane & 15u;
+    for (uint32_t byte = 0; byte < 8; ++byte)
+      EXPECT_EQ(state.response_data[dest_lane * 8 + byte],
+                static_cast<uint8_t>((row_base + byte) * 16 + col));
+  }
+}
+
 TEST(MfmaExecTest, Gfx12Wave64WmmaLocSplitsKAcrossFourLaneGroups) {
   auto a_k8 = amdgpu::gfx12_wmma_input_loc(amdgpu::WMMA_WAVE64, 16, 16, /*i=*/3, /*k=*/8, 16);
   EXPECT_EQ(a_k8.lane, 35u);
