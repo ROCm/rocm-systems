@@ -701,10 +701,11 @@ void CuidFile::get_grouped_entries(
 // CuidFileGenerator Implementation
 // ============================================================================
 
+namespace {
+
 // helper function to generate CUID files from a list of devices
-static amdcuid_status_t generate_from_devices(
-    const std::vector<std::shared_ptr<CuidDevice>>& devices, const std::string& file,
-    bool is_privileged) {
+amdcuid_status_t generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>>& devices,
+                                       const std::string& file, bool is_privileged) {
   // Create file handlers
   CuidFile cuid_file(file, is_privileged);
 
@@ -889,6 +890,8 @@ static amdcuid_status_t generate_from_devices(
 
   return AMDCUID_STATUS_SUCCESS;
 }
+
+}  // namespace
 
 amdcuid_status_t CuidFileGenerator::generate_unpriv_from_devices(
     const std::vector<std::shared_ptr<CuidDevice>>& devices, const std::string& unpriv_file_path) {

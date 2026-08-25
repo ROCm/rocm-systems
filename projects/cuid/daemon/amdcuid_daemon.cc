@@ -23,14 +23,16 @@
 #include "src/hmac.h"
 #include "src/ipc_protocol.h"
 
+namespace {
+
 // static hmac instance for daemon
-static cuid_hmac daemon_hmac = cuid_hmac();
+cuid_hmac daemon_hmac = cuid_hmac();
 
 // Global log file stream
-static std::unique_ptr<std::ofstream> g_log_file;
-static bool g_logging_to_file = false;
+std::unique_ptr<std::ofstream> g_log_file;
+bool g_logging_to_file = false;
 
-static std::ostream& log_out() {
+std::ostream& log_out() {
   if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
     *g_log_file << "timestamp: " << time(nullptr) << ": ";
     return *g_log_file;
@@ -39,7 +41,7 @@ static std::ostream& log_out() {
   return std::cout;
 }
 
-static std::ostream& log_err() {
+std::ostream& log_err() {
   if (g_logging_to_file && g_log_file && g_log_file->is_open()) {
     *g_log_file << "timestamp: " << time(nullptr) << ": ";
     return *g_log_file;
@@ -48,14 +50,13 @@ static std::ostream& log_err() {
   return std::cerr;
 }
 
-static void init_logging(bool enabled) {
+void init_logging(bool enabled) {
   if (enabled) {
     g_log_file = std::make_unique<std::ofstream>("/var/log/amdcuid.log", std::ios::app);
     if (g_log_file->is_open()) {
       g_logging_to_file = true;
-      // Add timestamp to log entry. ctime() formats into a static buffer
-      // shared by every thread; the daemon serves clients concurrently, so
-      // use the reentrant form.
+      // ctime() formats into a static buffer shared across threads; the accept
+      // thread and the main thread both log, so use the reentrant form.
       time_t now = time(nullptr);
       struct tm tm_buf{};
       char stamp[64] = "unknown time";
@@ -70,6 +71,8 @@ static void init_logging(bool enabled) {
     }
   }
 }
+
+}  // namespace
 
 // Daemon Server
 class CuidDaemonServer {
@@ -312,7 +315,7 @@ int main() {
     // get handle count for logging
     uint32_t count = 0;
     amdcuid_id_t dummy[1] = {};
-    status = amdcuid_get_all_handles(dummy, &count);
+    amdcuid_get_all_handles(dummy, &count);
 
     log_out() << "Total devices with CUIDs: " << count << std::endl;
   }

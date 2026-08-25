@@ -22,10 +22,12 @@
 
 CuidGpu::CuidGpu(const amdcuid_gpu_info& i) : m_info(i) {}
 
+namespace {
+
 // Helper to check if a /sys/class/drm entry name is a card device (e.g.,
 // "card0", "card1"). Excludes connector entries like "card0-DP-1" or
 // "card0-HDMI-A-1".
-static bool is_card_entry(const char* name) {
+bool is_card_entry(const char* name) {
   if (strncmp(name, "card", 4) != 0 || !isdigit(name[4])) return false;
   for (size_t i = 4; name[i] != '\0'; ++i) {
     if (!isdigit(name[i])) return false;
@@ -36,7 +38,7 @@ static bool is_card_entry(const char* name) {
 // Resolve the renderD node path for a given card path.
 // If a renderD node exists under the card's device/drm directory, returns
 // "/sys/class/drm/renderDXXX". Otherwise, returns the original card path.
-static std::string resolve_render_node(const std::string& card_path) {
+std::string resolve_render_node(const std::string& card_path) {
   std::string drm_dir = card_path + "/device/drm";
   DIR* dir = opendir(drm_dir.c_str());
   if (dir) {
@@ -55,6 +57,8 @@ static std::string resolve_render_node(const std::string& card_path) {
   }
   return card_path;
 }
+
+}  // namespace
 
 // Callers from /sys/class/drm enumeration pass paths of the form
 // "/sys/class/drm/<card>/device" and expect the trailing "/device" component

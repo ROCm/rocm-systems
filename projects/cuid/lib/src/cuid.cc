@@ -26,9 +26,13 @@
 #include "src/cuid_util.h"
 #include "src/hmac.h"
 
+namespace {
+
 // Static instance for API
-static CuidDeviceManager& mgr = CuidDeviceManager::instance();
-static cuid_hmac global_hmac = cuid_hmac();
+CuidDeviceManager& mgr = CuidDeviceManager::instance();
+cuid_hmac global_hmac = cuid_hmac();
+
+}  // namespace
 
 void amdcuid_get_library_version(uint32_t* major, uint32_t* minor, uint32_t* patch) {
   if (major) *major = AMDCUID_LIB_VERSION_MAJOR;
@@ -131,6 +135,8 @@ amdcuid_status_t amdcuid_get_all_handles(amdcuid_id_t* handles, uint32_t* count)
   return AMDCUID_STATUS_SUCCESS;
 }
 
+namespace {
+
 // helper function to discover device given dev_path
 DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t device_type) {
   DevicePtr device = nullptr;
@@ -223,6 +229,8 @@ DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t de
   return device;
 }
 
+}  // namespace
+
 amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
                                                 amdcuid_device_type_t device_type,
                                                 amdcuid_id_t* handle) {
@@ -296,7 +304,7 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
   if (geteuid() == 0) {
     device = discover_device_by_path(real_dev_path.c_str(), device_type);
   } else {
-    status = mgr.request_device(real_dev_path.c_str(), device_type, device);
+    mgr.request_device(real_dev_path.c_str(), device_type, device);
   }
 
   if (!device) {
@@ -383,7 +391,7 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
   if (geteuid() == 0) {
     device = discover_device_by_path(real_dev_path.c_str(), device_type);
   } else {
-    status = mgr.request_device(real_dev_path.c_str(), device_type, device);
+    mgr.request_device(real_dev_path.c_str(), device_type, device);
   }
 
   if (!device) {

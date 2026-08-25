@@ -16,21 +16,27 @@
 #include "cuid_util.h"
 #include "pci_util.h"
 
+namespace {
+
 // AMD vendor ID used to filter for AMD NPU devices
-static const uint16_t AMD_VENDOR_ID = 0x1022;
+const uint16_t AMD_VENDOR_ID = 0x1022;
 
 // PCI base classes that AMD NPUs may present as:
 //   0x11 = Signal processing controller (e.g., Strix/Strix Halo NPU 0x1180)
 //   0x12 = Processing accelerators
-static const uint16_t PCI_CLASS_SIGNAL_PROCESSING = 0x1100;
-static const uint16_t PCI_CLASS_PROCESSING_ACCEL = 0x1200;
-static const uint16_t PCI_CLASS_BASE_MASK = 0xFF00;
+const uint16_t PCI_CLASS_SIGNAL_PROCESSING = 0x1100;
+const uint16_t PCI_CLASS_PROCESSING_ACCEL = 0x1200;
+const uint16_t PCI_CLASS_BASE_MASK = 0xFF00;
+
+}  // namespace
 
 CuidNpu::CuidNpu(const amdcuid_npu_info& i) : m_info(i) {}
 
+namespace {
+
 // Helper to check if a /sys/class/accel entry name is an accel device
 // (e.g., "accel0", "accel1").
-static bool is_accel_entry(const char* name) {
+bool is_accel_entry(const char* name) {
   if (strncmp(name, "accel", 5) != 0 || !isdigit(name[5])) return false;
   for (size_t i = 5; name[i] != '\0'; ++i) {
     if (!isdigit(name[i])) return false;
@@ -39,7 +45,7 @@ static bool is_accel_entry(const char* name) {
 }
 
 // Discover NPU devices via /sys/class/accel (when amdxdna driver is loaded)
-static amdcuid_status_t discover_via_accel(std::vector<DevicePtr>& npus) {
+amdcuid_status_t discover_via_accel(std::vector<DevicePtr>& npus) {
   const char* accel_path = "/sys/class/accel";
   DIR* dir = opendir(accel_path);
   if (!dir) return AMDCUID_STATUS_UNSUPPORTED;
@@ -74,7 +80,7 @@ static amdcuid_status_t discover_via_accel(std::vector<DevicePtr>& npus) {
 // Fallback: discover NPU devices by scanning PCI bus for AMD processing
 // accelerator class devices. This handles systems where /sys/class/accel
 // is not populated (e.g., driver not loaded or accel subsystem absent).
-static amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
+amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
   const char* pci_path = "/sys/bus/pci/devices";
   DIR* dir = opendir(pci_path);
   if (!dir) return AMDCUID_STATUS_UNSUPPORTED;
@@ -112,6 +118,8 @@ static amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
 
   return npus.empty() ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_SUCCESS;
 }
+
+}  // namespace
 
 amdcuid_status_t CuidNpu::discover(std::vector<DevicePtr>& npus) {
   // Try /sys/class/accel first (when amdxdna driver is loaded)

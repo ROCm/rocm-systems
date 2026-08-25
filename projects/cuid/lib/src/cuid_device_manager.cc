@@ -188,6 +188,8 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
   return discovered_devices.empty() ? AMDCUID_STATUS_DEVICE_NOT_FOUND : AMDCUID_STATUS_SUCCESS;
 }
 
+namespace {
+
 // helper function to convert CuidFileEntry to appropriate CuidDevice
 void convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device) {
   switch (entry.device_type) {
@@ -252,6 +254,8 @@ void convert_entry_to_device(CuidFileEntry& entry, DevicePtr& device) {
     }
   }
 }
+
+}  // namespace
 
 amdcuid_status_t CuidDeviceManager::get_devices_from_file_entries(CuidFile& cuid_file) {
   std::lock_guard<std::mutex> lock(manager_mutex_);
@@ -440,7 +444,7 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
         return status;
       }
       // try saving to files if we were able to discover devices from the system
-      status = save_registry_to_files();
+      save_registry_to_files();
     }
   } else {
     status = get_devices_from_file_entries(unpriv_cuid_file_);
@@ -457,7 +461,7 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
         }
       }
       // try saving to files if we were able to discover devices from the system
-      status = save_registry_to_files();
+      save_registry_to_files();
     }
   }
 

@@ -25,6 +25,8 @@
  * - Always reads from the library's internal registry
  */
 
+namespace {
+
 /**
  * @brief Check if running with root privileges
  */
@@ -473,6 +475,8 @@ int query_device(const std::string& identifier, bool show_primary,
 
   return 0;
 }
+
+}  // namespace
 
 int main(int argc, char* argv[]) {
   static struct option long_options[] = {{"generate-cuid", no_argument, 0, 'g'},
