@@ -63,67 +63,60 @@ class Queue;
 class WDDMDevice;
 
 class WDDMQueue {
-public:
-  WDDMQueue(WDDMDevice *device,
-            uint64_t cmdbuf_addr,
-            uint32_t cmdbuf_size,
-            uint32_t engine,
-            bool use_hws = true) :
-            device(device),
-            context(0),
-            queue(0),
-            syncobj(0),
-            sync_addr(NULL),
-            cmdbuf(0),
-            cmdbuf_addr(cmdbuf_addr),
-            cmdbuf_size(cmdbuf_size),
-            queue_engine(engine),
-            use_hws(use_hws),
-            prio(Wkmi::kNormal) {}
+ public:
+  WDDMQueue(WDDMDevice* device, uint64_t cmdbuf_addr, uint32_t cmdbuf_size, uint32_t engine,
+            bool use_hws = true)
+      : device(device),
+        context(0),
+        queue(0),
+        syncobj(0),
+        sync_addr(NULL),
+        cmdbuf(0),
+        cmdbuf_addr(cmdbuf_addr),
+        cmdbuf_size(cmdbuf_size),
+        queue_engine(engine),
+        use_hws(use_hws),
+        prio(Wkmi::kNormal) {}
 
-  virtual ~WDDMQueue() { }
+  virtual ~WDDMQueue() {}
 
   virtual hsa_status_t Init(void) { return HSA_STATUS_SUCCESS; }
   virtual hsa_status_t Fini(void) { return HSA_STATUS_SUCCESS; }
-  virtual void RingDoorbell(uint64_t value) { }
+  virtual void RingDoorbell(uint64_t value) {}
   virtual void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
   hsa_status_t SwsInit(void);
   hsa_status_t SwsFini(void);
-  hsa_status_t SwsSubmit(uint64_t command_addr,
-                         uint64_t command_size,
-                         uint64_t fence_value);
+  hsa_status_t SwsSubmit(uint64_t command_addr, uint64_t command_size, uint64_t fence_value);
 
   hsa_status_t HwsInit(void);
   hsa_status_t HwsFini(void);
-  hsa_status_t HwsSubmit(uint64_t command_addr,
-                         uint64_t command_size,
-                         uint64_t fence_value);
+  hsa_status_t HwsSubmit(uint64_t command_addr, uint64_t command_size, uint64_t fence_value);
   hsa_status_t SetPriority(hsa_amd_queue_priority_t priority);
   hsa_status_t SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask);
 
-  uint64_t *GetSyncAddr(void) const { return sync_addr; }
+  uint64_t* GetSyncAddr(void) const { return sync_addr; }
   uint64_t GetCmdbufAddr(void) const { return cmdbuf_addr; }
 
   Wkmi::SchedLevel ConvertSchedLevel(hsa_amd_queue_priority_t prio) const {
     switch (prio) {
-    case HSA_AMD_QUEUE_PRIORITY_LOW:
-      return Wkmi::kLow;
-    case HSA_AMD_QUEUE_PRIORITY_HIGH:
-      return Wkmi::kHigh;
-    case HSA_AMD_QUEUE_PRIORITY_NORMAL:
-    default:
-      return Wkmi::kNormal;
+      case HSA_AMD_QUEUE_PRIORITY_LOW:
+        return Wkmi::kLow;
+      case HSA_AMD_QUEUE_PRIORITY_HIGH:
+        return Wkmi::kHigh;
+      case HSA_AMD_QUEUE_PRIORITY_NORMAL:
+      default:
+        return Wkmi::kNormal;
     }
   }
 
-  WDDMDevice *device;
+  WDDMDevice* device;
 
   D3DKMT_HANDLE context;
   D3DKMT_HANDLE queue;
 
   D3DKMT_HANDLE syncobj;
-  uint64_t *sync_addr;
+  uint64_t* sync_addr;
 
   GpuMemoryHandle cmdbuf;
   uint64_t cmdbuf_addr;
@@ -140,20 +133,14 @@ public:
   std::atomic<uint64_t>* ring_wptr = nullptr;
   std::atomic<uint64_t>* ring_rptr = nullptr;
 
-  uint32_t aql_doorbell_offset_ = 0; //!< Doorbell offset for this AQL queue
+  uint32_t aql_doorbell_offset_ = 0;  //!< Doorbell offset for this AQL queue
 };
 
 class ComputeQueue : public WDDMQueue {
-public:
-  ComputeQueue(WDDMDevice *device,
-               void *ring,
-               uint64_t ring_size,
-               std::atomic<uint64_t> *ring_wptr,
-               std::atomic<uint64_t> *ring_rptr,
-               volatile int64_t *error_addr,
-               uint32_t cmdbuf_size,
-               uint32_t engine,
-               bool use_hws = true);
+ public:
+  ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size, std::atomic<uint64_t>* ring_wptr,
+               std::atomic<uint64_t>* ring_rptr, volatile int64_t* error_addr, uint32_t cmdbuf_size,
+               uint32_t engine, bool use_hws = true);
 
   ~ComputeQueue();
 
@@ -171,42 +158,42 @@ public:
   void* GetHsaQueueAddr(void) const { return ring; }
 
   bool IsInvalidPacket(void) const {
-    uint16_t *packet = (uint16_t *)((char *)ring +
-                       (cmdbuf_aql_frame_write_index % ring_size) * 64);
+    uint16_t* packet = (uint16_t*)((char*)ring + (cmdbuf_aql_frame_write_index % ring_size) * 64);
     // Acquire-load to pair with the producer's release publication, consistent
     // with SwitchAql2PM4(); a plain read races a burst commit's not-yet-published slot.
     uint16_t header = rocr::atomic::Load(packet, std::memory_order_acquire);
-    return ((header >> HSA_PACKET_HEADER_TYPE) & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1))
-           == HSA_PACKET_TYPE_INVALID;
+    return ((header >> HSA_PACKET_HEADER_TYPE) & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1)) ==
+        HSA_PACKET_TYPE_INVALID;
   }
 
   hsa_status_t Process(void);
-  uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_value_; }
+  uint64_t* GetDoorbellPtr() const { return (uint64_t*)&doorbell_signal_value_; }
   void RingDoorbell(uint64_t value);
   GpuMemory* GetAmdQueueMemory() const { return amd_queue_memory_; }
 
  private:
-  hsa_status_t KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *packet);
-  hsa_status_t BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet, bool is_or = false);
+  hsa_status_t KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch_packet_t* packet);
+  hsa_status_t BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_packet_t* packet,
+                                      bool is_or = false);
 
-  uint64_t CalcDispatchGroups(hsa_kernel_dispatch_packet_t *packet);
-  uint64_t CalcDispatchWavesPerGroup(hsa_kernel_dispatch_packet_t *packet, bool wave32);
+  uint64_t CalcDispatchGroups(hsa_kernel_dispatch_packet_t* packet);
+  uint64_t CalcDispatchWavesPerGroup(hsa_kernel_dispatch_packet_t* packet, bool wave32);
 
   struct amd_aql_pm4_ib {
-      uint16_t header;
-      uint16_t ven_hdr;
-      uint32_t ib_jump_cmd[4];
-      uint32_t dw_cnt_remain;
-      uint32_t reserved[8];
-      hsa_signal_t completion_signal;
+    uint16_t header;
+    uint16_t ven_hdr;
+    uint32_t ib_jump_cmd[4];
+    uint32_t dw_cnt_remain;
+    uint32_t reserved[8];
+    hsa_signal_t completion_signal;
   };
-  hsa_status_t VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *packet);
+  hsa_status_t VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* packet);
   hsa_status_t SwitchAql2PM4(void);
 
   hsa_status_t PreSubmit(void);
   hsa_status_t EndSubmit(void);
 
-  void *ring; //!< AQL queue, allocated in ROCR and points to the AQL packets
+  void* ring;  //!< AQL queue, allocated in ROCR and points to the AQL packets
   uint64_t ring_size;
 
   // ib_start_addr is the current ib start address
@@ -215,33 +202,37 @@ public:
   // ib_size is the current ib size.
   uint64_t ib_size;
 
-  // record the last submitted aql frame write index
+  // This queue's submission ordinal: the number of PM4 frames it has submitted,
+  // which is also the fence value the most recent submission signals and, once
+  // the GPU reaches it, the value *sync_addr holds. It counts submissions
+  // rather than AQL packets, because one submission owns one physical frame
+  // however many merged packets that frame ended up holding. See
+  // impl/wddm/cmdbuf_frame_ring.h for the reuse invariant it indexes.
   uint64_t sync_point;
 
   uint64_t cmdbuf_aql_frame_write_index;
   uint32_t cmdbuf_aql_frame_size;
 
-  uint64_t  *signal_addr_;
+  uint64_t* signal_addr_;
   bool platform_atomic_support_;
   bool needs_barrier;
   bool ready_to_submit;
 
   CmdUtil cmd_util;
 
-private:
+ private:
   bool EnableProfiling() {
-    return AMD_HSA_BITS_GET(amd_queue_rocr_->queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
+    return AMD_HSA_BITS_GET(amd_queue_rocr_->queue_properties,
+                            AMD_QUEUE_PROPERTIES_ENABLE_PROFILING);
   }
   void HandleError(hsa_status_t status);
   bool UpdateScratch(uint32_t private_segment_size, bool wave32);
 
   uint32_t UpdateIndexStride(uint32_t srd, bool wave32);
 
-  void *ScratchBase() { return scratch_base_; }
+  void* ScratchBase() { return scratch_base_; }
 
-  void AppendCmdbufSratchBaseOffset(int offset) {
-      scratch_base_offset_array_.push_back(offset);
-  }
+  void AppendCmdbufSratchBaseOffset(int offset) { scratch_base_offset_array_.push_back(offset); }
 
   bool RelocateCmdbufScratchBase(uint64_t addr);
 
@@ -249,24 +240,24 @@ private:
   uint64_t GetKernelObjAddr(uint64_t addr) const;
   void InitScratchSRD();
   GpuMemoryHandle amd_queue_mem_;
-  GpuMemory* amd_queue_memory_;     //!< Memory object associated with amd_queue_t structure from ROCr
-  amd_queue_v2_t *amd_queue_;
-  amd_queue_v2_t *amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
+  GpuMemory* amd_queue_memory_;  //!< Memory object associated with amd_queue_t structure from ROCr
+  amd_queue_v2_t* amd_queue_;
+  amd_queue_v2_t* amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
   uint64_t doorbell_signal_value_;
-  volatile std::atomic<int64_t> *error_code_;
+  volatile std::atomic<int64_t>* error_code_;
   std::thread aql_to_pm4_thread_;
   bool thread_stop_;
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
-  static void AqlToPm4Thread(ComputeQueue *queue);
+  static void AqlToPm4Thread(ComputeQueue* queue);
 
   uint64_t scratch_waves_;
   uint64_t dispatch_waves_;
   uint64_t scratch_size_per_wave_;
   uint64_t scratch_size_;
   uint64_t total_scratch_size_;
-  void *scratch_base_;
+  void* scratch_base_;
   uint32_t scratch_mem_alignment_size_;
   GpuMemoryHandle scratch_mem_;
 
@@ -275,11 +266,8 @@ private:
 };
 
 class SDMAQueue : public WDDMQueue {
-public:
-  SDMAQueue(WDDMDevice *device,
-            void *ring,
-            uint64_t cmdbuf_size,
-            uint32_t engine,
+ public:
+  SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint32_t engine,
             bool use_hws = true);
 
   virtual ~SDMAQueue();
@@ -290,17 +278,15 @@ public:
 
   int PreparePacket(uint32_t offset, uint64_t size);
 
-  void WaitQueue(void) {
-    device->CpuWait(&syncobj, &rptr_next, 1, false);
-  }
+  void WaitQueue(void) { device->CpuWait(&syncobj, &rptr_next, 1, false); }
 
-  uint64_t * GetRingWptr(void) { return &wptr_next_; }
-  uint64_t * GetRingRptr(void) { return WDDMQueue::GetSyncAddr(); }
-  uint64_t * GetDoorbellPtr() { return &doorbell_; }
+  uint64_t* GetRingWptr(void) { return &wptr_next_; }
+  uint64_t* GetRingRptr(void) { return WDDMQueue::GetSyncAddr(); }
+  uint64_t* GetDoorbellPtr() { return &doorbell_; }
   void RingDoorbell(uint64_t value);
   void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
-private:
+ private:
   uint64_t wptr_next_;
   uint64_t wptr_pre_;
   uint64_t rptr_next;
@@ -313,7 +299,7 @@ private:
   bool thread_stop_;
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
-  static void SdmaThread(SDMAQueue *queue);
+  static void SdmaThread(SDMAQueue* queue);
 
   struct SDMA_PKT_POLL_REGMEM {
     union {
@@ -368,13 +354,11 @@ private:
   };
   const unsigned int SDMA_OP_POLL_REGMEM = 8;
   bool IsPollPacket(SDMA_PKT_POLL_REGMEM* pkt) {
-    return pkt->HEADER_UNION.op == SDMA_OP_POLL_REGMEM &&
-          pkt->HEADER_UNION.mem_poll == 1 &&
-          pkt->HEADER_UNION.func == 3;
+    return pkt->HEADER_UNION.op == SDMA_OP_POLL_REGMEM && pkt->HEADER_UNION.mem_poll == 1 &&
+        pkt->HEADER_UNION.func == 3;
   }
   uint32_t WrapIntoRocrRing(uint64_t idx) { return (idx & (cmdbuf_size - 1)); }
 };
 
-} // namespace thunk
-} // namespace wsl
-
+}  // namespace thunk
+}  // namespace wsl
