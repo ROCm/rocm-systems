@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace agent = ::rocprofiler::agent;
@@ -80,6 +81,18 @@ TEST(parse_gfx_target_version, packing_decomposition)
     EXPECT_EQ(hex_value / 10000, 9u);        // major
     EXPECT_EQ((hex_value / 100) % 100, 0u);  // minor
     EXPECT_EQ(hex_value % 100, 10u);         // step
+}
+
+TEST(parse_gfx_target_version, packed_uint32_boundary)
+{
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx4294969f"), std::optional<uint32_t>{4294960915u});
+    EXPECT_EQ(agent::parse_gfx_target_version("gfx42949700"), std::nullopt);
+}
+
+TEST(parse_gfx_target_version, rejects_very_long_overflow)
+{
+    const auto target = std::string{"gfx"} + std::string(4096, '9');
+    EXPECT_EQ(agent::parse_gfx_target_version(target), std::nullopt);
 }
 
 TEST(parse_gfx_target_version, rejects_malformed)

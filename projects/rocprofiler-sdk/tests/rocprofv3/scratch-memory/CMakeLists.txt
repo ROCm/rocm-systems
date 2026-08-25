@@ -15,18 +15,6 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-# WSL/DXG does not expose /dev/kfd; the GPU is scheduled through the dxg path, which does
-# not surface scratch-memory allocations. With no scratch reported, the rocprofv3
-# --scratch-memory-trace run produces no out_results.json, so the validate step errors on
-# a missing input file. Gate the whole scratch-memory execute+validate flow off on
-# WSL/no-KFD (same CMake-level pattern used for the multi-counter integration tests);
-# real-KFD CI still runs it normally.
-set(IS_WSL_DXG_NO_KFD OFF)
-rocprofiler_sdk_kfd_available(_KFD_AVAILABLE)
-if(NOT _KFD_AVAILABLE)
-    set(IS_WSL_DXG_NO_KFD ON)
-endif()
-
 foreach(_OUTPUT_FORMAT csv json)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT}
@@ -38,7 +26,7 @@ foreach(_OUTPUT_FORMAT csv json)
         TIMEOUT 45
         LABELS "integration-tests"
         PRELOAD "${PRELOAD_ENV}"
-        DISABLED "${IS_WSL_DXG_NO_KFD}"
+        DISABLED_NO_KFD
         FIXTURES_SETUP rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT})
 endforeach()
 
@@ -52,6 +40,6 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_scratch_memory_trace.csv
     TIMEOUT 45
     LABELS "integration-tests"
-    DISABLED "${IS_WSL_DXG_NO_KFD}"
+    DISABLED_NO_KFD
     FIXTURES_REQUIRED rocprofv3-test-scratch-memory-tracing-csv
                       rocprofv3-test-scratch-memory-tracing-json)

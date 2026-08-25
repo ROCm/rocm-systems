@@ -31,6 +31,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/format.h>
 
@@ -293,6 +294,8 @@ read_cpu_model_name()
     auto ifs = std::ifstream{"/proc/cpuinfo"};
     if(!ifs) return {};
 
+    constexpr auto whitespace = " \t\r\n\v\f";
+
     std::string line;
     while(std::getline(ifs, line))
     {
@@ -300,10 +303,11 @@ read_cpu_model_name()
         auto pos = line.find(':');
         if(pos == std::string::npos) continue;
         auto val = line.substr(pos + 1);
-        auto b   = val.find_first_not_of(" \t\r\n\v\f");
-        auto e   = val.find_last_not_of(" \t\r\n\v\f");
-        if(b == std::string::npos) return {};
-        return val.substr(b, e - b + 1);
+        // parse::strip() returns an all-whitespace value unchanged, so a
+        // "model name" line carrying no value has to be rejected here for the
+        // caller to fall back to "CPU" instead of naming the agent blank.
+        if(val.find_first_not_of(whitespace) == std::string::npos) return {};
+        return ::rocprofiler::sdk::parse::strip(std::move(val), whitespace);
     }
     return {};
 }
@@ -366,7 +370,7 @@ struct DxcoreHandle
         if(handle) ::dlclose(handle);
     }
 
-    DxcoreHandle(const DxcoreHandle&) = delete;
+    DxcoreHandle(const DxcoreHandle&)            = delete;
     DxcoreHandle& operator=(const DxcoreHandle&) = delete;
 
     bool ready() const
@@ -387,6 +391,15 @@ is_available()
 std::vector<unique_agent_t>
 enumerate()
 {
+    if(is_late_attach_mode())
+    {
+        ROCP_WARNING
+            << "wsl::enumerate: GPU agent enumeration is disabled for rocprof-attach until "
+               "librocdxg provides reference-counted topology snapshots; continuing without "
+               "WSL GPU agents";
+        return {};
+    }
+
     // On WSL the dxg/libhsakmt path only honors the vendor-specific PM4 IB
     // packets that aqlprofile emits for hardware counter collection when
     // WSLKMT_VENDOR_PACKET is set; otherwise the embedded PM4 IB is silently

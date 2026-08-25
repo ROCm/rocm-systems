@@ -140,11 +140,11 @@ using page_fault_start_ops_t =
 using page_fault_end_ops_t = std::index_sequence<ROCPROFILER_KFD_EVENT_PAGE_FAULT_END_PAGE_MIGRATED,
                                                  ROCPROFILER_KFD_EVENT_PAGE_FAULT_END_PAGE_UPDATED>;
 using queue_evict_ops_t    = std::index_sequence<ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SVM,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_USERPTR,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_TTM,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SUSPEND,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT,
-                                              ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE>;
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_USERPTR,
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_TTM,
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_SUSPEND,
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_CHECKPOINT,
+                                                 ROCPROFILER_KFD_EVENT_QUEUE_EVICT_CRIU_RESTORE>;
 
 using queue_restore_ops_t = std::index_sequence<ROCPROFILER_KFD_EVENT_QUEUE_RESTORE>;
 
@@ -966,10 +966,10 @@ struct poll_kfd_t
         active = true;
     }
 
-    poll_kfd_t(const poll_kfd_t&) = delete;
+    poll_kfd_t(const poll_kfd_t&)            = delete;
     poll_kfd_t& operator=(const poll_kfd_t&) = delete;
 
-    poll_kfd_t(poll_kfd_t&&) noexcept = default;
+    poll_kfd_t(poll_kfd_t&&) noexcept            = default;
     poll_kfd_t& operator=(poll_kfd_t&&) noexcept = default;
 
     ~poll_kfd_t()
@@ -1574,21 +1574,25 @@ context_filter(const context::context* ctx)
 }
 
 template <size_t... Inxs>
-rocprofiler_status_t init(std::index_sequence<Inxs...>)
+rocprofiler_status_t
+init(std::index_sequence<Inxs...>)
 {
     static const small_vector<size_t> event_ids{Inxs...};
 
     // On platforms without a usable KFD device node (e.g. WSL2, where only
-    // /dev/dxg is exposed), gracefully disable KFD event tracing instead of
-    // aborting in kfd_device_fd(). The capability probe lives at the topology
-    // level (rocprofiler::agent) so KFD tracing and counter collection share a
-    // single source of truth. Other rocprofiler services are unaffected.
+    // /dev/dxg is exposed), report the service as unavailable instead of
+    // aborting in kfd_device_fd(). init() runs only when a KFD buffer-tracing
+    // kind was explicitly requested, so this status reaches the caller of
+    // rocprofiler_configure_buffer_tracing_service rather than handing back a
+    // service that can never produce a record. The capability probe lives at
+    // the topology level (rocprofiler::agent) so KFD tracing and counter
+    // collection share a single source of truth.
     if(!::rocprofiler::agent::kfd_device_available())
     {
         ROCP_WARNING << fmt::format(
-            "KFD device {} is not available; KFD event tracing is disabled for this run",
+            "KFD device {} is not available; KFD event tracing is unavailable for this run",
             kfd::KFD_DEVICE_PATH);
-        return ROCPROFILER_STATUS_SUCCESS;
+        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     }
 
     // Check if version is more than 1.11

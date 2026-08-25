@@ -315,6 +315,8 @@ parse:
         - WILL_FAIL
         - UNSTABLE
         - DISABLED_CODECOV
+        - DISABLED_NO_KFD
+        - WSL_TIMEOUT_SCALE
       kwargs:
         TARGET: '*'
         WORKING_DIRECTORY: '*'
@@ -340,6 +342,7 @@ parse:
         - WILL_FAIL
         - UNSTABLE
         - DISABLED_CODECOV
+        - DISABLED_NO_KFD
         - STRIP_PARAM_BRACKETS
         - INCLUDE_FILE_NAME
         - BUNDLE_TESTS

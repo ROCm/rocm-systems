@@ -56,6 +56,19 @@ on the assumption that the layouts match. A layout rearranged without a change
 of ``sizeof()`` cannot be detected either way. None of this substitutes for a
 matched pair.
 
+Late attach has an additional runtime requirement. Released external
+``librocdxg`` packages do not reference-count the topology snapshot, so
+ROCprofiler-SDK recognizes rocprofiler-register's explicit late-attach marker
+and disables WSL agent enumeration before loading or calling ``librocdxg``.
+Consequently, ``rocprof-attach`` is unsupported on WSL until a refcount-capable
+runtime containing the `#10034 snapshot ownership fix
+<https://github.com/ROCm/rocm-systems/pull/10034>`_ is installed and this
+temporary restriction is removed. Ordinary ``rocprofv3`` launch remains safe
+with an older matched package because its topology read completes in a library
+constructor before ``hsa_init()``. This permits #7016 to land first and #10034
+second. ``DxgAbiCheck`` is only the structure-size handshake described above;
+its presence does not establish snapshot ownership.
+
 Required environment variables
 ------------------------------
 
@@ -67,29 +80,22 @@ Export the following before running ``rocprofv3``:
    # any older system install under /opt/rocm
    export LD_LIBRARY_PATH=<rocm-build>/lib:${LD_LIBRARY_PATH}
 
-   # Required: offer the HSA API table to rocprofiler-register on the DXG path
-   export HSA_TOOLS_DISABLE_REGISTER=0
-
    # Required with stock ROCm 7.2.x packages; already the default on current
    # builds. Never set this to 0 on WSL2.
    export HSA_ENABLE_DXG_DETECTION=1
 
-``HSA_TOOLS_DISABLE_REGISTER=0`` is mandatory. The HSA runtime disables tool
-registration on the DXG path by default, leaving rocprofiler-register with no
-HSA API table to intercept, so without this variable the profiled application
-runs to completion and ``rocprofv3`` writes no output files at all — not empty
-files, no files. That failure mode is silent, so if a run produces nothing,
-check this variable first.
+Tool registration needs no variable of its own. A matched runtime offers its HSA
+API table to rocprofiler-register on the DXG path exactly as it does on bare
+metal, so nothing has to be exported to make a run profilable. A runtime that
+still suppresses registration on the DXG path cannot be profiled at all: the
+application runs to completion and ``rocprofv3`` writes no output files — not
+empty files, no files. That failure mode is silent, so if a run produces
+nothing, confirm the runtime is the matched one described above.
 
-What makes ``0`` the working value is not the value but the fact that the
-variable is bound at all: the runtime reads any binding as a deliberate choice
-and stops applying its DXG default, and the choice ``0`` expresses is that
-registration should happen, since registration is disabled only when the
-variable reads exactly ``1``. Leaving it unset is therefore not neutral, and
-setting it to ``1`` disables registration outright; either way you get no
-output. The variable belongs to the general HSA runtime interface and is not
-something WSL introduced, so a ``1`` exported elsewhere in your environment for
-unrelated reasons will suppress profiling output here too.
+``HSA_TOOLS_DISABLE_REGISTER`` is the general HSA opt-out rather than something
+WSL introduced, and it disables registration when it reads exactly ``1``. Leave
+it unset; a ``1`` exported elsewhere in your environment for unrelated reasons
+suppresses profiling output here just as it does anywhere else.
 
 ``HSA_ENABLE_DXG_DETECTION`` is an HSA runtime variable rather than a
 ROCprofiler-SDK one. On a current build the runtime enables DXG detection unless
@@ -387,11 +393,8 @@ Environment variables
 ``HSA_TOOLS_DISABLE_REGISTER``
    An existing HSA runtime variable that disables tool registration when it
    reads ``1``, leaving rocprofiler-register without an HSA API table to
-   intercept. On WSL2 it must be set to ``0``: the DXG path disables
-   registration by default, but only while the variable is unset, so binding it
-   to ``0`` both suppresses that default and asks for registration. With the
-   variable unset, or set to ``1``, ``rocprofv3`` produces no output files at
-   all.
+   intercept. It takes no WSL2-specific value and should be left unset; set to
+   ``1``, here as anywhere else, ``rocprofv3`` produces no output files at all.
 
 ``HSA_ENABLE_DXG_DETECTION``
    An HSA runtime variable. Current builds enable DXG detection unless this is

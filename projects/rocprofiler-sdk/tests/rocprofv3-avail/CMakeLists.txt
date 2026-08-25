@@ -50,14 +50,7 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx9[0-9a-f][0-9a-f]$"
     # gfx906 is excluded for the same reason as IS_HW_COUNTERS_DISABLED above: its
     # counters cannot be queried.
     set(COUNTER_CHECK_L2_HIT TCC_HIT)
-elseif("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
-       AND _KFD_AVAILABLE)
-    # RDNA additionally requires /dev/kfd: these tests target device 0 (`-d 0` /
-    # `device=0`), but on the WSL/dxg path the only GPU is enumerated at index 1 (a
-    # synthetic CPU agent occupies index 0), so `-d 0` resolves to the CPU and pmc-check
-    # aborts with "Invalid device id : 0". Only RDNA reaches the dxg path, so a missing
-    # /dev/kfd on CDNA means the *build* host has no KFD passthrough, which says nothing
-    # about the test host and must not skip the test.
+elseif("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$")
     set(COUNTER_CHECK_L2_HIT GL2C_HIT)
 endif()
 

@@ -18,11 +18,6 @@ rocprofiler_configure_pytest_files(
     CONFIG pytest.ini
     COPY input.json)
 
-# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
-# these workloads run slower in practice and need more timeout headroom (root cause TBD),
-# so scale only there for the traced list-avail workload.
-rocprofiler_sdk_wsl_timeout_scale(_LIST_AVAIL_TRACE_TIMEOUT BASE 60)
-
 # basic-metrics
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-list-avail
@@ -56,7 +51,8 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2 -o metrics --list-avail
         --sys-trace --log-level warning -- $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT ${_LIST_AVAIL_TRACE_TIMEOUT}
+    TIMEOUT 60
+    WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPD_LOG_LEVEL=info")
