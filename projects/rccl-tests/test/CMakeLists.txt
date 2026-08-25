@@ -1,7 +1,11 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 
 # CPU-only host unit tests for rccl-tests helpers (no GPU/MPI).
-option(BUILD_RCCL_TESTS_HOST_UNIT_TESTS "Build rccl-tests host unit tests" ON)
+# Parent CMakeLists.txt skips this directory in TheRock super-project builds.
+if(DEFINED THEROCK_STAGE_INSTALL_ROOT)
+  message(STATUS "rccl-tests: host unit tests unavailable in TheRock build")
+  return()
+endif()
 
 if(NOT BUILD_RCCL_TESTS_HOST_UNIT_TESTS)
   return()
