@@ -751,7 +751,11 @@ HIP_TEST_CASE(Unit_hipHostRegister_Negative) {
   SECTION("hipHostRegister Negative Test - invalid memory size") {
     INFO("Trying to allocate: " << memFree);
     INFO("Host: " << hostMemFree << " device: " << devMemFree);
-    HIP_CHECK_ERROR(hipHostRegister(hostPtr, memFree, 0), hipErrorInvalidValue);
+    hipError_t localError = hipHostRegister(hostPtr, memFree, 0);
+    // The huge range may overlap internal runtime allocations, yielding
+    // rocr:hipErrorHostMemoryAlreadyRegistered instead of pal:hipErrorInvalidValue.
+    REQUIRE((localError == hipErrorInvalidValue ||
+             localError == hipErrorHostMemoryAlreadyRegistered));
   }
 
   free(hostPtr);
