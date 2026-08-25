@@ -27,7 +27,7 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
 | `--help`, `-h` | Print usage and exit |
-| `--version`, `-v` | Print version and exit |
+| `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit |
 | `--` | Separator between rocjitsu options and the target application command line |
 
 ### Usage Examples
