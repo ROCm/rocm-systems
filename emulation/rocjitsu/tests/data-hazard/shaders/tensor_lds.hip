@@ -26,8 +26,10 @@
 //   - Removing s_wait_tensorcnt → RAW hazard on LDS data: the ds_read may
 //     observe stale sentinel values instead of the tensor-loaded data.
 //
-// Requires gfx1250. The builtin is gated by the "gfx1250-insts" target
-// feature and is unavailable on earlier targets.
+// The builtin is gated by the "gfx1250-insts" target feature and is
+// unavailable on earlier targets, so the harness is told to skip this kernel
+// everywhere else:
+// requires: gfx1250
 
 typedef int v4i __attribute__((ext_vector_type(4)));
 typedef int v8i __attribute__((ext_vector_type(8)));
