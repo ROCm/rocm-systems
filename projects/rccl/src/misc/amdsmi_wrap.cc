@@ -55,7 +55,7 @@ static int is_wsl2 = -1;
   } while (0)
 
 RCCL_PARAM(UseAmdSmiLib, "USE_AMD_SMI_LIB",
-           0); // Opt-in environment variable for enabling using amd_smi_lib instead of internal code
+           1); // Enabled by default; set RCCL_USE_AMD_SMI_LIB=0 to use sysfs fallback instead
 
 #include <dlfcn.h>
 #define RCCL_AMDSMI_FN(name, rettype, arglist) rettype(*pfn_##name) arglist = nullptr;
@@ -256,7 +256,7 @@ static ncclResult_t amd_smi_init_impl() {
     // ualink sysfs nodes via ARSMI_get_fabric_info(). Both populate amdsmiFabricDevices
     // identically, so UALoE/UALLink works on this path.
     INFO(NCCL_INIT, "initialized internal alternative rsmi functionality; UALoE/UALLink fabric discovery uses sysfs "
-                    "(set RCCL_USE_AMD_SMI_LIB=1 to use amd_smi_lib instead)");
+                    "(RCCL_USE_AMD_SMI_LIB=0 was set; default is amd_smi_lib)");
   }
   return ncclSuccess;
 }
