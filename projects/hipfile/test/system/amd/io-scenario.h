@@ -314,4 +314,59 @@ template <class Policy> struct DataModificationBase : public testing::TestWithPa
     }
 };
 
+// ---------------------------------------------------------------------------
+// Test bodies that are shared between multiple data modification suites.
+//
+// These bodies need to be called with ASSERT_NO_FATAL_FAILURE from a TEST_P in order for
+// failures to propagate.
+// ---------------------------------------------------------------------------
+
+// Round trip with both the device sentinel regions and the file sentinel regions guarded
+// (checked to make sure they are not erroneously modified).
+template <class Policy>
+void
+runAllRegionsTest(DataModificationBase<Policy> &f)
+{
+    using Elem = typename Policy::Elem;
+
+    const IoTestScenario &s = f.GetParam();
+
+    const size_t n        = f.io_elems;
+    const size_t slack_n  = Policy::elems(4_KiB);
+    const hoff_t buf_off  = s.buf_off;
+    const hoff_t file_off = s.file_off;
+    const hoff_t head_off = file_off - static_cast<hoff_t>(4_KiB); // head file sentinel region
+    const hoff_t tail_off = file_off + static_cast<hoff_t>(f.io_bytes);
+
+    // File layout (each sentinel region slack_n elements, data n elements; data begins at
+    // file_off past the chunk boundary):
+    // [unwritten hole = 0][head file sentinel region][data][tail file sentinel region].
+    Policy::seedFileSlack(f.tmpfile.fd, head_off, slack_n);
+    Policy::seedFileData(f.tmpfile.fd, file_off, n);
+    Policy::seedFileSlack(f.tmpfile.fd, tail_off, slack_n);
+
+    ASSERT_EQ(static_cast<ssize_t>(f.io_bytes),
+              hipFileRead(f.tmpfile_handle, f.device_buffer, f.io_bytes, file_off, buf_off));
+
+    // Device layout (each sentinel region slack_n elements, data n elements):
+    // [head device sentinel region][data][tail device sentinel region].
+    Policy::verifyAndModify(f.buffer_start, f.buffer_elems, Policy::elems(static_cast<size_t>(buf_off)), n,
+                            gridFor(s.grid, n), dim3(kDefaultWorkgroupSize), s.stride);
+
+    ASSERT_EQ(static_cast<ssize_t>(f.io_bytes),
+              hipFileWrite(f.tmpfile_handle, f.device_buffer, f.io_bytes, file_off, buf_off));
+
+    // Start of file that was supposed to be untouched remains untouched.
+    assertHoleZero(f.tmpfile.fd, 0, head_off);
+    // Existing data before write is fully intact.
+    std::vector<Elem> head = Policy::readFile(f.tmpfile.fd, head_off, slack_n);
+    Policy::assertFileSlack(head.data(), 0, slack_n);
+    // Modified data is correctly modified.
+    std::vector<Elem> body = Policy::readFile(f.tmpfile.fd, file_off, n);
+    Policy::assertModified(body.data(), n, s.stride);
+    // Existing data after write is fully intact.
+    std::vector<Elem> tail = Policy::readFile(f.tmpfile.fd, tail_off, slack_n);
+    Policy::assertFileSlack(tail.data(), 0, slack_n);
+}
+
 } // namespace hipFileTest

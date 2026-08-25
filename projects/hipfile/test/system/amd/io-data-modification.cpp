@@ -156,151 +156,57 @@ INSTANTIATE_TEST_SUITE_P(, HipFileVerify,
 // Additionally, this test suite places the targeted data in the file at an offset past the fallback path's
 // chunking boundary to ensure the fallback path operates on the specified chunks.
 // ---------------------------------------------------------------------------
-namespace {
-
-struct WorkgroupParam {
-    GridMode    mode;
-    std::string name;
-};
-
-struct StrideParam {
-    size_t      stride;
-    std::string name;
-};
-
-} // namespace
-
-struct HipFileVerifyCombined
-    : public testing::TestWithParam<std::tuple<IoTestParam, SizeParam, WorkgroupParam, StrideParam>> {
-
-    const IoTestBackend backend{std::get<0>(GetParam()).backend}; // backend fulfilling the I/O request
-    const size_t        io_bytes{std::get<1>(GetParam()).bytes};  // bytes transferred using the hipFile API
-    const GridMode      grid_mode{std::get<2>(GetParam()).mode};  // workgroup count the kernel launches with
-    const size_t        stride{std::get<3>(GetParam()).stride};   // stride between modified cache lines
-    // Over-allocate a device sentinel region on each side of the data.
-    // Device layout (each sentinel region 4_KiB, data io_bytes):
-    // [head device sentinel region][data][tail device sentinel region].
-    const size_t buffer_bytes{io_bytes + 2 * 4_KiB};           // total device buffer size
-    const size_t io_elems{io_bytes / sizeof(int32_t)};         // transferred elements
-    const size_t buffer_elems{buffer_bytes / sizeof(int32_t)}; // elements spanning the whole buffer
-
-    Tmpfile         tmpfile;
-    hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr}; // allocated by SetUp
-    int32_t        *buffer_start{nullptr};  // typed view of device_buffer
-
-    HipFileVerifyCombined() : tmpfile{test_env.ais_capable_dir}
-    {
-    }
-
+struct HipFileVerifyCombined : public DataModificationBase<IntElementPolicy> {
     void SetUp() override
     {
-        Context<Configuration>::get()->fastpath(false);
-        Context<Configuration>::get()->fallback(false);
-
-        switch (backend) {
-            case IoTestBackend::Fastpath:
-                Context<Configuration>::get()->fastpath(true);
-                break;
-            case IoTestBackend::Fallback:
-                Context<Configuration>::get()->fallback(true);
-                break;
-            default:
-                FAIL() << "Unsupported IoTestBackend";
-        }
-
         // File layout (each sentinel region 4_KiB, data io_bytes; data begins at file
         // offset kCombinedFileOff past the chunk boundary):
         // [head file sentinel region][data][tail file sentinel region].
-        const hoff_t tail_off = kCombinedFileOff + static_cast<hoff_t>(io_bytes);
+        const hoff_t tail_off = GetParam().file_off + static_cast<hoff_t>(io_bytes);
         ASSERT_EQ(0, ftruncate(tmpfile.fd, tail_off + static_cast<hoff_t>(4_KiB)));
-
-        hipFileDescr_t descr{};
-        descr.type      = hipFileHandleTypeOpaqueFD;
-        descr.handle.fd = tmpfile.fd;
-        ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
-
-        ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
-        buffer_start = static_cast<int32_t *>(device_buffer);
-        ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
-        // hipMemset is not synchronous w.r.t. the host, and hipFileRead is not ordered w.r.t. the stream.
-        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
-
-        if (backend == IoTestBackend::Fastpath) {
-            enforceFastpathGate(tmpfile_handle, device_buffer);
-        }
-    }
-
-    void TearDown() override
-    {
-        if (device_buffer) {
-            ASSERT_EQ(hipSuccess, hipFree(device_buffer));
-        }
-        hipFileHandleDeregister(tmpfile_handle);
+        DataModificationBase::SetUp();
     }
 };
 
 TEST_P(HipFileVerifyCombined, RoundTripGuardsAllRegions)
 {
-    const size_t n        = io_elems;
-    const size_t slack_n  = 4_KiB / sizeof(int32_t);
-    const hoff_t buf_off  = static_cast<hoff_t>(4_KiB); // device head device sentinel region
-    const hoff_t file_off = kCombinedFileOff;
-    const hoff_t head_off = file_off - static_cast<hoff_t>(4_KiB); // head file sentinel region
-    const hoff_t tail_off = file_off + static_cast<hoff_t>(io_bytes);
-
-    // File layout (hole is kChunkBytes, each sentinel region slack_n ints, data n ints):
-    // [unwritten hole = 0][head file sentinel region = -1][data = i+1][tail file sentinel region = -1].
-    seedFileConstant(tmpfile.fd, head_off, slack_n, kSentinel);
-    seedFilePattern(tmpfile.fd, file_off, n);
-    seedFileConstant(tmpfile.fd, tail_off, slack_n, kSentinel);
-
-    ASSERT_EQ(static_cast<ssize_t>(io_bytes),
-              hipFileRead(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
-
-    // Device layout (each sentinel region slackElems() ints, data n ints):
-    // [head device sentinel region][data][tail device sentinel region].
-    assertVerifyAndModify(buffer_start, buffer_elems, slackElems(), n, gridFor(grid_mode, n),
-                          dim3(kDefaultWorkgroupSize), stride);
-
-    ASSERT_EQ(static_cast<ssize_t>(io_bytes),
-              hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
-
-    assertHoleZero(tmpfile.fd, 0, head_off);
-    std::vector<int32_t> head = readFileInts(tmpfile.fd, head_off, slack_n);
-    assertConstant(head.data(), 0, slack_n, kSentinel);
-    std::vector<int32_t> body = readFileInts(tmpfile.fd, file_off, n);
-    assertModifiedPattern(body.data(), n, stride);
-    std::vector<int32_t> tail = readFileInts(tmpfile.fd, tail_off, slack_n);
-    assertConstant(tail.data(), 0, slack_n, kSentinel);
+    ASSERT_NO_FATAL_FAILURE(runAllRegionsTest(*this));
 }
 
-static std::string
-combinedName(const testing::TestParamInfo<HipFileVerifyCombined::ParamType> &info)
-{
-    return std::get<0>(info.param).name + "_" + std::get<1>(info.param).name + "_" +
-           std::get<2>(info.param).name + "_" + std::get<3>(info.param).name;
-}
+HIPFILE_WARN_NO_EXIT_DTOR_OFF
+const std::array<Axis<GridMode>, 1> kGridAuto{{{GridMode::Default, "auto"}}};
+
+const std::array<Axis<GridMode>, 2> kGridSweep{{
+    {GridMode::OneWorkgroup, "1wg"},
+    {GridMode::ManyWorkgroups, "300wg"},
+}};
+
+const std::array<Axis<size_t>, 3> kStrides{{{2, "stride2"}, {32, "stride32"}, {64, "stride64"}}};
+const std::array<Axis<size_t>, 2> kStridesWide{{{2, "stride2"}, {512, "stride512"}}};
+const std::array<Axis<size_t>, 1> kMultiChunkOnly{{{2 * kChunkBytes, "multi_chunk"}}};
+HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 INSTANTIATE_TEST_SUITE_P(Sizes, HipFileVerifyCombined,
-                         testing::Combine(testing::ValuesIn(io_test_params),
-                                          testing::ValuesIn(combined_sizes),
-                                          testing::Values(WorkgroupParam{GridMode::Default, "auto"}),
-                                          testing::Values(StrideParam{2, "stride2"},
-                                                          StrideParam{32, "stride32"},
-                                                          StrideParam{64, "stride64"})),
-                         combinedName);
+                         testing::ValuesIn(IoTestScenarioSet{
+                             IoTestScenario{.file_off = kCombinedFileOff, .buf_off = kFourKiBOff}}
+                                               .over(&IoTestScenario::backend, kBackends)
+                                               .over(&IoTestScenario::io_bytes, kCombinedSizes)
+                                               .over(&IoTestScenario::grid, kGridAuto)
+                                               .over(&IoTestScenario::stride, kStrides)
+                                               .build()),
+                         ioTestScenarioName);
 
 // Use a large sweep in combination with many workgroups to exercise the behaviour of only some CUs modify
 // data.
 INSTANTIATE_TEST_SUITE_P(Workgroups, HipFileVerifyCombined,
-                         testing::Combine(testing::ValuesIn(io_test_params),
-                                          testing::Values(SizeParam{2 * kChunkBytes, "multi_chunk"}),
-                                          testing::Values(WorkgroupParam{GridMode::OneWorkgroup, "1wg"},
-                                                          WorkgroupParam{GridMode::ManyWorkgroups, "300wg"}),
-                                          testing::Values(StrideParam{2, "stride2"},
-                                                          StrideParam{512, "stride512"})),
-                         combinedName);
+                         testing::ValuesIn(IoTestScenarioSet{
+                             IoTestScenario{.file_off = kCombinedFileOff, .buf_off = kFourKiBOff}}
+                                               .over(&IoTestScenario::backend, kBackends)
+                                               .over(&IoTestScenario::io_bytes, kMultiChunkOnly)
+                                               .over(&IoTestScenario::grid, kGridSweep)
+                                               .over(&IoTestScenario::stride, kStridesWide)
+                                               .build()),
+                         ioTestScenarioName);
 
 // ---------------------------------------------------------------------------
 // This test suite exercises the same hipFileRead + hipFileWrite behaviour, in combination with the behaviour
