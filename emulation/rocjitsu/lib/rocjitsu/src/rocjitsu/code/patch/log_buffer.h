@@ -72,9 +72,11 @@ public:
   /// @brief Validate the header's self-describing fields before trusting it.
   ///
   /// Checks magic, abi_version, header_size, record_size, and slot_count against
-  /// the compiled-in ABI. Intended for buffers whose header was written by
-  /// another agent (a device or a shared allocation) before the first drain().
-  /// Returns false and sets @p error_out on the first mismatch.
+  /// the compiled-in ABI. Required precondition of drain() for any buffer whose
+  /// header was written by another agent (a device or a shared allocation):
+  /// drain() strides by a fixed sizeof(RjLogRecord) and cannot itself detect a
+  /// header describing a different record geometry. Returns false and sets
+  /// @p error_out on the first mismatch.
   [[nodiscard]] bool validate(std::string *error_out = nullptr) const;
 
   /// @brief Drain all records in [read_ptr, write_ptr) after completion.
@@ -86,10 +88,11 @@ public:
   /// write_ptr.
   ///
   /// A valid record whose per-record abi_version or record_size disagrees with
-  /// the compiled ABI was written by a probe built against a different layout;
-  /// decoding it with our offsets would be silently wrong. Such a record is
-  /// cleared, counted in incompatible_records, and not delivered to @p callback.
-  /// The header's own discriminants are separately checkable via validate().
+  /// the compiled ABI is cleared, counted in incompatible_records, and not
+  /// delivered to @p callback. This is defense-in-depth against a single
+  /// corrupted record, not the primary layout guard: drain() strides by a fixed
+  /// sizeof(RjLogRecord), so a wholesale record_size mismatch desyncs the stride
+  /// itself and must be caught by validate() on the header (see validate()).
   ///
   /// The producer contract is drop-newest: a full ring drops the incoming record
   /// and bumps overflow_count without advancing write_ptr, so a well-behaved

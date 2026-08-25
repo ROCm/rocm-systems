@@ -12,6 +12,11 @@
 ///
 /// The type names are currently unversioned, but versioned type names can be
 /// introduced to extend the ABI while keeping compatibility.
+///
+/// Layout handshake: the host consumer strides by a fixed sizeof(RjLogRecord), so
+/// both sides must agree on record geometry first. A producer compares the
+/// header's abi_version/record_size before writing; the host passes the header
+/// through LogBuffer::validate() before draining (see log_buffer.h).
 
 #pragma once
 

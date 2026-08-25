@@ -172,11 +172,12 @@ DrainStats LogBuffer::drain(const LogRecordCallback &callback) {
       ++stats.invalid_slots;
       continue;
     }
-    // The header passing validate() does not vouch for individual records: the
-    // host writes the header while the embedded probe writes each record, so a
-    // probe built against a different layout can publish a mismatched record
-    // under a valid header. Decoding it with our offsets would be silently
-    // wrong, so drop it rather than hand it to the callback.
+    // Defense-in-depth against a single corrupted record, not the primary layout
+    // guard: drain() strides by a fixed sizeof(RjLogRecord), so a wholesale
+    // record_size mismatch desyncs the stride itself and must be caught by
+    // validate() on the header (the required precondition). Past that, a record
+    // tripping this was built against a different layout -- decoding it with our
+    // offsets would be silently wrong, so drop it.
     if (record.abi_version != kRjLogAbiVersion || record.record_size != kRjLogRecordSize) {
       record.valid = 0;
       ++stats.incompatible_records;
