@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -419,13 +420,16 @@ public:
 class Sopp : public IsaInstruction<Isa> {
 public:
   Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
+  bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
 public:
   Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
+  bool default_encoding();
   bool hasImpliedLiteral();
   using OpEncoding = SopkMachineInst;
   const OpEncoding inst_;
@@ -474,8 +478,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -512,8 +514,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -552,8 +552,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -589,6 +587,8 @@ public:
 class Ds : public IsaInstruction<Isa> {
 public:
   Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
+  bool uses_split_ds_offsets() const;
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
 };

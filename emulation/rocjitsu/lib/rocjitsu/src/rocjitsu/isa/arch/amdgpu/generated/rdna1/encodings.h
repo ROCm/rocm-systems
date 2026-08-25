@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -118,10 +119,6 @@ inline constexpr uint16_t kVop2 = 4;
 inline constexpr uint16_t kVop2OpHi1 = 5;
 inline constexpr uint16_t kVop2OpHi2 = 6;
 inline constexpr uint16_t kVop2OpHi3 = 7;
-inline constexpr uint16_t kVop2OpHi4 = 8;
-inline constexpr uint16_t kVop2OpHi5 = 9;
-inline constexpr uint16_t kVop2OpHi6 = 10;
-inline constexpr uint16_t kVop2OpHi7 = 11;
 inline constexpr uint16_t kVop2OpHi8 = 12;
 inline constexpr uint16_t kVop2OpHi9 = 13;
 inline constexpr uint16_t kVop2OpHi10 = 14;
@@ -162,10 +159,6 @@ inline constexpr uint16_t kVop2OpHi44 = 48;
 inline constexpr uint16_t kVop2OpHi45 = 49;
 inline constexpr uint16_t kVop2OpHi46 = 50;
 inline constexpr uint16_t kVop2OpHi47 = 51;
-inline constexpr uint16_t kVop2OpHi48 = 52;
-inline constexpr uint16_t kVop2OpHi49 = 53;
-inline constexpr uint16_t kVop2OpHi50 = 54;
-inline constexpr uint16_t kVop2OpHi51 = 55;
 inline constexpr uint16_t kVop2OpHi56 = 60;
 inline constexpr uint16_t kVop2OpHi57 = 61;
 inline constexpr uint16_t kVop2OpHi58 = 62;
@@ -395,6 +388,7 @@ public:
   bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
@@ -439,6 +433,9 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -448,8 +445,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -477,6 +472,7 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -485,8 +481,6 @@ public:
   uint32_t dpp_bank_mask_ = 0xF;
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -513,6 +507,9 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
+  bool has_dpp8();
+  bool has_dpp16();
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
@@ -524,8 +521,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -550,6 +545,7 @@ public:
   bool default_encoding();
   using OpEncoding = VintrpMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Vop3 : public IsaInstruction<Isa> {
@@ -587,6 +583,8 @@ public:
 class Ds : public IsaInstruction<Isa> {
 public:
   Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
+  bool uses_split_ds_offsets() const;
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
 };

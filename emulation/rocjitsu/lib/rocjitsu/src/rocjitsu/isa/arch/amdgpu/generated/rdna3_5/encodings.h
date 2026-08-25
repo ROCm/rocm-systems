@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
 #include <cstdint>
@@ -382,6 +383,7 @@ public:
   bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
@@ -426,6 +428,8 @@ public:
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -435,8 +439,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -457,6 +459,8 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -466,8 +470,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -488,6 +490,8 @@ public:
   void implicit_uses(RegisterSet &uses) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_dpp8();
+  bool has_dpp16();
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
@@ -499,8 +503,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
   uint32_t sdwa_src0_sel_ = amdgpu::sdwa::DWORD;
   bool sdwa_src0_sext_ = false;
   bool sdwa_src0_neg_ = false;
@@ -518,6 +520,15 @@ class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3MachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
@@ -527,6 +538,8 @@ public:
   bool has_lit_0_has_lit_2();
   bool has_lit_1_has_lit_2();
   bool has_lit_0_has_lit_1_has_lit_2();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop3MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
@@ -536,14 +549,21 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vop3p : public IsaInstruction<Isa> {
 public:
   Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3pMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
@@ -553,6 +573,8 @@ public:
   bool has_lit_0_has_lit_2();
   bool has_lit_1_has_lit_2();
   bool has_lit_0_has_lit_1_has_lit_2();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop3pMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
@@ -562,8 +584,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 class Vinterp : public IsaInstruction<Isa> {
@@ -579,11 +599,14 @@ public:
   bool default_encoding();
   using OpEncoding = LdsdirMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Ds : public IsaInstruction<Isa> {
 public:
   Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
+  bool uses_split_ds_offsets() const;
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
 };
@@ -633,6 +656,15 @@ class Vop3SdstEnc : public IsaInstruction<Isa> {
 public:
   Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_literal32() const;
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const Vop3SdstEncMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
+      return emit_error.emit() << "DPP and literal operands cannot be combined";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override;
   void implicit_uses(RegisterSet &uses) const override;
   bool has_lit_0();
@@ -642,6 +674,8 @@ public:
   bool has_lit_0_has_lit_2();
   bool has_lit_1_has_lit_2();
   bool has_lit_0_has_lit_1_has_lit_2();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop3SdstEncMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 3> raw_words_{};
@@ -651,8 +685,6 @@ public:
   uint32_t dpp_bound_ctrl_ = 0;
   uint32_t dpp_fi_ = 1;
   uint32_t dpp8_lane_sel_ = 0;
-  std::unique_ptr<StagedOperand> dpp_src0_;
-  std::unique_ptr<StagedOperand> dpp_src1_;
 };
 
 } // namespace rdna3_5
