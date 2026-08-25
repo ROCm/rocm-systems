@@ -419,6 +419,10 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
 }
 
 TEST(ConSan, TargetProfileMatrixDefinesEveryAdmittedArchitecture) {
+  // Independent expected values for one row of the production target-profile
+  // table. This deliberately mirrors the public facts rather than reusing the
+  // production records: the test should fail if a target row changes without
+  // an explicit review of its architectural contract.
   struct ExpectedProfile {
     rj_code_target_id_t target;
     rj_code_arch_t arch;

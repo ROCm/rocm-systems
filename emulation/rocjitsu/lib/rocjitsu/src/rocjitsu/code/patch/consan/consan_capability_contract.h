@@ -16,9 +16,15 @@
 
 namespace rocjitsu {
 
-/// Stable engine identities used by the public capability contract. MOI keeps
-/// its implementation enum separate because SuperCollider is not an MOI
-/// engine.
+/// Names the four user-visible ConSan engines represented by the capability
+/// matrix.
+///
+/// This is a documentation and capability-contract identity, not the runtime
+/// engine-selection type. In particular, the MOI implementation keeps its own
+/// enum because SuperCollider is a ConSan engine but is not an MOI engine.
+/// Keeping this projection separate lets the public matrix describe all four
+/// engines without making an implementation layer depend on an engine it does
+/// not own. `Count` is an iteration sentinel and never denotes an engine.
 enum class ConSanCapabilityEngine : uint8_t {
   SuperCollider,
   RecordReplay,
@@ -27,6 +33,16 @@ enum class ConSanCapabilityEngine : uint8_t {
   Count,
 };
 
+/// Groups normalized capability forms by the kind of program behavior they
+/// describe.
+///
+/// A domain is deliberately broader than either an ISA instruction class or a
+/// GPU address space. For example, native LDS and group-FLAT operations are
+/// different instruction forms but both belong to the access domain. Domains
+/// exist so generated documentation and contract checks can organize forms;
+/// they do not decide whether an individual instruction is supported and must
+/// not be used as a substitute for decoded-instruction analysis. `Count` is an
+/// iteration sentinel and is not a semantic domain.
 enum class ConSanCapabilityDomain : uint8_t {
   Access,
   Barrier,
@@ -35,8 +51,16 @@ enum class ConSanCapabilityDomain : uint8_t {
   Count,
 };
 
-/// Semantic forms are intentionally coarser than ISA mnemonics. Target-native
-/// spellings enter the decoded inventory before this projection applies.
+/// Identifies a target-independent GPU operation shape whose ConSan behavior
+/// is described by the public capability contract.
+///
+/// Forms are intentionally coarser than ISA mnemonics: target-native
+/// instruction spellings and operand encodings first enter the exact decoded
+/// inventory, and only then project onto one of these forms. A form therefore
+/// records the behavioral question being asked (for example, an ordered LDS
+/// atomic), while the decoder and lowerer retain responsibility for exact
+/// instruction admission. `Count` is an iteration sentinel and never denotes
+/// an operation.
 enum class ConSanCapabilityForm : uint8_t {
   NativeLdsAccess,
   GroupFlatAccess,
@@ -50,14 +74,29 @@ enum class ConSanCapabilityForm : uint8_t {
   Count,
 };
 
-/// Product family is intentionally distinct from the instruction-encoding
-/// family. gfx1250 is a CDNA target that shares the gfx12 encoding family with
-/// RDNA4.
+/// Identifies the architectural product lineage to which a supported target
+/// belongs.
+///
+/// Product lineage captures architectural intent such as CDNA versus RDNA; it
+/// does not imply that two members use the same machine-instruction encoding.
+/// Conversely, targets from different product lineages may share encodings:
+/// gfx1250 is CDNA even though it shares the gfx12 encoding family with RDNA4.
+/// Callers that need to choose an instruction layout must use
+/// `ConSanEncodingFamily`, not this type.
 enum class ConSanArchitectureFamily : uint8_t {
   Cdna,
   Rdna,
 };
 
+/// Selects the machine-instruction encoding rules used by ConSan decoders and
+/// lowerers.
+///
+/// An encoding family is a statement about compatible binary layouts and
+/// instruction-building facilities, not product branding or the complete set
+/// of semantic capabilities. The two gfx9 CDNA generations remain distinct
+/// because some exact encodings differ, while RDNA4 and CDNA5 intentionally
+/// share `Gfx12`. Exact target exceptions may still be handled after this
+/// coarse routing decision.
 enum class ConSanEncodingFamily : uint8_t {
   Gfx9Cdna3,
   Gfx9Cdna4,
@@ -65,37 +104,85 @@ enum class ConSanEncodingFamily : uint8_t {
   Gfx12,
 };
 
-/// How a kernel descriptor's VGPR allocation relates to accumulator storage.
+/// Describes how accumulator registers participate in a kernel's physical
+/// vector-register allocation.
+///
+/// `None` means ConSan does not need a separate accumulator allocation model.
+/// `DescriptorPartitioned` means a descriptor field divides one allocation
+/// into ordinary VGPR and AccVGPR regions. `SelectableVgprBank` means the ISA
+/// selects among physical VGPR banks rather than exposing the gfx9 descriptor
+/// partition. Resource planning uses this type to interpret allocation facts;
+/// it does not by itself select an instrumentation strategy.
 enum class ConSanAccumulatorModel : uint8_t {
   None,
   DescriptorPartitioned,
   SelectableVgprBank,
 };
 
+/// Identifies the target-provided facility from which instrumentation can
+/// obtain a stable dispatch identity.
+///
+/// `PreloadedSgprPair` requires the descriptor/prologue path to make a pair of
+/// scalar registers available. `CodeObjectLiteral` means the instrumenter can
+/// materialize the identity from immutable code-object data instead. This enum
+/// records availability, not policy: an engine may choose not to consume the
+/// facility even when the target provides it.
 enum class ConSanDispatchIdentitySource : uint8_t {
   PreloadedSgprPair,
   CodeObjectLiteral,
 };
 
+/// Identifies the architectural source of the workgroup coordinates consumed
+/// by ConSan probes.
+///
+/// Some targets expose coordinates through descriptor-enabled system SGPRs;
+/// others make them available through command-processor temporary registers.
+/// The distinction controls prologue and resource planning and must not be
+/// inferred from CDNA/RDNA product lineage. This type describes the source
+/// facility only, not the higher-level owner key assembled from it.
 enum class ConSanWorkgroupIdentitySource : uint8_t {
   DescriptorSystemSgprs,
   CommandProcessorTtmps,
 };
 
+/// Selects the target generation's wait-counter encoding and counter model.
+///
+/// ConSan uses this type when it must order injected memory operations with
+/// guest operations. The values name encoding families rather than individual
+/// wait instructions: exact counter choice and immediate construction remain
+/// the responsibility of the relevant lowerer. Keeping the distinction typed
+/// prevents product-family tests from silently standing in for wait semantics.
 enum class ConSanWaitCounterFamily : uint8_t {
   Gfx9,
   Gfx11,
   Gfx12,
 };
 
+/// Names the direct scalar call form available to injected ConSan code.
+///
+/// `SCallB64` and `SCallI64` have different encodings and return-address
+/// behavior, so routing and relay construction must ask this typed target fact
+/// rather than infer it from a broad architecture family. The enum describes
+/// architectural availability; each engine still decides whether a direct
+/// call is suitable at a particular patch site.
 enum class ConSanDirectCallForm : uint8_t {
   SCallB64,
   SCallI64,
 };
 
-/// Supported means causal evidence for MOI engines or redundant access
-/// observation for SuperCollider. The other dispositions make intentionally
-/// weaker engine semantics explicit instead of presenting them as omissions.
+/// Describes the strength of the stable contract for one
+/// target/engine/capability-form combination.
+///
+/// `Supported` means causal evidence for an MOI engine or redundant access
+/// observation for SuperCollider. `MutationOnly` means the form can participate
+/// in fault injection but is not observed as evidence. `AccessOnly` means the
+/// access aspect is covered without claiming synchronization semantics.
+/// `AssociatedOnly` means the form can be associated with another observed
+/// event but is not independently covered. `NotApplicable` is a deliberate
+/// target/engine exclusion, whereas `OutOfContract` means the query itself used
+/// an unknown target, sentinel value, or otherwise invalid combination. These
+/// distinctions keep weaker behavior visible instead of presenting every
+/// non-`Supported` result as an accidental omission.
 enum class ConSanCapabilityDisposition : uint8_t {
   OutOfContract,
   NotApplicable,
@@ -105,9 +192,22 @@ enum class ConSanCapabilityDisposition : uint8_t {
   AssociatedOnly,
 };
 
-/// Immutable architectural facts selected once per admitted code object.
-/// Per-kernel values, such as a descriptor-selected wave size, are derived
-/// from this record and are never written back into it.
+/// The immutable, target-wide architectural contract used by ConSan.
+///
+/// There is exactly one profile for each admitted target. It contains facts
+/// that remain constant across every code object and kernel for that target:
+/// product and encoding families, available identity/call/wait facilities,
+/// register-allocation rules, address and memory limits, and normalized
+/// semantic-form availability. It deliberately contains no engine choice,
+/// decoded-instruction state, resource-allocation decision, or mutable analysis
+/// result.
+///
+/// A profile is selected once from the code-object target and thereafter
+/// passed or queried as read-only data. Descriptor-selected facts such as wave
+/// size are validated and projected into `ConSanKernelTargetProfile`; they are
+/// never written back here. This separation makes architecture support a small
+/// auditable table and prevents local lowerers from growing their own competing
+/// definitions of the same hardware facts.
 struct ConSanTargetProfile {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
@@ -147,8 +247,19 @@ struct ConSanTargetProfile {
   uint16_t semantic_form_mask = 0;
 };
 
-/// Immutable per-kernel facts derived from a target profile plus the kernel
-/// descriptor's wave-size selection.
+/// The validated, immutable target view for one kernel descriptor.
+///
+/// This record combines a pointer to the code object's `ConSanTargetProfile`
+/// with descriptor-selected wave size and the allocation consequences of that
+/// choice. Construction fails when the descriptor requests a wave size the
+/// target does not support, so downstream resource planning can consume this
+/// type without repeating wave-size admission logic. The `target` pointer
+/// refers to the static profile table and therefore outlives every derived
+/// kernel view.
+///
+/// The record remains intentionally narrow: decoded sites, liveness, selected
+/// scratch registers, and engine policy belong to later per-kernel stages and
+/// must not be added as mutable fields here.
 struct ConSanKernelTargetProfile {
   const ConSanTargetProfile *target = nullptr;
   uint8_t wave_size = 0;
