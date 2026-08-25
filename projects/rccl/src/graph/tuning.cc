@@ -1778,11 +1778,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     32ULL*1024,          // [8] AlltoAll        -- 32 KiB
   },
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
-  // RCCL_PARAM(DdaLL128, ...) defaults to 0 (disabled); set RCCL_DDA_LL128=1 to enable.
+  // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    32ULL*1024*1024,     // [2] AllGather       -- 32 MiB
+    1ULL*1024*1024,      // [2] AllGather       -- 1 MiB (LL128 wins to 1M total; VMM faster above)
     32ULL*1024*1024,     // [3] ReduceScatter   -- 32 MiB per-rank shard
     32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB
     0,                   // [5] SendRecv        -- not used
