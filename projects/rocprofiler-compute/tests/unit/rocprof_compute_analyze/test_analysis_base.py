@@ -196,10 +196,12 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
     assert "last two components" in mock_error.call_args.args[1]
 
 
-# -- pre_processing output_format dispatch ----------------------------------
+# ---------------------------------------------------------------------------
+# pre_processing output_format dispatch
+# ---------------------------------------------------------------------------
 
 
-def _make_analyzer(
+def make_analyzer(
     monkeypatch: pytest.MonkeyPatch,
     output_format: str,
     output_name: str = None,
@@ -225,7 +227,7 @@ def _make_analyzer(
     return analyzer
 
 
-def _render_report(analyzer: OmniAnalyze_Base, monkeypatch: pytest.MonkeyPatch) -> None:
+def render_report(analyzer: OmniAnalyze_Base, monkeypatch: pytest.MonkeyPatch) -> None:
     """Write one rendered panel to analyzer._output via the real tty renderer."""
     metric_dataframe = pd.DataFrame({
         "Metric": ["EA read request fraction - HBM"],
@@ -279,7 +281,7 @@ def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:
     mocks = common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.chdir(tmp_path)
 
-    analyzer = _make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
     analyzer.pre_processing()
 
     report = tmp_path / "analysis_report.txt"
@@ -297,7 +299,7 @@ def test_pre_processing_txt_default_name_is_uuid(tmp_path, monkeypatch) -> None:
     common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.chdir(tmp_path)
 
-    analyzer = _make_analyzer(monkeypatch, "txt")
+    analyzer = make_analyzer(monkeypatch, "txt")
     analyzer.pre_processing()
 
     created = list(tmp_path.iterdir())
@@ -312,7 +314,7 @@ def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
     common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.chdir(tmp_path)
 
-    analyzer = _make_analyzer(monkeypatch, "stdout")
+    analyzer = make_analyzer(monkeypatch, "stdout")
     analyzer.pre_processing()
 
     assert analyzer._output is sys.stdout
@@ -324,25 +326,24 @@ def test_txt_output_matches_stdout_output(tmp_path, monkeypatch, capsys) -> None
     common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
     monkeypatch.chdir(tmp_path)
 
-    txt_analyzer = _make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    txt_analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
     txt_analyzer.pre_processing()
-    _render_report(txt_analyzer, monkeypatch)
+    render_report(txt_analyzer, monkeypatch)
     # The analyzer never closes _output, so flush before reading it back.
     txt_analyzer._output.flush()
     txt_report = (tmp_path / "analysis_report.txt").read_text(encoding="utf-8")
     txt_analyzer._output.close()
 
-    stdout_analyzer = _make_analyzer(monkeypatch, "stdout")
+    stdout_analyzer = make_analyzer(monkeypatch, "stdout")
     stdout_analyzer.pre_processing()
     capsys.readouterr()
-    _render_report(stdout_analyzer, monkeypatch)
+    render_report(stdout_analyzer, monkeypatch)
     stdout_report = capsys.readouterr().out
 
     assert txt_report == stdout_report
     assert "30. Memory Bandwidth Analysis" in txt_report
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits required")
 @pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0,
     reason="root bypasses directory write permissions",
@@ -355,7 +356,7 @@ def test_pre_processing_txt_unwritable_directory_raises(tmp_path, monkeypatch) -
     read_only.chmod(0o555)
     monkeypatch.chdir(read_only)
 
-    analyzer = _make_analyzer(monkeypatch, "txt", output_name="analysis_report")
+    analyzer = make_analyzer(monkeypatch, "txt", output_name="analysis_report")
     try:
         with pytest.raises(PermissionError):
             analyzer.pre_processing()
