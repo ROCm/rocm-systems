@@ -2031,23 +2031,55 @@ simulated targets.
 
 ### Slice 3B: synchronization and ownership inventory
 
-- **Current responsibility:** Sync events, sequences, owner annotation,
+**Implementation status:** complete. `ProgramInventory` now owns sync events,
+logical sequences, owner annotations, barrier lifecycles, ordinary
+release/acquire associations, communication-address recipes, and MOI fence
+candidates. `ConSanResult` exposes a `SynchronizationInventoryView` whose spans
+are const; the former independently owned mutable vectors have been deleted.
+Only semantic analysis receives `SynchronizationInventoryBuildView`, making
+every remaining write capability explicit in a producer signature.
+
+Each decoded event has a content-qualified `SemanticSiteId`. Every sequence
+and lifecycle group preserves its ordered typed member IDs in parallel with a
+temporary string adapter for lowerers and diagnostics. Sequence association
+merges the typed IDs for barrier pairs, atomic/cache patterns, ordinary
+release/acquire patterns, and gfx1250 barrier lifecycles. Owner annotation and
+all derived recipes are completed before the immutable view is published.
+Fault and engine code consume that view read-only.
+
+`ProgramInventoryBuilder` can create a deep-copied analysis revision from a
+published inventory. The original storage remains immutable, making bounded
+component reanalysis and adversarial corruption tests explicit rather than
+letting callers mutate a published result. Focused host tests prove const view
+types, empty and populated projections, copy/move lifetime, complete projection
+of all synchronization-derived record kinds, revision isolation, and stable
+event/sequence/lifecycle IDs on a real gfx1250 code object. The completed gate
+also passed all 1,232 ConSan host tests, 85 ConSan hook tests, 564 paired
+barrier/atomic/fence/Stream-K/cluster simulator rows across all five targets,
+and 102 corresponding physical-gfx950 rows. Sampled D128 E2E validation stayed
+complete on physical gfx950 (128/128 accesses and 117/117 barriers) and
+RocJitsu-emulated gfx1250 (18/18 accesses and 8/8 barriers).
+
+- **Previous responsibility:** Sync events, sequences, owner annotation,
   barrier lifecycles, ordinary release/acquire association, address recipes,
-  and fence candidates are interleaved with fault and engine setup in the
+  and fence candidates were interleaved with fault and engine setup in the
   mutable result.
-- **New boundary and contract:** Extend `ProgramInventory` with immutable typed
-  synchronization/ownership data and stable member identities. Build the
-  semantic inventory regardless of which downstream MOI engine consumes it;
-  expensive optional analyses remain explicit builder requests.
-- **Temporary seam and consumers:** Extend `LegacyInventoryView` for current
-  synchronization lowerers and mutation planners. Fault planning receives a separate
-  inventory view and can no longer modify the sanitizer inventory.
+- **Implemented boundary and contract:** `ProgramInventory` owns immutable typed
+  synchronization/ownership data and stable member identities. Semantic
+  inventory construction is independent of the selected downstream MOI
+  engine; optional CFG products remain explicit requests.
+- **Current temporary seam and consumers:** Current lowerers and mutation
+  planners read `SynchronizationInventoryView`. String event identities remain
+  only as a compatibility projection adjacent to authoritative typed member
+  identities. Fault sites and mutation plans remain separate result-owned
+  inventories and cannot modify sanitizer semantics.
 - **Test gate:** Sync/ordinary/fault inventory tests, owner and shared-helper
   tests, barrier/atomic/fence device pairs on every applicable target, plus
   gfx1250 cluster sequence tests.
-- **Cutover and deletion:** Switch fault planning and the next policy slices;
-  delete duplicate semantic synchronization vectors and the option-dependent reset paths
-  that existed only to rebuild them.
+- **Completed cutover and deletion:** Fault planning and current engine
+  consumers read the immutable projection. Duplicate semantic synchronization
+  vector ownership and option-dependent reset paths have been deleted from
+  `ConSanResult`.
 - **Prerequisite:** Slice 3A.
 
 ### Slice 4A: access policy and coverage ledger

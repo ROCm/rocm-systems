@@ -387,16 +387,19 @@ TEST(ConSan, SynchronizationConsumerContractRequiresUniqueAcceptableSequence) {
                                             ConSanSemanticConfidence::Ambiguous));
 
   ConSanResult result;
+  ProgramInventoryBuilder inventory;
   ConSanSyncSequence sequence;
   sequence.identity = "sequence-a";
   sequence.member_event_identities = {"event-a", "event-b"};
-  result.sync_sequences.push_back(sequence);
+  inventory.synchronization().sync_sequences.push_back(sequence);
+  result.install_program_inventory(inventory.view());
   ASSERT_NE(find_consan_sync_sequence_for_event(result, "event-b"), nullptr);
   EXPECT_EQ(find_consan_sync_sequence_for_event(result, "missing"), nullptr);
 
   sequence.identity = "sequence-b";
   sequence.member_event_identities = {"event-b"};
-  result.sync_sequences.push_back(sequence);
+  inventory.synchronization().sync_sequences.push_back(sequence);
+  result.install_program_inventory(inventory.view());
   EXPECT_EQ(find_consan_sync_sequence_for_event(result, "event-b"), nullptr);
 }
 

@@ -246,6 +246,175 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   EXPECT_EQ(moved.program_inventory.access_sites().front().container.name, "inventory_kernel");
 }
 
+TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) {
+  static_assert(
+      std::same_as<typename decltype(SynchronizationInventoryView{}.sync_events)::element_type,
+                   const ConSanSyncEvent>);
+  static_assert(
+      std::same_as<typename decltype(SynchronizationInventoryView{}.sync_sequences)::element_type,
+                   const ConSanSyncSequence>);
+  static_assert(std::same_as<typename decltype(SynchronizationInventoryView{}
+                                                   .barrier_lifecycle_groups)::element_type,
+                             const ConSanBarrierLifecycleGroup>);
+  static_assert(std::same_as<typename decltype(SynchronizationInventoryView{}
+                                                   .communication_address_recipes)::element_type,
+                             const ConSanCommunicationAddressRecipe>);
+  static_assert(std::same_as<typename decltype(SynchronizationInventoryView{}
+                                                   .moi_fence_candidates)::element_type,
+                             const ConSanMoiFenceCandidate>);
+  static_assert(std::same_as<decltype(std::declval<ConSanResult &>().sync_events),
+                             std::span<const ConSanSyncEvent>>);
+
+  ProgramInventory empty;
+  EXPECT_TRUE(empty.synchronization_view().empty());
+
+  const std::array<uint8_t, 4> bytes = {4, 3, 2, 1};
+  ProgramInventoryBuilder builder(bytes);
+  SynchronizationInventoryBuildView build = builder.synchronization();
+  ConSanSyncEvent event;
+  event.identity = "event";
+  event.semantic_id = {
+      .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 16},
+      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+  };
+  build.sync_events.push_back(event);
+  ConSanSyncSequence sequence;
+  sequence.identity = "sequence";
+  SemanticSiteId member = event.semantic_id;
+  member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+  sequence.member_semantic_ids.push_back(member);
+  sequence.member_event_identities.push_back(event.identity);
+  build.sync_sequences.push_back(sequence);
+  ConSanBarrierLifecycleGroup lifecycle;
+  lifecycle.identity = "lifecycle";
+  lifecycle.member_semantic_ids = {member};
+  build.barrier_lifecycle_groups.push_back(lifecycle);
+  ConSanCommunicationAddressRecipe recipe;
+  recipe.support = ConSanCommunicationAddressSupport::Supported;
+  recipe.sequence_identity = sequence.identity;
+  build.communication_address_recipes.push_back(recipe);
+  ConSanMoiFenceCandidate fence;
+  fence.identity = "fence";
+  fence.sequence_identity = sequence.identity;
+  fence.eligible = true;
+  build.moi_fence_candidates.push_back(fence);
+
+  ProgramInventory published = builder.view();
+  const SynchronizationInventoryView view = published.synchronization_view();
+  EXPECT_FALSE(view.empty());
+  ASSERT_EQ(view.sync_events.size(), 1u);
+  ASSERT_EQ(view.sync_sequences.size(), 1u);
+  ASSERT_EQ(view.barrier_lifecycle_groups.size(), 1u);
+  ASSERT_EQ(view.communication_address_recipes.size(), 1u);
+  ASSERT_EQ(view.moi_fence_candidates.size(), 1u);
+  EXPECT_TRUE(view.sync_events.front().semantic_id.valid());
+  EXPECT_TRUE(view.sync_sequences.front().member_semantic_ids.front().valid());
+  EXPECT_TRUE(view.communication_address_recipes.front().supported());
+  EXPECT_TRUE(view.moi_fence_candidates.front().eligible);
+
+  ConSanResult result;
+  result.install_program_inventory(published);
+  ConSanResult copied = result;
+  ConSanResult moved = std::move(copied);
+  EXPECT_EQ(moved.sync_events.front().identity, "event");
+  EXPECT_EQ(moved.sync_sequences.front().identity, "sequence");
+  EXPECT_EQ(moved.barrier_lifecycle_groups.front().identity, "lifecycle");
+  EXPECT_EQ(moved.communication_address_recipes.front().sequence_identity, "sequence");
+  EXPECT_EQ(moved.moi_fence_candidates.front().identity, "fence");
+}
+
+TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) {
+  ProgramInventoryBuilder original(std::array<uint8_t, 1>{7});
+  original.kernels().push_back(make_inventory_kernel("original"));
+  ConSanSyncEvent event;
+  event.identity = "original-event";
+  original.synchronization().sync_events.push_back(event);
+  ConSanSyncSequence sequence;
+  sequence.identity = "original-sequence";
+  original.synchronization().sync_sequences.push_back(sequence);
+  ConSanBarrierLifecycleGroup group;
+  group.identity = "original-group";
+  original.synchronization().barrier_lifecycle_groups.push_back(group);
+  ConSanCommunicationAddressRecipe recipe;
+  recipe.sequence_identity = "original-sequence";
+  original.synchronization().communication_address_recipes.push_back(recipe);
+  ConSanMoiFenceCandidate fence;
+  fence.identity = "original-fence";
+  original.synchronization().moi_fence_candidates.push_back(fence);
+  const ProgramInventory published = original.view();
+
+  ProgramInventoryBuilder revision(published);
+  revision.kernels().front().name = "revision";
+  SynchronizationInventoryBuildView revised = revision.synchronization();
+  revised.sync_events.front().identity = "revision-event";
+  revised.sync_sequences.clear();
+  revised.barrier_lifecycle_groups.clear();
+  revised.communication_address_recipes.clear();
+  revised.moi_fence_candidates.front().eligible = true;
+
+  const SynchronizationInventoryView unchanged = published.synchronization_view();
+  EXPECT_EQ(published.legacy_view().kernels.front().name, "original");
+  EXPECT_EQ(unchanged.sync_events.front().identity, "original-event");
+  EXPECT_EQ(unchanged.sync_sequences.size(), 1u);
+  EXPECT_EQ(unchanged.barrier_lifecycle_groups.size(), 1u);
+  EXPECT_EQ(unchanged.communication_address_recipes.size(), 1u);
+  EXPECT_FALSE(unchanged.moi_fence_candidates.front().eligible);
+
+  const ProgramInventory revised_inventory = revision.view();
+  EXPECT_EQ(revised_inventory.legacy_view().kernels.front().name, "revision");
+  EXPECT_EQ(revised_inventory.synchronization_view().sync_events.front().identity,
+            "revision-event");
+  EXPECT_TRUE(revised_inventory.synchronization_view().sync_sequences.empty());
+  EXPECT_TRUE(revised_inventory.synchronization_view().barrier_lifecycle_groups.empty());
+  EXPECT_TRUE(revised_inventory.synchronization_view().communication_address_recipes.empty());
+  EXPECT_TRUE(revised_inventory.synchronization_view().moi_fence_candidates.front().eligible);
+}
+
+TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberIdentities) {
+  const std::array<uint32_t, 6> text_words = {
+      0xBE805181u, // s_barrier_init 1
+      0xBE805281u, // s_barrier_join 1
+      0xBE804E81u, // s_barrier_signal 1
+      0xBF940001u, // s_barrier_wait 1
+      0xBF950000u, // s_barrier_leave
+      0xBFB00000u, // s_endpgm
+  };
+  const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words);
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_dry_run = true;
+  const ConSanResult result = try_patch_consan(bytes, options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result));
+  ASSERT_FALSE(result.sync_events.empty());
+  for (const ConSanSyncEvent &event : result.sync_events) {
+    EXPECT_TRUE(event.semantic_id.valid());
+    EXPECT_EQ(event.semantic_id.domain, ConSanSemanticSiteDomain::SynchronizationEvent);
+    EXPECT_EQ(event.semantic_id.physical.code_object, result.program_inventory.code_object_id());
+    EXPECT_EQ(event.semantic_id.physical.original_text_offset, event.text_offset);
+  }
+  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+    ASSERT_EQ(sequence.member_semantic_ids.size(), sequence.member_event_identities.size());
+    for (size_t index = 0; index < sequence.member_semantic_ids.size(); ++index) {
+      const auto event = std::ranges::find(
+          result.sync_events, sequence.member_event_identities[index], &ConSanSyncEvent::identity);
+      ASSERT_NE(event, result.sync_events.end());
+      SemanticSiteId expected = event->semantic_id;
+      expected.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+      EXPECT_EQ(sequence.member_semantic_ids[index], expected);
+    }
+  }
+  ASSERT_EQ(result.barrier_lifecycle_groups.size(), 1u);
+  const ConSanBarrierLifecycleGroup &group = result.barrier_lifecycle_groups.front();
+  EXPECT_TRUE(group.admissible);
+  EXPECT_EQ(group.member_semantic_ids.size(), group.member_event_identities.size());
+  EXPECT_EQ(group.member_semantic_ids.size(), 5u);
+  EXPECT_TRUE(std::ranges::all_of(group.member_semantic_ids, [](const SemanticSiteId &member_id) {
+    return member_id.valid() &&
+           member_id.domain == ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+  }));
+}
+
 TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutPolicy) {
   const std::array<uint8_t, 8> bytes = {};
   ProgramInventoryBuilder builder(bytes);

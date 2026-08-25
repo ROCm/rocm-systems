@@ -526,8 +526,10 @@ TEST(ConSan, FinalValidationProvesPerturbationBytesAndPristineSequenceSemantics)
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
 
   ConSanResult rederived = valid;
-  rederived.sync_events.clear();
-  rederived.sync_sequences.clear();
+  ProgramInventoryBuilder rederived_inventory(rederived.program_inventory);
+  rederived_inventory.synchronization().sync_events.clear();
+  rederived_inventory.synchronization().sync_sequences.clear();
+  rederived.install_program_inventory(rederived_inventory.view());
   rederived.perturbation_candidates.clear();
   rederived.perturbation_plans.clear();
   EXPECT_TRUE(validate_consan_modified_elf(bytes, rederived).empty());

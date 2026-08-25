@@ -35,24 +35,6 @@ struct ConSanPerturbationPlan {
   bool removed_cache_boundary = false;
 };
 
-/// A contiguous static barrier lifecycle. On GFX12.5 `s_barrier_leave` has no
-/// operand and drops the last named barrier joined by the thread, so a group
-/// is admissible only when a matching static join proves that association.
-struct ConSanBarrierLifecycleGroup {
-  std::string identity;
-  std::string container_name;
-  bool in_kernel = true;
-  std::optional<uint32_t> basic_block_index;
-  uint64_t begin_text_offset = 0;
-  uint64_t end_text_offset = 0;
-  std::vector<std::string> member_event_identities;
-  std::optional<int32_t> barrier_id;
-  ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
-  bool admissible = false;
-  ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
-  std::string rejection_reason;
-};
-
 enum class ConSanScAccessCoverageKind : uint8_t {
   NativeLds,
   FlatGroup,
@@ -388,7 +370,7 @@ struct ConSanFlatSelectionTelemetry {
   size_t selected_anchor_relay_slot_count = 0;
 };
 
-struct ConSanResult : LegacyInventoryView {
+struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
   bool visited_code_object = false;
   /// True after the input has been parsed as a structurally valid AMDGPU code
   /// object. This remains true when its machine target is not enumerated.
@@ -497,16 +479,11 @@ struct ConSanResult : LegacyInventoryView {
   std::vector<ConSanPatchedImageGrowthRejection> patched_image_growth_rejections;
   std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
   std::vector<ConSanFaultMutationPlan> fault_plans;
-  std::vector<ConSanSyncEvent> sync_events;
-  std::vector<ConSanSyncSequence> sync_sequences;
-  std::vector<ConSanCommunicationAddressRecipe> communication_address_recipes;
-  std::vector<ConSanMoiFenceCandidate> moi_fence_candidates;
   std::vector<ConSanPerturbationCandidate> perturbation_candidates;
   std::vector<ConSanPerturbationPlan> perturbation_plans;
   size_t requested_perturbations = 0;
   size_t planned_perturbations = 0;
   size_t applied_perturbations = 0;
-  std::vector<ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
   size_t requested_fault_mutations = 0;
   size_t planned_fault_mutations = 0;
   size_t applied_fault_mutations = 0;
@@ -541,6 +518,7 @@ struct ConSanResult : LegacyInventoryView {
   void install_program_inventory(ProgramInventory inventory) {
     program_inventory = std::move(inventory);
     static_cast<LegacyInventoryView &>(*this) = program_inventory.legacy_view();
+    static_cast<SynchronizationInventoryView &>(*this) = program_inventory.synchronization_view();
   }
 };
 

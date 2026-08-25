@@ -171,6 +171,9 @@ combine_consan_sync_confidence(ConSanSemanticConfidence lhs, ConSanSemanticConfi
 /// Flavor-independent decoded synchronization semantics. Unknown information
 /// stays explicit so later sequence association cannot silently invent it.
 struct ConSanSyncEvent {
+  /// Stable original-program identity shared by every symbol alias that
+  /// decodes this same physical synchronization instruction.
+  SemanticSiteId semantic_id;
   ConSanSyncEventKind kind = ConSanSyncEventKind::Fence;
   ConSanSyncOperation operation = ConSanSyncOperation::Unknown;
   ConSanSyncAddressSource address_source = ConSanSyncAddressSource::NotApplicable;
@@ -242,6 +245,10 @@ struct ConSanSyncSequence {
   /// s_clause may not have a control-flow instruction inserted between it and
   /// the memory operations that it covers.
   std::optional<uint64_t> scalar_clause_text_offset;
+  /// Stable identities of the original synchronization events in semantic
+  /// order. These typed members are authoritative for joins; the adjacent
+  /// string identities remain a temporary diagnostics/lowering adapter.
+  std::vector<SemanticSiteId> member_semantic_ids;
   std::vector<std::string> member_event_identities;
   uint32_t width_bits = 0;
   std::optional<int64_t> static_byte_offset;
@@ -324,6 +331,33 @@ struct ConSanMoiFenceCandidate {
   std::optional<int64_t> communication_static_byte_offset;
   std::optional<uint32_t> raw_scope;
   bool eligible = false;
+  std::string rejection_reason;
+};
+
+/// A contiguous, statically associated barrier lifecycle retained in semantic
+/// inventory.
+///
+/// On gfx12-class targets `s_barrier_leave` has no explicit barrier operand and
+/// drops the last named barrier joined by the thread. A group is therefore
+/// admissible only when its ordered typed member identities and one matching
+/// static join prove that association. Rejected groups remain in inventory so
+/// later policy can explain the unsupported lifecycle without rediscovery.
+struct ConSanBarrierLifecycleGroup {
+  std::string identity;
+  std::string container_name;
+  bool in_kernel = true;
+  std::optional<uint32_t> basic_block_index;
+  uint64_t begin_text_offset = 0;
+  uint64_t end_text_offset = 0;
+  /// Stable original-program identities of every event in lifecycle order.
+  std::vector<SemanticSiteId> member_semantic_ids;
+  /// Temporary string projection retained for current fault and lowerer
+  /// consumers until their typed-identity cutover.
+  std::vector<std::string> member_event_identities;
+  std::optional<int32_t> barrier_id;
+  ConSanBarrierSite::Scope barrier_scope = ConSanBarrierSite::Scope::Unknown;
+  bool admissible = false;
+  ConSanSemanticConfidence confidence = ConSanSemanticConfidence::Unsupported;
   std::string rejection_reason;
 };
 

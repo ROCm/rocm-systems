@@ -2675,7 +2675,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   const rj_code_arch_t arch = consan_arch_for_target(original.target_id());
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
-  const SyncEventIdentityIndex pristine_events = build_sync_event_identity_index(pristine);
+  const SyncEventIdentityIndex pristine_events =
+      build_sync_event_identity_index(pristine.sync_events);
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation)
@@ -3795,10 +3796,12 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              publication_begin < store_positions.front() &&
-             std::ranges::any_of(owner_positions, [&](size_t owner_position) {
-               return store_positions.front() < owner_position &&
-                      owner_position < cas_positions.back();
-             });
+             std::ranges::any_of(
+                 owner_positions,
+                 [&](size_t owner_position) {
+                   return store_positions.front() < owner_position &&
+                          owner_position < cas_positions.back();
+                 });
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),

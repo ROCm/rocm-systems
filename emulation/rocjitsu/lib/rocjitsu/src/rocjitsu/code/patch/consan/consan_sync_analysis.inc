@@ -237,11 +237,16 @@ void classify_atomic_sync_confidence(const ConSanAtomicSite &site, ConSanSyncEve
 }
 
 template <typename Container>
-void append_sync_events_for_container(std::string_view fingerprint, const Container &container,
-                                      bool in_kernel, std::vector<ConSanSyncEvent> &events) {
+void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
+                                      const Container &container, bool in_kernel,
+                                      std::vector<ConSanSyncEvent> &events) {
   const size_t container_begin = events.size();
+  const std::string_view fingerprint = code_object_id.fingerprint;
   const std::string container_kind = in_kernel ? "kernel" : "function";
   const auto finish_event = [&](ConSanSyncEvent &event, std::string_view kind) {
+    event.semantic_id.physical.code_object = code_object_id;
+    event.semantic_id.physical.original_text_offset = event.text_offset;
+    event.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     event.code_object_fingerprint = fingerprint;
     event.container_name = container.name;
     event.in_kernel = in_kernel;
@@ -431,15 +436,17 @@ void append_sync_events_for_container(std::string_view fingerprint, const Contai
                    });
 }
 
-void build_sync_event_inventory(std::span<const uint8_t> bytes, ConSanResult &result) {
-  const std::string fingerprint = code_object_fingerprint(bytes);
-  result.sync_events.clear();
+void build_sync_event_inventory(std::span<const uint8_t> bytes,
+                                SynchronizationInventoryBuildView inventory,
+                                const ConSanResult &result) {
+  const ConSanCodeObjectId code_object_id = make_consan_code_object_id(bytes);
+  inventory.sync_events.clear();
   for (const ConSanKernelInfo &kernel : result.kernels) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
-      append_sync_events_for_container(fingerprint, kernel, true, result.sync_events);
+      append_sync_events_for_container(code_object_id, kernel, true, inventory.sync_events);
   }
   for (const ConSanFunctionInfo &function : result.functions)
-    append_sync_events_for_container(fingerprint, function, false, result.sync_events);
+    append_sync_events_for_container(code_object_id, function, false, inventory.sync_events);
 }
 
 [[nodiscard]] bool sync_event_semantics_equal(const ConSanSyncEvent &lhs,
@@ -462,7 +469,9 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes, ConSanResult &re
                   rhs.participant_count, rhs.participant_mask);
 }
 
-[[nodiscard]] bool canonicalize_sync_events_by_physical_site(ConSanResult &result) {
+[[nodiscard]] bool
+canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inventory,
+                                          ConSanResult &result) {
   std::unordered_map<std::string_view, uint64_t> kernel_entries;
   std::unordered_map<std::string_view, uint64_t> function_entries;
   kernel_entries.reserve(result.kernels.size());
@@ -478,7 +487,7 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes, ConSanResult &re
   };
 
   return consan_detail::canonicalize_physical_site_aliases(
-      result.sync_events, result.errors, "ConSan synchronization site",
+      inventory.sync_events, result.errors, "ConSan synchronization site",
       [](const ConSanSyncEvent &event) { return event.file_offset; },
       [](const ConSanSyncEvent &event) -> std::string_view { return event.container_name; },
       [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
@@ -586,7 +595,7 @@ build_original_proof_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &
 }
 
 void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                                    ConSanResult &result) {
+                                    SynchronizationInventoryBuildView inventory) {
   const BlockOffsetIndex block_offset_index = build_block_offset_index(blocks);
   std::unordered_map<const BasicBlock *, uint32_t> block_indices;
   block_indices.reserve(blocks.size());
@@ -595,9 +604,9 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
       block_indices.emplace(blocks[index].get(), static_cast<uint32_t>(index));
   }
   std::vector<std::optional<bool>> cyclic_block_cache(blocks.size());
-  result.sync_sequences.clear();
-  result.sync_sequences.reserve(result.sync_events.size());
-  for (const ConSanSyncEvent &event : result.sync_events) {
+  inventory.sync_sequences.clear();
+  inventory.sync_sequences.reserve(inventory.sync_events.size());
+  for (const ConSanSyncEvent &event : inventory.sync_events) {
     ConSanSyncSequence sequence;
     sequence.kind = sync_sequence_kind(event.kind);
     sequence.operation = event.operation;
@@ -612,6 +621,9 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
     sequence.in_kernel = event.in_kernel;
     sequence.begin_text_offset = event.text_offset;
     sequence.end_text_offset = event.text_offset + event.size;
+    SemanticSiteId member_id = event.semantic_id;
+    member_id.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+    sequence.member_semantic_ids.push_back(std::move(member_id));
     sequence.member_event_identities.push_back(event.identity);
     sequence.width_bits = event.width_bits;
     sequence.static_byte_offset = event.static_byte_offset;
@@ -654,7 +666,7 @@ void build_singleton_sync_sequences(const std::vector<std::unique_ptr<BasicBlock
         sequence.confidence_reason += "; ";
       sequence.confidence_reason += "event is not an exact instruction in a decoded basic block";
     }
-    result.sync_sequences.push_back(std::move(sequence));
+    inventory.sync_sequences.push_back(std::move(sequence));
   }
 }
 
@@ -827,14 +839,16 @@ is_safe_cluster_triangle_barrier_pair(const ConSanSyncSequence &signal,
 }
 
 void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                                      bool allow_extended_pairs, ConSanResult &result) {
+                                      bool allow_extended_pairs,
+                                      SynchronizationInventoryBuildView inventory) {
+  std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   const auto has_unresolved_preceding_signal = [&](size_t signal_index) {
     for (size_t cursor = signal_index; cursor > 0; --cursor) {
-      const ConSanSyncSequence &prior = result.sync_sequences[cursor - 1u];
+      const ConSanSyncSequence &prior = sync_sequences[cursor - 1u];
       if (prior.kind != ConSanSyncSequenceKind::Barrier)
         continue;
       if (prior.operation == ConSanSyncOperation::BarrierSignal) {
-        const ConSanSyncSequence &signal = result.sync_sequences[signal_index];
+        const ConSanSyncSequence &signal = sync_sequences[signal_index];
         return prior.in_kernel == signal.in_kernel &&
                prior.container_name == signal.container_name &&
                prior.basic_block_index == signal.basic_block_index;
@@ -846,20 +860,19 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
     }
     return false;
   };
-  std::vector<bool> unresolved_preceding_signal(result.sync_sequences.size(), false);
-  for (size_t index = 0; index < result.sync_sequences.size(); ++index)
+  std::vector<bool> unresolved_preceding_signal(sync_sequences.size(), false);
+  for (size_t index = 0; index < sync_sequences.size(); ++index)
     unresolved_preceding_signal[index] = has_unresolved_preceding_signal(index);
   std::vector<ConSanSyncSequence> associated;
-  associated.reserve(result.sync_sequences.size());
-  for (size_t i = 0; i < result.sync_sequences.size();) {
-    if (i + 1 < result.sync_sequences.size() &&
-        (is_safe_bounded_barrier_pair(result.sync_sequences[i], result.sync_sequences[i + 1],
-                                      blocks, allow_extended_pairs) ||
-         is_safe_cluster_triangle_barrier_pair(result.sync_sequences[i],
-                                               result.sync_sequences[i + 1], blocks)) &&
+  associated.reserve(sync_sequences.size());
+  for (size_t i = 0; i < sync_sequences.size();) {
+    if (i + 1 < sync_sequences.size() &&
+        (is_safe_bounded_barrier_pair(sync_sequences[i], sync_sequences[i + 1], blocks,
+                                      allow_extended_pairs) ||
+         is_safe_cluster_triangle_barrier_pair(sync_sequences[i], sync_sequences[i + 1], blocks)) &&
         !unresolved_preceding_signal[i]) {
-      ConSanSyncSequence sequence = std::move(result.sync_sequences[i]);
-      ConSanSyncSequence &wait = result.sync_sequences[i + 1];
+      ConSanSyncSequence sequence = std::move(sync_sequences[i]);
+      ConSanSyncSequence &wait = sync_sequences[i + 1];
       sequence.operation = ConSanSyncOperation::BarrierFull;
       sequence.memory_role = ConSanSyncMemoryRole::AcquireRelease;
       sequence.confidence = combine_consan_sync_confidence(sequence.confidence, wait.confidence);
@@ -885,6 +898,9 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
       sequence.member_event_identities.insert(sequence.member_event_identities.end(),
                                               wait.member_event_identities.begin(),
                                               wait.member_event_identities.end());
+      sequence.member_semantic_ids.insert(sequence.member_semantic_ids.end(),
+                                          wait.member_semantic_ids.begin(),
+                                          wait.member_semantic_ids.end());
       if (!sequence.participant_count)
         sequence.participant_count = wait.participant_count;
       if (!sequence.participant_mask)
@@ -894,7 +910,7 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
       continue;
     }
 
-    ConSanSyncSequence sequence = std::move(result.sync_sequences[i]);
+    ConSanSyncSequence sequence = std::move(sync_sequences[i]);
     if (sequence.kind == ConSanSyncSequenceKind::Barrier &&
         (sequence.operation == ConSanSyncOperation::BarrierSignal ||
          sequence.operation == ConSanSyncOperation::BarrierWait)) {
@@ -906,13 +922,15 @@ void associate_barrier_sync_sequences(const std::vector<std::unique_ptr<BasicBlo
     associated.push_back(std::move(sequence));
     ++i;
   }
-  result.sync_sequences = std::move(associated);
+  sync_sequences = std::move(associated);
 }
 
-void build_barrier_lifecycle_group_inventory(ConSanResult &result) {
-  result.barrier_lifecycle_groups.clear();
-  for (size_t begin = 0; begin < result.sync_sequences.size(); ++begin) {
-    const ConSanSyncSequence &init = result.sync_sequences[begin];
+void build_barrier_lifecycle_group_inventory(SynchronizationInventoryBuildView inventory) {
+  std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
+  std::vector<ConSanBarrierLifecycleGroup> &groups = inventory.barrier_lifecycle_groups;
+  groups.clear();
+  for (size_t begin = 0; begin < sync_sequences.size(); ++begin) {
+    const ConSanSyncSequence &init = sync_sequences[begin];
     if (init.operation != ConSanSyncOperation::BarrierInit)
       continue;
 
@@ -923,12 +941,16 @@ void build_barrier_lifecycle_group_inventory(ConSanResult &result) {
     group.basic_block_index = init.basic_block_index;
     group.begin_text_offset = init.begin_text_offset;
     group.end_text_offset = init.end_text_offset;
+    group.member_semantic_ids = init.member_semantic_ids;
     group.member_event_identities = init.member_event_identities;
     group.barrier_id = init.barrier_id;
     group.barrier_scope = init.barrier_scope;
 
     const auto append_member = [&](const ConSanSyncSequence &sequence) {
       group.end_text_offset = sequence.end_text_offset;
+      group.member_semantic_ids.insert(group.member_semantic_ids.end(),
+                                       sequence.member_semantic_ids.begin(),
+                                       sequence.member_semantic_ids.end());
       group.member_event_identities.insert(group.member_event_identities.end(),
                                            sequence.member_event_identities.begin(),
                                            sequence.member_event_identities.end());
@@ -953,16 +975,16 @@ void build_barrier_lifecycle_group_inventory(ConSanResult &result) {
          init.barrier_operand_source != ConSanBarrierSite::OperandSource::StaticM0Literal32 &&
          init.barrier_operand_source != ConSanBarrierSite::OperandSource::Literal32)) {
       group.rejection_reason = "lifecycle init has no proven static ID and scope";
-      result.barrier_lifecycle_groups.push_back(std::move(group));
+      groups.push_back(std::move(group));
       continue;
     }
 
     size_t cursor = begin + 1u;
     size_t join_count = 0;
     bool mismatch = false;
-    while (cursor < result.sync_sequences.size() &&
-           result.sync_sequences[cursor].operation == ConSanSyncOperation::BarrierJoin) {
-      const ConSanSyncSequence &join = result.sync_sequences[cursor];
+    while (cursor < sync_sequences.size() &&
+           sync_sequences[cursor].operation == ConSanSyncOperation::BarrierJoin) {
+      const ConSanSyncSequence &join = sync_sequences[cursor];
       if (!is_contiguous(join)) {
         group.rejection_reason = "lifecycle run crosses a block, container, or instruction gap";
         mismatch = true;
@@ -978,36 +1000,36 @@ void build_barrier_lifecycle_group_inventory(ConSanResult &result) {
       ++cursor;
     }
     if (mismatch) {
-      result.barrier_lifecycle_groups.push_back(std::move(group));
+      groups.push_back(std::move(group));
       continue;
     }
     if (join_count == 0) {
       group.rejection_reason = "lifecycle leave has no preceding matching static join association";
-      result.barrier_lifecycle_groups.push_back(std::move(group));
+      groups.push_back(std::move(group));
       continue;
     }
-    if (cursor >= result.sync_sequences.size() ||
-        result.sync_sequences[cursor].operation != ConSanSyncOperation::BarrierFull ||
-        !is_contiguous(result.sync_sequences[cursor])) {
+    if (cursor >= sync_sequences.size() ||
+        sync_sequences[cursor].operation != ConSanSyncOperation::BarrierFull ||
+        !is_contiguous(sync_sequences[cursor])) {
       group.rejection_reason = "lifecycle run has no contiguous same-block completing barrier pair";
-      result.barrier_lifecycle_groups.push_back(std::move(group));
+      groups.push_back(std::move(group));
       continue;
     }
-    const ConSanSyncSequence &barrier = result.sync_sequences[cursor++];
+    const ConSanSyncSequence &barrier = sync_sequences[cursor++];
     append_member(barrier);
     if (!has_matching_static_id(barrier)) {
       group.rejection_reason = "lifecycle members do not have one matching static ID and scope";
-      result.barrier_lifecycle_groups.push_back(std::move(group));
+      groups.push_back(std::move(group));
       continue;
     }
-    if (cursor >= result.sync_sequences.size() ||
-        result.sync_sequences[cursor].operation != ConSanSyncOperation::BarrierLeave ||
-        !is_contiguous(result.sync_sequences[cursor])) {
+    if (cursor >= sync_sequences.size() ||
+        sync_sequences[cursor].operation != ConSanSyncOperation::BarrierLeave ||
+        !is_contiguous(sync_sequences[cursor])) {
       group.rejection_reason = "lifecycle run has no contiguous same-block leave operation";
-      result.barrier_lifecycle_groups.push_back(std::move(group));
+      groups.push_back(std::move(group));
       continue;
     }
-    const ConSanSyncSequence &leave = result.sync_sequences[cursor];
+    const ConSanSyncSequence &leave = sync_sequences[cursor];
     append_member(leave);
     // LLVM's GFX12 ISA model defines S_BARRIER_LEAVE as a zero-operand SOPP
     // with a fixed-zero simm16. Its execution-synchronization specification
@@ -1017,21 +1039,22 @@ void build_barrier_lifecycle_group_inventory(ConSanResult &result) {
     if (leave.end_text_offset - leave.begin_text_offset != sizeof(uint32_t) ||
         leave.barrier_raw_simm16 != 0u) {
       group.rejection_reason = "lifecycle leave is not the fixed-zero GFX12 encoding";
-      result.barrier_lifecycle_groups.push_back(std::move(group));
+      groups.push_back(std::move(group));
       continue;
     }
     group.admissible = true;
     group.confidence = ConSanSemanticConfidence::Conservative;
-    result.barrier_lifecycle_groups.push_back(std::move(group));
+    groups.push_back(std::move(group));
   }
 }
 
 using SyncEventIdentityIndex = std::unordered_map<std::string_view, const ConSanSyncEvent *>;
 
-[[nodiscard]] SyncEventIdentityIndex build_sync_event_identity_index(const ConSanResult &result) {
+[[nodiscard]] SyncEventIdentityIndex
+build_sync_event_identity_index(std::span<const ConSanSyncEvent> sync_events) {
   SyncEventIdentityIndex index;
-  index.reserve(result.sync_events.size());
-  for (const ConSanSyncEvent &event : result.sync_events)
+  index.reserve(sync_events.size());
+  for (const ConSanSyncEvent &event : sync_events)
     index.emplace(event.identity, &event);
   return index;
 }
@@ -1271,7 +1294,8 @@ prove_completing_structured_diamond(const std::vector<std::unique_ptr<BasicBlock
 
 void build_barrier_move_destination_inventory(
     const AmdGpuCodeObject &code_object, const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-    const SyncEventIdentityIndex &events, rj_code_arch_t arch, ConSanResult &result) {
+    const SyncEventIdentityIndex &events, rj_code_arch_t arch,
+    std::span<const ConSanSyncSequence> sync_sequences, ConSanResult &result) {
   result.barrier_move_destinations.clear();
   if (code_object.text_sections().size() != 1u)
     return;
@@ -1280,7 +1304,7 @@ void build_barrier_move_destination_inventory(
       reinterpret_cast<const uint8_t *>(text_section->data()), text_section->size());
   std::unordered_set<std::string> seen;
 
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::Barrier ||
         sequence.operation != ConSanSyncOperation::BarrierFull ||
         !consan_sync_confidence_meets(sequence.confidence,
@@ -1800,6 +1824,7 @@ associate_atomic_cache_sequence(const ConSanSyncSequence *release, const ConSanS
                                    ? "bounded atomic/acquire-cache compiler-bookkeeping proof"
                                    : "same-block RDNA4 release-cache/atomic waits-only proof";
   std::vector<std::string> members;
+  std::vector<SemanticSiteId> semantic_members;
   if (release != nullptr) {
     sequence.identity += "|release-cache=" + release->identity;
     sequence.begin_text_offset = release->begin_text_offset;
@@ -1807,15 +1832,21 @@ associate_atomic_cache_sequence(const ConSanSyncSequence *release, const ConSanS
     sequence.inside_scalar_clause |= release->inside_scalar_clause;
     members.insert(members.end(), release->member_event_identities.begin(),
                    release->member_event_identities.end());
+    semantic_members.insert(semantic_members.end(), release->member_semantic_ids.begin(),
+                            release->member_semantic_ids.end());
   }
   members.insert(members.end(), atomic.member_event_identities.begin(),
                  atomic.member_event_identities.end());
+  semantic_members.insert(semantic_members.end(), atomic.member_semantic_ids.begin(),
+                          atomic.member_semantic_ids.end());
   if (acquire != nullptr) {
     sequence.identity += "|acquire-cache=" + acquire->identity;
     sequence.in_cyclic_cfg_component |= acquire->in_cyclic_cfg_component;
     sequence.inside_scalar_clause |= acquire->inside_scalar_clause;
     members.insert(members.end(), acquire->member_event_identities.begin(),
                    acquire->member_event_identities.end());
+    semantic_members.insert(semantic_members.end(), acquire->member_semantic_ids.begin(),
+                            acquire->member_semantic_ids.end());
   }
   if (acquire_tail != nullptr) {
     sequence.identity += "|acquire-cache-tail=" + acquire_tail->identity;
@@ -1823,12 +1854,15 @@ associate_atomic_cache_sequence(const ConSanSyncSequence *release, const ConSanS
     sequence.inside_scalar_clause |= acquire_tail->inside_scalar_clause;
     members.insert(members.end(), acquire_tail->member_event_identities.begin(),
                    acquire_tail->member_event_identities.end());
+    semantic_members.insert(semantic_members.end(), acquire_tail->member_semantic_ids.begin(),
+                            acquire_tail->member_semantic_ids.end());
   }
   if (acquire_tail != nullptr)
     sequence.end_text_offset = acquire_tail->end_text_offset;
   else if (acquire != nullptr)
     sequence.end_text_offset = acquire->end_text_offset;
   sequence.member_event_identities = std::move(members);
+  sequence.member_semantic_ids = std::move(semantic_members);
   return sequence;
 }
 
@@ -1893,33 +1927,35 @@ atomic_release_wait_boundary(const ConSanSyncSequence &atomic,
 
 void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                      rj_code_arch_t arch, const SyncEventIdentityIndex &events,
-                                     ConSanResult &result) {
+                                     SynchronizationInventoryBuildView inventory,
+                                     const ConSanResult &result) {
+  std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   std::vector<ConSanSyncSequence> associated;
-  associated.reserve(result.sync_sequences.size());
-  for (size_t i = 0; i < result.sync_sequences.size();) {
-    const ConSanSyncSequence &current = result.sync_sequences[i];
+  associated.reserve(sync_sequences.size());
+  for (size_t i = 0; i < sync_sequences.size();) {
+    const ConSanSyncSequence &current = sync_sequences[i];
     if (current.kind == ConSanSyncSequenceKind::Fence &&
         is_release_cache_event(first_sequence_event(events, current)) &&
-        i + 1 < result.sync_sequences.size()) {
-      const ConSanSyncSequence &atomic = result.sync_sequences[i + 1];
+        i + 1 < sync_sequences.size()) {
+      const ConSanSyncSequence &atomic = sync_sequences[i + 1];
       if (atomic.kind == ConSanSyncSequenceKind::Atomic &&
           has_only_waits_between(current, atomic, blocks)) {
         const ConSanSyncSequence *acquire = nullptr;
         const ConSanSyncSequence *acquire_tail = nullptr;
-        if (i + 2 < result.sync_sequences.size()) {
-          const ConSanSyncSequence &candidate = result.sync_sequences[i + 2];
+        if (i + 2 < sync_sequences.size()) {
+          const ConSanSyncSequence &candidate = sync_sequences[i + 2];
           if (candidate.kind == ConSanSyncSequenceKind::Fence &&
               is_acquire_cache_event(first_sequence_event(events, candidate)) &&
               prove_bounded_acquire_path(atomic, candidate, blocks)) {
             acquire = &candidate;
-          } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 && i + 3 < result.sync_sequences.size() &&
+          } else if (arch == ROCJITSU_CODE_ARCH_RDNA3 && i + 3 < sync_sequences.size() &&
                      candidate.kind == ConSanSyncSequenceKind::Fence &&
-                     result.sync_sequences[i + 3].kind == ConSanSyncSequenceKind::Fence &&
+                     sync_sequences[i + 3].kind == ConSanSyncSequenceKind::Fence &&
                      prove_bounded_acquire_path(atomic, candidate, blocks) &&
-                     is_rdna3_acquire_cache_pair(candidate, result.sync_sequences[i + 3], events,
+                     is_rdna3_acquire_cache_pair(candidate, sync_sequences[i + 3], events,
                                                  blocks)) {
             acquire = &candidate;
-            acquire_tail = &result.sync_sequences[i + 3];
+            acquire_tail = &sync_sequences[i + 3];
           }
         }
         associated.push_back(
@@ -1928,8 +1964,8 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
         continue;
       }
     }
-    if (current.kind == ConSanSyncSequenceKind::Atomic && i + 1 < result.sync_sequences.size()) {
-      const ConSanSyncSequence &acquire = result.sync_sequences[i + 1];
+    if (current.kind == ConSanSyncSequenceKind::Atomic && i + 1 < sync_sequences.size()) {
+      const ConSanSyncSequence &acquire = sync_sequences[i + 1];
       if (acquire.kind == ConSanSyncSequenceKind::Fence &&
           is_acquire_cache_event(first_sequence_event(events, acquire)) &&
           prove_bounded_acquire_path(current, acquire, blocks)) {
@@ -1937,13 +1973,13 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
         i += 2;
         continue;
       }
-      if (arch == ROCJITSU_CODE_ARCH_RDNA3 && i + 2 < result.sync_sequences.size() &&
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3 && i + 2 < sync_sequences.size() &&
           acquire.kind == ConSanSyncSequenceKind::Fence &&
-          result.sync_sequences[i + 2].kind == ConSanSyncSequenceKind::Fence &&
+          sync_sequences[i + 2].kind == ConSanSyncSequenceKind::Fence &&
           prove_bounded_acquire_path(current, acquire, blocks) &&
-          is_rdna3_acquire_cache_pair(acquire, result.sync_sequences[i + 2], events, blocks)) {
-        associated.push_back(associate_atomic_cache_sequence(nullptr, current, &acquire,
-                                                             &result.sync_sequences[i + 2]));
+          is_rdna3_acquire_cache_pair(acquire, sync_sequences[i + 2], events, blocks)) {
+        associated.push_back(
+            associate_atomic_cache_sequence(nullptr, current, &acquire, &sync_sequences[i + 2]));
         i += 3;
         continue;
       }
@@ -1951,7 +1987,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
     associated.push_back(current);
     ++i;
   }
-  result.sync_sequences = std::move(associated);
+  sync_sequences = std::move(associated);
 
   // gfx12 lowers the release half of an atomic to an immediately preceding
   // store-count-zero wait, either combined or inside a contiguous suffix of
@@ -1960,7 +1996,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
   // atomics followed by an acquire invalidate. Admit only that exact,
   // same-block encoding. The wait is a boundary of the addressed atomic
   // sequence, not a synchronization operation on its own.
-  for (ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (ConSanSyncSequence &sequence : sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::Atomic ||
         (sequence.memory_role != ConSanSyncMemoryRole::Unknown &&
          sequence.memory_role != ConSanSyncMemoryRole::Acquire)) {
@@ -1989,7 +2025,7 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
   // only the exact target-specific zero-wait suffix. This complements the
   // device/system cache sequence above and deliberately leaves a missing,
   // nonzero, or noncontiguous wait unqualified.
-  for (ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (ConSanSyncSequence &sequence : sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::Atomic)
       continue;
     const ConSanSyncEvent *communication = first_sequence_event(events, sequence);
@@ -2017,16 +2053,19 @@ void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBloc
   }
 }
 
-void build_moi_fence_candidate_inventory(ConSanResult &result) {
-  result.moi_fence_candidates.clear();
+void build_moi_fence_candidate_inventory(SynchronizationInventoryBuildView inventory) {
+  const std::vector<ConSanSyncEvent> &sync_events = inventory.sync_events;
+  const std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
+  std::vector<ConSanMoiFenceCandidate> &candidates = inventory.moi_fence_candidates;
+  candidates.clear();
 
   struct SequenceMembership {
     const ConSanSyncSequence *sequence = nullptr;
     bool unique = true;
   };
   std::unordered_map<std::string_view, SequenceMembership> sequence_by_event_identity;
-  sequence_by_event_identity.reserve(result.sync_events.size());
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  sequence_by_event_identity.reserve(sync_events.size());
+  for (const ConSanSyncSequence &sequence : sync_sequences) {
     for (const std::string &identity : sequence.member_event_identities) {
       const auto [membership, inserted] =
           sequence_by_event_identity.try_emplace(identity, SequenceMembership{&sequence, true});
@@ -2042,8 +2081,8 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
     bool unique = true;
   };
   std::unordered_map<std::string_view, UniqueSyncEvent> event_by_identity;
-  event_by_identity.reserve(result.sync_events.size());
-  for (const ConSanSyncEvent &event : result.sync_events) {
+  event_by_identity.reserve(sync_events.size());
+  for (const ConSanSyncEvent &event : sync_events) {
     const auto [indexed, inserted] =
         event_by_identity.try_emplace(event.identity, UniqueSyncEvent{&event, true});
     if (!inserted) {
@@ -2052,7 +2091,7 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
     }
   }
 
-  for (const ConSanSyncEvent &fence : result.sync_events) {
+  for (const ConSanSyncEvent &fence : sync_events) {
     if (fence.kind != ConSanSyncEventKind::Fence)
       continue;
 
@@ -2069,7 +2108,7 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
     if (membership == sequence_by_event_identity.end() || !membership->second.unique ||
         membership->second.sequence == nullptr) {
       candidate.rejection_reason = "missing-or-ambiguous-sequence-membership";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
     const ConSanSyncSequence *sequence = membership->second.sequence;
@@ -2084,7 +2123,7 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
                                      sequence->operation == ConSanSyncOperation::OrdinaryStore);
     if (!addressed_atomic && !addressed_ordinary) {
       candidate.rejection_reason = "fence-not-associated-with-addressed-communication-sequence";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
     if (!consan_sync_confidence_meets(sequence->confidence,
@@ -2092,7 +2131,7 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
         !consan_sync_confidence_meets(sequence->memory_role_confidence,
                                       ConSanSemanticConfidence::Conservative)) {
       candidate.rejection_reason = "communication-sequence-confidence-insufficient";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
 
@@ -2112,7 +2151,7 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
         fence.mnemonic == "buffer_gl0_inv" && sequence_has_cache_member("buffer_gl1_inv");
     if (rdna3_acquire_pair_head) {
       candidate.rejection_reason = "paired-acquire-prefix-covered-by-tail";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
     if (is_release_cache_event(&fence))
@@ -2121,7 +2160,7 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
       candidate.memory_role = ConSanSyncMemoryRole::Acquire;
     else {
       candidate.rejection_reason = "unsupported-cache-operation";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
     const bool role_is_carried =
@@ -2130,7 +2169,7 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
         sequence->memory_role == ConSanSyncMemoryRole::SequentiallyConsistent;
     if (!role_is_carried) {
       candidate.rejection_reason = "cache-role-not-carried-by-communication-sequence";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
 
@@ -2155,20 +2194,20 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
     }
     if (malformed_member || communication == nullptr || communication->identity.empty()) {
       candidate.rejection_reason = "missing-or-ambiguous-communication-event";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
     if (communication->address_source != ConSanSyncAddressSource::GlobalScalarVector &&
         communication->address_source != ConSanSyncAddressSource::BufferResource &&
         communication->address_source != ConSanSyncAddressSource::FlatVector) {
       candidate.rejection_reason = "communication-address-source-unsupported";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
     if (!communication->raw_scope || *communication->raw_scope == 0u ||
         *communication->raw_scope > 3u) {
       candidate.rejection_reason = "communication-scope-unsupported";
-      result.moi_fence_candidates.push_back(std::move(candidate));
+      candidates.push_back(std::move(candidate));
       continue;
     }
 
@@ -2177,7 +2216,7 @@ void build_moi_fence_candidate_inventory(ConSanResult &result) {
     candidate.communication_static_byte_offset = communication->static_byte_offset;
     candidate.raw_scope = communication->raw_scope;
     candidate.eligible = true;
-    result.moi_fence_candidates.push_back(std::move(candidate));
+    candidates.push_back(std::move(candidate));
   }
 }
 
@@ -2268,38 +2307,40 @@ ordinary_release_wait_boundary(const ConSanSyncSequence &store,
   return exact_release_wait_boundary(store, blocks, arch);
 }
 
-[[nodiscard]] std::vector<size_t> fence_sequence_indices_by_begin(const ConSanResult &result) {
+[[nodiscard]] std::vector<size_t>
+fence_sequence_indices_by_begin(std::span<const ConSanSyncSequence> sync_sequences) {
   std::vector<size_t> indices;
-  indices.reserve(result.sync_sequences.size());
-  for (size_t index = 0; index < result.sync_sequences.size(); ++index) {
-    if (result.sync_sequences[index].kind == ConSanSyncSequenceKind::Fence)
+  indices.reserve(sync_sequences.size());
+  for (size_t index = 0; index < sync_sequences.size(); ++index) {
+    if (sync_sequences[index].kind == ConSanSyncSequenceKind::Fence)
       indices.push_back(index);
   }
   std::ranges::sort(indices, [&](size_t lhs, size_t rhs) {
-    const uint64_t lhs_offset = result.sync_sequences[lhs].begin_text_offset;
-    const uint64_t rhs_offset = result.sync_sequences[rhs].begin_text_offset;
+    const uint64_t lhs_offset = sync_sequences[lhs].begin_text_offset;
+    const uint64_t rhs_offset = sync_sequences[rhs].begin_text_offset;
     return lhs_offset != rhs_offset ? lhs_offset < rhs_offset : lhs < rhs;
   });
   return indices;
 }
 
-[[nodiscard]] auto fence_sequence_lower_bound(const ConSanResult &result,
+[[nodiscard]] auto fence_sequence_lower_bound(std::span<const ConSanSyncSequence> sync_sequences,
                                               const std::vector<size_t> &indices,
                                               uint64_t text_offset) {
   return std::lower_bound(indices.begin(), indices.end(), text_offset,
                           [&](size_t index, uint64_t offset) {
-                            return result.sync_sequences[index].begin_text_offset < offset;
+                            return sync_sequences[index].begin_text_offset < offset;
                           });
 }
 
 void associate_ordinary_release_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, rj_code_arch_t arch,
-    const SyncEventIdentityIndex &events, ConSanResult &result) {
-  const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(result);
+    const SyncEventIdentityIndex &events, SynchronizationInventoryBuildView inventory) {
+  std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
+  const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(sync_sequences);
   std::unordered_map<size_t, size_t> associations;
   std::unordered_set<size_t> claimed_cache_sequences;
-  for (size_t store_index = 0; store_index < result.sync_sequences.size(); ++store_index) {
-    const ConSanSyncSequence &store_sequence = result.sync_sequences[store_index];
+  for (size_t store_index = 0; store_index < sync_sequences.size(); ++store_index) {
+    const ConSanSyncSequence &store_sequence = sync_sequences[store_index];
     if (store_sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
         store_sequence.operation != ConSanSyncOperation::OrdinaryStore) {
       continue;
@@ -2317,10 +2358,10 @@ void associate_ordinary_release_sync_sequences(
     if (!cache_offset)
       continue;
     std::vector<size_t> cache_matches;
-    for (auto it = fence_sequence_lower_bound(result, fence_indices, *cache_offset);
+    for (auto it = fence_sequence_lower_bound(sync_sequences, fence_indices, *cache_offset);
          it != fence_indices.end(); ++it) {
       const size_t cache_index = *it;
-      const ConSanSyncSequence &cache_sequence = result.sync_sequences[cache_index];
+      const ConSanSyncSequence &cache_sequence = sync_sequences[cache_index];
       if (cache_sequence.begin_text_offset != *cache_offset)
         break;
       const ConSanSyncEvent *cache = first_sequence_event(events, cache_sequence);
@@ -2336,17 +2377,17 @@ void associate_ordinary_release_sync_sequences(
   }
 
   std::vector<ConSanSyncSequence> associated;
-  associated.reserve(result.sync_sequences.size());
-  for (size_t index = 0; index < result.sync_sequences.size(); ++index) {
+  associated.reserve(sync_sequences.size());
+  for (size_t index = 0; index < sync_sequences.size(); ++index) {
     if (claimed_cache_sequences.contains(index))
       continue;
     const auto association = associations.find(index);
     if (association == associations.end()) {
-      associated.push_back(std::move(result.sync_sequences[index]));
+      associated.push_back(std::move(sync_sequences[index]));
       continue;
     }
-    ConSanSyncSequence sequence = std::move(result.sync_sequences[index]);
-    ConSanSyncSequence &cache = result.sync_sequences[association->second];
+    ConSanSyncSequence sequence = std::move(sync_sequences[index]);
+    ConSanSyncSequence &cache = sync_sequences[association->second];
     sequence.memory_role = ConSanSyncMemoryRole::Release;
     sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
     sequence.confidence = combine_consan_sync_confidence(sequence.confidence, cache.confidence);
@@ -2361,16 +2402,20 @@ void associate_ordinary_release_sync_sequences(
     members.insert(members.end(), sequence.member_event_identities.begin(),
                    sequence.member_event_identities.end());
     sequence.member_event_identities = std::move(members);
+    std::vector<SemanticSiteId> semantic_members = cache.member_semantic_ids;
+    semantic_members.insert(semantic_members.end(), sequence.member_semantic_ids.begin(),
+                            sequence.member_semantic_ids.end());
+    sequence.member_semantic_ids = std::move(semantic_members);
     associated.push_back(std::move(sequence));
   }
-  result.sync_sequences = std::move(associated);
+  sync_sequences = std::move(associated);
 
   // Optimized language-level releases can omit a separate writeback event and
   // carry their release half in the architecture-specific store-count-zero
   // wait immediately before the device/system-scoped store. Keep this
   // admission separate from the broader cache-associated form above: a
   // missing or nonzero wait, intervening code, or weaker scope stays unknown.
-  for (ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (ConSanSyncSequence &sequence : sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
         sequence.operation != ConSanSyncOperation::OrdinaryStore ||
         sequence.memory_role != ConSanSyncMemoryRole::Unknown) {
@@ -2406,16 +2451,17 @@ void associate_ordinary_release_sync_sequences(
 
 void associate_ordinary_acquire_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventIdentityIndex &events,
-    rj_code_arch_t arch, ConSanResult &result) {
+    rj_code_arch_t arch, SynchronizationInventoryBuildView inventory, const ConSanResult &result) {
+  std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   struct Association {
     size_t cache_index = 0;
     std::optional<size_t> cache_tail_index;
   };
-  const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(result);
+  const std::vector<size_t> fence_indices = fence_sequence_indices_by_begin(sync_sequences);
   std::unordered_map<size_t, Association> associations;
   std::unordered_set<size_t> claimed_cache_sequences;
-  for (size_t load_index = 0; load_index < result.sync_sequences.size(); ++load_index) {
-    const ConSanSyncSequence &load_sequence = result.sync_sequences[load_index];
+  for (size_t load_index = 0; load_index < sync_sequences.size(); ++load_index) {
+    const ConSanSyncSequence &load_sequence = sync_sequences[load_index];
     if (load_sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
         load_sequence.operation != ConSanSyncOperation::OrdinaryLoad) {
       continue;
@@ -2432,10 +2478,11 @@ void associate_ordinary_acquire_sync_sequences(
     const uint64_t maximum_cache_offset = load_sequence.end_text_offset > UINT64_MAX - 64u
                                               ? UINT64_MAX
                                               : load_sequence.end_text_offset + 64u;
-    for (auto it = fence_sequence_lower_bound(result, fence_indices, load_sequence.end_text_offset);
+    for (auto it = fence_sequence_lower_bound(sync_sequences, fence_indices,
+                                              load_sequence.end_text_offset);
          it != fence_indices.end(); ++it) {
       const size_t cache_index = *it;
-      const ConSanSyncSequence &cache_sequence = result.sync_sequences[cache_index];
+      const ConSanSyncSequence &cache_sequence = sync_sequences[cache_index];
       if (cache_sequence.begin_text_offset > maximum_cache_offset)
         break;
       const ConSanSyncEvent *cache = first_sequence_event(events, cache_sequence);
@@ -2458,18 +2505,18 @@ void associate_ordinary_acquire_sync_sequences(
     }
 
     if (bounded_metadata_matches.empty()) {
-      for (auto it =
-               fence_sequence_lower_bound(result, fence_indices, load_sequence.end_text_offset);
+      for (auto it = fence_sequence_lower_bound(sync_sequences, fence_indices,
+                                                load_sequence.end_text_offset);
            it != fence_indices.end(); ++it) {
         const size_t first_index = *it;
-        const ConSanSyncSequence &first = result.sync_sequences[first_index];
+        const ConSanSyncSequence &first = sync_sequences[first_index];
         if (first.begin_text_offset > maximum_cache_offset)
           break;
         const auto tail_it = std::next(it);
         if (tail_it == fence_indices.end())
           break;
         const size_t tail_index = *tail_it;
-        const ConSanSyncSequence &tail = result.sync_sequences[tail_index];
+        const ConSanSyncSequence &tail = sync_sequences[tail_index];
         const ConSanSyncEvent *first_event = first_sequence_event(events, first);
         const ConSanSyncEvent *tail_event = first_sequence_event(events, tail);
         if (first_event == nullptr || tail_event == nullptr ||
@@ -2517,21 +2564,20 @@ void associate_ordinary_acquire_sync_sequences(
   }
 
   std::vector<ConSanSyncSequence> associated;
-  associated.reserve(result.sync_sequences.size());
-  for (size_t index = 0; index < result.sync_sequences.size(); ++index) {
+  associated.reserve(sync_sequences.size());
+  for (size_t index = 0; index < sync_sequences.size(); ++index) {
     if (claimed_cache_sequences.contains(index))
       continue;
     const auto association = associations.find(index);
     if (association == associations.end()) {
-      associated.push_back(std::move(result.sync_sequences[index]));
+      associated.push_back(std::move(sync_sequences[index]));
       continue;
     }
-    ConSanSyncSequence sequence = std::move(result.sync_sequences[index]);
-    ConSanSyncSequence &cache = result.sync_sequences[association->second.cache_index];
-    ConSanSyncSequence *cache_tail =
-        association->second.cache_tail_index
-            ? &result.sync_sequences[*association->second.cache_tail_index]
-            : nullptr;
+    ConSanSyncSequence sequence = std::move(sync_sequences[index]);
+    ConSanSyncSequence &cache = sync_sequences[association->second.cache_index];
+    ConSanSyncSequence *cache_tail = association->second.cache_tail_index
+                                         ? &sync_sequences[*association->second.cache_tail_index]
+                                         : nullptr;
     sequence.memory_role = ConSanSyncMemoryRole::Acquire;
     sequence.memory_role_confidence = ConSanSemanticConfidence::Conservative;
     sequence.confidence = combine_consan_sync_confidence(sequence.confidence, cache.confidence);
@@ -2549,16 +2595,22 @@ void associate_ordinary_acquire_sync_sequences(
     sequence.member_event_identities.insert(sequence.member_event_identities.end(),
                                             cache.member_event_identities.begin(),
                                             cache.member_event_identities.end());
+    sequence.member_semantic_ids.insert(sequence.member_semantic_ids.end(),
+                                        cache.member_semantic_ids.begin(),
+                                        cache.member_semantic_ids.end());
     if (cache_tail != nullptr) {
       sequence.in_cyclic_cfg_component |= cache_tail->in_cyclic_cfg_component;
       sequence.inside_scalar_clause |= cache_tail->inside_scalar_clause;
       sequence.member_event_identities.insert(sequence.member_event_identities.end(),
                                               cache_tail->member_event_identities.begin(),
                                               cache_tail->member_event_identities.end());
+      sequence.member_semantic_ids.insert(sequence.member_semantic_ids.end(),
+                                          cache_tail->member_semantic_ids.begin(),
+                                          cache_tail->member_semantic_ids.end());
     }
     associated.push_back(std::move(sequence));
   }
-  result.sync_sequences = std::move(associated);
+  sync_sequences = std::move(associated);
 
   // CDNA3/4 lower an LDS acquire load to group-FLAT SC0 plus a combined
   // VMEM/LDS zero wait. CDNA5's group-aperture form needs only the exact
@@ -2566,7 +2618,7 @@ void associate_ordinary_acquire_sync_sequences(
   // fallback separate from RDNA's cache-associated acquire paths above.
   if (!consan_uses_gfx9_cdna_encoding(arch) && arch != ROCJITSU_CODE_ARCH_CDNA5)
     return;
-  for (ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (ConSanSyncSequence &sequence : sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
         sequence.operation != ConSanSyncOperation::OrdinaryLoad ||
         sequence.memory_role != ConSanSyncMemoryRole::Unknown || sequence.inside_scalar_clause)
@@ -2741,8 +2793,10 @@ communication_address_operands(const ConSanResult &result, const ConSanSyncEvent
 void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
                                          const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                          const SyncEventIdentityIndex &events, rj_code_arch_t arch,
-                                         ConSanResult &result) {
-  result.communication_address_recipes.clear();
+                                         SynchronizationInventoryBuildView inventory,
+                                         const ConSanResult &result) {
+  std::vector<ConSanCommunicationAddressRecipe> &recipes = inventory.communication_address_recipes;
+  recipes.clear();
   const std::vector<BasicBlock *> block_ptrs = block_ptrs_for(blocks);
   if (block_ptrs.empty())
     return;
@@ -2750,7 +2804,7 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
 
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : inventory.sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::Atomic &&
         sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory)
       continue;
@@ -2760,7 +2814,7 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
     if (!communication_role_is_supported(sequence.memory_role) || sequence.identity.empty() ||
         sequence.in_cyclic_cfg_component || sequence.inside_scalar_clause) {
       recipe.support = ConSanCommunicationAddressSupport::UnsupportedSequence;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
 
@@ -2778,7 +2832,7 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
     }
     if (communication == nullptr) {
       recipe.support = ConSanCommunicationAddressSupport::AmbiguousCommunicationEvent;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     recipe.communication_event_identity = communication->identity;
@@ -2786,7 +2840,7 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
     if (communication->address_source != ConSanSyncAddressSource::GlobalScalarVector &&
         communication->address_source != ConSanSyncAddressSource::FlatVector) {
       recipe.support = ConSanCommunicationAddressSupport::UnsupportedAddressSource;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     const auto operands = communication_address_operands(result, *communication);
@@ -2794,7 +2848,7 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
       recipe.support = communication->static_byte_offset
                            ? ConSanCommunicationAddressSupport::MissingAddressOperands
                            : ConSanCommunicationAddressSupport::InvalidStaticOffset;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     recipe.kind = operands->kind;
@@ -2808,7 +2862,7 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
         find_instruction_at_text_offset(KernelBlockScope(block_ptrs), sequence.end_text_offset);
     if (post_sequence == nullptr) {
       recipe.support = ConSanCommunicationAddressSupport::MissingPostSequenceInstruction;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     if (!liveness.all_live_before(*post_sequence,
@@ -2819,12 +2873,12 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
                                    RegisterRef{RegClass::SGPR, *recipe.address_sgpr,
                                                static_cast<uint8_t>(recipe.address_sgpr_count)}))) {
       recipe.support = ConSanCommunicationAddressSupport::AddressNotLiveAfterSequence;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     if (sequence.execution_owners.empty()) {
       recipe.support = ConSanCommunicationAddressSupport::MissingOwners;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     for (const ConSanExecutionOwner &owner : sequence.execution_owners)
@@ -2835,7 +2889,7 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
         recipe.owner_descriptor_file_offsets.end());
     if (recipe.owner_descriptor_file_offsets.size() != sequence.execution_owners.size()) {
       recipe.support = ConSanCommunicationAddressSupport::MissingOwners;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     std::optional<uint16_t> owner_vgpr_limit;
@@ -2848,25 +2902,25 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
       owner_vgpr_limit = std::min(owner_vgpr_limit.value_or(*count), *count);
     }
     if (recipe.support == ConSanCommunicationAddressSupport::InvalidOwnerDescriptor) {
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     recipe.scratch_vgpr_count = 2;
     recipe.scratch_vgpr = liveness.find_free_run(post_sequence, recipe.scratch_vgpr_count);
     if (!recipe.scratch_vgpr) {
       recipe.support = ConSanCommunicationAddressSupport::NoPostSequenceScratchPair;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     if (static_cast<uint32_t>(*recipe.scratch_vgpr) + recipe.scratch_vgpr_count >
         *owner_vgpr_limit) {
       recipe.scratch_vgpr.reset();
       recipe.support = ConSanCommunicationAddressSupport::ScratchOutsideOwnerAllocation;
-      result.communication_address_recipes.push_back(std::move(recipe));
+      recipes.push_back(std::move(recipe));
       continue;
     }
     recipe.support = ConSanCommunicationAddressSupport::Supported;
-    result.communication_address_recipes.push_back(std::move(recipe));
+    recipes.push_back(std::move(recipe));
   }
 }
 
@@ -2981,7 +3035,7 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
 
 void build_perturbation_candidate_inventory(ConSanResult &result) {
   result.perturbation_candidates.clear();
-  const SyncEventIdentityIndex events = build_sync_event_identity_index(result);
+  const SyncEventIdentityIndex events = build_sync_event_identity_index(result.sync_events);
   for (const ConSanSyncSequence &sequence : result.sync_sequences) {
     const ConSanPerturbationKind kind =
         sequence.kind == ConSanSyncSequenceKind::Barrier  ? ConSanPerturbationKind::Barrier
@@ -3617,7 +3671,8 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                                rj_code_arch_t arch, const ConSanOptions &options,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
                                std::span<ConSanKernelInfo> kernels,
-                               std::span<ConSanFunctionInfo> functions, ConSanResult &result) {
+                               std::span<ConSanFunctionInfo> functions,
+                               SynchronizationInventoryBuildView inventory, ConSanResult &result) {
   std::vector<uint64_t> leaders;
   std::vector<uint64_t> kernel_entries;
   for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -3688,7 +3743,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   for (ConSanFaultSite &site : result.fault_sites)
     site.execution_owners =
         execution_owners_for_offset(owners_by_block, block_index, site.text_offset);
-  for (ConSanSyncEvent &event : result.sync_events)
+  for (ConSanSyncEvent &event : inventory.sync_events)
     event.execution_owners =
         execution_owners_for_offset(owners_by_block, block_index, event.text_offset);
   for (ConSanBarrierMoveDestination &destination : result.barrier_move_destinations) {
@@ -3722,10 +3777,10 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   // events and sequences. Looking up every sequence member with a linear scan
   // makes owner annotation quadratic in the sync inventory size.
   std::unordered_map<std::string_view, const ConSanSyncEvent *> sync_event_by_identity;
-  sync_event_by_identity.reserve(result.sync_events.size());
-  for (const ConSanSyncEvent &event : result.sync_events)
+  sync_event_by_identity.reserve(inventory.sync_events.size());
+  for (const ConSanSyncEvent &event : inventory.sync_events)
     sync_event_by_identity.emplace(event.identity, &event);
-  for (ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (ConSanSyncSequence &sequence : inventory.sync_sequences) {
     bool first = true;
     for (const std::string &identity : sequence.member_event_identities) {
       const auto event = sync_event_by_identity.find(identity);

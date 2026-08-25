@@ -799,27 +799,38 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
                                         options.fault_dry_run || has_fault || has_perturbation ||
                                         options.abort_unmatched_barrier_wait ||
                                         options.collect_barrier_move_destinations;
+  SynchronizationInventoryBuildView synchronization_inventory = inventory_builder.synchronization();
   if (needs_semantic_inventory) {
     build_fault_site_inventory(code_object_bytes, arch, result);
-    build_sync_event_inventory(code_object_bytes, result);
-    if (options.flavor == ConSanFlavor::Moi && !canonicalize_sync_events_by_physical_site(result))
+    build_sync_event_inventory(code_object_bytes, synchronization_inventory, result);
+    if (options.flavor == ConSanFlavor::Moi &&
+        !canonicalize_sync_events_by_physical_site(synchronization_inventory, result)) {
+      result.install_program_inventory(inventory_builder.view());
       return result;
-    const SyncEventIdentityIndex sync_events = build_sync_event_identity_index(result);
+    }
+    const SyncEventIdentityIndex sync_events =
+        build_sync_event_identity_index(synchronization_inventory.sync_events);
     const auto sync_blocks = build_sync_basic_blocks(*code_object, *decoder, arch, result);
-    build_singleton_sync_sequences(sync_blocks, result);
+    build_singleton_sync_sequences(sync_blocks, synchronization_inventory);
     associate_barrier_sync_sequences(sync_blocks, consan_qualifies_extended_barrier_pairs(options),
-                                     result);
-    associate_atomic_sync_sequences(sync_blocks, arch, sync_events, result);
-    build_barrier_lifecycle_group_inventory(result);
+                                     synchronization_inventory);
+    associate_atomic_sync_sequences(sync_blocks, arch, sync_events, synchronization_inventory,
+                                    result);
+    build_barrier_lifecycle_group_inventory(synchronization_inventory);
     if (options.collect_barrier_move_destinations)
       build_barrier_move_destination_inventory(*code_object, sync_blocks, sync_events, arch,
-                                               result);
+                                               synchronization_inventory.sync_sequences, result);
     annotate_execution_owners(*code_object, *decoder, arch, options, &sync_blocks,
-                              inventory_builder.kernels(), inventory_builder.functions(), result);
-    associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events, result);
-    associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch, result);
-    build_communication_address_recipes(*code_object, sync_blocks, sync_events, arch, result);
-    build_moi_fence_candidate_inventory(result);
+                              inventory_builder.kernels(), inventory_builder.functions(),
+                              synchronization_inventory, result);
+    associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events,
+                                              synchronization_inventory);
+    associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch,
+                                              synchronization_inventory, result);
+    build_communication_address_recipes(*code_object, sync_blocks, sync_events, arch,
+                                        synchronization_inventory, result);
+    build_moi_fence_candidate_inventory(synchronization_inventory);
+    result.install_program_inventory(inventory_builder.view());
     build_perturbation_candidate_inventory(result);
     annotate_fault_sites_with_sync_sequences(result);
   } else if (std::ranges::any_of(result.functions, [](const ConSanFunctionInfo &function) {
@@ -829,7 +840,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     // semantics. Shared-function memory sites still need kernel ownership,
     // while kernel-local sites carry their descriptor directly.
     annotate_execution_owners(*code_object, *decoder, arch, options, nullptr,
-                              inventory_builder.kernels(), inventory_builder.functions(), result);
+                              inventory_builder.kernels(), inventory_builder.functions(),
+                              synchronization_inventory, result);
   }
   publish_access_inventory();
   if (options.fault_dry_run) {

@@ -12230,10 +12230,13 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty());
   ASSERT_EQ(inventory.moi_fence_candidates.size(), 2u);
-  for (ConSanMoiFenceCandidate &candidate : inventory.moi_fence_candidates) {
+  ProgramInventoryBuilder stale_inventory(inventory.program_inventory);
+  for (ConSanMoiFenceCandidate &candidate :
+       stale_inventory.synchronization().moi_fence_candidates) {
     ASSERT_TRUE(candidate.eligible);
     candidate.communication_event_identity += "|stale";
   }
+  inventory.install_program_inventory(stale_inventory.view());
 
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
@@ -12276,13 +12279,17 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty());
   ASSERT_EQ(inventory.moi_fence_candidates.size(), 2u);
-  for (const ConSanMoiFenceCandidate &candidate : inventory.moi_fence_candidates) {
+  ProgramInventoryBuilder unowned_inventory(inventory.program_inventory);
+  for (const ConSanMoiFenceCandidate &candidate :
+       unowned_inventory.synchronization().moi_fence_candidates) {
     ASSERT_TRUE(candidate.eligible);
-    const auto event = std::ranges::find(
-        inventory.sync_events, candidate.communication_event_identity, &ConSanSyncEvent::identity);
-    ASSERT_NE(event, inventory.sync_events.end());
+    auto &sync_events = unowned_inventory.synchronization().sync_events;
+    const auto event = std::ranges::find(sync_events, candidate.communication_event_identity,
+                                         &ConSanSyncEvent::identity);
+    ASSERT_NE(event, sync_events.end());
     event->execution_owners.clear();
   }
+  inventory.install_program_inventory(unowned_inventory.view());
 
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;

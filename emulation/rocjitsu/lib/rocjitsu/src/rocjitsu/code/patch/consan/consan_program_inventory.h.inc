@@ -1,156 +1,6 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Content-stable identity of the pristine code object from which semantic
-/// inventory was decoded.
-///
-/// `fingerprint` preserves ConSan's externally reported FNV-1a spelling.
-/// Equality additionally includes the byte size and an independently seeded,
-/// reverse-order verification hash. That second digest makes a collision in
-/// the externally visible fingerprint detectable inside semantic IDs rather
-/// than silently treating two different inputs as one program. This is a
-/// content identity only: it deliberately contains no HSA reader, executable,
-/// load, or dispatch handle and therefore says nothing about runtime lifetime.
-struct ConSanCodeObjectId {
-  /// Stable diagnostic fingerprint retained for compatibility with existing
-  /// report and validation formats.
-  std::string fingerprint;
-  /// Size of the complete pristine input image in bytes.
-  uint64_t byte_size = 0;
-  /// Independent content digest used to disambiguate a primary-fingerprint
-  /// collision before semantic records are compared or joined.
-  uint64_t collision_verifier = 0;
-
-  /// Return whether construction supplied a content fingerprint. The empty
-  /// default is the sole invalid identity; an empty byte sequence can still
-  /// have a valid content identity even though it is not a valid code object.
-  [[nodiscard]] bool valid() const { return !fingerprint.empty(); }
-
-  bool operator==(const ConSanCodeObjectId &) const = default;
-};
-
-/// Build the content identity used by `ProgramInventory` and stable site IDs.
-/// The function is deterministic across hosts and retains the pre-production
-/// `fnv1a64:<hex>` diagnostic representation.
-[[nodiscard]] inline ConSanCodeObjectId make_consan_code_object_id(std::span<const uint8_t> bytes) {
-  const auto fnv1a = [](auto begin, auto end, uint64_t seed) {
-    uint64_t hash = seed;
-    for (auto cursor = begin; cursor != end; ++cursor) {
-      hash ^= static_cast<uint8_t>(*cursor);
-      hash *= 1099511628211ull;
-    }
-    return hash;
-  };
-  const auto hex = [](uint64_t value) {
-    constexpr char kHex[] = "0123456789abcdef";
-    std::string result(16, '0');
-    for (unsigned i = 0; i < 16; ++i) {
-      result[15 - i] = kHex[value & 0xfu];
-      value >>= 4u;
-    }
-    return result;
-  };
-  const uint64_t primary = fnv1a(bytes.begin(), bytes.end(), 14695981039346656037ull);
-  const uint64_t verifier = fnv1a(bytes.rbegin(), bytes.rend(), 7809847782465536322ull);
-  return {
-      .fingerprint = "fnv1a64:" + hex(primary),
-      .byte_size = bytes.size(),
-      .collision_verifier = verifier,
-  };
-}
-
-/// Stable identity of one physical instruction in the pristine code object.
-///
-/// The original text offset is independent of ELF file layout changes made by
-/// later transforms. All semantic interpretations and all aliases of the same
-/// instruction share this value, ensuring that placement can eventually emit
-/// at most one physical insertion point for them.
-struct PhysicalSiteId {
-  /// Content identity of the pristine image containing the instruction.
-  ConSanCodeObjectId code_object;
-  /// Instruction offset in the original executable text address space.
-  uint64_t original_text_offset = 0;
-
-  /// Return whether the containing code-object identity was initialized.
-  [[nodiscard]] bool valid() const { return code_object.valid(); }
-
-  bool operator==(const PhysicalSiteId &) const = default;
-};
-
-/// Semantic domain that gives meaning to the member ordinals in a
-/// `SemanticSiteId`.
-///
-/// The domain prevents an access range and a synchronization event at the same
-/// instruction from colliding merely because both use member zero. New domains
-/// belong here only when they describe an original-program fact; lowerer patch
-/// kinds and engine-specific plan entries are not semantic site domains.
-enum class ConSanSemanticSiteDomain : uint8_t {
-  /// A logical byte range read, written, or atomically accessed by an
-  /// instruction.
-  Access,
-  /// A synchronization event decoded from an instruction or qualified
-  /// instruction sequence.
-  SynchronizationEvent,
-  /// A stable member of a logical synchronization sequence.
-  SynchronizationSequenceMember,
-  /// One past the last domain. This is an iteration bound and is never a valid
-  /// semantic identity.
-  Count,
-};
-
-/// Complete iterable set of semantic-site domains, excluding the invalid
-/// one-past-the-end bound.
-inline constexpr std::array<ConSanSemanticSiteDomain, 3> kConSanSemanticSiteDomains = {
-    ConSanSemanticSiteDomain::Access,
-    ConSanSemanticSiteDomain::SynchronizationEvent,
-    ConSanSemanticSiteDomain::SynchronizationSequenceMember,
-};
-
-/// Return the stable diagnostic spelling of a semantic-site domain. Invalid
-/// values cannot acquire a plausible domain name.
-[[nodiscard]] constexpr std::string_view
-consan_semantic_site_domain_name(ConSanSemanticSiteDomain domain) {
-  switch (domain) {
-  case ConSanSemanticSiteDomain::Access:
-    return "access";
-  case ConSanSemanticSiteDomain::SynchronizationEvent:
-    return "synchronization-event";
-  case ConSanSemanticSiteDomain::SynchronizationSequenceMember:
-    return "synchronization-sequence-member";
-  case ConSanSemanticSiteDomain::Count:
-    break;
-  }
-  return "invalid-semantic-site-domain";
-}
-
-static_assert(kConSanSemanticSiteDomains.size() ==
-              static_cast<size_t>(ConSanSemanticSiteDomain::Count));
-
-/// Stable identity of one logical fact contributed by a physical instruction.
-///
-/// `member_ordinal` distinguishes multiple semantic members in one domain;
-/// `range_ordinal` distinguishes multiple byte ranges of one access member.
-/// For example, a two-address LDS instruction has one access member and two
-/// range ordinals while still retaining one `PhysicalSiteId`. Ordinals describe
-/// decoded program meaning, never traversal or patch-emission order.
-struct SemanticSiteId {
-  /// Physical instruction that contributes this semantic fact.
-  PhysicalSiteId physical;
-  /// Vocabulary in which the member and range ordinals are interpreted.
-  ConSanSemanticSiteDomain domain = ConSanSemanticSiteDomain::Count;
-  /// Stable logical-member ordinal within the selected domain.
-  uint32_t member_ordinal = 0;
-  /// Stable range/member sub-ordinal within the logical member.
-  uint32_t range_ordinal = 0;
-
-  /// Return whether both the physical identity and semantic domain are valid.
-  [[nodiscard]] bool valid() const {
-    return physical.valid() && domain != ConSanSemanticSiteDomain::Count;
-  }
-
-  bool operator==(const SemanticSiteId &) const = default;
-};
-
 /// Kind of original program container through which an instruction was
 /// decoded.
 ///
@@ -513,6 +363,46 @@ struct LegacyInventoryView {
   }
 };
 
+/// Immutable synchronization and ownership projection produced by semantic
+/// analysis.
+///
+/// Events retain physical and typed semantic identities; sequences and
+/// lifecycle groups retain ordered member identities; communication recipes
+/// and fence candidates retain the bounded facts derived from those sequences.
+/// The view owns no storage and remains valid while its `ProgramInventory`
+/// owner is alive. Fault planning and engine policy may query this projection
+/// but cannot modify or rebuild sanitizer semantics through it.
+struct SynchronizationInventoryView {
+  std::span<const ConSanSyncEvent> sync_events;
+  std::span<const ConSanSyncSequence> sync_sequences;
+  std::span<const ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
+  std::span<const ConSanCommunicationAddressRecipe> communication_address_recipes;
+  std::span<const ConSanMoiFenceCandidate> moi_fence_candidates;
+
+  /// Return whether semantic analysis published no synchronization-derived
+  /// records of any kind.
+  [[nodiscard]] bool empty() const {
+    return sync_events.empty() && sync_sequences.empty() && barrier_lifecycle_groups.empty() &&
+           communication_address_recipes.empty() && moi_fence_candidates.empty();
+  }
+};
+
+/// Mutable construction capability for synchronization inventory during the
+/// single semantic-analysis stage.
+///
+/// References point into one `ProgramInventoryBuilder`. Producer passes receive
+/// this value explicitly, which makes mutation visible in their signatures and
+/// prevents fault planners or lowerers from acquiring write access. The build
+/// view must not escape analysis; published consumers receive only
+/// `SynchronizationInventoryView`.
+struct SynchronizationInventoryBuildView {
+  std::vector<ConSanSyncEvent> &sync_events;
+  std::vector<ConSanSyncSequence> &sync_sequences;
+  std::vector<ConSanBarrierLifecycleGroup> &barrier_lifecycle_groups;
+  std::vector<ConSanCommunicationAddressRecipe> &communication_address_recipes;
+  std::vector<ConSanMoiFenceCandidate> &moi_fence_candidates;
+};
+
 /// Internal shared storage owned by `ProgramInventory` and populated only by
 /// `ProgramInventoryBuilder` during the analysis stage.
 ///
@@ -530,6 +420,11 @@ struct ConSanProgramInventoryStorage {
   std::vector<ConSanKernelInfo> kernels;
   std::vector<ConSanFunctionInfo> functions;
   std::vector<ConSanAccessInventorySite> access_sites;
+  std::vector<ConSanSyncEvent> sync_events;
+  std::vector<ConSanSyncSequence> sync_sequences;
+  std::vector<ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
+  std::vector<ConSanCommunicationAddressRecipe> communication_address_recipes;
+  std::vector<ConSanMoiFenceCandidate> moi_fence_candidates;
 };
 
 /// Immutable owner and query interface for original code-object facts used by
@@ -538,9 +433,9 @@ struct ConSanProgramInventoryStorage {
 /// Copies share const storage, so site IDs and references remain stable while
 /// results move through retries and lowering. Only `ProgramInventoryBuilder`
 /// can populate the storage during a transform. The public interface exposes
-/// original-program facts and normalized access semantics; it deliberately
-/// excludes engine admission, report layout, registers, patches, diagnostics,
-/// and mutable transformation state.
+/// original-program facts plus normalized access and synchronization
+/// semantics; it deliberately excludes engine admission, report layout,
+/// registers, patches, diagnostics, and mutable transformation state.
 class ProgramInventory {
 public:
   ProgramInventory() = default;
@@ -579,6 +474,17 @@ public:
         .functions = storage_->functions,
     };
   }
+  [[nodiscard]] SynchronizationInventoryView synchronization_view() const {
+    if (!storage_)
+      return {};
+    return {
+        .sync_events = storage_->sync_events,
+        .sync_sequences = storage_->sync_sequences,
+        .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
+        .communication_address_recipes = storage_->communication_address_recipes,
+        .moi_fence_candidates = storage_->moi_fence_candidates,
+    };
+  }
 
 private:
   friend class ProgramInventoryBuilder;
@@ -605,16 +511,38 @@ private:
 /// the derived normalized-access projection.
 class ProgramInventoryBuilder {
 public:
+  /// Start a fresh inventory for one pristine code-object image.
   explicit ProgramInventoryBuilder(std::span<const uint8_t> code_object_bytes = {})
       : storage_(std::make_shared<ConSanProgramInventoryStorage>()) {
     storage_->code_object_id = make_consan_code_object_id(code_object_bytes);
   }
 
+  /// Start a distinct mutable analysis revision from an immutable inventory.
+  ///
+  /// Storage is deep-copied: publishing or modifying the revision cannot
+  /// mutate any existing `ProgramInventory` view. This operation supports
+  /// component-sized reanalysis and adversarial tests; ordinary initial
+  /// analysis should use the pristine-byte constructor above.
+  explicit ProgramInventoryBuilder(const ProgramInventory &source)
+      : storage_(std::make_shared<ConSanProgramInventoryStorage>(
+            source.storage_ ? *source.storage_ : ConSanProgramInventoryStorage{})) {}
+
+  /// Publish an immutable shared view of the builder's current revision.
   [[nodiscard]] ProgramInventory view() const { return ProgramInventory(storage_); }
 
   [[nodiscard]] std::vector<ConSanTextSection> &text_sections() { return storage_->text_sections; }
   [[nodiscard]] std::vector<ConSanKernelInfo> &kernels() { return storage_->kernels; }
   [[nodiscard]] std::vector<ConSanFunctionInfo> &functions() { return storage_->functions; }
+  /// Return the analysis-only capability for synchronization-derived facts.
+  [[nodiscard]] SynchronizationInventoryBuildView synchronization() {
+    return {
+        .sync_events = storage_->sync_events,
+        .sync_sequences = storage_->sync_sequences,
+        .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
+        .communication_address_recipes = storage_->communication_address_recipes,
+        .moi_fence_candidates = storage_->moi_fence_candidates,
+    };
+  }
 
   void set_code_object_facts(bool kernel_metadata_trustworthy,
                              size_t malformed_kernel_metadata_note_count, rj_code_arch_t arch,

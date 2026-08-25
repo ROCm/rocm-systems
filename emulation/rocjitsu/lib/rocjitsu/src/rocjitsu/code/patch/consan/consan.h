@@ -30,6 +30,8 @@
 
 #include "rocjitsu/code/patch/consan/consan_code_object_types.h.inc"
 
+#include "rocjitsu/code/patch/consan/consan_site_identity.h.inc"
+
 #include "rocjitsu/code/patch/consan/consan_resource_types.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_fault_sync_types.h.inc"
