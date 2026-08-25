@@ -475,6 +475,14 @@ struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
   /// installed and remains only as a read-only compatibility projection for
   /// lowerers not yet migrated to typed inventory.
   ProgramInventory program_inventory;
+  /// Target-neutral policy output retained independently of current lowering
+  /// candidates and patch telemetry. Slice 4A initially populates access
+  /// decisions and intents; later slices extend the same plan with sync forms.
+  ConSanObservationPlan observation_plan;
+  /// Joined static policy and lowering state. This is initialized from
+  /// `observation_plan` before resource planning and never infers policy from
+  /// an emitted patch kind.
+  ConSanCoverageLedger coverage_ledger;
   std::vector<ConSanFaultSite> fault_sites;
   std::vector<ConSanPatchedImageGrowthRejection> patched_image_growth_rejections;
   std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;

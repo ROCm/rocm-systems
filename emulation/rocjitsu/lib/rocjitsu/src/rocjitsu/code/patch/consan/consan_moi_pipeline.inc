@@ -1186,6 +1186,44 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
     site.lowering_reason = ConSanSiteLoweringReason::InstrumentationPatchMissing;
     site.resource_reason = ConSanRegisterPlanReason::None;
   }
+
+  // Site dispositions remain the temporary adapter into current MOI resource
+  // and placement code. Publish their final access outcomes through stable
+  // intent IDs so production coverage no longer requires a consumer to scan
+  // patch kinds or warning strings.
+  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    const auto site = std::ranges::find_if(result.site_dispositions, [&](const auto &candidate) {
+      return candidate.site_kind == ConSanResourceSiteKind::Access &&
+             candidate.text_offset == intent.physical_site.original_text_offset;
+    });
+    ConSanLoweringOutcomeKind outcome = ConSanLoweringOutcomeKind::PlacementRejected;
+    std::string detail = "legacy MOI lowering published no access outcome";
+    if (site != result.site_dispositions.end()) {
+      switch (site->lowering_outcome) {
+      case ConSanSiteLoweringOutcome::Patched:
+        outcome = ConSanLoweringOutcomeKind::Instrumented;
+        detail.clear();
+        break;
+      case ConSanSiteLoweringOutcome::ResourceFailed:
+        outcome = ConSanLoweringOutcomeKind::ResourceRejected;
+        detail = "legacy MOI resource plan rejected the access";
+        break;
+      case ConSanSiteLoweringOutcome::PlacementOrLoweringFailed:
+      case ConSanSiteLoweringOutcome::Pending:
+        outcome = ConSanLoweringOutcomeKind::PlacementRejected;
+        detail = "legacy MOI lowerer emitted no access patch";
+        break;
+      case ConSanSiteLoweringOutcome::NotApplicable:
+      case ConSanSiteLoweringOutcome::Unsupported:
+        // An admitted production intent cannot become semantically excluded
+        // during lowering. Preserve the inconsistency as a mechanism failure.
+        outcome = ConSanLoweringOutcomeKind::PlacementRejected;
+        detail = "legacy MOI lowering contradicted access admission";
+        break;
+      }
+    }
+    (void)result.coverage_ledger.set_lowering_outcome(intent.id, outcome, std::move(detail));
+  }
 }
 
 void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOptions &options,

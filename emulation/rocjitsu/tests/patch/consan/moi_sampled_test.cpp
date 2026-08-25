@@ -7988,7 +7988,7 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
             kSiteCount);
   EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Access,
                                &ConSanSiteDispositionRecord::site_kind),
-            2u * kSiteCount);
+            kSiteCount);
   EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Barrier,
                                &ConSanSiteDispositionRecord::site_kind),
             4u * kSiteCount);
@@ -7997,6 +7997,19 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
            site.lowering_outcome == ConSanSiteLoweringOutcome::Patched &&
            site.lowering_reason == ConSanSiteLoweringReason::None;
   })) << testing::PrintToString(result.site_dispositions);
+  ASSERT_EQ(std::ranges::count(result.observation_plan.site_decisions,
+                               ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
+            kSiteCount);
+  ASSERT_EQ(result.observation_plan.probe_intents.size(), kSiteCount);
+  EXPECT_TRUE(std::ranges::all_of(result.observation_plan.site_decisions,
+                                  [](const ConSanSiteDecision &decision) {
+                                    return decision.kind != ConSanSiteDecisionKind::Admitted ||
+                                           decision.source_containers.size() == 2u;
+                                  }));
+  EXPECT_TRUE(std::ranges::all_of(
+      result.coverage_ledger.intent_entries(), [](const ConSanIntentCoverageEntry &entry) {
+        return entry.lowering == ConSanLoweringOutcomeKind::Instrumented;
+      }));
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());

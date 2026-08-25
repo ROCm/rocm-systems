@@ -600,22 +600,44 @@ classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
   return ConSanSiteDispositionReason::None;
 }
 
-void append_moi_access_site_disposition(std::span<const uint8_t> bytes,
-                                        const ConSanMoiCandidate &candidate, rj_code_arch_t arch,
-                                        ConSanResult &result) {
-  const ConSanSiteDispositionReason reason =
-      classify_moi_access_candidate_support(bytes, candidate, arch);
-  ConSanSiteDispositionRecord record;
-  record.site_kind = ConSanResourceSiteKind::Access;
-  record.disposition = reason == ConSanSiteDispositionReason::None
-                           ? ConSanSiteDisposition::Supported
-                           : ConSanSiteDisposition::Unsupported;
-  record.reason = reason;
-  record.container_name = candidate.container_name;
-  record.in_kernel = candidate.in_kernel;
-  record.text_offset = candidate.text_offset;
-  record.mnemonic = candidate.mnemonic;
-  result.site_dispositions.push_back(std::move(record));
+[[nodiscard]] ConSanSiteDispositionReason
+legacy_access_disposition_reason(ConSanAccessPolicyReason reason) {
+  switch (reason) {
+  case ConSanAccessPolicyReason::None:
+    return ConSanSiteDispositionReason::None;
+  case ConSanAccessPolicyReason::NonAccessInstruction:
+  case ConSanAccessPolicyReason::OperationKindExcluded:
+    return ConSanSiteDispositionReason::NonAccessInstruction;
+  case ConSanAccessPolicyReason::InvalidInstructionSize:
+    return ConSanSiteDispositionReason::InvalidInstructionSize;
+  case ConSanAccessPolicyReason::InvalidAccessWidth:
+    return ConSanSiteDispositionReason::InvalidAccessWidth;
+  case ConSanAccessPolicyReason::MissingAddressOperand:
+    return ConSanSiteDispositionReason::MissingAddressOperand;
+  case ConSanAccessPolicyReason::InstructionOutOfBounds:
+    return ConSanSiteDispositionReason::InstructionOutOfBounds;
+  case ConSanAccessPolicyReason::UnsupportedFlatEncoding:
+    return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
+  case ConSanAccessPolicyReason::NonzeroFlatOffset:
+    return ConSanSiteDispositionReason::NonzeroFlatOffset;
+  case ConSanAccessPolicyReason::ReservedFlatAddressRegister:
+    return ConSanSiteDispositionReason::ReservedFlatAddressRegister;
+  case ConSanAccessPolicyReason::NonGroupAddressSpace:
+    return ConSanSiteDispositionReason::NonGroupAddressSpace;
+  case ConSanAccessPolicyReason::FlatProvenancePolicyExcluded:
+    return ConSanSiteDispositionReason::FlatProvenancePolicyExcluded;
+  case ConSanAccessPolicyReason::RangeEncodingUnavailable:
+  case ConSanAccessPolicyReason::UnsupportedMnemonic:
+  case ConSanAccessPolicyReason::ConflictingPhysicalAliases:
+    return ConSanSiteDispositionReason::UnsupportedMnemonic;
+  case ConSanAccessPolicyReason::AccessFamilyDisabled:
+  case ConSanAccessPolicyReason::ReservedForSynchronizationPolicy:
+  case ConSanAccessPolicyReason::ContainerFilterExcluded:
+  case ConSanAccessPolicyReason::TargetCapabilityUnavailable:
+  case ConSanAccessPolicyReason::Count:
+    break;
+  }
+  return ConSanSiteDispositionReason::UnsupportedMnemonic;
 }
 
 /// Discover current lowering candidates exclusively from normalized program
@@ -673,37 +695,119 @@ void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenan
   }
 }
 
-/// Build access admission records from normalized inventory while projecting
-/// only the current candidate shape into the legacy support classifier.
-void append_moi_access_site_dispositions(
+/// Run pure access policy, initialize the production coverage ledger, and
+/// project one legacy disposition per physical access for lowerers that have
+/// not yet migrated to plan-local intent identifiers.
+[[nodiscard]] bool initialize_moi_access_observation_plan(
     std::span<const uint8_t> bytes, const ProgramInventory &inventory,
     ConSanFlatProvenanceMode mode, const ConSanOptions &options, rj_code_arch_t arch,
     const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites, ConSanResult &result) {
+  std::vector<PhysicalSiteId> synchronization_sites;
   for (const ConSanAccessInventorySite &access : inventory.access_sites()) {
     const bool in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
-    if (!options.test_kernel_name_filter.empty() &&
-        access.container.name.find(options.test_kernel_name_filter) == std::string::npos)
-      continue;
-    if (access.origin != ConSanAccessOrigin::Flat) {
-      if (access.kind != ConSanLdsAccessKind::Read && access.kind != ConSanLdsAccessKind::Write &&
-          !(consan_arch_supports_capability_form(arch,
-                                                 ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
-            access.kind == ConSanLdsAccessKind::Atomic))
+    if (is_ordered_ordinary_sync_site(ordered_sync_sites, access.container.name, in_kernel,
+                                      access.physical_id.original_text_offset) &&
+        std::ranges::find(synchronization_sites, access.physical_id) ==
+            synchronization_sites.end()) {
+      synchronization_sites.push_back(access.physical_id);
+    }
+  }
+
+  const auto engine = consan_capability_engine(ConSanFlavor::Moi, options.moi_engine);
+  if (!engine) {
+    result.errors.emplace_back("ConSan MOI access policy received an invalid engine");
+    return false;
+  }
+  const ConSanAccessPolicyRequest request{
+      .engine = *engine,
+      .native_lds_enabled = true,
+      .group_flat_enabled = true,
+      .flat_provenance_mode = mode,
+      .container_filter = options.test_kernel_name_filter,
+      .reserved_for_synchronization = synchronization_sites,
+  };
+  ConSanAccessPolicyResult policy = plan_consan_access_observation(inventory, request);
+  result.observation_plan = std::move(policy.plan);
+  result.coverage_ledger = ConSanCoverageLedger(result.observation_plan);
+  if (!policy.errors.empty() || !result.observation_plan.valid()) {
+    for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
+      if (decision.reason != ConSanAccessPolicyReason::ConflictingPhysicalAliases)
         continue;
-      append_moi_access_site_disposition(bytes, make_moi_candidate(access), arch, result);
+      std::string aliases;
+      for (const std::string &name : decision.source_containers) {
+        if (!aliases.empty())
+          aliases += "', '";
+        aliases += name;
+      }
+      result.errors.emplace_back(
+          "ConSan MOI physical access at original text offset " +
+          std::to_string(decision.semantic_site.physical.original_text_offset) +
+          " was decoded inconsistently through aliases '" + aliases + "'");
+    }
+    if (result.errors.empty())
+      result.errors.emplace_back("ConSan MOI access policy produced an invalid observation plan");
+    return false;
+  }
+
+  std::unordered_set<uint64_t> projected_physical_sites;
+  for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
+    if (decision.kind == ConSanSiteDecisionKind::NotApplicable ||
+        !projected_physical_sites.insert(decision.semantic_site.physical.original_text_offset)
+             .second) {
       continue;
     }
-    if (is_ordered_ordinary_sync_site(ordered_sync_sites, access.container.name, in_kernel,
-                                      access.physical_id.original_text_offset) ||
-        (access.kind != ConSanLdsAccessKind::Read && access.kind != ConSanLdsAccessKind::Write))
-      continue;
-    const bool group = access.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group;
-    const bool admitted_maybe_group =
-        mode == ConSanFlatProvenanceMode::Likely &&
-        access.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup;
-    if (group || admitted_maybe_group)
-      append_moi_access_site_disposition(bytes, make_moi_candidate(access), arch, result);
+    const auto access = std::ranges::find_if(inventory.access_sites(), [&](const auto &candidate) {
+      return candidate.physical_id == decision.semantic_site.physical;
+    });
+    if (access == inventory.access_sites().end()) {
+      result.errors.emplace_back("ConSan MOI access policy lost its inventory site");
+      return false;
+    }
+    const ConSanSiteDispositionReason reason = legacy_access_disposition_reason(decision.reason);
+    if (access->complete()) {
+      const ConSanSiteDispositionReason legacy_reason =
+          classify_moi_access_candidate_support(bytes, make_moi_candidate(*access), arch);
+      if (legacy_reason != reason) {
+        result.errors.emplace_back(
+            "ConSan MOI access policy disagreed with the legacy support classifier at text "
+            "offset " +
+            std::to_string(access->physical_id.original_text_offset));
+        return false;
+      }
+    }
+    ConSanSiteDispositionRecord record;
+    record.site_kind = ConSanResourceSiteKind::Access;
+    record.disposition = decision.kind == ConSanSiteDecisionKind::Admitted
+                             ? ConSanSiteDisposition::Supported
+                             : ConSanSiteDisposition::Unsupported;
+    record.reason = reason;
+    record.container_name = access->container.name;
+    record.in_kernel = access->container.kind == ConSanProgramContainerKind::Kernel;
+    record.text_offset = access->physical_id.original_text_offset;
+    record.mnemonic = access->mnemonic;
+    record.lowering_outcome = record.disposition == ConSanSiteDisposition::Supported
+                                  ? ConSanSiteLoweringOutcome::Pending
+                                  : ConSanSiteLoweringOutcome::Unsupported;
+    record.lowering_reason = record.disposition == ConSanSiteDisposition::Supported
+                                 ? ConSanSiteLoweringReason::None
+                                 : ConSanSiteLoweringReason::SemanticUnsupported;
+    result.site_dispositions.push_back(std::move(record));
   }
+  return true;
+}
+
+/// Temporary lowering adapter: retain only current candidates requested by
+/// admitted production intents. The remaining candidate structure carries
+/// legacy operands and ownership into resource/placement code.
+void retain_admitted_moi_access_candidates(const ConSanObservationPlan &plan,
+                                           std::vector<ConSanMoiCandidate> &candidates) {
+  std::unordered_set<uint64_t> admitted_offsets;
+  admitted_offsets.reserve(plan.probe_intents.size());
+  for (const ConSanProbeIntent &intent : plan.probe_intents)
+    admitted_offsets.insert(intent.physical_site.original_text_offset);
+  std::erase_if(candidates, [&](const ConSanMoiCandidate &candidate) {
+    return !admitted_offsets.contains(candidate.text_offset);
+  });
 }
 
 [[nodiscard]] bool moi_candidate_semantics_equal(const ConSanMoiCandidate &lhs,

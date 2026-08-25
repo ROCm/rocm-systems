@@ -7,6 +7,7 @@
 #pragma once
 
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -37,6 +38,8 @@
 #include "rocjitsu/code/patch/consan/consan_fault_sync_types.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_program_inventory.h.inc"
+
+#include "rocjitsu/code/patch/consan/consan_observation_plan.h.inc"
 
 #include "rocjitsu/code/patch/consan/consan_result.h.inc"
 

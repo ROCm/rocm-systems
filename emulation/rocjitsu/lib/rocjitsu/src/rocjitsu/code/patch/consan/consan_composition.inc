@@ -948,6 +948,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     }
   }
 
+  finalize_sc_access_coverage_ledger(result);
   apply_fault_mutation_to_inventory(*code_object, arch, options, result);
 
   return result;

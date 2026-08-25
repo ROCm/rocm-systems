@@ -2084,25 +2084,67 @@ RocJitsu-emulated gfx1250 (18/18 accesses and 8/8 barriers).
 
 ### Slice 4A: access policy and coverage ledger
 
-- **Current responsibility:** SuperCollider and each MOI engine independently
-  filter access candidates, append dispositions, later infer success from patch
-  kinds, and render warnings.
-- **New boundary and contract:** A pure engine-policy function consumes access
-  inventory and produces access `SiteDecision`s and `ProbeIntent`s for all four
-  modes. Initialize one `CoverageLedger` with those decisions.
-- **Temporary seam and consumers:** `LegacyConSanLowering` translates admitted
-  intents into current engine candidate lists/options. It translates current
-  resource/patch outcomes back into `LoweringOutcome`; a comparison assertion
-  checks the existing supported-site set during incremental cutover.
+**Implementation status:** complete. The pure
+`plan_consan_access_observation` boundary consumes immutable access inventory
+and produces one explicit `ConSanSiteDecision` per semantic access range plus
+one coalesced `ConSanProbeIntent` per physical instruction. It handles all four
+engines, native LDS, direct-to-LDS, group FLAT, relaxed LDS atomic access,
+target capability, provenance confidence, container filters, synchronization
+reservation, inventory exclusions, and physical aliases without mutating its
+inputs. Equivalent aliases share one intent while retaining every source name;
+conflicting aliases fail closed with a typed reason.
+
+`ConSanCoverageLedger` owns copies of the plan's immutable decisions and
+intents and records a typed lowering outcome for every admitted intent. MOI
+candidate discovery is now restricted to admitted physical intents, and both
+MOI and SuperCollider project their current resource and placement outcomes
+back into the ledger. SuperCollider's former physical coverage list and MOI's
+site dispositions remain temporary diagnostic adapters; they are no longer the
+authority for access applicability. For complete MOI inventory sites, a
+comparison check still requires the new policy and the legacy exact-mnemonic
+classifier to agree while later placement slices retain the old lowerers.
+
+The focused `observation_plan_test.cpp` suite covers every enum and stable
+name, invalid sentinels, plan-local identities, construction invariants,
+lookup, deep-copy lifetime, ledger transitions, physical-outcome adaptation,
+all four engine mappings, multi-range coalescing, every typed inventory
+limitation, capability and mnemonic rejection, family/provenance/filter/sync
+exclusions, relaxed atomics, alias agreement and conflict, determinism, and
+input immutability. Engine integration tests additionally require a real
+SuperCollider patch and current MOI lowerers to publish their final typed
+outcomes.
+
+- **Previous responsibility:** SuperCollider and each MOI engine independently
+  filtered access candidates, appended dispositions, later inferred success
+  from patch kinds, and rendered warnings.
+- **Implemented boundary and contract:** One pure engine-policy function owns
+  access applicability and target-neutral intent admission for all four modes.
+  One result-owned ledger joins those decisions to typed mechanism outcomes.
+- **Current temporary seam and consumers:** Current candidate, resource, and
+  placement implementations still consume legacy shapes translated from the
+  admitted intents. Their results are translated back into
+  `ConSanLoweringOutcomeKind`; the physical SuperCollider coverage list and MOI
+  disposition list remain compatibility and diagnostic projections only.
 - **Test gate:** Pure four-engine policy matrices, physical-site coalescing,
   the complete common paired scenario set on all simulator targets,
   wide/group-FLAT and target-specific access contracts, then physical gfx950
   access pairs.
-- **Cutover and deletion:** Switch one semantic access-form family at a time
-  (native LDS, group FLAT, multi-range/special forms). Delete the corresponding
-  per-engine filtering/disposition code and patch-kind-based applicability
-  inference. Patch telemetry remains debug-only.
+- **Completed cutover and deletion:** Native LDS, direct-to-LDS, group FLAT,
+  multi-range, and relaxed-atomic access applicability now enter every engine
+  through the common plan. Duplicate per-container physical dispositions were
+  collapsed. Exact target lowering classifiers, candidate payloads, and legacy
+  coverage renderers remain until the resource/placement and evidence slices
+  can replace them without a global switch.
 - **Prerequisite:** Slice 3A.
+
+The completed gate passed 1,414 ConSan host tests (plus two intentionally
+skipped external-object benchmarks), 98 ConSan hook/runtime tests, all 2,908
+simulator device rows, and 142 access-focused physical-gfx950 rows. The
+`d128-block` E2E row remained accepted in all four engines on physical gfx950.
+RocJitsu-emulated gfx1250 remained accepted in SuperCollider, Sampled, and
+Inline Shadow with complete static coverage; Record/Replay retained its
+already-published yellow status, with 18/18 accesses and 8/8 barriers statically
+covered but incomplete bounded runtime metadata.
 
 ### Slice 4B: barrier policy
 

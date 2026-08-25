@@ -38,61 +38,72 @@ struct ByteRange {
                                                  ConSanResult &result) {
   result.sc_access_coverage_resolved = false;
   result.sc_access_coverage_sites.clear();
-
-  /// One container-attributed view of a physical access considered for the
-  /// SuperCollider coverage denominator. The pointer borrows immutable
-  /// `ProgramInventory` storage for the duration of ledger construction.
-  struct CoverageAlias {
-    const ConSanAccessInventorySite *access = nullptr;
-    ConSanScAccessCoverageKind kind = ConSanScAccessCoverageKind::NativeLds;
+  const ConSanAccessPolicyRequest request{
+      .engine = ConSanCapabilityEngine::SuperCollider,
+      .native_lds_enabled = options.probe_lds_check_trap,
+      .group_flat_enabled = options.probe_flat_check_trap,
+      .flat_provenance_mode = options.flat_provenance_mode,
+      // A test-only selection filter must not shrink the physical coverage
+      // denominator. Current lowerers may still use it to choose work.
+      .container_filter = {},
+      .reserved_for_synchronization = {},
   };
-  std::vector<CoverageAlias> aliases;
-  std::unordered_map<uint64_t, size_t> index_by_text_offset;
-  index_by_text_offset.reserve(result.program_inventory.access_sites().size());
-  for (const ConSanAccessInventorySite &access : result.program_inventory.access_sites()) {
-    if (access.kind != ConSanLdsAccessKind::Read && access.kind != ConSanLdsAccessKind::Write)
-      continue;
-    const bool native = access.origin == ConSanAccessOrigin::NativeLds ||
-                        access.origin == ConSanAccessOrigin::DirectToLds;
-    const bool flat = access.origin == ConSanAccessOrigin::Flat &&
-                      (access.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group ||
-                       (options.flat_provenance_mode == ConSanFlatProvenanceMode::Likely &&
-                        access.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup));
-    if ((!options.probe_lds_check_trap || !native) && (!options.probe_flat_check_trap || !flat))
-      continue;
-    const ConSanScAccessCoverageKind kind =
-        native ? ConSanScAccessCoverageKind::NativeLds : ConSanScAccessCoverageKind::FlatGroup;
-    const auto [entry, inserted] =
-        index_by_text_offset.emplace(access.physical_id.original_text_offset, aliases.size());
-    if (inserted) {
-      aliases.push_back({.access = &access, .kind = kind});
-      continue;
-    }
-    const CoverageAlias &retained = aliases[entry->second];
-    if (retained.kind != kind ||
-        retained.access->container.entry_text_offset != access.container.entry_text_offset ||
-        retained.access->file_offset != access.file_offset ||
-        retained.access->kind != access.kind ||
-        retained.access->instruction_size != access.instruction_size ||
-        retained.access->decoded_width_bits != access.decoded_width_bits ||
-        retained.access->mnemonic != access.mnemonic ||
-        retained.access->operands != access.operands || retained.access->ranges != access.ranges) {
+  ConSanAccessPolicyResult policy =
+      plan_consan_access_observation(result.program_inventory, request);
+  result.observation_plan = std::move(policy.plan);
+  result.coverage_ledger = ConSanCoverageLedger(result.observation_plan);
+  if (!policy.errors.empty() || !result.observation_plan.valid()) {
+    for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
+      if (decision.reason != ConSanAccessPolicyReason::ConflictingPhysicalAliases)
+        continue;
+      std::string aliases;
+      for (const std::string &name : decision.source_containers) {
+        if (!aliases.empty())
+          aliases += "', '";
+        aliases += name;
+      }
+      const auto access =
+          std::ranges::find_if(result.program_inventory.access_sites(), [&](const auto &candidate) {
+            return candidate.physical_id == decision.semantic_site.physical;
+          });
       const std::string_view access_kind =
-          kind == ConSanScAccessCoverageKind::NativeLds ? "native-LDS" : "FLAT";
+          access != result.program_inventory.access_sites().end() &&
+                  access->origin == ConSanAccessOrigin::Flat
+              ? "FLAT"
+              : "native-LDS";
       result.errors.emplace_back(
           "ConSan SuperCollider " + std::string(access_kind) + " access at original text offset " +
-          std::to_string(access.physical_id.original_text_offset) +
-          " was decoded inconsistently through aliases '" + retained.access->container.name +
-          "' and '" + access.container.name + "'");
-      return false;
+          std::to_string(decision.semantic_site.physical.original_text_offset) +
+          " was decoded inconsistently through aliases '" + aliases + "'");
     }
+    if (result.errors.empty()) {
+      result.errors.emplace_back(
+          "ConSan SuperCollider access policy produced an invalid observation plan");
+    }
+    return false;
   }
 
-  result.sc_access_coverage_sites.reserve(aliases.size());
-  for (const CoverageAlias &alias : aliases) {
+  std::unordered_set<uint64_t> projected_physical_sites;
+  for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
+    if (decision.kind == ConSanSiteDecisionKind::NotApplicable ||
+        !projected_physical_sites.insert(decision.semantic_site.physical.original_text_offset)
+             .second) {
+      continue;
+    }
+    const auto access = std::ranges::find_if(
+        result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &candidate) {
+          return candidate.physical_id == decision.semantic_site.physical;
+        });
+    if (access == result.program_inventory.access_sites().end()) {
+      result.errors.emplace_back("ConSan SuperCollider access policy lost its inventory site");
+      return false;
+    }
     result.sc_access_coverage_sites.push_back({
-        .kind = alias.kind,
-        .file_offset = alias.access->file_offset,
+        .kind = access->origin == ConSanAccessOrigin::Flat ? ConSanScAccessCoverageKind::FlatGroup
+                                                           : ConSanScAccessCoverageKind::NativeLds,
+        .file_offset = access->file_offset,
+        .evaluated = decision.kind == ConSanSiteDecisionKind::Unsupported,
+        .supported = false,
     });
   }
   std::ranges::sort(result.sc_access_coverage_sites, [](const auto &lhs, const auto &rhs) {
@@ -129,6 +140,56 @@ void publish_sc_access_coverage_support(ConSanResult &result, ConSanScAccessCove
       site.evaluated = true;
       site.supported = is_supported;
     }
+  }
+}
+
+/// Project final current-lowerer results into the production ledger. Patch
+/// kinds remain a temporary compatibility input; policy applicability has
+/// already been fixed by `ConSanObservationPlan` and is never inferred here.
+void finalize_sc_access_coverage_ledger(ConSanResult &result) {
+  const auto is_access_patch = [](ConSanPatchKind kind) {
+    switch (kind) {
+    case ConSanPatchKind::InlineLdsLoadCheckTrap:
+    case ConSanPatchKind::InlineLdsStoreCheckTrap:
+    case ConSanPatchKind::LocalCaveLdsLoadCheckTrap:
+    case ConSanPatchKind::LocalCaveLdsStoreCheckTrap:
+    case ConSanPatchKind::InlineFlatLoadCheckTrap:
+    case ConSanPatchKind::InlineFlatStoreCheckTrap:
+    case ConSanPatchKind::LocalCaveFlatLoadCheckTrap:
+    case ConSanPatchKind::LocalCaveFlatStoreCheckTrap:
+      return true;
+    default:
+      return false;
+    }
+  };
+  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    const bool instrumented =
+        std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
+          return patch.phase == ConSanPatchPhase::Instrumentation && is_access_patch(patch.kind) &&
+                 patch.anchor_offset == intent.physical_site.original_text_offset;
+        });
+    if (instrumented) {
+      (void)result.coverage_ledger.set_lowering_outcome(intent.id,
+                                                        ConSanLoweringOutcomeKind::Instrumented);
+      continue;
+    }
+    const auto access = std::ranges::find_if(result.program_inventory.access_sites(),
+                                             [&](const ConSanAccessInventorySite &candidate) {
+                                               return candidate.physical_id == intent.physical_site;
+                                             });
+    const auto legacy =
+        access == result.program_inventory.access_sites().end()
+            ? result.sc_access_coverage_sites.end()
+            : std::ranges::find(result.sc_access_coverage_sites, access->file_offset,
+                                &ConSanScAccessCoverageSite::file_offset);
+    const bool resource_supported =
+        legacy != result.sc_access_coverage_sites.end() && legacy->evaluated && legacy->supported;
+    (void)result.coverage_ledger.set_lowering_outcome(
+        intent.id,
+        resource_supported ? ConSanLoweringOutcomeKind::PlacementRejected
+                           : ConSanLoweringOutcomeKind::ResourceRejected,
+        resource_supported ? "legacy lowerer emitted no access patch"
+                           : "legacy lowerer found no complete planning context");
   }
 }
 

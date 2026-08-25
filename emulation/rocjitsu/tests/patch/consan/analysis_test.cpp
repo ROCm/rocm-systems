@@ -2366,7 +2366,7 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
   }
 }
 
-TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPreFilterLedger) {
+TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates) {
   const auto target_it =
       std::ranges::find(kFlatSubwordTargets, ROCJITSU_CODE_ARCH_CDNA4, &FlatSubwordTarget::arch);
   ASSERT_NE(target_it, kFlatSubwordTargets.end());
@@ -2382,13 +2382,15 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPreFilterLedger) {
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  const ConSanMoiCandidate &candidate = result.moi_candidates.front();
-  EXPECT_EQ(candidate.mnemonic, "flat_load_dwordx3");
-  EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
-  EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
-  EXPECT_EQ(candidate.width_bits, 96u);
+  EXPECT_TRUE(result.moi_candidates.empty());
   EXPECT_FALSE(consan_moi_supports_flat_access_mnemonic("flat_load_dwordx3"));
+  ASSERT_EQ(result.observation_plan.site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan.site_decisions.front().kind,
+            ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(result.observation_plan.site_decisions.front().reason,
+            ConSanAccessPolicyReason::UnsupportedMnemonic);
+  EXPECT_TRUE(result.observation_plan.probe_intents.empty());
+  EXPECT_TRUE(result.coverage_ledger.intent_entries().empty());
   ASSERT_EQ(result.site_dispositions.size(), 1u);
   const ConSanSiteDispositionRecord &site = result.site_dispositions.front();
   EXPECT_EQ(site.site_kind, ConSanResourceSiteKind::Access);
@@ -2420,6 +2422,13 @@ TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   EXPECT_EQ(result.patches.front().anchor_offset, 3u * sizeof(uint32_t));
   EXPECT_EQ(result.patches.front().scratch_vgpr, 3u);
   EXPECT_EQ(result.patches.front().original_size, 17u * sizeof(uint32_t));
+  ASSERT_EQ(result.observation_plan.probe_intents.size(), 1u);
+  EXPECT_EQ(result.observation_plan.probe_intents.front().kind,
+            ConSanProbeIntentKind::RedundantAccessObservation);
+  ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
+            ConSanLoweringOutcomeKind::Instrumented);
+  EXPECT_TRUE(result.coverage_ledger.all_required_intents_instrumented());
   ASSERT_FALSE(result.elf_bytes.empty());
   AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_EQ(replacement.text_sections().size(), 1u);
@@ -3692,7 +3701,9 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      (*atomic)[0],
+      (*atomic)[1],
+      (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   ConSanOptions options;

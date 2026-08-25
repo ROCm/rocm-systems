@@ -213,12 +213,31 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   EXPECT_FALSE(result.moi_candidates.front().kernel_descriptor_file_offset);
   ASSERT_EQ(result.sync_events.size(), 1u);
   EXPECT_EQ(result.sync_events.front().kind, ConSanSyncEventKind::Barrier);
-  ASSERT_EQ(result.site_dispositions.size(), 4u);
+  ASSERT_EQ(result.site_dispositions.size(), 3u);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Access,
+                               &ConSanSiteDispositionRecord::site_kind),
+            1u);
+  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Barrier,
+                               &ConSanSiteDispositionRecord::site_kind),
+            2u);
   EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &disposition) {
     return (disposition.site_kind == ConSanResourceSiteKind::Access ||
             disposition.site_kind == ConSanResourceSiteKind::Barrier) &&
            disposition.disposition == ConSanSiteDisposition::Supported;
   }));
+  ASSERT_EQ(std::ranges::count(result.observation_plan.site_decisions,
+                               ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
+            1u);
+  ASSERT_EQ(result.observation_plan.probe_intents.size(), 1u);
+  const auto access_decision =
+      std::ranges::find(result.observation_plan.site_decisions, ConSanSiteDecisionKind::Admitted,
+                        &ConSanSiteDecision::kind);
+  ASSERT_NE(access_decision, result.observation_plan.site_decisions.end());
+  EXPECT_EQ(access_decision->source_containers,
+            (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
+  ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
+            ConSanLoweringOutcomeKind::Instrumented);
   ASSERT_EQ(result.resource_plans.size(), 2u);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
