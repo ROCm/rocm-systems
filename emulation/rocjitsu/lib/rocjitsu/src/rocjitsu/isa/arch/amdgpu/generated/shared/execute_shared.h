@@ -421,6 +421,21 @@ inline void execute_s_addc_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
 }
 
 template <typename Inst>
+inline void execute_s_addk_co_i32_sopk([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
+      amdgpu::RegisterAccess(wf).read_scalar(inst.sdst),
+      static_cast<uint32_t>(static_cast<int32_t>(
+          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.simm16) << 16) >> 16))));
+  amdgpu::RegisterAccess(wf).write_scalar(
+      inst.sdst,
+      (amdgpu::RegisterAccess(wf).read_scalar(inst.sdst) +
+       static_cast<uint32_t>(static_cast<int32_t>(
+           static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.simm16) << 16) >>
+           16))));
+}
+
+template <typename Inst>
 inline void execute_s_addk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
       amdgpu::RegisterAccess(wf).read_scalar(inst.sdst),
@@ -2546,6 +2561,10 @@ inline void execute_s_set_gpr_idx_on_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_set_inst_prefetch_distance_sopp([[maybe_unused]] Inst &inst,
                                                       [[maybe_unused]] Wavefront &wf) {}
+
+template <typename Inst>
+inline void execute_s_set_valu_coexec_mode_sopp([[maybe_unused]] Inst &inst,
+                                                [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
 inline void execute_s_sethalt_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
@@ -17085,20 +17104,12 @@ inline void execute_v_pk_add_f32_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_lo_w = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t s0_hi_w = s0_lo_w;
-    if (inst.src0.encoding_value_ >= 256 && inst.src0.encoding_value_ <= 511) {
-      uint64_t s0_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane);
-      s0_lo_w = static_cast<uint32_t>(s0_pair_w);
-      s0_hi_w = static_cast<uint32_t>(s0_pair_w >> 32);
-    }
-    uint32_t s1_lo_w = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t s1_hi_w = s1_lo_w;
-    if (inst.src1.encoding_value_ >= 256 && inst.src1.encoding_value_ <= 511) {
-      uint64_t s1_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane);
-      s1_lo_w = static_cast<uint32_t>(s1_pair_w);
-      s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
-    }
+    const auto s0_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32(inst.src0, lane);
+    const uint32_t s0_lo_w = s0_pair_w.lo;
+    const uint32_t s0_hi_w = s0_pair_w.hi;
+    const auto s1_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32(inst.src1, lane);
+    const uint32_t s1_lo_w = s1_pair_w.lo;
+    const uint32_t s1_hi_w = s1_pair_w.hi;
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
@@ -17264,27 +17275,15 @@ inline void execute_v_pk_fma_f32_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_lo_w = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t s0_hi_w = s0_lo_w;
-    if (inst.src0.encoding_value_ >= 256 && inst.src0.encoding_value_ <= 511) {
-      uint64_t s0_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane);
-      s0_lo_w = static_cast<uint32_t>(s0_pair_w);
-      s0_hi_w = static_cast<uint32_t>(s0_pair_w >> 32);
-    }
-    uint32_t s1_lo_w = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t s1_hi_w = s1_lo_w;
-    if (inst.src1.encoding_value_ >= 256 && inst.src1.encoding_value_ <= 511) {
-      uint64_t s1_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane);
-      s1_lo_w = static_cast<uint32_t>(s1_pair_w);
-      s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
-    }
-    uint32_t s2_lo_w = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-    uint32_t s2_hi_w = s2_lo_w;
-    if (inst.src2.encoding_value_ >= 256 && inst.src2.encoding_value_ <= 511) {
-      uint64_t s2_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src2, lane);
-      s2_lo_w = static_cast<uint32_t>(s2_pair_w);
-      s2_hi_w = static_cast<uint32_t>(s2_pair_w >> 32);
-    }
+    const auto s0_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32(inst.src0, lane);
+    const uint32_t s0_lo_w = s0_pair_w.lo;
+    const uint32_t s0_hi_w = s0_pair_w.hi;
+    const auto s1_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32(inst.src1, lane);
+    const uint32_t s1_lo_w = s1_pair_w.lo;
+    const uint32_t s1_hi_w = s1_pair_w.hi;
+    const auto s2_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32(inst.src2, lane);
+    const uint32_t s2_lo_w = s2_pair_w.lo;
+    const uint32_t s2_hi_w = s2_pair_w.hi;
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel2_lo = (inst.inst_.op_sel >> 2) & 1;
@@ -17794,20 +17793,12 @@ inline void execute_v_pk_mul_f32_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0_lo_w = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t s0_hi_w = s0_lo_w;
-    if (inst.src0.encoding_value_ >= 256 && inst.src0.encoding_value_ <= 511) {
-      uint64_t s0_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src0, lane);
-      s0_lo_w = static_cast<uint32_t>(s0_pair_w);
-      s0_hi_w = static_cast<uint32_t>(s0_pair_w >> 32);
-    }
-    uint32_t s1_lo_w = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t s1_hi_w = s1_lo_w;
-    if (inst.src1.encoding_value_ >= 256 && inst.src1.encoding_value_ <= 511) {
-      uint64_t s1_pair_w = amdgpu::RegisterAccess(wf).read_lane64(inst.src1, lane);
-      s1_lo_w = static_cast<uint32_t>(s1_pair_w);
-      s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
-    }
+    const auto s0_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32(inst.src0, lane);
+    const uint32_t s0_lo_w = s0_pair_w.lo;
+    const uint32_t s0_hi_w = s0_pair_w.hi;
+    const auto s1_pair_w = amdgpu::RegisterAccess(wf).read_lane_pair32(inst.src1, lane);
+    const uint32_t s1_lo_w = s1_pair_w.lo;
+    const uint32_t s1_hi_w = s1_pair_w.hi;
     bool sel0_lo = (inst.inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst.inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst.inst_.op_sel_hi >> 0) & 1;
