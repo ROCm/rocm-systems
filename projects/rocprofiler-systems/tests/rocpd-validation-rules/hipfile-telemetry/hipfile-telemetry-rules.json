@@ -18,7 +18,7 @@
                     "description": "Check for hipFile PMC metric descriptions",
                     "error_message": "No hipFile PMC info rows found in rocpd_info_pmc",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'hipFile GPU%'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE name LIKE 'device_storage_%'"
                 },
                 {
                     "comparison": "greater_than",
@@ -71,7 +71,7 @@
                     "description": "Check for hipFile PMC counter events in trace",
                     "error_message": "No hipFile PMC events found in rocpd_pmc_event",
                     "expected_result": 0,
-                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'hipFile GPU%'"
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name LIKE 'device_storage_%'"
                 },
                 {
                     "comparison": "greater_than",

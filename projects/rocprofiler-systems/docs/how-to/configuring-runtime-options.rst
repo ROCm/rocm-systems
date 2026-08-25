@@ -323,11 +323,18 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,rocdecode_api,rocjpeg_api
 
-Add ``hipfile_api`` to trace the hipFILE (GPU-direct storage) API:
+Add ``hipfile_api`` to trace the hipFile (GPU-direct storage) API:
 
 .. code-block:: shell
 
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,hipfile_api
+
+This traces individual hipFile API calls. To instead sample per-GPU hipFile I/O
+counters, such as fastpath and fallback operation counts, bandwidth, and bytes
+transferred, enable ``ROCPROFSYS_USE_HIPFILE`` and select metrics with
+``ROCPROFSYS_HIPFILE_METRICS``. The two features are independent and can be used
+together. For the full workflow, see
+:doc:`hipFile GPU-direct storage I/O telemetry <./hipfile-telemetry>`.
 
 
 For KFD event tracing, first check whether your GPU supports XNACK by running
