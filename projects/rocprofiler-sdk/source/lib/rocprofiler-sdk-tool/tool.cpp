@@ -1643,6 +1643,18 @@ get_replay_profile(rocprofiler_agent_id_t agent_id, uint64_t pass_index)
     return profiles->second[pass_index % profiles->second.size()];
 }
 
+// Counter groups configured for an agent, or 0 when the agent has none. Lets the asynchronous
+// record path sanity-check a pass index that arrived through user_data without duplicating the
+// lookup in get_replay_profile. Safe to call from any thread: get_agent_profiles() is built once
+// and the profiles map is read-only afterwards.
+size_t
+get_replay_group_count(rocprofiler_agent_id_t agent_id)
+{
+    const auto& profiles_map = get_agent_profiles().profiles;
+    const auto  profiles     = profiles_map.find(agent_id);
+    return (profiles == profiles_map.end()) ? 0 : profiles->second.size();
+}
+
 int64_t
 get_instruction_index(rocprofiler_pc_t pc)
 {
@@ -1942,11 +1954,13 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
         ROCP_CI_LOG_IF(ERROR, tl_current_replay_pass.has_value() && !profile)
             << "kernel replay: in replay pass " << pass << " but agent " << agent_id.handle
             << " has no counter groups configured";
-        if(profile)
-        {
-            *config          = *profile;
-            user_data->value = pack_replay_user_data(common::get_tid(), pass);
-        }
+
+        // Packed unconditionally, ahead of the profile check. Without a profile the SDK collects
+        // nothing for this dispatch and the record callback should not fire, but user_data is the
+        // record path's only source of thread id and pass index, and leaving it at its default
+        // would surface as thread_id 0 with replay_pass 0 if a record ever did arrive.
+        user_data->value = pack_replay_user_data(common::get_tid(), pass);
+        if(profile) *config = *profile;
     }
     else if(auto profile = get_device_counting_service(agent_id))
     {
@@ -1979,9 +1993,29 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
         // user_data was packed in counter_dispatch_callback (synchronous, pass-ordered), so
         // replay_pass stays tied to the counter group actually collected for this pass rather than
         // the order in which async records arrive.
-        const auto replay          = unpack_replay_user_data(user_data.value);
-        counter_record.thread_id   = replay.tid;
-        counter_record.replay_pass = replay.pass;
+        const auto replay = unpack_replay_user_data(user_data.value);
+
+        // Both fields are validated before they reach the record, because user_data is opaque to
+        // us on the way back: a record whose dispatch never went through counter_dispatch_callback
+        // arrives with a default-constructed slot that unpacks to a plausible-looking (0, 0), which
+        // would otherwise be written out as a real thread id and a real pass index.
+        const auto group_count = get_replay_group_count(dispatch_data.dispatch_info.agent_id);
+
+        ROCP_CI_LOG_IF(ERROR, replay.tid == 0)
+            << "kernel replay: counter record on agent "
+            << dispatch_data.dispatch_info.agent_id.handle
+            << " unpacked thread id 0, so its user_data was never packed by the dispatch callback";
+
+        ROCP_CI_LOG_IF(ERROR, group_count > 0 && replay.pass >= group_count)
+            << "kernel replay: counter record unpacked pass " << replay.pass << " but agent "
+            << dispatch_data.dispatch_info.agent_id.handle << " has only " << group_count
+            << " counter groups";
+
+        counter_record.thread_id = replay.tid;
+        // Clamped so a pass index that survived the checks above cannot be emitted as a group that
+        // was never collected. With group_count == 0 there is nothing to clamp against, so the
+        // unpacked value is passed through and the log above carries the diagnosis.
+        counter_record.replay_pass = (group_count > 0) ? (replay.pass % group_count) : replay.pass;
     }
     else
     {
