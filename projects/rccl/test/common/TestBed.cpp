@@ -3,12 +3,13 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-#include <cstdlib>
-#include <cstring>
 #include <unistd.h>
 #include "TestBed.hpp"
-#include "Rendezvous.hpp"
 #include <rccl/rccl.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include "Rendezvous.hpp"
 
 #define PIPE_WRITE(childId, val)                                        \
   ASSERT_EQ(write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
@@ -77,15 +78,18 @@ namespace RcclUnitTesting
       const bool  readyGo = getenv("RCCL_TEST_READY_GO") != nullptr;
       const char* rdvDir  = getenv("RCCL_TEST_RENDEZVOUS_DIR");
       const char* goTo    = getenv("RCCL_TEST_GO_TIMEOUT_SEC");
-      const bool  anyVar  = profile || readyGo || (rdvDir && rdvDir[0]) || goTo;
+      // An EMPTY profile is absent, like an empty rendezvous dir; treating it as present misdiagnosed "missing profile" as "wrong profile".
+      const bool  hasProf = profile && profile[0];
+      const bool  anyVar  = hasProf || readyGo || (rdvDir && rdvDir[0]) || goTo;
       if (anyVar)
       {
+        double goTimeoutSec = 0.0;
         const char* why = nullptr;
-        if (!profile)                              why = "READY_GO/rendezvous set without RCCL_TEST_WARMUP_PROFILE";
+        if (!hasProf)                              why = "READY_GO/rendezvous set without RCCL_TEST_WARMUP_PROFILE";
         else if (strcmp(profile, "fork_coll"))     why = "wrong RCCL_TEST_WARMUP_PROFILE for this binary (expected fork_coll)";
         else if (!readyGo)                         why = "RCCL_TEST_WARMUP_PROFILE set without RCCL_TEST_READY_GO";
         else if (!(rdvDir && rdvDir[0]))           why = "pipeline profile without RCCL_TEST_RENDEZVOUS_DIR";
-        else if (goTo && (goTo[0] == '\0' || atof(goTo) < 0.0)) why = "invalid RCCL_TEST_GO_TIMEOUT_SEC";
+        else if (goTo && !ParseGoTimeoutSec(goTo, goTimeoutSec)) why = "invalid RCCL_TEST_GO_TIMEOUT_SEC";
         if (why)
         {
           TEST_ERROR("[RCCL_TEST_CONFIG_ERROR] rccl-UnitTests: %s", why);
@@ -208,18 +212,26 @@ namespace RcclUnitTesting
       // so it stays fork-safe. No-op unless RCCL_TEST_RENDEZVOUS_DIR is set.
       if (Rendezvous::Enabled())
       {
+        // FAIL() only returns from InitComms and no caller checks HasFailure(), so abort here; forked children exit on their pipe's EOF.
         if (!Rendezvous::PublishReady())
         {
           TEST_ERROR("Failed to publish READY token");
-          FAIL();
+          ADD_FAILURE() << "init-pipeline: failed to publish READY token";
+          fflush(nullptr);
+          _exit(RCCL_TEST_CONFIG_ERROR);
         }
-        double goTimeout = 0.0;  // 0 = indefinite (rely on liveness pipe / process group)
-        if (const char* t = getenv("RCCL_TEST_GO_TIMEOUT_SEC")) { goTimeout = atof(t); }
+        double goTimeout = 0.0;  // 0 = indefinite (rely on process-group teardown)
+        if (const char* t = getenv("RCCL_TEST_GO_TIMEOUT_SEC"))
+        {
+          (void)ParseGoTimeoutSec(t, goTimeout);  // already validated above
+        }
         ReleaseStatus rel = Rendezvous::WaitForGo(goTimeout);
         if (rel != RELEASE_GO)
         {
           TEST_ERROR("GO not received (release status %d)", (int)rel);
-          FAIL();
+          ADD_FAILURE() << "init-pipeline: GO not received (release status " << (int)rel << ")";
+          fflush(nullptr);
+          _exit(RCCL_TEST_CONFIG_ERROR);
         }
       }
     }

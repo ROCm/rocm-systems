@@ -53,18 +53,21 @@ void MPIEnvironment::warmup_device_code()
         const bool  readyGo = std::getenv("RCCL_TEST_READY_GO") != nullptr;
         const char* rdvDir  = std::getenv("RCCL_TEST_RENDEZVOUS_DIR");
         const char* goTo    = std::getenv("RCCL_TEST_GO_TIMEOUT_SEC");
-        const bool  anyVar  = profile || readyGo || (rdvDir && rdvDir[0]) || goTo;
+        // An EMPTY profile is absent, like an empty rendezvous dir; treating it as present misdiagnosed "missing profile" as "wrong profile".
+        const bool  hasProf = profile && profile[0];
+        const bool  anyVar  = hasProf || readyGo || (rdvDir && rdvDir[0]) || goTo;
 
         if(!anyVar)
         {
             return;  // serial entry: all pipeline vars absent -> no-op.
         }
+        double goTimeoutSec = 0.0;
         const char* why = nullptr;
-        if(!profile)                                 why = "READY_GO/rendezvous set without RCCL_TEST_WARMUP_PROFILE";
+        if(!hasProf)                                 why = "READY_GO/rendezvous set without RCCL_TEST_WARMUP_PROFILE";
         else if(std::strcmp(profile, "mpi_coll"))    why = "wrong RCCL_TEST_WARMUP_PROFILE for this binary (expected mpi_coll)";
         else if(!readyGo)                            why = "RCCL_TEST_WARMUP_PROFILE set without RCCL_TEST_READY_GO";
         else if(!(rdvDir && rdvDir[0]))              why = "pipeline profile without RCCL_TEST_RENDEZVOUS_DIR";
-        else if(goTo && (goTo[0] == '\0' || std::atof(goTo) < 0.0)) why = "invalid RCCL_TEST_GO_TIMEOUT_SEC";
+        else if(goTo && !RcclUnitTesting::ParseGoTimeoutSec(goTo, goTimeoutSec)) why = "invalid RCCL_TEST_GO_TIMEOUT_SEC";
         if(why)
         {
             if(world_rank == 0)
@@ -192,8 +195,11 @@ void MPIEnvironment::warmup_device_code()
         }
         else
         {
-            double go_timeout = 0.0;  // 0 = indefinite (rely on liveness pipe / process group)
-            if(const char* t = std::getenv("RCCL_TEST_GO_TIMEOUT_SEC")) { go_timeout = std::atof(t); }
+            double go_timeout = 0.0;  // 0 = indefinite (rely on process-group teardown)
+            if(const char* t = std::getenv("RCCL_TEST_GO_TIMEOUT_SEC"))
+            {
+                (void)RcclUnitTesting::ParseGoTimeoutSec(t, go_timeout);  // already validated above
+            }
             release = static_cast<int>(RcclUnitTesting::Rendezvous::WaitForGo(go_timeout));
         }
     }

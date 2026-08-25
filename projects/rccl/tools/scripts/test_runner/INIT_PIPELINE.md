@@ -83,6 +83,8 @@ sides). Totals across differently-configured runs are not comparable.
   warmed device ⊇ the assigned device (and never the fork parent's pid).
 - **A3 (one entry):** `RCCL_TEST_READY_GO=1 RCCL_TEST_RENDEZVOUS_DIR=<dir>` on one
   entry; it warms, writes `<dir>/ready`, blocks; `touch <dir>/go` releases it.
+  Set these on the **binary directly** — the runner owns the four `RCCL_TEST_*` vars
+  and scrubs any ambient copy from every child it launches, serial included.
 - **A4 (two-entry overlap):** two entries warm concurrently, execute serially
   (`--phase-timings` shows `time_to_ready` overlapping the prior `execution_time`).
 - **A5 (scale & perf):** sweep `--init-pool ∈ {1,2,4,6,8}` × `--loader-policy`;
