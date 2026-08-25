@@ -138,6 +138,74 @@ restored. Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)
 The last executed pass is **not** restored, so the application sees the memory the kernel actually
 produced.
 
+When a dispatch is not replayed
+===============================
+
+The SDK can decline to replay a dispatch. The dispatch still runs, and counter rows still appear
+for it — but they cover only the groups whose passes ran, so counters from different groups are not
+comparable for that dispatch. This is the failure mode to watch for, because the output looks
+complete.
+
+The most common cause is memory the snapshot cannot capture. Stream-ordered
+(``hipMallocAsync``), managed, and virtual-memory allocators — including PyTorch's
+``expandable_segments:True`` and Kokkos built with ``KOKKOS_ENABLE_IMPL_HIP_MALLOC_ASYNC`` — put
+application data outside the snapshot, so later passes would run on mutated inputs. Replay is
+declined rather than allowed to report those numbers. Other causes are a snapshot footprint over
+the host budget, GPU work launched from a profiler callback, and a queue that does not drain within
+the bound.
+
+Two things tell you it happened:
+
+* The SDK logs one ``[kernel-replay]`` line per dispatch naming the outcome and, for a decline, the
+  reason. Raise the log level to see them (``--log-level info``, or ``warning`` for declines alone).
+* ``rocprofv3`` reports at the end of the run how many targeted dispatches did not collect every
+  counter group.
+
+If the cause is the allocator, the fix is in the application or its environment: build or configure
+it to use ordinary device allocations for the buffers the kernels of interest write. If you
+understand the risk and want the numbers anyway, the SDK's tuning variables in
+:ref:`using-kernel-replay` override the decline.
+
+Combining with other collection modes
+=====================================
+
+Kernel replay executes one logical dispatch several times under a single ``dispatch_id``. That is
+harmless for counter collection, which is the point of the feature, but not for everything else.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 15 55
+
+   * - Mode
+     - Combined
+     - Why
+   * - ``--pmc`` counter collection
+     - Required
+     - The pass count is the number of counter groups.
+   * - ``--att`` (thread trace)
+     - Rejected
+     - Attributes a trace per dispatch; the traces of the individual executions would be
+       indistinguishable.
+   * - ``--pc-sampling-*``
+     - Rejected
+     - Samples are attributed per dispatch, so one logical dispatch would appear to have executed
+       for the sum of its passes.
+   * - ``--spm``
+     - Rejected
+     - Streams samples over time rather than per dispatch; replay inflates the interval being
+       sampled.
+   * - ``--kernel-trace``, ``--stats``
+     - Allowed, with a warning
+     - The records are correct — there really were N executions — but kernel counts, durations and
+       statistics reflect the pass count rather than the number of dispatches the application
+       issued.
+   * - API tracing (``--hip-trace``, ``--hsa-trace``, marker, memory copy)
+     - Allowed
+     - The application's API calls are unaffected; only the kernel dispatch records multiply.
+
+The rejections are enforced both by the launcher and by the tool, so setting
+``ROCPROF_KERNEL_REPLAY`` directly in the environment does not bypass them.
+
 Limitations (CLI)
 =================
 
@@ -155,7 +223,7 @@ Limitations (CLI)
   unsafe. The SDK already selects groups per agent; what is missing is a multi-GPU / MPI test.
 * **Async copies are not fenced** (SDK). An ``hsa_amd_memory_async_copy`` on another thread can
   mutate device memory during the replay window.
-* **Stuck drains abort the process** (SDK, roughly 60 s).
+* **A dispatch may not be replayed at all.** See `When a dispatch is not replayed`_ below.
 * **Host RAM duplication** of the tracked device footprint. For large footprints, snapshot plus
   restore can cost more than re-running the application.
 
