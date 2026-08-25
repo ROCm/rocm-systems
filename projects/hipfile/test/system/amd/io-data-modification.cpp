@@ -214,147 +214,44 @@ INSTANTIATE_TEST_SUITE_P(Workgroups, HipFileVerifyCombined,
 // hipFileWrite are either the previously present data, or a hole of 0-initialized data, matching the POSIX
 // behaviour.
 // ---------------------------------------------------------------------------
-namespace {
+struct HipFileExtend : public DataModificationBase<IntElementPolicy> {
+    void SetUp() override
+    {
+        // Every scenario must actually extend the file; the final-size assertion in the
+        // body depends on it.
+        ASSERT_TRUE(GetParam().ext.has_value());
+        ASSERT_GT(GetParam().ext->file_off + static_cast<hoff_t>(io_bytes), GetParam().ext->base_len);
 
-struct ScenarioParam {
-    ExtendCase  ext;
-    std::string name;
+        // Size file to base_len to be extended.
+        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(GetParam().ext->base_len)));
+        DataModificationBase::SetUp();
+    }
 };
 
+TEST_P(HipFileExtend, Extends)
+{
+    ASSERT_NO_FATAL_FAILURE(runExtendTest(*this));
+}
+
 HIPFILE_WARN_NO_EXIT_DTOR_OFF
-const std::array<ScenarioParam, 5> extend_scenarios{{
+const std::array<Axis<ExtendCase>, 5> kExtendCases{{
     {appendFromEmpty(), "extend_empty_contiguous"},
     {appendAt(kChunkOff), "append_aligned"},
     {holeAfter(0, kChunkOff), "hole_from_empty"},
     {holeAfter(kChunkOff, kChunkOff), "hole_from_aligned"},
     {overwriteAppend(kChunkOff, kFourKiBOff / 2), "overwrite_and_append"},
 }};
+
+const std::array<Axis<size_t>, 2> kExtendSizes{{{4_KiB, "small"}, {kChunkBytes + 4_KiB, "large"}}};
 HIPFILE_WARN_NO_EXIT_DTOR_ON
 
-} // namespace
-
-struct HipFileExtend : public testing::TestWithParam<std::tuple<IoTestParam, ScenarioParam, SizeParam>> {
-
-    const IoTestBackend backend{std::get<0>(GetParam()).backend};       // backend fulfilling the I/O request
-    const hoff_t        base_len{std::get<1>(GetParam()).ext.base_len}; // file length before the write
-    const hoff_t        file_off{std::get<1>(GetParam()).ext.file_off}; // file offset the write starts at
-    const size_t        io_bytes{std::get<2>(GetParam()).bytes}; // bytes transferred using the hipFile API
-    // One head sentinel region + data + one tail sentinel region.
-    // [head device sentinel region][data][tail device sentinel region].
-    const size_t buffer_bytes{io_bytes + 2 * 4_KiB};           // total device buffer size
-    const size_t io_elems{io_bytes / sizeof(int32_t)};         // transferred elements
-    const size_t buffer_elems{buffer_bytes / sizeof(int32_t)}; // elements spanning the whole buffer
-
-    Tmpfile         tmpfile;
-    hipFileHandle_t tmpfile_handle{nullptr};
-    void           *device_buffer{nullptr}; // allocated by SetUp;
-    int32_t        *buffer_start{nullptr};  // typed view of device_buffer
-
-    HipFileExtend() : tmpfile{test_env.ais_capable_dir}
-    {
-    }
-
-    void SetUp() override
-    {
-        Context<Configuration>::get()->fastpath(false);
-        Context<Configuration>::get()->fallback(false);
-        switch (backend) {
-            case IoTestBackend::Fastpath:
-                Context<Configuration>::get()->fastpath(true);
-                break;
-            case IoTestBackend::Fallback:
-                Context<Configuration>::get()->fallback(true);
-                break;
-            default:
-                FAIL() << "Unsupported IoTestBackend";
-        }
-
-        // Every scenario must actually extend the file; the final-size assertion below depends on it.
-        ASSERT_GT(file_off + static_cast<hoff_t>(io_bytes), base_len);
-
-        // Size file to base_len to be extended.
-        ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(base_len)));
-
-        hipFileDescr_t descr{};
-        descr.type      = hipFileHandleTypeOpaqueFD;
-        descr.handle.fd = tmpfile.fd;
-        ASSERT_EQ(HIPFILE_SUCCESS, hipFileHandleRegister(&tmpfile_handle, &descr));
-
-        ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, buffer_bytes));
-        buffer_start = static_cast<int32_t *>(device_buffer);
-        ASSERT_EQ(hipSuccess, hipMemset(device_buffer, kSentinelByte, buffer_bytes));
-
-        if (backend == IoTestBackend::Fastpath) {
-            enforceFastpathGate(tmpfile_handle, device_buffer);
-        }
-    }
-
-    void TearDown() override
-    {
-        if (device_buffer) {
-            ASSERT_EQ(hipSuccess, hipFree(device_buffer));
-        }
-        hipFileHandleDeregister(tmpfile_handle);
-    }
-};
-
-TEST_P(HipFileExtend, Extends)
-{
-    const size_t     n       = io_elems;
-    const size_t     slack_n = slackElems();
-    const hoff_t     buf_off = static_cast<hoff_t>(4_KiB);
-    constexpr size_t kStride = 2;
-
-    // Device layout (each sentinel region slack_n ints, data n ints):
-    // [head device sentinel region][data][tail device sentinel region].
-    // data starts after the head device sentinel region; seed the index pattern there.
-    seedDevicePattern(device_buffer, buf_off, n);
-
-    assertVerifyAndModify(buffer_start, buffer_elems, slack_n, n, defaultGrid(n), dim3(kDefaultWorkgroupSize),
-                          kStride);
-
-    // File layout after the write (preserved region is preserved_n ints, data is n ints, hole spans
-    // [base_len, file_off) and is empty when we append to the file):
-    // [preserved = -1][hole = 0][data = stride-modified i+1], when file_off >= base_len.
-    // [preserved = -1][data = stride-modified i+1], when file_off < base_len.
-    const hoff_t preserved_end = (file_off < base_len) ? file_off : base_len;
-    const size_t preserved_n   = static_cast<size_t>(preserved_end) / sizeof(int32_t);
-    if (preserved_n > 0) {
-        seedFileConstant(tmpfile.fd, 0, preserved_n, kSentinel);
-    }
-
-    ASSERT_EQ(static_cast<ssize_t>(io_bytes),
-              hipFileWrite(tmpfile_handle, device_buffer, io_bytes, file_off, buf_off));
-
-    std::vector<int32_t> body = readFileInts(tmpfile.fd, file_off, n);
-    assertModifiedPattern(body.data(), n, kStride);
-
-    // Hole was zero-filled.
-    if (file_off > base_len) {
-        assertHoleZero(tmpfile.fd, base_len, file_off);
-    }
-
-    // Final size correct.
-    ASSERT_EQ(file_off + static_cast<hoff_t>(io_bytes), fileSize(tmpfile.fd));
-
-    // Existing data below the write is fully intact.
-    if (preserved_n > 0) {
-        std::vector<int32_t> head = readFileInts(tmpfile.fd, 0, preserved_n);
-        assertConstant(head.data(), 0, preserved_n, kSentinel);
-    }
-}
-
-static std::string
-extendName(const testing::TestParamInfo<HipFileExtend::ParamType> &info)
-{
-    return std::get<0>(info.param).name + "_" + std::get<1>(info.param).name + "_" +
-           std::get<2>(info.param).name;
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    , HipFileExtend,
-    testing::Combine(testing::ValuesIn(io_test_params), testing::ValuesIn(extend_scenarios),
-                     testing::Values(SizeParam{4_KiB, "small"}, SizeParam{kChunkBytes + 4_KiB, "large"})),
-    extendName);
+INSTANTIATE_TEST_SUITE_P(, HipFileExtend,
+                         testing::ValuesIn(IoTestScenarioSet{
+                             IoTestScenario{.buf_off = kFourKiBOff, .stride = 2}}
+                                               .over(&IoTestScenario::backend, kBackends)
+                                               .over(&IoTestScenario::ext, kExtendCases)
+                                               .over(&IoTestScenario::io_bytes, kExtendSizes)
+                                               .build()),
+                         ioTestScenarioName);
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

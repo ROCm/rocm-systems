@@ -369,4 +369,59 @@ runAllRegionsTest(DataModificationBase<Policy> &f)
     Policy::assertFileSlack(tail.data(), 0, slack_n);
 }
 
+// A write that extends the file size. If hipFileWrite is made past the current EOF, that
+// gap should be zero-filled.
+template <class Policy>
+void
+runExtendTest(DataModificationBase<Policy> &f)
+{
+    using Elem = typename Policy::Elem;
+
+    const IoTestScenario &s = f.GetParam();
+    ASSERT_TRUE(s.ext.has_value()) << "runExtendTest requires IoTestScenario::ext to be set";
+
+    const size_t n          = f.io_elems;
+    const hoff_t base_len   = s.ext->base_len;
+    const hoff_t file_off   = s.ext->file_off;
+    const hoff_t buf_off    = s.buf_off;
+    const size_t data_start = Policy::elems(static_cast<size_t>(buf_off));
+
+    // Device layout (data begins at buf_off, after the head sentinel region):
+    // [head device sentinel region][data][tail device sentinel region].
+    Policy::seedDeviceData(f.device_buffer, buf_off, n);
+
+    Policy::verifyAndModify(f.buffer_start, f.buffer_elems, data_start, n, gridFor(s.grid, n),
+                            dim3(kDefaultWorkgroupSize), s.stride);
+
+    // File layout after the write (the hole spans [base_len, file_off) and is empty when
+    // we append to the file):
+    // [preserved][hole = 0][data = stride-modified], when file_off >= base_len.
+    // [preserved][data = stride-modified],           when file_off <  base_len.
+    const hoff_t preserved_end = (file_off < base_len) ? file_off : base_len;
+    const size_t preserved_n   = Policy::elems(static_cast<size_t>(preserved_end));
+    if (preserved_n > 0) {
+        Policy::seedFileSlack(f.tmpfile.fd, 0, preserved_n);
+    }
+
+    ASSERT_EQ(static_cast<ssize_t>(f.io_bytes),
+              hipFileWrite(f.tmpfile_handle, f.device_buffer, f.io_bytes, file_off, buf_off));
+
+    std::vector<Elem> body = Policy::readFile(f.tmpfile.fd, file_off, n);
+    Policy::assertModified(body.data(), n, s.stride);
+
+    // Hole was zero-filled.
+    if (file_off > base_len) {
+        assertHoleZero(f.tmpfile.fd, base_len, file_off);
+    }
+
+    // Final size correct.
+    ASSERT_EQ(file_off + static_cast<hoff_t>(f.io_bytes), fileSize(f.tmpfile.fd));
+
+    // Existing data below the write is fully intact.
+    if (preserved_n > 0) {
+        std::vector<Elem> head = Policy::readFile(f.tmpfile.fd, 0, preserved_n);
+        Policy::assertFileSlack(head.data(), 0, preserved_n);
+    }
+}
+
 } // namespace hipFileTest
