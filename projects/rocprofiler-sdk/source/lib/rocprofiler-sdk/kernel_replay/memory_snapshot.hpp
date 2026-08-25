@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+
 #include <hsa/hsa.h>
 
 #include <cstddef>
@@ -97,6 +99,26 @@ estimate_footprint(hsa_agent_t agent);
 // abort replay rather than submit another pass over corrupted device memory.
 bool
 restore(const device_snapshot_t& snapshot);
+
+// True when [`gpu_addr`, +`size`) in `inventory` still names the allocation that carried
+// `generation`, and is therefore safe to copy.
+//
+// This is the predicate that keeps replay from corrupting the application, so it is named and
+// exposed rather than left inline. The alloc/free wrappers deliberately sit outside the per-agent
+// replay lock, so between snap() recording a region and restore() writing it back, another thread
+// may free that allocation and receive the same base address for a new one -- with a caching or
+// pooling allocator that is the expected outcome, not a rare race. A check on (base, size) alone
+// cannot tell the two apart, and writing the old bytes over the new allocation would silently
+// corrupt live data. The generation stamp is what distinguishes them.
+//
+// `generation == 0` means "any live allocation of at least `size` bytes", used for regions that are
+// not tracker-owned (module-scope variables). No tracked allocation is ever stamped 0, so a tracked
+// region can never fall back to the weaker check by accident.
+bool
+region_is_restorable(const memory_tracker::tracked_map_t& inventory,
+                     void*                                gpu_addr,
+                     size_t                               size,
+                     uint64_t                             generation);
 }  // namespace memory_snapshot
 }  // namespace kernel_replay
 }  // namespace rocprofiler

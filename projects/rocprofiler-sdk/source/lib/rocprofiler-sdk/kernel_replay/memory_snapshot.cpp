@@ -53,17 +53,10 @@ dma_copy(void* dst, const void* src, size_t n)
     return core->hsa_memory_copy_fn(dst, src, n);
 }
 
-/// @brief Run @p copy under the tracker read lock, but only while [@p gpu_addr, +@p size) is still
-/// the same live tracked allocation of >= @p size bytes, so a concurrent free (write lock) can't
-/// retire it mid-copy. Direction is caller-supplied: snap reads device->host, restore writes
+/// @brief Run @p copy under the tracker read lock, but only while region_is_restorable() still
+/// holds for [@p gpu_addr, +@p size), so a concurrent free (write lock) can't retire or replace the
+/// allocation mid-copy. Direction is caller-supplied: snap reads device->host, restore writes
 /// host->device.
-///
-/// @param generation The generation the caller expects, or 0 to accept any live allocation of
-/// sufficient size. Matching on (base, size) alone is not enough: the alloc/free wrappers sit
-/// outside the per-agent replay lock, so another thread can free a region and allocate a new one at
-/// the same base inside the window -- and a caching allocator makes that the likely outcome rather
-/// than an unlikely one. Restoring the old bytes over the new allocation would corrupt it silently,
-/// which is exactly the failure a profiler must not cause.
 ///
 /// @return @p copy's status, or @c std::nullopt if the region was freed, shrunk, or replaced since
 /// it was recorded.
@@ -73,9 +66,7 @@ with_inventory_check(void* gpu_addr, size_t size, uint64_t generation, CopyFn&& 
 {
     return memory_tracker::inventory().rlock(
         [&](const memory_tracker::tracked_map_t& map) -> std::optional<hsa_status_t> {
-            auto itr = map.find(gpu_addr);
-            if(itr == map.end() || itr->second.size < size) return std::nullopt;
-            if(generation != 0 && itr->second.generation != generation) return std::nullopt;
+            if(!region_is_restorable(map, gpu_addr, size, generation)) return std::nullopt;
             return copy();
         });
 }
@@ -141,6 +132,24 @@ discover_module_variables(hsa_agent_t agent)
     return found;
 }
 }  // namespace
+
+bool
+region_is_restorable(const memory_tracker::tracked_map_t& inventory,
+                     void*                                gpu_addr,
+                     size_t                               size,
+                     uint64_t                             generation)
+{
+    const auto itr = inventory.find(gpu_addr);
+    if(itr == inventory.end()) return false;
+
+    // A shrunk allocation is rejected rather than partially copied: the recorded length is what the
+    // snapshot holds, and writing it into something smaller would run past the allocation.
+    if(itr->second.size < size) return false;
+
+    // A caller that supplied a generation is asserting an exact identity, so a mismatch is a reused
+    // address and not the region that was captured.
+    return generation == 0 || itr->second.generation == generation;
+}
 
 device_snapshot_t
 snap(hsa_agent_t agent)
