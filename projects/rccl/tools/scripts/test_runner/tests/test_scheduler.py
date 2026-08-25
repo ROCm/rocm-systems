@@ -449,7 +449,8 @@ def test_quiescent_exec_pauses_launches_during_perf_entry(tmp_path):
     perf, e1 = entries[0], entries[1]
     assert perf.result == "PASSED" and e1.result == "PASSED"
     # e1 was launched only after the perf entry finished executing.
-    assert e1.t_launch >= perf.t_exit - 0.02, (
+    # No tolerance: subtracting it here would permit a real 20 ms quiescent violation.
+    assert e1.t_launch >= perf.t_exit, (
         f"e1 launched during perf exec (quiescent violated): "
         f"e1.launch={e1.t_launch:.3f} perf.exit={perf.t_exit:.3f}")
 
@@ -522,6 +523,88 @@ def test_finish_entry_idempotent(tmp_path):
     sched._finish_entry(e, RESULT_FAILED, "exec", terminate=False)  # ignored
     assert e.result == "PASSED"
     assert sched.terminal == 1 and sched.settled == 1
+
+
+def test_late_fault_after_loader_drains_still_completes(tmp_path):
+    """Regression: a fault that lands AFTER the loader has drained used to hang run().
+
+    The loader finishes as soon as everything is launched; every watcher then returns at
+    its stop_flag check without finalizing, so a one-shot stop_flag check before an
+    unbounded completed.wait() blocked forever. run() must still return, with all entries
+    terminal.
+    """
+    entries = _entries(tmp_path, [{"label": f"P{i}", "warm": 0, "exec": 0, "code": 0}
+                                  for i in range(3)])
+
+    def spawn(entry):
+        # Only entry 0 reaches READY; 1 and 2 stay in their watcher's polling loop.
+        if entry.seq == 0:
+            with open(entry.rendezvous.ready_path, "w") as f:
+                f.write("ready\n")
+        return _FakeProc(0), None
+
+    def wait_exit(proc, deadline):
+        time.sleep(0.3)   # let the loader thread drain first: that is the whole point
+        raise RuntimeError("injected late executor fault")
+
+    sched = PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit,
+                              infer=lambda e, rc: "PASSED", terminate=lambda p: None,
+                              init_pool=3, poll_interval=0.01)
+    done = threading.Event()
+    t = threading.Thread(target=lambda: (sched.run(), done.set()), daemon=True)
+    t.start()
+    # The fault arrives only once a watcher promotes an entry, i.e. after the loader has drained.
+    assert done.wait(timeout=20), "run() deadlocked after a post-loader fault"
+    _assert_model_a(entries)
+    assert sched.settled == sched.total
+
+
+def test_raising_terminate_does_not_leak_the_init_slot(tmp_path):
+    """Regression: _terminate ran before the slot release, so a raising terminate left
+    slot_owned True forever -- two such faults deadlock the loader on --init-pool 2."""
+    entries = _entries(tmp_path, [{"label": "P0", "warm": 0, "exec": 0, "code": 0}])
+    sched = PipelineScheduler(entries, spawn=lambda e: (_FakeProc(0), None),
+                              wait_exit=lambda p, d: 0, infer=lambda e, rc: "PASSED",
+                              terminate=_boom, init_pool=1, poll_interval=0.01)
+    e = entries[0]
+    e.proc = _FakeProc(0)
+    e.slot_owned = True
+    sched.slot.acquire()
+    sched._finish_entry(e, RESULT_CANCELLED, "init", terminate=True)
+    assert e.result == RESULT_CANCELLED and e.phase == "init"
+    assert not e.slot_owned, "init-pool slot leaked"
+    assert sched.slot.acquire(timeout=0.5), "semaphore was never released"
+    assert sched.settled == 1
+    assert not sched.worker_exc.empty(), "the terminate fault must still be reported"
+
+
+def _boom(proc):
+    raise RuntimeError("injected terminate fault")
+
+
+def test_fail_fast_does_not_cancel_a_lower_index_sibling(tmp_path):
+    """Regression: fail-fast is the serial isCorrect short-circuit, which only skips work
+    AFTER the failure. s1 dies in init while s0 is still warming; s0 must still run.
+
+    Gating on a bare `cancelled` flag made s0's result depend purely on READY timing --
+    CANCELLED when it reached READY after s1 died, PASSED when it got there first.
+    """
+    tl = os.path.join(str(tmp_path), "tl.txt")
+    entries = _grouped_entries(tmp_path, "P", [
+        {"label": "s0", "warm": 0.40, "exec": 0.05, "code": 0},   # still warming when s1 dies
+        {"label": "s1", "warm": 0.02, "exec": 0.0, "code": 7, "skip_ready": True},
+        {"label": "s2", "warm": 0.02, "exec": 0.05, "code": 0},
+    ])
+    spawn, wait_exit, infer, terminate = _real_io(tl)
+    PipelineScheduler(entries, spawn=spawn, wait_exit=wait_exit, infer=infer,
+                      terminate=terminate, init_pool=3, init_timeout=30, exec_timeout=30,
+                      fork_sweep_policy="legacy").run()
+    r = {e.label: e.result for e in entries}
+    assert r["s1"] == RESULT_FAILED
+    assert r["s2"] == RESULT_CANCELLED          # after the failure -> short-circuited
+    assert r["s0"] == "PASSED", r               # before the failure -> must still run
+    assert "s0" in [x[0] for x in _parse_intervals(tl)]
+    _assert_model_a(entries)
 
 
 if __name__ == "__main__":

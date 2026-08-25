@@ -40,6 +40,12 @@ from dataclasses import dataclass
 READY_TOKEN = "ready"
 GO_TOKEN = "go"
 
+# Env the runner alone owns; the C++ contract _exit(42)s on any inconsistent subset, so an ambient export must be scrubbed from EVERY launch.
+RUNNER_OWNED_ENV = ("RCCL_TEST_WARMUP_PROFILE", "RCCL_TEST_READY_GO",
+                    "RCCL_TEST_RENDEZVOUS_DIR", "RCCL_TEST_GO_TIMEOUT_SEC")
+# Test-only fault injection consumed by MPIEnvironment.cpp; a stray export silently forces failures.
+INJECT_ENV_PREFIX = "RCCL_TEST_INJECT_"
+
 # Terminal results.
 RESULT_FAILED = "FAILED"         # exited before READY, or a failing exec exit code
 RESULT_TIMED_OUT = "TIMED_OUT"   # init- or exec-phase timeout
@@ -280,6 +286,8 @@ class _ParentGroup:
     total: int
     next_index: int = 0                 # the only sibling index currently eligible
     cancelled: bool = False             # a sibling failed -> fail-fast the rest
+    # Lowest index the fail-fast covers; serial short-circuits only AFTER the failure, so a bare `cancelled` made this READY-timing dependent.
+    cancel_from: int = None
     ready_by_index: dict = None         # sibling_index -> entry that reached READY early
 
     def __post_init__(self):
@@ -399,14 +407,17 @@ class PipelineScheduler:
                 return
             entry.finalized = True
             self.terminal += 1
+        # Record state FIRST: a raising terminate must not leave result/phase unset nor leak the init slot (deadlocks the loader).
+        entry.result = result
+        entry.phase = phase
         try:
             if terminate and entry.proc is not None:
                 self._terminate(entry.proc)
+        except BaseException as e:  # noqa: BLE001 -- contained so the slot/fd cleanup below always runs
+            self.worker_exc.put(e)
+        finally:
             self._release_slot_if_owned(entry)
             self._close_fd(entry)
-            entry.result = result
-            entry.phase = phase
-        finally:
             with self.state_lock:
                 self.settled += 1
                 reached = (self.settled == self.total)
@@ -426,7 +437,14 @@ class PipelineScheduler:
         if not self._grouped(entry):
             return False
         with self.state_lock:
-            return self._parents[entry.parent].cancelled
+            return self._cancelled_locked(self._parents[entry.parent], entry)
+
+    @staticmethod
+    def _cancelled_locked(group, entry):
+        """True iff the parent's fail-fast covers this sibling. Caller holds state_lock."""
+        if not group.cancelled:
+            return False
+        return group.cancel_from is None or entry.sibling_index >= group.cancel_from
 
     def _on_ready(self, entry):
         """Decide what to do when a grouped entry reaches READY: 'release'
@@ -436,7 +454,7 @@ class PipelineScheduler:
             return "release"
         with self.state_lock:
             g = self._parents[entry.parent]
-            if g.cancelled:
+            if self._cancelled_locked(g, entry):
                 return "cancel"
             g.ready_by_index[entry.sibling_index] = entry
             return "release" if entry.sibling_index == g.next_index else "wait"
@@ -457,6 +475,7 @@ class PipelineScheduler:
                     to_release.append(nxt)     # it was waiting; now it's its turn
             else:
                 g.cancelled = True             # fail-fast: cancel every later sibling
+                g.cancel_from = entry.sibling_index + 1
                 for e in self.entries:
                     if (e.parent == entry.parent and e.sibling_total > 1
                             and e.sibling_index > entry.sibling_index
@@ -496,6 +515,7 @@ class PipelineScheduler:
                 g = self._parents.get(entry.parent)
                 if g is not None:
                     g.cancelled = True
+                    g.cancel_from = entry.sibling_index + 1
                 for e in self.entries:
                     if (e.parent == entry.parent and e.sibling_total > 1
                             and e.sibling_index > entry.sibling_index and not e.finalized):
@@ -635,6 +655,10 @@ class PipelineScheduler:
             unit = self.exec_q.get()
             if unit is self._SENTINEL:
                 return
+            if self.stop_flag.is_set():
+                # Stopping: never launch one more test. _shutdown() finalizes this unit.
+                self._release_slot_if_owned(unit)
+                continue
             # Atomic READY->EXECUTING handoff (plan section 5 #5): claim ownership
             # or skip an already-finalized (e.g. cancelled) unit.
             with self.state_lock:
@@ -702,6 +726,18 @@ class PipelineScheduler:
         """Ask the scheduler to stop launching new work (e.g. Ctrl-C / fatal)."""
         self.stop_flag.set()
 
+    def _await_completion(self, shut=False):
+        """Wait for settled == total, running _shutdown() once if a fault stops the run.
+
+        The loader drains minutes before the entries finish, so a LATER fault leaves every
+        watcher returning at its stop_flag check without finalizing its entry; a one-shot
+        stop_flag check before an unbounded wait would then block forever.
+        """
+        while not self.completed.wait(self.poll_interval):
+            if self.stop_flag.is_set() and not shut:
+                self._shutdown()
+                shut = True
+
     # ---- driver ------------------------------------------------------------
     def run(self):
         """Run to completion; return the entries (each with a terminal result).
@@ -716,14 +752,10 @@ class PipelineScheduler:
         exec_t.start()
         try:
             loader_t.join()
-            # If a fault stopped the run, finalize whatever the watchers abandoned
-            # so `settled` can reach `total` (otherwise completion never arrives).
-            if self.stop_flag.is_set():
-                self._shutdown()
-            self.completed.wait()
+            self._await_completion()
         except KeyboardInterrupt:
             self._shutdown()
-            self.completed.wait()
+            self._await_completion(shut=True)
             raise
         finally:
             exec_t.join()
