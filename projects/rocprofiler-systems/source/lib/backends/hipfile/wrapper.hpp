@@ -18,6 +18,8 @@
 #include <hipfile.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <type_traits>
 
 // Supplied by the build (see source/lib/backends/hipfile/CMakeLists.txt). Checked
 // explicitly because an undefined macro evaluates to 0 in #if, which would turn both
@@ -107,13 +109,14 @@ struct wrapper
     /**
      * @brief Snapshot the Level-3 (per-GPU) stats for the calling process.
      *
-     * @param out [out] zero-initialized first, populated on success.
+     * @param out [out] caller-owned buffer; populated on success. The caller
+     *            value-initializes it (see backend::query) so this wrapper does not
+     *            memset the ~5 KB Level-3 struct a second time.
      * @return true on success. False means the target never initialized hipFile stats -
      *         it performed no hipFile I/O, or HIPFILE_STATS_LEVEL is disabled.
      */
     static bool get_stats_l3(stats_l3_t* out) noexcept
     {
-        *out = stats_l3_t{};
         return hipFileGetStatsL3(out).err == hipFileSuccess;
     }
 };
@@ -121,5 +124,33 @@ struct wrapper
 static_assert(wrapper::MAX_GPU_SLOTS == MAX_GPUS,
               "backends::hipfile::MAX_GPUS is out of sync with HIPFILE_MAX_GPUS; the "
               "snapshot would silently drop or over-read per-GPU slots");
+
+/// @brief Contract for a per-GPU counter: convertible to std::uint64_t without losing
+/// value.
+template <typename T>
+inline constexpr bool is_counter_type =
+    std::is_integral_v<T> && std::is_unsigned_v<T> && sizeof(T) <= sizeof(std::uint64_t);
+
+// backend::query() copies these counters into stats_snapshot's std::uint64_t fields. A
+// field renamed upstream already breaks that copy at compile time, since query() is
+// instantiated against the real struct. A retyped field would not: a signed counter
+// carrying a negative sentinel would convert to a huge unsigned value and surface as an
+// absurd bandwidth reading. Locked here because this is the only file that sees the real
+// struct.
+static_assert(
+    is_counter_type<decltype(hipFilePerGpuStats_t::read_bytes)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::write_bytes)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_total_reads)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_total_writes)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_nvfs_reads)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_nvfs_writes)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_posix_reads)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_posix_writes)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_unaligned_reads)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_unaligned_writes)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_reads_err)> &&
+        is_counter_type<decltype(hipFilePerGpuStats_t::n_writes_err)>,
+    "a hipFilePerGpuStats_t counter is no longer an unsigned integer that fits in "
+    "std::uint64_t; backends::hipfile::backend::query() would convert it silently");
 
 }  // namespace rocprofsys::backends::hipfile

@@ -79,7 +79,6 @@ struct mock_wrapper
     static bool get_stats_l3(stats_l3_t* out) noexcept
     {
         ++call_count;
-        *out = stats_l3_t{};
         if(!query_succeeds) return false;
         *out = next_stats;
         return true;

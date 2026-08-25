@@ -85,6 +85,7 @@ private:
             return out;
         }
 
+        // Single zero-init of the Level-3 struct; the wrapper does not memset again.
         typename Wrapper::stats_l3_t raw{};
 
         m_available = Wrapper::get_stats_l3(&raw);

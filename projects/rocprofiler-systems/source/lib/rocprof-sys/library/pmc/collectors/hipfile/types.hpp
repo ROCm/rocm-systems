@@ -6,6 +6,7 @@
 #include "backends/hipfile/types.hpp"
 
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -166,7 +167,23 @@ metric_group_mask(std::string_view group) noexcept
 [[nodiscard]] inline std::string
 track_name(std::size_t gpu_id, const char* suffix)
 {
-    return "hipFile GPU" + std::to_string(gpu_id) + " " + suffix;
+    return "GPU [" + std::to_string(gpu_id) + "] Storage " + suffix + " (S)";
+}
+
+/**
+ * @brief RocPD PMC identifier for a metric, e.g. "device_storage_read_bytes".
+ */
+[[nodiscard]] inline std::string
+pmc_name(const char* suffix)
+{
+    std::string out = "device_storage_";
+    for(const char* c = suffix; *c != '\0'; ++c)
+    {
+        out += (*c == ' ')
+                   ? '_'
+                   : static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
+    }
+    return out;
 }
 
 }  // namespace rocprofsys::pmc::collectors::hipfile

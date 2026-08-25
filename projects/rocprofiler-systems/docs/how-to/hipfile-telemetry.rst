@@ -8,15 +8,17 @@ hipFile GPU-direct storage I/O telemetry
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_
 can collect GPU-direct storage I/O telemetry from applications that use
-`hipFile <https://github.com/ROCm/hipFile>`_. A background sampler periodically
-queries hipFile's in-process telemetry API and reports the results as per-GPU
-counter tracks in both the Perfetto trace and the RocPD database.
+`hipFile <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_.
+A background sampler periodically queries hipFile's in-process telemetry API and
+reports the results as per-GPU counter tracks in both the Perfetto trace and the
+RocPD database.
 
 Metrics collected
 ==================
 
 All hipFile telemetry is per GPU, reported under tracks named
-``hipFile GPU<N> <metric>``. Metrics are selected in groups, and each group covers
+``GPU [<N>] Storage <metric> (S)``, matching the naming other sampled GPU metrics
+use. Metrics are selected in groups, and each group covers
 both the read and the write track. The group name is the token accepted by
 ``ROCPROFSYS_HIPFILE_METRICS``.
 
@@ -28,19 +30,19 @@ Collected by default:
   to POSIX I/O (``count``)
 * ``bandwidth`` -- **Read Bandwidth** / **Write Bandwidth**, transfer rate over the
   sampling interval (``bytes/s``)
+* ``bytes`` -- **Read Bytes** / **Write Bytes**, cumulative bytes transferred
+  (``bytes``)
+* ``errors`` -- **Read Errors** / **Write Errors**, failed operations (``count``)
 
 Available, but off by default:
 
-* ``bytes`` -- **Read Bytes** / **Write Bytes**, cumulative bytes transferred
-  (``bytes``)
 * ``ops`` -- **Read Ops** / **Write Ops**, cumulative operation counts (``count``)
 * ``unaligned`` -- **Unaligned Reads** / **Unaligned Writes**, operations that were
   not aligned (``count``)
-* ``errors`` -- **Read Errors** / **Write Errors**, failed operations (``count``)
 
-The default set answers the two questions that usually come first: whether GPU-direct
-I/O is actually being used (``fastpath`` against ``fallback``) and how fast it is
-(``bandwidth``). Add the remaining groups, or ``all``, when you need the full picture.
+The default set covers path usage (``fastpath`` against ``fallback``), transfer
+volume and rate (``bytes`` and ``bandwidth``), and I/O failures (``errors``). Add
+``ops``, ``unaligned``, or ``all`` when you need the full picture.
 
 Interpreting the values
 -----------------------
@@ -81,7 +83,6 @@ Requirements
 * A target application that links and uses hipFile. The statistics API is
   in-process, so telemetry is only produced when the profiled application
   actually performs hipFile I/O.
-* A Linux kernel version 5.3 or later (required by hipFile's statistics server).
 
 Build support
 =============
@@ -126,16 +127,24 @@ Enabling collection at run time
 Even in a build that includes hipFile support, collection is off until you ask for
 it: ``ROCPROFSYS_USE_HIPFILE`` defaults to ``OFF``. Enable it by setting
 ``ROCPROFSYS_USE_HIPFILE=ON``. Collection runs on the process-sampling thread, so
-process sampling must also be enabled (it is on by default). Setting this in a build
-made with ``ROCPROFSYS_BUILD_HIPFILE=OFF`` has no effect, because the collector is
-not present in the binary.
+process sampling must also be enabled (it is on by default). If it is off, the
+profiler logs a warning and records no hipFile telemetry. In a build made with
+``ROCPROFSYS_BUILD_HIPFILE=OFF`` the collector is not present and the settings are
+not registered. Their presence in ``rocprof-sys-avail --settings`` is a direct
+indicator of compile-time support:
+
+.. code-block:: shell
+
+   rocprof-sys-avail --settings | grep HIPFILE
+
+To enable collection:
 
 .. code-block:: shell
 
    ROCPROFSYS_USE_HIPFILE=ON
    ROCPROFSYS_USE_PROCESS_SAMPLING=ON
    ROCPROFSYS_PROCESS_SAMPLING_FREQ=100
-   # Optional; the default is "fastpath, fallback, bandwidth"
+   # Optional; the default is "fastpath, fallback, bandwidth, bytes, errors"
    ROCPROFSYS_HIPFILE_METRICS=all
 
 Details of the settings:
@@ -146,8 +155,8 @@ Details of the settings:
 * **ROCPROFSYS_PROCESS_SAMPLING_FREQ**: Samples per second. A higher frequency
   captures short-lived I/O bursts more precisely.
 * **ROCPROFSYS_HIPFILE_METRICS**: Which hipFile metrics to collect. Defaults to
-  ``fastpath, fallback, bandwidth``. Accepts ``all`` or ``on``, ``none`` or ``off``,
-  or a comma or semicolon separated list of the group names listed in
+  ``fastpath, fallback, bandwidth, bytes, errors``. Accepts ``all`` or ``on``,
+  ``none`` or ``off``, or a comma or semicolon separated list of the group names listed in
   `Metrics collected`_: ``bytes``, ``ops``, ``fastpath``, ``fallback``,
   ``unaligned``, ``errors``, and ``bandwidth``. Each name selects both the read and
   the write track, in the same way ``ROCPROFSYS_AMD_SMI_METRICS`` treats ``power``
@@ -155,9 +164,11 @@ Details of the settings:
 * **ROCPROFSYS_SAMPLING_GPUS**: Which GPUs to collect from. hipFile telemetry
   honors the same GPU selection as the AMD SMI GPU metrics.
 
-When hipFile telemetry is enabled, the profiler sets ``HIPFILE_STATS_LEVEL=1``
-during configuration so that hipFile starts its statistics server. If you set
-``HIPFILE_STATS_LEVEL`` explicitly, your value is preserved.
+hipFile's statistics collection is on by default (``HIPFILE_STATS_LEVEL``
+defaults to ``1``). The profiler does not overwrite that variable. If you set
+``HIPFILE_STATS_LEVEL=0`` while also enabling ``ROCPROFSYS_USE_HIPFILE``, hipFile
+produces no statistics and the profiler logs a warning rather than overriding
+your setting. Unset it, or set it to ``1`` or higher, to collect telemetry.
 
 Running the profiler
 ====================
@@ -179,8 +190,9 @@ You can also place the settings in a configuration file and point to it with
    ROCPROFSYS_USE_PROCESS_SAMPLING=ON
    ROCPROFSYS_PROCESS_SAMPLING_FREQ=100
    ROCPROFSYS_TRACE=ON
+
 Visualize the results in ROCm Optiq or Perfetto
-==================================
+===============================================
 
 To view the ``.db`` file generated by the profiler in
 `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_,
@@ -189,15 +201,18 @@ set ``ROCPROFSYS_USE_ROCPD=ON``:
 .. code-block:: shell
 
    ROCPROFSYS_USE_ROCPD=ON
-#. Open the `ROCm Optiq UI page <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_ and click ``Open trace file`` and select the ``.db`` file. The hipFile
-   counter tracks appear as ``hipFile GPU<N> <metric>``.
-To view the ``.proto`` file generated by the profiler in Perfetto, open the
-`Perfetto UI page <https://ui.perfetto.dev/>`_ and click ``Open trace file`` and select the ``.proto`` file. The hipFile
-counter tracks appear as ``hipFile GPU<N> <metric>``.
+
+Then load the trace:
+
+#. Open the `ROCm Optiq UI <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`__.
+#. Click ``Open trace file`` and select the ``.db`` file. The hipFile counter
+   tracks appear as ``GPU [<N>] Storage <metric> (S)``.
+
+To view the ``.proto`` file generated by the profiler in Perfetto:
 
 #. Open the `Perfetto UI page <https://ui.perfetto.dev/>`_.
 #. Click ``Open trace file`` and select the ``.proto`` file. The hipFile
-   counter tracks appear as ``hipFile GPU<N> <metric>``.
+   counter tracks appear as ``GPU [<N>] Storage <metric> (S)``.
 
 Troubleshooting
 ===============

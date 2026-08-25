@@ -32,6 +32,9 @@ list(GET _hipfile_min_version 0 _hipfile_min_version_major)
 list(GET _hipfile_min_version 1 _hipfile_min_version_minor)
 list(GET _hipfile_min_version 2 _hipfile_min_version_patch)
 
+# ROCPROFSYS_BUILD_HIPFILE is also exported globally on
+# rocprofiler-systems-compile-definitions (cmake/Packages.cmake) so core can
+# guard setting registration. Kept here as well for the backend's own headers.
 target_compile_definitions(
     rocprofiler-systems-hipfile-backend
     INTERFACE
