@@ -20,18 +20,16 @@ L1ScalarCache::L1ScalarCache(L2Cache *l2)
 L1ScalarCache::~L1ScalarCache() = default;
 
 void L1ScalarCache::set_l2(L2Cache *l2) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   l2_ = l2;
 }
 
 void L1ScalarCache::set_memory(GpuMemory *mem) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   memory_ = mem;
 }
 
-void L1ScalarCache::ensure_line_locked(uint64_t addr, uint32_t vmid) {
+void L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid) {
   if (cache_.lookup(addr, nullptr, vmid))
     return;
 
@@ -47,8 +45,7 @@ void L1ScalarCache::ensure_line_locked(uint64_t addr, uint32_t vmid) {
 }
 
 void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
     uint8_t buf[4];
@@ -65,24 +62,24 @@ void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *sr
         mtype = memory_->pte_mtype(chunk_addr, vmid);
 
       if (mtype == Mtype::UC) {
-        flush_line_locked(chunk_addr, vmid);
+        flush_line(chunk_addr, vmid);
         l2_->write(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
         copied += chunk;
         continue;
       }
 
       if (mtype == Mtype::CC) {
-        flush_line_locked(chunk_addr, vmid);
+        flush_line(chunk_addr, vmid);
         l2_->write(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
         copied += chunk;
         continue;
       }
 
-      ensure_line_locked(chunk_addr, vmid); // read-allocate on miss
+      ensure_line(chunk_addr, vmid); // read-allocate on miss
 
       simdojo::CacheTag *tag = nullptr;
       cache_.lookup(chunk_addr, &tag, vmid);
-      assert(tag != nullptr && "ensure_line_locked must guarantee hit");
+      assert(tag != nullptr && "ensure_line must guarantee hit");
 
       cache_.write_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
       l2_->write(chunk_addr, buf + copied, chunk, mtype, vmid);
@@ -98,22 +95,21 @@ void L1ScalarCache::writeback_all(uint32_t vmid) {
 }
 
 void L1ScalarCache::invalidate_all() {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
-  invalidate_all_locked();
+  synchronize_epoch();
+  invalidate_all_lines();
 }
 
-void L1ScalarCache::invalidate_all_locked() { cache_.invalidate_all(); }
+void L1ScalarCache::invalidate_all_lines() { cache_.invalidate_all(); }
 
-void L1ScalarCache::synchronize_epoch_locked() {
+void L1ScalarCache::synchronize_epoch() {
   const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
   if (coherence_epoch_ == current_epoch)
     return;
-  invalidate_all_locked();
+  invalidate_all_lines();
   coherence_epoch_ = current_epoch;
 }
 
-void L1ScalarCache::flush_line_locked(uint64_t addr, uint32_t vmid) {
+void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
   simdojo::CacheTag *tag = nullptr;
   if (!cache_.lookup(addr, &tag, vmid))
     return;
@@ -123,8 +119,7 @@ void L1ScalarCache::flush_line_locked(uint64_t addr, uint32_t vmid) {
 }
 
 void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
     uint8_t buf[4]{};
@@ -140,13 +135,13 @@ void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint
         mtype = memory_->pte_mtype(chunk_addr, vmid);
 
       if (mtype == Mtype::UC) {
-        flush_line_locked(chunk_addr, vmid);
+        flush_line(chunk_addr, vmid);
         l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
       } else if (mtype == Mtype::CC) {
-        flush_line_locked(chunk_addr, vmid);
+        flush_line(chunk_addr, vmid);
         l2_->read(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
       } else {
-        ensure_line_locked(chunk_addr, vmid);
+        ensure_line(chunk_addr, vmid);
         cache_.read_line(chunk_addr, buf + copied, line_offset, chunk, vmid);
       }
       copied += chunk;
@@ -156,8 +151,7 @@ void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint
 }
 
 void L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   uint32_t copied = 0;
   while (copied < num_bytes) {
     uint64_t ea = addr + copied;
@@ -169,13 +163,13 @@ void L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, 
       mtype = memory_->pte_mtype(ea, vmid);
 
     if (mtype == Mtype::UC) {
-      flush_line_locked(ea, vmid);
+      flush_line(ea, vmid);
       l2_->read(ea, dst + copied, chunk, Mtype::UC, vmid);
     } else if (mtype == Mtype::CC) {
-      flush_line_locked(ea, vmid);
+      flush_line(ea, vmid);
       l2_->read(ea, dst + copied, chunk, Mtype::CC, vmid);
     } else {
-      ensure_line_locked(ea, vmid);
+      ensure_line(ea, vmid);
       cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
     }
     copied += chunk;
