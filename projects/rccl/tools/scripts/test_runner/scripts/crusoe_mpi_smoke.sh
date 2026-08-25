@@ -41,6 +41,11 @@ if [ -n "${first}" ] && [ "$(hostname -s)" != "${first}" ]; then
 fi
 trap 'rm -f "${PARK_SENTINEL:-}"; touch "${_done}"' EXIT
 
+# Local session dir on tmpfs, same as crusoe_run_batch.sh: $HOME is NFS and
+# OpenMPI's session/tmp there can make orted fail at launch, which would look
+# exactly like a network failure -- keep the smoke faithful to the real run.
+export TMPDIR="/dev/shm/rccl-smoke-${SLURM_JOB_ID:-$$}"
+mkdir -p "${TMPDIR}"
 # 1 task/node allocation; OpenMPI plm slurm reads this. The shim maps ranks.
 if [ -n "${SLURM_NNODES:-}" ]; then
   export SLURM_TASKS_PER_NODE="1(x${SLURM_NNODES})"
@@ -67,8 +72,9 @@ hostspec=$(printf '%s' "${HOSTS}" | awk -F, '{for(i=1;i<=NF;i++){printf "%s%s:1"
 
 echo "MPI smoke: mpirun -np ${nnodes} --host ${hostspec} (oob=${oob_if}) on ${HOSTS}"
 out=$(timeout -k 5 90 mpirun -np "${nnodes}" --host "${hostspec}" --map-by ppr:1:node \
+  --bind-to none --oversubscribe \
   --prefix /opt/openmpi \
-  --mca plm slurm \
+  --mca plm slurm --mca orte_tmpdir_base /dev/shm \
   --mca pml ob1 --mca osc ^ucx \
   --mca btl tcp,self \
   --mca btl_tcp_if_include "${oob_if}" \
