@@ -51,6 +51,10 @@ BUILD_TYPE="${BUILD_TYPE:-Debug}"
 BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
 GTEST_FILTER="${GTEST_FILTER:-*}"
 HOST_TEST_SHUFFLE="${HOST_TEST_SHUFFLE---gtest_shuffle}"  # `-` not `:-`: an explicit empty value disables it
+# Split into argv elements. Passing the value as one quoted word makes gtest treat a multi-word
+# setting as a single unknown flag: it prints its help, runs ZERO tests and exits 0 -- a silent green
+# that `|| rc=1` cannot see. An empty value yields an empty array, which still disables shuffling.
+read -ra HOST_TEST_SHUFFLE_ARGS <<< "$HOST_TEST_SHUFFLE"
 LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/host_tests.log}"
 XML_FILE="${XML_FILE:-$SCRIPT_DIR/host_tests.xml}"
 JOBS="$(nproc 2>/dev/null || echo 4)"
@@ -133,8 +137,16 @@ do_host_tests() {
     "$BUILD_DIR/$name" \
       --gtest_filter="$GTEST_FILTER" \
       --gtest_output="xml:$xml" \
-      ${HOST_TEST_SHUFFLE:+"$HOST_TEST_SHUFFLE"} \
+      ${HOST_TEST_SHUFFLE_ARGS[@]+"${HOST_TEST_SHUFFLE_ARGS[@]}"} \
       --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee -a "$LOG_FILE" || rc=1
+    # A binary that rejects its arguments prints usage, runs nothing and still exits 0, so the exit
+    # status alone cannot tell "all green" from "never started". The report is the second signal:
+    # gtest writes it before returning, and its absence means no suite ran at all.
+    if [ ! -f "$xml" ] || ! grep -q "<testsuites" "$xml"; then
+      echo "ERROR: $name wrote no test report ($xml) -- it likely rejected an argument" \
+        | tee -a "$LOG_FILE"
+      rc=1
+    fi
   done
   return "$rc"
 }
