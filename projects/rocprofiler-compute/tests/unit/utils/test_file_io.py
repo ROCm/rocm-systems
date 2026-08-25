@@ -5,6 +5,7 @@
 
 import tempfile
 
+import common
 import pandas as pd
 import pytest
 
@@ -149,7 +150,7 @@ def test_filters() -> None:
 
 
 # =============================================================================
-# create_df_pmc: long-form vs wide pmc_perf.csv
+# create_df_pmc: long-form vs wide pmc_perf.csv.gz
 # =============================================================================
 
 
@@ -164,7 +165,7 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_BUSY_CYCLES,100\n"
     )
-    (tmp_path / "pmc_perf.csv").write_text(long_form_csv)
+    common.write_pmc_perf(tmp_path, long_form_csv)
 
     df = create_df_pmc(str(tmp_path), verbose=0)
 
@@ -175,7 +176,7 @@ def test_create_df_pmc_pivots_long_form_without_a_profiling_config(tmp_path) -> 
 
 
 def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
-    """A wide pmc_perf.csv was written by a removed backend; analyze only
+    """A wide pmc_perf.csv.gz was written by a removed backend; analyze only
     supports the rocpd long format, so it is rejected with a re-profile error."""
     wide_csv = (
         "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
@@ -183,7 +184,7 @@ def test_create_df_pmc_rejects_wide_pmc_perf(tmp_path) -> None:
         "Start_Timestamp,End_Timestamp,Kernel_ID,SQ_WAVES,SQ_BUSY_CYCLES\n"
         "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,4,100\n"
     )
-    (tmp_path / "pmc_perf.csv").write_text(wide_csv)
+    common.write_pmc_perf(tmp_path, wide_csv)
 
     with pytest.raises(SystemExit):
         create_df_pmc(str(tmp_path), verbose=0)

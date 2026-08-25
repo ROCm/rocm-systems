@@ -3,8 +3,8 @@
 
 """Gzip CSV boundary for the profile and analyze counter and marker artifacts.
 
-Only compressed artifacts belong here. Plain CSVs (``sysinfo.csv``,
-``pmc_perf.csv``) are opened by their caller with the builtin ``open``.
+Only compressed artifacts belong here. Plain CSVs (``sysinfo.csv``) are opened
+by their caller with the builtin ``open``.
 """
 
 import gzip
