@@ -216,11 +216,15 @@ replay_drain_agent_or_decline(hsa_agent_t agent)
     }
 }
 
-// RAII marker for "this thread is inside a replay window", used by the reader-lock path below to
-// avoid a non-recursive deadlock. State and predicates live in kernel_replay/replay_diagnostics.hpp.
+// RAII marker for "this thread is inside a replay window on this agent", used by the dispatch paths
+// below to avoid a non-recursive deadlock. State and predicates live in
+// kernel_replay/replay_diagnostics.hpp.
 struct replay_window_scope
 {
-    replay_window_scope() { kernel_replay::enter_replay_window(); }
+    explicit replay_window_scope(rocprofiler_agent_id_t agent)
+    {
+        kernel_replay::enter_replay_window(agent);
+    }
     ~replay_window_scope() { kernel_replay::exit_replay_window(); }
 
     replay_window_scope(const replay_window_scope&)     = delete;
@@ -980,13 +984,9 @@ WriteInterceptor(const void* packets,
             // (b) agent-scoped snapshots so a replay only saves/restores its own agent's device
             // memory (other GPUs untouched). Different agents hold different locks and run
             // concurrently.
-            const auto& core         = queue.core_api();
-            hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
-            const auto  replay_guard = std::unique_lock<std::shared_mutex>{
-                agent_replay_mutex(queue.get_agent().get_rocp_agent()->id)};
-            // Must be constructed after the writer lock: it marks the interval in which a nested
-            // dispatch on this thread would deadlock on the reader lock.
-            const auto window_scope = replay_window_scope{};
+            const auto& core            = queue.core_api();
+            hsa_agent_t replay_agent    = queue.get_agent().get_hsa_agent();
+            const auto  replay_agent_id = queue.get_agent().get_rocp_agent()->id;
 
             const auto& policy  = kernel_replay::resolve_policy();
             auto        outcome = kernel_replay::replay_outcome_t{};
@@ -1014,7 +1014,7 @@ WriteInterceptor(const void* packets,
             // the packet processor would decrement a destroyed signal. Leaking one signal on a path
             // that is already reporting a stuck queue is the lesser fault.
             auto decline_and_run_once = [&](kernel_replay::decline_reason reason,
-                                            bool                         destroy_drain_signal) {
+                                            bool                          destroy_drain_signal) {
                 outcome.reason              = reason;
                 outcome.reentrancy_observed = kernel_replay::replay_reentrancy_observed();
                 kernel_replay::log_replay_outcome(outcome);
@@ -1029,12 +1029,42 @@ WriteInterceptor(const void* packets,
                                      replay_dispatch_id);
             };
 
+            // A replay window cannot be opened inside a replay window on the same agent. Getting
+            // here means a tool's KERNEL_REPLAY callback launched a kernel that itself matched the
+            // replay filter, on the thread that already holds this agent's writer lock. The reader
+            // path further down can skip its lock and let such a dispatch through; the writer side
+            // cannot -- std::unique_lock on a shared_mutex this thread already owns exclusively
+            // never returns, and there is no timeout to escape it. Decline and run once instead,
+            // and mark the enclosing window's outcome, whose counters are no longer trustworthy.
+            if(kernel_replay::in_replay_window(replay_agent_id))
+            {
+                kernel_replay::note_replay_reentrancy();
+                ROCP_ERROR_IF(kernel_replay::should_warn_replay_reentrancy())
+                    << "kernel replay: a dispatch that itself requested replay was launched from "
+                       "inside a replay window on the same agent, by a KERNEL_REPLAY callback "
+                       "(CONFIG, PASS, pass_count_cb, or replay_continue_cb). It is run once "
+                       "without replay to avoid deadlocking on the per-agent replay lock, and the "
+                       "enclosing dispatch's counters are not trustworthy because this kernel "
+                       "mutated device memory inside the snapshot window. Move GPU work out of the "
+                       "replay callbacks";
+                decline_and_run_once(kernel_replay::decline_reason::reentrant_dispatch,
+                                     /*destroy_drain_signal=*/false);
+                return;
+            }
+
+            const auto replay_guard =
+                std::unique_lock<std::shared_mutex>{agent_replay_mutex(replay_agent_id)};
+            // Must be constructed after the writer lock: it marks the interval in which a nested
+            // dispatch on this thread would deadlock on this agent's replay lock.
+            const auto window_scope = replay_window_scope{replay_agent_id};
+
             // Admission control, before any device->host traffic. Two independent questions:
             // whether the snapshot would actually cover the application's data, and whether it
             // would fit and finish in a sane amount of time. Both are answerable from the tracker
             // alone, so answering them here costs nothing and turns a silently-wrong result (or an
             // apparently hung job) into a diagnostic naming the cause.
-            outcome.untracked = kernel_replay::memory_tracker::untracked_device_memory(replay_agent);
+            outcome.untracked =
+                kernel_replay::memory_tracker::untracked_device_memory(replay_agent);
             if(const auto reason = kernel_replay::check_untracked(outcome.untracked, policy);
                reason != kernel_replay::decline_reason::none)
             {
@@ -1240,16 +1270,19 @@ WriteInterceptor(const void* packets,
     // agent-wide drain, not by this lock.)
     //
     // The one case where the lock must be skipped is a dispatch submitted from inside a replay
-    // window on this same thread -- a tool callback that launches a kernel. std::shared_mutex is not
-    // recursive, so taking the reader lock there would block on the writer lock this thread already
-    // holds, with no timeout and no way out. Skipping it lets the dispatch through: its writes land
-    // inside the snapshot window, so the replay's counters for the surrounding dispatch are not
-    // trustworthy, and that is recorded and reported (see tl_in_replay_window). Reporting an
-    // untrustworthy measurement is a better outcome than an unkillable process.
+    // window *on this agent* on this same thread -- a tool callback that launches a kernel.
+    // std::shared_mutex is not recursive, so taking the reader lock there would block on the writer
+    // lock this thread already holds, with no timeout and no way out. Skipping it lets the dispatch
+    // through: its writes land inside the snapshot window, so the replay's counters for the
+    // surrounding dispatch are not trustworthy, and that is recorded and reported (see
+    // in_replay_window). Reporting an untrustworthy measurement is a better outcome than an
+    // unkillable process. A callback that launches work on a *different* agent contends for a
+    // different mutex, so it keeps its reader lock and stays isolated from that agent's replays.
     std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
     if(has_kernel_replay)
     {
-        if(kernel_replay::in_replay_window())
+        const auto dispatch_agent_id = queue.get_agent().get_rocp_agent()->id;
+        if(kernel_replay::in_replay_window(dispatch_agent_id))
         {
             kernel_replay::note_replay_reentrancy();
             ROCP_ERROR_IF(kernel_replay::should_warn_replay_reentrancy())
@@ -1263,7 +1296,7 @@ WriteInterceptor(const void* packets,
         }
         else
         {
-            replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
+            replay_reader_guard.emplace(agent_replay_mutex(dispatch_agent_id));
         }
     }
 

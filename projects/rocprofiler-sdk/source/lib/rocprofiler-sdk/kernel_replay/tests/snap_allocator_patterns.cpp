@@ -24,8 +24,8 @@
 //
 // snap_restore.cpp covers the straightforward case: hipMalloc, a kernel writes, restore reverts.
 // These tests cover the patterns where that reasoning breaks down, because in each of them the
-// snapshot's implicit assumption -- "a device address names one allocation for the whole window, and
-// every allocation the kernel touches is in the inventory" -- is false:
+// snapshot's implicit assumption -- "a device address names one allocation for the whole window,
+// and every allocation the kernel touches is in the inventory" -- is false:
 //
 //   * A caching or pooling allocator frees a buffer and hands the same address back for a different
 //     buffer. Deep-learning frameworks, Kokkos, RAPIDS and Thrust all do this by design, so
@@ -125,7 +125,8 @@ TEST(kernel_replay_allocator_patterns, generation_distinguishes_reused_address)
     if(second == first)
     {
         EXPECT_NE(mt::generation_of(second), first_generation)
-            << "the same address was reused for a new allocation but carries the old generation, so "
+            << "the same address was reused for a new allocation but carries the old generation, "
+               "so "
                "restore() cannot tell the two apart";
     }
     else
@@ -141,11 +142,11 @@ TEST(kernel_replay_allocator_patterns, generation_distinguishes_reused_address)
 // The load-bearing case. A buffer is captured, freed, and its address handed to a different buffer
 // holding different data; restore() must leave the new buffer alone.
 //
-// Before the generation check this test fails by writing the old buffer's contents over the new one:
-// silent corruption of application data by the profiler, which is the worst failure mode available
-// to us. It is reachable in ordinary single-threaded code because the free and the reallocation only
-// need to happen between snap() and restore() -- exactly what a caching allocator does between two
-// passes of a replay loop.
+// Before the generation check this test fails by writing the old buffer's contents over the new
+// one: silent corruption of application data by the profiler, which is the worst failure mode
+// available to us. It is reachable in ordinary single-threaded code because the free and the
+// reallocation only need to happen between snap() and restore() -- exactly what a caching allocator
+// does between two passes of a replay loop.
 TEST(kernel_replay_allocator_patterns, restore_does_not_write_into_a_reused_address)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
@@ -191,8 +192,8 @@ TEST(kernel_replay_allocator_patterns, restore_does_not_write_into_a_reused_addr
     sync_ok();
     ASSERT_TRUE(all_equal(reused, kElems, kReused)) << "failed to seed the reusing allocation";
 
-    // restore() must skip this region: the address is live and the right size, but it is a different
-    // allocation than the one captured.
+    // restore() must skip this region: the address is live and the right size, but it is a
+    // different allocation than the one captured.
     EXPECT_TRUE(msnp::restore(snapshot))
         << "restore must report success -- skipping a replaced region is not a failure";
 
@@ -203,8 +204,8 @@ TEST(kernel_replay_allocator_patterns, restore_does_not_write_into_a_reused_addr
     ASSERT_EQ(hipFree(reused), hipSuccess);
 }
 
-// Restoring after a plain free must be a no-op rather than a write to retired device memory. This is
-// the pre-existing liveness check; kept here so the generation change cannot silently break it.
+// Restoring after a plain free must be a no-op rather than a write to retired device memory. This
+// is the pre-existing liveness check; kept here so the generation change cannot silently break it.
 TEST(kernel_replay_allocator_patterns, restore_skips_a_freed_region)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
@@ -253,7 +254,7 @@ TEST(kernel_replay_allocator_patterns, stream_ordered_allocation_is_snapshotted_
 
     const bool tracked   = in_snapshot_inventory(async_ptr, agent);
     const auto untracked = mt::untracked_device_memory(agent);
-    const bool counted   = untracked.any();
+    const bool counted   = kernel_replay::memory_tracker::any_untracked(untracked);
 
     EXPECT_TRUE(tracked || counted)
         << "a stream-ordered allocation of " << kBufferBytes
@@ -261,7 +262,8 @@ TEST(kernel_replay_allocator_patterns, stream_ordered_allocation_is_snapshotted_
            "writing to it would not be reverted between passes and nothing would report that";
 
     // If it went down the virtual-memory path it must not also be in the snapshot inventory:
-    // snap/restore cannot reason about a range whose physical backing can be remapped underneath it.
+    // snap/restore cannot reason about a range whose physical backing can be remapped underneath
+    // it.
     if(untracked.vmem_regions > 0)
     {
         EXPECT_FALSE(tracked) << "a virtual-memory mapping must stay out of the snapshot inventory";
@@ -286,7 +288,8 @@ TEST(kernel_replay_allocator_patterns, managed_allocation_is_snapshotted_or_coun
     if(hipMallocManaged(&managed, kBufferBytes) != hipSuccess || managed == nullptr)
         GTEST_SKIP() << "hipMallocManaged unavailable on this runtime";
 
-    // Touch it from a kernel so it is genuinely device-resident rather than a host-side reservation.
+    // Touch it from a kernel so it is genuinely device-resident rather than a host-side
+    // reservation.
     kernel_launch::fill(managed, 3.0f, kElems);
     sync_ok();
 
@@ -304,7 +307,7 @@ TEST(kernel_replay_allocator_patterns, managed_allocation_is_snapshotted_or_coun
                         "placement), so the device-visible case is not exercised";
     }
 
-    EXPECT_TRUE(tracked || untracked.any())
+    EXPECT_TRUE(tracked || kernel_replay::memory_tracker::any_untracked(untracked))
         << "a device-resident managed allocation is neither snapshottable nor counted as untracked";
 
     ASSERT_EQ(hipFree(managed), hipSuccess);
@@ -339,8 +342,7 @@ TEST(kernel_replay_allocator_patterns, footprint_estimate_matches_the_snapshot)
     // Exact agreement is not required: the runtime allocates and frees between the two calls. The
     // estimate must be the right magnitude, or it is not usable for admission control.
     ASSERT_GT(captured_bytes, 0U);
-    const double ratio =
-        static_cast<double>(estimate.bytes) / static_cast<double>(captured_bytes);
+    const double ratio = static_cast<double>(estimate.bytes) / static_cast<double>(captured_bytes);
     EXPECT_GT(ratio, 0.5) << "footprint estimate " << estimate.bytes
                           << " badly under-reports the captured " << captured_bytes << " bytes";
     EXPECT_LT(ratio, 2.0) << "footprint estimate " << estimate.bytes
@@ -351,9 +353,9 @@ TEST(kernel_replay_allocator_patterns, footprint_estimate_matches_the_snapshot)
 
 // A kernel that writes memory outside the snapshot accumulates across passes. This test asserts the
 // accumulation directly rather than asserting that it does not happen, because it *does* happen and
-// the snapshot cannot prevent it -- which is exactly why the replay window declines instead. Pinning
-// the behaviour here means a future change that makes such memory snapshottable will fail this test
-// and force the decline policy to be revisited deliberately.
+// the snapshot cannot prevent it -- which is exactly why the replay window declines instead.
+// Pinning the behaviour here means a future change that makes such memory snapshottable will fail
+// this test and force the decline policy to be revisited deliberately.
 TEST(kernel_replay_allocator_patterns, untracked_memory_accumulates_across_passes)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
@@ -399,7 +401,8 @@ TEST(kernel_replay_allocator_patterns, untracked_memory_accumulates_across_passe
 
     const auto host = read_device(buffer, 1);
     EXPECT_FLOAT_EQ(host[0], static_cast<float>(kPasses))
-        << "expected untracked memory to accumulate one increment per pass. If this now reads 0 the "
+        << "expected untracked memory to accumulate one increment per pass. If this now reads 0 "
+           "the "
            "allocation became snapshottable, and the decline policy in the replay window should be "
            "reconsidered rather than this test relaxed";
 

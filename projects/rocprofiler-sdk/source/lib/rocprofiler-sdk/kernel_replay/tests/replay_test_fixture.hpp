@@ -73,12 +73,8 @@ tool_init(rocprofiler_client_finalize_t /*fini*/, void* /*tool_data*/)
     // that the allocation tracker chains onto. The tracker itself is switched on explicitly by
     // ensure_live_tracking() because these tests drive snap/restore directly rather than through a
     // KERNEL_REPLAY service.
-    rocprofiler_configure_callback_tracing_service(context(),
-                                                  ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-                                                  nullptr,
-                                                  0,
-                                                  tracing_noop,
-                                                  nullptr);
+    rocprofiler_configure_callback_tracing_service(
+        context(), ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API, nullptr, 0, tracing_noop, nullptr);
     rocprofiler_start_context(context());
     return 0;
 }

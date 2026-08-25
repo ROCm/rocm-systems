@@ -23,8 +23,8 @@
 // Performance tests for the cost term snap_bandwidth.cpp does not cover: the number of regions, as
 // distinct from the number of bytes.
 //
-// snap_bandwidth.cpp measures throughput on a single large buffer, which is the friendly shape. Real
-// applications do not have that shape. A framework or a mesh code holds thousands of separate
+// snap_bandwidth.cpp measures throughput on a single large buffer, which is the friendly shape.
+// Real applications do not have that shape. A framework or a mesh code holds thousands of separate
 // allocations, and snap/restore pays a per-region cost on each one: a hash lookup under the tracker
 // read lock, a std::vector allocation, and a separate hsa_memory_copy. Because the snapshot
 // destination is unpinned host memory, each of those copies also drives a pin / IOMMU-map / DMA /
@@ -159,8 +159,8 @@ measure_median(hsa_agent_t agent, int samples)
     }
     std::sort(totals.begin(), totals.end());
 
-    auto out            = last;
-    const auto mid      = totals[totals.size() / 2];
+    auto       out = last;
+    const auto mid = totals[totals.size() / 2];
     // Report the median as the snap term and fold restore into it; only the total is compared.
     out.snap_seconds    = mid;
     out.restore_seconds = 0.0;
@@ -170,14 +170,13 @@ measure_median(hsa_agent_t agent, int samples)
 void
 log_shape(const char* label, const timing_t& t)
 {
-    std::printf("[kr-perf] %s regions=%zu bytes=%zu total_ms=%.3f effective_gbps=%.2f\n",
-                label,
-                t.regions,
-                t.bytes,
-                t.total_seconds() * 1000.0,
-                t.total_seconds() > 0.0
-                    ? static_cast<double>(t.bytes) / t.total_seconds() / 1e9
-                    : 0.0);
+    std::printf(
+        "[kr-perf] %s regions=%zu bytes=%zu total_ms=%.3f effective_gbps=%.2f\n",
+        label,
+        t.regions,
+        t.bytes,
+        t.total_seconds() * 1000.0,
+        t.total_seconds() > 0.0 ? static_cast<double>(t.bytes) / t.total_seconds() / 1e9 : 0.0);
 }
 }  // namespace
 
@@ -260,8 +259,8 @@ TEST(kernel_replay_region_scaling, footprint_estimate_is_much_cheaper_than_a_sna
     const double estimate_seconds =
         std::chrono::duration<double>(clock::now() - estimate_from).count() / kEstimates;
 
-    const auto snap_from = clock::now();
-    const auto snapshot  = msnp::snap(agent);
+    const auto   snap_from    = clock::now();
+    const auto   snapshot     = msnp::snap(agent);
     const double snap_seconds = std::chrono::duration<double>(clock::now() - snap_from).count();
     ASSERT_TRUE(snapshot.ok);
 
@@ -277,9 +276,9 @@ TEST(kernel_replay_region_scaling, footprint_estimate_is_much_cheaper_than_a_sna
 }
 
 // Restore is the term that gets paid P-1 times, so it is the one that decides whether replay is
-// affordable. It should not be dramatically more expensive than the single capture, and an asymmetry
-// appearing here (host->device markedly slower than device->host at the same region count) is the
-// signal that the copy path regressed.
+// affordable. It should not be dramatically more expensive than the single capture, and an
+// asymmetry appearing here (host->device markedly slower than device->host at the same region
+// count) is the signal that the copy path regressed.
 TEST(kernel_replay_region_scaling, restore_is_not_much_slower_than_snap)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
@@ -294,10 +293,10 @@ TEST(kernel_replay_region_scaling, restore_is_not_much_slower_than_snap)
 
     // Sum a few samples rather than taking one: either direction can be perturbed by an unrelated
     // process on a shared GPU.
-    constexpr int kSamples    = 3;
-    double        snap_total  = 0.0;
+    constexpr int kSamples      = 3;
+    double        snap_total    = 0.0;
     double        restore_total = 0.0;
-    size_t        bytes       = 0;
+    size_t        bytes         = 0;
     for(int i = 0; i < kSamples; ++i)
     {
         const auto t = measure(agent);

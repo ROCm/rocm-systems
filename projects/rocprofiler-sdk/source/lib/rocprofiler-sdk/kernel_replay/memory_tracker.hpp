@@ -92,9 +92,13 @@ struct untracked_summary_t
     size_t vmem_regions = 0;
     size_t pool_bytes   = 0;
     size_t pool_regions = 0;
-
-    bool any() const { return vmem_regions > 0 || pool_regions > 0; }
 };
+
+// True when the summary names at least one region the snapshot cannot capture. Region counts rather
+// than byte counts are the evidence: a zero-length mapping is still a mapping, and a caller that
+// tested bytes would miss it.
+bool
+any_untracked(const untracked_summary_t& summary);
 
 // Enable/disable inventory population. Disabled by default until a replay context is configured.
 bool
@@ -167,8 +171,12 @@ generation_of(void* ptr);
 void
 record_vmem_map(void* va, size_t size, hsa_agent_t agent);
 
+// `size` is the number of bytes being unmapped, which HSA permits to be a prefix of a larger
+// mapping. Only an unmap that covers the whole recorded range drops the record; a partial unmap
+// shrinks it. Erasing on any unmap would let a still-mapped range disappear from the accounting,
+// and the consequence of under-counting is admitting a replay that should have been declined.
 void
-record_vmem_unmap(void* va);
+record_vmem_unmap(void* va, size_t size);
 
 // The Synchronized allocation inventory. Exposed so restore() can look up a block and copy it under
 // the read lock, which blocks a concurrent free for the copy. Callers reachable during finalization

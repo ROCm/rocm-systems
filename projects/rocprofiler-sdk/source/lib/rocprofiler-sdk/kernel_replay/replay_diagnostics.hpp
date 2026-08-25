@@ -26,9 +26,10 @@
 //
 // Two problems this solves. First, a replay can be *sound but useless* (the snapshot missed the
 // application's real data) or *correct but ruinous* (the footprint dwarfs the kernel), and both are
-// decidable before any device->host traffic is issued. Second, when a replay is declined or when its
-// inputs were not in fact identical across passes, nothing in the output says so today -- a user
-// reading counter rows cannot tell a clean replay from one that silently ran on mutated memory.
+// decidable before any device->host traffic is issued. Second, when a replay is declined or when
+// its inputs were not in fact identical across passes, nothing in the output says so today -- a
+// user reading counter rows cannot tell a clean replay from one that silently ran on mutated
+// memory.
 //
 // Everything here is a free function over plain structs, per rocprofiler-sdk CONTRIBUTING guidance
 // on internal interfaces.
@@ -52,9 +53,9 @@ namespace kernel_replay
 enum class decline_reason
 {
     none = 0,
-    untracked_memory,   // application data lives outside the snapshot (VMM / managed / fine-grained)
-    footprint_budget,   // snapshot would not fit the configured host budget
-    snapshot_failed,    // snap() could not capture a complete image
+    untracked_memory,  // application data lives outside the snapshot (VMM / managed / fine-grained)
+    footprint_budget,  // snapshot would not fit the configured host budget
+    snapshot_failed,   // snap() could not capture a complete image
     queue_drain_stuck,  // this queue's prior GPU work did not complete within the drain bound
     agent_drain_stuck,  // sibling queues on the agent did not go idle within the drain bound
     pass_drain_stuck,   // a pass's async completion handler did not finish within the drain bound
@@ -144,26 +145,31 @@ check_admission(const memory_snapshot::snapshot_footprint_t& footprint,
                 uint64_t                                     passes,
                 const replay_policy_t&                       policy);
 
-// Thread-scoped marker for "inside a replay window".
+// Thread-scoped marker for "this thread is inside a replay window on this agent".
 //
 // The per-agent replay lock is a std::shared_mutex, which is not recursive, and every dispatch on
-// the agent takes its reader side while a replay service is active. A tool callback (CONFIG, PASS,
+// the agent takes one side of it while a replay service is active. A tool callback (CONFIG, PASS,
 // pass_count_cb, replay_continue_cb) that launches GPU work therefore submits a dispatch from the
-// one thread that already holds the writer lock, and the reader acquisition never returns. Unlike
-// the drain waits there is no timeout: the process becomes unkillable-by-signal in a blocking lock
-// acquisition. The dispatch path consults in_replay_window() to skip the reader lock in exactly that
-// case, which trades a wrong measurement (reported via note_replay_reentrancy) for liveness.
+// one thread that already holds the writer lock. Unlike the drain waits there is no timeout: the
+// acquisition never returns and the process is left blocked in a lock, unkillable by signal. Two
+// distinct acquisitions can hit this, so the dispatch path consults in_replay_window() at both:
 //
-// enter/exit are not nestable: a replay window cannot contain another replay window, because the
-// nested dispatch skips the lock and never opens a window of its own.
+//   * the reader side of an ordinary dispatch, which is skipped, letting the dispatch through; and
+//   * the writer side of a *nested* replay request, which cannot be skipped -- a window inside a
+//     window has no meaning -- so that dispatch is declined with `reentrant_dispatch` and run once.
+//
+// Both trade a wrong measurement (reported via note_replay_reentrancy on the window's outcome line)
+// for liveness. The agent is part of the state because the deadlock is per-agent: a callback that
+// launches work on a *different* GPU contends for a different mutex and must keep its lock, or two
+// concurrent replays on two agents would stop excluding each other's dispatches.
 void
-enter_replay_window();
+enter_replay_window(rocprofiler_agent_id_t agent);
 
 void
 exit_replay_window();
 
 bool
-in_replay_window();
+in_replay_window(rocprofiler_agent_id_t agent);
 
 // Record that a dispatch was submitted from inside this thread's replay window. Cleared by
 // enter_replay_window so the flag describes one window only.

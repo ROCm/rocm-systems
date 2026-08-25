@@ -58,13 +58,12 @@ dma_copy(void* dst, const void* src, size_t n)
 /// retire it mid-copy. Direction is caller-supplied: snap reads device->host, restore writes
 /// host->device.
 ///
-/// @param generation The generation the caller expects. Pass 0 to accept whatever is live and adopt
-/// its generation (snap, which is establishing the expectation) and non-zero to require an exact
-/// match (restore, which is checking it). Matching on (base, size) alone is not enough: the
-/// alloc/free wrappers sit outside the per-agent replay lock, so another thread can free a region
-/// and allocate a new one at the same base inside the window -- and a caching allocator makes that
-/// the likely outcome rather than an unlikely one. Restoring the old bytes over the new allocation
-/// would corrupt it silently, which is exactly the failure a profiler must not cause.
+/// @param generation The generation the caller expects, or 0 to accept any live allocation of
+/// sufficient size. Matching on (base, size) alone is not enough: the alloc/free wrappers sit
+/// outside the per-agent replay lock, so another thread can free a region and allocate a new one at
+/// the same base inside the window -- and a caching allocator makes that the likely outcome rather
+/// than an unlikely one. Restoring the old bytes over the new allocation would corrupt it silently,
+/// which is exactly the failure a profiler must not cause.
 ///
 /// @return @p copy's status, or @c std::nullopt if the region was freed, shrunk, or replaced since
 /// it was recorded.
@@ -77,7 +76,7 @@ with_inventory_check(void* gpu_addr, size_t size, uint64_t generation, CopyFn&& 
             auto itr = map.find(gpu_addr);
             if(itr == map.end() || itr->second.size < size) return std::nullopt;
             if(generation != 0 && itr->second.generation != generation) return std::nullopt;
-            return copy(itr->second.generation);
+            return copy();
         });
 }
 
@@ -168,7 +167,8 @@ snap(hsa_agent_t agent)
         // caller declines replay and runs the dispatch once. Aborting the process here would kill a
         // long job over transient host memory pressure, which is a worse outcome than not profiling
         // one dispatch -- and the caller already has a correct path for ok == false.
-        ROCP_WARNING << "kernel-replay snapshot: out of memory reserving metadata; declining replay";
+        ROCP_WARNING
+            << "kernel-replay snapshot: out of memory reserving metadata; declining replay";
         out.ok = false;
         return out;
     }
@@ -179,11 +179,11 @@ snap(hsa_agent_t agent)
     /// The caller must decline replay rather than restore partial state.
     /// @retval true The region was captured, or was dropped because it had been freed, shrunk, or
     /// replaced by a different allocation at the same address since snap_inventory(). Dropping a
-    /// freed region is harmless -- restore() runs the same check, so it could not have been restored
-    /// anyway. Dropping a *replaced* region means the new allocation is not reverted between passes,
-    /// so a kernel writing to it sees accumulated values; that is a narrow soundness gap, but it is
-    /// strictly better than restoring the previous allocation's bytes over live data, and the window
-    /// between snap_inventory() and this copy is microseconds.
+    /// freed region is harmless -- restore() runs the same check, so it could not have been
+    /// restored anyway. Dropping a *replaced* region means the new allocation is not reverted
+    /// between passes, so a kernel writing to it sees accumulated values; that is a narrow
+    /// soundness gap, but it is strictly better than restoring the previous allocation's bytes over
+    /// live data, and the window between snap_inventory() and this copy is microseconds.
     auto capture = [&](void*            gpu_addr,
                        size_t           size,
                        uint64_t         generation,
@@ -222,7 +222,7 @@ snap(hsa_agent_t agent)
                       gpu_addr,
                       size,
                       generation,
-                      [&](uint64_t) { return dma_copy(blk.host_copy.data(), gpu_addr, size); })
+                      [&] { return dma_copy(blk.host_copy.data(), gpu_addr, size); })
                 : std::optional<hsa_status_t>{dma_copy(blk.host_copy.data(), gpu_addr, size)};
 
         if(!st)
@@ -294,14 +294,9 @@ restore(const device_snapshot_t& snapshot)
             // Skipping is benign -- not a restore failure -- and is the only safe action, because
             // writing our bytes into a different allocation would corrupt live application data.
             const auto st =
-                with_inventory_check(blk.gpu_addr,
-                                     blk.host_copy.size(),
-                                     blk.generation,
-                                     [&](uint64_t) {
-                                         return dma_copy(blk.gpu_addr,
-                                                         blk.host_copy.data(),
-                                                         blk.host_copy.size());
-                                     });
+                with_inventory_check(blk.gpu_addr, blk.host_copy.size(), blk.generation, [&] {
+                    return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
+                });
 
             if(!st)
             {

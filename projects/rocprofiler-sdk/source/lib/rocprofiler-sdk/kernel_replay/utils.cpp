@@ -73,6 +73,12 @@ query_alloc(void* ptr)
 }
 
 bool
+untracked_device_visible(const alloc_query_t& q)
+{
+    return q.gpu_owned && !q.kernarg && (!q.coarse || q.ipc_shared || q.vmem);
+}
+
+bool
 is_gpu_agent(hsa_agent_t agent)
 {
     if(agent.handle == 0) return false;

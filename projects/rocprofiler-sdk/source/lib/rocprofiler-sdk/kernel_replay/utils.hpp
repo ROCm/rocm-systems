@@ -50,14 +50,13 @@ struct alloc_query_t
     bool coarse     = false;  // HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
     bool ipc_shared = false;  // HSA_EXT_POINTER_TYPE_IPC: backing pages owned by another process
     bool vmem       = false;  // HSA_EXT_POINTER_TYPE_HSA_VMEM: virtual-memory mapping
-
-    // GPU-resident memory that snap() will not capture. True for fine-grained device memory,
-    // managed memory that landed on the device, IPC-imported memory, and virtual-memory mappings.
-    bool untracked_device_visible() const
-    {
-        return gpu_owned && !kernarg && (!coarse || ipc_shared || vmem);
-    }
 };
+
+// True when `q` describes GPU-resident memory that snap() will not capture: fine-grained device
+// memory, managed memory that landed on the device, IPC-imported memory, and virtual-memory
+// mappings. Host and kernarg memory are excluded -- they are out of scope rather than missing.
+bool
+untracked_device_visible(const alloc_query_t& q);
 
 // True when `agent` is a GPU. Used to separate device-resident memory the snapshot cannot capture
 // (which makes replay unsound) from host memory (which is simply out of scope).

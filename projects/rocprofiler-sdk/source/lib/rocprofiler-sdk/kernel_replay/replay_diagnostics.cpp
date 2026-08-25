@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <string>
 
 namespace rocprofiler
@@ -71,9 +72,8 @@ build_policy()
 
     policy.decline_on_vmem =
         common::get_env("ROCPROFILER_KERNEL_REPLAY_DECLINE_ON_VMEM", policy.decline_on_vmem);
-    policy.decline_on_untracked_pool =
-        common::get_env("ROCPROFILER_KERNEL_REPLAY_DECLINE_ON_UNTRACKED_POOL",
-                        policy.decline_on_untracked_pool);
+    policy.decline_on_untracked_pool = common::get_env(
+        "ROCPROFILER_KERNEL_REPLAY_DECLINE_ON_UNTRACKED_POOL", policy.decline_on_untracked_pool);
     policy.warn_seconds =
         common::get_env("ROCPROFILER_KERNEL_REPLAY_WARN_SECONDS", policy.warn_seconds);
     policy.assumed_gbps =
@@ -244,28 +244,30 @@ check_admission(const memory_snapshot::snapshot_footprint_t& footprint,
 
 namespace
 {
-thread_local bool tl_in_replay_window        = false;
-thread_local bool tl_reentrancy_observed     = false;
-std::atomic<bool> reentrancy_warning_emitted = false;
+// The agent whose window this thread is inside, or nullopt when it is not inside one. An id is not
+// used as its own sentinel because a zero agent handle is not reserved.
+thread_local std::optional<rocprofiler_agent_id_t> tl_replay_window_agent     = std::nullopt;
+thread_local bool                                  tl_reentrancy_observed     = false;
+std::atomic<bool>                                  reentrancy_warning_emitted = false;
 }  // namespace
 
 void
-enter_replay_window()
+enter_replay_window(rocprofiler_agent_id_t agent)
 {
-    tl_in_replay_window    = true;
+    tl_replay_window_agent = agent;
     tl_reentrancy_observed = false;
 }
 
 void
 exit_replay_window()
 {
-    tl_in_replay_window = false;
+    tl_replay_window_agent = std::nullopt;
 }
 
 bool
-in_replay_window()
+in_replay_window(rocprofiler_agent_id_t agent)
 {
-    return tl_in_replay_window;
+    return tl_replay_window_agent && tl_replay_window_agent->handle == agent.handle;
 }
 
 void

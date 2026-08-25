@@ -49,10 +49,10 @@ struct mem_block_t
     // false = module-scope variable in a loaded executable; always live, so restore
     // unconditionally.
     bool from_tracker = false;
-    // Tracker generation observed at snap time (see memory_tracker::alloc_info_t). restore() refuses
-    // to write unless the address still carries this generation, which is what distinguishes "the
-    // same allocation" from "a different allocation that reused the address". Unused when
-    // from_tracker is false.
+    // Tracker generation observed at snap time (see memory_tracker::alloc_info_t). restore()
+    // refuses to write unless the address still carries this generation, which is what
+    // distinguishes "the same allocation" from "a different allocation that reused the address".
+    // Unused when from_tracker is false.
     uint64_t generation = 0;
 };
 

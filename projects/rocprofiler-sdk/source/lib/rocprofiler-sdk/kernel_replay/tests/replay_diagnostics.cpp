@@ -27,11 +27,12 @@
 // whether a replay is sound would have no automated coverage at all.
 //
 // The decision functions take an explicit replay_policy_t rather than reading the environment, so
-// each policy combination is exercised directly instead of through process environment manipulation.
+// each policy combination is exercised directly instead of through process environment
+// manipulation.
 
+#include "lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.hpp"
 
 #include <gtest/gtest.h>
 
@@ -93,8 +94,7 @@ footprint(size_t bytes, size_t regions)
 TEST(kernel_replay_diagnostics, no_untracked_memory_admits_replay)
 {
     auto policy = replay_policy_t{};
-    EXPECT_EQ(check_untracked(memory_tracker::untracked_summary_t{}, policy),
-              decline_reason::none);
+    EXPECT_EQ(check_untracked(memory_tracker::untracked_summary_t{}, policy), decline_reason::none);
 }
 
 // A live virtual-memory mapping is unambiguous evidence that application data is outside the
@@ -155,18 +155,19 @@ TEST(kernel_replay_diagnostics, bytes_without_regions_does_not_decline)
 
 TEST(kernel_replay_diagnostics, untracked_summary_any_reflects_both_classes)
 {
-    EXPECT_FALSE(memory_tracker::untracked_summary_t{}.any());
-    EXPECT_TRUE(vmem_only(kMiB, 1).any());
-    EXPECT_TRUE(pool_only(kMiB, 1).any());
-    EXPECT_FALSE(vmem_only(kMiB, 0).any()) << "bytes alone must not count as evidence";
+    EXPECT_FALSE(memory_tracker::any_untracked(memory_tracker::untracked_summary_t{}));
+    EXPECT_TRUE(memory_tracker::any_untracked(vmem_only(kMiB, 1)));
+    EXPECT_TRUE(memory_tracker::any_untracked(pool_only(kMiB, 1)));
+    EXPECT_FALSE(memory_tracker::any_untracked(vmem_only(kMiB, 0)))
+        << "bytes alone must not count as evidence";
 }
 
 // ------------------------- footprint admission -------------------------
 
 TEST(kernel_replay_diagnostics, footprint_within_budget_is_admitted)
 {
-    auto policy                = permissive_policy();
-    policy.max_snapshot_bytes  = 256 * kMiB;
+    auto policy               = permissive_policy();
+    policy.max_snapshot_bytes = 256 * kMiB;
 
     EXPECT_EQ(check_admission(footprint(64 * kMiB, 4), 4, policy), decline_reason::none);
 }
@@ -202,9 +203,9 @@ TEST(kernel_replay_diagnostics, zero_budget_means_unlimited)
               decline_reason::none);
 }
 
-// The pass count must not affect the memory decision: the snapshot is one copy of the footprint held
-// for the window, not one per pass. Getting this wrong would decline large pass counts that are
-// perfectly affordable.
+// The pass count must not affect the memory decision: the snapshot is one copy of the footprint
+// held for the window, not one per pass. Getting this wrong would decline large pass counts that
+// are perfectly affordable.
 TEST(kernel_replay_diagnostics, pass_count_does_not_affect_the_memory_budget)
 {
     auto policy               = permissive_policy();
@@ -316,15 +317,15 @@ TEST(kernel_replay_diagnostics, outcome_line_reports_a_successful_replay)
 
 TEST(kernel_replay_diagnostics, outcome_line_reports_a_decline_with_its_cause)
 {
-    auto outcome                    = replay_outcome_t{};
-    outcome.dispatch_id             = 9;
-    outcome.reason                  = decline_reason::untracked_memory;
-    outcome.requested_passes        = 8;
-    outcome.executed_passes         = 0;
-    outcome.untracked.vmem_bytes    = 4096;
-    outcome.untracked.vmem_regions  = 2;
-    outcome.untracked.pool_bytes    = 512;
-    outcome.untracked.pool_regions  = 1;
+    auto outcome                   = replay_outcome_t{};
+    outcome.dispatch_id            = 9;
+    outcome.reason                 = decline_reason::untracked_memory;
+    outcome.requested_passes       = 8;
+    outcome.executed_passes        = 0;
+    outcome.untracked.vmem_bytes   = 4096;
+    outcome.untracked.vmem_regions = 2;
+    outcome.untracked.pool_bytes   = 512;
+    outcome.untracked.pool_regions = 1;
 
     const auto line = format_replay_outcome(outcome);
 
@@ -341,10 +342,10 @@ TEST(kernel_replay_diagnostics, outcome_line_reports_a_decline_with_its_cause)
 // decline, and it is also not trustworthy. The line has to distinguish that third state.
 TEST(kernel_replay_diagnostics, outcome_line_flags_reentrancy_on_an_otherwise_clean_replay)
 {
-    auto outcome                 = replay_outcome_t{};
-    outcome.reason               = decline_reason::none;
-    outcome.executed_passes      = 4;
-    outcome.reentrancy_observed  = true;
+    auto outcome                = replay_outcome_t{};
+    outcome.reason              = decline_reason::none;
+    outcome.executed_passes     = 4;
+    outcome.reentrancy_observed = true;
 
     const auto line = format_replay_outcome(outcome);
 
@@ -364,39 +365,77 @@ TEST(kernel_replay_diagnostics, logging_an_outcome_does_not_throw)
 
 // ------------------------- reentrancy marker -------------------------
 
+namespace
+{
+constexpr auto agent_a = rocprofiler_agent_id_t{.handle = 11};
+constexpr auto agent_b = rocprofiler_agent_id_t{.handle = 22};
+}  // namespace
+
 TEST(kernel_replay_diagnostics, replay_window_marker_tracks_enter_and_exit)
 {
-    ASSERT_FALSE(in_replay_window()) << "no window should be open before the first enter";
+    ASSERT_FALSE(in_replay_window(agent_a)) << "no window should be open before the first enter";
 
-    enter_replay_window();
-    EXPECT_TRUE(in_replay_window());
+    enter_replay_window(agent_a);
+    EXPECT_TRUE(in_replay_window(agent_a));
     EXPECT_FALSE(replay_reentrancy_observed()) << "entering must clear the previous window's flag";
 
     note_replay_reentrancy();
     EXPECT_TRUE(replay_reentrancy_observed());
 
     exit_replay_window();
-    EXPECT_FALSE(in_replay_window());
+    EXPECT_FALSE(in_replay_window(agent_a));
 
     // The flag survives the exit so the outcome record, written after the window closes, can still
     // report it.
     EXPECT_TRUE(replay_reentrancy_observed());
 
     // ...and a new window starts clean, so one dispatch's reentrancy is not attributed to the next.
-    enter_replay_window();
+    enter_replay_window(agent_a);
     EXPECT_FALSE(replay_reentrancy_observed());
     exit_replay_window();
+}
+
+// The marker is agent-scoped, and this is load-bearing rather than cosmetic. A tool callback that
+// launches work on a second GPU while agent A is replaying contends for agent B's mutex, which this
+// thread does not hold, so that dispatch must keep its reader lock. If the marker were agent-blind
+// it would skip it, and a concurrent replay on agent B would lose the isolation the lock exists to
+// provide -- silently, and only on multi-GPU runs.
+TEST(kernel_replay_diagnostics, replay_window_marker_is_agent_scoped)
+{
+    enter_replay_window(agent_a);
+
+    EXPECT_TRUE(in_replay_window(agent_a));
+    EXPECT_FALSE(in_replay_window(agent_b))
+        << "a window on one agent must not suppress locking on another agent";
+
+    exit_replay_window();
+    EXPECT_FALSE(in_replay_window(agent_a));
+}
+
+// A zero agent handle is not reserved, so "not in a window" cannot be encoded as handle 0.
+TEST(kernel_replay_diagnostics, replay_window_marker_handles_a_zero_agent_handle)
+{
+    constexpr auto agent_zero = rocprofiler_agent_id_t{.handle = 0};
+
+    ASSERT_FALSE(in_replay_window(agent_zero));
+
+    enter_replay_window(agent_zero);
+    EXPECT_TRUE(in_replay_window(agent_zero));
+    EXPECT_FALSE(in_replay_window(agent_a));
+
+    exit_replay_window();
+    EXPECT_FALSE(in_replay_window(agent_zero));
 }
 
 // The marker is thread-scoped: a replay window on one thread must not make an unrelated dispatch on
 // another thread skip the reader lock, which would drop the isolation the lock provides.
 TEST(kernel_replay_diagnostics, replay_window_marker_is_thread_scoped)
 {
-    enter_replay_window();
-    ASSERT_TRUE(in_replay_window());
+    enter_replay_window(agent_a);
+    ASSERT_TRUE(in_replay_window(agent_a));
 
     bool other_thread_saw_window = true;
-    auto observer                = std::thread{[&]() { other_thread_saw_window = in_replay_window(); }};
+    auto observer = std::thread{[&]() { other_thread_saw_window = in_replay_window(agent_a); }};
     observer.join();
 
     EXPECT_FALSE(other_thread_saw_window)
@@ -413,4 +452,128 @@ TEST(kernel_replay_diagnostics, reentrancy_warning_is_emitted_once)
     EXPECT_TRUE(should_warn_replay_reentrancy()) << "the first occurrence must warn";
     EXPECT_FALSE(should_warn_replay_reentrancy());
     EXPECT_FALSE(should_warn_replay_reentrancy());
+}
+
+// ------------------------- virtual-memory accounting -------------------------
+//
+// The map/unmap bookkeeping is what turns "this application uses a virtual-memory allocator" into a
+// decision, and it is testable without a GPU: record_vmem_map/unmap only touch the tracker's side
+// inventory. Which is worth doing, because the interception itself needs a real VMM allocation (a
+// physical handle and a reserved address range) and so is only reachable on a GPU runner.
+//
+// Direction of error matters here. Over-counting declines a replay that would have been fine, which
+// a user sees and can override. Under-counting admits a replay whose later passes silently run on
+// mutated inputs, which nobody sees. Every case below is written so that a bug in the conservative
+// direction fails the test.
+
+namespace
+{
+// Handles that no real agent will hold, so these tests cannot collide with a live inventory.
+constexpr auto vmem_agent    = hsa_agent_t{.handle = 0xF00D1};
+constexpr auto other_agent   = hsa_agent_t{.handle = 0xF00D2};
+constexpr auto unknown_agent = hsa_agent_t{.handle = 0};
+
+// Distinct fake addresses; nothing dereferences them.
+void*
+fake_va(uintptr_t offset)
+{
+    return reinterpret_cast<void*>(uintptr_t{0x100000000} + offset);
+}
+}  // namespace
+
+TEST(kernel_replay_vmem_accounting, a_mapping_is_counted_against_its_own_agent_only)
+{
+    auto* va = fake_va(0x1000);
+    memory_tracker::record_vmem_map(va, 4 * kMiB, vmem_agent);
+
+    const auto mine = memory_tracker::untracked_device_memory(vmem_agent);
+    EXPECT_EQ(mine.vmem_regions, 1U);
+    EXPECT_EQ(mine.vmem_bytes, 4 * kMiB);
+
+    const auto theirs = memory_tracker::untracked_device_memory(other_agent);
+    EXPECT_EQ(theirs.vmem_regions, 0U)
+        << "one GPU's virtual-memory mappings must not decline replay on another GPU";
+
+    memory_tracker::record_vmem_unmap(va, 4 * kMiB);
+    EXPECT_EQ(memory_tracker::untracked_device_memory(vmem_agent).vmem_regions, 0U);
+}
+
+// hsa_amd_pointer_info does not always name an owning agent for a VMM range. Attributing such a
+// mapping to no agent would hide it from every replay window, which is the one outcome that must
+// not happen: the mapping is still device-visible application data outside the snapshot.
+TEST(kernel_replay_vmem_accounting, a_mapping_with_no_resolved_agent_counts_everywhere)
+{
+    auto* va = fake_va(0x2000);
+    memory_tracker::record_vmem_map(va, kMiB, unknown_agent);
+
+    EXPECT_EQ(memory_tracker::untracked_device_memory(vmem_agent).vmem_regions, 1U);
+    EXPECT_EQ(memory_tracker::untracked_device_memory(other_agent).vmem_regions, 1U);
+
+    memory_tracker::record_vmem_unmap(va, kMiB);
+    EXPECT_EQ(memory_tracker::untracked_device_memory(vmem_agent).vmem_regions, 0U);
+}
+
+// HSA permits unmapping a prefix of a larger mapping, which is how a stream-ordered allocator
+// returns part of a pooled range. Dropping the whole record on any unmap would make the rest of a
+// still-mapped range invisible.
+TEST(kernel_replay_vmem_accounting, a_partial_unmap_shrinks_the_record_instead_of_dropping_it)
+{
+    auto* va = fake_va(0x3000);
+    memory_tracker::record_vmem_map(va, 8 * kMiB, vmem_agent);
+
+    memory_tracker::record_vmem_unmap(va, 2 * kMiB);
+
+    const auto after = memory_tracker::untracked_device_memory(vmem_agent);
+    EXPECT_EQ(after.vmem_regions, 1U) << "6 MiB is still mapped; the evidence must survive";
+    EXPECT_EQ(after.vmem_bytes, 6 * kMiB);
+
+    memory_tracker::record_vmem_unmap(va, 6 * kMiB);
+    EXPECT_EQ(memory_tracker::untracked_device_memory(vmem_agent).vmem_regions, 0U);
+}
+
+// An unmap larger than the record (or of an address never mapped) must not underflow the byte count
+// or leave a phantom region behind.
+TEST(kernel_replay_vmem_accounting, an_oversized_or_unknown_unmap_is_harmless)
+{
+    auto* va = fake_va(0x4000);
+    memory_tracker::record_vmem_map(va, kMiB, vmem_agent);
+    memory_tracker::record_vmem_unmap(va, 64 * kMiB);
+
+    const auto after = memory_tracker::untracked_device_memory(vmem_agent);
+    EXPECT_EQ(after.vmem_regions, 0U);
+    EXPECT_EQ(after.vmem_bytes, 0U);
+
+    EXPECT_NO_THROW(memory_tracker::record_vmem_unmap(fake_va(0x5000), kMiB));
+    EXPECT_EQ(memory_tracker::untracked_device_memory(vmem_agent).vmem_regions, 0U);
+}
+
+// A remap of the same address replaces the record rather than accumulating a second one; otherwise
+// a pooled allocator that reuses one address would inflate the reported footprint without bound.
+TEST(kernel_replay_vmem_accounting, remapping_the_same_address_replaces_the_record)
+{
+    auto* va = fake_va(0x6000);
+    memory_tracker::record_vmem_map(va, kMiB, vmem_agent);
+    memory_tracker::record_vmem_map(va, 4 * kMiB, vmem_agent);
+
+    const auto after = memory_tracker::untracked_device_memory(vmem_agent);
+    EXPECT_EQ(after.vmem_regions, 1U);
+    EXPECT_EQ(after.vmem_bytes, 4 * kMiB);
+
+    memory_tracker::record_vmem_unmap(va, 4 * kMiB);
+}
+
+// The end-to-end shape of the decision: a live mapping, under the default policy, declines.
+TEST(kernel_replay_vmem_accounting, a_live_mapping_declines_under_the_default_policy)
+{
+    auto* va = fake_va(0x7000);
+    memory_tracker::record_vmem_map(va, 512 * kMiB, vmem_agent);
+
+    const auto summary = memory_tracker::untracked_device_memory(vmem_agent);
+    ASSERT_TRUE(memory_tracker::any_untracked(summary));
+    EXPECT_EQ(check_untracked(summary, replay_policy_t{}), decline_reason::untracked_memory);
+
+    memory_tracker::record_vmem_unmap(va, 512 * kMiB);
+    EXPECT_EQ(
+        check_untracked(memory_tracker::untracked_device_memory(vmem_agent), replay_policy_t{}),
+        decline_reason::none);
 }

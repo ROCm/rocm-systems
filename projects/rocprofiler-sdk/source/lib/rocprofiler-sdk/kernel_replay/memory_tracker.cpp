@@ -72,7 +72,7 @@ unsupported_executable_inventory()
     struct unsupported_executable_tag
     {};
     static auto*& _v = common::static_object<common::Synchronized<tracked_map_t>,
-                                            unsupported_executable_tag>::construct();
+                                             unsupported_executable_tag>::construct();
     return *_v;
 }
 
@@ -153,7 +153,7 @@ void
 record_untracked_pool(void* ptr, size_t size, const alloc_query_t& q)
 {
     if(registration::get_fini_status() > 0) return;
-    if(!q.untracked_device_visible()) return;
+    if(!untracked_device_visible(q)) return;
 
     untracked_pool_inventory().wlock([&](auto& _map) {
         _map[ptr] = alloc_info_t{size, q.agent, 0};
@@ -256,7 +256,7 @@ vmem_unmap_wrapper(void* va, size_t size)
 {
     auto st = next_vmem_unmap(va, size);
     if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && va)
-        record_vmem_unmap(va);
+        record_vmem_unmap(va, size);
     return st;
 }
 }  // namespace
@@ -310,10 +310,17 @@ record_vmem_map(void* va, size_t size, hsa_agent_t agent)
 }
 
 void
-record_vmem_unmap(void* va)
+record_vmem_unmap(void* va, size_t size)
 {
     if(registration::get_fini_status() > 0) return;
-    vmem_inventory().wlock([va](auto& _map) { _map.erase(va); });
+    vmem_inventory().wlock([va, size](auto& _map) {
+        auto itr = _map.find(va);
+        if(itr == _map.end()) return;
+        if(size >= itr->second.size)
+            _map.erase(itr);
+        else
+            itr->second.size -= size;
+    });
 }
 
 tracked_map_t
@@ -336,6 +343,12 @@ tracked_footprint(hsa_agent_t agent)
 
     const auto [bytes, regions] = sum_for_agent(inventory(), agent);
     return footprint_t{bytes, regions};
+}
+
+bool
+any_untracked(const untracked_summary_t& summary)
+{
+    return summary.vmem_regions > 0 || summary.pool_regions > 0;
 }
 
 untracked_summary_t

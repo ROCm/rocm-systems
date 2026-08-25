@@ -89,9 +89,9 @@ rocprofiler_add_unit_test(
         "rocprofiler_kernel_replay"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-# snap/restore bandwidth tests allocate up to 128 MB ballast plus host snapshot copies.
-# (thread-local override state) with no GPU or rocprofiler runtime dependency, so it is a
-# plain CXX unit test that runs unconditionally.
+# Exercises only the localized context-control routing (thread-local override state) with
+# no GPU or rocprofiler runtime dependency, so it is a plain CXX unit test that runs
+# unconditionally.
 add_executable(kernel-replay-local-context-test)
 target_sources(kernel-replay-local-context-test PRIVATE local_context.cpp)
 
