@@ -197,6 +197,7 @@ TEST_F(GinAnvilIpcDeviceTest, DetailHelpers_ChannelAndDirty) {
   hostCtx.sdmaChannelStride = 1;
   hostCtx.fusedSdmaSignal = 1;
   hostCtx.signals = reinterpret_cast<uint64_t*>(0x1);  // non-null for fused predicate
+  hostCtx.signal_remote_addrs = reinterpret_cast<uintptr_t*>(0x1);
 
   DeviceBuffer<uint64_t> d_dirty(1);
   d_dirty.zero();
