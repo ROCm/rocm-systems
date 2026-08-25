@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -29,6 +30,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstddef>
 #include <vector>
 
@@ -239,6 +241,27 @@ TEST(pc_sampling, multiple_contexts_one_per_agent)
                 << "Failed to configure PC sampling for context " << i << " with agent "
                 << agent_id.handle;
         }
+
+        // Phase 1b: is_configured_on_agent is what the HSA write interceptor now consults in
+        // place of the per-queue callback registration that used to advertise PC sampling.
+        // It has to answer per agent: true for every agent a service was just configured on,
+        // and false for an agent that has none, or the interceptor would either miss dispatches
+        // or instrument agents nobody asked about.
+        printf("\n[multi_context] Phase 1b: Checking per-agent queue-hook gate\n");
+        for(size_t i = 0; i < data->gpu_pcs_agents.size(); i++)
+        {
+            const auto agent_id = data->gpu_pcs_agents[i]->id;
+            EXPECT_TRUE(rocprofiler::pc_sampling::is_configured_on_agent(agent_id))
+                << "agent " << agent_id.handle << " has a configured PC sampling service";
+        }
+
+        auto unconfigured_agent_id = rocprofiler_agent_id_t{.handle = 0};
+        for(const auto* agent : data->gpu_pcs_agents)
+            unconfigured_agent_id.handle = std::max(unconfigured_agent_id.handle, agent->id.handle);
+        unconfigured_agent_id.handle += 1;
+
+        EXPECT_FALSE(rocprofiler::pc_sampling::is_configured_on_agent(unconfigured_agent_id))
+            << "agent " << unconfigured_agent_id.handle << " has no configured PC sampling service";
 
         // Phase 2: Try to add remaining agents to each context (all should fail)
         printf("\n[multi_context] Phase 2: Attempting to add already-configured agents to contexts "
