@@ -9,6 +9,7 @@
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 
 #include <cstddef>
@@ -95,24 +96,15 @@ struct cache_policy
         // which has query_failed false and so still drops the tracks to zero.
         if(metric_values.query_failed) return;
 
-        const std::uint32_t active = enabled_metrics_cfg.value & supported_metrics.value;
+        enabled_metrics active;
+        active.value = enabled_metrics_cfg.value & supported_metrics.value;
 
-        for(const auto& metric : METRIC_TABLE)
-        {
-            if((active & (1U << metric.bit)) == 0U) continue;
-
-            // Display label for the counter track, and the device-independent identifier
-            // RocPD joins on. Perfetto shows the former; rocpd_info_pmc stores the
-            // latter.
-            const auto name = track_name(device_id, metric.suffix);
-
-            trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
-                static_cast<std::size_t>(category_enum_id<category::hipfile>::value),
-                name, timestamp, "{}", 0, 0, 0, "{}", "{}",
-                static_cast<std::uint32_t>(device_id),
-                static_cast<std::uint8_t>(agent_type::GPU), pmc_name(metric.suffix),
-                metric.value(metric_values), std::nullopt });
-        }
+        // The whole per-GPU snapshot goes out as one record. Track names and PMC
+        // identifiers are derived from METRIC_TABLE during post-processing, so this
+        // path - which runs on the sampling thread shared with every other collector -
+        // builds no strings and allocates nothing.
+        trace_cache::get_buffer_storage().store(sample{
+            active, static_cast<std::uint32_t>(device_id), timestamp, metric_values });
     }
 };
 
