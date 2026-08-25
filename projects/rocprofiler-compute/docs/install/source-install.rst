@@ -77,9 +77,6 @@ follows.
     * - ``TEST_FROM_INSTALL``
       - Should be ON to enable testing from the installation location without dependency on the source directory.
 
-    * - ``SKIP_NATIVE_TOOL_BUILD``
-      - Should be ON to skip building the native profiling tool. When enabled, the native tool will be compiled at runtime instead of build time. This is useful when ROCprofiler-SDK is not available during build time.
-
     * - ``ENABLE_SANITIZER``
       - Builds with sanitizer instrumentation for development.
         One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, ``TSAN``, or ``UBSAN``. See
