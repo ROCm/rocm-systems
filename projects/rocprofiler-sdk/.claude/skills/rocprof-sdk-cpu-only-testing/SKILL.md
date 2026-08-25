@@ -7,7 +7,7 @@ description: "Use when iterating on rocprofiler-sdk without a full ROCm/HIP buil
 
 A full configure-and-build needs ROCm, HIP, and initialized submodules. Without them you can still get real feedback on logic that does not call into HSA at runtime.
 
-Assumes the monorepo layout, with `rocr-runtime`, `hip`, and `clr` as siblings of `rocprofiler-sdk`, and commands run from the `rocprofiler-sdk` project root.
+Run every command below from this project root, `projects/rocprofiler-sdk` in the rocm-systems monorepo, with `rocr-runtime`, `hip`, and `clr` checked out as its siblings. Non-default locations go in `SIBLINGS` or `ROCR`, and the generated tree in `OUT`.
 
 ## Tier 1 — Syntax Only
 
@@ -49,7 +49,7 @@ black --check <changed .py>
 tail -c 1 <each changed file> | xxd                  # must end in a newline
 ```
 
-**Which formatter version:** clang-format 11 and `cmake-format`, per [CONTRIBUTING.md](../../../CONTRIBUTING.md) and [requirements.txt](../../../requirements.txt) (`clang-format>=11.0.0,<12.0.0`). The repository root `.pre-commit-config.yaml` pins clang-format 18 and gersemi and does not exclude this project, but the workflow that runs it sparse-checks out only `emulation/rocjitsu`, so it never sees these files. The enforcing job is `.github/workflows/rocprofiler-sdk-formatting.yml`. Formatting with 18 produces a diff CI rejects.
+**Which formatter version:** clang-format 11 and `cmake-format`, per [CONTRIBUTING.md](../../../CONTRIBUTING.md) and [requirements.txt](../../../requirements.txt) (`clang-format>=11.0.0,<12.0.0`). The monorepo root's `.pre-commit-config.yaml` pins clang-format 18 and gersemi and does not exclude this project, but the workflow that runs it sparse-checks out only `emulation/rocjitsu`, so it never sees these files. The enforcing job is `rocprofiler-sdk-formatting.yml`, also under the monorepo root's `.github/workflows/`. Formatting with 18 produces a diff CI rejects.
 
 Warnings are a merge gate (CONTRIBUTING requirement 6; `ROCPROFILER_BUILD_DEVELOPER` adds `-Werror`), so treat a new warning as a failure even when your own command line is not using `-Werror`.
 
