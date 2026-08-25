@@ -605,4 +605,15 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
   }
 }
 
+ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
+                              const ConSanRequest &request, const TransformPolicy &transform_policy,
+                              const RuntimePolicy &runtime_policy,
+                              const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+                              const RuntimeCapabilities &capabilities,
+                              const BoundRuntimeResources &resources) {
+  const ConSanOptions legacy_options = LegacyOptionsAdapter::adapt(
+      request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
+  return try_patch_consan(code_object_bytes, legacy_options);
+}
+
 } // namespace rocjitsu

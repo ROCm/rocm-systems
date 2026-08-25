@@ -1918,6 +1918,39 @@ family tests; exact single-target branches remain in classifiers and lowerers.
 
 ### Slice 2: split immutable requests and runtime facts from implementation state
 
+**Implementation status (2026-08-25): complete.** The documented request,
+transform, runtime, debug, mutation, capability-requirement, and bound-resource
+contracts live in `consan_request_contract.h.inc`. The environment parser now
+constructs those contracts as the public base values of `HookConfig` and runs
+their deterministic cross-field validation once. Production code receives the
+contracts separately and by const reference after construction; the two
+values that genuinely change during a load, `MutationRequest` and
+`BoundRuntimeResources`, are copied into explicitly named working values.
+
+The HSA adapter now performs one region walk per load to produce
+`RuntimeCapabilities`. Automatic SuperCollider and MOI report paths state and
+validate their capability requirements before allocation, and the typed
+maximum workgroup-LDS fact replaces the former separate group-region query.
+The production transformer entry accepts the separated contracts. A
+`LegacyOptionsAdapter` creates a fresh `ConSanOptions` only at the remaining
+prototype lowering, retry, and inventory seams; the direct `ConSanOptions`
+overload is marked internal for focused legacy tests. The former production
+hook block that manually copied approximately ninety policy, mutation,
+register, and report fields has been deleted, and the adapter exposes a
+reviewed projection inventory.
+
+The focused `request_contract_test.cpp` host suite covers defaults, value
+semantics, all validation and sentinel branches, mode conflicts, sampling and
+register boundaries, every mutation predicate, pristine mutation projection,
+both physical and simulator capability fixtures, every missing required
+runtime fact, all resource lifetimes, issue naming, fresh legacy projection,
+and typed-entry equivalence. The hook suite retains load-only Record/Replay
+activation, fail-open/fail-closed, parser, allocation, and lifecycle coverage.
+The completed cutover gate is the full ConSan host suite, all HSA-hook units,
+the capability-manifest check, all 2,908 simulator device contracts on all
+five targets, and a physical gfx950 correct/incorrect pair for each of the four
+engines.
+
 - **Current responsibility:** `ConSanOptions` mixes product configuration,
   mutation/debug controls, late-bound report data, and derived register/
   placement state. HSA/simulator capability facts are queried or inferred at

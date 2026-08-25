@@ -844,13 +844,15 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     }
   }
   if (config.fault_lds_wrong_address) {
+    uint32_t address_vgpr = 0;
     if (std::getenv("RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR") == nullptr ||
-        !parse_u32_env("RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR", 0, &config.fault_lds_address_vgpr) ||
-        config.fault_lds_address_vgpr > 255u) {
+        !parse_u32_env("RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR", 0, &address_vgpr) ||
+        address_vgpr > 255u) {
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] RJ_CONSAN_FAULT_LDS_WRONG_ADDRESS requires "
                            "RJ_CONSAN_FAULT_LDS_ADDRESS_VGPR in the range 0..255\n");
       return std::nullopt;
     }
+    config.fault_lds_address_vgpr = static_cast<uint16_t>(address_vgpr);
   }
   if (config.fault_ordinary_wrong_address) {
     if (std::getenv("RJ_CONSAN_FAULT_ORDINARY_VALID_ADDRESS_DELTA") == nullptr) {
@@ -1136,6 +1138,19 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
                          "RJ_CONSAN_MOI_FORBID_DIAGNOSTICS cannot both be enabled\n");
     return std::nullopt;
   }
+  config.max_patches_is_expert_limit = config.max_patches_explicit;
+  const auto reject_contract = [](rocjitsu::ConSanContractIssue issue) {
+    if (issue == rocjitsu::ConSanContractIssue::None)
+      return false;
+    const std::string_view name = rocjitsu::consan_contract_issue_name(issue);
+    std::fprintf(stderr, "[rocjitsu-dbi-hooks] invalid ConSan typed configuration: %.*s\n",
+                 static_cast<int>(name.size()), name.data());
+    return true;
+  };
+  if (reject_contract(rocjitsu::validate_consan_configuration(config, config, config, config,
+                                                              config, config))) {
+    return std::nullopt;
+  }
   warn_irrelevant_env_combinations(config);
   return config;
 }
@@ -1206,6 +1221,8 @@ void warn_irrelevant_env_combinations(const HookConfig &config) {
     return false;
   }
 
+  config->scope = config->bound() ? rocjitsu::ConSanRuntimeResourceScope::CodeObject
+                                  : rocjitsu::ConSanRuntimeResourceScope::Unbound;
   return parse_u32_env("RJ_CONSAN_REPORT_MARKER", 1, &config->report_marker);
 }
 

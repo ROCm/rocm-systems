@@ -96,6 +96,27 @@ rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
   return rocjitsu::try_patch_consan(bytes, options);
 }
 
+/// Invoke the current lowering implementation through the sole Slice-2
+/// compatibility seam. Every call receives immutable typed inputs and creates
+/// a fresh legacy value immediately before entering the prototype patcher.
+rocjitsu::ConSanResult run_consan_transform(std::span<const uint8_t> bytes,
+                                            const rocjitsu::ConSanRequest &request,
+                                            const rocjitsu::TransformPolicy &transform_policy,
+                                            const rocjitsu::RuntimePolicy &runtime_policy,
+                                            const rocjitsu::ConSanDebugOverrides &debug,
+                                            const rocjitsu::MutationRequest &mutation,
+                                            const rocjitsu::RuntimeCapabilities &capabilities,
+                                            const rocjitsu::BoundRuntimeResources &resources) {
+  if (const ConSanTransformOverride override =
+          g_test_consan_transform_override.load(std::memory_order_acquire)) {
+    const rocjitsu::ConSanOptions legacy_options = rocjitsu::LegacyOptionsAdapter::adapt(
+        request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
+    return override(bytes, legacy_options);
+  }
+  return rocjitsu::try_patch_consan(bytes, request, transform_policy, runtime_policy, debug,
+                                    mutation, capabilities, resources);
+}
+
 rocjitsu::ConSanResult retry_consan_moi_transform(std::span<const uint8_t> bytes,
                                                   const rocjitsu::ConSanOptions &options,
                                                   rocjitsu::ConSanResult inventory) {
@@ -121,40 +142,91 @@ rocjitsu::ConSanResult retry_consan_moi_transform(std::span<const uint8_t> bytes
   return rocjitsu::retry_patch_consan_moi_from_inventory(std::move(inventory), retry, bytes);
 }
 
-struct GroupSegmentRegionSearch {
+rocjitsu::ConSanResult retry_consan_moi_transform(
+    std::span<const uint8_t> bytes, const rocjitsu::ConSanRequest &request,
+    const rocjitsu::TransformPolicy &transform_policy,
+    const rocjitsu::RuntimePolicy &runtime_policy, const rocjitsu::ConSanDebugOverrides &debug,
+    const rocjitsu::MutationRequest &mutation, const rocjitsu::RuntimeCapabilities &capabilities,
+    const rocjitsu::BoundRuntimeResources &resources, rocjitsu::ConSanResult inventory) {
+  const rocjitsu::ConSanOptions legacy_options = rocjitsu::LegacyOptionsAdapter::adapt(
+      request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
+  return retry_consan_moi_transform(bytes, legacy_options, std::move(inventory));
+}
+
+/// Accumulator used by the HSA runtime-capability query adapter. It owns no HSA
+/// handles; the callback only normalizes region facts into the shared typed
+/// contract.
+struct RuntimeCapabilityRegionSearch {
   CoreApiTable *core = nullptr;
-  std::optional<uint32_t> size_bytes;
+  rocjitsu::RuntimeCapabilities *capabilities = nullptr;
 };
 
-hsa_status_t HSA_API select_group_segment_region(hsa_region_t region, void *data) {
-  auto *search = static_cast<GroupSegmentRegionSearch *>(data);
+hsa_status_t HSA_API collect_runtime_capability_region(hsa_region_t region, void *data) {
+  auto *search = static_cast<RuntimeCapabilityRegionSearch *>(data);
   hsa_region_segment_t segment{};
   hsa_status_t status =
       search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_SEGMENT, &segment);
-  if (status != HSA_STATUS_SUCCESS || segment != HSA_REGION_SEGMENT_GROUP)
-    return status;
-  size_t size_bytes = 0;
-  status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_SIZE, &size_bytes);
   if (status != HSA_STATUS_SUCCESS)
     return status;
-  if (size_bytes == 0 || size_bytes > std::numeric_limits<uint32_t>::max())
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  search->size_bytes = static_cast<uint32_t>(size_bytes);
-  return HSA_STATUS_INFO_BREAK;
+  if (segment == HSA_REGION_SEGMENT_GROUP) {
+    size_t size_bytes = 0;
+    status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_SIZE, &size_bytes);
+    if (status != HSA_STATUS_SUCCESS)
+      return status;
+    if (size_bytes != 0 && size_bytes <= std::numeric_limits<uint32_t>::max())
+      search->capabilities->max_workgroup_lds_bytes = static_cast<uint32_t>(size_bytes);
+    return HSA_STATUS_SUCCESS;
+  }
+  if (segment != HSA_REGION_SEGMENT_GLOBAL)
+    return HSA_STATUS_SUCCESS;
+
+  bool allocation_allowed = false;
+  status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED,
+                                                &allocation_allowed);
+  if (status != HSA_STATUS_SUCCESS || !allocation_allowed)
+    return status;
+  size_t max_size = 0;
+  status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_ALLOC_MAX_SIZE, &max_size);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  uint32_t flags = 0;
+  status = search->core->hsa_region_get_info_fn(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags);
+  if (status != HSA_STATUS_SUCCESS)
+    return status;
+  const bool fine_grained = (flags & HSA_REGION_GLOBAL_FLAG_FINE_GRAINED) != 0;
+  const bool coarse_grained = (flags & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) != 0;
+  if (!fine_grained && !coarse_grained)
+    return HSA_STATUS_SUCCESS;
+  search->capabilities->host_device_visible_memory = true;
+  search->capabilities->device_atomic_publication = true;
+  search->capabilities->host_device_coherent_memory |= fine_grained;
+  const uint64_t prior = search->capabilities->max_report_allocation_bytes.value_or(0);
+  search->capabilities->max_report_allocation_bytes =
+      std::max<uint64_t>(prior, static_cast<uint64_t>(max_size));
+  return HSA_STATUS_SUCCESS;
 }
 
-[[nodiscard]] std::optional<uint32_t> runtime_group_segment_size_bytes(CoreApiTable *core,
-                                                                       hsa_agent_t agent) {
+[[nodiscard]] rocjitsu::RuntimeCapabilities query_hsa_runtime_capabilities(CoreApiTable *core,
+                                                                           hsa_agent_t agent) {
+  rocjitsu::RuntimeCapabilities capabilities;
+  capabilities.backend = rocjitsu::ConSanRuntimeBackend::PhysicalHsa;
   if (core == nullptr || core->hsa_agent_iterate_regions_fn == nullptr ||
       core->hsa_region_get_info_fn == nullptr) {
-    return std::nullopt;
+    return capabilities;
   }
-  GroupSegmentRegionSearch search{.core = core, .size_bytes = std::nullopt};
-  const hsa_status_t status =
-      core->hsa_agent_iterate_regions_fn(agent, select_group_segment_region, &search);
-  if (status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-    return std::nullopt;
-  return search.size_bytes;
+  capabilities.executable_binding = core->hsa_code_object_reader_create_from_memory_fn != nullptr &&
+                                    core->hsa_executable_load_agent_code_object_fn != nullptr;
+  capabilities.dispatch_segment_binding = true;
+  RuntimeCapabilityRegionSearch search{.core = core, .capabilities = &capabilities};
+  if (core->hsa_agent_iterate_regions_fn(agent, collect_runtime_capability_region, &search) !=
+      HSA_STATUS_SUCCESS) {
+    rocjitsu::RuntimeCapabilities unavailable;
+    unavailable.backend = rocjitsu::ConSanRuntimeBackend::PhysicalHsa;
+    unavailable.executable_binding = capabilities.executable_binding;
+    unavailable.dispatch_segment_binding = capabilities.dispatch_segment_binding;
+    return unavailable;
+  }
+  return capabilities;
 }
 
 enum class WaitcheckPreflightOutcome { NotApplicable, Passed, HazardReported, AnalysisFailed };
@@ -904,6 +976,14 @@ private:
 
 void disable_fault_mutations(rocjitsu::ConSanOptions *options) {
   rocjitsu::disable_consan_fault_mutations(*options);
+}
+
+[[nodiscard]] bool fault_mutations_enabled(const rocjitsu::MutationRequest &request) {
+  return request.has_fault_mutation();
+}
+
+void disable_fault_mutations(rocjitsu::MutationRequest *request) {
+  *request = rocjitsu::without_consan_fault_mutations(*request);
 }
 
 namespace {
@@ -3723,110 +3803,28 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                                           waitcheck_begin)
                     .count());
 
-    rocjitsu::ConSanOptions patch_options;
-    patch_options.flavor = config->flavor.value_or(rocjitsu::ConSanFlavor::None);
-    patch_options.moi_engine = config->moi_engine;
-    patch_options.moi_owner_source = config->moi_owner_source;
-    patch_options.flat_provenance_mode = config->flat_provenance_mode;
-    patch_options.fail_closed = config->fail_closed;
-    patch_options.probe_nop = config->probe_nop;
-    patch_options.probe_trampoline_nop = config->probe_trampoline_nop;
-    patch_options.probe_endpgm = config->probe_endpgm;
-    patch_options.probe_lds_endpgm = config->probe_lds_endpgm;
-    patch_options.probe_lds_check_trap = config->probe_lds_check_trap;
-    patch_options.probe_flat_check_trap = config->probe_flat_check_trap;
-    patch_options.probe_flat_trap = config->probe_flat_trap;
-    patch_options.abort_unmatched_barrier_wait = config->abort_unmatched_barrier_wait;
-    patch_options.fault_drop_barrier = config->fault_drop_barrier;
-    patch_options.fault_allow_destructive_incomplete_barrier_drop =
-        config->fault_allow_destructive_incomplete_barrier_drop;
-    patch_options.fault_move_barrier = config->fault_move_barrier;
-    patch_options.collect_barrier_move_destinations = config->fault_move_barrier;
-    patch_options.fault_allow_completing_conditional_barrier_move =
-        config->fault_allow_completing_conditional_barrier_move;
-    patch_options.fault_allow_destructive_divergent_barrier_move =
-        config->fault_allow_destructive_divergent_barrier_move;
-    patch_options.fault_mutate_barrier_id_scope = config->fault_mutate_barrier_id_scope;
-    patch_options.fault_mutate_barrier_participants = config->fault_mutate_barrier_participants;
-    patch_options.fault_barrier_move_direction = config->fault_barrier_move_direction;
-    patch_options.fault_barrier_destination_identity = config->fault_barrier_destination_identity;
-    patch_options.fault_barrier_sequence_identity = config->fault_barrier_sequence_identity;
-    patch_options.fault_barrier_companion_site_identity =
-        config->fault_barrier_companion_site_identity;
-    patch_options.fault_barrier_companion_sequence_identity =
-        config->fault_barrier_companion_sequence_identity;
-    patch_options.fault_barrier_target_id = config->fault_barrier_target_id;
-    patch_options.fault_barrier_target_participant_count =
-        config->fault_barrier_target_participant_count;
-    patch_options.fault_barrier_target_participant_mask =
-        config->fault_barrier_target_participant_mask;
-    patch_options.fault_atomic_wrong_address = config->fault_atomic_wrong_address;
-    patch_options.fault_atomic_weaken_order = config->fault_atomic_weaken_order;
-    patch_options.fault_atomic_order_edge = config->fault_atomic_order_edge;
-    patch_options.fault_atomic_weaken_scope = config->fault_atomic_weaken_scope;
-    patch_options.fault_lds_wrong_address = config->fault_lds_wrong_address;
-    patch_options.fault_ordinary_wrong_address = config->fault_ordinary_wrong_address;
-    patch_options.fault_ordinary_weaken_order = config->fault_ordinary_weaken_order;
-    patch_options.fault_ordinary_weaken_scope = config->fault_ordinary_weaken_scope;
-    patch_options.fault_atomic_address_delta = config->fault_atomic_address_delta;
-    patch_options.fault_lds_address_vgpr = config->fault_lds_address_vgpr;
-    patch_options.fault_ordinary_address_delta = config->fault_ordinary_address_delta;
-    patch_options.fault_dry_run = config->fault_dry_run;
+    const rocjitsu::RuntimeCapabilities runtime_capabilities =
+        query_hsa_runtime_capabilities(layer().core_table(), agent);
+    const auto &request = static_cast<const rocjitsu::ConSanRequest &>(*config);
+    const auto &transform_policy = static_cast<const rocjitsu::TransformPolicy &>(*config);
+    const auto &runtime_policy = static_cast<const rocjitsu::RuntimePolicy &>(*config);
+    const auto &debug_overrides = static_cast<const rocjitsu::ConSanDebugOverrides &>(*config);
+    rocjitsu::BoundRuntimeResources runtime_resources =
+        static_cast<const rocjitsu::BoundRuntimeResources &>(*config);
+    rocjitsu::MutationRequest mutation_request =
+        static_cast<const rocjitsu::MutationRequest &>(*config);
     // Exact fault selection is process-scoped in the HSA hook: workloads can
     // load runtime-helper code objects before the one containing the reviewed
     // site.  The process-wide atomic reservation below admits only the first match,
     // while retained fault telemetry lets the validation driver reject zero
     // matches.  Enforcing this inside each code-object transform would reject
     // every preceding nonmatching object.
-    patch_options.fault_require_exactly_one = false;
-    patch_options.sc_perturb_kind = config->sc_perturb_kind;
-    patch_options.sc_perturb_edge = config->sc_perturb_edge;
-    patch_options.sc_perturb_identity = config->sc_perturb_identity;
-    patch_options.sc_perturb_index = config->sc_perturb_index;
-    patch_options.sc_perturb_max = config->sc_perturb_max;
-    patch_options.sc_perturb_sleep = config->sc_perturb_sleep;
-    patch_options.sc_perturb_required_count = config->sc_perturb_required_count;
-    patch_options.moi_init_owner_epoch = config->moi_init_owner_epoch;
-    patch_options.moi_track_barriers = config->moi_track_barriers;
-    patch_options.moi_track_atomics = config->moi_track_atomics;
-    patch_options.moi_dynamic_access_records = config->moi_dynamic_access_records;
-    patch_options.moi_inline_workgroup_shadow =
-        config->moi_engine == rocjitsu::ConSanMoiEngine::InlineShadow;
-    patch_options.moi_sampled_check = config->moi_sampled_check;
-    patch_options.moi_partition_mask_debug = config->moi_partition_mask_debug;
-    patch_options.force_vgpr_spill = config->test_force_vgpr_spill;
-    patch_options.force_private_epoch = config->test_force_private_epoch;
-    patch_options.test_kernel_name_filter = config->test_kernel_name_filter;
-    patch_options.fault_barrier_index = config->fault_barrier_index;
-    patch_options.fault_atomic_index = config->fault_atomic_index;
-    patch_options.fault_lds_index = config->fault_lds_index;
-    patch_options.fault_ordinary_index = config->fault_ordinary_index;
-    patch_options.fault_site_identity = config->fault_site_identity;
-    patch_options.delay_mode = config->delay_mode;
-    patch_options.delay_var_ssrc = config->delay_var_ssrc;
-    patch_options.scratch_vgpr = config->scratch_vgpr;
-    patch_options.moi_exec_save_sgpr = config->moi_exec_save_sgpr;
-    patch_options.moi_owner_sgpr = config->moi_owner_sgpr;
-    patch_options.moi_owner_vgpr = config->moi_owner_vgpr;
-    patch_options.moi_epoch_vgpr = config->moi_epoch_vgpr;
-    patch_options.report_buffer_address = config->report_buffer_address;
-    patch_options.moi_report_buffer_address = config->moi_report_buffer_address;
-    patch_options.moi_report_buffer_size = config->moi_report_buffer_size;
-    patch_options.moi_max_workgroup_lds_bytes =
-        runtime_group_segment_size_bytes(layer().core_table(), agent);
-    patch_options.delay_nops = config->delay_nops;
-    patch_options.patched_image_growth_limit = config->patched_image_growth_limit;
-    patch_options.max_patches = config->max_patches;
-    patch_options.max_patches_is_expert_limit = config->max_patches_explicit;
-    patch_options.moi_sample_stride = config->moi_sample_stride;
-    patch_options.moi_sample_offset = config->moi_sample_offset;
-    patch_options.moi_runtime_sample_stride = config->moi_runtime_sample_stride;
-    patch_options.moi_runtime_sample_offset = config->moi_runtime_sample_offset;
-    patch_options.report_marker = config->report_marker;
-    if (patch_options.flavor != rocjitsu::ConSanFlavor::None) {
+    mutation_request.fault_require_exactly_one = false;
+    if (request.flavor != rocjitsu::ConSanFlavor::None) {
       const std::optional<ConSanTransformReservationEstimate> reservation =
-          consan_transform_major_image_reservation(size, patch_options.patched_image_growth_limit);
-      const bool relative_growth = patch_options.patched_image_growth_limit.kind ==
+          consan_transform_major_image_reservation(size,
+                                                   transform_policy.patched_image_growth_limit);
+      const bool relative_growth = transform_policy.patched_image_growth_limit.kind ==
                                    rocjitsu::ConSanPatchedImageGrowthLimitKind::InputPercent;
       log_message(
           kLogInfo,
@@ -3840,8 +3838,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           static_cast<unsigned long long>(reservation ? reservation->maximum_image_copies() : 0),
           relative_growth ? "input-percent" : "absolute-bytes",
           static_cast<unsigned long long>(
-              relative_growth ? patch_options.patched_image_growth_limit.input_percent
-                              : patch_options.patched_image_growth_limit.absolute_bytes));
+              relative_growth ? transform_policy.patched_image_growth_limit.input_percent
+                              : transform_policy.patched_image_growth_limit.absolute_bytes));
       std::optional<ProcessTransformAdmissionRegistry::AdmissionResult> admission;
       if (reservation) {
         admission = transform_state.acquire(reservation->reservation_bytes,
@@ -3917,18 +3915,26 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     size_t process_prior_fault_applications = 0;
     if ((config->fault_require_exactly_one && !config->fault_dry_run) ||
         config->fault_load_occurrence) {
-      rocjitsu::ConSanOptions probe_options = patch_options;
+      rocjitsu::MutationRequest probe_mutation = mutation_request;
+      rocjitsu::BoundRuntimeResources probe_resources = runtime_resources;
       // Keep the configured flavor: try_patch_consan intentionally skips all
       // ConSan planning for flavor=None, including dry-run fault planning.
       // The probe result is discarded, so retaining the flavor cannot install
       // instrumentation but does let the exact fault resolver identify this
       // dynamic code-object load.
-      probe_options.fault_dry_run = true;
-      probe_options.fault_require_exactly_one = false;
-      probe_options.moi_report_buffer_address.reset();
-      probe_options.moi_report_buffer_size = 0;
-      const rocjitsu::ConSanResult probe =
-          run_consan_transform(std::span<const uint8_t>(bytes, size), probe_options);
+      probe_mutation.fault_dry_run = true;
+      probe_mutation.fault_require_exactly_one = false;
+      probe_resources.moi_report_buffer_address.reset();
+      probe_resources.moi_report_buffer_size = 0;
+      probe_resources.moi_report_layout.reset();
+      probe_resources.moi_report_generation = 0;
+      probe_resources.moi_report_dispatch_id = 0;
+      probe_resources.scope = probe_resources.report_buffer_address
+                                  ? rocjitsu::ConSanRuntimeResourceScope::CodeObject
+                                  : rocjitsu::ConSanRuntimeResourceScope::Unbound;
+      const rocjitsu::ConSanResult probe = run_consan_transform(
+          std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
+          debug_overrides, probe_mutation, runtime_capabilities, probe_resources);
       const bool matched = probe.planned_fault_mutations != 0;
       if (probe.planned_fault_mutations > 1) {
         std::fprintf(stderr,
@@ -3989,17 +3995,18 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         }
       }
       if (!selected)
-        disable_fault_mutations(&patch_options);
+        disable_fault_mutations(&mutation_request);
     }
-    if (patch_options.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
-        config->sc_report_mode == ScReportMode::Auto && !patch_options.report_buffer_address) {
-      rocjitsu::ConSanOptions inventory_options = patch_options;
+    if (request.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
+        config->sc_report_mode == ScReportMode::Auto && !runtime_resources.report_buffer_address) {
+      rocjitsu::MutationRequest inventory_mutation = mutation_request;
       const bool live_fault_transform =
-          fault_mutations_enabled(patch_options) && !patch_options.fault_dry_run;
+          fault_mutations_enabled(mutation_request) && !mutation_request.fault_dry_run;
       if (live_fault_transform)
-        disable_fault_mutations(&inventory_options);
-      rocjitsu::ConSanResult inventory =
-          run_consan_transform(std::span<const uint8_t>(bytes, size), inventory_options);
+        disable_fault_mutations(&inventory_mutation);
+      rocjitsu::ConSanResult inventory = run_consan_transform(
+          std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
+          debug_overrides, inventory_mutation, runtime_capabilities, runtime_resources);
       if (!sc_inventory_needs_report_buffer(inventory)) {
         log_message(kLogInfo,
                     "ConSan SC auto report buffer skipped reader=%llu: no selected check sites",
@@ -4009,9 +4016,25 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       } else {
         uint64_t auto_report_address = 0;
         uint64_t auto_report_generation = 0;
-        if (!AutoScReportBufferRegistry::instance().allocate(
-                layer().core_table(), agent, code_object_reader.handle, &auto_report_address,
-                &auto_report_generation)) {
+        rocjitsu::RuntimeCapabilityRequirements report_requirements;
+        report_requirements.host_device_visible_memory = true;
+        report_requirements.minimum_report_allocation_bytes = sizeof(uint32_t);
+        report_requirements.executable_binding = true;
+        const rocjitsu::ConSanContractIssue capability_issue =
+            rocjitsu::validate_runtime_capabilities(runtime_capabilities, report_requirements);
+        const bool allocated = capability_issue == rocjitsu::ConSanContractIssue::None &&
+                               AutoScReportBufferRegistry::instance().allocate(
+                                   layer().core_table(), agent, code_object_reader.handle,
+                                   &auto_report_address, &auto_report_generation);
+        if (!allocated) {
+          if (capability_issue != rocjitsu::ConSanContractIssue::None) {
+            const std::string_view reason = rocjitsu::consan_contract_issue_name(capability_issue);
+            log_message(kLogInfo,
+                        "ConSan SC automatic report rejected by runtime capabilities "
+                        "reader=%llu reason=%.*s",
+                        static_cast<unsigned long long>(code_object_reader.handle),
+                        static_cast<int>(reason.size()), reason.data());
+          }
           std::fprintf(stderr, "[rocjitsu-dbi-hooks] ConSan SC automatic non-trapping report "
                                "allocation failed; analysis incomplete, refusing trap fallback\n");
           for (rocjitsu::ConSanSiteDispositionRecord &site : inventory.site_dispositions) {
@@ -4035,25 +4058,30 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 *config, HSA_STATUS_ERROR_OUT_OF_RESOURCES, code_object_reader.handle,
                 "supercollider-report-allocation", fault_installation_evidence);
         } else {
-          patch_options.report_buffer_address = auto_report_address;
+          runtime_resources.report_buffer_address = auto_report_address;
+          runtime_resources.scope = rocjitsu::ConSanRuntimeResourceScope::Executable;
           auto_report_guard.note_sc(code_object_reader.handle, auto_report_generation);
         }
       }
     }
-    if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
-        patch_options.moi_report_buffer_address && !patch_options.moi_report_dispatch_id) {
+    if (request.flavor == rocjitsu::ConSanFlavor::Moi &&
+        runtime_resources.moi_report_buffer_address && !runtime_resources.moi_report_dispatch_id) {
       // Explicit report buffers are commonly installed immediately before a
       // fixture's code object is loaded. Give their emitted records the same
       // nonzero code-object identity used by automatic report buffers.
-      patch_options.moi_report_dispatch_id = code_object_reader.handle;
+      runtime_resources.moi_report_dispatch_id = code_object_reader.handle;
     }
     std::optional<uint64_t> registered_auto_moi_report_generation;
-    if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
-        !patch_options.moi_report_buffer_address && config->moi_auto_report_buffer_size != 0) {
-      rocjitsu::ConSanOptions inventory_options = patch_options;
+    if (request.flavor == rocjitsu::ConSanFlavor::Moi &&
+        !runtime_resources.moi_report_buffer_address && request.moi_auto_report_buffer_size != 0) {
+      rocjitsu::MutationRequest inventory_mutation = mutation_request;
+      rocjitsu::BoundRuntimeResources inventory_resources = runtime_resources;
+      rocjitsu::ConSanOptions inventory_options = rocjitsu::LegacyOptionsAdapter::adapt(
+          request, transform_policy, runtime_policy, debug_overrides, inventory_mutation,
+          runtime_capabilities, inventory_resources);
       inventory_options.moi_report_buffer_size = 0;
       const bool live_fault_transform =
-          fault_mutations_enabled(patch_options) && !patch_options.fault_dry_run;
+          fault_mutations_enabled(mutation_request) && !mutation_request.fault_dry_run;
       // A report-sizing pass is pristine MOI inventory, never the live
       // mutation stage. fault_dry_run returns after fault planning and before
       // MOI candidate/resource planning, so disable the mutation members while
@@ -4061,8 +4089,14 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       // mutation and runtime layout to this pristine inventory.
       if (live_fault_transform) {
         inventory_options.qualify_extended_barrier_pairs =
-            rocjitsu::consan_qualifies_extended_barrier_pairs(patch_options);
-        disable_fault_mutations(&inventory_options);
+            rocjitsu::consan_qualifies_extended_barrier_pairs(inventory_options);
+        disable_fault_mutations(&inventory_mutation);
+        const bool qualify_extended_barrier_pairs =
+            inventory_options.qualify_extended_barrier_pairs;
+        inventory_options = rocjitsu::LegacyOptionsAdapter::adapt(
+            request, transform_policy, runtime_policy, debug_overrides, inventory_mutation,
+            runtime_capabilities, inventory_resources);
+        inventory_options.qualify_extended_barrier_pairs = qualify_extended_barrier_pairs;
       }
       log_message(kLogInfo, "ConSan MOI inventory begin reader=%llu bytes=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle), size);
@@ -4097,7 +4131,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       std::optional<rocjitsu::ConSanMoiReportLayoutOverride> report_layout_override;
       std::optional<rocjitsu::ConSanMoiAutoReportInventory> planned_report_inventory;
       if (inventory_requires_report_buffer && !patch_result_storage &&
-          patch_options.moi_dynamic_access_records) {
+          request.moi_dynamic_access_records) {
         if (!config->moi_auto_report_buffer_size_explicit) {
           log_message(kLogInfo,
                       "ConSan MOI auto report plan reader=%llu outcome="
@@ -4167,24 +4201,49 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             static_cast<unsigned long long>(report_inventory.inline_causal_snapshot_count),
             static_cast<unsigned long long>(report_inventory.inline_acquired_epoch_token_count));
       }
-      if (auto_report_plan_available && !patch_result_storage &&
+      bool report_runtime_capabilities_available = true;
+      if (auto_report_plan_available && !patch_result_storage) {
+        rocjitsu::RuntimeCapabilityRequirements report_requirements;
+        report_requirements.host_device_visible_memory = true;
+        report_requirements.device_atomic_publication = true;
+        report_requirements.minimum_report_allocation_bytes = requested_report_size;
+        report_requirements.executable_binding = true;
+        const rocjitsu::ConSanContractIssue capability_issue =
+            rocjitsu::validate_runtime_capabilities(runtime_capabilities, report_requirements);
+        report_runtime_capabilities_available =
+            capability_issue == rocjitsu::ConSanContractIssue::None;
+        if (!report_runtime_capabilities_available) {
+          const std::string_view reason = rocjitsu::consan_contract_issue_name(capability_issue);
+          log_message(kLogInfo,
+                      "ConSan MOI auto report rejected by runtime capabilities "
+                      "reader=%llu required_bytes=%llu reason=%.*s",
+                      static_cast<unsigned long long>(code_object_reader.handle),
+                      static_cast<unsigned long long>(requested_report_size),
+                      static_cast<int>(reason.size()), reason.data());
+          reject_auto_moi_report_plan(code_object_reader.handle, required_report_size,
+                                      config->moi_auto_report_buffer_size, reason);
+        }
+      }
+      if (auto_report_plan_available && report_runtime_capabilities_available &&
+          !patch_result_storage &&
           allocate_auto_moi_report_buffer(
               layer().core_table(), agent, code_object_reader.handle, required_report_size,
               requested_report_size, config->moi_auto_report_buffer_size, report_layout,
               config->moi_engine, config->moi_track_barriers, config->moi_track_atomics,
               config->test_seed_inline_exact_odd, &auto_report_address, &auto_report_size,
               &auto_report_generation)) {
-        patch_options.moi_report_buffer_address = auto_report_address;
-        patch_options.moi_report_buffer_size = auto_report_size;
-        patch_options.moi_report_layout = report_layout_override;
-        patch_options.moi_report_generation = auto_report_generation;
+        runtime_resources.scope = rocjitsu::ConSanRuntimeResourceScope::Executable;
+        runtime_resources.moi_report_buffer_address = auto_report_address;
+        runtime_resources.moi_report_buffer_size = auto_report_size;
+        runtime_resources.moi_report_layout = report_layout_override;
+        runtime_resources.moi_report_generation = auto_report_generation;
         registered_auto_moi_report_generation = auto_report_generation;
         auto_report_guard.note_moi(code_object_reader.handle, auto_report_generation);
-        patch_options.moi_report_dispatch_id = code_object_reader.handle;
+        runtime_resources.moi_report_dispatch_id = code_object_reader.handle;
         if (live_fault_transform && planned_report_inventory)
           live_fault_auto_report_capacity_inventory = *planned_report_inventory;
         if (!live_fault_transform ||
-            patch_options.sc_perturb_kind == rocjitsu::ConSanPerturbationKind::None)
+            mutation_request.sc_perturb_kind == rocjitsu::ConSanPerturbationKind::None)
           reusable_moi_inventory = std::move(inventory);
       } else if (auto_report_plan_available && !patch_result_storage && config->fail_closed) {
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,
@@ -4199,30 +4258,35 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     log_message(kLogInfo, "ConSan patch begin reader=%llu bytes=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle), size);
     const auto patch_begin = std::chrono::steady_clock::now();
+    const rocjitsu::ConSanOptions legacy_options = rocjitsu::LegacyOptionsAdapter::adapt(
+        request, transform_policy, runtime_policy, debug_overrides, mutation_request,
+        runtime_capabilities, runtime_resources);
     if (!patch_result_storage) {
       if (reusable_moi_inventory) {
-        patch_result_storage =
-            retry_consan_moi_transform(std::span<const uint8_t>(bytes, size), patch_options,
-                                       std::move(*reusable_moi_inventory));
+        patch_result_storage = retry_consan_moi_transform(
+            std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
+            debug_overrides, mutation_request, runtime_capabilities, runtime_resources,
+            std::move(*reusable_moi_inventory));
       } else {
-        patch_result_storage =
-            run_consan_transform(std::span<const uint8_t>(bytes, size), patch_options);
+        patch_result_storage = run_consan_transform(
+            std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
+            debug_overrides, mutation_request, runtime_capabilities, runtime_resources);
       }
     }
     const rocjitsu::ConSanResult &patch_result = *patch_result_storage;
     fault_installation_evidence.record_applied_mutations(patch_result.applied_fault_mutations);
     if (live_fault_auto_report_capacity_inventory) {
       const rocjitsu::ConSanMoiAutoReportInventory live_requirement =
-          rocjitsu::inventory_consan_moi_auto_report(patch_result, patch_options,
+          rocjitsu::inventory_consan_moi_auto_report(patch_result, legacy_options,
                                                      std::span<const uint8_t>(bytes, size),
                                                      config->moi_auto_report_buffer_size);
       if (!rocjitsu::consan_moi_auto_report_inventory_covers(
               *live_fault_auto_report_capacity_inventory, live_requirement)) {
         std::fprintf(stderr, "[rocjitsu-dbi-hooks] ConSan internal invariant violation: live fault "
                              "transform grew the automatic MOI report inventory\n");
-        reject_auto_moi_report_plan(code_object_reader.handle, patch_options.moi_report_buffer_size,
-                                    config->moi_auto_report_buffer_size,
-                                    "live_fault_inventory_growth");
+        reject_auto_moi_report_plan(
+            code_object_reader.handle, runtime_resources.moi_report_buffer_size,
+            config->moi_auto_report_buffer_size, "live_fault_inventory_growth");
         return reject_code_object_load(
             *config, HSA_STATUS_ERROR_OUT_OF_RESOURCES, code_object_reader.handle,
             "moi-report-live-inventory-growth", fault_installation_evidence);
@@ -4439,8 +4503,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "moi_report_buffer=%s moi_report_buffer_size=%llu "
         "moi_auto_report_buffer_size=%llu require_patch=%s",
         static_cast<unsigned long long>(code_object_reader.handle),
-        flavor_name(patch_options.flavor),
-        rocjitsu::consan_moi_engine_name(patch_options.moi_engine), patch_result.input_size,
+        flavor_name(request.flavor.value_or(rocjitsu::ConSanFlavor::None)),
+        rocjitsu::consan_moi_engine_name(request.moi_engine), patch_result.input_size,
         patch_result.visited_code_object ? "true" : "false",
         patch_result.modified ? "true" : "false", config->delay_nops,
         config->fail_closed ? "true" : "false", config->probe_nop ? "true" : "false",
@@ -4453,9 +4517,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->moi_track_barriers ? "true" : "false", config->moi_track_atomics ? "true" : "false",
         config->moi_dynamic_access_records ? "true" : "false", config->fault_barrier_index,
         delay_mode_name(config->delay_mode), config->delay_var_ssrc,
-        patched_image_growth_limit_kind_name(patch_options.patched_image_growth_limit.kind),
+        patched_image_growth_limit_kind_name(transform_policy.patched_image_growth_limit.kind),
         static_cast<unsigned long long>(
-            patched_image_growth_limit_value(patch_options.patched_image_growth_limit)),
+            patched_image_growth_limit_value(transform_policy.patched_image_growth_limit)),
         config->process_concurrent_transform_limit_bytes
             ? std::to_string(*config->process_concurrent_transform_limit_bytes).c_str()
             : "unlimited",
@@ -4476,10 +4540,10 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->report_buffer_address ? std::to_string(*config->report_buffer_address).c_str()
                                       : "disabled",
         config->report_marker,
-        patch_options.moi_report_buffer_address
-            ? std::to_string(*patch_options.moi_report_buffer_address).c_str()
+        runtime_resources.moi_report_buffer_address
+            ? std::to_string(*runtime_resources.moi_report_buffer_address).c_str()
             : "disabled",
-        static_cast<unsigned long long>(patch_options.moi_report_buffer_size),
+        static_cast<unsigned long long>(runtime_resources.moi_report_buffer_size),
         static_cast<unsigned long long>(config->moi_auto_report_buffer_size),
         config->require_patch ? "true" : "false");
     if (patch_result.parsed_code_object) {
@@ -4843,7 +4907,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   sync_confidence_name(group.confidence), reason.c_str(),
                   members.empty() ? "-" : members.c_str());
     }
-    if (patch_options.flavor == rocjitsu::ConSanFlavor::Moi) {
+    if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
       log_message(kLogInfo, "ConSan MOI inventory reader=%llu candidates=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   patch_result.moi_candidates.size());
@@ -5463,9 +5527,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     detailed_log_batch.flush();
     if (config->require_patch && !config->fault_dry_run &&
         !has_consan_site_instrumentation_patch(patch_result)) {
-      const bool required = (patch_options.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
+      const bool required = (request.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
                              require_patch_applies_to(patch_result, *config)) ||
-                            (patch_options.flavor == rocjitsu::ConSanFlavor::Moi &&
+                            (request.flavor == rocjitsu::ConSanFlavor::Moi &&
                              require_moi_patch_applies_to(patch_result));
       if (required) {
         std::fprintf(stderr,

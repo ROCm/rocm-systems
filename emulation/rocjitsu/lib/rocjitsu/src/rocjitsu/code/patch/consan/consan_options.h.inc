@@ -273,6 +273,8 @@ struct ConSanMoiReportLayoutOverride {
   uint64_t sampled_sync_metadata_offset = 0;
   uint64_t sampled_pending_acquires_offset = 0;
   uint64_t required_bytes = 0;
+
+  bool operator==(const ConSanMoiReportLayoutOverride &) const = default;
 };
 
 /// Exact persistent Record/Replay workgroup tuple. Record/Replay publishes

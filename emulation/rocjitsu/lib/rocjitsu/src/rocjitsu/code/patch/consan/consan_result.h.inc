@@ -584,11 +584,22 @@ consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
 [[nodiscard]] std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value);
 [[nodiscard]] std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value);
 
+/// Apply ConSan using the separated immutable request, policy, capability, and
+/// bound-resource contracts. This is the production Slice-2 entry point; it
+/// creates a fresh compatibility value immediately before current lowering.
+[[nodiscard]] ConSanResult
+try_patch_consan(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+                 const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+                 const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+                 const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources);
+
 /// @brief Try to apply ConSan instrumentation to @p code_object_bytes.
 ///
 /// @details The early DBI slices parse and inventory the code object, return
 /// `modified=false`, and leave `elf_bytes` empty so callers continue loading the
-/// original code object.
+/// original code object. This direct mutable-options overload is an internal
+/// legacy seam retained for focused host tests and existing lowerers during the
+/// incremental migration; new production callers must use the typed overload.
 [[nodiscard]] ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
                                             const ConSanOptions &options);
 

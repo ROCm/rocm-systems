@@ -60,111 +60,34 @@ constexpr uint32_t kConSanMoiAutoDetailLogLimit = 4;
   return std::min(visible_count, kConSanMoiAutoDetailLogLimit);
 }
 
-struct HookConfig {
-  bool enabled = false;
+/// Fully parsed hook configuration.
+///
+/// The six public base subobjects are the Slice-2 contracts constructed by the
+/// environment parser. The remaining members are hook-local presentation,
+/// allocation-mode, and parsing-provenance state; they are deliberately not
+/// forwarded to legacy lowering. Inheritance preserves the existing parser's
+/// concise field spelling while allowing production callers to pass each
+/// immutable contract independently.
+struct HookConfig : rocjitsu::ConSanRequest,
+                    rocjitsu::TransformPolicy,
+                    rocjitsu::RuntimePolicy,
+                    rocjitsu::ConSanDebugOverrides,
+                    rocjitsu::MutationRequest,
+                    rocjitsu::BoundRuntimeResources {
   HookPolicy policy = HookPolicy::Default;
-  std::optional<rocjitsu::ConSanFlavor> flavor;
-  rocjitsu::ConSanMoiEngine moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
-  rocjitsu::ConSanMoiOwnerSource moi_owner_source = rocjitsu::ConSanMoiOwnerSource::Automatic;
-  rocjitsu::ConSanFlatProvenanceMode flat_provenance_mode =
-      rocjitsu::ConSanFlatProvenanceMode::Likely;
-  bool fail_closed = false;
-  bool require_patch = false;
-  bool probe_nop = false;
-  bool probe_trampoline_nop = false;
-  bool probe_endpgm = false;
-  bool probe_lds_endpgm = false;
   CheckTrapMode check_trap_mode = CheckTrapMode::All;
-  bool probe_lds_check_trap = false;
-  bool probe_flat_check_trap = false;
-  bool probe_flat_trap = false;
-  bool abort_unmatched_barrier_wait = false;
-  bool fault_drop_barrier = false;
-  bool fault_allow_destructive_incomplete_barrier_drop = false;
-  bool fault_move_barrier = false;
-  bool fault_allow_completing_conditional_barrier_move = false;
-  bool fault_allow_destructive_divergent_barrier_move = false;
-  bool fault_mutate_barrier_id_scope = false;
-  bool fault_mutate_barrier_participants = false;
-  rocjitsu::ConSanBarrierMoveDirection fault_barrier_move_direction =
-      rocjitsu::ConSanBarrierMoveDirection::LegacyMarker;
-  std::string fault_barrier_destination_identity;
-  std::string fault_barrier_sequence_identity;
-  std::string fault_barrier_companion_site_identity;
-  std::string fault_barrier_companion_sequence_identity;
-  std::optional<int32_t> fault_barrier_target_id;
-  std::optional<uint32_t> fault_barrier_target_participant_count;
-  std::optional<uint64_t> fault_barrier_target_participant_mask;
-  bool fault_atomic_wrong_address = false;
-  bool fault_atomic_weaken_order = false;
-  rocjitsu::ConSanAtomicOrderEdge fault_atomic_order_edge = rocjitsu::ConSanAtomicOrderEdge::Any;
-  bool fault_atomic_weaken_scope = false;
-  bool fault_lds_wrong_address = false;
-  bool fault_ordinary_weaken_order = false;
-  bool fault_ordinary_weaken_scope = false;
-  uint32_t fault_atomic_address_delta = 0;
-  uint32_t fault_lds_address_vgpr = 0;
-  bool fault_ordinary_wrong_address = false;
-  uint32_t fault_ordinary_address_delta = 0;
-  bool fault_dry_run = false;
-  bool fault_require_exactly_one = false;
-  uint32_t fault_reservation_timeout_ms = kConSanDefaultFaultReservationTimeoutMs;
-  std::optional<uint32_t> fault_load_occurrence;
-  rocjitsu::ConSanPerturbationKind sc_perturb_kind = rocjitsu::ConSanPerturbationKind::None;
-  rocjitsu::ConSanPerturbationEdge sc_perturb_edge = rocjitsu::ConSanPerturbationEdge::Release;
-  std::string sc_perturb_identity;
-  uint32_t sc_perturb_index = 0;
-  uint32_t sc_perturb_max = 1;
-  uint32_t sc_perturb_sleep = 1;
-  uint32_t sc_perturb_required_count = 0;
-  bool moi_init_owner_epoch = false;
-  bool moi_track_barriers = false;
-  bool moi_track_atomics = false;
-  bool moi_dynamic_access_records = false;
-  bool moi_sampled_check = false;
-  bool moi_partition_mask_debug = false;
-  bool test_force_vgpr_spill = false;
-  bool test_force_private_epoch = false;
-  bool test_seed_inline_exact_odd = false;
-  std::string test_kernel_name_filter;
-  bool moi_require_records = false;
-  bool moi_require_diagnostics = false;
-  bool moi_forbid_diagnostics = false;
-  bool moi_require_replay_conflict = false;
-  bool moi_forbid_overflow = false;
-  uint32_t fault_barrier_index = 0;
-  uint32_t fault_atomic_index = 0;
-  uint32_t fault_lds_index = 0;
-  uint32_t fault_ordinary_index = 0;
-  std::string fault_site_identity;
-  rocjitsu::ConSanDelayMode delay_mode = rocjitsu::ConSanDelayMode::Nop;
-  uint16_t delay_var_ssrc = 106;
-  std::optional<uint16_t> scratch_vgpr;
-  std::optional<uint16_t> moi_exec_save_sgpr;
-  std::optional<uint16_t> moi_owner_sgpr;
-  std::optional<uint16_t> moi_owner_vgpr;
-  std::optional<uint16_t> moi_epoch_vgpr;
-  std::optional<uint64_t> report_buffer_address;
   ScReportMode sc_report_mode = ScReportMode::Auto;
-  std::optional<uint64_t> moi_report_buffer_address;
-  uint64_t moi_report_buffer_size = 0;
-  uint64_t moi_auto_report_buffer_size = 0;
   bool moi_auto_report_buffer_size_explicit = false;
-  uint32_t delay_nops = 0;
-  rocjitsu::ConSanPatchedImageGrowthLimit patched_image_growth_limit;
-  std::optional<uint64_t> process_concurrent_transform_limit_bytes;
-  std::optional<uint64_t> process_patched_image_limit_bytes;
-  std::optional<uint64_t> process_patched_image_growth_limit_bytes;
-  uint32_t max_patches = kConSanAllSupportedPatchBudget;
   bool max_patches_explicit = false;
-  uint32_t moi_sample_stride = 1;
-  uint32_t moi_sample_offset = 0;
-  uint32_t moi_runtime_sample_stride = 1;
   bool moi_runtime_sample_stride_explicit = false;
-  uint32_t moi_runtime_sample_offset = 0;
-  uint32_t report_marker = 1;
   int log_level = kLogDisabled;
   std::string dump_dir;
+
+  HookConfig() {
+    max_patches = kConSanAllSupportedPatchBudget;
+    max_patches_is_expert_limit = false;
+    fault_reservation_timeout_ms = kConSanDefaultFaultReservationTimeoutMs;
+  }
 };
 
 struct ConSanSuperColliderAccessCoverage {

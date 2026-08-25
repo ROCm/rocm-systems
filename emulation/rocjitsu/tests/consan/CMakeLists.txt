@@ -72,6 +72,7 @@ function(rj_add_consan_unit_sources target)
             patch/consan/moi_record_replay_test.cpp
             patch/consan/moi_sampled_test.cpp
             patch/consan/resource_test.cpp
+            patch/consan/request_contract_test.cpp
             patch/consan/supercollider_test.cpp
             patch/consan_moi_adversarial_test.cpp
             patch/consan_moi_report_plan_test.cpp

@@ -85,6 +85,13 @@ static_assert(std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_regis
                              ExpectedQueueInterceptRegister>);
 static_assert(
     std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_create_fn), ExpectedAmdQueueCreate>);
+static_assert(std::is_base_of_v<rocjitsu::ConSanRequest, rocjitsu::consan_hook::HookConfig>);
+static_assert(std::is_base_of_v<rocjitsu::TransformPolicy, rocjitsu::consan_hook::HookConfig>);
+static_assert(std::is_base_of_v<rocjitsu::RuntimePolicy, rocjitsu::consan_hook::HookConfig>);
+static_assert(std::is_base_of_v<rocjitsu::ConSanDebugOverrides, rocjitsu::consan_hook::HookConfig>);
+static_assert(std::is_base_of_v<rocjitsu::MutationRequest, rocjitsu::consan_hook::HookConfig>);
+static_assert(
+    std::is_base_of_v<rocjitsu::BoundRuntimeResources, rocjitsu::consan_hook::HookConfig>);
 
 TEST(HsaHooksUnitTest, QueueInterceptionEntriesUsePublicAbiSignatures) {
   EXPECT_TRUE((std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_intercept_create_fn),
@@ -93,6 +100,17 @@ TEST(HsaHooksUnitTest, QueueInterceptionEntriesUsePublicAbiSignatures) {
                               ExpectedQueueInterceptRegister>));
   EXPECT_TRUE(
       (std::is_same_v<decltype(AmdExtTable::hsa_amd_queue_create_fn), ExpectedAmdQueueCreate>));
+}
+
+TEST(HsaHooksUnitTest, ConSanHookConfigConstructsSeparatedSlice2Contracts) {
+  const rocjitsu::consan_hook::HookConfig config;
+  EXPECT_FALSE(static_cast<const rocjitsu::RuntimePolicy &>(config).enabled);
+  EXPECT_FALSE(static_cast<const rocjitsu::ConSanRequest &>(config).flavor.has_value());
+  EXPECT_EQ(static_cast<const rocjitsu::TransformPolicy &>(config).max_patches,
+            rocjitsu::consan_hook::kConSanAllSupportedPatchBudget);
+  EXPECT_FALSE(static_cast<const rocjitsu::TransformPolicy &>(config).max_patches_is_expert_limit);
+  EXPECT_FALSE(static_cast<const rocjitsu::MutationRequest &>(config).has_mutation());
+  EXPECT_FALSE(static_cast<const rocjitsu::BoundRuntimeResources &>(config).bound());
 }
 
 TEST(ProcessByteBudgetTest, PlansCommitsRefundsAndTracksPeak) {
