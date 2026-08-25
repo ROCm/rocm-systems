@@ -55,8 +55,8 @@ def filtr_api_name(name):
   return name
 
 def filtr_api_decl(record):
-  record = re.sub("\s__dparm\([^\)]*\)", r'', record);
-  record = re.sub("\(void\*\)", r'', record);
+  record = re.sub(r"\s__dparm\([^\)]*\)", r'', record);
+  record = re.sub(r"\(void\*\)", r'', record);
   return record
 
 # Normalizing API arguments
@@ -83,7 +83,7 @@ def list_api_args(args_str):
     for arg_pair in args_str.split(','):
       if arg_pair == 'void': continue
       arg_pair = re.sub(r'\s*=\s*\S+$','', arg_pair);
-      m = re.match("^(.*)\s(\S+)$", arg_pair);
+      m = re.match(r"^(.*)\s(\S+)$", arg_pair);
       if m:
         arg_type = norm_api_types(m.group(1))
         arg_name = m.group(2)
@@ -127,9 +127,9 @@ def parse_api(inp_file_p, out):
   global line_num
   inp_file = inp_file_p
 
-  beg_pattern = re.compile("^(hipError_t|const char\s*\*)\s+([^\(]+)\(");
-  api_pattern = re.compile("^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)");
-  end_pattern = re.compile("Texture");
+  beg_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+([^\(]+)\(");
+  api_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)");
+  end_pattern = re.compile(r"Texture");
   hidden_pattern = re.compile(r'__attribute__\(\(visibility\("hidden"\)\)\)')
   nms_open_pattern = re.compile(r'namespace hip_impl {')
   nms_close_pattern = re.compile(r'}')
@@ -161,7 +161,7 @@ def parse_api(inp_file_p, out):
         found = 1
 
     if found != 0:
-      record = re.sub("\s__dparm\([^\)]*\)", '', record);
+      record = re.sub(r"\s__dparm\([^\)]*\)", '', record);
       m = api_pattern.match(record)
       if m:
         found = 0
@@ -200,13 +200,13 @@ def parse_content(inp_file_p, api_map, out):
   inp_file = inp_file_p
 
   # API method begin pattern
-  beg_pattern = re.compile("^(hipError_t|const char\s*\*)\s+[^\(]+\(");
+  beg_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+[^\(]+\(");
   # API declaration pattern
-  decl_pattern = re.compile("^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*;");
+  decl_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*;");
   # API definition pattern
-  api_pattern = re.compile("^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*{");
+  api_pattern = re.compile(r"^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*{");
   # API init macro pattern
-  init_pattern = re.compile("(^\s*HIP_INIT_API[^\s]*\s*)\((([^,]+)(,.*|)|)(\);|,)\s*$");
+  init_pattern = re.compile(r"(^\s*HIP_INIT_API[^\s]*\s*)\((([^,]+)(,.*|)|)(\);|,)\s*$");
 
   # Open input file
   inp = open(inp_file, 'r')
@@ -401,8 +401,8 @@ def generate_prof_header(f, api_map, callback_ids, opts_map):
       priv_lst.append(name)
       message("Private: " + name)
 
-  f.write('\n#define HIP_API_ID_CONCAT_HELPER(a,b) a##b\n');
-  f.write('#define HIP_API_ID_CONCAT(a,b) HIP_API_ID_CONCAT_HELPER(a,b)\n');
+  # f.write('\n#define HIP_API_ID_CONCAT_HELPER(a,b) a##b\n');
+  # f.write('#define HIP_API_ID_CONCAT(a,b) HIP_API_ID_CONCAT_HELPER(a,b)\n');
 
   # Generating the callbacks ID enumaration
   f.write('\n// HIP API callbacks ID enumeration\n')
@@ -412,7 +412,11 @@ def generate_prof_header(f, api_map, callback_ids, opts_map):
 
   cb_id_map = {}
   last_cb_id = 0
-  versioned_functions = set()
+
+  # In the past, we rely on macro pollutions and `HIP_API_ID_CONCAT()`
+  # to version the symbols, we no longer need that.
+  # 
+  # versioned_functions = set()
   for name, cb_id in callback_ids:
     if not name in api_map:
       f.write('  HIP_API_ID_RESERVED_' + str(cb_id) + ' = ' + str(cb_id) + ',\n')
@@ -420,29 +424,30 @@ def generate_prof_header(f, api_map, callback_ids, opts_map):
       f.write('  HIP_API_ID_' + name + ' = ' + str(cb_id) + ',\n')
     cb_id_map[name] = cb_id
     if cb_id > last_cb_id: last_cb_id = cb_id
-    m = re.match(r'(.*)R[0-9][0-9][0-9][0-9]$', name)
-    if m: versioned_functions.add(m.group(1))
+    # m = re.match(r'(.*)R[0-9][0-9][0-9][0-9]$', name)
+    #if m: versioned_functions.add(m.group(1))
 
   for name in sorted(api_map.keys()):
     if not name in cb_id_map:
       last_cb_id += 1
       f.write('  HIP_API_ID_' + name + ' = ' + str(last_cb_id) + ',\n')
-      m = re.match(r'(.*)R[0-9][0-9][0-9][0-9]$', name)
-      if m: versioned_functions.add(m.group(1))
+      # m = re.match(r'(.*)R[0-9][0-9][0-9][0-9]$', name)
+      # if m: versioned_functions.add(m.group(1))
 
   f.write('  HIP_API_ID_LAST = ' + str(last_cb_id) + ',\n')
   f.write('\n')
 
-  for name in sorted(versioned_functions):
-    f.write('  HIP_API_ID_' + name + ' = ' + 'HIP_API_ID_CONCAT(HIP_API_ID_,' + name + '),\n')
+  # for name in sorted(versioned_functions):
+  #  f.write('  HIP_API_ID_' + name + ' = ' + 'HIP_API_ID_CONCAT(HIP_API_ID_,' + name + '),\n')
+
   f.write('\n')
 
   for name in sorted(priv_lst):
     f.write('  HIP_API_ID_' + name + ' = HIP_API_ID_NONE,\n')
   f.write('};\n')
 
-  f.write('\n#undef HIP_API_ID_CONCAT_HELPER\n');
-  f.write('#undef HIP_API_ID_CONCAT\n');
+  # f.write('\n#undef HIP_API_ID_CONCAT_HELPER\n');
+  # f.write('#undef HIP_API_ID_CONCAT\n');
 
   # Generating the method to return API name by ID
   f.write('\n// Return the HIP API string for a given callback ID\n')
@@ -635,7 +640,7 @@ if (len(sys.argv) < 4):
          " ./src ./include/hip/amd_detail/hip_prof_str.h ./include/hip/amd_detail/hip_prof_str.h.new");
 
 # API header file given as an argument
-src_pat = "\.cpp$"
+src_pat = r"\.cpp$"
 api_hfile = sys.argv[1]
 if not os.path.isfile(api_hfile):
   fatal("input file '" + api_hfile + "' not found")
