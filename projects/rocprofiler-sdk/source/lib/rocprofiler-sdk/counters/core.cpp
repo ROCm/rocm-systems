@@ -159,51 +159,10 @@ start_context(const context::context* ctx)
         enabled         = true;
     });
 
-    if(!already_enabled)
-    {
-        callback_thread_start();
-
-        for(auto& cb : ctx->dispatch_counter_collection->callbacks)
-        {
-            using external_corr_id_map_t = tracing::external_correlation_id_map_t;
-
-            // Insert our callbacks into HSA Interceptor. This
-            // turns on counter instrumentation.
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
-            cb->queue_id = controller->add_callback(
-                std::nullopt,
-                hsa::queue_callbacks_t{.batch_packets = []() { return false; },
-                                       .write_interceptor =
-                                           [=](const hsa::Queue&              q,
-                                               const hsa::rocprofiler_packet& kern_pkt,
-                                               rocprofiler_kernel_id_t        kernel_id,
-                                               rocprofiler_dispatch_id_t      dispatch_id,
-                                               rocprofiler_user_data_t*       user_data,
-                                               const external_corr_id_map_t&  extern_corr_ids,
-                                               const context::correlation_id* correlation_id) {
-                                               return queue_cb(ctx,
-                                                               cb,
-                                                               q,
-                                                               kern_pkt,
-                                                               kernel_id,
-                                                               dispatch_id,
-                                                               user_data,
-                                                               extern_corr_ids,
-                                                               correlation_id);
-                                           },
-                                       // Completion CB
-                                       .signal_completion =
-                                           [=](const hsa::Queue& /*queue*/,
-                                               hsa::rocprofiler_packet /*kern_pkt*/,
-                                               std::shared_ptr<hsa::queue_info_session_t>& session,
-                                               hsa::packet_data_t&                         packet,
-                                               inst_pkt_t&                                 aql,
-                                               kernel_dispatch::profiling_time dispatch_time) {
-                                               completed_cb(
-                                                   ctx, cb, session, packet, aql, dispatch_time);
-                                           }});
-        }
-    }
+    // The queue-callback registration that used to follow is gone: WriteInterceptor now calls
+    // counters::write_hook directly. Starting the callback thread on the first enable is not part of
+    // that, so it stays.
+    if(!already_enabled) callback_thread_start();
 }
 
 void
@@ -222,21 +181,12 @@ stop_context(const context::context* ctx)
     {
         controller->disable_serialization();
 
-        // In attach mode, remove counter callbacks when stopping the context so
-        // new dispatches during detach drain can pass through without incrementing
-        // _active_kernels. In normal profiling, keep callbacks registered to avoid
-        // dropping counter data for in-flight dispatches.
-        if(registration::is_attached())
-        {
-            for(auto& cb : ctx->dispatch_counter_collection->callbacks)
-            {
-                if(cb->queue_id != rocprofiler::hsa::ClientID{-1})
-                {
-                    controller->remove_callback(cb->queue_id);
-                    cb->queue_id = rocprofiler::hsa::ClientID{-1};
-                }
-            }
-        }
+        // The attach-mode callback removal that used to live here is implicit now:
+        // write_hook is reached through the active-context list, so a stopped context
+        // stops instrumenting new dispatches and they pass through the detach drain
+        // without incrementing _active_kernels. Unlike the registration model this
+        // also applies outside attach mode, so a dispatch already in flight at stop
+        // no longer reports counters.
     }
 
     callback_thread_stop();

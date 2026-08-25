@@ -28,10 +28,13 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/activation.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
@@ -42,8 +45,11 @@
 #include "lib/rocprofiler-sdk/kernel_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/replay_diagnostics.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -92,32 +98,6 @@ namespace
 {
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
 
-template <typename DomainT, typename... Args>
-inline bool
-context_filter(const context::context* ctx, DomainT domain, Args... args)
-{
-    if constexpr(std::is_same<DomainT, rocprofiler_buffer_tracing_kind_t>::value)
-    {
-        return (ctx->buffered_tracer && ctx->buffered_tracer->domains(domain, args...));
-    }
-    else if constexpr(std::is_same<DomainT, rocprofiler_callback_tracing_kind_t>::value)
-    {
-        return (ctx->callback_tracer && ctx->callback_tracer->domains(domain, args...));
-    }
-    else
-    {
-        static_assert(common::mpl::assert_false<DomainT>::value, "unsupported domain type");
-        return false;
-    }
-}
-
-bool
-full_packet_instrumentation_context_filter(const context::context* ctx)
-{
-    return (context_filter(ctx, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
-            context_filter(ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH));
-}
-
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
@@ -161,19 +141,33 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
         kernel_dispatch::dispatch_complete(queue_info_session, packet, dispatch_time);
 
-        // Calls our internal callbacks to callers who need to be notified post
-        // kernel execution.
-        queue_info_session.queue.signal_callback([&](const auto& map) {
-            for(const auto& [client_id, cb_data] : map)
-            {
-                cb_data.signal_completion(queue_info_session.queue,
-                                          packet.kernel_packet,
-                                          _session,
-                                          packet,
-                                          packet.instrumentation_packets,
-                                          dispatch_time);
-            }
-        });
+        rocprofiler::counters::signal_completion_hook(queue_info_session.queue,
+                                                      packet.kernel_packet,
+                                                      _session,
+                                                      packet,
+                                                      packet.instrumentation_packets,
+                                                      dispatch_time);
+
+        rocprofiler::thread_trace::signal_completion_hook(queue_info_session.queue,
+                                                          packet.kernel_packet,
+                                                          _session,
+                                                          packet,
+                                                          packet.instrumentation_packets,
+                                                          dispatch_time);
+
+        rocprofiler::pc_sampling::signal_completion_hook(queue_info_session.queue,
+                                                         packet.kernel_packet,
+                                                         _session,
+                                                         packet,
+                                                         packet.instrumentation_packets,
+                                                         dispatch_time);
+
+        rocprofiler::spm::signal_completion_hook(queue_info_session.queue,
+                                                 packet.kernel_packet,
+                                                 _session,
+                                                 packet,
+                                                 packet.instrumentation_packets,
+                                                 dispatch_time);
 
         if(packet.is_serialized)
         {
@@ -312,13 +306,20 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    const bool no_real_consumers =
-        (queue.get_notifiers() == 0 &&
-         context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
+    if(pkt_count == 0)
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
+    // Skip per-packet rewriting when no subsystem needs it. Each subsystem answers for itself
+    // rather than through a shared registration count.
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
+    const bool no_real_consumers =
+        !queue_hooks::any_consumer_active(queue.get_agent().get_rocp_agent()->id);
 
-    if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay))
+    if(no_real_consumers && !graph_launch_active && !has_kernel_replay)
     {
         writer(packets, pkt_count);
         return;
@@ -646,30 +647,40 @@ WriteInterceptor(const void* packets,
                 thr_id,
                 ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
 
-            // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
-            // along with an ID of the client we got the packet from (this will be returned via
-            // completed_cb_t)
+            // Append per-subsystem AQL injection packets to instrumentation_packets.
+            // Each hook checks its own activation state; serialize flag is OR-folded.
+            rocprofiler::counters::write_hook(queue,
+                                              kernel_packet,
+                                              kernel_id,
+                                              dispatch_id,
+                                              &_packet_data.user_data,
+                                              _packet_data.tracing_data.external_correlation_ids,
+                                              corr_id,
+                                              _packet_data.instrumentation_packets,
+                                              _packet_data.is_serialized);
 
-            // Signal callbacks that a kernel_packet is being enqueued
-            queue.signal_callback([&](const auto& map) {
-                for(const auto& [client_id, cb_data] : map)
-                {
-                    // NOTE: if map.size() > 1, multiple callbacks will be sharing the same user
-                    // data. This needs to be fixed. (bewelton)
-                    auto [packet, bSerial] = cb_data.write_interceptor(
-                        queue,
-                        kernel_packet,
-                        kernel_id,
-                        dispatch_id,
-                        &_packet_data.user_data,
-                        _packet_data.tracing_data.external_correlation_ids,
-                        corr_id);
-                    _packet_data.is_serialized |= bSerial;
-                    if(packet)
-                        _packet_data.instrumentation_packets.push_back(
-                            std::make_pair(std::move(packet), client_id));
-                }
-            });
+            rocprofiler::thread_trace::write_hook(
+                queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
+
+            rocprofiler::spm::write_hook(queue,
+                                         kernel_packet,
+                                         kernel_id,
+                                         dispatch_id,
+                                         &_packet_data.user_data,
+                                         _packet_data.tracing_data.external_correlation_ids,
+                                         corr_id,
+                                         _packet_data.instrumentation_packets,
+                                         _packet_data.is_serialized);
+
+            // PC sampling marker is spliced separately below (maybe_marker_packet).
 
             bool inserted_before = false;
             if(_packet_data.is_serialized)
@@ -702,14 +713,11 @@ WriteInterceptor(const void* packets,
                 }
             }
 
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-            if(pc_sampling::is_pc_sample_service_configured(queue.get_agent().get_rocp_agent()->id))
+            if(auto marker = rocprofiler::pc_sampling::maybe_marker_packet(
+                   queue, dispatch_id, _packet_data.tracing_data.external_correlation_ids, corr_id))
             {
-                transformed_packets.emplace_back(
-                    pc_sampling::hsa::generate_marker_packet_for_kernel(
-                        corr_id, _packet_data.tracing_data.external_correlation_ids, dispatch_id));
+                transformed_packets.emplace_back(*marker);
             }
-#endif
 
             // emplace the kernel packet
             transformed_packets.emplace_back(kernel_packet);
@@ -867,17 +875,7 @@ WriteInterceptor(const void* packets,
             replay_reader_guard.emplace(*replay_mutex);
     }
 
-    bool should_batch_packets = true;
-    queue.signal_callback([&should_batch_packets](const auto& map) {
-        for(const auto& [_, cb_data] : map)
-        {
-            if(!cb_data.batch_packets())
-            {
-                should_batch_packets = false;
-                break;
-            }
-        }
-    });
+    const bool should_batch_packets = queue_hooks::should_batch_packets();
 
     if(should_batch_packets)
     {
@@ -1165,24 +1163,6 @@ Queue::sync() const
     ROCP_WARNING_IF(_value != 0) << fmt::format(
         "Timeout while waiting for queue sync: {} kernels still active", _value);
     return _value == 0;
-}
-
-void
-Queue::register_callback(ClientID id, queue_callbacks_t callbacks)
-{
-    _callbacks.wlock([&](auto& map) {
-        ROCP_FATAL_IF(rocprofiler::common::get_val(map, id)) << "ID already exists!";
-        _notifiers++;
-        map[id] = std::move(callbacks);
-    });
-}
-
-void
-Queue::remove_callback(ClientID id)
-{
-    _callbacks.wlock([&](auto& map) {
-        if(map.erase(id) == 1) _notifiers--;
-    });
 }
 
 queue_state

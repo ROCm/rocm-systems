@@ -4,6 +4,14 @@
 #
 add_subdirectory(parser)
 
+# queue_hooks.{cpp,hpp} is always-available: it provides the is_configured_on_agent
+# wrapper and maybe_marker_packet/signal_completion_hook shims that the HSA queue
+# write/completion paths call unconditionally. The translation unit guards its body
+# with ROCPROFILER_SDK_HSA_PC_SAMPLING; in disabled builds the symbols return
+# nullopt / false / no-op. It MUST be added before the HSA version early-return so
+# consumers can link to it on any HSA runtime.
+target_sources(rocprofiler-sdk-object-library PRIVATE queue_hooks.cpp queue_hooks.hpp)
+
 if(hsa-runtime64_VERSION AND hsa-runtime64_VERSION VERSION_LESS 1.14.0)
     return()
 endif()

@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/tests/fake_queue.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <gtest/gtest.h>
@@ -42,31 +43,6 @@ using namespace rocprofiler::counters::test_constants;
 
 namespace
 {
-namespace rocprofiler
-{
-namespace hsa
-{
-class FakeQueue : public Queue
-{
-public:
-    FakeQueue(const AgentCache& a, rocprofiler_queue_id_t id)
-    : Queue(a, get_api_table())
-    , _agent(a)
-    , _id(id)
-    {}
-    virtual const AgentCache&      get_agent() const override final { return _agent; };
-    virtual rocprofiler_queue_id_t get_id() const override final { return _id; };
-
-    ~FakeQueue() {}
-
-private:
-    const AgentCache&      _agent;
-    rocprofiler_queue_id_t _id = {};
-};
-
-}  // namespace hsa
-}  // namespace rocprofiler
-
 QueueController::queue_map_t
 create_queue_map(size_t count)
 {

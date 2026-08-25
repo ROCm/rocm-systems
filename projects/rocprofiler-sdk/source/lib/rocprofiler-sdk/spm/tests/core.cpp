@@ -29,10 +29,12 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/spm.h>
@@ -595,14 +597,7 @@ TEST(spm_core, start_stop_callback_ctx)
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_TRUE(found);
 
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_spm->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
-    EXPECT_TRUE(found);
+    EXPECT_TRUE(spm::is_any_active());
 
     /**
      * Check if context can be disabled correctly
@@ -612,6 +607,8 @@ TEST(spm_core, start_stop_callback_ctx)
     found = false;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_FALSE(found);
+
+    EXPECT_FALSE(spm::is_any_active());
 
     registration::set_init_status(1);
     registration::finalize();
@@ -663,14 +660,7 @@ TEST(spm_core, start_stop_buffered_ctx)
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_TRUE(found);
 
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.dispatch_spm->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
-    EXPECT_TRUE(found);
+    EXPECT_TRUE(spm::is_any_active());
 
     /**
      * Check if context can be disabled correctly
@@ -680,6 +670,8 @@ TEST(spm_core, start_stop_buffered_ctx)
     found = false;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_FALSE(found);
+
+    EXPECT_FALSE(spm::is_any_active());
 
     rocprofiler_flush_buffer(opt_buff_id);
     rocprofiler_destroy_buffer(opt_buff_id);
@@ -915,7 +907,7 @@ TEST(spm_core, query_agent_configurations)
     if(!any_spm_agent) ROCP_ERROR << "SPM unavailable";
 }
 
-TEST(spm_core, stop_context_removes_callbacks)
+TEST(spm_core, stop_context_deactivates_the_hook)
 {
     rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -942,28 +934,20 @@ TEST(spm_core, stop_context_removes_callbacks)
     ASSERT_TRUE(ctx.dispatch_spm);
     ASSERT_EQ(ctx.dispatch_spm->callbacks.size(), 1);
 
-    auto pre_stop_queue_id = ctx.dispatch_spm->callbacks.at(0)->queue_id;
-    bool found             = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == pre_stop_queue_id) found = true;
-    });
-    EXPECT_TRUE(found) << "Callback should be registered after start";
+    // The interceptor reaches SPM through spm::write_hook, which finds this context by
+    // iterating the active contexts. is_any_active() is the gate the interceptor asks
+    // about, so it stands in for "the hook will run" the way a registered ClientID used
+    // to.
+    EXPECT_TRUE(spm::is_any_active()) << "Hook should be live after start";
 
-    // Stop exercises queue_controller_sync + remove_callback
+    // Stop exercises queue_controller_sync + serialization teardown
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
     bool enabled = true;
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { enabled = data; });
     EXPECT_FALSE(enabled);
 
-    EXPECT_EQ(ctx.dispatch_spm->callbacks.at(0)->queue_id, hsa::ClientID{-1})
-        << "queue_id should be reset to -1 after stop";
-
-    found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == pre_stop_queue_id) found = true;
-    });
-    EXPECT_FALSE(found) << "Callback should be removed from queue controller after stop";
+    EXPECT_FALSE(spm::is_any_active()) << "Hook should be dormant after stop";
 
     registration::set_init_status(1);
     registration::finalize();
@@ -997,9 +981,10 @@ TEST(spm_core, stop_context_sync_and_restart)
     auto& ctx = *ctx_p;
     ASSERT_TRUE(ctx.dispatch_spm);
 
-    auto pre_stop_queue_id = ctx.dispatch_spm->callbacks.at(0)->queue_id;
+    const auto callback_count = ctx.dispatch_spm->callbacks.size();
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+    EXPECT_FALSE(spm::is_any_active()) << "Hook should be dormant while stopped";
 
     // Restart to verify queue controller is in a clean state after sync + teardown
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "restart context");
@@ -1008,19 +993,101 @@ TEST(spm_core, stop_context_sync_and_restart)
     ctx.dispatch_spm->enabled.rlock([&](const auto& data) { enabled = data; });
     EXPECT_TRUE(enabled) << "Context should be enabled after restart";
 
-    auto post_restart_queue_id = ctx.dispatch_spm->callbacks.at(0)->queue_id;
-    EXPECT_NE(post_restart_queue_id, hsa::ClientID{-1})
-        << "Restarted context should have a valid queue_id";
-    EXPECT_NE(post_restart_queue_id, pre_stop_queue_id)
-        << "Restarted context should get a fresh callback ID";
+    EXPECT_TRUE(spm::is_any_active()) << "Hook should be live again after restart";
 
-    bool found = false;
-    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == post_restart_queue_id) found = true;
-    });
-    EXPECT_TRUE(found) << "New callback should be registered after restart";
+    // The hook is discovered rather than registered, so a restart must not duplicate
+    // the per-callback work the way a second add_callback() would have.
+    EXPECT_EQ(ctx.dispatch_spm->callbacks.size(), callback_count)
+        << "Restart should not add a second callback entry";
 
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context final");
+
+    registration::set_init_status(1);
+    registration::finalize();
+    context::pop_client(1);
+    set_client_ctx(get_client_ctx());
+}
+
+// The hook is called on every dispatch that reaches the interceptor rather than only
+// when SPM registered itself, so "no active SPM context" has to be a true no-op: it
+// must not append an inst_pkt entry and must not claim serialization. A stray entry
+// here would be handed to post_kernel_call at completion with no config behind it.
+TEST(spm_core, write_hook_is_inert_with_no_active_context)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+
+    ASSERT_FALSE(spm::is_any_active()) << "no SPM context has been started";
+
+    const auto& agent = agents.begin()->second;
+    hsa::FakeQueue fq(agent, rocprofiler_queue_id_t{.handle = 0});
+
+    hsa::rocprofiler_packet                          pkt{};
+    hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
+    context::correlation_id                          corr_id{};
+    auto                                             user_data = rocprofiler_user_data_t{.value = 0};
+
+    hsa::inst_pkt_t inst_pkt{};
+    bool            is_serialized = false;
+
+    spm::write_hook(fq, pkt, 0, 0, &user_data, extern_ids, &corr_id, inst_pkt, is_serialized);
+
+    EXPECT_TRUE(inst_pkt.empty()) << "dormant hook must not inject packets";
+    EXPECT_FALSE(is_serialized) << "dormant hook must not request serialization";
+}
+
+// Completion routes each inst_pkt entry back to its producer by client id. If the
+// hook tagged its packets with anything else, post_kernel_call would be handed
+// another subsystem's AQL packet.
+TEST(spm_core, write_hook_tags_packets_with_the_spm_client_id)
+{
+    rocprofiler::common::set_env("ROCPROFILER_SPM_BETA_ENABLED", true);
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    registration::set_fini_status(0);
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+    ROCPROFILER_CALL(rocprofiler_spm_configure_callback_dispatch_service(get_client_ctx(),
+                                                                         null_dispatch_callback,
+                                                                         (void*) 0x12345,
+                                                                         null_record_callback,
+                                                                         (void*) 0x54321),
+                     "Could not setup counting service");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    ASSERT_TRUE(spm::is_any_active());
+
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+    const auto& agent = agents.begin()->second;
+    hsa::FakeQueue fq(agent, rocprofiler_queue_id_t{.handle = 0});
+
+    hsa::rocprofiler_packet                          pkt{};
+    hsa::queue_info_session_t::external_corr_id_map_t extern_ids{};
+    context::correlation_id                          corr_id{};
+    auto                                             user_data = rocprofiler_user_data_t{.value = 0};
+
+    hsa::inst_pkt_t inst_pkt{};
+    bool            is_serialized = false;
+
+    spm::write_hook(fq, pkt, 0, 0, &user_data, extern_ids, &corr_id, inst_pkt, is_serialized);
+
+    for(const auto& entry : inst_pkt)
+    {
+        EXPECT_EQ(entry.second, hsa::queue_hooks::SPM_CLIENT_ID)
+            << "SPM must tag its own packets";
+    }
+
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
     registration::set_init_status(1);
     registration::finalize();

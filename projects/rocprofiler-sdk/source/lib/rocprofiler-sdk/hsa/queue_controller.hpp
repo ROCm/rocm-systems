@@ -48,11 +48,9 @@ namespace hsa
 class QueueController
 {
 public:
-    using agent_callback_tuple_t = std::tuple<rocprofiler_agent_t, queue_callbacks_t>;
-    using queue_iterator_cb_t    = std::function<void(const Queue*)>;
-    using callback_iterator_cb_t = std::function<void(ClientID, const agent_callback_tuple_t&)>;
-    using queue_map_t            = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
-    using agent_cache_map_t      = std::unordered_map<uint32_t, AgentCache>;
+    using queue_iterator_cb_t = std::function<void(const Queue*)>;
+    using queue_map_t         = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
+    using agent_cache_map_t   = std::unordered_map<uint32_t, AgentCache>;
 
     QueueController()  = default;
     ~QueueController() = default;
@@ -66,12 +64,6 @@ public:
     // whose packet format and queue-size semantics are incompatible with AQL interposition.
     void add_queue(hsa_queue_t*, std::unique_ptr<Queue>, bool create_interposition_state = true);
     void destroy_queue(hsa_queue_t*);
-
-    // Add callback to queues associated with the agent. Returns a client
-    // id that can be used by callers to remove the callback. If no agent
-    // is specified, callback will be applied to all agents.
-    ClientID add_callback(std::optional<rocprofiler_agent_t>, queue_callbacks_t callbacks);
-    void     remove_callback(ClientID);
 
     const CoreApiTable& get_core_table() const { return _core_table; }
     const AmdExtTable&  get_ext_table() const { return _ext_table; }
@@ -87,8 +79,6 @@ public:
     void set_queue_state(queue_state state, hsa_queue_t* hsa_queue);
 
     void add_dispatch_ready(const Queue* queue);
-
-    void iterate_callbacks(const callback_iterator_cb_t&) const;
 
     common::Synchronized<hsa::profiler_serializer>& serializer(const Queue*);
 
@@ -111,15 +101,13 @@ public:
 #endif
 
 private:
-    using client_id_map_t  = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using resource_alloc_t = void(const AgentCache&, const CoreApiTable&, const AmdExtTable&);
 
-    CoreApiTable                          _core_table         = {};
-    AmdExtTable                           _ext_table          = {};
-    common::Synchronized<queue_map_t>     _queues             = {};
-    common::Synchronized<client_id_map_t> _callback_cache     = {};
-    agent_cache_map_t                     _supported_agents   = {};
-    std::atomic<bool>                     _serialized_enabled = {false};
+    CoreApiTable                      _core_table         = {};
+    AmdExtTable                       _ext_table          = {};
+    common::Synchronized<queue_map_t> _queues             = {};
+    agent_cache_map_t                 _supported_agents   = {};
+    std::atomic<bool>                 _serialized_enabled = {false};
     common::Synchronized<
         std::unordered_map<rocprofiler_agent_id_t,
                            std::shared_ptr<common::Synchronized<hsa::profiler_serializer>>>>

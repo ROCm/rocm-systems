@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 ROCm Developer Tools
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,31 +22,26 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
 {
-namespace pc_sampling
-{
-void
-post_hsa_init_start_active_service();
-
 namespace hsa
 {
-extern void
-amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* packet,
-                                      hsa_queue_t*                             queue,
-                                      uint64_t                                 packet_id);
+namespace queue_hooks
+{
+// Whether any subsystem wants to see individual dispatch packets on this agent.
+// When false, WriteInterceptor forwards the submission untouched: no signals are
+// allocated and no packets are rewritten. Every subsystem that installs a write
+// hook must be represented here, or its hook will never be reached.
+bool
+any_consumer_active(rocprofiler_agent_id_t agent);
 
-extern void
-data_ready_callback(void*                                client_callback_data,
-                    size_t                               data_size,
-                    size_t                               lost_sample_count,
-                    hsa_ven_amd_pcs_data_copy_callback_t data_copy_callback,
-                    void*                                hsa_callback_data);
-
+// Whether a multi-packet submission may be processed as one batch. Subsystems that
+// inject per-dispatch AQL packets (counters, ATT, SPM) need per-packet mode; PC
+// sampling splices a single marker and tolerates batching.
+bool
+should_batch_packets();
+}  // namespace queue_hooks
 }  // namespace hsa
-}  // namespace pc_sampling
 }  // namespace rocprofiler
