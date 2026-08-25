@@ -820,6 +820,11 @@ enum hipLimit_t {
                                        ///< device. Must be between hipExtLimitScratchMin and
                                        ///< hipExtLimitScratchMaxValid values. Valid only on Rocm
                                        ///< device. This can be modified.
+  hipLimitPersistingL2CacheSize = 0x1003, ///< Requested persisting L2 cache size in bytes for the
+                                        ///< current device. This size can be set to a value up to
+                                        ///< persistingL2CacheMaxSize reported in hipDeviceProp_t.
+                                        ///< Only supported on MI400/MI450 and later. This can be
+                                        ///< modified.
   hipLimitRange                        ///< Supported limit range
 };
 

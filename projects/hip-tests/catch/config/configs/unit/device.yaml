@@ -262,6 +262,22 @@ device:
   Unit_hipDeviceGetSetLimit_Scratch_SetGetThreads:
     <<: *level_2
     tags: [config]
+  # GL2 Residency Control Tests - Compact Version (5 tests)
+  Unit_hipDeviceLimit_PersistingL2Cache_Comprehensive:
+    <<: *level_2
+    tags: [config, gl2_residency, P0]
+  Unit_hipDeviceLimit_PersistingL2Cache_BoundaryTests:
+    <<: *level_2
+    tags: [config, gl2_residency]
+  Unit_hipDeviceLimit_PersistingL2Cache_KernelIntegration:
+    <<: *level_2
+    tags: [config, gl2_residency, P0]
+  Unit_hipDeviceLimit_PersistingL2Cache_Concurrency:
+    <<: *level_2
+    tags: [config, gl2_residency]
+  Unit_hipDeviceLimit_PersistingL2Cache_NegativeParams:
+    <<: *level_2
+    tags: [config, gl2_residency]
   Unit_hipDeviceSetSharedMemConfig_Positive_Basic:
     <<: *level_2
     tags: [config, P0]

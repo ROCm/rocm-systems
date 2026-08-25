@@ -132,6 +132,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_vmem_import_fabric_handle)* hsa_amd_vmem_import_fabric_handle_;
   decltype(hsa_amd_vmem_retain_alloc_handle)* hsa_amd_vmem_retain_alloc_handle_;
   decltype(hsa_amd_agent_set_async_scratch_limit)* hsa_amd_agent_set_async_scratch_limit_;
+  decltype(hsa_amd_agent_set_attribute)* hsa_amd_agent_set_attribute_;
   decltype(hsa_amd_vmem_address_reserve_align)* hsa_amd_vmem_address_reserve_align_;
   decltype(hsa_amd_enable_logging)* hsa_amd_enable_logging_;
   decltype(hsa_amd_memory_get_preferred_copy_engine)* hsa_amd_memory_get_preferred_copy_engine_;
@@ -557,6 +558,10 @@ class Hsa : public amd::AllStatic {
   }
   static hsa_status_t agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold) {
     return ROCR_DYN(hsa_amd_agent_set_async_scratch_limit)(agent, threshold);
+  }
+  static hsa_status_t agent_set_attribute(hsa_agent_t agent, hsa_amd_agent_attribute_t attribute,
+    void* value) {
+    return ROCR_DYN(hsa_amd_agent_set_attribute)(agent, attribute, value);
   }
   static hsa_status_t vmem_address_reserve_align(void** ptr, size_t size, uint64_t address,
     uint64_t alignment, uint64_t flags) {
