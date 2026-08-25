@@ -246,15 +246,41 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
 // an unset env var uses this table, and an arch with no table gets 0.
 enum { RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1 };
 struct rcclArchThresholds {
-  // DDA tier upper bounds, per collective. gfx1250 uses fabric LL/LL128/VMM;
+  // DDA tier upper bounds, per collective.  gfx1250 uses fabric LL/LL128/VMM;
   // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL/LL128 unused, stay 0).
+  // All arrays are indexed by ncclFunc_t; 0 disables that tier for that coll.
+  // AR/AG/AlltoAll compare total message bytes; RS compares per-rank shard bytes.
   size_t ddaLLMax[RCCL_DDA_FUNC_COUNT];     // DDA LL tier:    0 .. ddaLLMax[func]
   size_t ddaLL128Max[RCCL_DDA_FUNC_COUNT];  // DDA LL128 tier: ddaLLMax[func]+1 .. ddaLL128Max[func]
   size_t ddaVmmMax[RCCL_DDA_FUNC_COUNT];    // DDA VMM/IPC cap: ddaLL128Max[func]+1 .. ddaVmmMax[func]
 
+  // R2 variant: DDA VMM cap when recv buffer is registered (winRegType !=
+  // ncclSymSendNonregRecvNonreg).  On gfx1250, RS fires DDA even when
+  // symEligible=true; lowering this cap for R2 lets CE win at smaller sizes.
+  // 0 means "use ddaVmmMax" (same as R0 behavior) -- only RS needs an override.
+  size_t ddaVmmMaxR2[RCCL_DDA_FUNC_COUNT];
+
+  // Graph-mode variant: DDA VMM cap to use when the comm is inside a graph
+  // capture (graphCapturingHint=true).  CE AllReduce is blocked during graph
+  // captures, so DDA can fill the full window that CE would normally absorb.
+  // 0 means "use ddaVmmMax" (no graph-specific override).
+  size_t ddaVmmMaxGraph[RCCL_DDA_FUNC_COUNT];
+
   // CE AllReduce eligible window (total bytes, single-node, recv-registered only)
   size_t ceArMin;
   size_t ceArMax;
+
+  // Per-size unroll factor breakpoints for gfx1250.  Each entry is a
+  // (maxBytes, unrollIdx) pair: the first entry whose maxBytes >= msgBytes
+  // wins.  A terminal entry with maxBytes == SIZE_MAX covers everything larger.
+  // unrollIdx values: NCCL_UNROLL_1=0, NCCL_UNROLL_2=1, NCCL_UNROLL_4=2,
+  //                   NCCL_UNROLL_8=3, NCCL_UNROLL_16=4, NCCL_UNROLL_32=5.
+  // Null pointer means "keep the comm-level default (gfx1250 default = UNROLL_32)".
+  struct rcclUnrollEntry { size_t maxBytes; int unrollIdx; };
+  const rcclUnrollEntry* unrollMapAR;   // AllReduce per-size unroll breakpoints
+  const rcclUnrollEntry* unrollMapAG;   // AllGather per-size unroll breakpoints
+  const rcclUnrollEntry* unrollMapRS;   // ReduceScatter per-size unroll breakpoints
+  const rcclUnrollEntry* unrollMapA2A;  // AlltoAll per-size unroll breakpoints
 
 };
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);

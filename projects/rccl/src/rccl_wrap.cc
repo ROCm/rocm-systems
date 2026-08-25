@@ -725,6 +725,69 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
   return ddaThresholdFromTable(table->ddaVmmMax, func);
 }
 
+// Context-aware VMM threshold resolver.  Callers pass the full winRegType so
+// the function can apply the correct override without the caller having to
+// interpret registration semantics.  Policy: only recv registration shifts the
+// DDA VMM cap (send-only registration does not change DDA/CE dispatch).
+// When the recv buffer is registered (ncclSymSendNonregRecvReg or
+// ncclSymSendRegRecvReg) and the arch table has a non-zero R2 override for
+// this collective, that cap wins over the default ddaVmmMax.
+// When inside a graph capture (graphMode=true) and the table has a non-zero
+// graph-mode override, that cap wins.  Graph-mode is checked first.
+// Env var (RCCL_DDA_THRESHOLD) always wins over all context variants.
+size_t rcclDdaVmmThresholdCtx(const ncclComm* comm, ncclFunc_t func,
+                               ncclSymRegType_t winRegType, bool graphMode) {
+  // Env var wins unconditionally -- same as rcclDdaVmmThreshold().
+  size_t threshold;
+  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return 0;
+  // Graph-mode override: CE AR is blocked during captures; let DDA extend further.
+  if (graphMode) {
+    size_t graphCap = ddaThresholdFromTable(table->ddaVmmMaxGraph, func);
+    if (graphCap != 0) return graphCap;
+  }
+  // R2 override: recv buffer registered; only recv registration shifts the cap.
+  const bool recvReg = (winRegType == ncclSymSendNonregRecvReg ||
+                         winRegType == ncclSymSendRegRecvReg);
+  if (recvReg) {
+    size_t r2Cap = ddaThresholdFromTable(table->ddaVmmMaxR2, func);
+    if (r2Cap != 0) return r2Cap;
+  }
+  return ddaThresholdFromTable(table->ddaVmmMax, func);
+}
+
+// Apply the per-size unroll factor from the arch table for `func` and `msgBytes`.
+// Sets comm->unroll to the matching breakpoint entry.  No-op when:
+//  - the arch table is absent (unknown arch),
+//  - the map pointer for this collective is null (not yet tuned),
+//  - or the user set RCCL_UNROLL_FACTOR explicitly (env override takes priority).
+// Call this at the start of each *_impl() function before the DDA/CE dispatch
+// so that later branches that return early (DDA) still pick up the right unroll.
+void rcclApplyUnrollForSize(ncclComm* comm, ncclFunc_t func, size_t msgBytes) {
+  // Env override (RCCL_UNROLL_FACTOR != -1) wins -- leave comm->unroll alone.
+  if (rcclParamUnrollFactor() != -1) return;
+  const rcclArchThresholds* table = ddaArchTable(comm);
+  if (table == nullptr) return;
+  const rcclArchThresholds::rcclUnrollEntry* map = nullptr;
+  switch (func) {
+    case ncclFuncAllReduce:      map = table->unrollMapAR;  break;
+    case ncclFuncAllGather:      map = table->unrollMapAG;  break;
+    case ncclFuncReduceScatter:  map = table->unrollMapRS;  break;
+    case ncclFuncAlltoAll:       map = table->unrollMapA2A; break;
+    default: break;
+  }
+  if (map == nullptr) return;
+  // Walk the breakpoint table; first entry with maxBytes >= msgBytes wins.
+  for (int i = 0; ; ++i) {
+    if (msgBytes <= map[i].maxBytes) {
+      comm->unroll = (ncclUnrollType)map[i].unrollIdx;
+      return;
+    }
+    if (map[i].maxBytes == SIZE_MAX) return;  // terminal entry (safety)
+  }
+}
+
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold) {
   if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) {
     return false;
