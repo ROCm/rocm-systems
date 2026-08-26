@@ -821,6 +821,13 @@ namespace RcclUnitTesting
           printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Output",
                  collArg.outputCpu.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
 
+          // Device-data mode builds the reference in expectedGpu; the host 'expected'
+          // buffer is unused there, so copy it back before printing.
+          if (collArg.expectedOnDevice)
+          {
+            CHECK_HIP(hipMemcpy(collArg.expected.ptr, collArg.expectedGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+          }
+
           printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Expected",
                  collArg.expected.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
         }

@@ -9,6 +9,15 @@
 #include "collectives.h"
 #include "primitives.h"
 
+// Two kernel variants are generated (see reg_values_of() in src/device/generate.py). The
+// add_unroll.sh hipify pass appends the USE_ACC/COLL_UNROLL/Pipeline/UserRegMode template
+// parameters to this specialization; UserRegMode selects the latency protocol:
+//   UserRegMode == 0 -> latency-bound send/recv uses the legacy LL protocol. Built on every
+//                       arch; the default and the only variant when LL128 is off.
+//   UserRegMode == 1 -> latency-bound send/recv uses LL128. Only generated for gfx942/gfx950
+//                       and only launched when NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
+// The host picks the variant via ncclDevFuncId_P2p(useLL128); the per-op work->{send,recv}
+// ProtoLL bit only means "this op is latency-bound", not which LL-family protocol.
 template <typename T, typename RedOp>
 struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   static_assert(sizeof(T) == 1, "SendRecv only works on single byte types T.");
@@ -174,7 +183,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #endif
   } else if (isSend) {
     if (work->sendProtoLL) {
-      runSend<ProtoLL>(subtid, subtn, group, work);
+      if constexpr (UserRegMode == 1) {
+        runSend<ProtoLL128>(subtid, subtn, group, work);
+      } else {
+        runSend<ProtoLL>(subtid, subtn, group, work);
+      }
     } else {
 #if defined(__gfx90a__)
       runSend<ProtoSimple<1, 1, 0, 8>>(subtid, subtn, group, work);
@@ -188,7 +201,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
   } else {
     if (work->recvProtoLL) {
-      runRecv<ProtoLL>(subtid, subtn, group, work);
+      if constexpr (UserRegMode == 1) {
+        runRecv<ProtoLL128>(subtid, subtn, group, work);
+      } else {
+        runRecv<ProtoLL>(subtid, subtn, group, work);
+      }
     } else {
 #if defined(__gfx90a__)
       runRecv<ProtoSimple<1, 1, 0, 8>>(subtid, subtn, group, work);

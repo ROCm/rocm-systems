@@ -14,7 +14,7 @@ from amdisa.codegen.execute.simd_codegen import (
 )
 from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
-from amdisa.isa_profile import Gfx1250Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna5Profile, Rdna4Profile
 from amdisa.parser import Parser, _uniquify_fieldless_names
 from amdisa.semantics import InstructionSemantics
 
@@ -151,7 +151,7 @@ def test_vop3p_literal64_rejection_uses_complete_encoding_capability():
 
 
 def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
-    source = CodeGenerator._emit_gfx1250_matrix_fmt_helpers().execution[0]
+    source = CodeGenerator._emit_cdna5_matrix_fmt_helpers().execution[0]
 
     reader_start = source.index('PkF32Words read_pk_f32_words')
     reader_end = source.index('\n}', reader_start)
@@ -745,8 +745,8 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='gfx1250',
-        profile=Gfx1250Profile(),
+        arch_name='cdna5',
+        profile=Cdna5Profile(),
         inst_encodings=[],
         encoding_map={},
     )
@@ -779,9 +779,7 @@ def test_literal_fma_can_share_with_matching_operand_layouts_only():
     rdna_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
 
     gfx_codegen = object.__new__(CodeGenerator)
-    gfx_codegen.isa_spec = SimpleNamespace(
-        arch_name='gfx1250', profile=Gfx1250Profile()
-    )
+    gfx_codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
     gfx_codegen.shared_plan = plan
     gfx_codegen.config = SimpleNamespace(unshared_execute_keys=frozenset())
 
@@ -801,7 +799,7 @@ def test_simd_ternary_literal_operand_name_for_inline_literal_forms():
     # Every inline-literal FMA entry reads its literal from `simm32`.
     assert simd_ternary_literal_operand_name('v_fmaak_f32_vop2') == 'simm32'
     assert simd_ternary_literal_operand_name('v_fmamk_f32_vop2') == 'simm32'
-    assert simd_ternary_literal_operand_name('v_fmaak_f16_vop2') == 'simm32'
+    assert simd_ternary_literal_operand_name('v_fmaak_f16_vop2') is None
 
 
 def test_simd_ternary_literal_operand_name_none_for_accumulate_and_unknown():

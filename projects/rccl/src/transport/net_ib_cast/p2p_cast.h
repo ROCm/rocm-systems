@@ -59,13 +59,11 @@ static inline ncclResult_t IbCastRequestRetrieveAsIndex(ncclIbRequest* reqs, uin
 
 // --- Field accessors (layout-aware, row-based) ---
 static inline uint32_t ctsFifoNreqs(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].nreqs;
+  if (IbCastAinicCtsInlineData) return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].nreqs;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].nreqs;
 }
 static inline uint64_t ctsFifoAddr(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].addr;
+  if (IbCastAinicCtsInlineData) return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].addr;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].addr;
 }
 static inline uint16_t ctsFifoRxReqIndex(volatile void* slotBase, uint32_t rxReqId) {
@@ -80,18 +78,15 @@ static inline uint32_t ctsFifoRkey(volatile void* slotBase, uint32_t rxReqId, in
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].rkeys[devIdx];
 }
 static inline uint32_t ctsFifoIdx(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].idx;
+  if (IbCastAinicCtsInlineData) return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].idx;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].idx;
 }
 static inline size_t ctsFifoSize(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return (size_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].size;
+  if (IbCastAinicCtsInlineData) return (size_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].size;
   return (size_t)((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].size;
 }
 static inline uint32_t ctsFifoTag(volatile void* slotBase, uint32_t rxReqId) {
-  if (IbCastAinicCtsInlineData)
-    return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].tag;
+  if (IbCastAinicCtsInlineData) return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].tag;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].tag;
 }
 

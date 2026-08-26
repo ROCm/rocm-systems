@@ -39,7 +39,6 @@
 #endif
 #endif
 
-
 // GIN rocshmem device templates (GDA, SDMA) gate on ENABLE_ROCSHMEM_GIN.
 #ifndef NCCL_GIN_ROCSHMEM_GDA_ENABLE
 #if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
