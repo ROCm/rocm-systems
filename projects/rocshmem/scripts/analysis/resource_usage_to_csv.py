@@ -8,7 +8,7 @@
 -Rpass-analysis=kernel-resource-usage) into a normalized CSV, one row per kernel.
 
 Usage:
-    python3 scripts/functional_tests/resource_usage_to_csv.py \\
+    python3 scripts/analysis/resource_usage_to_csv.py \\
         --log build/resource_usage_summary.log \\
         --arch gfx950 --build-config ipc_single \\
         --out resource_usage.csv

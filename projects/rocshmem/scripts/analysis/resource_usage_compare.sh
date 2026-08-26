@@ -3,23 +3,14 @@
 # Compare per-kernel GPU resource usage (VGPR/SGPR/AGPR/scratch/LDS/occupancy)
 # between two commits (or one commit vs the current working tree).
 #
-# AMDGPU LTO codegen (register allocation, instruction scheduling, internal-
-# linkage symbol layout) is measurably NON-DETERMINISTIC build-to-build, even
-# for byte-identical, unmodified source. Because of this, a real two-commit
-# comparison (COMMIT_2 set) always rebuilds BOTH sides fresh, back-to-back, in
-# this one invocation ("matched-fresh-pair") -- diffing a freshly-built branch
-# against a baseline built at some earlier, unrelated point in time (e.g. a
-# stale cached CSV from a previous run) can show spurious per-kernel deltas
-# that are pure build noise, not a consequence of the change under test.
-#
-# Builds are still cached per (gpu_target, build_config, commit) under
-# $PROJECTS_DIR/build-cache, but that cache is only trusted for a
-# single-commit snapshot (COMMIT_2 unset) or when --skip-build is passed
-# explicitly (e.g. fast iteration on report/chart formatting, or checking a
-# new commit against an already-measured baseline, where the absolute
-# numbers don't matter). Any real before/after decision should not use
-# --skip-build for a two-commit comparison. The durable outputs of a build
-# (res-<sha>.csv, build.log, resource_usage_summary.log) live separately under
+# Builds are cached per (gpu_target, build_config, commit) under
+# $PROJECTS_DIR/build-cache and reused by default. Pass --force-rebuild for a
+# "matched-fresh-pair" rebuild of both sides before a real before/after
+# decision: AMDGPU LTO codegen (register allocation, scheduling, symbol
+# layout) is NON-DETERMINISTIC build-to-build even for identical source, so
+# diffing a fresh build against a stale cached one can show spurious deltas
+# that are pure build noise. The durable outputs of a build (res-<sha>.csv,
+# build.log, resource_usage_summary.log) live separately under
 # $PROJECTS_DIR/resource-usage/cache, so build-cache can be wiped for disk
 # space without losing prior measurements.
 #
@@ -28,14 +19,13 @@
 #
 # `rocshmem_device_bitcode` (DeviceBitcode.cmake's librocshmem_device_<arch>.bc,
 # consumed by rocshmem_hipmodule_init/Triton-PyTorch JIT) is declared ALL, so
-# the same matched-fresh-pair build above already produces it as a side
-# effect. Its final `opt -O3` is an ungated whole-program inliner, a
-# materially different regime from the production library's cost-gated LTO --
-# this script also backend-compiles that .bc with
-# -Rpass-analysis=kernel-resource-usage (see measure_device_bitcode() below)
-# and diffs it separately (res_diff_bitcode_<Column>.{csv,png}), so a change
-# that looks safe under the production library alone doesn't get treated as
-# validated everywhere.
+# every build above already produces it as a side effect. Its final `opt -O3`
+# is an ungated whole-program inliner, a materially different regime from the
+# production library's cost-gated LTO -- this script also backend-compiles
+# that .bc with -Rpass-analysis=kernel-resource-usage (see
+# measure_device_bitcode() below) and diffs it separately
+# (res_diff_bitcode_<Column>.{csv,png}), so a change that looks safe under the
+# production library alone doesn't get treated as validated everywhere.
 #
 # Usage:
 #   ./resource_usage_compare.sh [OPTIONS]
@@ -53,34 +43,24 @@
 #   --gpu-target ARCH     GPU target architecture (default: gfx950).
 #   --build-config CFG    Build config script under scripts/build_configs/
 #                         (default: all_backends).
-#   --skip-build          Opt out of matched-fresh-pair rebuilding for a
-#                         two-commit comparison: reuse each commit's cached
-#                         CSV if one exists, and only build the commit(s)
-#                         that aren't cached yet, instead of forcing both
-#                         sides to rebuild fresh. Useful for fast iteration
-#                         on report/chart formatting (when both sides are
-#                         already cached, nothing gets built) or for
-#                         checking a new commit against an
-#                         already-measured baseline without repaying to
-#                         rebuild it. NOT for a real before/after
-#                         performance or regression decision, since it can
-#                         reintroduce build-to-build LTO noise as a
-#                         confound if either side reuses a build from a
-#                         different point in time.
-#   --force-rebuild       Rebuild+re-extract even if the commit is already
-#                         cached (needed after changing --build-config or the
-#                         resource-usage extraction scripts themselves). This
-#                         is now the default for two-commit comparisons; the
-#                         flag remains for single-commit snapshots and as a
-#                         no-op for explicitness.
+#   --skip-build          Reuse cached builds when available (default
+#                         behavior; flag accepted as a no-op for
+#                         explicitness).
+#   --force-rebuild       Force a fresh rebuild+re-extract even if the
+#                         commit is already cached (needed after changing
+#                         --build-config or the resource-usage extraction
+#                         scripts themselves, or for a matched-fresh-pair
+#                         two-commit comparison -- see header note above).
 #   --match REGEX         Pin kernels matching this regex (against demangled or
 #                         mangled name, case-insensitive) to the top of every
 #                         report/chart regardless of delta.
+#   --top N               Number of rows to show in each generated chart/CSV
+#                         (default: 50).
 #   --output-dir DIR      Directory to write the comparison report (CSVs +
 #                         charts) to. Default:
 #                         $PROJECTS_DIR/resource-usage/<gpu>-<config>-<sha1>-vs-<sha2>/
 #
-# Example: compare two explicit commits (both rebuilt fresh, matched-pair)
+# Example: compare two explicit commits (reusing cached builds if present)
 #   ./resource_usage_compare.sh --commit1 d48c64f6e --commit2 3caf8d080 \
 #     --build-config all_backends
 #
@@ -92,10 +72,8 @@
 #     --match alltoall_test
 ###############################################################################
 set -euo pipefail
-# Without this, command substitution $(...) (e.g. CSV_1="$(measure_commit ...)")
-# runs in a subshell with errexit silently UNSET, so a failing command inside
-# measure_commit (e.g. python3 erroring out) does not stop the script -- it
-# just falls through to `echo "$csv"`, which exits 0 and masks the failure.
+# Without this, command substitution runs in a subshell with errexit silently
+# UNSET, so a failing command inside measure_commit wouldn't stop the script.
 shopt -s inherit_errexit
 
 COMMIT_1=""
@@ -104,9 +82,10 @@ GPU_TARGET="gfx950"
 BUILD_CONFIG="all_backends"
 PR_NUM=""
 BASE_BRANCH="origin/develop"
-SKIP_BUILD=false
+SKIP_BUILD=true
 FORCE_REBUILD=false
 MATCH=""
+TOP_N=50
 OUTPUT_DIR=""
 
 _need_arg() {
@@ -128,6 +107,7 @@ while [[ $# -gt 0 ]]; do
     --skip-build)    SKIP_BUILD=true;    shift ;;
     --force-rebuild) FORCE_REBUILD=true; shift ;;
     --match)         _need_arg "$1" "$#"; MATCH="$2";         shift 2 ;;
+    --top)           _need_arg "$1" "$#"; TOP_N="$2";         shift 2 ;;
     --output-dir)    _need_arg "$1" "$#"; OUTPUT_DIR="$2";    shift 2 ;;
     -h|--help)
       sed -n '2,/^#####/p' "$0" | head -n -1
@@ -142,7 +122,7 @@ PROJECTS_DIR="$(cd "$ROCSHMEM_DIR/.." && pwd)"
 cd "$ROCSHMEM_DIR"
 
 
-TOOLS_DIR="$ROCSHMEM_DIR/scripts/functional_tests"
+TOOLS_DIR="$ROCSHMEM_DIR/scripts/analysis"
 
 # Must match resource_usage_diff.py's NUMERIC_COLS -- these are the valid
 # --sort-by values. Also duplicated in .claude/skills/rocshmem-resource-usage/
@@ -152,10 +132,8 @@ SORT_BY_TYPE=(
   "OccupancyWavesPerSIMD" "SGPRsSpill" "VGPRsSpill" "LDSBytesPerBlock"
 )
 
-# Tracks the worktree currently being built so the EXIT trap below can clean
-# it up if the build fails partway through (errexit exits the script before
-# reaching the normal `git worktree remove` call, otherwise leaking a
-# worktree registration + /tmp checkout).
+# Tracks the in-progress worktree so the EXIT trap can remove it if a build
+# fails partway through (errexit would otherwise leak the worktree/checkout).
 CURRENT_WORKTREE=""
 _cleanup_worktree() {
   if [[ -n "$CURRENT_WORKTREE" ]]; then
@@ -180,27 +158,22 @@ _find_build_config() {
   echo "$result"
 }
 
-# Backend-compile a device-bitcode artifact (DeviceBitcode.cmake's
-# librocshmem_device_<arch>.bc, produced by the `rocshmem_device_bitcode`
-# target -- ALL, so already built by the time this is called) directly with
+# Backend-compile the device-bitcode artifact (DeviceBitcode.cmake's
+# librocshmem_device_<arch>.bc, already built as a side effect of ALL) with
 # -Rpass-analysis=kernel-resource-usage to get its resource-usage remarks.
-# This is not a re-optimization: DeviceBitcode.cmake's own pipeline (clang
-# -emit-llvm, llvm-link, opt -O3) never runs AMDGPU instruction selection, so
-# it can never emit these remarks itself -- that codegen normally only
-# happens later, at JIT time (rocshmem_hipmodule_init). Backend-compiling the
-# .bc here just reuses those same codegen decisions early, for reporting.
+# DeviceBitcode.cmake's own pipeline never runs AMDGPU instruction selection
+# (that normally only happens later, at JIT time), so this reuses those same
+# codegen decisions early, for reporting.
 #
-# The .bc has no debug info (llvm-link merges many TUs, opt -O3 runs with no
-# -g), so source_file/line in the output CSV are the placeholder
-# "<bitcode>"/0 for every row -- only mangled_name (and the resource columns)
-# are meaningful, which is fine since resource_usage_diff.py keys/compares by
-# (arch, build_config, mangled_name).
+# The .bc has no debug info, so source_file/line in the output CSV are the
+# placeholder "<bitcode>"/0 for every row -- only mangled_name (and the
+# resource columns) are meaningful; resource_usage_diff.py keys/compares by
+# (arch, build_config, mangled_name), so that's sufficient.
 measure_device_bitcode() {
   local bc_file="$1" arch="$2" build_config="$3" commit="$4" out_csv="$5"
 
   # Same search order as DeviceBitcode.cmake's find_program(LLVM_CLANG ...)
-  # (plus ROCM_HOME), so this backend-compile uses the same ROCm clang++ that
-  # built the .bc, falling back to PATH only if none of those are set.
+  # plus ROCM_HOME, so this uses the same ROCm clang++ that built the .bc.
   local -a _clangxx_candidates=()
   [[ -n "${ROCM_PATH:-}" ]] && _clangxx_candidates+=("$ROCM_PATH/llvm/bin/clang++")
   [[ -n "${ROCM_HOME:-}" ]] && _clangxx_candidates+=("$ROCM_HOME/llvm/bin/clang++")
@@ -223,10 +196,8 @@ measure_device_bitcode() {
 
   local workdir
   workdir="$(mktemp -d /tmp/rocshmem-device-bitcode-XXXXXX)"
-  # A RETURN trap isn't scoped to this function -- left registered, it also
-  # fires on the *caller's* next return, by which point $workdir is out of
-  # scope and set -u aborts the script ("workdir: unbound variable"). Clear
-  # it as part of firing so it only ever runs once, for this call.
+  # RETURN traps aren't scoped to this function -- clear it as it fires, or
+  # it re-fires on the caller's next return once $workdir is out of scope.
   trap 'rm -rf "$workdir"; trap - RETURN' RETURN
 
   local raw_log="$workdir/raw.log"
@@ -241,10 +212,8 @@ measure_device_bitcode() {
       return 1
     }
 
-  # Normalize `remark: <unknown>:0:0: Function Name: X [-Rpass-analysis=...]`
-  # (no frontend source-location metadata on this direct backend-only
-  # invocation) into the `<file>:<line>:<col>: Key: value` shape
-  # resource_usage_to_csv.py expects.
+  # Normalize the backend-only remark format into the `<file>:<line>:<col>:
+  # Key: value` shape resource_usage_to_csv.py expects.
   sed -E \
     -e 's/^remark: <unknown>:0:0:/<bitcode>:0:0:/' \
     -e 's/ \[-Rpass-analysis=kernel-resource-usage\]$//' \
@@ -290,45 +259,30 @@ measure_commit() {
     exit 1
   fi
 
-  # cmake's --fresh has been unreliable at fully resetting cache/generated
-  # state between commits, so wipe the directory ourselves instead of
-  # relying on it.
+  # cmake --fresh is unreliable at fully resetting state between commits, so
+  # wipe the build dir ourselves.
   rm -rf "$build_dir"
   mkdir -p "$build_dir"
   mkdir -p "$cache_dir"
-  # resource_usage_to_csv.py merges new rows into any pre-existing --out file
-  # (by design, for incremental single-build runs) -- but that means a stale
-  # CSV left over from a previous measure_commit() run of this same commit
-  # would silently combine with this fresh build's rows instead of being
-  # replaced, since they key on (arch, build_config, source_file, line,
-  # mangled_name) and each build's ephemeral worktree path differs. That
-  # breaks the "matched-fresh-pair" guarantee documented at the top of this
-  # script. Since we're about to rebuild unconditionally at this point in the
-  # function, always start this commit's CSVs from a clean slate.
+  # resource_usage_to_csv.py merges into any pre-existing --out file; without
+  # this, a stale CSV from a prior run of this same commit would silently mix
+  # with this fresh build's rows instead of being replaced.
   rm -f "$csv" "$cache_dir/res-${sha}-bitcode.csv"
   (
     cd "$build_dir"
-    # measure_commit's own stdout is captured by the caller ($(measure_commit ...)) and
-    # must contain only the final `echo "$csv"` path below -- tee's stdout copy of the
-    # build log must go to stderr (>&2), not stdout, or it corrupts the captured path
-    # (and can make it megabytes long, blowing out ARG_MAX in later `cp "$CSV_1" ...`).
-    # build.log/resource_usage_summary.log are written under cache_dir (not
-    # build_dir) so they survive a `rm -rf build-cache/`.
+    # Caller captures this function's stdout as the CSV path -- the build
+    # log must go to stderr only, or it corrupts (and bloats) that capture.
+    # build.log/resource_usage_summary.log live under cache_dir so they
+    # survive a `rm -rf build-cache/`.
     "$FOUND_BUILD_CONFIG" \
       --fresh \
       -DGPU_TARGETS="$GPU_TARGET" \
       -DCMAKE_CXX_FLAGS="-Rpass-analysis=kernel-resource-usage" 2>&1 |
       tee "$cache_dir/build.log" >&2
-    # A plain "-A9" context window assumes each kernel's ~9-line remark block
-    # stays contiguous in the log, which only holds for a serial (-j1) build.
-    # Under the normal -j>1 build, multiple TUs' compiler processes emit their
-    # remarks to this shared log concurrently -- each line is written
-    # atomically, but two kernels' blocks can interleave line-by-line, so a
-    # fixed window after one kernel's "Function Name:" line can both pull in
-    # a neighboring kernel's lines and cut off that kernel's own later lines.
-    # resource_usage_to_csv.py's parser re-attributes every line by its own
-    # "<file>:<line>:" prefix (immune to interleaving) instead of by position,
-    # so just pass through every remark-key line unfiltered by position.
+    # Under -j>1, multiple TUs write remarks to the log concurrently, so
+    # blocks can interleave line-by-line. resource_usage_to_csv.py's parser
+    # re-attributes each line by its own "<file>:<line>:" prefix rather than
+    # position, so we just pass every remark-key line through unfiltered.
     grep -E '(Function Name|TotalSGPRs|VGPRs|AGPRs|ScratchSize \[bytes/lane\]|Dynamic Stack|Occupancy \[waves/SIMD\]|SGPRs Spill|VGPRs Spill|LDS Size \[bytes/block\]):' \
       "$cache_dir/build.log" >"$cache_dir/resource_usage_summary.log" || true
   )
@@ -336,21 +290,16 @@ measure_commit() {
   git -C "$ROCSHMEM_DIR" worktree remove "$worktree" >&2 || true
   CURRENT_WORKTREE=""
 
-  # measure_commit's stdout is captured by the caller (CSV_1="$(measure_commit ...)")
-  # and must contain only the final `echo "$csv"` path -- redirect this script's own
-  # report (which prints to stdout) to stderr so it stays visible without corrupting
-  # the captured path.
+  # Same stdout-capture constraint as above: redirect this script's own
+  # report to stderr.
   python3 "$TOOLS_DIR/resource_usage_to_csv.py" \
     --log "$cache_dir/resource_usage_summary.log" \
     --arch "$GPU_TARGET" --build-config "$BUILD_CONFIG" --commit "$sha" \
     --out "$csv" >&2
 
-  # `rocshmem_device_bitcode` is declared ALL in DeviceBitcode.cmake, so the
-  # plain `cmake --build .` above already produced it as a side effect --
-  # measure the device-bitcode artifact's whole-program `opt -O3` codegen too
-  # (a materially different, ungated inlining regime from the production
-  # library's cost-gated LTO) rather than only ever checking the
-  # production-library numbers.
+  # rocshmem_device_bitcode is declared ALL, so the build above already
+  # produced it -- measure its whole-program opt -O3 codegen too, not just
+  # the production library's cost-gated-LTO numbers.
   local bc_file="$build_dir/librocshmem_device_${GPU_TARGET}.bc"
   local bitcode_csv="$cache_dir/res-${sha}-bitcode.csv"
   if [[ -f "$bc_file" ]]; then
@@ -377,20 +326,14 @@ else
   COMMIT_1="${COMMIT_1:-HEAD}"
 fi
 
-# Matched-fresh-pair discipline: a real two-commit comparison must not diff a
-# freshly-built branch against a baseline built at some earlier, unrelated
-# point in time -- AMDGPU LTO codegen is not deterministic build-to-build, so
-# that comparison can show spurious per-kernel deltas that are pure build
-# noise rather than a consequence of the change under test. Force both sides
-# to rebuild fresh in this invocation unless the caller explicitly opted out
-# (--skip-build).
-if [[ -n "$COMMIT_2" && "$SKIP_BUILD" == false ]]; then
-  if [[ "$FORCE_REBUILD" == false ]]; then
-    echo "  Two-commit comparison: forcing a fresh matched-pair rebuild of both" >&2
-    echo "  commits (pass --skip-build to reuse cached builds instead -- not" >&2
-    echo "  recommended for a real before/after decision)." >&2
-  fi
-  FORCE_REBUILD=true
+# Cached builds are reused by default; nudge towards --force-rebuild for a
+# real before/after decision, since AMDGPU LTO codegen isn't deterministic
+# build-to-build and a stale baseline can show spurious per-kernel deltas.
+if [[ -n "$COMMIT_2" && "$FORCE_REBUILD" == false ]]; then
+  echo "  Two-commit comparison: reusing cached builds where available." >&2
+  echo "  Pass --force-rebuild for a matched-fresh-pair rebuild before a real" >&2
+  echo "  before/after regression decision (AMDGPU LTO codegen is not" >&2
+  echo "  build-to-build deterministic)." >&2
 fi
 
 echo "=== resource usage: $COMMIT_1${COMMIT_2:+ vs $COMMIT_2} ($GPU_TARGET / $BUILD_CONFIG) ==="
@@ -418,15 +361,14 @@ for sort_by in "${SORT_BY_TYPE[@]}"; do
     --branch "$CSV_2" \
     --out "$OUTDIR/res_diff_${sort_by}.csv" \
     --chart "$OUTDIR/res_diff_${sort_by}.png" \
-    --top 20 --sort-by "$sort_by" \
+    --top "$TOP_N" --sort-by "$sort_by" \
     ${MATCH:+--match "$MATCH"}
 done
 
-# Device-bitcode artifact (DeviceBitcode.cmake's whole-program `opt -O3`)
-# numbers, when both sides have them -- see the note in measure_commit(). A
-# change that looks safe/beneficial under the production library's
-# cost-gated LTO can still regress here, since this inliner has no cost
-# model and no per-TU boundary.
+# Device-bitcode (whole-program opt -O3) numbers, when both sides have them --
+# this inliner has no cost model/per-TU boundary, so a change that's
+# safe/beneficial under the production library's cost-gated LTO can still
+# regress here.
 BITCODE_CSV_1="${CSV_1%.csv}-bitcode.csv"
 BITCODE_CSV_2="${CSV_2%.csv}-bitcode.csv"
 if [[ -f "$BITCODE_CSV_1" && -f "$BITCODE_CSV_2" ]]; then
@@ -438,7 +380,7 @@ if [[ -f "$BITCODE_CSV_1" && -f "$BITCODE_CSV_2" ]]; then
       --branch "$BITCODE_CSV_2" \
       --out "$OUTDIR/res_diff_bitcode_${sort_by}.csv" \
       --chart "$OUTDIR/res_diff_bitcode_${sort_by}.png" \
-      --top 20 --sort-by "$sort_by" \
+      --top "$TOP_N" --sort-by "$sort_by" \
       ${MATCH:+--match "$MATCH"}
   done
 else
