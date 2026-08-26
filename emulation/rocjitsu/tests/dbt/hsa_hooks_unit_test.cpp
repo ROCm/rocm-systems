@@ -4156,7 +4156,7 @@ TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpe
   ASSERT_FALSE(direct.program_inventory.text_sections().empty());
   ASSERT_FALSE(direct.program_inventory.kernels().empty());
   ASSERT_FALSE(direct.program_inventory.semantic_arch_required());
-  ASSERT_TRUE(rocjitsu::consan_result_has_resolved_semantic_arch(direct));
+  ASSERT_TRUE(direct.program_inventory.has_resolved_semantic_arch());
 
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
   for (const ConSanHookProfile &profile : kConSanHookProfiles) {
@@ -5596,6 +5596,38 @@ rocjitsu::ConSanResult auto_report_sampled_transform_result(
   return result;
 }
 
+rocjitsu::ConSanResult auto_report_inline_shadow_transform_result() {
+  rocjitsu::ConSanResult result = auto_report_replay_transform_result();
+  constexpr std::array<uint8_t, 8> instruction_bytes{};
+  rocjitsu::ProgramInventoryBuilder inventory(instruction_bytes);
+  inventory.set_code_object_facts(true, 0u, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201);
+  rocjitsu::ConSanKernelInfo kernel;
+  kernel.name = "auto_report_inline_shadow";
+  kernel.descriptor_file_offset = 0x100u;
+  kernel.declared_group_segment_bytes = 256u;
+  rocjitsu::ConSanLdsSite access;
+  access.kind = rocjitsu::ConSanLdsAccessKind::Write;
+  access.supported_mvp = true;
+  access.text_offset = 0u;
+  access.file_offset = 0u;
+  access.size = sizeof(uint32_t);
+  access.width_bits = 32u;
+  access.addr_vgpr = 0u;
+  access.data_vgpr = 1u;
+  access.owner_descriptor_file_offsets = {kernel.descriptor_file_offset};
+  access.mnemonic = "ds_store_b32";
+  kernel.lds_sites.push_back(std::move(access));
+  inventory.kernels().push_back(std::move(kernel));
+  inventory.rebuild_access_inventory(instruction_bytes);
+  result.program_inventory = inventory.view();
+  install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
+                               rocjitsu::ConSanAccessPolicyReason::None,
+                               rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
+                               rocjitsu::ConSanCapabilityEngine::InlineShadow,
+                               rocjitsu::ConSanProbeIntentKind::ExactShadowAccess);
+  return result;
+}
+
 TEST(HsaHooksUnitTest, ConSanAutoReportNeverReconstructsMissingEvidenceFromMechanismTelemetry) {
   ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
@@ -6157,25 +6189,28 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportAllocationFailureRejectsWhenFailClosed)
   g_fail_core_memory_allocate = false;
 }
 
-TEST(HsaHooksUnitTest, AutoReportsPreferFineRegionAcrossEnginesAndIterationOrders) {
+TEST(HsaHooksUnitTest, AutoReportsHonorTypedVisibilityAndPreferFineRegionAcrossEngines) {
   struct Case {
     const char *mode;
     bool offer_fine_region;
     bool offer_coarse_region;
     bool offer_coarse_region_first;
-    uint64_t expected_region;
+    hsa_status_t expected_status;
+    std::optional<uint64_t> expected_region;
   };
   constexpr std::array cases = {
-      Case{"record-replay", true, false, false, 30u},
-      Case{"record-replay", true, true, false, 30u},
-      Case{"record-replay", true, true, true, 30u},
-      Case{"sampled", true, false, false, 30u},
-      Case{"sampled", true, true, false, 30u},
-      Case{"sampled", true, true, true, 30u},
-      Case{"inline-shadow", true, false, false, 30u},
-      Case{"inline-shadow", true, true, false, 30u},
-      Case{"inline-shadow", true, true, true, 30u},
-      Case{"record-replay", false, true, false, 31u},
+      Case{"record-replay", true, false, false, HSA_STATUS_SUCCESS, 30u},
+      Case{"record-replay", true, true, false, HSA_STATUS_SUCCESS, 30u},
+      Case{"record-replay", true, true, true, HSA_STATUS_SUCCESS, 30u},
+      Case{"sampled", true, false, false, HSA_STATUS_SUCCESS, 30u},
+      Case{"sampled", true, true, false, HSA_STATUS_SUCCESS, 30u},
+      Case{"sampled", true, true, true, HSA_STATUS_SUCCESS, 30u},
+      Case{"inline-shadow", true, false, false, HSA_STATUS_SUCCESS, 30u},
+      Case{"inline-shadow", true, true, false, HSA_STATUS_SUCCESS, 30u},
+      Case{"inline-shadow", true, true, true, HSA_STATUS_SUCCESS, 30u},
+      Case{"record-replay", false, true, false, HSA_STATUS_ERROR_OUT_OF_RESOURCES, std::nullopt},
+      Case{"sampled", false, true, false, HSA_STATUS_ERROR_OUT_OF_RESOURCES, std::nullopt},
+      Case{"inline-shadow", false, true, false, HSA_STATUS_ERROR_OUT_OF_RESOURCES, std::nullopt},
   };
   for (const Case &test : cases) {
     SCOPED_TRACE(test.mode);
@@ -6194,6 +6229,8 @@ TEST(HsaHooksUnitTest, AutoReportsPreferFineRegionAcrossEnginesAndIterationOrder
     g_offer_coarse_report_region_first = test.offer_coarse_region_first;
     g_transform_override_result = std::string_view(test.mode) == "sampled"
                                       ? auto_report_sampled_transform_result()
+                                  : std::string_view(test.mode) == "inline-shadow"
+                                      ? auto_report_inline_shadow_transform_result()
                                       : auto_report_replay_transform_result();
     {
       FakeApiTable api;
@@ -6204,11 +6241,15 @@ TEST(HsaHooksUnitTest, AutoReportsPreferFineRegionAcrossEnginesAndIterationOrder
       ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
                                                                       original.size(), &reader),
                 HSA_STATUS_SUCCESS);
-      ASSERT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
                                                                   reader, nullptr, nullptr),
-                HSA_STATUS_SUCCESS);
-      ASSERT_EQ(g_core_memory_allocation_regions.size(), 1u);
-      EXPECT_EQ(g_core_memory_allocation_regions.front(), test.expected_region);
+                test.expected_status);
+      if (test.expected_region) {
+        ASSERT_EQ(g_core_memory_allocation_regions.size(), 1u);
+        EXPECT_EQ(g_core_memory_allocation_regions.front(), *test.expected_region);
+      } else {
+        EXPECT_TRUE(g_core_memory_allocation_regions.empty());
+      }
     }
     EXPECT_TRUE(g_core_memory_allocations.empty());
   }

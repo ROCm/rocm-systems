@@ -473,13 +473,6 @@ struct ConSanResult {
   std::vector<std::string> warnings;
 };
 
-/// Whether every architecture-dependent result stage has a typed architecture.
-/// Parse-only results are safe to pass through without one.
-[[nodiscard]] inline bool consan_result_has_resolved_semantic_arch(const ConSanResult &result) {
-  return !result.program_inventory.semantic_arch_required() ||
-         result.program_inventory.arch() != ROCJITSU_CODE_ARCH_INVALID;
-}
-
 /// Whether a semantic claim is at least as strong as the weakest confidence a
 /// consumer explicitly accepts.
 [[nodiscard]] constexpr bool

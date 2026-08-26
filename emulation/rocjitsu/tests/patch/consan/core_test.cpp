@@ -453,7 +453,7 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
     EXPECT_FALSE(result.modified);
     EXPECT_TRUE(result.errors.empty());
     EXPECT_FALSE(result.program_inventory.semantic_arch_required());
-    EXPECT_TRUE(consan_result_has_resolved_semantic_arch(result));
+    EXPECT_TRUE(result.program_inventory.has_resolved_semantic_arch());
     EXPECT_EQ(result.program_inventory.target(), unsupported.target);
     EXPECT_TRUE(std::ranges::any_of(result.warnings, [&](const std::string &warning) {
       return warning == "ConSan does not support target '" +
@@ -462,7 +462,7 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
   }
 }
 
-TEST(ConSan, SemanticArchitectureGateTracksAnalysisStageRatherThanResultMembers) {
+TEST(ConSan, ProgramInventoryOwnsSemanticArchitectureResolutionGate) {
   ConSanResult parse_only;
   parse_only.outcome = ConSanTransformOutcome::Unsupported;
   ProgramInventoryBuilder inventory;
@@ -470,18 +470,18 @@ TEST(ConSan, SemanticArchitectureGateTracksAnalysisStageRatherThanResultMembers)
   inventory.kernels().push_back({});
   inventory.functions().push_back({});
   parse_only.program_inventory = inventory.view();
-  EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
+  EXPECT_TRUE(parse_only.program_inventory.has_resolved_semantic_arch());
 
   ProgramInventoryBuilder required_inventory(parse_only.program_inventory);
   required_inventory.set_semantic_arch_required(true);
   parse_only.program_inventory = required_inventory.view();
-  EXPECT_FALSE(consan_result_has_resolved_semantic_arch(parse_only));
+  EXPECT_FALSE(parse_only.program_inventory.has_resolved_semantic_arch());
 
   ProgramInventoryBuilder resolved_inventory(parse_only.program_inventory);
   resolved_inventory.set_code_object_facts(false, 0u, ROCJITSU_CODE_ARCH_RDNA4,
                                            ROCJITSU_CODE_TARGET_GFX1201);
   parse_only.program_inventory = resolved_inventory.view();
-  EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
+  EXPECT_TRUE(parse_only.program_inventory.has_resolved_semantic_arch());
 }
 
 TEST(ConSan, StubRejectsEmptyCodeObject) {

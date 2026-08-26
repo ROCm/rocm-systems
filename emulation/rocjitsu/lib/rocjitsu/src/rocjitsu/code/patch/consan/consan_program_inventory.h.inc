@@ -442,6 +442,12 @@ public:
   [[nodiscard]] bool semantic_arch_required() const {
     return storage_ && storage_->semantic_arch_required;
   }
+  /// Return whether every architecture-dependent inventory stage has a
+  /// concrete semantic architecture. Parse-only inventories do not require
+  /// one and remain safe for an unchanged pass-through result.
+  [[nodiscard]] bool has_resolved_semantic_arch() const {
+    return !semantic_arch_required() || arch() != ROCJITSU_CODE_ARCH_INVALID;
+  }
   [[nodiscard]] std::span<const ConSanTextSection> text_sections() const {
     return storage_ ? std::span<const ConSanTextSection>(storage_->text_sections)
                     : std::span<const ConSanTextSection>{};

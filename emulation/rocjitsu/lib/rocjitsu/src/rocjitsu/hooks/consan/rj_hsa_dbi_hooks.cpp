@@ -4151,7 +4151,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                             inventory_begin)
                       .count());
-      if (!rocjitsu::consan_result_has_resolved_semantic_arch(inventory.legacy_mechanism()))
+      if (!inventory.program_inventory.has_resolved_semantic_arch())
         return reject_unresolved_semantic_arch(*config, code_object_reader.handle,
                                                fault_installation_evidence);
       uint64_t auto_report_address = 0;
@@ -4358,7 +4358,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
             "moi-report-live-inventory-growth", fault_installation_evidence);
       }
     }
-    if (!rocjitsu::consan_result_has_resolved_semantic_arch(patch_result))
+    if (!transform_result.program_inventory.has_resolved_semantic_arch())
       return reject_unresolved_semantic_arch(*config, code_object_reader.handle,
                                              fault_installation_evidence);
     if (registered_auto_moi_report_generation)

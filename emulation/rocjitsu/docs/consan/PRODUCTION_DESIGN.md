@@ -2455,6 +2455,41 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   after the following deletion tranche. E2E validation remains outside this
   work.
 
+### Slice 4J: make semantic-architecture admission an inventory invariant
+
+- **Completed deletion and ownership cutover:** The free
+  `consan_result_has_resolved_semantic_arch` compatibility helper is gone.
+  `ProgramInventory::has_resolved_semantic_arch()` now owns the invariant
+  because the inventory itself records both whether semantic analysis was
+  attempted and which architecture supplied those semantics. Both pristine
+  inventory admission and final transform admission query that typed owner;
+  they no longer infer an analysis-stage invariant from the mutable mechanism
+  result surrounding it.
+- **Explicit pass-through behavior:** A parse-only unsupported-target
+  inventory does not require a semantic architecture and remains safe to pass
+  through unchanged. Once an architecture-dependent stage marks the
+  requirement, an invalid architecture is rejected, and assigning a concrete
+  semantic architecture resolves the invariant. The direct inventory test and
+  both hook paths guard all three states.
+- **Typed HSA fixture repair:** The complete hook gate exposed one stale
+  synthetic test fixture left by Slice 4I. Its InlineShadow case had reused a
+  Record/Replay plan without the matching immutable LDS inventory. The fixture
+  now supplies an engine-correct exact-shadow intent and access inventory.
+  The same test now consistently proves that Record/Replay, Sampled, and
+  InlineShadow prefer fine-grained report memory regardless of region order
+  and reject a coarse-only region that cannot satisfy their typed coherence
+  requirement.
+- **Deletion result:** Production source is one net line smaller: seven lines
+  of result-level compatibility API were replaced by a six-line inventory
+  invariant, while the two production callers are line-neutral. The focused
+  test contract grows by 41 net lines to model the real InlineShadow input and
+  all three engines' negative coarse-only capability cases.
+- **Completed checked-in gate:** The complete RocJitsu host binary passed
+  5,600 of 5,604 tests with four intentional skips; the complete HSA-hook
+  binary passed all 197 tests. All 2,878 currently registered simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 75.19
+  seconds of wall time. E2E validation remains outside this deletion work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner
