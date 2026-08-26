@@ -34,6 +34,17 @@ RaceLogParseResult parse(std::string_view log) {
   return parseRaceLog(input);
 }
 
+std::vector<RaceRecord> validRaceRecords() {
+  RaceLogParseResult parsed = parse(kValidRaceLog);
+  EXPECT_TRUE(parsed.ok()) << parsed.error;
+  return std::move(parsed.records);
+}
+
+void expectMatchError(const RaceExpectationMatchResult &matched, std::string_view error) {
+  EXPECT_FALSE(matched.ok());
+  EXPECT_NE(matched.message().find(error), std::string::npos) << matched.message();
+}
+
 class EnvironmentGuard {
 public:
   explicit EnvironmentGuard(const char *name) : name_(name) {
@@ -195,6 +206,75 @@ TEST(RaceLogExpectationTest, MatchesStructuredExpectation) {
   const RaceExpectationMatchResult matched = matchRaceExpectation(parsed.records, expected);
 
   EXPECT_TRUE(matched.ok()) << matched.message();
+}
+
+TEST(RaceLogExpectationTest, RejectsFindingCountMismatches) {
+  const RaceExpectation exactly_one;
+  expectMatchError(matchRaceExpectation({}, exactly_one), "expected exactly one race, got 0");
+
+  std::vector<RaceRecord> two_records = validRaceRecords();
+  ASSERT_EQ(two_records.size(), 1u);
+  two_records.push_back(two_records.front());
+  expectMatchError(matchRaceExpectation(two_records, exactly_one),
+                   "expected exactly one race, got 2");
+
+  const RaceExpectation one_or_more{
+      .findings = FindingCount::OneOrMore,
+  };
+  expectMatchError(matchRaceExpectation({}, one_or_more), "expected at least one race, got none");
+}
+
+TEST(RaceLogExpectationTest, RejectsInvalidDispatchIdentity) {
+  std::vector<RaceRecord> records = validRaceRecords();
+  ASSERT_EQ(records.size(), 1u);
+  records.front().kernel = "?";
+  records.front().symbol.clear();
+  records.front().dispatch = 0;
+
+  const RaceExpectation expected{
+      .kernel = "racy_kernel",
+  };
+  const RaceExpectationMatchResult matched = matchRaceExpectation(records, expected);
+
+  expectMatchError(matched, "kernel name is unresolved");
+  expectMatchError(matched, "missing kernel symbol");
+  expectMatchError(matched, "dispatch id must be positive");
+}
+
+TEST(RaceLogExpectationTest, ReportsAllNormalizedFieldMismatches) {
+  const std::vector<RaceRecord> records = validRaceRecords();
+  ASSERT_EQ(records.size(), 1u);
+  const RaceExpectation expected{
+      .type = "SGPR",
+      .type_substring = "LDS",
+      .access = "write",
+      .wave = 2,
+      .lane = 3,
+  };
+
+  const RaceExpectationMatchResult matched = matchRaceExpectation(records, expected);
+
+  expectMatchError(matched, "race type mismatch");
+  expectMatchError(matched, "race type 'VGPR' does not contain 'LDS'");
+  expectMatchError(matched, "race access mismatch");
+  expectMatchError(matched, "wave mismatch");
+  expectMatchError(matched, "lane mismatch");
+}
+
+TEST(RaceLogExpectationTest, ReportsAllTraceSectionMismatches) {
+  const std::vector<RaceRecord> records = validRaceRecords();
+  ASSERT_EQ(records.size(), 1u);
+  const RaceExpectation expected{
+      .producer = "buffer_load_dword",
+      .between = "s_barrier",
+      .consumer = "v_add_f32",
+  };
+
+  const RaceExpectationMatchResult matched = matchRaceExpectation(records, expected);
+
+  expectMatchError(matched, "producer trace");
+  expectMatchError(matched, "intervening trace");
+  expectMatchError(matched, "consumer trace");
 }
 
 TEST(RaceLogExpectationTest, MissingExpectedTraceMarkerFails) {
