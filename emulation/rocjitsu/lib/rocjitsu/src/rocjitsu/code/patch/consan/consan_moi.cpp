@@ -374,10 +374,11 @@ struct MoiPhysicalSyncSiteKeyHash {
 class MoiSyncInventoryIndex {
 public:
   explicit MoiSyncInventoryIndex(const ConSanResult &result) {
-    events_by_identity_.reserve(result.sync_events.size());
-    events_by_site_.reserve(result.sync_events.size());
-    events_by_physical_site_.reserve(result.sync_events.size());
-    for (const ConSanSyncEvent &event : result.sync_events) {
+    const SynchronizationInventoryView sync = result.program_inventory.sync();
+    events_by_identity_.reserve(sync.sync_events.size());
+    events_by_site_.reserve(sync.sync_events.size());
+    events_by_physical_site_.reserve(sync.sync_events.size());
+    for (const ConSanSyncEvent &event : sync.sync_events) {
       insert_unique(events_by_identity_, std::string_view(event.identity), &event);
       insert_unique(
           events_by_site_,
@@ -388,10 +389,10 @@ public:
     }
 
     size_t member_count = 0;
-    for (const ConSanSyncSequence &sequence : result.sync_sequences)
+    for (const ConSanSyncSequence &sequence : sync.sync_sequences)
       member_count += sequence.member_event_identities.size();
     sequences_by_event_identity_.reserve(member_count);
-    for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+    for (const ConSanSyncSequence &sequence : sync.sync_sequences) {
       for (const std::string &identity : sequence.member_event_identities)
         insert_unique(sequences_by_event_identity_, std::string_view(identity), &sequence);
     }
@@ -643,7 +644,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
                             return has_operational_atomic(function, false);
                           }) ||
       !operational_ordinary_atomics.empty() ||
-      std::ranges::any_of(result.moi_fence_candidates, &ConSanMoiFenceCandidate::eligible);
+      std::ranges::any_of(result.program_inventory.sync().moi_fence_candidates,
+                          &ConSanMoiFenceCandidate::eligible);
   const bool atomic_or_fence_relevant =
       effective_options.moi_track_atomics &&
       (effective_options.moi_engine == ConSanMoiEngine::RecordReplay
@@ -1132,7 +1134,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.sampled_bank_count_adaptive = true;
     if (options.moi_track_barriers) {
       inventory.barrier_event_count = 0;
-      for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+      for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
         if (consan_moi_sampled_qualifies_barrier_sequence(sequence))
           inventory.barrier_event_count += sequence.member_event_identities.size();
       }

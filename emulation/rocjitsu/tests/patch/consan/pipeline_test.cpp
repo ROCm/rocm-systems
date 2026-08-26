@@ -495,9 +495,9 @@ TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrie
       MutationRequest{}, complete_runtime_capabilities(), supplied_binding,
       /*preserve_extended_barrier_pairs=*/true);
 
-  const auto ordinary_sync = ordinary.program_inventory.synchronization_view().sync_sequences;
-  const auto preserved_sync = preserved.program_inventory.synchronization_view().sync_sequences;
-  const auto cleared_sync = cleared_binding.program_inventory.synchronization_view().sync_sequences;
+  const auto ordinary_sync = ordinary.program_inventory.sync().sync_sequences;
+  const auto preserved_sync = preserved.program_inventory.sync().sync_sequences;
+  const auto cleared_sync = cleared_binding.program_inventory.sync().sync_sequences;
   EXPECT_EQ(std::ranges::count(ordinary_sync, ConSanSyncOperation::BarrierFull,
                                &ConSanSyncSequence::operation),
             0u);

@@ -52,7 +52,7 @@ void append_unmatched_barrier_waits(const Container &container, bool in_kernel,
       continue;
     const ConSanSyncEvent *event = nullptr;
     size_t event_count = 0;
-    for (const ConSanSyncEvent &candidate : result.sync_events) {
+    for (const ConSanSyncEvent &candidate : result.program_inventory.sync().sync_events) {
       if (candidate.kind != ConSanSyncEventKind::Barrier ||
           candidate.operation != ConSanSyncOperation::BarrierWait ||
           candidate.container_name != container.name || candidate.in_kernel != in_kernel ||
@@ -63,8 +63,8 @@ void append_unmatched_barrier_waits(const Container &container, bool in_kernel,
     }
     if (event_count != 1u || event == nullptr)
       continue;
-    const bool belongs_to_sequence =
-        std::ranges::any_of(result.sync_sequences, [&](const ConSanSyncSequence &sequence) {
+    const bool belongs_to_sequence = std::ranges::any_of(
+        result.program_inventory.sync().sync_sequences, [&](const ConSanSyncSequence &sequence) {
           return sequence.kind == ConSanSyncSequenceKind::Barrier &&
                  sequence.member_event_identities.size() > 1u &&
                  std::ranges::find(sequence.member_event_identities, event->identity) !=
@@ -2289,8 +2289,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           "ConSan mutation proof found an incomplete or inconsistent barrier ID/scope group");
     } else {
       // Re-derive the exact selected group from pristine executable bytes and
-      // patch anchors. Do not use result.sync_sequences or lifecycle groups:
-      // they are mutable transform output, not validation evidence.
+      // patch anchors. Do not use result.program_inventory.sync().sync_sequences or
+      // lifecycle groups: they are mutable transform output, not validation evidence.
       for (size_t i = 1; i < barrier_id_scope_patches.size(); ++i) {
         const ConSanPatchInfo &previous = *barrier_id_scope_patches[i - 1u];
         const ConSanPatchInfo &current = *barrier_id_scope_patches[i];
@@ -2678,7 +2678,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   const uint32_t nop = build_s_nop(0, arch);
   std::unordered_set<std::string> proven_edges;
   const SyncEventIdentityIndex pristine_events =
-      build_sync_event_identity_index(pristine.sync_events);
+      build_sync_event_identity_index(pristine.program_inventory.sync().sync_events);
 
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation)
@@ -2779,9 +2779,11 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       continue;
     }
     if (!carried_stage) {
-      const auto sequence = std::ranges::find(pristine.sync_sequences, proof_sequence_identity,
-                                              &ConSanSyncSequence::identity);
-      if (sequence == pristine.sync_sequences.end() || !sequence->basic_block_index ||
+      const auto sequence =
+          std::ranges::find(pristine.program_inventory.sync().sync_sequences,
+                            proof_sequence_identity, &ConSanSyncSequence::identity);
+      if (sequence == pristine.program_inventory.sync().sync_sequences.end() ||
+          !sequence->basic_block_index ||
           !consan_sync_confidence_meets(sequence->confidence,
                                         ConSanSemanticConfidence::Conservative) ||
           !perturbation_rejection_reason(pristine_events, *sequence, candidate->kind,
@@ -3588,10 +3590,12 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
   const auto is_release_transaction = [&](const ConSanPatchInfo &patch) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiInlineAtomicOrdering)
       return false;
-    const auto event = std::ranges::find_if(result.sync_events, [&](const ConSanSyncEvent &item) {
-      return item.kind == ConSanSyncEventKind::Atomic && item.text_offset == patch.anchor_offset;
-    });
-    if (event == result.sync_events.end())
+    const auto event = std::ranges::find_if(result.program_inventory.sync().sync_events,
+                                            [&](const ConSanSyncEvent &item) {
+                                              return item.kind == ConSanSyncEventKind::Atomic &&
+                                                     item.text_offset == patch.anchor_offset;
+                                            });
+    if (event == result.program_inventory.sync().sync_events.end())
       return false;
     const ConSanSyncSequence *sequence =
         find_consan_sync_sequence_for_event(result, event->identity);
@@ -4548,7 +4552,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
   if (result.program_inventory.empty()) {
     ProgramInventoryBuilder inventory_builder(original_bytes);
-    result.install_program_inventory(inventory_builder.view());
+    result.program_inventory = inventory_builder.view();
   }
   if (has_rejected_kernel(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;

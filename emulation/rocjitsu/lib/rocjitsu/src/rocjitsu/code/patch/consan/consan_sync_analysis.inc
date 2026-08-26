@@ -2949,8 +2949,9 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
 
 [[nodiscard]] const ConSanSyncEvent *find_sync_event(const ConSanResult &result,
                                                      std::string_view identity) {
-  const auto event = std::ranges::find(result.sync_events, identity, &ConSanSyncEvent::identity);
-  return event == result.sync_events.end() ? nullptr : &*event;
+  const auto event = std::ranges::find(result.program_inventory.sync().sync_events, identity,
+                                       &ConSanSyncEvent::identity);
+  return event == result.program_inventory.sync().sync_events.end() ? nullptr : &*event;
 }
 
 [[nodiscard]] bool sequence_has_exact_members(const ConSanResult &result,
@@ -3049,8 +3050,9 @@ void build_communication_address_recipes(const AmdGpuCodeObject &code_object,
 
 void build_perturbation_candidate_inventory(ConSanResult &result) {
   result.perturbation_candidates.clear();
-  const SyncEventIdentityIndex events = build_sync_event_identity_index(result.sync_events);
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  const SyncEventIdentityIndex events =
+      build_sync_event_identity_index(result.program_inventory.sync().sync_events);
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     const ConSanPerturbationKind kind =
         sequence.kind == ConSanSyncSequenceKind::Barrier  ? ConSanPerturbationKind::Barrier
         : sequence.kind == ConSanSyncSequenceKind::Atomic ? ConSanPerturbationKind::Atomic
@@ -3512,7 +3514,7 @@ void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {
   // search per site makes this annotation quadratic and spends most of its
   // time comparing those names.
   std::unordered_map<EventKey, const ConSanSyncEvent *, EventKeyHash> event_by_site;
-  event_by_site.reserve(result.sync_events.size());
+  event_by_site.reserve(result.program_inventory.sync().sync_events.size());
   struct PhysicalEventKey {
     ConSanSyncEventKind kind;
     uint64_t text_offset;
@@ -3529,8 +3531,8 @@ void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {
   };
   std::unordered_map<PhysicalEventKey, const ConSanSyncEvent *, PhysicalEventKeyHash>
       event_by_physical_site;
-  event_by_physical_site.reserve(result.sync_events.size());
-  for (const ConSanSyncEvent &event : result.sync_events) {
+  event_by_physical_site.reserve(result.program_inventory.sync().sync_events.size());
+  for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
     event_by_site.emplace(
         EventKey{event.kind, event.in_kernel, event.container_name, event.text_offset}, &event);
     const auto [entry, inserted] =
@@ -3540,11 +3542,11 @@ void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {
   }
 
   size_t sequence_member_count = 0;
-  for (const ConSanSyncSequence &sequence : result.sync_sequences)
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences)
     sequence_member_count += sequence.member_event_identities.size();
   std::unordered_map<std::string_view, const ConSanSyncSequence *> sequence_by_event;
   sequence_by_event.reserve(sequence_member_count);
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     for (const std::string &identity : sequence.member_event_identities) {
       const auto [entry, inserted] = sequence_by_event.emplace(identity, &sequence);
       if (!inserted)

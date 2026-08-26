@@ -7,6 +7,7 @@ struct OrdinaryAcquireMutationTarget {
 
 [[nodiscard]] std::optional<OrdinaryAcquireMutationTarget>
 select_ordinary_acquire_mutation_target(const ConSanResult &result, const ConSanOptions &options) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
   const auto same_owners = [](std::span<const ConSanExecutionOwner> lhs,
                               std::span<const ConSanExecutionOwner> rhs) {
     return !lhs.empty() && lhs.size() == rhs.size() &&
@@ -24,9 +25,9 @@ select_ordinary_acquire_mutation_target(const ConSanResult &result, const ConSan
         !owned_by_requested_kernel(site.execution_owners, result, options))
       return std::nullopt;
     const ConSanSyncEvent *load = find_sync_event(result, *site.sync_event_identity);
-    const auto sequence_it = std::ranges::find(result.sync_sequences, *site.sync_sequence_identity,
+    const auto sequence_it = std::ranges::find(sync.sync_sequences, *site.sync_sequence_identity,
                                                &ConSanSyncSequence::identity);
-    if (load == nullptr || sequence_it == result.sync_sequences.end())
+    if (load == nullptr || sequence_it == sync.sync_sequences.end())
       return std::nullopt;
     const ConSanSyncSequence *sequence = &*sequence_it;
     if (load->operation != ConSanSyncOperation::OrdinaryLoad || !load->raw_scope ||
@@ -87,14 +88,14 @@ struct ExactBarrierDropPair {
 [[nodiscard]] std::optional<ExactBarrierDropPair>
 resolve_exact_barrier_drop_pair(const ConSanResult &result, const ConSanOptions &options,
                                 std::string *reason) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
   if (options.fault_site_identity.empty() || options.fault_barrier_sequence_identity.empty()) {
     *reason = "an exact site identity and logical sequence identity are both required";
     return std::nullopt;
   }
-  const auto sequence =
-      std::ranges::find(result.sync_sequences, options.fault_barrier_sequence_identity,
-                        &ConSanSyncSequence::identity);
-  if (sequence == result.sync_sequences.end()) {
+  const auto sequence = std::ranges::find(
+      sync.sync_sequences, options.fault_barrier_sequence_identity, &ConSanSyncSequence::identity);
+  if (sequence == sync.sync_sequences.end()) {
     *reason = "the exact logical sequence identity was not found";
     return std::nullopt;
   }
@@ -235,24 +236,26 @@ resolve_exact_barrier_drop_group(const ConSanResult &result, const ConSanOptions
 
 [[nodiscard]] const ConSanBarrierLifecycleGroup *
 find_lifecycle_group_for_sequence(const ConSanResult &result, const ConSanSyncSequence &sequence) {
-  const auto group = std::ranges::find_if(result.barrier_lifecycle_groups, [&](const auto &item) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const auto group = std::ranges::find_if(sync.barrier_lifecycle_groups, [&](const auto &item) {
     return std::ranges::all_of(sequence.member_event_identities, [&](const std::string &identity) {
       return std::ranges::find(item.member_event_identities, identity) !=
              item.member_event_identities.end();
     });
   });
-  return group == result.barrier_lifecycle_groups.end() ? nullptr : &*group;
+  return group == sync.barrier_lifecycle_groups.end() ? nullptr : &*group;
 }
 
 [[nodiscard]] const ConSanBarrierSite *
 find_static_participant_init(const ConSanResult &result, const ConSanBarrierLifecycleGroup &group) {
-  const auto init_event = std::ranges::find_if(result.sync_events, [&](const auto &event) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const auto init_event = std::ranges::find_if(sync.sync_events, [&](const auto &event) {
     return event.operation == ConSanSyncOperation::BarrierInit &&
            event.container_name == group.container_name && event.in_kernel == group.in_kernel &&
            std::ranges::find(group.member_event_identities, event.identity) !=
                group.member_event_identities.end();
   });
-  if (init_event == result.sync_events.end())
+  if (init_event == sync.sync_events.end())
     return nullptr;
   const auto find_in = [&](const auto &containers) -> const ConSanBarrierSite * {
     for (const auto &container : containers) {
@@ -348,6 +351,7 @@ void mark_participant_mutation_unsupported(ConSanResult &result, std::string_vie
 
 void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch,
                                ConSanResult &result) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
   auto append_primary = [&](ConSanFaultMutationKind kind, const ConSanFaultSite *site) {
     if (site == nullptr) {
       result.warnings.emplace_back("ConSan fault dry run found no site for the requested mutation");
@@ -541,9 +545,9 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
           "ConSan barrier ID/scope dry run requires an exact logical sequence identity");
     } else {
       const auto selected =
-          std::ranges::find(result.sync_sequences, options.fault_barrier_sequence_identity,
+          std::ranges::find(sync.sync_sequences, options.fault_barrier_sequence_identity,
                             &ConSanSyncSequence::identity);
-      if (selected == result.sync_sequences.end()) {
+      if (selected == sync.sync_sequences.end()) {
         result.warnings.emplace_back(
             "ConSan barrier ID/scope dry run found no logical sequence with exact identity '" +
             options.fault_barrier_sequence_identity + "'");
@@ -628,10 +632,10 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   }
   if (options.fault_mutate_barrier_participants) {
     const auto selected =
-        std::ranges::find(result.sync_sequences, options.fault_barrier_sequence_identity,
+        std::ranges::find(sync.sync_sequences, options.fault_barrier_sequence_identity,
                           &ConSanSyncSequence::identity);
     const ConSanBarrierLifecycleGroup *group =
-        selected == result.sync_sequences.end()
+        selected == sync.sync_sequences.end()
             ? nullptr
             : find_lifecycle_group_for_sequence(result, *selected);
     const ConSanBarrierSite *init = group != nullptr && group->admissible
@@ -709,11 +713,11 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
           encoding != AtomicFaultEncoding::CdnaFlat)
         release_wait_text_offset = sequence->release_wait_text_offset;
       for (const std::string &identity : sequence->member_event_identities) {
-        const auto event = std::ranges::find_if(result.sync_events, [&](const auto &candidate) {
+        const auto event = std::ranges::find_if(sync.sync_events, [&](const auto &candidate) {
           return candidate.identity == identity && candidate.kind == ConSanSyncEventKind::Fence;
         });
         const bool edge_matches =
-            event != result.sync_events.end() &&
+            event != sync.sync_events.end() &&
             (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Any ||
              (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Release &&
               is_release_cache_event(&*event)) ||
@@ -1007,16 +1011,15 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
 
 void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
                                             const ConSanOptions &options, ConSanResult &result) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
   if (options.fault_barrier_sequence_identity.empty() || !options.fault_barrier_target_id) {
     result.errors.emplace_back(
         "ConSan barrier ID/scope mutation requires an exact sequence identity and target ID");
     return;
   }
-  const auto selected =
-      std::ranges::find(result.sync_sequences, options.fault_barrier_sequence_identity,
-                        &ConSanSyncSequence::identity);
-  if (selected == result.sync_sequences.end() ||
-      selected->kind != ConSanSyncSequenceKind::Barrier ||
+  const auto selected = std::ranges::find(
+      sync.sync_sequences, options.fault_barrier_sequence_identity, &ConSanSyncSequence::identity);
+  if (selected == sync.sync_sequences.end() || selected->kind != ConSanSyncSequenceKind::Barrier ||
       selected->operation != ConSanSyncOperation::BarrierFull ||
       !consan_sync_confidence_meets(selected->confidence, ConSanSemanticConfidence::Conservative) ||
       selected->member_event_identities.size() != 2u || !selected->barrier_id ||
@@ -1052,8 +1055,8 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
   std::vector<const ConSanSyncEvent *> members;
   members.reserve(member_identities.size());
   for (const std::string &identity : member_identities) {
-    const auto event = std::ranges::find(result.sync_events, identity, &ConSanSyncEvent::identity);
-    if (event == result.sync_events.end()) {
+    const auto event = std::ranges::find(sync.sync_events, identity, &ConSanSyncEvent::identity);
+    if (event == sync.sync_events.end()) {
       result.errors.emplace_back(
           "ConSan barrier ID/scope mutation could not resolve every logical member");
       return;
@@ -1163,13 +1166,12 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
 
 void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_object,
                                                const ConSanOptions &options, ConSanResult &result) {
-  const auto selected =
-      std::ranges::find(result.sync_sequences, options.fault_barrier_sequence_identity,
-                        &ConSanSyncSequence::identity);
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  const auto selected = std::ranges::find(
+      sync.sync_sequences, options.fault_barrier_sequence_identity, &ConSanSyncSequence::identity);
   const ConSanBarrierLifecycleGroup *group =
-      selected == result.sync_sequences.end()
-          ? nullptr
-          : find_lifecycle_group_for_sequence(result, *selected);
+      selected == sync.sync_sequences.end() ? nullptr
+                                            : find_lifecycle_group_for_sequence(result, *selected);
   const ConSanBarrierSite *init = group != nullptr && group->admissible
                                       ? find_static_participant_init(result, *group)
                                       : nullptr;
@@ -1572,6 +1574,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
 
 void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                   const ConSanOptions &options, ConSanResult &result) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
   const ConSanFaultSite *selected = select_fault_site_for_plan(
       result, options, ConSanFaultSiteKind::Atomic, options.fault_atomic_index);
   if (!selected) {
@@ -1667,11 +1670,11 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
       if (options.fault_atomic_order_edge != ConSanAtomicOrderEdge::Acquire)
         release_wait_text_offset = sequence->release_wait_text_offset;
       for (const std::string &identity : sequence->member_event_identities) {
-        const auto event = std::ranges::find_if(result.sync_events, [&](const auto &candidate) {
+        const auto event = std::ranges::find_if(sync.sync_events, [&](const auto &candidate) {
           return candidate.identity == identity && candidate.kind == ConSanSyncEventKind::Fence;
         });
         const bool edge_matches =
-            event != result.sync_events.end() &&
+            event != sync.sync_events.end() &&
             (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Any ||
              (options.fault_atomic_order_edge == ConSanAtomicOrderEdge::Release &&
               is_release_cache_event(&*event)) ||

@@ -387,7 +387,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             const size_t owner_atomic_count =
                 key.first ? kernel->atomic_sites.size() : function->atomic_sites.size();
             owner_sync_ranges.reserve(owner_barrier_count + owner_fence_count + owner_atomic_count +
-                                      result.sync_sequences.size());
+                                      result.program_inventory.sync().sync_sequences.size());
             const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
               if (size != 0u)
                 owner_sync_ranges.emplace_back(begin, begin + size);
@@ -410,7 +410,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             // fence_sites. Preserve the complete qualified sequence: a dense
             // access router that borrows any part of it as a relocatable host
             // otherwise prevents the ordering pass from emitting its record.
-            for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+            for (const ConSanSyncSequence &sequence :
+                 result.program_inventory.sync().sync_sequences) {
               if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
                   sequence.in_kernel != key.first || sequence.container_name != key.second ||
                   !consan_sync_confidence_meets(sequence.confidence,

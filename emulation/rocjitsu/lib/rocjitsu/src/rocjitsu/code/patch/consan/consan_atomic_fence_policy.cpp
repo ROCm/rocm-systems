@@ -533,7 +533,7 @@ plan_consan_atomic_fence_observation(const ProgramInventory &inventory,
   if (!valid_engine(request.engine) || inventory.empty())
     return result;
 
-  const SynchronizationInventoryView synchronization = inventory.synchronization_view();
+  const SynchronizationInventoryView synchronization = inventory.sync();
   const SequenceMembershipIndex memberships =
       build_sequence_membership_index(synchronization.sync_sequences);
   const auto events_by_identity = build_event_index(synchronization.sync_events);

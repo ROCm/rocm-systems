@@ -2058,10 +2058,10 @@ simulated targets.
 **Implementation status:** complete. `ProgramInventory` now owns sync events,
 logical sequences, owner annotations, barrier lifecycles, ordinary
 release/acquire associations, communication-address recipes, and MOI fence
-candidates. `ConSanResult` exposes a `SynchronizationInventoryView` whose spans
-are const; the former independently owned mutable vectors have been deleted.
-Only semantic analysis receives `SynchronizationInventoryBuildView`, making
-every remaining write capability explicit in a producer signature.
+candidates. Its `SynchronizationInventoryView` is an immutable query value;
+`ConSanResult` neither inherits nor stores a second copy of those spans. Only
+semantic analysis receives `SynchronizationInventoryBuildView`, making every
+remaining write capability explicit in a producer signature.
 
 Each decoded event has a content-qualified `SemanticSiteId`. Every sequence
 and lifecycle group preserves its ordered typed member IDs in parallel with a
@@ -2341,6 +2341,36 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   rerun without unrelated contention. In the 593-row physical-gfx950 matrix,
   592 rows passed in the aggregate 501.60-second run; the sole timed-out
   Sampled independent-scalar-proofs row then passed alone in 1.21 seconds.
+
+### Slice 4G: delete the synchronization-inventory result projection
+
+- **Completed deletion:** `ConSanResult` no longer inherits
+  `SynchronizationInventoryView`, copies five borrowed spans, or offers an
+  install-and-rebind method. Inventory producers assign one immutable
+  `ProgramInventory`; consumers request its synchronization view explicitly.
+- **Retained clean boundary:** `SynchronizationInventoryView` remains the
+  grouped, read-only input to barrier and atomic/fence policy. It has no owner
+  state and cannot outlive the `ProgramInventory` storage it describes.
+  `SynchronizationInventoryBuildView` remains the distinct analysis-only
+  mutation capability.
+- **Focused contract:** the inventory unit suite now asserts that
+  `ConSanResult` is not derived from the view while continuing to prove const
+  element types, complete projection, copy/move lifetime, and builder-revision
+  isolation. This guards against reintroducing convenient duplicate result
+  state.
+- **Deletion result and immediate payoff:** production grows by nine formatted
+  lines because consumers now name the real inventory and a few large
+  functions retain a local immutable view. The paired follow-up is Slice 4H:
+  delete the roughly 185-line pre-plan auto-report inventory reconstruction
+  that still rescans these same synchronization facts. No additional adapter
+  is needed for that deletion. More importantly, the code already has one
+  synchronization owner, one mutation capability, and one immutable policy
+  projection; result copying can no longer carry stale spans that require
+  rebinding.
+- **Completed checked-in gate:** all 1,519 selected ConSan host tests, all 86
+  focused HSA-hook tests, all 2,908 simulator device rows, and all 593
+  physical-gfx950 device rows passed. The final simulator and physical matrices
+  took 75.32 and 441.91 seconds of wall time, respectively.
 
 ### Slice 5A: Record/Replay evidence requirements
 

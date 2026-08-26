@@ -287,11 +287,11 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublica
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                                 << " sequences=" << testing::PrintToString(result.sync_sequences)
-                                 << " events=" << testing::PrintToString(result.sync_events)
-                                 << " kernels="
-                                 << testing::PrintToString(result.program_inventory.kernels());
+    ASSERT_TRUE(result.modified)
+        << "warnings=" << testing::PrintToString(result.warnings)
+        << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
+        << " events=" << testing::PrintToString(result.program_inventory.sync().sync_events)
+        << " kernels=" << testing::PrintToString(result.program_inventory.kernels());
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());
@@ -346,11 +346,11 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                                 << " sequences=" << testing::PrintToString(result.sync_sequences)
-                                 << " events=" << testing::PrintToString(result.sync_events)
-                                 << " kernels="
-                                 << testing::PrintToString(result.program_inventory.kernels());
+    ASSERT_TRUE(result.modified)
+        << "warnings=" << testing::PrintToString(result.warnings)
+        << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
+        << " events=" << testing::PrintToString(result.program_inventory.sync().sync_events)
+        << " kernels=" << testing::PrintToString(result.program_inventory.kernels());
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());
@@ -489,10 +489,11 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireReleaseUsesExactVscntBoundary) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.sync_sequences.size(), 1u);
-  EXPECT_EQ(result.sync_sequences.front().memory_role, ConSanSyncMemoryRole::AcquireRelease);
-  ASSERT_TRUE(result.sync_sequences.front().release_wait_text_offset);
-  EXPECT_EQ(*result.sync_sequences.front().release_wait_text_offset, 0u);
+  ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().memory_role,
+            ConSanSyncMemoryRole::AcquireRelease);
+  ASSERT_TRUE(result.program_inventory.sync().sync_sequences.front().release_wait_text_offset);
+  EXPECT_EQ(*result.program_inventory.sync().sync_sequences.front().release_wait_text_offset, 0u);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering,
                               &ConSanPatchInfo::kind),
@@ -640,10 +641,11 @@ TEST(ConSanMoi, Gfx1100AcquireAssociationRequiresExactOrderedCachePair) {
     options.flavor = ConSanFlavor::SuperCollider;
     const ConSanResult result = try_patch_consan(fixture(cache_words, kernel_name), options);
     EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    return std::ranges::count_if(result.sync_sequences, [](const ConSanSyncSequence &sequence) {
-      return sequence.kind == ConSanSyncSequenceKind::Atomic &&
-             sequence.memory_role == ConSanSyncMemoryRole::Acquire;
-    });
+    return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
+                                 [](const ConSanSyncSequence &sequence) {
+                                   return sequence.kind == ConSanSyncSequenceKind::Atomic &&
+                                          sequence.memory_role == ConSanSyncMemoryRole::Acquire;
+                                 });
   };
 
   std::vector<uint32_t> exact;
@@ -3364,16 +3366,19 @@ TEST(ConSanMoi, FenceRecordsDynamicallyPublishExactAtomicAddresses) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
-  ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
-  EXPECT_TRUE(std::ranges::all_of(result.moi_fence_candidates, &ConSanMoiFenceCandidate::eligible));
+  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(result.program_inventory.sync().moi_fence_candidates,
+                                  &ConSanMoiFenceCandidate::eligible));
   std::vector<const ConSanPatchInfo *> fences;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineMoiFenceRecord)
       fences.push_back(&patch);
   }
   ASSERT_EQ(fences.size(), 2u);
-  EXPECT_EQ(fences[0]->anchor_offset, result.moi_fence_candidates[0].text_offset);
-  EXPECT_EQ(fences[1]->anchor_offset, result.moi_fence_candidates[1].text_offset);
+  EXPECT_EQ(fences[0]->anchor_offset,
+            result.program_inventory.sync().moi_fence_candidates[0].text_offset);
+  EXPECT_EQ(fences[1]->anchor_offset,
+            result.program_inventory.sync().moi_fence_candidates[1].text_offset);
   EXPECT_EQ(std::ranges::count(result.resource_plans, ConSanResourceSiteKind::Fence,
                                &ConSanCandidateResourcePlan::site_kind),
             2);
@@ -3473,23 +3478,27 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     const ConSanResult result = try_patch_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
-    ASSERT_TRUE(result.moi_fence_candidates.front().eligible())
-        << consan_fence_association_name(result.moi_fence_candidates.front().association);
+    ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
+    ASSERT_TRUE(result.program_inventory.sync().moi_fence_candidates.front().eligible())
+        << consan_fence_association_name(
+               result.program_inventory.sync().moi_fence_candidates.front().association);
     const auto communication = std::ranges::find(
-        result.sync_events, result.moi_fence_candidates.front().communication_event_identity,
+        result.program_inventory.sync().sync_events,
+        result.program_inventory.sync().moi_fence_candidates.front().communication_event_identity,
         &ConSanSyncEvent::identity);
-    ASSERT_NE(communication, result.sync_events.end());
+    ASSERT_NE(communication, result.program_inventory.sync().sync_events.end());
     ASSERT_FALSE(communication->execution_owners.empty());
     const auto candidate_sequence = std::ranges::find(
-        result.sync_sequences, result.moi_fence_candidates.front().sequence_identity,
+        result.program_inventory.sync().sync_sequences,
+        result.program_inventory.sync().moi_fence_candidates.front().sequence_identity,
         &ConSanSyncSequence::identity);
-    ASSERT_NE(candidate_sequence, result.sync_sequences.end());
+    ASSERT_NE(candidate_sequence, result.program_inventory.sync().sync_sequences.end());
     EXPECT_EQ(candidate_sequence->kind, ConSanSyncSequenceKind::OrdinaryMemory);
     EXPECT_EQ(candidate_sequence->memory_role, ConSanSyncMemoryRole::Acquire);
     EXPECT_EQ(candidate_sequence->begin_text_offset, communication->text_offset);
-    EXPECT_GE(candidate_sequence->end_text_offset, result.moi_fence_candidates.front().text_offset +
-                                                       result.moi_fence_candidates.front().size);
+    EXPECT_GE(candidate_sequence->end_text_offset,
+              result.program_inventory.sync().moi_fence_candidates.front().text_offset +
+                  result.program_inventory.sync().moi_fence_candidates.front().size);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.size(), 1u);
     EXPECT_TRUE(
@@ -3497,25 +3506,28 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
             ConSanOrdinaryMemorySupportReason::Supported ||
         result.program_inventory.kernels().front().ordinary_memory_sites.front().support_reason ==
             ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly);
-    ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                                 << " sequences=" << testing::PrintToString(result.sync_sequences)
-                                 << " fences="
-                                 << testing::PrintToString(result.moi_fence_candidates)
-                                 << " resources=" << testing::PrintToString(result.resource_plans);
+    ASSERT_TRUE(result.modified)
+        << "warnings=" << testing::PrintToString(result.warnings)
+        << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
+        << " fences="
+        << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates)
+        << " resources=" << testing::PrintToString(result.resource_plans);
     ASSERT_TRUE(result.final_validation_passed);
     const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                          &ConSanPatchInfo::kind);
     ASSERT_NE(fence, result.patches.end()) << testing::PrintToString(result.patches);
-    const ConSanMoiFenceCandidate &semantic_fence = result.moi_fence_candidates.front();
+    const ConSanMoiFenceCandidate &semantic_fence =
+        result.program_inventory.sync().moi_fence_candidates.front();
     ASSERT_TRUE(semantic_fence.eligible());
     EXPECT_EQ(fence->anchor_offset, 0u);
     EXPECT_GT(semantic_fence.text_offset, fence->anchor_offset);
 
-    const auto sequence = std::ranges::find_if(result.sync_sequences, [](const auto &candidate) {
-      return candidate.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
-             candidate.memory_role == ConSanSyncMemoryRole::Acquire;
-    });
-    ASSERT_NE(sequence, result.sync_sequences.end());
+    const auto sequence = std::ranges::find_if(
+        result.program_inventory.sync().sync_sequences, [](const auto &candidate) {
+          return candidate.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+                 candidate.memory_role == ConSanSyncMemoryRole::Acquire;
+        });
+    ASSERT_NE(sequence, result.program_inventory.sync().sync_sequences.end());
     EXPECT_EQ(fence->original_size, sequence->end_text_offset - sequence->begin_text_offset);
     const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &candidate) {
       return candidate.site_kind == ConSanResourceSiteKind::Fence;
@@ -3529,11 +3541,11 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     const uint16_t materialized_address =
         static_cast<uint16_t>(*plan->scratch_vgpr + plan->scratch_vgpr_count - 2u);
 
-    const auto recipe =
-        std::ranges::find_if(result.communication_address_recipes, [](const auto &candidate) {
+    const auto recipe = std::ranges::find_if(
+        result.program_inventory.sync().communication_address_recipes, [](const auto &candidate) {
           return candidate.kind == ConSanCommunicationAddressKind::Ordinary;
         });
-    ASSERT_NE(recipe, result.communication_address_recipes.end());
+    ASSERT_NE(recipe, result.program_inventory.sync().communication_address_recipes.end());
     EXPECT_EQ(recipe->support, ConSanCommunicationAddressSupport::AddressNotLiveAfterSequence);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
@@ -4437,8 +4449,9 @@ TEST(ConSanMoi, InlineAtomicReturningCasClaimsBeforeGuestAndRollsBackFailedLanes
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.sync_sequences.size(), 1u);
-  EXPECT_EQ(result.sync_sequences.front().operation, ConSanSyncOperation::AtomicCompareExchange);
+  ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().operation,
+            ConSanSyncOperation::AtomicCompareExchange);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiInlineAtomicOrdering;
   });
@@ -4530,9 +4543,11 @@ TEST(ConSanMoi, InlineVglobalReturningCasImportsOnlyInsideClaimedSuccessfulTrans
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    ASSERT_EQ(result.sync_sequences.size(), 1u);
-    EXPECT_EQ(result.sync_sequences.front().operation, ConSanSyncOperation::AtomicCompareExchange);
-    EXPECT_EQ(result.sync_sequences.front().memory_role, ConSanSyncMemoryRole::AcquireRelease);
+    ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
+    EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().operation,
+              ConSanSyncOperation::AtomicCompareExchange);
+    EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().memory_role,
+              ConSanSyncMemoryRole::AcquireRelease);
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
     const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();

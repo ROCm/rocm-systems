@@ -311,12 +311,12 @@ using OrderedOrdinarySyncSiteKey = std::tuple<bool, std::string, uint64_t>;
 [[nodiscard]] std::set<OrderedOrdinarySyncSiteKey>
 ordered_ordinary_sync_site_keys(const ConSanResult &result) {
   std::unordered_map<std::string_view, const ConSanSyncEvent *> events;
-  events.reserve(result.sync_events.size());
-  for (const ConSanSyncEvent &event : result.sync_events)
+  events.reserve(result.program_inventory.sync().sync_events.size());
+  for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events)
     events.emplace(event.identity, &event);
 
   std::set<OrderedOrdinarySyncSiteKey> keys;
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
         (sequence.memory_role != ConSanSyncMemoryRole::Acquire &&
          sequence.memory_role != ConSanSyncMemoryRole::Release) ||

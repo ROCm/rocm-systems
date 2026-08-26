@@ -677,9 +677,10 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
     options.fault_dry_run = true;
     return options;
   }());
-  const auto sequence = std::ranges::find(
-      selection.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
-  ASSERT_NE(sequence, selection.sync_sequences.end());
+  const auto sequence =
+      std::ranges::find(selection.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, selection.program_inventory.sync().sync_sequences.end());
   const auto primary = std::ranges::find_if(selection.fault_sites, [&](const auto &site) {
     return site.sync_sequence_identity == sequence->identity && site.mnemonic == "s_barrier_signal";
   });
@@ -692,8 +693,8 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
   inventory_options.fault_drop_barrier = false;
   inventory_options.qualify_extended_barrier_pairs = true;
   ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(std::ranges::count(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                               &ConSanSyncSequence::operation),
+  ASSERT_EQ(std::ranges::count(inventory.program_inventory.sync().sync_sequences,
+                               ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
             1u);
   const ConSanResult fresh = try_patch_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
@@ -721,9 +722,10 @@ TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
   selection_options.fault_drop_barrier = true;
   selection_options.fault_dry_run = true;
   const ConSanResult selection = try_patch_consan(bytes, selection_options);
-  const auto sequence = std::ranges::find(
-      selection.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
-  ASSERT_NE(sequence, selection.sync_sequences.end());
+  const auto sequence =
+      std::ranges::find(selection.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, selection.program_inventory.sync().sync_sequences.end());
   const auto primary = std::ranges::find_if(selection.fault_sites, [&](const auto &site) {
     return site.sync_sequence_identity == sequence->identity && site.mnemonic == "s_barrier_signal";
   });
@@ -744,8 +746,8 @@ TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
   inventory_options.fault_drop_barrier = false;
   inventory_options.fault_require_exactly_one = false;
   ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(std::ranges::count(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                               &ConSanSyncSequence::operation),
+  ASSERT_EQ(std::ranges::count(inventory.program_inventory.sync().sync_sequences,
+                               ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
             0u);
 
   const ConSanResult fresh = try_patch_consan(bytes, live);
@@ -936,9 +938,10 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  const auto sequence = std::ranges::find(
-      inventory.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
-  ASSERT_NE(sequence, inventory.sync_sequences.end());
+  const auto sequence =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, inventory.program_inventory.sync().sync_sequences.end());
   const auto primary =
       std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
         return site.sync_sequence_identity == sequence->identity &&
@@ -1033,9 +1036,10 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  const auto sequence = std::ranges::find(
-      inventory.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
-  ASSERT_NE(sequence, inventory.sync_sequences.end());
+  const auto sequence =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, inventory.program_inventory.sync().sync_sequences.end());
   const auto primary =
       std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
         return site.sync_sequence_identity == sequence->identity &&
@@ -1118,7 +1122,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
-  ASSERT_EQ(inventory.sync_sequences.size(), 2u);
+  ASSERT_EQ(inventory.program_inventory.sync().sync_sequences.size(), 2u);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             4u);
@@ -1136,7 +1140,8 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   options.fault_drop_barrier = true;
   options.fault_require_exactly_one = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
-  options.fault_barrier_sequence_identity = inventory.sync_sequences.front().identity;
+  options.fault_barrier_sequence_identity =
+      inventory.program_inventory.sync().sync_sequences.front().identity;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 

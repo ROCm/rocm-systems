@@ -61,9 +61,10 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
     ASSERT_TRUE(first_sites[i]->sync_event_identity);
     ASSERT_TRUE(second_sites[i]->sync_event_identity);
     EXPECT_EQ(first_sites[i]->sync_event_identity, second_sites[i]->sync_event_identity);
-    const auto event = std::ranges::find(first.sync_events, *first_sites[i]->sync_event_identity,
-                                         &ConSanSyncEvent::identity);
-    ASSERT_NE(event, first.sync_events.end());
+    const auto event =
+        std::ranges::find(first.program_inventory.sync().sync_events,
+                          *first_sites[i]->sync_event_identity, &ConSanSyncEvent::identity);
+    ASSERT_NE(event, first.program_inventory.sync().sync_events.end());
     EXPECT_EQ(event->kind, ConSanSyncEventKind::OrdinaryMemory);
     EXPECT_EQ(event->operation, i % 2u == 0u ? ConSanSyncOperation::OrdinaryLoad
                                              : ConSanSyncOperation::OrdinaryStore);
@@ -321,10 +322,11 @@ TEST(ConSan, AssociatesGeneratedGfx1250BufferPollLoopShape) {
   ASSERT_NE(sequence, nullptr);
   EXPECT_EQ(sequence->memory_role, ConSanSyncMemoryRole::Acquire);
   EXPECT_EQ(sequence->member_event_identities.size(), 2u);
-  ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
-  EXPECT_TRUE(result.moi_fence_candidates.front().eligible());
-  EXPECT_EQ(result.moi_fence_candidates.front().communication_address_source,
-            ConSanSyncAddressSource::BufferResource);
+  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
+  EXPECT_TRUE(result.program_inventory.sync().moi_fence_candidates.front().eligible());
+  EXPECT_EQ(
+      result.program_inventory.sync().moi_fence_candidates.front().communication_address_source,
+      ConSanSyncAddressSource::BufferResource);
 }
 
 TEST(ConSan, OrdinaryAcquireAssociationFailsClosedOnInexactShapes) {
@@ -335,10 +337,11 @@ TEST(ConSan, OrdinaryAcquireAssociationFailsClosedOnInexactShapes) {
     options.fault_dry_run = true;
     const ConSanResult result =
         try_patch_consan(make_rdna4_lds_code_object(words, "inexact_acquire"), options);
-    return std::ranges::count_if(result.sync_sequences, [](const ConSanSyncSequence &sequence) {
-      return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
-             sequence.memory_role == ConSanSyncMemoryRole::Acquire;
-    });
+    return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
+                                 [](const ConSanSyncSequence &sequence) {
+                                   return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+                                          sequence.memory_role == ConSanSyncMemoryRole::Acquire;
+                                 });
   };
   constexpr std::array<uint32_t, 3> load = {0xEE050004u, 7u | (2u << 18u), 10u};
   constexpr std::array<uint32_t, 3> unordered_load = {0xEE050004u, 7u, 10u};
@@ -467,10 +470,11 @@ TEST(ConSan, OrdinaryReleaseAssociationFailsClosedOnInexactShapes) {
     options.fault_dry_run = true;
     const ConSanResult result =
         try_patch_consan(make_rdna4_lds_code_object(words, "inexact_release"), options);
-    return std::ranges::count_if(result.sync_sequences, [](const ConSanSyncSequence &sequence) {
-      return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
-             sequence.memory_role == ConSanSyncMemoryRole::Release;
-    });
+    return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
+                                 [](const ConSanSyncSequence &sequence) {
+                                   return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+                                          sequence.memory_role == ConSanSyncMemoryRole::Release;
+                                 });
   };
   constexpr std::array<uint32_t, 3> writeback = {0xEE0B0000u, 0u, 0u};
   constexpr std::array<uint32_t, 3> store = {0xEE068004u, 2u << 18u | 7u << 23u, 10u};
@@ -543,11 +547,12 @@ TEST(ConSan, AssociatesExactScopedOrdinaryReleaseWaitTail) {
   EXPECT_EQ(sequence->release_wait_text_offset, 0u);
   EXPECT_NE(sequence->identity.find("|release-waits="), std::string::npos);
 
-  const auto recipe = std::ranges::find_if(
-      result.communication_address_recipes, [&](const ConSanCommunicationAddressRecipe &candidate) {
-        return candidate.sequence_identity == sequence->identity;
-      });
-  ASSERT_NE(recipe, result.communication_address_recipes.end());
+  const auto recipe =
+      std::ranges::find_if(result.program_inventory.sync().communication_address_recipes,
+                           [&](const ConSanCommunicationAddressRecipe &candidate) {
+                             return candidate.sequence_identity == sequence->identity;
+                           });
+  ASSERT_NE(recipe, result.program_inventory.sync().communication_address_recipes.end());
   EXPECT_EQ(recipe->kind, ConSanCommunicationAddressKind::Ordinary);
   EXPECT_EQ(recipe->support, ConSanCommunicationAddressSupport::AddressNotLiveAfterSequence);
 }
@@ -570,9 +575,9 @@ TEST(ConSan, CommunicationAddressRecipeProvesOrdinaryReleasePostSequenceResource
       try_patch_consan(make_rdna4_lds_code_object(text_words, "ordinary_address_recipe"), options);
 
   const auto recipe = std::ranges::find_if(
-      result.communication_address_recipes,
+      result.program_inventory.sync().communication_address_recipes,
       [](const ConSanCommunicationAddressRecipe &candidate) { return candidate.supported(); });
-  ASSERT_NE(recipe, result.communication_address_recipes.end());
+  ASSERT_NE(recipe, result.program_inventory.sync().communication_address_recipes.end());
   EXPECT_EQ(recipe->kind, ConSanCommunicationAddressKind::Ordinary);
   EXPECT_EQ(recipe->address_source, ConSanSyncAddressSource::GlobalScalarVector);
   EXPECT_EQ(recipe->post_sequence_text_offset, 5u * sizeof(uint32_t));
@@ -607,11 +612,12 @@ TEST(ConSan, CommunicationAddressRecipeRejectsPartiallyLiveScalarAddressPair) {
   const ConSanResult result = try_patch_consan(
       make_rdna4_lds_code_object(text_words, "partial_scalar_address_recipe"), options);
 
-  const auto recipe = std::ranges::find_if(
-      result.communication_address_recipes, [](const ConSanCommunicationAddressRecipe &candidate) {
-        return candidate.kind == ConSanCommunicationAddressKind::Ordinary;
-      });
-  ASSERT_NE(recipe, result.communication_address_recipes.end());
+  const auto recipe =
+      std::ranges::find_if(result.program_inventory.sync().communication_address_recipes,
+                           [](const ConSanCommunicationAddressRecipe &candidate) {
+                             return candidate.kind == ConSanCommunicationAddressKind::Ordinary;
+                           });
+  ASSERT_NE(recipe, result.program_inventory.sync().communication_address_recipes.end());
   EXPECT_EQ(recipe->post_sequence_text_offset, 5u * sizeof(uint32_t));
   EXPECT_EQ(recipe->address_vgpr, 10u);
   ASSERT_TRUE(recipe->address_sgpr);
@@ -630,10 +636,11 @@ TEST(ConSan, ScopedOrdinaryReleaseWaitTailFailsClosedOnInexactShapes) {
     options.fault_dry_run = true;
     const ConSanResult result =
         try_patch_consan(make_rdna4_lds_code_object(words, "scoped_release_reject"), options);
-    return std::ranges::count_if(result.sync_sequences, [](const ConSanSyncSequence &sequence) {
-      return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
-             sequence.memory_role == ConSanSyncMemoryRole::Release;
-    });
+    return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
+                                 [](const ConSanSyncSequence &sequence) {
+                                   return sequence.kind == ConSanSyncSequenceKind::OrdinaryMemory &&
+                                          sequence.memory_role == ConSanSyncMemoryRole::Release;
+                                 });
   };
   constexpr std::array<uint32_t, 3> device_store = {0xEE068004u, 2u << 18u | 7u << 23u, 10u};
   constexpr std::array<uint32_t, 3> wave_store = {0xEE068004u, 7u << 23u, 10u};
@@ -928,14 +935,14 @@ TEST(ConSan, LargeSyncInventoryAnnotatesEverySequenceOwner) {
       try_patch_consan(make_rdna4_lds_code_object(text_words, "large_sync_inventory"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.sync_events.size(), kLoadCount);
-  ASSERT_EQ(result.sync_sequences.size(), kLoadCount);
+  ASSERT_EQ(result.program_inventory.sync().sync_events.size(), kLoadCount);
+  ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), kLoadCount);
   ASSERT_EQ(result.fault_sites.size(), kLoadCount);
   for (const ConSanFaultSite &site : result.fault_sites) {
     EXPECT_TRUE(site.sync_event_identity.has_value());
     EXPECT_TRUE(site.sync_sequence_identity.has_value());
   }
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     ASSERT_EQ(sequence.member_event_identities.size(), 1u);
     ASSERT_EQ(sequence.execution_owners.size(), 1u);
     EXPECT_EQ(sequence.execution_owners.front().proof, ConSanOwnerProofKind::KernelLocal);

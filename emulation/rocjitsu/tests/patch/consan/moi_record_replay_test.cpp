@@ -211,8 +211,8 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().container_name, "shared_owner_0");
   EXPECT_FALSE(result.moi_candidates.front().kernel_descriptor_file_offset);
-  ASSERT_EQ(result.sync_events.size(), 1u);
-  EXPECT_EQ(result.sync_events.front().kind, ConSanSyncEventKind::Barrier);
+  ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncEventKind::Barrier);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   ASSERT_EQ(std::ranges::count(result.observation_plan.site_decisions,
                                ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
@@ -605,7 +605,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
       wrong_target.program_inventory.kernel_metadata_trustworthy(),
       wrong_target.program_inventory.malformed_kernel_metadata_note_count(),
       wrong_target.program_inventory.arch(), ROCJITSU_CODE_TARGET_GFX1250);
-  wrong_target.install_program_inventory(wrong_target_inventory.view());
+  wrong_target.program_inventory = wrong_target_inventory.view();
   expect_invalid(std::move(wrong_target), bytes, "code-object target");
 
   ConSanResult wrong_arch = pristine;
@@ -614,7 +614,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
       wrong_arch.program_inventory.kernel_metadata_trustworthy(),
       wrong_arch.program_inventory.malformed_kernel_metadata_note_count(), ROCJITSU_CODE_ARCH_CDNA5,
       wrong_arch.program_inventory.target());
-  wrong_arch.install_program_inventory(wrong_arch_inventory.view());
+  wrong_arch.program_inventory = wrong_arch_inventory.view();
   expect_invalid(std::move(wrong_arch), bytes, "code-object architecture");
 
   ConSanResult modified = pristine;
@@ -4743,7 +4743,7 @@ TEST(ConSanMoi, AutoReportInventoryReservesLaneScaledRecordReplayFenceHeadroom) 
   const ConSanMoiAutoReportInventory inventory =
       inventory_consan_moi_auto_report(result, options, bytes);
 
-  ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
+  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
   EXPECT_EQ(inventory.fence_event_count, 2u * kConSanMoiRecordReplayDynamicLaneEventHeadroom);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
@@ -9686,7 +9686,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierDoesNotBorrowAcrossFollowingFence) {
   ASSERT_NE(barrier_patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(barrier_patch->original_size, sizeof(uint32_t));
   EXPECT_FALSE(barrier_patch->branch_only_borrowed_indirect_entry);
-  EXPECT_FALSE(result.moi_fence_candidates.empty());
+  EXPECT_FALSE(result.program_inventory.sync().moi_fence_candidates.empty());
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -10548,9 +10548,9 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
             *result.resolved_moi_exec_save_sgpr);
   EXPECT_TRUE(std::ranges::none_of(result.resolved_moi_transient_sgpr_assignments,
                                    &ConSanMoiTransientSgprAssignment::spill_backed));
-  ASSERT_EQ(result.moi_fence_candidates.size(), 2u);
+  ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(
-      result.moi_fence_candidates,
+      result.program_inventory.sync().moi_fence_candidates,
       [](const ConSanMoiFenceCandidate &candidate) { return candidate.eligible(); }));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
@@ -11617,11 +11617,15 @@ TEST(ConSanMoi, Gfx1250DenseAccessRouterPreservesOrdinaryAcquireSequence) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.sync_sequences.size(), 1u);
-  EXPECT_EQ(result.sync_sequences.front().kind, ConSanSyncSequenceKind::OrdinaryMemory);
-  EXPECT_EQ(result.sync_sequences.front().memory_role, ConSanSyncMemoryRole::Acquire);
-  EXPECT_EQ(result.sync_sequences.front().begin_text_offset, kAcquireOffset);
-  EXPECT_EQ(result.sync_sequences.front().end_text_offset, kAcquireOffset + 4u * sizeof(uint32_t));
+  ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().kind,
+            ConSanSyncSequenceKind::OrdinaryMemory);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().memory_role,
+            ConSanSyncMemoryRole::Acquire);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().begin_text_offset,
+            kAcquireOffset);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().end_text_offset,
+            kAcquireOffset + 4u * sizeof(uint32_t));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -11634,7 +11638,8 @@ TEST(ConSanMoi, Gfx1250DenseAccessRouterPreservesOrdinaryAcquireSequence) {
         patch.original_size == 0u)
       return false;
     const uint64_t patch_end = patch.anchor_offset + patch.original_size;
-    return patch.anchor_offset < result.sync_sequences.front().end_text_offset &&
+    return patch.anchor_offset <
+               result.program_inventory.sync().sync_sequences.front().end_text_offset &&
            kAcquireOffset < patch_end;
   })) << testing::PrintToString(result.patches);
   const ConSanAtomicSiteDecision *acquire_decision =
@@ -11964,7 +11969,7 @@ TEST(ConSanMoi, AtomicRecordUsesLocalIndirectIslandForFarAppendedHelper) {
       << "errors=" << testing::PrintToString(result.errors)
       << " warnings=" << testing::PrintToString(result.warnings)
       << " patches=" << testing::PrintToString(result.patches)
-      << " fences=" << testing::PrintToString(result.moi_fence_candidates);
+      << " fences=" << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   const auto island = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland, &ConSanPatchInfo::kind);
@@ -12170,18 +12175,19 @@ TEST(ConSanMoi, FenceRecordPatchCardinalityIsBoundedAndPrefixComplete) {
       << "errors=" << testing::PrintToString(result.errors)
       << " warnings=" << testing::PrintToString(result.warnings)
       << " patches=" << testing::PrintToString(result.patches)
-      << " fences=" << testing::PrintToString(result.moi_fence_candidates);
+      << " fences=" << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates);
   const auto fence = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(fence, result.patches.end())
       << "warnings=" << testing::PrintToString(result.warnings)
       << " patches=" << testing::PrintToString(result.patches)
-      << " fences=" << testing::PrintToString(result.moi_fence_candidates)
+      << " fences=" << testing::PrintToString(result.program_inventory.sync().moi_fence_candidates)
       << " plans=" << testing::PrintToString(result.resource_plans);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1);
-  EXPECT_EQ(fence->anchor_offset, result.moi_fence_candidates.front().text_offset);
+  EXPECT_EQ(fence->anchor_offset,
+            result.program_inventory.sync().moi_fence_candidates.front().text_offset);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
@@ -12211,7 +12217,7 @@ TEST(ConSanMoi, FenceRecordAcceptsSupportedRdna4OrdinaryAcquireAddress) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.size(), 1u);
-  EXPECT_EQ(result.moi_fence_candidates.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
   EXPECT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.front().support_reason,
             ConSanOrdinaryMemorySupportReason::Supported);
   ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 1u);
@@ -12272,14 +12278,14 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   inventory_options.flavor = ConSanFlavor::Moi;
   ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty());
-  ASSERT_EQ(inventory.moi_fence_candidates.size(), 2u);
+  ASSERT_EQ(inventory.program_inventory.sync().moi_fence_candidates.size(), 2u);
   ProgramInventoryBuilder stale_inventory(inventory.program_inventory);
   for (ConSanMoiFenceCandidate &candidate :
        stale_inventory.synchronization().moi_fence_candidates) {
     ASSERT_TRUE(candidate.eligible());
     candidate.communication_event_identity += "|stale";
   }
-  inventory.install_program_inventory(stale_inventory.view());
+  inventory.program_inventory = stale_inventory.view();
 
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
@@ -12319,7 +12325,7 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   inventory_options.flavor = ConSanFlavor::Moi;
   ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty());
-  ASSERT_EQ(inventory.moi_fence_candidates.size(), 2u);
+  ASSERT_EQ(inventory.program_inventory.sync().moi_fence_candidates.size(), 2u);
   ProgramInventoryBuilder unowned_inventory(inventory.program_inventory);
   for (const ConSanMoiFenceCandidate &candidate :
        unowned_inventory.synchronization().moi_fence_candidates) {
@@ -12330,7 +12336,7 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
     ASSERT_NE(event, sync_events.end());
     event->execution_owners.clear();
   }
-  inventory.install_program_inventory(unowned_inventory.view());
+  inventory.program_inventory = unowned_inventory.view();
 
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;

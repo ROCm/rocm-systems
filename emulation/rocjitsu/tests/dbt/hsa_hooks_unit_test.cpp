@@ -93,7 +93,7 @@ void install_consan_test_program_inventory(rocjitsu::ConSanResult &result, Confi
           : rocjitsu::ProgramInventoryBuilder(std::span<const uint8_t>{});
   configure(builder);
   builder.rebuild_access_inventory({});
-  result.install_program_inventory(builder.view());
+  result.program_inventory = builder.view();
 }
 
 void install_consan_test_program_identity(rocjitsu::ConSanResult &result, rj_code_arch_t arch,

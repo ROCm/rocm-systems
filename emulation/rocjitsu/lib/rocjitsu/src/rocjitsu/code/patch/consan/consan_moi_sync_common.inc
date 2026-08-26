@@ -272,7 +272,8 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
 void append_fence_record_candidates(const ConSanResult &result,
                                     const MoiSyncInventoryIndex &sync_index,
                                     std::vector<FenceRecordCandidate> &candidates) {
-  for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  for (const ConSanMoiFenceCandidate &fence : sync.moi_fence_candidates) {
     if (!fence.eligible())
       continue;
     const ConSanSyncEvent *event = sync_index.event(fence.communication_event_identity);
@@ -282,11 +283,11 @@ void append_fence_record_candidates(const ConSanResult &result,
         event->container_name != fence.container_name || event->in_kernel != fence.in_kernel ||
         event->execution_owners.empty())
       continue;
-    const auto sequence_it = std::ranges::find(result.sync_sequences, fence.sequence_identity,
+    const auto sequence_it = std::ranges::find(sync.sync_sequences, fence.sequence_identity,
                                                &ConSanSyncSequence::identity);
     const ConSanSyncSequence *sequence =
-        sequence_it != result.sync_sequences.end() &&
-                std::ranges::count(result.sync_sequences, fence.sequence_identity,
+        sequence_it != sync.sync_sequences.end() &&
+                std::ranges::count(sync.sync_sequences, fence.sequence_identity,
                                    &ConSanSyncSequence::identity) == 1
             ? &*sequence_it
             : nullptr;
@@ -378,7 +379,8 @@ void append_fence_record_candidates(const ConSanResult &result,
 void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
                                                const MoiSyncInventoryIndex &sync_index,
                                                std::vector<AtomicRecordCandidate> &candidates) {
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  for (const ConSanSyncSequence &sequence : sync.sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
         !consan_sync_confidence_meets(sequence.confidence,
                                       ConSanSemanticConfidence::Conservative) ||
@@ -474,15 +476,14 @@ void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
 ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanResult &result,
                                                        const MoiSyncInventoryIndex &sync_index,
                                                        const AtomicRecordCandidate &candidate) {
-  return std::ranges::any_of(
-      result.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
-        if (!fence.eligible())
-          return false;
-        const ConSanSyncEvent *communication = sync_index.event(fence.communication_event_identity);
-        return communication != nullptr &&
-               communication->kind == ConSanSyncEventKind::OrdinaryMemory &&
-               communication->file_offset == candidate.site.file_offset;
-      });
+  const SynchronizationInventoryView sync = result.program_inventory.sync();
+  return std::ranges::any_of(sync.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
+    if (!fence.eligible())
+      return false;
+    const ConSanSyncEvent *communication = sync_index.event(fence.communication_event_identity);
+    return communication != nullptr && communication->kind == ConSanSyncEventKind::OrdinaryMemory &&
+           communication->file_offset == candidate.site.file_offset;
+  });
 }
 
 [[nodiscard]] uint16_t inline_atomic_scratch_count(const ConSanAtomicSite &site,

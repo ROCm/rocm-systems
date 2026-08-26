@@ -816,7 +816,7 @@ TEST(ConSanAtomicFencePolicy, ConflictingPhysicalAliasesProduceTypedFatalError) 
 
 TEST(ConSanAtomicFencePolicy, PolicyIsDeterministicAndDoesNotMutatePublishedInventory) {
   const ProgramInventory inventory = ordinary_fence_inventory();
-  const SynchronizationInventoryView before = inventory.synchronization_view();
+  const SynchronizationInventoryView before = inventory.sync();
   std::vector<std::string> event_identities_before;
   for (const ConSanSyncEvent &event : before.sync_events)
     event_identities_before.push_back(event.identity);
@@ -831,7 +831,7 @@ TEST(ConSanAtomicFencePolicy, PolicyIsDeterministicAndDoesNotMutatePublishedInve
       plan_consan_atomic_fence_observation(inventory, request);
   EXPECT_EQ(first, second);
   EXPECT_TRUE(first.valid());
-  const SynchronizationInventoryView after = inventory.synchronization_view();
+  const SynchronizationInventoryView after = inventory.sync();
   std::vector<std::string> event_identities_after;
   for (const ConSanSyncEvent &event : after.sync_events)
     event_identities_after.push_back(event.identity);

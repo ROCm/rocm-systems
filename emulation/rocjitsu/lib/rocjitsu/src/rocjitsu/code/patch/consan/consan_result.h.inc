@@ -352,7 +352,7 @@ struct ConSanFlatSelectionTelemetry {
   size_t selected_anchor_relay_slot_count = 0;
 };
 
-struct ConSanResult : SynchronizationInventoryView {
+struct ConSanResult {
   bool visited_code_object = false;
   /// True after the input has been parsed as a structurally valid AMDGPU code
   /// object. This remains true when its machine target is not enumerated.
@@ -471,15 +471,6 @@ struct ConSanResult : SynchronizationInventoryView {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
   std::vector<std::string> warnings;
-
-  /// Install one immutable program inventory and bind the temporary inherited
-  /// synchronization view to its owned storage. Copies and moves remain valid
-  /// because the inventory shares const heap storage rather than borrowing
-  /// this object.
-  void install_program_inventory(ProgramInventory inventory) {
-    program_inventory = std::move(inventory);
-    static_cast<SynchronizationInventoryView &>(*this) = program_inventory.synchronization_view();
-  }
 };
 
 /// Whether every architecture-dependent result stage has a typed architecture.

@@ -478,7 +478,7 @@ TEST(ConSanEvidenceRequirements,
   const InlineEvidenceFixture fixture =
       make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);
   ConSanResult inline_result;
-  inline_result.install_program_inventory(fixture.inventory);
+  inline_result.program_inventory = fixture.inventory;
   inline_result.observation_plan = fixture.plan;
   inline_result.resource_plans.resize(29);
   inline_result.patches.resize(31);

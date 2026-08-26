@@ -458,7 +458,8 @@ public:
     return storage_ ? std::span<const ConSanAccessInventorySite>(storage_->access_sites)
                     : std::span<const ConSanAccessInventorySite>{};
   }
-  [[nodiscard]] SynchronizationInventoryView synchronization_view() const {
+  /// Return the complete immutable synchronization projection as one value.
+  [[nodiscard]] SynchronizationInventoryView sync() const {
     if (!storage_)
       return {};
     return {

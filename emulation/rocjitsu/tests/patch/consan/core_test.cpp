@@ -392,14 +392,14 @@ TEST(ConSan, SynchronizationConsumerContractRequiresUniqueAcceptableSequence) {
   sequence.identity = "sequence-a";
   sequence.member_event_identities = {"event-a", "event-b"};
   inventory.synchronization().sync_sequences.push_back(sequence);
-  result.install_program_inventory(inventory.view());
+  result.program_inventory = inventory.view();
   ASSERT_NE(find_consan_sync_sequence_for_event(result, "event-b"), nullptr);
   EXPECT_EQ(find_consan_sync_sequence_for_event(result, "missing"), nullptr);
 
   sequence.identity = "sequence-b";
   sequence.member_event_identities = {"event-b"};
   inventory.synchronization().sync_sequences.push_back(sequence);
-  result.install_program_inventory(inventory.view());
+  result.program_inventory = inventory.view();
   EXPECT_EQ(find_consan_sync_sequence_for_event(result, "event-b"), nullptr);
 }
 
@@ -469,18 +469,18 @@ TEST(ConSan, SemanticArchitectureGateTracksAnalysisStageRatherThanResultMembers)
   inventory.text_sections().push_back({});
   inventory.kernels().push_back({});
   inventory.functions().push_back({});
-  parse_only.install_program_inventory(inventory.view());
+  parse_only.program_inventory = inventory.view();
   EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
 
   ProgramInventoryBuilder required_inventory(parse_only.program_inventory);
   required_inventory.set_semantic_arch_required(true);
-  parse_only.install_program_inventory(required_inventory.view());
+  parse_only.program_inventory = required_inventory.view();
   EXPECT_FALSE(consan_result_has_resolved_semantic_arch(parse_only));
 
   ProgramInventoryBuilder resolved_inventory(parse_only.program_inventory);
   resolved_inventory.set_code_object_facts(false, 0u, ROCJITSU_CODE_ARCH_RDNA4,
                                            ROCJITSU_CODE_TARGET_GFX1201);
-  parse_only.install_program_inventory(resolved_inventory.view());
+  parse_only.program_inventory = resolved_inventory.view();
   EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
 }
 

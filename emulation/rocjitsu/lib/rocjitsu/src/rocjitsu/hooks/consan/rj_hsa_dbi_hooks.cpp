@@ -4842,10 +4842,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
               : "not-applicable",
           static_cast<unsigned long long>(proof.atomic_mutation_anchor_text_offset.value_or(0)));
     }
+    const rocjitsu::SynchronizationInventoryView sync = patch_result.program_inventory.sync();
     log_message(kLogInfo, "ConSan sync inventory reader=%llu events=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),
-                patch_result.sync_events.size());
-    for (const rocjitsu::ConSanSyncEvent &event : patch_result.sync_events) {
+                sync.sync_events.size());
+    for (const rocjitsu::ConSanSyncEvent &event : sync.sync_events) {
       const OwnerLogFields owners =
           owner_log_fields(event.execution_owners, patch_result.program_inventory.kernels());
       std::string reason = event.confidence_reason;
@@ -4897,8 +4898,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     log_message(kLogInfo, "ConSan sync sequence inventory reader=%llu sequences=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),
-                patch_result.sync_sequences.size());
-    for (const rocjitsu::ConSanSyncSequence &sequence : patch_result.sync_sequences) {
+                sync.sync_sequences.size());
+    for (const rocjitsu::ConSanSyncSequence &sequence : sync.sync_sequences) {
       const OwnerLogFields owners =
           owner_log_fields(sequence.execution_owners, patch_result.program_inventory.kernels());
       std::string reason = sequence.confidence_reason;
@@ -4971,9 +4972,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     log_message(kLogInfo, "ConSan barrier lifecycle inventory reader=%llu groups=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),
-                patch_result.barrier_lifecycle_groups.size());
-    for (const rocjitsu::ConSanBarrierLifecycleGroup &group :
-         patch_result.barrier_lifecycle_groups) {
+                sync.barrier_lifecycle_groups.size());
+    for (const rocjitsu::ConSanBarrierLifecycleGroup &group : sync.barrier_lifecycle_groups) {
       std::string members;
       for (const std::string &identity : group.member_event_identities) {
         if (!members.empty())

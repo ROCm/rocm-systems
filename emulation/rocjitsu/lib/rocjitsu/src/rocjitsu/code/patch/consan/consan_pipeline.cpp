@@ -118,7 +118,7 @@ void add_contract_issue(TransformResult &result, ConSanPipelineStage stage,
   ConSanResult result;
   result.visited_code_object = false;
   ProgramInventoryBuilder inventory_builder(code_object_bytes);
-  result.install_program_inventory(inventory_builder.view());
+  result.program_inventory = inventory_builder.view();
   result.flavor = request.flavor.value_or(ConSanFlavor::None);
   result.moi_engine = request.moi_engine;
   result.outcome = ConSanTransformOutcome::Invalid;

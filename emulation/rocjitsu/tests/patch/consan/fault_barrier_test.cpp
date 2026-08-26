@@ -184,7 +184,7 @@ TEST(ConSan, SyncSequencesRejectLiteralBarrierIdMarkers) {
   };
   const ConSanResult literal32 =
       try_patch_consan(make_gfx1250_code_object(literal32_words), options);
-  EXPECT_TRUE(literal32.sync_sequences.empty());
+  EXPECT_TRUE(literal32.program_inventory.sync().sync_sequences.empty());
 
   const std::array<uint32_t, 5> literal64_words = {
       0xBE804EFEu, 0xFFFFFFFFu, 0xFFFFFFFFu, // s_barrier_signal literal64
@@ -193,7 +193,7 @@ TEST(ConSan, SyncSequencesRejectLiteralBarrierIdMarkers) {
   };
   const ConSanResult literal64 =
       try_patch_consan(make_gfx1250_code_object(literal64_words), options);
-  EXPECT_TRUE(literal64.sync_sequences.empty());
+  EXPECT_TRUE(literal64.program_inventory.sync().sync_sequences.empty());
 }
 
 TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
@@ -210,9 +210,10 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  const auto barrier = std::ranges::find(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                                         &ConSanSyncSequence::operation);
-  ASSERT_NE(barrier, inventory.sync_sequences.end());
+  const auto barrier =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(barrier, inventory.program_inventory.sync().sync_sequences.end());
 
   ConSanOptions options = inventory_options;
   options.fault_mutate_barrier_id_scope = true;
@@ -223,7 +224,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
   ASSERT_TRUE(dry_run.errors.empty()) << (dry_run.errors.empty() ? "" : dry_run.errors.front());
   ASSERT_EQ(dry_run.fault_plans.size(), 1u);
   EXPECT_EQ(dry_run.fault_plans[0].logical_sequence_identity,
-            inventory.barrier_lifecycle_groups[0].identity);
+            inventory.program_inventory.sync().barrier_lifecycle_groups[0].identity);
   EXPECT_EQ(dry_run.fault_plans[0].ordered_member_identities.size(), 5u);
 
   options.fault_dry_run = false;
@@ -269,8 +270,8 @@ TEST(ConSan, FaultBarrierIdScopeRejectsLiteralLifecycleMembersAtDecode) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  EXPECT_TRUE(inventory.barrier_lifecycle_groups.empty());
-  EXPECT_TRUE(inventory.sync_sequences.empty());
+  EXPECT_TRUE(inventory.program_inventory.sync().barrier_lifecycle_groups.empty());
+  EXPECT_TRUE(inventory.program_inventory.sync().sync_sequences.empty());
   EXPECT_FALSE(inventory.modified);
 }
 
@@ -292,18 +293,20 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(inventory.barrier_lifecycle_groups.size(), 1u);
-  ASSERT_TRUE(inventory.barrier_lifecycle_groups.front().admissible);
-  const auto init = std::ranges::find(inventory.sync_events, ConSanSyncOperation::BarrierInit,
-                                      &ConSanSyncEvent::operation);
-  ASSERT_NE(init, inventory.sync_events.end());
+  ASSERT_EQ(inventory.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
+  ASSERT_TRUE(inventory.program_inventory.sync().barrier_lifecycle_groups.front().admissible);
+  const auto init =
+      std::ranges::find(inventory.program_inventory.sync().sync_events,
+                        ConSanSyncOperation::BarrierInit, &ConSanSyncEvent::operation);
+  ASSERT_NE(init, inventory.program_inventory.sync().sync_events.end());
   EXPECT_EQ(init->barrier_operand_source, ConSanBarrierSite::OperandSource::StaticM0Literal32);
   EXPECT_EQ(init->barrier_id, 1);
   EXPECT_EQ(init->participant_count, 12u);
   EXPECT_FALSE(init->participant_mask);
-  const auto barrier = std::ranges::find(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                                         &ConSanSyncSequence::operation);
-  ASSERT_NE(barrier, inventory.sync_sequences.end());
+  const auto barrier =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(barrier, inventory.program_inventory.sync().sync_sequences.end());
 
   ConSanOptions options = inventory_options;
   options.fault_mutate_barrier_participants = true;
@@ -317,7 +320,7 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   EXPECT_EQ(dry_run.fault_plans.front().original_participant_count, 12u);
   EXPECT_EQ(dry_run.fault_plans.front().target_participant_count, 8u);
   EXPECT_EQ(dry_run.fault_plans.front().logical_sequence_identity,
-            inventory.barrier_lifecycle_groups.front().identity);
+            inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
 
   options.fault_dry_run = false;
   const ConSanResult result = try_patch_consan(bytes, options);
@@ -327,7 +330,7 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   EXPECT_EQ(result.requested_fault_mutations, 1u);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
   EXPECT_EQ(result.applied_fault_logical_identity,
-            inventory.barrier_lifecycle_groups.front().identity);
+            inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineBarrierParticipantCountRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
@@ -351,9 +354,10 @@ TEST(ConSan, FaultBarrierParticipantsReturnTypedUnsupportedWithoutProvenEncoding
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(immediate_bytes, inventory_options);
-  const auto barrier = std::ranges::find(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                                         &ConSanSyncSequence::operation);
-  ASSERT_NE(barrier, inventory.sync_sequences.end());
+  const auto barrier =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(barrier, inventory.program_inventory.sync().sync_sequences.end());
 
   ConSanOptions options = inventory_options;
   options.fault_mutate_barrier_participants = true;
@@ -379,9 +383,9 @@ TEST(ConSan, FaultBarrierParticipantsReturnTypedUnsupportedWithoutProvenEncoding
   const std::vector<uint8_t> counted_bytes = make_gfx1250_code_object(counted_words);
   const ConSanResult counted_inventory = try_patch_consan(counted_bytes, inventory_options);
   const auto counted_barrier =
-      std::ranges::find(counted_inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                        &ConSanSyncSequence::operation);
-  ASSERT_NE(counted_barrier, counted_inventory.sync_sequences.end());
+      std::ranges::find(counted_inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(counted_barrier, counted_inventory.program_inventory.sync().sync_sequences.end());
   options.fault_barrier_sequence_identity = counted_barrier->identity;
   options.fault_barrier_target_participant_count.reset();
   options.fault_barrier_target_participant_mask = 0x3;
@@ -409,10 +413,11 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(inventory.barrier_lifecycle_groups.size(), 1u);
-  const auto barrier = std::ranges::find(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                                         &ConSanSyncSequence::operation);
-  ASSERT_NE(barrier, inventory.sync_sequences.end());
+  ASSERT_EQ(inventory.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
+  const auto barrier =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(barrier, inventory.program_inventory.sync().sync_sequences.end());
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_barriers = true;
@@ -437,9 +442,9 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
   EXPECT_EQ(result.applied_fault_mutations, 1u);
   ASSERT_TRUE(result.applied_fault_logical_identity);
   EXPECT_EQ(*result.applied_fault_logical_identity,
-            inventory.barrier_lifecycle_groups.front().identity);
-  ASSERT_EQ(result.barrier_lifecycle_groups.size(), 1u);
-  EXPECT_EQ(result.barrier_lifecycle_groups.front().barrier_id, 2);
+            inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
+  ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.front().barrier_id, 2);
 
   const size_t mutation_count =
       std::ranges::count_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -447,9 +452,10 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
                patch.kind == ConSanPatchKind::InlineBarrierIdScopeRewrite;
       });
   EXPECT_EQ(mutation_count, 4u);
-  const auto init = std::ranges::find(inventory.sync_events, ConSanSyncOperation::BarrierInit,
-                                      &ConSanSyncEvent::operation);
-  ASSERT_NE(init, inventory.sync_events.end());
+  const auto init =
+      std::ranges::find(inventory.program_inventory.sync().sync_events,
+                        ConSanSyncOperation::BarrierInit, &ConSanSyncEvent::operation);
+  ASSERT_NE(init, inventory.program_inventory.sync().sync_events.end());
   const auto owner = result.program_inventory.kernels().front().descriptor_file_offset;
   size_t barrier_record_count = 0;
   size_t nested_instrumentation_count = 0;
@@ -491,9 +497,10 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  const auto barrier = std::ranges::find(inventory.sync_sequences, ConSanSyncOperation::BarrierFull,
-                                         &ConSanSyncSequence::operation);
-  ASSERT_NE(barrier, inventory.sync_sequences.end());
+  const auto barrier =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(barrier, inventory.program_inventory.sync().sync_sequences.end());
 
   ConSanOptions options = moi_options();
   options.moi_track_barriers = true;
@@ -582,7 +589,7 @@ TEST(ConSan, FaultDropInventoryCanSkipUnneededMoveDestinations) {
   options.collect_barrier_move_destinations = false;
   const ConSanResult inventory = try_patch_consan(bytes, options);
   EXPECT_FALSE(inventory.fault_sites.empty());
-  EXPECT_FALSE(inventory.sync_sequences.empty());
+  EXPECT_FALSE(inventory.program_inventory.sync().sync_sequences.empty());
   EXPECT_TRUE(inventory.barrier_move_destinations.empty());
 }
 
@@ -667,9 +674,10 @@ TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
-  const auto sequence = std::ranges::find(
-      inventory.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
-  ASSERT_NE(sequence, inventory.sync_sequences.end());
+  const auto sequence =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, inventory.program_inventory.sync().sync_sequences.end());
 
   ConSanOptions options = inventory_options;
   options.fault_drop_barrier = true;
@@ -749,9 +757,10 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
-  const auto sequence = std::ranges::find(
-      inventory.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
-  ASSERT_NE(sequence, inventory.sync_sequences.end());
+  const auto sequence =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, inventory.program_inventory.sync().sync_sequences.end());
 
   ConSanOptions options = inventory_options;
   options.fault_drop_barrier = true;
@@ -783,9 +792,10 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
       make_rdna4_lds_code_object(partial_words, "partial_whole_barrier_drop");
   const ConSanResult partial_inventory = try_patch_consan(partial_bytes, inventory_options);
   ASSERT_EQ(partial_inventory.fault_sites.size(), 1u);
-  ASSERT_EQ(partial_inventory.sync_sequences.size(), 1u);
+  ASSERT_EQ(partial_inventory.program_inventory.sync().sync_sequences.size(), 1u);
   options.fault_site_identity = partial_inventory.fault_sites.front().identity;
-  options.fault_barrier_sequence_identity = partial_inventory.sync_sequences.front().identity;
+  options.fault_barrier_sequence_identity =
+      partial_inventory.program_inventory.sync().sync_sequences.front().identity;
   const ConSanResult partial = try_patch_consan(partial_bytes, options);
   EXPECT_EQ(partial.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(partial.modified);
@@ -806,17 +816,18 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFault
   ConSanOptions ordinary_options;
   ordinary_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult ordinary = try_patch_consan(bytes, ordinary_options);
-  EXPECT_EQ(std::ranges::count(ordinary.sync_sequences, ConSanSyncOperation::BarrierFull,
-                               &ConSanSyncSequence::operation),
+  EXPECT_EQ(std::ranges::count(ordinary.program_inventory.sync().sync_sequences,
+                               ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
             0u);
 
   ConSanOptions inventory_options = ordinary_options;
   inventory_options.fault_drop_barrier = true;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  const auto sequence = std::ranges::find(
-      inventory.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
-  ASSERT_NE(sequence, inventory.sync_sequences.end());
+  const auto sequence =
+      std::ranges::find(inventory.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, inventory.program_inventory.sync().sync_sequences.end());
   ASSERT_EQ(sequence->member_event_identities.size(), 2u);
   EXPECT_EQ(sequence->begin_text_offset, 0u);
   EXPECT_EQ(sequence->end_text_offset, 16u * sizeof(uint32_t));
@@ -850,8 +861,8 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsLongExactPairsAndRejectsUnsafeS
     options.fault_drop_barrier = true;
     options.fault_dry_run = true;
     const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(words), options);
-    return std::ranges::count(result.sync_sequences, ConSanSyncOperation::BarrierFull,
-                              &ConSanSyncSequence::operation);
+    return std::ranges::count(result.program_inventory.sync().sync_sequences,
+                              ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
   };
 
   std::array<uint32_t, 20> long_straight_line_pair{};
@@ -902,7 +913,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCompletePairsAsOneMutation) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   std::vector<const ConSanSyncSequence *> sequences;
-  for (const ConSanSyncSequence &sequence : inventory.sync_sequences)
+  for (const ConSanSyncSequence &sequence : inventory.program_inventory.sync().sync_sequences)
     if (sequence.operation == ConSanSyncOperation::BarrierFull)
       sequences.push_back(&sequence);
   ASSERT_EQ(sequences.size(), 2u);
@@ -970,7 +981,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   std::vector<const ConSanSyncSequence *> sequences;
-  for (const ConSanSyncSequence &sequence : inventory.sync_sequences)
+  for (const ConSanSyncSequence &sequence : inventory.program_inventory.sync().sync_sequences)
     if (sequence.operation == ConSanSyncOperation::BarrierFull)
       sequences.push_back(&sequence);
   ASSERT_EQ(sequences.size(), 2u);
@@ -1130,14 +1141,15 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarge
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty())
       << (inventory.errors.empty() ? "" : inventory.errors.front());
-  ASSERT_EQ(inventory.sync_sequences.size(), 1u);
+  ASSERT_EQ(inventory.program_inventory.sync().sync_sequences.size(), 1u);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
 
   ConSanOptions options = inventory_options;
   options.fault_mutate_barrier_id_scope = true;
-  options.fault_barrier_sequence_identity = inventory.sync_sequences[0].identity;
+  options.fault_barrier_sequence_identity =
+      inventory.program_inventory.sync().sync_sequences[0].identity;
   options.fault_barrier_target_id = -2;
   options.fault_require_exactly_one = true;
   const ConSanResult result = try_patch_consan(bytes, options);
@@ -1152,8 +1164,10 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarge
   EXPECT_EQ(plan.kind, ConSanFaultMutationKind::BarrierIdScope);
   EXPECT_EQ(plan.primary_identity, inventory.fault_sites[0].identity);
   EXPECT_EQ(plan.companion_identity, inventory.fault_sites[1].identity);
-  EXPECT_EQ(plan.logical_sequence_identity, inventory.sync_sequences[0].identity);
-  EXPECT_EQ(plan.ordered_member_identities, inventory.sync_sequences[0].member_event_identities);
+  EXPECT_EQ(plan.logical_sequence_identity,
+            inventory.program_inventory.sync().sync_sequences[0].identity);
+  EXPECT_EQ(plan.ordered_member_identities,
+            inventory.program_inventory.sync().sync_sequences[0].member_event_identities);
   EXPECT_EQ(plan.original_barrier_id, -1);
   EXPECT_EQ(plan.target_barrier_id, -2);
   EXPECT_EQ(plan.original_barrier_scope, ConSanBarrierSite::Scope::Workgroup);
@@ -1182,9 +1196,11 @@ TEST(ConSan, FaultBarrierIdScopePairsBoundedSignalWaitWithInterveningInstruction
   options.fault_barrier_target_id = -2;
 
   const ConSanResult discovery = try_patch_consan(bytes, options);
-  const auto sequence = std::ranges::find(
-      discovery.sync_sequences, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
-  ASSERT_NE(sequence, discovery.sync_sequences.end()) << testing::PrintToString(discovery.warnings);
+  const auto sequence =
+      std::ranges::find(discovery.program_inventory.sync().sync_sequences,
+                        ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
+  ASSERT_NE(sequence, discovery.program_inventory.sync().sync_sequences.end())
+      << testing::PrintToString(discovery.warnings);
 
   options.fault_barrier_sequence_identity = sequence->identity;
   options.fault_require_exactly_one = true;
@@ -1216,7 +1232,7 @@ TEST(ConSan, FaultBarrierIdScopeDryRunRejectsInexactAndInvalidTargets) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(inventory.sync_sequences.size(), 1u);
+  ASSERT_EQ(inventory.program_inventory.sync().sync_sequences.size(), 1u);
 
   ConSanOptions options = inventory_options;
   options.fault_mutate_barrier_id_scope = true;
@@ -1233,7 +1249,8 @@ TEST(ConSan, FaultBarrierIdScopeDryRunRejectsInexactAndInvalidTargets) {
   EXPECT_TRUE(wrong_identity.fault_plans.empty());
   EXPECT_FALSE(wrong_identity.errors.empty());
 
-  options.fault_barrier_sequence_identity = inventory.sync_sequences[0].identity;
+  options.fault_barrier_sequence_identity =
+      inventory.program_inventory.sync().sync_sequences[0].identity;
   options.fault_barrier_target_id = -1;
   const ConSanResult unchanged = try_patch_consan(bytes, options);
   EXPECT_TRUE(unchanged.fault_plans.empty());
@@ -1256,13 +1273,14 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  ASSERT_EQ(inventory.sync_sequences.size(), 1u);
+  ASSERT_EQ(inventory.program_inventory.sync().sync_sequences.size(), 1u);
 
   ConSanOptions options = inventory_options;
   options.fault_dry_run = false;
   options.fault_mutate_barrier_id_scope = true;
   options.fault_barrier_target_id = -2;
-  options.fault_barrier_sequence_identity = inventory.sync_sequences[0].identity;
+  options.fault_barrier_sequence_identity =
+      inventory.program_inventory.sync().sync_sequences[0].identity;
   options.fault_require_exactly_one = true;
   const ConSanResult result = try_patch_consan(bytes, options);
 
@@ -1300,7 +1318,7 @@ TEST(ConSan, FaultBarrierIdScopeRejectsLiteralSignalMarkerAtDecode) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
-  EXPECT_TRUE(inventory.sync_sequences.empty());
+  EXPECT_TRUE(inventory.program_inventory.sync().sync_sequences.empty());
   EXPECT_FALSE(inventory.modified);
 }
 

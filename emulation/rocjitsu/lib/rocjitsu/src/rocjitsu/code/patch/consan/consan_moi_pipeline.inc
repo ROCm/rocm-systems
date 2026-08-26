@@ -2,8 +2,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
                                   rj_code_arch_t arch, ConSanResult &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::RecordReplay)
     return;
-  const bool has_eligible =
-      std::ranges::any_of(result.moi_fence_candidates, &ConSanMoiFenceCandidate::eligible);
+  const bool has_eligible = std::ranges::any_of(
+      result.program_inventory.sync().moi_fence_candidates, &ConSanMoiFenceCandidate::eligible);
   if (!has_eligible)
     return;
   if (!consan_is_capability_arch(arch)) {
@@ -815,15 +815,15 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
 
   std::unordered_map<std::string_view, const ConSanSyncEvent *> event_by_identity;
   std::unordered_map<uint64_t, const ConSanSyncEvent *> barrier_event_by_offset;
-  event_by_identity.reserve(result.sync_events.size());
-  barrier_event_by_offset.reserve(result.sync_events.size());
-  for (const ConSanSyncEvent &event : result.sync_events) {
+  event_by_identity.reserve(result.program_inventory.sync().sync_events.size());
+  barrier_event_by_offset.reserve(result.program_inventory.sync().sync_events.size());
+  for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events) {
     event_by_identity.try_emplace(event.identity, &event);
     if (event.kind == ConSanSyncEventKind::Barrier)
       barrier_event_by_offset.try_emplace(event.text_offset, &event);
   }
   std::unordered_map<std::string_view, const ConSanSyncSequence *> sequence_by_member;
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     for (const std::string &identity : sequence.member_event_identities) {
       const auto [found, inserted] = sequence_by_member.try_emplace(identity, &sequence);
       if (!inserted)

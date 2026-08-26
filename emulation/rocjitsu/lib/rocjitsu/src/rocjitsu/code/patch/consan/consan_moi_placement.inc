@@ -73,9 +73,10 @@ constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
       options.moi_track_barriers ? moi_reserved_barrier_island_count(result, options) : 0u;
   const uint64_t fence_count =
       options.moi_track_atomics
-          ? std::min<uint64_t>(std::ranges::count_if(result.moi_fence_candidates,
-                                                     &ConSanMoiFenceCandidate::eligible),
-                               options.max_patches)
+          ? std::min<uint64_t>(
+                std::ranges::count_if(result.program_inventory.sync().moi_fence_candidates,
+                                      &ConSanMoiFenceCandidate::eligible),
+                options.max_patches)
           : 0u;
   return barrier_count + fence_count;
 }
@@ -2003,21 +2004,22 @@ struct MoiResourcePlanningState {
     // assignments are the one exception: their dense relay search may inspect
     // any relocatable instruction in an owning block.
     const bool restrict_liveness_queries = options.moi_transient_sgpr_assignments.empty();
+    const SynchronizationInventoryView sync = result.program_inventory.sync();
     std::unordered_map<BasicBlock *, std::vector<const Instruction *>> liveness_queries_by_block;
     if (restrict_liveness_queries) {
       std::unordered_set<uint64_t> query_offsets;
       query_offsets.reserve(
-          result.moi_candidates.size() + result.sync_events.size() + result.resource_plans.size() +
+          result.moi_candidates.size() + sync.sync_events.size() + result.resource_plans.size() +
           result.observation_plan.probe_intents.size() + result.program_inventory.kernels().size());
       for (const ConSanMoiCandidate &candidate : result.moi_candidates)
         query_offsets.insert(candidate.text_offset);
-      for (const ConSanSyncEvent &event : result.sync_events)
+      for (const ConSanSyncEvent &event : sync.sync_events)
         query_offsets.insert(event.text_offset);
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
         query_offsets.insert(plan.text_offset);
       for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
         query_offsets.insert(intent.physical_site.original_text_offset);
-      for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates)
+      for (const ConSanMoiFenceCandidate &fence : sync.moi_fence_candidates)
         query_offsets.insert(fence.text_offset);
       for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
         if (kernel.has_text_range)

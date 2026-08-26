@@ -2539,7 +2539,7 @@ TEST(ConSanMoi, SampledAtomicWeakenedReleaseIsReinventoriedBeforeInstrumentation
   }
   ASSERT_EQ(fault_sync.size(), 1u) << testing::PrintToString(fault.warnings);
   EXPECT_EQ(fault_sync.front()->anchor_offset, 32u);
-  EXPECT_EQ(std::ranges::count_if(fault.sync_sequences,
+  EXPECT_EQ(std::ranges::count_if(fault.program_inventory.sync().sync_sequences,
                                   [](const ConSanSyncSequence &sequence) {
                                     return sequence.kind == ConSanSyncSequenceKind::Atomic &&
                                            sequence.memory_role == ConSanSyncMemoryRole::Release;
@@ -8466,12 +8466,12 @@ TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
   options.max_patches = 8;
   options.fault_dry_run = true;
   const ConSanResult inventory = try_patch_consan(bytes, options);
-  const auto cluster_sequence =
-      std::ranges::find_if(inventory.sync_sequences, [](const ConSanSyncSequence &sequence) {
+  const auto cluster_sequence = std::ranges::find_if(
+      inventory.program_inventory.sync().sync_sequences, [](const ConSanSyncSequence &sequence) {
         return sequence.operation == ConSanSyncOperation::BarrierFull &&
                sequence.barrier_scope == ConSanBarrierSite::Scope::Cluster;
       });
-  ASSERT_NE(cluster_sequence, inventory.sync_sequences.end());
+  ASSERT_NE(cluster_sequence, inventory.program_inventory.sync().sync_sequences.end());
   const auto primary =
       std::ranges::find_if(inventory.fault_sites, [&](const ConSanFaultSite &site) {
         return site.sync_sequence_identity == cluster_sequence->identity &&

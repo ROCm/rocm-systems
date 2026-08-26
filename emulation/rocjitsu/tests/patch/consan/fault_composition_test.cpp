@@ -82,9 +82,9 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
 
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
   ASSERT_EQ(release.perturbation_plans.size(), 1u);
-  ASSERT_EQ(release.sync_sequences.size(), 1u);
+  ASSERT_EQ(release.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(release.perturbation_plans[0].anchor_event_identity,
-            release.sync_sequences[0].member_event_identities.front());
+            release.program_inventory.sync().sync_sequences[0].member_event_identities.front());
   EXPECT_EQ(release.perturbation_plans[0].anchor_text_offset, 0u);
 
   options.sc_perturb_edge = ConSanPerturbationEdge::Acquire;
@@ -92,7 +92,7 @@ TEST(ConSan, PerturbationPlansOrderedAtomicOuterEdgesOnly) {
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
   ASSERT_EQ(acquire.perturbation_plans.size(), 1u);
   EXPECT_EQ(acquire.perturbation_plans[0].anchor_event_identity,
-            acquire.sync_sequences[0].member_event_identities.back());
+            acquire.program_inventory.sync().sync_sequences[0].member_event_identities.back());
   EXPECT_EQ(acquire.perturbation_plans[0].anchor_text_offset, 32u);
 }
 
@@ -529,7 +529,7 @@ TEST(ConSan, FinalValidationProvesPerturbationBytesAndPristineSequenceSemantics)
   ProgramInventoryBuilder rederived_inventory(rederived.program_inventory);
   rederived_inventory.synchronization().sync_events.clear();
   rederived_inventory.synchronization().sync_sequences.clear();
-  rederived.install_program_inventory(rederived_inventory.view());
+  rederived.program_inventory = rederived_inventory.view();
   rederived.perturbation_candidates.clear();
   rederived.perturbation_plans.clear();
   EXPECT_TRUE(validate_consan_modified_elf(bytes, rederived).empty());
@@ -789,19 +789,23 @@ TEST(ConSan, PerturbationEmissionAcceptsReturningOrderedCasReleaseEdge) {
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "errors=" << testing::PrintToString(result.errors)
       << " warnings=" << testing::PrintToString(result.warnings)
-      << " sequences=" << testing::PrintToString(result.sync_sequences)
+      << " sequences=" << testing::PrintToString(result.program_inventory.sync().sync_sequences)
       << " candidates=" << testing::PrintToString(result.perturbation_candidates);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineScPerturbation);
   EXPECT_EQ(result.patches.front().anchor_offset, 20u);
   EXPECT_EQ(result.patches.front().original_size, 12u);
-  ASSERT_EQ(result.sync_sequences.size(), 1u);
-  EXPECT_EQ(result.sync_sequences.front().operation, ConSanSyncOperation::AtomicCompareExchange);
-  EXPECT_EQ(result.sync_sequences.front().rmw_outcome, ConSanSyncRmwOutcome::CompareExchange);
-  EXPECT_EQ(result.sync_sequences.front().address_source, ConSanSyncAddressSource::FlatVector);
-  EXPECT_TRUE(consan_sync_confidence_meets(result.sync_sequences.front().confidence,
-                                           ConSanSemanticConfidence::Conservative));
+  ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().operation,
+            ConSanSyncOperation::AtomicCompareExchange);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().rmw_outcome,
+            ConSanSyncRmwOutcome::CompareExchange);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().address_source,
+            ConSanSyncAddressSource::FlatVector);
+  EXPECT_TRUE(consan_sync_confidence_meets(
+      result.program_inventory.sync().sync_sequences.front().confidence,
+      ConSanSemanticConfidence::Conservative));
 }
 
 TEST(ConSan, PerturbationAcceptsExactOrderedCasWithoutStaticFlatProvenance) {
@@ -816,12 +820,16 @@ TEST(ConSan, PerturbationAcceptsExactOrderedCasWithoutStaticFlatProvenance) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.sync_events.size(), 2u);
-  EXPECT_EQ(result.sync_events[1].operation, ConSanSyncOperation::AtomicCompareExchange);
-  EXPECT_EQ(result.sync_events[1].confidence, ConSanSemanticConfidence::Unsupported);
-  ASSERT_EQ(result.sync_sequences.size(), 1u);
-  EXPECT_EQ(result.sync_sequences.front().address_source, ConSanSyncAddressSource::FlatVector);
-  EXPECT_EQ(result.sync_sequences.front().confidence, ConSanSemanticConfidence::Conservative);
+  ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
+  EXPECT_EQ(result.program_inventory.sync().sync_events[1].operation,
+            ConSanSyncOperation::AtomicCompareExchange);
+  EXPECT_EQ(result.program_inventory.sync().sync_events[1].confidence,
+            ConSanSemanticConfidence::Unsupported);
+  ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().address_source,
+            ConSanSyncAddressSource::FlatVector);
+  EXPECT_EQ(result.program_inventory.sync().sync_sequences.front().confidence,
+            ConSanSemanticConfidence::Conservative);
   ASSERT_EQ(result.perturbation_plans.size(), 1u);
   EXPECT_EQ(result.perturbation_plans.front().anchor_text_offset, 0u);
   ASSERT_EQ(result.patches.size(), 1u);
@@ -1052,15 +1060,15 @@ TEST(ConSan, PerturbationRejectsClausesUnknownRolesAndWaveScope) {
   };
   const ConSanResult wave_scope =
       try_patch_consan(make_rdna4_lds_code_object(wave_scope_words), options);
-  ASSERT_EQ(wave_scope.sync_events.size(), 2u);
-  const auto atomic = std::ranges::find(wave_scope.sync_events, ConSanSyncEventKind::Atomic,
-                                        &ConSanSyncEvent::kind);
-  ASSERT_NE(atomic, wave_scope.sync_events.end());
+  ASSERT_EQ(wave_scope.program_inventory.sync().sync_events.size(), 2u);
+  const auto atomic = std::ranges::find(wave_scope.program_inventory.sync().sync_events,
+                                        ConSanSyncEventKind::Atomic, &ConSanSyncEvent::kind);
+  ASSERT_NE(atomic, wave_scope.program_inventory.sync().sync_events.end());
   ASSERT_TRUE(atomic->raw_scope);
   EXPECT_EQ(*atomic->raw_scope, 0u);
-  ASSERT_EQ(wave_scope.sync_sequences.size(), 1u);
-  ASSERT_TRUE(wave_scope.sync_sequences.front().raw_scope);
-  EXPECT_EQ(*wave_scope.sync_sequences.front().raw_scope, 0u);
+  ASSERT_EQ(wave_scope.program_inventory.sync().sync_sequences.size(), 1u);
+  ASSERT_TRUE(wave_scope.program_inventory.sync().sync_sequences.front().raw_scope);
+  EXPECT_EQ(*wave_scope.program_inventory.sync().sync_sequences.front().raw_scope, 0u);
   ASSERT_FALSE(wave_scope.perturbation_candidates.empty());
   EXPECT_TRUE(std::ranges::none_of(wave_scope.perturbation_candidates,
                                    &ConSanPerturbationCandidate::eligible));

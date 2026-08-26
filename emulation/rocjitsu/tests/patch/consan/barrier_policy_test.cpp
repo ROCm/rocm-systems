@@ -366,7 +366,7 @@ TEST(ConSanBarrierPolicy, IdenticalAliasesCoalesceAndConflictingAliasesAreFatal)
 
 TEST(ConSanBarrierPolicy, PolicyIsDeterministicAndDoesNotMutateInventory) {
   const ProgramInventory inventory = one_full_barrier_inventory();
-  const SynchronizationInventoryView view = inventory.synchronization_view();
+  const SynchronizationInventoryView view = inventory.sync();
   const std::vector<ConSanSyncEvent> events(view.sync_events.begin(), view.sync_events.end());
   const std::vector<ConSanSyncSequence> sequences(view.sync_sequences.begin(),
                                                   view.sync_sequences.end());

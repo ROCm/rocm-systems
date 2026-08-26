@@ -142,7 +142,7 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
   if (!valid_engine(request.engine) || inventory.empty())
     return result;
 
-  const SynchronizationInventoryView synchronization = inventory.synchronization_view();
+  const SynchronizationInventoryView synchronization = inventory.sync();
   std::map<uint64_t, std::vector<const ConSanSyncEvent *>> events_by_offset;
   for (const ConSanSyncEvent &event : synchronization.sync_events) {
     if (event.kind == ConSanSyncEventKind::Barrier)

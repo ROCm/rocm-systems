@@ -5259,8 +5259,8 @@ TEST(ConSan, ProbeLdsCheckTrapModeLeavesAdjacentAtomicAndBarrierUntouched) {
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
   EXPECT_EQ(result.patches.front().original_size, 8u);
   EXPECT_TRUE(result.fault_sites.empty());
-  EXPECT_TRUE(result.sync_events.empty());
-  EXPECT_TRUE(result.sync_sequences.empty());
+  EXPECT_TRUE(result.program_inventory.sync().sync_events.empty());
+  EXPECT_TRUE(result.program_inventory.sync().sync_sequences.empty());
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   const ConSanSiteDecision *access_decision = consan_access_decision_at_file_offset(result, 0x100u);
   ASSERT_NE(access_decision, nullptr);

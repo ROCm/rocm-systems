@@ -748,7 +748,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     function_by_name.try_emplace(function.name, &function);
 
   std::vector<SampledBarrierCandidate> candidates;
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     if (!consan_moi_sampled_qualifies_barrier_sequence(sequence))
       continue;
     const std::vector<ConSanBarrierSite> *barrier_sites = nullptr;

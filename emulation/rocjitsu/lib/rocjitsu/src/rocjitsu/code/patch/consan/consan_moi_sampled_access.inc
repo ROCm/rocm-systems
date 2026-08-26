@@ -19,7 +19,7 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
   if (!options.moi_track_atomics)
     return 0u;
   uint32_t count = 0u;
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     if (sequence.kind != ConSanSyncSequenceKind::Atomic || sequence.width_bits != 32u ||
         !consan_sync_confidence_meets(sequence.confidence,
                                       ConSanSemanticConfidence::Conservative) ||
@@ -34,9 +34,10 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
       continue;
     bool eligible = false;
     for (const std::string &identity : sequence.member_event_identities) {
-      const auto event =
-          std::ranges::find(result.sync_events, identity, &ConSanSyncEvent::identity);
-      if (event == result.sync_events.end() || event->kind != ConSanSyncEventKind::Atomic)
+      const auto event = std::ranges::find(result.program_inventory.sync().sync_events, identity,
+                                           &ConSanSyncEvent::identity);
+      if (event == result.program_inventory.sync().sync_events.end() ||
+          event->kind != ConSanSyncEventKind::Atomic)
         continue;
       const ConSanAtomicSite *site = nullptr;
       if (event->in_kernel) {

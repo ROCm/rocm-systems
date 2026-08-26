@@ -214,12 +214,13 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
     for (const ConSanPatchInfo &patch : mutation_stage.patches) {
       if (patch.phase == ConSanPatchPhase::Mutation &&
           patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite) {
-        const auto event = std::ranges::find_if(pristine_plan.sync_events, [&](const auto &item) {
-          return item.container_name == candidate->container_name &&
-                 item.in_kernel == candidate->in_kernel &&
-                 item.text_offset == patch.anchor_offset && item.size == patch.original_size;
-        });
-        if (event != pristine_plan.sync_events.end() &&
+        const auto event = std::ranges::find_if(
+            pristine_plan.program_inventory.sync().sync_events, [&](const auto &item) {
+              return item.container_name == candidate->container_name &&
+                     item.in_kernel == candidate->in_kernel &&
+                     item.text_offset == patch.anchor_offset && item.size == patch.original_size;
+            });
+        if (event != pristine_plan.program_inventory.sync().sync_events.end() &&
             std::ranges::find(candidate->ordered_member_identities, event->identity) !=
                 candidate->ordered_member_identities.end()) {
           sequence_semantics_weakened = true;
@@ -284,7 +285,7 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
 const ConSanSyncSequence *find_consan_sync_sequence_for_event(const ConSanResult &result,
                                                               std::string_view event_identity) {
   const ConSanSyncSequence *match = nullptr;
-  for (const ConSanSyncSequence &sequence : result.sync_sequences) {
+  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
     if (std::ranges::find(sequence.member_event_identities, event_identity) ==
         sequence.member_event_identities.end()) {
       continue;
@@ -362,7 +363,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   result.carried_composite_instrumentation_stage = !carried_plans.empty();
   result.requested_fault_mutations = requested_fault_mutation_count(options);
   ProgramInventoryBuilder inventory_builder(code_object_bytes);
-  result.install_program_inventory(inventory_builder.view());
+  result.program_inventory = inventory_builder.view();
   const bool has_fault = options.fault_drop_barrier || options.fault_move_barrier ||
                          options.fault_mutate_barrier_id_scope ||
                          options.fault_mutate_barrier_participants ||
@@ -725,10 +726,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     inventory_builder.functions().push_back(std::move(info));
   }
 
-  result.install_program_inventory(inventory_builder.view());
+  result.program_inventory = inventory_builder.view();
   const auto publish_access_inventory = [&] {
     inventory_builder.rebuild_access_inventory(code_object_bytes);
-    result.install_program_inventory(inventory_builder.view());
+    result.program_inventory = inventory_builder.view();
   };
 
   if (result.program_inventory.text_sections().empty())
@@ -802,7 +803,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     build_sync_event_inventory(code_object_bytes, synchronization_inventory, result);
     if (options.flavor == ConSanFlavor::Moi &&
         !canonicalize_sync_events_by_physical_site(synchronization_inventory, result)) {
-      result.install_program_inventory(inventory_builder.view());
+      result.program_inventory = inventory_builder.view();
       return result;
     }
     const SyncEventIdentityIndex sync_events =
@@ -827,7 +828,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     build_communication_address_recipes(*code_object, sync_blocks, sync_events, arch,
                                         synchronization_inventory, result);
     build_moi_fence_candidate_inventory(synchronization_inventory);
-    result.install_program_inventory(inventory_builder.view());
+    result.program_inventory = inventory_builder.view();
     build_perturbation_candidate_inventory(result);
     annotate_fault_sites_with_sync_sequences(result);
   } else if (std::ranges::any_of(
