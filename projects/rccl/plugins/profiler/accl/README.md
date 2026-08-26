@@ -51,11 +51,11 @@ Per-collective JSONL records with timing decomposition:
 ## Build
 
 ```bash
-# From this directory (after building RCCL)
-make
+# CMake (standalone)
+cmake -S . -B build && cmake --build build
 
-# Or with custom NCCL_HOME
-make NCCL_HOME=/path/to/rccl/build
+# CMake (as part of RCCL build — automatic when BUILD_PLUGIN_EXAMPLES=ON)
+cmake -DBUILD_PLUGIN_EXAMPLES=ON ...
 ```
 
 ## Usage
@@ -64,8 +64,6 @@ make NCCL_HOME=/path/to/rccl/build
 export NCCL_PROFILER_PLUGIN=/path/to/librccl-profiler-accl.so
 export ACCL_PROFILER_OUTPUT_DIR=/path/to/output
 export ACCL_PROFILER_MIN_SIZE_BYTES=0       # optional, filter small messages
-export ACCL_PROFILER_WARMUP_ITERS=5         # optional, skip warmup iterations
-export NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING=0  # required on some ROCm versions
 
 ./all_reduce_perf -b 1K -e 256M -f 2 -g 1 -n 20 -w 5
 ```
@@ -84,12 +82,13 @@ python3 accl_report.py compare --baseline /path/to/baseline/ --candidate /path/t
 ```
 
 The report classifies bottlenecks per message size:
-- **GPU-COMPUTE** — kernel time dominates
-- **PROXY-FLUSH/GDR** — GDR flush dominates
-- **PROXY-PEER-WAIT** — remote FIFO wait dominates
-- **NETWORK** — raw network I/O dominates
-- **LAUNCH-OVERHEAD** — host-side launch latency dominates
-- **GPU-SCHEDULING** — proxy GPU wait dominates
+- **GPU-COMPUTE** — kernel time dominates (>50% of wall time)
+- **gpu-compute (no proxy)** — kernel-only collective with no proxy ops
+- **NETWORK** — network send/recv + peer wait dominates
+- **PROXY-FLUSH/GDR** — GDR flush + GPU recv wait dominates
+- **GPU-SCHEDULING** — proxy GPU wait dominates (>20% of wall time)
+- **LAUNCH-OVERHEAD** — host-side launch latency dominates (>40%)
+- **mixed** — no single component dominates
 
 ## Requirements
 

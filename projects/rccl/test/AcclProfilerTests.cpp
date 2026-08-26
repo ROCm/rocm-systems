@@ -449,4 +449,250 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
     );
 }
 
+// =========================================================================
+// ProxyStep lifecycle: Coll → KernelCh → ProxyOp → ProxyStep → stop all
+// =========================================================================
+TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.FullProxyStepDecomposition",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xA1B2, &mask, "proxystep_test",
+                                     1, 2, 0, nullptr), 0);
+
+            // Start Coll
+            ncclProfilerEventDescr_v5_t collDescr;
+            memset(&collDescr, 0, sizeof(collDescr));
+            collDescr.type = (1 << 1);
+            collDescr.coll.func = "AllReduce";
+            collDescr.coll.algo = "Ring";
+            collDescr.coll.proto = "Simple";
+            collDescr.coll.datatype = "ncclFloat32";
+            collDescr.coll.count = 256;
+            collDescr.coll.seqNumber = 30;
+            collDescr.coll.nChannels = 1;
+
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
+
+            // Start KernelCh
+            ncclProfilerEventDescr_v5_t kchDescr;
+            memset(&kchDescr, 0, sizeof(kchDescr));
+            kchDescr.type = (1 << 6);
+            kchDescr.parentObj = collHandle;
+            kchDescr.kernelCh.channelId = 0;
+            kchDescr.kernelCh.pTimer = 5000000;
+            void* kchHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
+
+            // Start ProxyOp
+            ncclProfilerEventDescr_v5_t proxyDescr;
+            memset(&proxyDescr, 0, sizeof(proxyDescr));
+            proxyDescr.type = (1 << 3);
+            proxyDescr.parentObj = collHandle;
+            proxyDescr.proxyOp.channelId = 0;
+            proxyDescr.proxyOp.peer = 1;
+            proxyDescr.proxyOp.nSteps = 1;
+            proxyDescr.proxyOp.isSend = 1;
+            void* proxyHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &proxyHandle, &proxyDescr), 0);
+
+            // Start ProxyStep
+            ncclProfilerEventDescr_v5_t stepDescr;
+            memset(&stepDescr, 0, sizeof(stepDescr));
+            stepDescr.type = (1 << 4);
+            stepDescr.parentObj = proxyHandle;
+            stepDescr.proxyStep.step = 0;
+            void* stepHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &stepDescr), 0);
+
+            // Simulate proxy step state transitions
+            ASSERT_EQ(acclPluginRecordEventState(
+                stepHandle,
+                static_cast<ncclProfilerEventState_v5_t>(8),   // SendGPUWait
+                nullptr), 0);
+            ASSERT_EQ(acclPluginRecordEventState(
+                stepHandle,
+                static_cast<ncclProfilerEventState_v5_t>(9),   // SendWait
+                nullptr), 0);
+
+            // Stop everything in order: step → op → kernel → coll
+            ASSERT_EQ(acclPluginStopEvent(stepHandle), 0);
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+
+            // Record GPU stop
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 5010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kchHandle, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+
+            ASSERT_EQ(acclPluginStopEvent(kchHandle), 0);
+            ASSERT_EQ(acclPluginStopEvent(proxyHandle), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            char hostname[256] = {0};
+            gethostname(hostname, sizeof(hostname) - 1);
+            char path[1024];
+            snprintf(path, sizeof(path),
+                "/tmp/accl_test_proxystep/accl_profiler_rank0_%s_pid%d_0xa1b2.jsonl",
+                hostname, (int)getpid());
+            std::ifstream ifs(path);
+            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
+            std::string line;
+            ASSERT_TRUE(std::getline(ifs, line));
+            EXPECT_NE(line.find("\"n_proxy_ops\":1"), std::string::npos);
+            EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_proxystep"}}
+    );
+}
+
+// =========================================================================
+// Channel bounds: channelId >= nChannels should be silently dropped
+// =========================================================================
+TEST(AcclProfilerLifecycle, OutOfRangeChannelIdDropped) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.OutOfRangeChannelIdDropped",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xCB01, &mask, "chbound_test",
+                                     1, 2, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t collDescr;
+            memset(&collDescr, 0, sizeof(collDescr));
+            collDescr.type = (1 << 1);
+            collDescr.coll.func = "AllReduce";
+            collDescr.coll.algo = "Ring";
+            collDescr.coll.proto = "Simple";
+            collDescr.coll.datatype = "ncclFloat32";
+            collDescr.coll.count = 256;
+            collDescr.coll.seqNumber = 50;
+            collDescr.coll.nChannels = 2;
+
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
+
+            // channelId=5 with nChannels=2 should be dropped
+            ncclProfilerEventDescr_v5_t kchDescr;
+            memset(&kchDescr, 0, sizeof(kchDescr));
+            kchDescr.type = (1 << 6);
+            kchDescr.parentObj = collHandle;
+            kchDescr.kernelCh.channelId = 5;
+            kchDescr.kernelCh.pTimer = 0;
+            void* kchHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
+            EXPECT_EQ(kchHandle, nullptr)
+                << "channelId=5 with nChannels=2 should return NULL handle";
+
+            // Valid channels should still work
+            kchDescr.kernelCh.channelId = 0;
+            kchDescr.kernelCh.pTimer = 1000;
+            void* kch0 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kchDescr), 0);
+            ASSERT_NE(kch0, nullptr);
+
+            kchDescr.kernelCh.channelId = 1;
+            kchDescr.kernelCh.pTimer = 1000;
+            void* kch1 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch1, &kchDescr), 0);
+            ASSERT_NE(kch1, nullptr);
+
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 2000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch0, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch1, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch0), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch1), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_chbound"}}
+    );
+}
+
+// =========================================================================
+// Kernel timing assertions: verify gpu_kernel_avg/min/max_us in output
+// =========================================================================
+TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.KernelTimingFieldsPresent",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1D2, &mask, "ktime_test",
+                                     1, 2, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t collDescr;
+            memset(&collDescr, 0, sizeof(collDescr));
+            collDescr.type = (1 << 1);
+            collDescr.coll.func = "AllReduce";
+            collDescr.coll.algo = "Ring";
+            collDescr.coll.proto = "Simple";
+            collDescr.coll.datatype = "ncclFloat32";
+            collDescr.coll.count = 1024;
+            collDescr.coll.seqNumber = 60;
+            collDescr.coll.nChannels = 2;
+
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
+
+            // Channel 0: 100 us (10000 ticks at 100 MHz)
+            ncclProfilerEventDescr_v5_t kd;
+            memset(&kd, 0, sizeof(kd));
+            kd.type = (1 << 6);
+            kd.parentObj = collHandle;
+            kd.kernelCh.channelId = 0;
+            kd.kernelCh.pTimer = 1000000;
+            void* kch0 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch0, &kd), 0);
+
+            // Channel 1: 200 us (20000 ticks)
+            kd.kernelCh.channelId = 1;
+            kd.kernelCh.pTimer = 1000000;
+            void* kch1 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch1, &kd), 0);
+
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;  // +10000 = 100 us
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch0, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+            sa.kernelCh.pTimer = 1020000;  // +20000 = 200 us
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch1, static_cast<ncclProfilerEventState_v5_t>(22), &sa), 0);
+
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch0), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch1), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            char hostname[256] = {0};
+            gethostname(hostname, sizeof(hostname) - 1);
+            char path[1024];
+            snprintf(path, sizeof(path),
+                "/tmp/accl_test_ktime/accl_profiler_rank0_%s_pid%d_0xd1d2.jsonl",
+                hostname, (int)getpid());
+            std::ifstream ifs(path);
+            ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
+            std::string line;
+            ASSERT_TRUE(std::getline(ifs, line));
+            EXPECT_NE(line.find("\"gpu_kernel_avg_us\":150.00"), std::string::npos)
+                << "Expected avg of 100+200=150us";
+            EXPECT_NE(line.find("\"gpu_kernel_min_us\":100.00"), std::string::npos);
+            EXPECT_NE(line.find("\"gpu_kernel_max_us\":200.00"), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ktime"}}
+    );
+}
+
 } // namespace RcclUnitTesting

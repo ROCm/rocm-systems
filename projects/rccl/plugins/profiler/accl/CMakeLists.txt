@@ -35,6 +35,8 @@ set_target_properties(rccl-profiler-accl PROPERTIES
     OUTPUT_NAME "rccl-profiler-accl"
     PREFIX "lib"
     POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET default
+    VISIBILITY_INLINES_HIDDEN OFF
 )
 
 if(NOT ACCL_STANDALONE)

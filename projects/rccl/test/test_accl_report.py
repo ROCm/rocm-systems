@@ -42,31 +42,31 @@ def _write_jsonl(lines):
 
 def test_warmup_does_not_multiply_by_nranks():
     """seqNumber is per-comm, identical across ranks — warmup should not scale."""
-    path = _write_jsonl([_make_record(sn=i, n_ranks=32) for i in range(1, 20)])
+    path = _write_jsonl([_make_record(sn=i, n_ranks=32) for i in range(0, 20)])
     try:
         records = parse_jsonl(path, warmup=5)
-        # Should drop sn 1-5, keep sn 6-19 → 14 records
-        assert len(records) == 14
-        assert all(r.sn > 5 for r in records)
+        # Should drop sn 0-4, keep sn 5-19 → 15 records
+        assert len(records) == 15
+        assert all(r.sn >= 5 for r in records)
     finally:
         os.unlink(path)
 
 
 def test_warmup_zero_keeps_all():
-    path = _write_jsonl([_make_record(sn=i) for i in range(1, 6)])
+    path = _write_jsonl([_make_record(sn=i) for i in range(0, 6)])
     try:
         records = parse_jsonl(path, warmup=0)
-        assert len(records) == 5
+        assert len(records) == 6
     finally:
         os.unlink(path)
 
 
 def test_warmup_default_drops_first_five():
-    path = _write_jsonl([_make_record(sn=i) for i in range(1, 11)])
+    path = _write_jsonl([_make_record(sn=i) for i in range(0, 11)])
     try:
         records = parse_jsonl(path, warmup=5)
-        assert len(records) == 5
-        assert records[0].sn == 6
+        assert len(records) == 6
+        assert records[0].sn == 5
     finally:
         os.unlink(path)
 
@@ -81,7 +81,7 @@ def test_empty_file_returns_empty():
 
 
 def test_zero_records_after_warmup_warns(capsys):
-    path = _write_jsonl([_make_record(sn=i) for i in range(1, 4)])
+    path = _write_jsonl([_make_record(sn=i) for i in range(0, 4)])
     try:
         records = parse_jsonl(path, warmup=10)
         assert len(records) == 0

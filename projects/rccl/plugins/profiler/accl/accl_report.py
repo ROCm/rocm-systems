@@ -68,7 +68,7 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
 
             sn = cp.get('coll_sn', 0)
             n_ranks = hdr.get('n_ranks', 1)
-            if sn <= warmup:
+            if sn < warmup:
                 continue
 
             decomp = cp.get('decomposition', {})
@@ -425,18 +425,25 @@ def main():
         parser.print_help()
         sys.exit(1)
 
+    out_file = None
     if args.output:
-        sys.stdout = open(args.output, 'w', encoding="utf-8")  # noqa: SIM115
+        out_file = open(args.output, 'w', encoding="utf-8")
+        sys.stdout = out_file
 
-    if args.cmd == 'single':
-        records = load_dir_or_file(args.input, args.warmup)
-        print(f"Loaded {len(records)} records")
-        print_single_report(records)
-    elif args.cmd == 'compare':
-        base = load_dir_or_file(args.baseline, args.warmup)
-        cand = load_dir_or_file(args.candidate, args.warmup)
-        print(f"Baseline: {len(base)} records, Candidate: {len(cand)} records")
-        print_compare_report(base, cand, args.threshold)
+    try:
+        if args.cmd == 'single':
+            records = load_dir_or_file(args.input, args.warmup)
+            print(f"Loaded {len(records)} records")
+            print_single_report(records)
+        elif args.cmd == 'compare':
+            base = load_dir_or_file(args.baseline, args.warmup)
+            cand = load_dir_or_file(args.candidate, args.warmup)
+            print(f"Baseline: {len(base)} records, Candidate: {len(cand)} records")
+            print_compare_report(base, cand, args.threshold)
+    finally:
+        if out_file:
+            sys.stdout = sys.__stdout__
+            out_file.close()
 
 
 if __name__ == '__main__':

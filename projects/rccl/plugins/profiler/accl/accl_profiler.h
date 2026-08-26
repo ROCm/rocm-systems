@@ -10,7 +10,7 @@
 #include <time.h>
 
 // Limits
-#define ACCL_MAX_CHANNELS      64
+#define ACCL_MAX_CHANNELS      256
 #define ACCL_MAX_PROXY_OPS     256
 
 static inline uint64_t acclGetTimeUs() {
@@ -54,6 +54,7 @@ struct acclProxyOpInfo {
   uint64_t type;
   void*    parentObj;    // points to acclCollInfo (the coll event handle)
   void*    commCtx;      // owning acclCommContext (for pool free)
+  uint64_t parentGeneration; // captured generation of parent coll at start
   uint8_t  channelId;
   int      peer;
   int      nSteps;
@@ -75,6 +76,7 @@ struct acclProxyOpInfo {
 // Per collective record
 struct acclCollInfo {
   uint64_t    type;         // ncclProfileColl
+  uint64_t    generation;   // monotonic generation for stale-callback detection
   int         collStopped;
   int         finalized;
   pthread_mutex_t mutex;
@@ -155,6 +157,7 @@ struct acclCompletedRecord {
 
 // Per-communicator context (owns all pools)
 struct acclCommContext {
+  volatile int refCount;    // ref-count: 1 (init) + 1 per live coll slot
   uint64_t    commHash;
   int         rank;
   int         nRanks;
@@ -165,6 +168,9 @@ struct acclCommContext {
   FILE*       outputFile;
   char        outputPath[1024];
   pthread_mutex_t outputMutex;
+
+  // Per-slot generation counters (bumped on each alloc to detect stale callbacks)
+  uint64_t    collGeneration[ACCL_COLL_POOL_SIZE];
 
   // Per-comm pools
   struct acclCollInfo      collPool[ACCL_COLL_POOL_SIZE];
