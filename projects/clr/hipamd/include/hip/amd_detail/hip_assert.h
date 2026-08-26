@@ -25,7 +25,7 @@ extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void _wass
 #else /* defined(_WIN32) || defined(_WIN64) */
 extern "C" __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
     const char* assertion, const char* file, unsigned int line, const char* function) {
-  const char fmt[] = "%s:%u: %s: Device-side assertion `%s' failed.\n";
+  static const char fmt[] = "%s:%u: %s: Device-side assertion `%s' failed.\n";
 
   // strlen is not available as a built-in yet, so we create our own
   // loop in a macro. With a string literal argument, the compiler

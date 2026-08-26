@@ -165,6 +165,18 @@ TEST(ProbeCallableTest, BuildsNopProbe) {
   EXPECT_EQ(callable->output_text_offset, 0u); // assigned by a later layout step.
 }
 
+TEST(ProbeCallableTest, ReportsRejectedEncodingAndWordOffset) {
+  const std::vector<uint32_t> body{0xffffffffu, kSSetpcS30S31};
+  const auto image = make_elf(body);
+  AmdGpuCodeObject obj(image.data(), image.size());
+
+  std::string err;
+  EXPECT_FALSE(build_probe_callable(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2, &err)
+                   .has_value());
+  EXPECT_NE(err.find("word 0"), std::string::npos) << err;
+  EXPECT_NE(err.find("Invalid instruction opcode"), std::string::npos) << err;
+}
+
 TEST(ProbeCallableTest, RejectsBodyWithCall) {
   const std::vector<uint32_t> body{kSSwappcS30S31, kSSetpcS30S31};
   const auto image = make_elf(body);

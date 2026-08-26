@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 604 | 604 | 0 |
-| **total** | **604** | **604** | **0** |
+| `contract` | 608 | 608 | 0 |
+| **total** | **608** | **608** | **0** |
 
 ## Tier: `contract`
 
@@ -158,7 +158,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DeviceConfig_HipDeviceSetLimit_Default_RoundTripsOrIsUnsupported` | hipDeviceSetLimit | setting the heap limit back to its current value succeeds or reports unsupported |
 | `Contract_DeviceConfig_HipGetDeviceFlags_AndStreamPriorityRange_AreConsistent` | hipGetDeviceFlags | the schedule subfield is a documented mode and greatest stream priority <= least |
 
-### `device_identity` (7 cases)
+### `device_identity` (9 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -169,14 +169,18 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_Default_RoundTripsWithGetPCIBusId` | hipDeviceGetByPCIBusId | the PCI bus id from hipDeviceGetPCIBusId round-trips back to the same device ordinal |
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_InvalidString_IsRejected` | hipDeviceGetByPCIBusId | empty and malformed PCI bus id strings are rejected with a non-success status |
 | `Contract_DeviceIdentity_HipDeviceGetByPCIBusId_NullArgs_AreRejected` | hipDeviceGetByPCIBusId | a null device out-pointer or null bus-id string is rejected with a non-success status |
+| `Contract_DeviceIdentity_HipDeviceGetLuid_Default_AcceptedOrUnsupported` | hipDeviceGetLuid | a well-formed query returns hipSuccess or the documented hipErrorNotSupported |
+| `Contract_DeviceIdentity_HipDeviceGetLuid_NullArgs_AreRejected` | hipDeviceGetLuid | a null luid or node-mask out-pointer is rejected with a non-success status |
 
-### `device_lifecycle` (5 cases)
+### `device_lifecycle` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_DeviceLifecycle_HipDevicePrimaryCtxReset_Default_LeavesDeviceUsable` | hipDevicePrimaryCtxReset | after resetting the primary context the device still serves fresh allocations |
 | `Contract_DeviceLifecycle_HipDevicePrimaryCtxSetFlags_Default_IsAcceptedOrInUse` | hipDevicePrimaryCtxSetFlags | setting primary-context flags is accepted or reports context-already-in-use |
 | `Contract_DeviceLifecycle_HipDeviceSetSharedMemConfig_Default_RoundTripsCurrentConfig` | hipDeviceSetSharedMemConfig | setting back the currently-reported shared-mem config is accepted or unsupported |
+| `Contract_DeviceLifecycle_HipInitDevice_Default_AcceptsVisibleDevice` | hipInitDevice | initializing a visible device with no flags is accepted or reported unsupported |
+| `Contract_DeviceLifecycle_HipInitDevice_InvalidDevice_IsRejected` | hipInitDevice | an out-of-range device ordinal is rejected with a defined error |
 | `Contract_DeviceLifecycle_HipSetDeviceFlags_Default_AcceptsCurrentFlags` | hipSetDeviceFlags | writing back the currently-active device flags is accepted or reported not-settable |
 | `Contract_DeviceLifecycle_HipSetValidDevices_Default_AcceptsFullDeviceList` | hipSetValidDevices | presenting the full set of visible device ordinals is accepted or reported unsupported |
 

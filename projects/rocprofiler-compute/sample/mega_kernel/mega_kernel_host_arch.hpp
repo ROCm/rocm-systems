@@ -26,6 +26,7 @@ detect_architecture(const char* arch, char* out_name, size_t out_name_sz, int* o
         const char* needle;
         int         typ;
     } map[] = {
+        {"gfx1250", 7},
         {"gfx1153", 6}, {"gfx1152", 6}, {"gfx1151", 6}, {"gfx1150", 6},
         {"gfx1201", 5}, {"gfx1200", 4},
         {"gfx950", 3},
@@ -55,6 +56,7 @@ arch_description(int arch_type)
         case 5: return "RX 9070 XT/9070 (RDNA4/gfx1201)";
         case 6:
             return "Strix/Strix Halo/Krackan (RDNA3.5/gfx115x APU)";
+        case 7: return "gfx1250";
         default: return "Unknown Architecture";
     }
 }

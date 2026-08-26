@@ -221,7 +221,7 @@ elif command -v rocm-smi >/dev/null && rocm-smi --version 2>&1 >/dev/null; then
 else
     NUM_GPUS=0
 fi
-NUM_GPUS=$((NUM_GPUS > 0 ? NUM_GPUS : 8))
+NUM_GPUS=$((NUM_GPUS > 0 ? NUM_GPUS : 0))
 
 # Extract number of ranks from test name (format: testname_n<ranks>_w<wg>_z<threads>)
 # Or from ROCSHMEM_SLR_NP if in SLR mode
