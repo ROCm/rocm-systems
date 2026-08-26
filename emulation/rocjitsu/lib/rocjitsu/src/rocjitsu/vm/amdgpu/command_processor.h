@@ -246,20 +246,16 @@ public:
 
   [[nodiscard]] size_t next_cu_index() const { return next_cu_; }
 
-  /// @brief Deepest (@p queue_id, @p process_id) ever got on this CP.
+  /// @brief Number of entries (@p queue_id, @p process_id) accepted on this CP.
   ///
-  /// @details Test-only. A replica's entry list is otherwise unobservable: a packet
-  /// that runs no shader retires in zero time, so once a run finishes every queue is
-  /// empty whether or not those packets were ever placed on the peers at all. The
-  /// peak is recorded by the owning CP as it pushes, under its own queue mutex, so
-  /// this is read AFTER a run rather than sampled during one. Sampling was the
-  /// earlier design and was wrong: it reached into every peer CP from inside a
-  /// workgroup callback that already held the dispatching CP's mutex, which is a
-  /// lock-order inversion between any two CPs the moment more than one thread runs.
-  [[nodiscard]] size_t peak_queued_entry_count_for_test(uint32_t queue_id, uint32_t process_id) {
+  /// @details Test-only. Acceptance is recorded at the queue's single ordered push
+  /// site under this CP's queue mutex and read AFTER a run. Unlike queue depth, the
+  /// count does not depend on whether a peer retires an earlier entry before the
+  /// next one arrives.
+  [[nodiscard]] size_t accepted_entry_count_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const auto *qs = find_queue_state(queue_id, process_id);
-    return qs == nullptr ? 0 : qs->peak_entries;
+    return qs == nullptr ? 0 : qs->accepted_entries;
   }
 
   /// @brief Hardware queues registered with this CP, including fan-out replicas.
