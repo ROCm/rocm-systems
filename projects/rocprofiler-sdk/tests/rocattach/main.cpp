@@ -34,6 +34,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <thread>
 
 static bool
@@ -90,6 +91,7 @@ main(int argc, char** argv)
 
     bool send_signal                 = false;
     bool poison_register_library_env = false;
+    auto equivalent_register_library = std::string{};
     for(int i = 3; i < argc; ++i)
     {
         std::string arg{argv[i]};
@@ -100,6 +102,15 @@ main(int argc, char** argv)
         else if(arg == "--stale-register-library")
         {
             poison_register_library_env = true;
+        }
+        else if(arg == "--equivalent-register-library")
+        {
+            if(i + 1 >= argc)
+            {
+                std::cout << "error: --equivalent-register-library requires a path\n";
+                return 1;
+            }
+            equivalent_register_library = argv[++i];
         }
         else
         {
@@ -131,7 +142,7 @@ main(int argc, char** argv)
     if(pid1 == 0 || pid2 == 0)
     {
         // Child process
-        if(poison_register_library_env)
+        if(poison_register_library_env || !equivalent_register_library.empty())
         {
             // These values should reach the target only through rocattach's injected
             // environment buffer, not through normal fork/exec inheritance.
@@ -148,7 +159,8 @@ main(int argc, char** argv)
     }
     else
     {
-        auto kill_children = [&]() {
+        auto equivalent_register_library_alias = std::filesystem::path{};
+        auto kill_children                     = [&]() {
             kill(pid1, SIGKILL);
             kill(pid2, SIGKILL);
             waitpid(pid1, nullptr, 0);
@@ -176,6 +188,36 @@ main(int argc, char** argv)
                    "/tmp/rocattach-missing-librocprofiler-sdk.so.999.999.999",
                    true);
             setenv("ROCPROFILER_TEST_FORWARDING", "preserved", true);
+        }
+        if(!equivalent_register_library.empty())
+        {
+            equivalent_register_library_alias =
+                std::filesystem::temp_directory_path() /
+                ("rocattach-equivalent-librocprofiler-sdk-" + std::to_string(getpid()) + ".so");
+
+            std::error_code ec;
+            std::filesystem::remove(equivalent_register_library_alias, ec);
+            ec.clear();
+            std::filesystem::create_hard_link(
+                equivalent_register_library, equivalent_register_library_alias, ec);
+            if(ec)
+            {
+                ec.clear();
+                std::filesystem::create_symlink(
+                    equivalent_register_library, equivalent_register_library_alias, ec);
+            }
+            if(ec)
+            {
+                std::cout << "error: could not create equivalent register-library alias: "
+                          << ec.message() << "\n";
+                kill_children();
+                return 1;
+            }
+
+            setenv("ROCPROFILER_REGISTER_LIBRARY",
+                   equivalent_register_library_alias.string().c_str(),
+                   true);
+            setenv("ROCPROFILER_TEST_FORWARDING", "equivalent", true);
         }
 
         {
@@ -269,6 +311,12 @@ main(int argc, char** argv)
         {
             std::cout << "error in pid2, returned non-zero status: " << pid2status;
             return 1;
+        }
+
+        if(!equivalent_register_library_alias.empty())
+        {
+            std::error_code ec;
+            std::filesystem::remove(equivalent_register_library_alias, ec);
         }
     }
     return 0;
