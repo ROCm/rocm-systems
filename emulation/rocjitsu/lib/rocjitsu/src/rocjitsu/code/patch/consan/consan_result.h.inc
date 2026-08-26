@@ -131,15 +131,13 @@ struct ConSanBranchOnlyRoutingTelemetry {
 struct ConSanBranchOnlyReservoirTelemetry {
   size_t planned_reservoir_count = 0;
   size_t used_reservoir_count = 0;
-  size_t unused_reservoir_count = 0;
   size_t planned_appended_bytes = 0;
   size_t used_appended_bytes = 0;
-  size_t unused_appended_bytes = 0;
 
   bool operator==(const ConSanBranchOnlyReservoirTelemetry &) const = default;
 };
 
-static_assert(sizeof(ConSanBranchOnlyReservoirTelemetry) == 6u * sizeof(size_t),
+static_assert(sizeof(ConSanBranchOnlyReservoirTelemetry) == 4u * sizeof(size_t),
               "update the reservoir telemetry schema tests");
 
 /// Records one complete reserved appended footprint. Keeping the payload and
@@ -170,9 +168,6 @@ accumulate_branch_only_reservoir_telemetry(ConSanBranchOnlyReservoirTelemetry &t
   if (used) {
     add(telemetry.used_reservoir_count, 1u);
     add(telemetry.used_appended_bytes, bytes);
-  } else {
-    add(telemetry.unused_reservoir_count, 1u);
-    add(telemetry.unused_appended_bytes, bytes);
   }
 }
 

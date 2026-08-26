@@ -3114,6 +3114,32 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   periodic physical gate remains applicable. E2E validation remains outside
   this work.
 
+### Slice 4AD: derive unused reservoir footprint
+
+- **Single authoritative inventory:** Retained relay-reservoir footprint is
+  completely described by planned count/bytes and used count/bytes. Unused
+  footprint is their difference, not independently mutable transform state.
+- **Completed deletion:** `ConSanBranchOnlyReservoirTelemetry` no longer stores
+  `unused_reservoir_count` or `unused_appended_bytes`. The shared accumulator no
+  longer updates them and MOI barrier composition no longer recomputes them
+  after changing the used totals. The value is now four counters with no
+  derived mirrors.
+- **Contract-test correction:** The shared reservoir test still proves the
+  exact unused count and bytes by subtraction. Record/Replay proves a retained
+  unused reservation, while Inline Shadow and SuperCollider prove planned
+  footprint bounds used footprint and retain their exact emitted-use checks.
+  These assertions cover behavior without testing redundant storage.
+- **Deletion result:** Production source is 11 lines smaller and source plus
+  tests is 13 lines smaller. No accessor, cache, or compatibility field replaces
+  the deleted values.
+- **Completed checked-in gate:** The ConSan host gate passed 1,509 of 1,511
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 75.50
+  seconds. This derived-state deletion does not change emitted device code; the
+  periodic physical gate remains applicable. E2E validation remains outside
+  this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

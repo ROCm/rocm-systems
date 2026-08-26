@@ -775,12 +775,6 @@ struct MoiReservedBarrierIslandLayout {
     ConSanBranchOnlyReservoirTelemetry &telemetry = result.moi_branch_only_reservoir_telemetry;
     telemetry.used_reservoir_count = used_count;
     telemetry.used_appended_bytes = used_bytes;
-    telemetry.unused_reservoir_count = telemetry.planned_reservoir_count > used_count
-                                           ? telemetry.planned_reservoir_count - used_count
-                                           : 0u;
-    telemetry.unused_appended_bytes = telemetry.planned_appended_bytes > used_bytes
-                                          ? telemetry.planned_appended_bytes - used_bytes
-                                          : 0u;
   }
   return pruned_any;
 }

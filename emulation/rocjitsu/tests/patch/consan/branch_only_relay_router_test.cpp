@@ -3511,10 +3511,11 @@ TEST(ConSanBranchOnlyRelayRouter, InventoriesUsedAndUnusedDirectReservoirFootpri
   const ConSanBranchOnlyReservoirTelemetry telemetry = reservoirs.telemetry();
   EXPECT_EQ(telemetry.planned_reservoir_count, 2u);
   EXPECT_EQ(telemetry.used_reservoir_count, 1u);
-  EXPECT_EQ(telemetry.unused_reservoir_count, 1u);
+  EXPECT_EQ(telemetry.planned_reservoir_count - telemetry.used_reservoir_count, 1u);
   EXPECT_EQ(telemetry.planned_appended_bytes, (16u + 32u) * sizeof(uint32_t) + 2u * 4u);
   EXPECT_EQ(telemetry.used_appended_bytes, 16u * sizeof(uint32_t) + 4u);
-  EXPECT_EQ(telemetry.unused_appended_bytes, 32u * sizeof(uint32_t) + 4u);
+  EXPECT_EQ(telemetry.planned_appended_bytes - telemetry.used_appended_bytes,
+            32u * sizeof(uint32_t) + 4u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, EmitsDirectReservoirAtItsOwnedAppendedOffset) {

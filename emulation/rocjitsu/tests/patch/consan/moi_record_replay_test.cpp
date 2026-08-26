@@ -9061,7 +9061,8 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierConsumesReservoirOmittedByAccessSelectio
   }));
   ASSERT_GT(result.moi_branch_only_reservoir_telemetry.planned_reservoir_count, 0u);
   EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
-  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.unused_reservoir_count, 0u);
+  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.planned_reservoir_count,
+            result.moi_branch_only_reservoir_telemetry.used_reservoir_count);
   const auto barrier_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end()) << testing::PrintToString(result.warnings);

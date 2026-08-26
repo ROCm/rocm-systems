@@ -7469,10 +7469,8 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   const ConSanBranchOnlyReservoirTelemetry &inventory = result.lds_relay_reservoir_telemetry;
   EXPECT_GE(inventory.planned_reservoir_count, 1u);
   EXPECT_EQ(inventory.used_reservoir_count, 1u);
-  EXPECT_EQ(inventory.planned_reservoir_count,
-            inventory.used_reservoir_count + inventory.unused_reservoir_count);
-  EXPECT_EQ(inventory.planned_appended_bytes,
-            inventory.used_appended_bytes + inventory.unused_appended_bytes);
+  EXPECT_GE(inventory.planned_reservoir_count, inventory.used_reservoir_count);
+  EXPECT_GE(inventory.planned_appended_bytes, inventory.used_appended_bytes);
   EXPECT_EQ(inventory.used_appended_bytes, reservoir->trampoline_size);
   EXPECT_GT(result.planning_work_telemetry.sopp_relay_work_count, 0u);
   EXPECT_EQ(result.planning_work_telemetry.sopp_relay_exhaustion_count, 0u);
