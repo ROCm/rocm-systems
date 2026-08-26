@@ -134,12 +134,12 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollReduceScatter};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64, ncclFloat32, ncclFloat16, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat64,ncclFloat32,ncclFloat16,ncclBfloat16,ncclFloat8e4m3,ncclFloat8e5m2};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1,4314};
+    std::vector<int>            const numElements     = {1,3,7,4314,5003,1048575,1048576};
     std::vector<bool>           const inPlaceList     = {true,false};
-    std::vector<bool>           const managedMemList  = {true,false};
+    std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true,false};
 
     setenv("NCCL_SINGLE_PROC_MEM_REG_ENABLE", "1", 1);

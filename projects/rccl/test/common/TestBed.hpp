@@ -71,7 +71,7 @@ namespace RcclUnitTesting
                            int             const groupId       = 0,
                            int             const rank          = -1,
                            int             const streamIdx     = 0);
-
+                                                   
     // Allocate memory for specified collective / rank
     // - Requires SetCollectiveArgs to have been called already
     // Using collId = -1 (default) applies settings to all collectives in group
@@ -186,5 +186,19 @@ namespace RcclUnitTesting
   protected:
     // Ends the specified child process
     void StopChild(int const childId);
+  
+  private:
+    // AllocateMem is split into AllocateMemInternal + RegisterMemInternal to maintain
+    // compatibility with existing tests, and extend registration for symmetric memory
+    void AllocateMemInternal(bool   const inPlace = false,
+                                    bool   const useManagedMem = false,
+                                    int    const groupId  = -1,
+                                    int    const collId   = -1,
+                                    int    const rank     = -1,
+                                    bool   const userRegistered = false);
+
+    void RegisterMemInternal(int    const groupId,
+                             int    const collId,
+                             int    const rank);
   };
 }

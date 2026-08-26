@@ -181,6 +181,7 @@ namespace RcclUnitTesting
       case CHILD_EXECUTE_COLL    : status = ExecuteCollectives();   break;
       case CHILD_VALIDATE_RESULTS: status = ValidateResults();      break;
       case CHILD_LAUNCH_GRAPHS   : status = LaunchGraphs();         break;
+      // case CHILD_DEREGISTER_MEM  : status = DeregisterMemInternal();break;
       case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
       case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
@@ -1064,23 +1065,9 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
-  ErrCode TestBedChild::DeallocateMem()
+  ErrCode TestBedChild::DeregisterMemInternal_impl(int groupId, int collId, int localRank)
   {
-    if (this->verbose) TEST_INFO("Child %d begins DeallocateMem", this->childId);
-
-    // Read values sent by parent [matches IPC pipe format]
-    int globalRank, groupId, collId;
-    PIPE_READ(globalRank);
-    PIPE_READ(groupId);
-    PIPE_READ(collId);
-
-    if (globalRank < this->rankOffset || (this->rankOffset + static_cast<int>(comms.size()) <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-
-    int const localRank = globalRank - rankOffset;
+    if (this->verbose) TEST_INFO("Child %d begins DeregisterMemInternal", this->childId);
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
     ErrCode errCode = TEST_SUCCESS;
@@ -1164,10 +1151,14 @@ namespace RcclUnitTesting
       }
     }
     CHILD_NCCL_CALL(ncclGroupEnd(), "ncclGroupEnd DeregisterMem");
+    if (this->verbose) TEST_INFO("Child %d finishes DeregisterMemInternal", this->childId);
+    return errCode;
+  }
 
-    // =========================================================================
-    // 3. Free GPU/CPU Allocations & Custom Operators
-    // =========================================================================
+  ErrCode TestBedChild::DeallocateMemInternal_impl(int groupId, int collId, int localRank)
+  {
+    if (this->verbose) TEST_INFO("Child %d begins DeallocateMemInternal", this->childId);
+    ErrCode errCode = TEST_SUCCESS;
     for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
     {
       CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
@@ -1188,8 +1179,29 @@ namespace RcclUnitTesting
         }
       }
     }
+    if (this->verbose) TEST_INFO("Child %d finishes DeallocateMemInternal", this->childId);
+    return errCode;
+  }
 
-    if (this->verbose) TEST_INFO("Child %d finishes DeregisterMem", this->childId);
+  ErrCode TestBedChild::DeallocateMem()
+  {
+    if (this->verbose) TEST_INFO("Child %d begins DeallocateMem", this->childId);
+    ErrCode errCode = TEST_SUCCESS;
+    // Read values sent by parent [matches IPC pipe format]
+    int globalRank, groupId, collId;
+    PIPE_READ(globalRank);
+    PIPE_READ(groupId);
+    PIPE_READ(collId);
+
+    if (globalRank < this->rankOffset || (this->rankOffset + static_cast<int>(comms.size()) <= globalRank))
+    {
+      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
+      return TEST_FAIL;
+    }
+
+    int const localRank = globalRank - rankOffset;
+    CHECK_CALL(this->DeregisterMemInternal_impl(groupId,collId,localRank));
+    CHECK_CALL(this->DeallocateMemInternal_impl(groupId,collId,localRank));
     return errCode;
   }
 
@@ -1334,15 +1346,20 @@ namespace RcclUnitTesting
           {
             if (collArg.inPlace)
             {
-              // For in-place collectives, register the FULL allocation (outputGpu) first
+              // For in-place collectives, register the FULL allocation first
+              RcclUnitTesting::ncclFunc_t fn = collArg.funcType;
+              void* buff = (fn == ncclCollScatter || fn ==ncclCollReduceScatter) ? collArg.inputGpu.ptr : collArg.outputGpu.ptr;
+              size_t bufSize = (fn == ncclCollScatter || fn ==ncclCollReduceScatter) ? collArg.numInputBytesAllocated : collArg.numOutputBytesAllocated;
+
+              if (this->verbose) TEST_INFO("Child %d calls ncclCommWindowRegister(this->comms[localRank = %d]) buff= %lu bufSize = %d &(collArg.outputWin) NCCL_WIN_COLL_SYMMETRIC", this->childId,localRank,buff,bufSize);
               CHILD_NCCL_CALL_RANK(errCode,
               ncclCommWindowRegister(this->comms[localRank],
-                                     collArg.outputGpu.ptr,
-                                     collArg.numOutputBytesAllocated,
+                                     buff,
+                                     bufSize,
                                      &(collArg.outputWin),
                                      NCCL_WIN_COLL_SYMMETRIC),
               "ncclCommWindowRegister (output in-place)");
-
+              // Just to indicate windows are same, this assignment doesn't affect functionality.
               collArg.inputWin = collArg.outputWin;
            }
            else

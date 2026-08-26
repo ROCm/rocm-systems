@@ -358,14 +358,14 @@ namespace RcclUnitTesting
     InteractiveWait("Finishing SetCollectiveArgs");
   }
 
-  void TestBed::AllocateMem(bool   const inPlace,
-                            bool   const useManagedMem,
-                            int    const groupId,
-                            int    const collId,
-                            int    const rank,
-                            bool   const userRegistered)
+  void TestBed::AllocateMemInternal(bool   const inPlace,
+                                    bool   const useManagedMem,
+                                    int    const groupId,
+                                    int    const collId,
+                                    int    const rank,
+                                    bool   const userRegistered) 
   {
-    InteractiveWait("Starting AllocateMem");
+    InteractiveWait("Starting AllocateMemInternal");
 
     // Build list of ranks this applies to (-1 for rank means to set for all)
     std::vector<int> rankList;
@@ -396,6 +396,24 @@ namespace RcclUnitTesting
     for (int childId = 0; childId < this->numActiveChildren; ++childId) {
       PIPE_CHECK(childId);
     }
+    InteractiveWait("Finishing AllocateMemInternal");
+  }
+
+  void TestBed::RegisterMemInternal(int    const groupId,
+                                    int    const collId,
+                                    int    const rank)
+  {
+    InteractiveWait("Starting RegisterMemInternal");
+    // Build list of ranks this applies to (-1 for rank means to set for all)
+    std::vector<int> rankList;
+    for (int i = 0; i < this->numActiveRanks; ++i)
+      if (rank == -1 || rank == i) rankList.push_back(i);
+
+    // Build list of groups this applies to (-1 for groupId means to set for all)
+    std::vector<int> groupList;
+    for (int i = 0; i < this->numGroupCalls; ++i)
+      if (groupId == -1 || groupId == i) groupList.push_back(i);
+
     // Grouped RCCL Window Registration across all active children
     int const regCmd = TestBedChild::CHILD_REGISTER_MEM;
     for (auto currGroup : groupList) {
@@ -408,9 +426,20 @@ namespace RcclUnitTesting
       // 2. THEN wait for all child ACKs after all children have entered registration
       for (int childId = 0; childId < this->numActiveChildren; ++childId) {
          PIPE_CHECK(childId);
-         }
       }
-    InteractiveWait("Finishing AllocateMem");
+    }
+    InteractiveWait("Finishing RegisterMemInternal");
+  }
+
+  void TestBed::AllocateMem(bool   const inPlace,
+                            bool   const useManagedMem,
+                            int    const groupId,
+                            int    const collId,
+                            int    const rank,
+                            bool   const userRegistered)
+  {
+    this->AllocateMemInternal(inPlace,useManagedMem,groupId,collId,rank,userRegistered);
+    this->RegisterMemInternal(groupId,collId,rank);
   }
 
   void TestBed::PrepareData(int         const groupId,

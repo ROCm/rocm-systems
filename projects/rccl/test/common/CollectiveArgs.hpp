@@ -191,5 +191,6 @@ namespace RcclUnitTesting
 
     // Returns true if collective function utilizes a root rank
     static bool UsesRoot(ncclFunc_t const funcType);
+    ErrCode AttachMem();
   };
 }

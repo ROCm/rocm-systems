@@ -135,10 +135,10 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllGather};
-    std::vector<ncclDataType_t> const dataTypes       = {ncclUint8, ncclBfloat16, ncclUint32, ncclUint64};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclUint64,ncclUint32,ncclBfloat16,ncclUint8};
     std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
     std::vector<int>            const roots           = {0};
-    std::vector<int>            const numElements     = {1,4314};
+    std::vector<int>            const numElements     = {1,3,7,4314,5003,1048575,1048576};
     std::vector<bool>           const inPlaceList     = {true,false};
     std::vector<bool>           const managedMemList  = {false};
     std::vector<bool>           const useHipGraphList = {true,false};

@@ -34,6 +34,7 @@ namespace RcclUnitTesting
       CHILD_DESTROY_GRAPHS   = 10, // DestroyGraphs()
       CHILD_STOP             = 11, // Stop()
       CHILD_REGISTER_MEM     = 12, // RegisterMem()
+      // CHILD_DEREGISTER_MEM   = 13, // DeregisterMemInternal()
       NUM_CHILD_COMMANDS     = 13
     };
 
@@ -127,5 +128,11 @@ namespace RcclUnitTesting
     ErrCode DestroyGraphs();
 
     ErrCode RegisterMem();
+    
+  private:
+    ErrCode DeregisterMemInternal_impl(int groupId, int collId, int localRank);
+
+    ErrCode DeallocateMemInternal_impl(int groupId, int collId, int localRank);
+
   };
 }

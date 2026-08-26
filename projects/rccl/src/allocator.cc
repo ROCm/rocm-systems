@@ -10,8 +10,6 @@
 #include "group.h"
 #include "nvtx.h"
 #include "utils.h"
-#include <mutex>
-
 
 NCCL_PARAM(ShadowMempoolMaxSize, "SHADOW_MEMPOOL_MAX_SIZE", 1LL << 30);
 
@@ -137,7 +135,7 @@ ncclResult_t ncclMemFree_impl(void* ptr) {
   CUDACHECKGOTO(cudaSetDevice((int)ptrDev), ret, fail);
   if (ncclCuMemEnable()) {
     // User facing API, memManager does not need to track user memory. Same as ncclMemAlloc
-    NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret, fail); 
+    NCCLCHECKGOTO(ncclCuMemFree(ptr, nullptr), ret, fail);
     goto exit;
   }
 

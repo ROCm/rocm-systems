@@ -36,6 +36,10 @@ namespace RcclUnitTesting
     this->dataType          = dataType;
     this->numInputElements  = numInputElements;
     this->numOutputElements = numOutputElements;
+    if (this->inputGpu.ptr != nullptr || this->outputGpu.ptr != nullptr) 
+    {
+      this->AttachMem();
+    }
     this->streamIdx         = streamIdx;
     this->options           = optionalColArgs;
 
@@ -57,6 +61,35 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  ErrCode CollectiveArgs::AttachMem()
+  {
+    // Calculate the current active bytes based on this iteration's element count
+     size_t currentInputBytes = this->numInputElements * DataTypeToBytes(this->dataType);
+     size_t currentOutputBytes = this->numOutputElements * DataTypeToBytes(this->dataType);
+     
+    // For out-of-place, both pointers remain at the start of their respective base allocations.
+    // No attachment/offsetting is necessary.
+    if (this->inPlace)
+    {
+      if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
+      {
+        // inputGpu holds the base pointer. Offset outputGpu.
+        this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank * currentOutputBytes));
+      }
+      else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
+      {
+        // outputGpu holds the base pointer. Offset inputGpu.
+        this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * currentInputBytes));
+      }
+      else
+      {
+        // Both buffers share the exact same base pointer
+        this->outputGpu.Attach(this->inputGpu.ptr);
+      }
+    }
+    return TEST_SUCCESS;
+  }
+
   ErrCode CollectiveArgs::AllocateMem(bool   const inPlace,
                                       bool   const useManagedMem,
                                       bool   const userRegistered)
@@ -73,22 +106,20 @@ namespace RcclUnitTesting
 
     if (inPlace)
     {
-      if (this->funcType == ncclCollScatter)
+      if (this->funcType == ncclCollScatter || this->funcType == ncclCollReduceScatter)
       {
         CHECK_CALL(this->inputGpu.AllocateGpuMem(this->numInputBytesAllocated, useManagedMem, userRegistered));
-        this->outputGpu.Attach(this->inputGpu.U1 + (this->globalRank  * this->numOutputBytesAllocated));
       }
       else if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
       {
         CHECK_CALL(this->outputGpu.AllocateGpuMem(this->numOutputBytesAllocated, useManagedMem, userRegistered));
-        this->inputGpu.Attach(this->outputGpu.U1 + (this->globalRank * this->numInputBytesAllocated));
       }
       else
       {
         size_t const numBytes = std::max(this->numInputBytesAllocated, this->numOutputBytesAllocated);
         CHECK_CALL(this->inputGpu.AllocateGpuMem(numBytes, useManagedMem, userRegistered));
-        this->outputGpu.Attach(this->inputGpu.ptr);
       }
+      CHECK_CALL(this->AttachMem());
       CHECK_CALL(this->expected.AllocateCpuMem(this->numOutputBytesAllocated));
     }
     else
@@ -181,7 +212,7 @@ namespace RcclUnitTesting
     // If in-place, either only inputGpu or outputGpu was allocated
     if (this->inPlace)
     {
-      if (this->funcType == ncclCollGather)
+      if (this->funcType == ncclCollGather || this->funcType == ncclCollAllGather)
         this->outputGpu.FreeGpuMem();
       else
         this->inputGpu.FreeGpuMem(this->userRegistered);
