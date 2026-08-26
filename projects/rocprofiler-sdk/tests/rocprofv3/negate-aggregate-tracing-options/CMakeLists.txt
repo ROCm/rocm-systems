@@ -92,7 +92,7 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
-        "direct rocprofv3 output format.*deprecated: CSV, PFTrace \\(Perfetto\\), OTF2.*hipFILE and rocSHMEM"
+        "direct rocprofv3 output format.*deprecated: CSV, PFTrace \\(Perfetto\\), OTF2.*hipFILE, rocSHMEM, and HIP event"
     )
 
 rocprofiler_add_integration_execute_test(
@@ -106,4 +106,5 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
-        "direct rocprofv3 output format.*deprecated: CSV.*hipFILE and rocSHMEM")
+        "direct rocprofv3 output format.*deprecated: CSV.*hipFILE, rocSHMEM, and HIP event"
+    )

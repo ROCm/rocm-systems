@@ -205,7 +205,7 @@ thread_local active_event_context_t g_active_event_ctx = {};
 
 using event_info_map_t     = std::unordered_map<uint64_t, event_record_info_t>;
 using coalesce_group_map_t = std::unordered_map<uint64_t, coalesce_group_ptr_t>;
-using pending_wait_map_t   = std::unordered_map<uint64_t, pending_wait_t>;
+using pending_wait_map_t   = std::unordered_multimap<uint64_t, pending_wait_t>;
 
 using stream_is_capturing_fn_t = hipError_t (*)(hipStream_t, hipStreamCaptureStatus*);
 
@@ -364,6 +364,7 @@ event_record_impl(hipEvent_t event, hipStream_t stream)
     return ret;
 }
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 10
 hipError_t
 event_record_with_flags_impl(hipEvent_t event, hipStream_t stream, unsigned int flags)
 {
@@ -374,6 +375,7 @@ event_record_with_flags_impl(hipEvent_t event, hipStream_t stream, unsigned int 
         check_coalesced_record(reinterpret_cast<uint64_t>(event));
     return ret;
 }
+#endif
 
 void
 check_deferred_wait(uint64_t hip_event_handle)
@@ -456,7 +458,23 @@ get_active_event_context()
 void
 record_event_info(uint64_t hip_event_handle, event_record_info_t info)
 {
-    get_event_info_map()->wlock([&](auto& map) { map[hip_event_handle] = info; });
+    auto old_signal = uint64_t{0};
+    get_event_info_map()->wlock([&](auto& map) {
+        auto it = map.find(hip_event_handle);
+        if(it != map.end()) old_signal = it->second.original_signal;
+        map[hip_event_handle] = info;
+    });
+
+    if(old_signal != 0 && old_signal != info.original_signal)
+    {
+        for(;;)
+        {
+            auto pw = consume_pending_wait(old_signal);
+            if(!pw.corr_id_ref) break;
+            pw.corr_id_ref->sub_kern_count();
+            pw.corr_id_ref->sub_ref_count();
+        }
+    }
 }
 
 event_record_info_t
@@ -481,13 +499,35 @@ erase_event_info(uint64_t hip_event_handle)
     auto info = lookup_event_info(hip_event_handle);
     if(info.original_signal != 0)
     {
-        auto pw = consume_pending_wait(info.original_signal);
-        if(pw.corr_id_ref)
+        for(;;)
         {
+            auto pw = consume_pending_wait(info.original_signal);
+            if(!pw.corr_id_ref) break;
             pw.corr_id_ref->sub_kern_count();
             pw.corr_id_ref->sub_ref_count();
         }
     }
+
+    get_pending_wait_map()->wlock([&](auto& map) {
+        for(auto it = map.begin(); it != map.end();)
+        {
+            if(it->second.hip_event_handle == hip_event_handle)
+            {
+                if(it->second.corr_id_ref)
+                {
+                    it->second.corr_id_ref->sub_kern_count();
+                    it->second.corr_id_ref->sub_ref_count();
+                }
+                it = map.erase(it);
+                g_pending_wait_count.fetch_sub(1, std::memory_order_release);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    });
+
     get_event_info_map()->wlock([&](auto& map) { map.erase(hip_event_handle); });
     get_coalesce_group_map()->wlock([&](auto& map) { map.erase(hip_event_handle); });
 }
@@ -505,25 +545,8 @@ lookup_coalesce_group(uint64_t hip_event_handle)
 void
 register_pending_wait(uint64_t signal_handle, pending_wait_t pw)
 {
-    pending_wait_t replaced{};
-    get_pending_wait_map()->wlock([&](auto& map) {
-        auto it = map.find(signal_handle);
-        if(it != map.end())
-        {
-            replaced   = std::move(it->second);
-            it->second = std::move(pw);
-        }
-        else
-        {
-            map.emplace(signal_handle, std::move(pw));
-            g_pending_wait_count.fetch_add(1, std::memory_order_release);
-        }
-    });
-    if(replaced.corr_id_ref)
-    {
-        replaced.corr_id_ref->sub_kern_count();
-        replaced.corr_id_ref->sub_ref_count();
-    }
+    get_pending_wait_map()->wlock([&](auto& map) { map.emplace(signal_handle, std::move(pw)); });
+    g_pending_wait_count.fetch_add(1, std::memory_order_release);
 }
 
 bool
