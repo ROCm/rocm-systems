@@ -878,8 +878,9 @@ add_test(
 add_test(
     NAME test_torch_trace_kernel_names
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_kernel_names.xml
-        ${COV_OPTION} tests/unit/test_torch_trace_kernel_names.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_torch_trace_kernel_names.xml ${COV_OPTION}
+        tests/unit/test_torch_trace_kernel_names.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1282,7 +1283,7 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
 )
 # BUILD_TORCH_TRACE_COLLECTOR=AUTO skips the extension when Torch is absent.
-# The loader searches lib*/rocprofiler-compute/ for the versioned artifact.
+# The loader searches lib/rocprofiler-compute/ for the versioned artifact.
 if(TARGET ${TORCH_TRACE_COLLECTOR_TARGET})
     install(
         TARGETS ${TORCH_TRACE_COLLECTOR_TARGET}

@@ -69,9 +69,7 @@ class _TorchState:
         self.nn: Any = None
         self.torch_root: str = ""
 
-        self.loader_module: Any = None
         self.load_torch_trace_collector: Optional[Callable[..., Any]] = None
-        self.load_diagnostics: list[tuple[str, str]] = []
         self.torch_trace_collector: Any = None
         self.using_c_tier: bool = False
         self.c_tier_initialized: bool = False
@@ -272,22 +270,19 @@ def _initialize_c_tier() -> bool:
         return False
 
     try:
-        result = _STATE.load_torch_trace_collector()
+        module = _STATE.load_torch_trace_collector()
     except UnsupportedTorchVersionError as exc:
         console_error("ml api trace", str(exc))
+        module = None
     except Exception as exc:
         console_warning(
             "ml api trace",
             "C++ RecordFunction tier unavailable "
             f"({type(exc).__name__}: {exc}); falling back to Python tier",
         )
-        result = None
+        module = None
 
-    if result is not None:
-        _STATE.torch_trace_collector = result.module
-        _STATE.load_diagnostics = result.diagnostics
-    else:
-        _STATE.torch_trace_collector = None
+    _STATE.torch_trace_collector = module
 
     if _STATE.torch_trace_collector is not None:
         try:
@@ -318,20 +313,11 @@ def _emit_python_tier_fallback_warning() -> None:
     """Emit one warning when the C++ tier is unavailable."""
     if _STATE.using_c_tier:
         return
-    loader_trail = ""
-    if _STATE.loader_module is not None:
-        try:
-            loader_trail = _STATE.loader_module.format_load_diagnostic_trail(
-                _STATE.load_diagnostics,
-            )
-        except Exception:
-            loader_trail = ""
-    trail_block = f"\nLoader trail:\n{loader_trail}" if loader_trail else ""
     console_warning(
         "ml api trace",
         "Coverage tier: Python-only injector (the C++ RecordFunction tier is "
         "unavailable). Operator coverage on autograd backward threads is "
-        "reduced; backward markers may lack their full context chain." + trail_block,
+        "reduced; backward markers may lack their full context chain.",
     )
 
 
@@ -1237,10 +1223,8 @@ def _resolve_torch() -> bool:
     except Exception:
         _STATE.nn = None
     try:
-        from . import torch_cpp_loader as _loader_mod
         from .torch_cpp_loader import load as _loader_fn
 
-        _STATE.loader_module = _loader_mod
         _STATE.load_torch_trace_collector = _loader_fn
     except Exception as exc:
         console_warning(
