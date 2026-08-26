@@ -192,7 +192,7 @@ protected:
 
 TEST_F(shmem_gotcha_test, test_static_labels)
 {
-    shmem_gotcha_under_test_t g;
+    const shmem_gotcha_under_test_t g;
     EXPECT_EQ(g.label(), "shmem_gotcha");
     EXPECT_EQ(g.gotcha_capacity, GOTCHA_CAPACITY);
 }
@@ -279,7 +279,7 @@ TEST_F(shmem_gotcha_test, test_audit_outgoing_int)
     MockedGotchaData data;
     data.tool_id = "shmem_my_pe";
 
-    int ret = 42;
+    const int ret = 42;
 
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_int)
         .Times(1)
@@ -296,7 +296,7 @@ TEST_F(shmem_gotcha_test, test_audit_outgoing_long)
     MockedGotchaData data;
     data.tool_id = "shmem_fadd64";
 
-    long ret = 999999L;
+    const long ret = 999999L;
 
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_long)
         .Times(1)
@@ -399,15 +399,15 @@ TEST_F(shmem_gotcha_test, test_expand_tokens_to_apis)
     using namespace rocprofsys::component::shmem_categories;
     const auto& m = get_category_map();
 
-    std::set<std::string> init_only = { "init" };
-    auto                  expanded  = expand_tokens_to_apis(init_only);
+    const std::set<std::string> init_only = { "init" };
+    auto                        expanded  = expand_tokens_to_apis(init_only);
     EXPECT_EQ(expanded, m.at("init"));
 
-    std::set<std::string> raw_api = { "shmem_init" };
+    const std::set<std::string> raw_api = { "shmem_init" };
     EXPECT_EQ(expand_tokens_to_apis(raw_api), std::set<std::string>{ "shmem_init" });
 
-    std::set<std::string> mixed          = { "init", "shmem_malloc" };
-    auto                  mixed_expanded = expand_tokens_to_apis(mixed);
+    const std::set<std::string> mixed          = { "init", "shmem_malloc" };
+    auto                        mixed_expanded = expand_tokens_to_apis(mixed);
     EXPECT_EQ(mixed_expanded.count("shmem_init"), 1u);
     EXPECT_EQ(mixed_expanded.count("shmem_malloc"), 1u);
 }
@@ -451,8 +451,8 @@ TEST_F(shmem_gotcha_test, test_configure_function_names)
     }
     EXPECT_EQ(expected_names.size(), static_cast<size_t>(NUMBER_OF_FUNCTIONS));
 
-    std::set<std::string> configured_set(configured_names.begin(),
-                                         configured_names.end());
+    const std::set<std::string> configured_set(configured_names.begin(),
+                                               configured_names.end());
     EXPECT_EQ(configured_set, expected_names);
 }
 
