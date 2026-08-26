@@ -102,13 +102,10 @@ extern "C" const char* __asan_default_options() {
 class InitMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    // call_once latches (onceEnvCtaPolicy :3066) make an ambient value order-dependent and unresettable, so mask them.
-    // Re-derive with: grep -n 'ncclGetEnv(\|getenv(' src/init.cc src/misc/{utils,argcheck,archinfo}.cc
+    // ncclGetEnv reads are hermetic already (micro_getenv is strict). Only the bare getenv/std::getenv
+    // sites reach the real environment, so mask those. Re-derive with: grep -n '\bgetenv(' src/init.cc
     ctaPolicyEnv = NCCL_CONFIG_UNDEF_INT;
-    for (const char* name : {"NCCL_CTA_POLICY", "NCCL_COLLNET_ENABLE", "NCCL_CHECK_MODE",
-                             "NCCL_COMM_ID", "NCCL_LAUNCH_MODE", "NCCL_NET", "NCCL_PAT_ENABLE",
-                             "NCCL_TOPO_DUMP_FILE", "HSA_FORCE_FINE_GRAIN_PCIE",
-                             "HSA_NO_SCRATCH_RECLAIM", "ROCSHMEM_HEAP_SIZE", "NCCL_HOSTID"}) {
+    for (const char* name : {"HSA_NO_SCRATCH_RECLAIM", "HSA_FORCE_FINE_GRAIN_PCIE", "ROCSHMEM_HEAP_SIZE"}) {
       SetMicroEnvAbsent(name);
     }
   }
@@ -168,35 +165,11 @@ TEST_F(InitMicrotest, UniformRanksPerHost_ZeroRanks_ReturnsFalse) {
 }
 
 namespace {
-// These targets link GTest::GTest only (no gmock), so ::testing::HasSubstr is unavailable.
-bool LogHas(const std::string& log, const char* needle) {
-  return log.find(needle) != std::string::npos;
-}
+using RcclUnitTesting::LogHas;
+using RcclUnitTesting::ScopedDebugLogging;
 
-// INFO is gated on ncclDebugLevel, pinned to NCCL_LOG_NONE by the fakes; captures must raise it. WARN/VERSION are not.
-class ScopedDebugLogging {
- public:
-  explicit ScopedDebugLogging(int level = NCCL_LOG_INFO, uint64_t mask = NCCL_ALL)
-      : level_(ncclDebugLevel), mask_(ncclDebugMask) {
-    ncclDebugLevel = level;
-    ncclDebugMask = mask;
-  }
-  ~ScopedDebugLogging() {
-    ncclDebugLevel = level_;
-    ncclDebugMask = mask_;
-  }
-  ScopedDebugLogging(const ScopedDebugLogging&) = delete;
-  ScopedDebugLogging& operator=(const ScopedDebugLogging&) = delete;
-
- private:
-  int level_;
-  uint64_t mask_;
-};
-}  // namespace
-
-namespace {
 std::string RunShowVersion(int debugLevel) {
-  ScopedDebugLogging dbg(debugLevel);
+  ScopedDebugLogging dbg(debugLevel, NCCL_ALL);
   return RcclUnitTesting::CaptureLog([] { showVersion(); });
 }
 }  // namespace
@@ -723,7 +696,7 @@ TEST_F(InitMicrotest, P2pSchedule_IndivisibleLocalRanks_ShrinksGroupSizeByGcd) {
   std::string log;
   ncclResult_t res = ncclInternalError;
   {
-    ScopedDebugLogging dbg;
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
     log = RcclUnitTesting::CaptureLog([&] { res = ncclP2pSchedule(c.get()); });
   }
   EXPECT_EQ(ncclSuccess, res);
@@ -827,7 +800,7 @@ int RunCtaPolicyEnv(const char* value) {
 
 // Several inputs are state-indistinguishable ("7" and unset both leave UNDEF), so the diagnostic is the only oracle.
 std::string RunCtaPolicyEnvCapturingLog(const char* value, int* policyOut) {
-  ScopedDebugLogging dbg;
+  ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
   return RcclUnitTesting::CaptureLog([&] { *policyOut = RunCtaPolicyEnv(value); });
 }
 }  // namespace
