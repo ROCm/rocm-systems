@@ -3362,7 +3362,7 @@ TEST(ConSan, LdsAddressFaultTracksGuestAfterGfx1250PrivateSpillPrologue) {
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3405,7 +3405,7 @@ TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
     return candidate.phase == ConSanPatchPhase::Instrumentation &&
            candidate.anchor_offset == sizeof(uint32_t);

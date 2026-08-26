@@ -123,14 +123,14 @@ TEST(ConSan, FaultMutationCardinalityReportsZeroAndEnforcesGuard) {
 
   const ConSanResult unguarded = try_patch_consan(bytes, options);
   EXPECT_EQ(unguarded.outcome, ConSanTransformOutcome::Unchanged);
-  EXPECT_EQ(unguarded.requested_fault_mutations, 1u);
-  EXPECT_EQ(unguarded.applied_fault_mutations, 0u);
+  EXPECT_EQ(unguarded.mutation.fault.requested, 1u);
+  EXPECT_EQ(unguarded.mutation.fault.applied, 0u);
 
   options.fault_require_exactly_one = true;
   const ConSanResult guarded = try_patch_consan(bytes, options);
   EXPECT_EQ(guarded.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(guarded.requested_fault_mutations, 1u);
-  EXPECT_EQ(guarded.applied_fault_mutations, 0u);
+  EXPECT_EQ(guarded.mutation.fault.requested, 1u);
+  EXPECT_EQ(guarded.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(guarded.errors, [](const std::string &error) {
     return error.find("required exactly one applied mutation, got 0") != std::string::npos;
   }));
@@ -149,8 +149,8 @@ TEST(ConSan, FaultMutationCardinalityExcludesRetiredThOrderMutation) {
 
   const ConSanResult unguarded = try_patch_consan(bytes, options);
   EXPECT_EQ(unguarded.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(unguarded.requested_fault_mutations, 2u);
-  EXPECT_EQ(unguarded.applied_fault_mutations, 2u);
+  EXPECT_EQ(unguarded.mutation.fault.requested, 2u);
+  EXPECT_EQ(unguarded.mutation.fault.applied, 2u);
   EXPECT_TRUE(std::ranges::any_of(unguarded.warnings, [](const std::string &warning) {
     return warning.find("removed associated global_inv") != std::string::npos;
   }));
@@ -158,8 +158,8 @@ TEST(ConSan, FaultMutationCardinalityExcludesRetiredThOrderMutation) {
   options.fault_require_exactly_one = true;
   const ConSanResult guarded = try_patch_consan(bytes, options);
   EXPECT_EQ(guarded.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(guarded.requested_fault_mutations, 2u);
-  EXPECT_EQ(guarded.applied_fault_mutations, 2u);
+  EXPECT_EQ(guarded.mutation.fault.requested, 2u);
+  EXPECT_EQ(guarded.mutation.fault.applied, 2u);
 }
 
 TEST(ConSan, LdsAddressFaultInventoryAndExactMutationAreTargetNeutral) {
@@ -200,10 +200,10 @@ TEST(ConSan, LdsAddressFaultInventoryAndExactMutationAreTargetNeutral) {
     const ConSanResult result = try_patch_consan(bytes, live_options);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-    EXPECT_EQ(result.requested_fault_mutations, 1u);
-    EXPECT_EQ(result.planned_fault_mutations, 1u);
-    EXPECT_EQ(result.applied_fault_mutations, 1u);
-    EXPECT_EQ(result.applied_fault_logical_identity, site->identity);
+    EXPECT_EQ(result.mutation.fault.requested, 1u);
+    EXPECT_EQ(result.mutation.fault.planned, 1u);
+    EXPECT_EQ(result.mutation.fault.applied, 1u);
+    EXPECT_EQ(result.mutation.applied_fault_logical_identity, site->identity);
     const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
       return patch.phase == ConSanPatchPhase::Mutation &&
              patch.kind == ConSanPatchKind::InlineLdsAddressRewrite;
@@ -229,7 +229,7 @@ TEST(ConSan, LdsAddressFaultRejectsSameRegisterAndFinalProofRejectsOtherFieldDri
   options.fault_require_exactly_one = true;
   const ConSanResult rejected = try_patch_consan(bytes, options);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(rejected.applied_fault_mutations, 0u);
+  EXPECT_EQ(rejected.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(rejected.errors, [](const std::string &error) {
     return error.find("requires a distinct 8-bit replacement VGPR") != std::string::npos;
   }));
@@ -290,7 +290,7 @@ TEST(ConSan, LdsAddressFaultRequiresExplicitAllocatedReplacement) {
   options.fault_lds_address_vgpr = 4u;
   const ConSanResult outside_allocation = try_patch_consan(bytes, options);
   EXPECT_EQ(outside_allocation.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(outside_allocation.applied_fault_mutations, 0u);
+  EXPECT_EQ(outside_allocation.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(outside_allocation.errors, [](const std::string &error) {
     return error.find("outside an execution owner's allocated VGPR window") != std::string::npos;
   })) << testing::PrintToString(outside_allocation.errors);
@@ -340,7 +340,7 @@ TEST(ConSanMoi, LdsAddressFaultComposesWithEveryMoiAccessEngine) {
         << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
     EXPECT_TRUE(result.staged_composition_validated);
     EXPECT_TRUE(result.final_validation_passed);
-    EXPECT_EQ(result.applied_fault_mutations, 1u);
+    EXPECT_EQ(result.mutation.fault.applied, 1u);
     const auto mutation = std::ranges::find(
         result.patches, ConSanPatchKind::InlineLdsAddressRewrite, &ConSanPatchInfo::kind);
     ASSERT_NE(mutation, result.patches.end());
@@ -440,9 +440,9 @@ TEST(ConSan, FinalValidationRejectsScopeMutationThatChangesTh) {
   options.fault_atomic_index = 0;
   const ConSanResult valid = try_patch_consan(bytes, options);
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(valid.requested_fault_mutations, 1u);
-  EXPECT_EQ(valid.planned_fault_mutations, 1u);
-  EXPECT_EQ(valid.applied_fault_mutations, 1u);
+  EXPECT_EQ(valid.mutation.fault.requested, 1u);
+  EXPECT_EQ(valid.mutation.fault.planned, 1u);
+  EXPECT_EQ(valid.mutation.fault.applied, 1u);
   ASSERT_EQ(valid.fault_plans.size(), 1u);
   EXPECT_EQ(valid.fault_plans.front().kind, ConSanFaultMutationKind::AtomicWeakenScope);
   ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);

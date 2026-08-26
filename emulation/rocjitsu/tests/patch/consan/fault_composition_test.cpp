@@ -115,8 +115,8 @@ TEST(ConSan, PerturbationEmissionOrdersBarrierSleepAtSelectedEdge) {
   EXPECT_EQ(release.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(release.modified);
   EXPECT_TRUE(release.final_validation_passed);
-  EXPECT_EQ(release.planned_perturbations, 1u);
-  EXPECT_EQ(release.applied_perturbations, 1u);
+  EXPECT_EQ(release.mutation.perturbation.planned, 1u);
+  EXPECT_EQ(release.mutation.perturbation.applied, 1u);
   ASSERT_EQ(release.patches.size(), 1u);
   const ConSanPatchInfo &release_patch = release.patches.front();
   EXPECT_EQ(release_patch.kind, ConSanPatchKind::TrampolineScPerturbation);
@@ -343,7 +343,7 @@ TEST(ConSan, PerturbationEmissionPrefersLocalCaveAndReservesMultipleAppendedBodi
       try_patch_consan(make_rdna4_lds_code_object(two_pair_words), options);
   ASSERT_TRUE(multiple.errors.empty()) << (multiple.errors.empty() ? "" : multiple.errors.front());
   EXPECT_EQ(multiple.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(multiple.applied_perturbations, 2u);
+  EXPECT_EQ(multiple.mutation.perturbation.applied, 2u);
   ASSERT_EQ(multiple.patches.size(), 2u);
   EXPECT_EQ(multiple.patches[0].trampoline_offset, 20u);
   EXPECT_EQ(multiple.patches[1].trampoline_offset, 32u);
@@ -367,8 +367,8 @@ TEST(ConSan, PerturbationEmissionFailsClosedWithoutReachableCaveAndRollsBackComp
   EXPECT_FALSE(unreachable.modified);
   EXPECT_TRUE(unreachable.elf_bytes.empty());
   EXPECT_TRUE(unreachable.errors.empty());
-  EXPECT_EQ(unreachable.planned_perturbations, 1u);
-  EXPECT_EQ(unreachable.applied_perturbations, 0u);
+  EXPECT_EQ(unreachable.mutation.perturbation.planned, 1u);
+  EXPECT_EQ(unreachable.mutation.perturbation.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(unreachable.warnings, [](const std::string &warning) {
     return warning.find("no reachable local or appended cave") != std::string::npos;
   }));
@@ -419,8 +419,8 @@ TEST(ConSan, BarrierCompositeRollsBackWhenDropDestroysSelectedEdge) {
   EXPECT_FALSE(result.staged_composition_validated);
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
-  EXPECT_EQ(result.applied_fault_mutations, 0u);
-  EXPECT_EQ(result.applied_perturbations, 0u);
+  EXPECT_EQ(result.mutation.fault.applied, 0u);
+  EXPECT_EQ(result.mutation.perturbation.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("selected perturbation edge was destroyed") != std::string::npos;
   }));
@@ -568,12 +568,12 @@ TEST(ConSan, FinalValidationProvesPerturbationBytesAndPristineSequenceSemantics)
   expect_rejected(std::move(stale_identity), "one pristine admitted sequence edge");
 
   ConSanResult wrong_count = valid;
-  wrong_count.applied_perturbations = 0;
+  wrong_count.mutation.perturbation.applied = 0;
   expect_rejected(std::move(wrong_count), "inconsistent applied patch count");
 
   ConSanResult duplicate = valid;
   duplicate.patches.push_back(duplicate.patches.front());
-  duplicate.applied_perturbations = 2;
+  duplicate.mutation.perturbation.applied = 2;
   expect_rejected(std::move(duplicate), "duplicate sequence edge");
 
   expect_rejected(replace_body_word(patch.trampoline_size - sizeof(uint32_t),
@@ -651,7 +651,7 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   ASSERT_TRUE(composed.errors.empty()) << testing::PrintToString(composed.errors);
   EXPECT_EQ(composed.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(composed.final_validation_passed);
-  EXPECT_EQ(composed.applied_perturbations, 1u);
+  EXPECT_EQ(composed.mutation.perturbation.applied, 1u);
   ASSERT_EQ(composed.patches.size(), 2u);
   EXPECT_EQ(composed.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(composed.patches[0].anchor_offset, 8u);
@@ -678,7 +678,7 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   ASSERT_TRUE(all_supported.errors.empty()) << testing::PrintToString(all_supported.errors);
   EXPECT_EQ(all_supported.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(all_supported.final_validation_passed);
-  EXPECT_EQ(all_supported.applied_perturbations, 1u);
+  EXPECT_EQ(all_supported.mutation.perturbation.applied, 1u);
   ASSERT_EQ(all_supported.patches.size(), 2u);
   EXPECT_EQ(all_supported.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(all_supported.patches[1].kind, ConSanPatchKind::TrampolineScPerturbation);
@@ -725,7 +725,7 @@ TEST(ConSan, PerturbationCompositionReservesLocalCaveAndRollsBackUnreachablePlan
   EXPECT_FALSE(unreachable.modified);
   EXPECT_TRUE(unreachable.elf_bytes.empty());
   EXPECT_TRUE(unreachable.patches.empty());
-  EXPECT_EQ(unreachable.applied_perturbations, 0u);
+  EXPECT_EQ(unreachable.mutation.perturbation.applied, 0u);
 }
 
 TEST(ConSan, PerturbationCompositionSharesTransactionWithFlatRedundantAccess) {
@@ -853,8 +853,8 @@ TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
   EXPECT_FALSE(disabled_first.modified);
   EXPECT_TRUE(disabled_first.elf_bytes.empty());
   EXPECT_TRUE(disabled_first.patches.empty());
-  EXPECT_EQ(disabled_first.planned_perturbations, 0u);
-  EXPECT_EQ(disabled_first.applied_perturbations, 0u);
+  EXPECT_EQ(disabled_first.mutation.perturbation.planned, 0u);
+  EXPECT_EQ(disabled_first.mutation.perturbation.applied, 0u);
   ASSERT_EQ(disabled_first.perturbation_candidates.size(),
             disabled_second.perturbation_candidates.size());
   for (size_t i = 0; i < disabled_first.perturbation_candidates.size(); ++i) {
@@ -872,8 +872,8 @@ TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
   const ConSanResult one = try_patch_consan(bytes, enabled);
   ASSERT_EQ(one.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(one.errors);
-  EXPECT_EQ(one.planned_perturbations, 1u);
-  EXPECT_EQ(one.applied_perturbations, 1u);
+  EXPECT_EQ(one.mutation.perturbation.planned, 1u);
+  EXPECT_EQ(one.mutation.perturbation.applied, 1u);
   EXPECT_EQ(one.patches.size(), 1u);
 
   enabled.sc_perturb_max = 2;
@@ -882,8 +882,8 @@ TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
   const ConSanResult two = try_patch_consan(bytes, enabled);
   ASSERT_EQ(two.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(two.errors);
-  EXPECT_EQ(two.planned_perturbations, 2u);
-  EXPECT_EQ(two.applied_perturbations, 2u);
+  EXPECT_EQ(two.mutation.perturbation.planned, 2u);
+  EXPECT_EQ(two.mutation.perturbation.applied, 2u);
   EXPECT_EQ(two.patches.size(), 2u);
 
   std::vector<uint32_t> far_words(40000u, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
@@ -902,8 +902,8 @@ TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
   EXPECT_TRUE(unreachable.elf_bytes.empty());
   EXPECT_TRUE(unreachable.patches.empty());
   EXPECT_FALSE(unreachable.final_validation_passed);
-  EXPECT_EQ(unreachable.planned_perturbations, 1u);
-  EXPECT_EQ(unreachable.applied_perturbations, 0u);
+  EXPECT_EQ(unreachable.mutation.perturbation.planned, 1u);
+  EXPECT_EQ(unreachable.mutation.perturbation.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(unreachable.warnings, [](const std::string &warning) {
     return warning.find("no reachable local or appended cave") != std::string::npos;
   }));
@@ -1103,7 +1103,7 @@ TEST(ConSan, FaultCompositionRollsBackMutationWhenInstrumentationIsInvalid) {
   EXPECT_NE(result.errors.front().find("16-bit s_sleep"), std::string::npos);
   ASSERT_FALSE(result.warnings.empty());
   EXPECT_NE(result.warnings.back().find("rolled back staged fault mutation"), std::string::npos);
-  EXPECT_EQ(result.applied_fault_mutations, 0u);
+  EXPECT_EQ(result.mutation.fault.applied, 0u);
   EXPECT_EQ(bytes, original);
 }
 

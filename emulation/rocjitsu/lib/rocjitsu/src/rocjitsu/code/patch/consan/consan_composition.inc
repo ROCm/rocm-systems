@@ -1,13 +1,17 @@
 namespace {
 
-struct ConSanTransformStage {
+/// Owns the independently validated fault-corruption image while the ordinary
+/// instrumentation pass analyzes and lowers against that image. This stage is
+/// intentionally fault-only: perturbation is planned against the pristine
+/// image and applied by the subsequent instrumentation pass, so carrying a
+/// complete `ConSanMutationOutcome` here would give this stage false ownership
+/// of perturbation facts and permit it to erase the later pass's outcome.
+struct ConSanFaultTransformStage {
   std::vector<uint8_t> image;
   std::vector<ConSanPatchInfo> patches;
   std::vector<std::string> warnings;
-  size_t requested_fault_mutations = 0;
-  size_t planned_fault_mutations = 0;
-  size_t applied_fault_mutations = 0;
-  std::optional<std::string> applied_fault_logical_identity;
+  ConSanMutationTally fault;
+  std::optional<std::string> logical_identity;
 };
 
 using ConSanDescriptorNameIndex = std::unordered_map<std::string, uint64_t>;
@@ -114,23 +118,16 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
   }
 }
 
-[[nodiscard]] ConSanTransformStage take_modified_stage(ConSanResult &result) {
-  return {std::move(result.elf_bytes),
-          std::move(result.patches),
-          std::move(result.warnings),
-          result.requested_fault_mutations,
-          result.planned_fault_mutations,
-          result.applied_fault_mutations,
-          std::move(result.applied_fault_logical_identity)};
+[[nodiscard]] ConSanFaultTransformStage take_modified_stage(ConSanResult &result) {
+  return {std::move(result.elf_bytes), std::move(result.patches), std::move(result.warnings),
+          result.mutation.fault, std::move(result.mutation.applied_fault_logical_identity)};
 }
 
-void prepend_stage_diagnostics(ConSanResult &result, ConSanTransformStage &stage) {
+void prepend_stage_diagnostics(ConSanResult &result, ConSanFaultTransformStage &stage) {
   result.warnings.insert(result.warnings.begin(), std::make_move_iterator(stage.warnings.begin()),
                          std::make_move_iterator(stage.warnings.end()));
-  result.requested_fault_mutations = stage.requested_fault_mutations;
-  result.planned_fault_mutations = stage.planned_fault_mutations;
-  result.applied_fault_mutations = stage.applied_fault_mutations;
-  result.applied_fault_logical_identity = std::move(stage.applied_fault_logical_identity);
+  result.mutation.fault = stage.fault;
+  result.mutation.applied_fault_logical_identity = std::move(stage.logical_identity);
 }
 
 [[nodiscard]] bool ranges_overlap(uint64_t first_offset, uint32_t first_size,
@@ -140,7 +137,7 @@ void prepend_stage_diagnostics(ConSanResult &result, ConSanTransformStage &stage
 
 [[nodiscard]] std::optional<std::vector<CarriedPerturbationPlan>>
 carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
-                                         const ConSanTransformStage &mutation_stage,
+                                         const ConSanFaultTransformStage &mutation_stage,
                                          std::string *error) {
   std::vector<CarriedPerturbationPlan> carried;
   carried.reserve(pristine_plan.perturbation_plans.size());
@@ -273,8 +270,8 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
   result.staged_composition_validated = false;
   result.elf_bytes.clear();
   result.patches.clear();
-  result.applied_fault_mutations = 0;
-  result.applied_perturbations = 0;
+  result.mutation.fault.applied = 0;
+  result.mutation.perturbation.applied = 0;
   result.warnings.emplace_back("ConSan rolled back staged fault/perturbation composition: " +
                                std::move(reason));
   return result;
@@ -311,10 +308,10 @@ void reset_inventory_for_fault_planning(const ConSanOptions &options, ConSanResu
   result.outcome = ConSanTransformOutcome::Unchanged;
   result.final_validation_passed = false;
   result.staged_composition_validated = false;
-  result.requested_fault_mutations = requested_fault_mutation_count(options);
-  result.planned_fault_mutations = 0;
-  result.applied_fault_mutations = 0;
-  result.applied_fault_logical_identity.reset();
+  result.mutation.fault.requested = requested_fault_mutation_count(options);
+  result.mutation.fault.planned = 0;
+  result.mutation.fault.applied = 0;
+  result.mutation.applied_fault_logical_identity.reset();
   result.fault_plans.clear();
 }
 
@@ -339,12 +336,12 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
        options.fault_ordinary_weaken_scope) &&
       result.errors.empty())
     try_apply_ordinary_fault_patch(code_object, options, result);
-  result.applied_fault_mutations = applied_fault_mutation_count(result);
+  result.mutation.fault.applied = applied_fault_mutation_count(result);
   if (options.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
-      result.applied_fault_mutations != 1u) {
+      result.mutation.fault.applied != 1u) {
     result.errors.emplace_back(
         "ConSan fault injection required exactly one applied mutation, got " +
-        std::to_string(result.applied_fault_mutations));
+        std::to_string(result.mutation.fault.applied));
   }
 }
 
@@ -361,7 +358,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   result.flavor = options.flavor;
   result.moi_engine = options.moi_engine;
   result.carried_composite_instrumentation_stage = !carried_plans.empty();
-  result.requested_fault_mutations = requested_fault_mutation_count(options);
+  result.mutation.fault.requested = requested_fault_mutation_count(options);
   ProgramInventoryBuilder inventory_builder(code_object_bytes);
   result.program_inventory = inventory_builder.view();
   const bool has_fault = options.fault_drop_barrier || options.fault_move_barrier ||
@@ -408,7 +405,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     } else {
       pristine_mutation_plan = try_patch_consan_impl(code_object_bytes, planning_options);
     }
-    const size_t retained_planned_fault_mutations = pristine_mutation_plan.planned_fault_mutations;
+    const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
         pristine_mutation_plan.fault_plans;
     if (has_perturbation &&
@@ -457,7 +454,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     }
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;
-    ConSanTransformStage mutation_stage = take_modified_stage(fault_result);
+    ConSanFaultTransformStage mutation_stage = take_modified_stage(fault_result);
     const major_image_ownership::ScopedOwner mutation_image_owner(
         major_image_ownership::OwnerKind::CompositeImage, mutation_stage.image);
     const major_image_ownership::ScopedPhase composite_phase(
@@ -575,8 +572,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         instrument_result.modified = false;
         instrument_result.elf_bytes.clear();
         instrument_result.patches.clear();
-        instrument_result.applied_fault_mutations = 0;
-        instrument_result.applied_fault_logical_identity.reset();
+        instrument_result.mutation.fault.applied = 0;
+        instrument_result.mutation.applied_fault_logical_identity.reset();
         return instrument_result;
       }
       instrument_result.staged_composition_validated = true;
@@ -584,12 +581,14 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       // inventories the mutated image, so without this provenance a live
       // staged result loses which dry-run plan authorized the mutation.
       if (!retained_fault_plans.empty()) {
-        instrument_result.planned_fault_mutations = retained_planned_fault_mutations;
+        instrument_result.mutation.fault.planned = retained_planned_faults;
         instrument_result.fault_plans = retained_fault_plans;
       }
       if (has_perturbation) {
-        instrument_result.requested_perturbations = pristine_mutation_plan.requested_perturbations;
-        instrument_result.planned_perturbations = pristine_mutation_plan.planned_perturbations;
+        instrument_result.mutation.perturbation.requested =
+            pristine_mutation_plan.mutation.perturbation.requested;
+        instrument_result.mutation.perturbation.planned =
+            pristine_mutation_plan.mutation.perturbation.planned;
       }
       instrument_result.patches.insert(instrument_result.patches.begin(),
                                        std::make_move_iterator(mutation_stage.patches.begin()),
@@ -599,7 +598,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       // A no-target instrumentation stage must not discard an otherwise valid
       // mutation. Its inventory describes the staged image being committed.
       if (!retained_fault_plans.empty()) {
-        instrument_result.planned_fault_mutations = retained_planned_fault_mutations;
+        instrument_result.mutation.fault.planned = retained_planned_faults;
         instrument_result.fault_plans = retained_fault_plans;
       }
       instrument_result.elf_bytes = std::move(mutation_stage.image);
@@ -618,7 +617,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         // reason to discard an independently validated mutation stage.
         instrument_result.outcome = ConSanTransformOutcome::Unchanged;
         if (!retained_fault_plans.empty()) {
-          instrument_result.planned_fault_mutations = retained_planned_fault_mutations;
+          instrument_result.mutation.fault.planned = retained_planned_faults;
           instrument_result.fault_plans = retained_fault_plans;
         }
         instrument_result.elf_bytes = std::move(mutation_stage.image);
@@ -628,14 +627,14 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       }
       instrument_result.warnings.emplace_back(
           "ConSan rolled back staged fault mutation because instrumentation is unsupported");
-      instrument_result.applied_fault_mutations = 0;
-      instrument_result.applied_fault_logical_identity.reset();
+      instrument_result.mutation.fault.applied = 0;
+      instrument_result.mutation.applied_fault_logical_identity.reset();
       break;
     case ConSanTransformOutcome::Invalid:
       instrument_result.warnings.emplace_back(
           "ConSan rolled back staged fault mutation because instrumentation is invalid");
-      instrument_result.applied_fault_mutations = 0;
-      instrument_result.applied_fault_logical_identity.reset();
+      instrument_result.mutation.fault.applied = 0;
+      instrument_result.mutation.applied_fault_logical_identity.reset();
       break;
     }
     instrument_result.elf_bytes.clear();
@@ -940,7 +939,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
   if (has_perturbation && result.errors.empty()) {
     try_apply_perturbation_patches(*code_object, arch, options, result);
-    if (result.applied_perturbations != result.perturbation_plans.size()) {
+    if (result.mutation.perturbation.applied != result.perturbation_plans.size()) {
       result.modified = false;
       result.elf_bytes.clear();
       result.patches.clear();

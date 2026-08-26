@@ -119,7 +119,7 @@ TEST(ConSanMoi, FaultRetryRejectsDryRunFaultRequest) {
 
   EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(retried.modified);
-  EXPECT_EQ(retried.applied_fault_mutations, 0u);
+  EXPECT_EQ(retried.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(retried.errors, [](const std::string &error) {
     return error.find("only a live late-bound fault selection") != std::string::npos;
   })) << testing::PrintToString(retried.errors);
@@ -149,8 +149,9 @@ TEST(ConSanMoi, AtomicWrongAddressRetryFromInventoryMatchesFreshLiveTransform) {
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
   EXPECT_EQ(retried.modified, fresh.modified);
   EXPECT_EQ(retried.final_validation_passed, fresh.final_validation_passed);
-  EXPECT_EQ(retried.applied_fault_mutations, fresh.applied_fault_mutations);
-  EXPECT_EQ(retried.applied_fault_logical_identity, fresh.applied_fault_logical_identity);
+  EXPECT_EQ(retried.mutation.fault.applied, fresh.mutation.fault.applied);
+  EXPECT_EQ(retried.mutation.applied_fault_logical_identity,
+            fresh.mutation.applied_fault_logical_identity);
   EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
   ASSERT_EQ(retried.patches.size(), fresh.patches.size());
   for (size_t index = 0; index < fresh.patches.size(); ++index) {
@@ -176,7 +177,7 @@ TEST(ConSanMoi, UnsatisfiedLateFaultRetryMatchesFreshRejection) {
       std::move(inventory), moi_inventory_retry_config(live), bytes);
 
   EXPECT_EQ(retried.outcome, fresh.outcome);
-  EXPECT_EQ(retried.applied_fault_mutations, 0u);
+  EXPECT_EQ(retried.mutation.fault.applied, 0u);
   EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
   EXPECT_EQ(retried.errors, fresh.errors);
   EXPECT_EQ(retried.warnings, fresh.warnings);
@@ -234,7 +235,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   probe_options.fault_require_exactly_one = false;
   const auto [probe, probe_ms] = timed([&] { return try_patch_consan(bytes, probe_options); });
   ASSERT_TRUE(probe.errors.empty()) << testing::PrintToString(probe.errors);
-  ASSERT_EQ(probe.planned_fault_mutations, 1u)
+  ASSERT_EQ(probe.mutation.fault.planned, 1u)
       << "benchmark object needs one default atomic wrong-address target";
 
   ConSanOptions inventory_options = live;
@@ -265,7 +266,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
   EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
-  EXPECT_EQ(retried.applied_fault_mutations, 1u);
+  EXPECT_EQ(retried.mutation.fault.applied, 1u);
   const ConSanMoiAutoReportInventory required = plan_test_moi_evidence_inventory(retried, live);
   EXPECT_TRUE(consan_moi_auto_report_inventory_covers(capacity, required));
 
@@ -357,7 +358,7 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
       << testing::PrintToString(valid.errors) << testing::PrintToString(valid.warnings);
   EXPECT_TRUE(valid.staged_composition_validated);
   EXPECT_TRUE(valid.final_validation_passed);
-  EXPECT_EQ(valid.applied_fault_mutations, 1u);
+  EXPECT_EQ(valid.mutation.fault.applied, 1u);
   ASSERT_GE(valid.elf_bytes.size(), bytes.size());
   const auto mutation = std::ranges::find(
       valid.patches, ConSanPatchKind::InlineAtomicAddressRewrite, &ConSanPatchInfo::kind);
@@ -542,7 +543,7 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithRetainedInlineShadowProbe) {
       << testing::PrintToString(valid.errors) << testing::PrintToString(valid.warnings);
   EXPECT_TRUE(valid.staged_composition_validated);
   EXPECT_TRUE(valid.final_validation_passed);
-  EXPECT_EQ(valid.applied_fault_mutations, 1u);
+  EXPECT_EQ(valid.mutation.fault.applied, 1u);
   const auto mutation = std::ranges::find(
       valid.patches, ConSanPatchKind::InlineAtomicAddressRewrite, &ConSanPatchInfo::kind);
   ASSERT_NE(mutation, valid.patches.end());
@@ -626,7 +627,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   const ConSanResult live = try_patch_consan(bytes, live_options);
   ASSERT_EQ(live.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(live.errors) << testing::PrintToString(live.warnings);
-  ASSERT_EQ(live.applied_fault_mutations, 1u);
+  ASSERT_EQ(live.mutation.fault.applied, 1u);
   const ConSanMoiInventoryRetryConfig retry{
       .report =
           {
@@ -641,7 +642,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(pristine, retry, bytes);
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
-  EXPECT_EQ(retried.applied_fault_mutations, 1u);
+  EXPECT_EQ(retried.mutation.fault.applied, 1u);
   EXPECT_EQ(retried.elf_bytes, live.elf_bytes);
   EXPECT_EQ(retried.final_validation_passed, live.final_validation_passed);
   const ConSanMoiAutoReportInventory live_inventory =
@@ -700,7 +701,7 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
 
   EXPECT_EQ(fresh.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_EQ(retried.outcome, fresh.outcome);
-  EXPECT_EQ(retried.applied_fault_mutations, 0u);
+  EXPECT_EQ(retried.mutation.fault.applied, 0u);
   EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
   EXPECT_EQ(retried.errors, fresh.errors);
   EXPECT_EQ(retried.warnings, fresh.warnings);
@@ -754,7 +755,7 @@ TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
   ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(fresh.errors);
   EXPECT_EQ(retried.outcome, fresh.outcome);
-  EXPECT_EQ(retried.applied_fault_mutations, 1u);
+  EXPECT_EQ(retried.mutation.fault.applied, 1u);
   EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
   EXPECT_EQ(retried.errors, fresh.errors);
   EXPECT_EQ(retried.warnings, fresh.warnings);
@@ -810,7 +811,7 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
       << (result.errors.empty() ? "" : result.errors.front());
   EXPECT_TRUE(result.modified);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineBarrierMoveTargetRewrite;
@@ -978,7 +979,7 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
         << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
     EXPECT_TRUE(result.staged_composition_validated);
     EXPECT_TRUE(result.final_validation_passed);
-    EXPECT_EQ(result.applied_fault_mutations, 1u);
+    EXPECT_EQ(result.mutation.fault.applied, 1u);
     const ConSanPatchKind barrier_patch = engine == ConSanMoiEngine::Sampled
                                               ? ConSanPatchKind::TrampolineMoiSampledSyncMetadata
                                               : ConSanPatchKind::TrampolineMoiBarrierRecord;
@@ -1072,7 +1073,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("sampled barrier sync fell back from dense relay") != std::string::npos &&
            warning.find("no liveness-safe relocatable host") != std::string::npos;
@@ -1147,7 +1148,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineBarrierNopRewrite,
                                &ConSanPatchInfo::kind),
             2u);

@@ -746,7 +746,7 @@ TEST(ConSan, OrdinaryAcquireFaultDryRunExportsStableExactAddressOrderAndScopePla
   EXPECT_FALSE(result.fault_plans[0].companion_identity);
   ASSERT_TRUE(result.fault_plans[1].companion_identity);
   EXPECT_FALSE(result.fault_plans[2].companion_identity);
-  EXPECT_EQ(result.planned_fault_mutations, 3u);
+  EXPECT_EQ(result.mutation.fault.planned, 3u);
   EXPECT_FALSE(result.modified);
 }
 
@@ -764,7 +764,7 @@ TEST(ConSan, OrdinaryAcquireWeakenOrderRemovesOnlyGlobalInvAndPreservesLoadWait)
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineOrdinaryOrderRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 4u * sizeof(uint32_t));
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
   const size_t text_file_offset = result.program_inventory.text_sections().front().file_offset;
   EXPECT_TRUE(std::equal(bytes.begin() + static_cast<ptrdiff_t>(text_file_offset),
@@ -792,7 +792,7 @@ TEST(ConSan, OrdinaryAcquireWrongAddressChangesOnlyAlignedSignedIoffset) {
   ASSERT_TRUE(result.final_validation_passed);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineOrdinaryAddressRewrite);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
   const size_t text_file_offset = result.program_inventory.text_sections().front().file_offset;
   std::array<uint32_t, 3> before{};
@@ -863,13 +863,13 @@ TEST(ConSan, OrdinaryAcquireOrderAndScopeComposeAsTwoExactTransactionalMutations
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.applied_fault_mutations, 2u);
+  EXPECT_EQ(result.mutation.fault.applied, 2u);
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineOrdinaryOrderRewrite);
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineOrdinaryScopeRewrite);
   EXPECT_EQ(result.patches[0].fault_primary_identity, result.patches[1].fault_primary_identity);
   EXPECT_EQ(result.patches[0].fault_sequence_identity, result.patches[1].fault_sequence_identity);
-  EXPECT_EQ(result.applied_fault_logical_identity,
+  EXPECT_EQ(result.mutation.applied_fault_logical_identity,
             std::optional(result.patches[0].fault_sequence_identity));
 }
 
@@ -888,12 +888,12 @@ TEST(ConSan, OrdinaryAcquireFaultRejectsStoreNoBoundaryAlreadyWaveAndWrongIdenti
         make_rdna4_ordinary_acquire_code_object(0u, true, false)}) {
     const ConSanResult result = rejected(bytes);
     EXPECT_FALSE(result.modified);
-    EXPECT_EQ(result.applied_fault_mutations, 0u);
+    EXPECT_EQ(result.mutation.fault.applied, 0u);
   }
   const ConSanResult wrong =
       rejected(make_rdna4_ordinary_acquire_code_object(), "not-an-exact-site");
   EXPECT_FALSE(wrong.modified);
-  EXPECT_EQ(wrong.applied_fault_mutations, 0u);
+  EXPECT_EQ(wrong.mutation.fault.applied, 0u);
 }
 
 TEST(ConSan, FinalValidationRejectsCorruptedOrdinaryScopeMutation) {

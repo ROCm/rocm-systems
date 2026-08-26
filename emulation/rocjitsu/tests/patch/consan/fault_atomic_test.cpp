@@ -34,11 +34,11 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.staged_composition_validated);
-  EXPECT_EQ(result.planned_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.planned, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.fault_plans.size(), 1u);
   EXPECT_EQ(result.fault_plans.front().primary_identity, inventory.fault_sites.front().identity);
-  EXPECT_EQ(result.applied_perturbations, 1u);
+  EXPECT_EQ(result.mutation.perturbation.applied, 1u);
   const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite;
   });
@@ -151,8 +151,8 @@ TEST(ConSan, AtomicFaultRollsBackWhenCarriedPerturbationIsUnreachable) {
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
-  EXPECT_EQ(result.applied_fault_mutations, 0u);
-  EXPECT_EQ(result.applied_perturbations, 0u);
+  EXPECT_EQ(result.mutation.fault.applied, 0u);
+  EXPECT_EQ(result.mutation.perturbation.applied, 0u);
 
   ConSanOptions discovery = options;
   discovery.fault_dry_run = true;
@@ -181,8 +181,8 @@ TEST(ConSan, AtomicAddressFaultComposesWithExactFlatUnknownCasReleaseEdge) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.staged_composition_validated);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_perturbations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  EXPECT_EQ(result.mutation.perturbation.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineAtomicAddressRewrite;
   }));
@@ -237,8 +237,8 @@ TEST(ConSan, FaultAtomicExactIdentitySupersedesGlobalIndex) {
   ASSERT_TRUE(result.program_inventory.kernels().front().atomic_sites[1].raw_ioffset);
   EXPECT_EQ(*result.program_inventory.kernels().front().atomic_sites[0].raw_ioffset, 0);
   EXPECT_EQ(*result.program_inventory.kernels().front().atomic_sites[1].raw_ioffset, 8);
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
 }
 
 TEST(ConSan, FaultAtomicWrongAddressRejectsUnalignedDelta) {
@@ -251,7 +251,7 @@ TEST(ConSan, FaultAtomicWrongAddressRejectsUnalignedDelta) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(result.applied_fault_mutations, 0u);
+  EXPECT_EQ(result.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
     return error.find("positive aligned signed-24-bit offset") != std::string::npos;
   }));
@@ -281,12 +281,12 @@ TEST(ConSan, FaultAtomicDryRunPreservesBytesAndReportsExactPlans) {
   EXPECT_EQ(result.fault_plans[0].kind, ConSanFaultMutationKind::AtomicWrongAddress);
   EXPECT_EQ(result.fault_plans[0].primary_identity, inventory.fault_sites[1].identity);
   EXPECT_FALSE(result.fault_plans[0].companion_identity);
-  EXPECT_EQ(result.requested_fault_mutations, 2u);
+  EXPECT_EQ(result.mutation.fault.requested, 2u);
   EXPECT_EQ(result.fault_plans[1].kind, ConSanFaultMutationKind::AtomicWeakenOrder);
   EXPECT_EQ(result.fault_plans[1].primary_identity, inventory.fault_sites[1].identity);
   EXPECT_TRUE(result.fault_plans[1].companion_identity);
-  EXPECT_EQ(result.planned_fault_mutations, 2u);
-  EXPECT_EQ(result.applied_fault_mutations, 0u);
+  EXPECT_EQ(result.mutation.fault.planned, 2u);
+  EXPECT_EQ(result.mutation.fault.applied, 0u);
 }
 
 TEST(ConSan, FaultAtomicWeakenOrderDryRunRejectsThAsOrderingField) {
@@ -318,7 +318,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSelectsExplicitReleaseAndAcquireEdges) {
   release_options.fault_atomic_index = 0;
   const ConSanResult release = try_patch_consan(bytes, release_options);
   ASSERT_TRUE(release.errors.empty()) << testing::PrintToString(release.errors);
-  EXPECT_EQ(release.applied_fault_mutations, 1u);
+  EXPECT_EQ(release.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(release.warnings, [](const std::string &warning) {
     return warning.find("removed associated global_wb") != std::string::npos;
   }));
@@ -328,7 +328,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSelectsExplicitReleaseAndAcquireEdges) {
   acquire_options.fault_atomic_index = 1;
   const ConSanResult acquire = try_patch_consan(bytes, acquire_options);
   ASSERT_TRUE(acquire.errors.empty()) << testing::PrintToString(acquire.errors);
-  EXPECT_EQ(acquire.applied_fault_mutations, 1u);
+  EXPECT_EQ(acquire.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(acquire.warnings, [](const std::string &warning) {
     return warning.find("removed associated global_inv") != std::string::npos;
   }));
@@ -365,7 +365,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   const ConSanResult order = try_patch_consan(bytes, order_options);
   ASSERT_TRUE(order.errors.empty()) << testing::PrintToString(order.errors);
   EXPECT_EQ(order.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(order.applied_fault_mutations, 1u);
+  EXPECT_EQ(order.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(order.warnings, [](const std::string &warning) {
     return warning.find("removed associated buffer_wbl2") != std::string::npos;
   }));
@@ -448,7 +448,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerGlobalSequence) {
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("removed associated buffer_wbl2") != std::string::npos;
   }));
@@ -474,7 +474,7 @@ TEST(ConSan, FaultAtomicWeakenOrderExplicitEdgeFailsClosedWhenAbsent) {
 
   EXPECT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.fault_plans.empty());
-  EXPECT_EQ(result.planned_fault_mutations, 0u);
+  EXPECT_EQ(result.mutation.fault.planned, 0u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("no qualified atomic ordering boundary") != std::string::npos;
   }));
@@ -503,9 +503,9 @@ TEST(ConSan, FaultAtomicWeakenScopeDryRunPreservesBytesAndIdentity) {
   EXPECT_EQ(result.fault_plans.front().kind, ConSanFaultMutationKind::AtomicWeakenScope);
   EXPECT_EQ(result.fault_plans.front().primary_identity, inventory.fault_sites[1].identity);
   EXPECT_FALSE(result.fault_plans.front().companion_identity);
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.planned_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 0u);
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.planned, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 0u);
 }
 
 TEST(ConSan, FaultAtomicWrongAddressIsVisibleToSubsequentInventory) {
@@ -570,8 +570,8 @@ TEST(ConSan, FaultAtomicWeakenOrderPreservesReturningCasDataOperation) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
@@ -606,8 +606,8 @@ TEST(ConSan, FaultAtomicWeakenScopeLeavesThReturnAndAddressUntouched) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
@@ -658,7 +658,7 @@ TEST(ConSan, FaultGlobalAtomicWeakenScopePreservesReturnedValueAndAddress) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
   const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
@@ -683,7 +683,7 @@ TEST(ConSan, FaultGlobalAtomicWeakenOrderPreservesReturnedValue) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
   const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
@@ -710,7 +710,7 @@ TEST(ConSan, FaultNoReturnAtomicWeakenOrderRemovesExactReleaseWait) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
@@ -747,7 +747,7 @@ TEST(ConSan, FaultAtomicWeakenOrderRemovesReleaseWaitBeforeWaitAlu) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
@@ -777,8 +777,8 @@ TEST(ConSan, FaultGlobalAtomicExactIdentityNoTargetFailsCardinalityWithoutMutati
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(result.modified);
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 0u);
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("found no site with exact identity") != std::string::npos;
   }));
@@ -819,7 +819,7 @@ TEST(ConSan, FaultBufferAtomicWrongAddressPreservesScopeAndReturnedValue) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
   const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
@@ -845,7 +845,7 @@ TEST(ConSan, FaultBufferAtomicWeakenScopePreservesAddressAndReturnedValue) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
   const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
@@ -869,7 +869,7 @@ TEST(ConSan, FaultBufferAtomicWeakenOrderPreservesDataOperationAndReturnedValue)
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
@@ -900,7 +900,7 @@ TEST(ConSan, FaultDsAtomicWrongAddressUsesAlignedOffset0AndExactCardinality) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
   uint32_t mutated_word0 = 0;
   std::memcpy(&mutated_word0,

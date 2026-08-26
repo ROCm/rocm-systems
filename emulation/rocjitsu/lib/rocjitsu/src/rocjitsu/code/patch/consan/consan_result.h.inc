@@ -352,6 +352,56 @@ struct ConSanFlatSelectionTelemetry {
   size_t selected_anchor_relay_slot_count = 0;
 };
 
+/// Counts one validation-only mutation domain as it moves from a user request
+/// through semantic selection to emitted replacement bytes.
+///
+/// A count greater than one is not inherently malformed: the planner retains
+/// ambiguous matches so the runtime policy can reject them with a precise
+/// reason, and fault-injection tests deliberately model multiple applied
+/// mutations. This tally reports transform facts only. It does not claim that
+/// a replacement code object was installed by a runtime.
+struct ConSanMutationTally {
+  /// Number of mutations requested by the validated mutation policy.
+  size_t requested = 0;
+  /// Number of concrete semantic mutations selected by planning.
+  size_t planned = 0;
+  /// Number of selected mutations whose bytes were emitted successfully.
+  size_t applied = 0;
+
+  /// Return whether planning found at least one matching mutation.
+  [[nodiscard]] bool has_plan() const { return planned != 0u; }
+  /// Return whether selection is ambiguous rather than exactly one match.
+  [[nodiscard]] bool has_ambiguous_plan() const { return planned > 1u; }
+  /// Return whether the replacement image contains a mutation from this
+  /// domain, independently of whether a runtime later installed that image.
+  [[nodiscard]] bool has_application() const { return applied != 0u; }
+
+  bool operator==(const ConSanMutationTally &) const = default;
+};
+
+/// Typed transform output for validation-only fault mutation and perturbation.
+///
+/// Fault mutation intentionally corrupts a synchronization or memory idiom;
+/// perturbation changes scheduling without changing the sanitizer's ordinary
+/// observation contract. Keeping both tallies beside the stable identity of
+/// an applied fault lets runtime selection, strict exactly-one enforcement,
+/// and post-load installation accounting consume one immutable result instead
+/// of inspecting lowering patches. Runtime installation state and process-wide
+/// reservation state are deliberately owned by the runtime coordinator and do
+/// not appear here.
+struct ConSanMutationOutcome {
+  /// Destructive fault-mutation request, plan, and emission counts.
+  ConSanMutationTally fault;
+  /// Non-destructive scheduling-perturbation request, plan, and emission
+  /// counts.
+  ConSanMutationTally perturbation;
+  /// Stable semantic identity of the applied fault, when the selected fault
+  /// form defines one and its bytes were emitted.
+  std::optional<std::string> applied_fault_logical_identity;
+
+  bool operator==(const ConSanMutationOutcome &) const = default;
+};
+
 struct ConSanResult {
   bool visited_code_object = false;
   /// True after the input has been parsed as a structurally valid AMDGPU code
@@ -448,15 +498,9 @@ struct ConSanResult {
   std::vector<ConSanFaultMutationPlan> fault_plans;
   std::vector<ConSanPerturbationCandidate> perturbation_candidates;
   std::vector<ConSanPerturbationPlan> perturbation_plans;
-  size_t requested_perturbations = 0;
-  size_t planned_perturbations = 0;
-  size_t applied_perturbations = 0;
-  size_t requested_fault_mutations = 0;
-  size_t planned_fault_mutations = 0;
-  size_t applied_fault_mutations = 0;
-  /// Stable pristine logical identity retained across staged mutation plus
-  /// instrumentation composition. Empty when no mutation is committed.
-  std::optional<std::string> applied_fault_logical_identity;
+  /// Validation-only mutation facts. The transform pipeline moves this value
+  /// into its public immutable result before exposing legacy mechanism detail.
+  ConSanMutationOutcome mutation;
   std::vector<ConSanMoiCandidate> moi_candidates;
   /// Warning boundary immediately before MOI planning. A validated retry with
   /// a runtime-allocated report buffer trims only the prior MOI-stage

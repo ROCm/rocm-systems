@@ -80,9 +80,9 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_TRUE(result.staged_composition_validated);
-  EXPECT_EQ(result.planned_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_perturbations, 1u);
+  EXPECT_EQ(result.mutation.fault.planned, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  EXPECT_EQ(result.mutation.perturbation.applied, 1u);
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineBarrierNopRewrite);
   const ConSanPatchInfo &patch = result.patches[1];
@@ -139,9 +139,9 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_TRUE(result.staged_composition_validated);
-  EXPECT_EQ(result.planned_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_perturbations, 1u);
+  EXPECT_EQ(result.mutation.fault.planned, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  EXPECT_EQ(result.mutation.perturbation.applied, 1u);
   ASSERT_EQ(result.patches.size(), 4u);
   const ConSanPatchInfo &move_target = result.patches[2];
   const ConSanPatchInfo &perturb_patch = result.patches[3];
@@ -232,7 +232,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
   ASSERT_TRUE(execution.errors.empty())
       << (execution.errors.empty() ? "" : execution.errors.front());
   EXPECT_TRUE(execution.modified);
-  EXPECT_EQ(execution.applied_fault_mutations, 1u);
+  EXPECT_EQ(execution.mutation.fault.applied, 1u);
   EXPECT_TRUE(execution.final_validation_passed);
   ASSERT_EQ(execution.patches.size(), 4u);
   EXPECT_TRUE(std::ranges::all_of(execution.patches, [](const ConSanPatchInfo &patch) {
@@ -327,9 +327,9 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_logical_identity,
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  EXPECT_EQ(result.mutation.applied_fault_logical_identity,
             inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineBarrierParticipantCountRewrite);
@@ -368,7 +368,7 @@ TEST(ConSan, FaultBarrierParticipantsReturnTypedUnsupportedWithoutProvenEncoding
   EXPECT_EQ(unavailable.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_TRUE(unavailable.errors.empty());
   EXPECT_TRUE(unavailable.fault_plans.empty());
-  EXPECT_EQ(unavailable.requested_fault_mutations, 1u);
+  EXPECT_EQ(unavailable.mutation.fault.requested, 1u);
   EXPECT_TRUE(std::ranges::any_of(unavailable.warnings, [](const std::string &warning) {
     return warning == "ConSan barrier participant mutation is unsupported: no complete lifecycle "
                       "has an immediately preceding literal M0 count setup";
@@ -438,10 +438,10 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
       << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_TRUE(result.staged_composition_validated);
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_TRUE(result.applied_fault_logical_identity);
-  EXPECT_EQ(*result.applied_fault_logical_identity,
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  ASSERT_TRUE(result.mutation.applied_fault_logical_identity);
+  EXPECT_EQ(*result.mutation.applied_fault_logical_identity,
             inventory.program_inventory.sync().barrier_lifecycle_groups.front().identity);
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.front().barrier_id, 2);
@@ -524,9 +524,9 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(result.errors.empty());
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 0u);
-  EXPECT_FALSE(result.applied_fault_logical_identity);
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 0u);
+  EXPECT_FALSE(result.mutation.applied_fault_logical_identity);
   EXPECT_EQ(result.resource_plans.size(), 5u);
   EXPECT_EQ(result.resource_plan_summary.unsupported_plans, 5u);
   EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
@@ -614,8 +614,8 @@ TEST(ConSan, FaultDropBarrierRejectsQualifiedPairHalfWithoutDestructiveOptIn) {
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_FALSE(rejected.modified);
   EXPECT_TRUE(rejected.patches.empty());
-  EXPECT_EQ(rejected.requested_fault_mutations, 1u);
-  EXPECT_EQ(rejected.applied_fault_mutations, 0u);
+  EXPECT_EQ(rejected.mutation.fault.requested, 1u);
+  EXPECT_EQ(rejected.mutation.fault.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(rejected.warnings, [](const std::string &warning) {
     return warning.find("dropping one half of a qualified logical barrier pair") !=
            std::string::npos;
@@ -627,7 +627,7 @@ TEST(ConSan, FaultDropBarrierRejectsQualifiedPairHalfWithoutDestructiveOptIn) {
       << (allowed.errors.empty() ? "" : allowed.errors.front());
   ASSERT_EQ(allowed.patches.size(), 1u);
   EXPECT_EQ(allowed.patches.front().anchor_offset, inventory.fault_sites.front().text_offset);
-  EXPECT_EQ(allowed.applied_fault_mutations, 1u);
+  EXPECT_EQ(allowed.mutation.fault.applied, 1u);
 }
 
 TEST(ConSan, FaultDropBarrierDryRunRequiresDestructiveOptInForQualifiedPairHalf) {
@@ -650,14 +650,14 @@ TEST(ConSan, FaultDropBarrierDryRunRequiresDestructiveOptInForQualifiedPairHalf)
   options.fault_site_identity = inventory.fault_sites.back().identity;
   const ConSanResult rejected = try_patch_consan(bytes, options);
   EXPECT_TRUE(rejected.fault_plans.empty());
-  EXPECT_EQ(rejected.planned_fault_mutations, 0u);
+  EXPECT_EQ(rejected.mutation.fault.planned, 0u);
 
   options.fault_allow_destructive_incomplete_barrier_drop = true;
   const ConSanResult allowed = try_patch_consan(bytes, options);
   ASSERT_EQ(allowed.fault_plans.size(), 1u);
   EXPECT_EQ(allowed.fault_plans.front().kind, ConSanFaultMutationKind::DropBarrier);
   EXPECT_EQ(allowed.fault_plans.front().primary_identity, inventory.fault_sites.back().identity);
-  EXPECT_EQ(allowed.planned_fault_mutations, 1u);
+  EXPECT_EQ(allowed.mutation.fault.planned, 1u);
 }
 
 TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
@@ -688,7 +688,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
   const ConSanResult dry_run = try_patch_consan(bytes, options);
   ASSERT_TRUE(dry_run.errors.empty()) << testing::PrintToString(dry_run.errors);
   ASSERT_EQ(dry_run.fault_plans.size(), 1u);
-  EXPECT_EQ(dry_run.planned_fault_mutations, 1u);
+  EXPECT_EQ(dry_run.mutation.fault.planned, 1u);
   EXPECT_EQ(dry_run.fault_plans.front().primary_identity, inventory.fault_sites.front().identity);
   EXPECT_EQ(dry_run.fault_plans.front().companion_identity, inventory.fault_sites.back().identity);
   EXPECT_EQ(dry_run.fault_plans.front().logical_sequence_identity, sequence->identity);
@@ -700,12 +700,12 @@ TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
   ASSERT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(execution.errors);
   EXPECT_TRUE(execution.final_validation_passed);
-  EXPECT_EQ(execution.requested_fault_mutations, 1u);
-  EXPECT_EQ(execution.planned_fault_mutations, 1u);
-  EXPECT_EQ(execution.applied_fault_mutations, 1u);
+  EXPECT_EQ(execution.mutation.fault.requested, 1u);
+  EXPECT_EQ(execution.mutation.fault.planned, 1u);
+  EXPECT_EQ(execution.mutation.fault.applied, 1u);
   ASSERT_EQ(execution.fault_plans.size(), 1u);
   EXPECT_EQ(execution.fault_plans.front().logical_sequence_identity, sequence->identity);
-  EXPECT_EQ(execution.applied_fault_logical_identity, sequence->identity);
+  EXPECT_EQ(execution.mutation.applied_fault_logical_identity, sequence->identity);
   ASSERT_EQ(execution.patches.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(execution.patches, [&](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
@@ -727,12 +727,12 @@ TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
   const ConSanResult no_target_execution = try_patch_consan(bytes, no_target_options);
   ASSERT_EQ(no_target_execution.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(no_target_execution.errors);
-  EXPECT_EQ(no_target_execution.requested_fault_mutations, 1u);
-  EXPECT_EQ(no_target_execution.planned_fault_mutations, 1u);
-  EXPECT_EQ(no_target_execution.applied_fault_mutations, 1u);
+  EXPECT_EQ(no_target_execution.mutation.fault.requested, 1u);
+  EXPECT_EQ(no_target_execution.mutation.fault.planned, 1u);
+  EXPECT_EQ(no_target_execution.mutation.fault.applied, 1u);
   ASSERT_EQ(no_target_execution.fault_plans.size(), 1u);
   EXPECT_EQ(no_target_execution.fault_plans.front().logical_sequence_identity, sequence->identity);
-  EXPECT_EQ(no_target_execution.applied_fault_logical_identity, sequence->identity);
+  EXPECT_EQ(no_target_execution.mutation.applied_fault_logical_identity, sequence->identity);
   EXPECT_EQ(no_target_execution.patches.size(), 2u);
 
   ConSanResult corrupted = execution;
@@ -771,9 +771,9 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
   EXPECT_EQ(stale_sequence.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(stale_sequence.modified);
   EXPECT_TRUE(stale_sequence.patches.empty());
-  EXPECT_EQ(stale_sequence.requested_fault_mutations, 1u);
-  EXPECT_EQ(stale_sequence.planned_fault_mutations, 0u);
-  EXPECT_EQ(stale_sequence.applied_fault_mutations, 0u);
+  EXPECT_EQ(stale_sequence.mutation.fault.requested, 1u);
+  EXPECT_EQ(stale_sequence.mutation.fault.planned, 0u);
+  EXPECT_EQ(stale_sequence.mutation.fault.applied, 0u);
   EXPECT_TRUE(stale_sequence.fault_plans.empty());
 
   options.fault_barrier_sequence_identity = sequence->identity;
@@ -782,7 +782,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
   EXPECT_EQ(stale_site.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(stale_site.modified);
   EXPECT_TRUE(stale_site.patches.empty());
-  EXPECT_EQ(stale_site.applied_fault_mutations, 0u);
+  EXPECT_EQ(stale_site.mutation.fault.applied, 0u);
 
   const std::array<uint32_t, 2> partial_words = {
       0xBE804EC1u, // s_barrier_signal -1 without a completing wait
@@ -800,7 +800,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRejectsStaleAndIncompleteIdentities) {
   EXPECT_EQ(partial.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(partial.modified);
   EXPECT_TRUE(partial.patches.empty());
-  EXPECT_EQ(partial.applied_fault_mutations, 0u);
+  EXPECT_EQ(partial.mutation.fault.applied, 0u);
 }
 
 TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFaultMode) {
@@ -847,8 +847,8 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFault
   ASSERT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(execution.errors);
   EXPECT_TRUE(execution.final_validation_passed);
-  EXPECT_EQ(execution.applied_fault_mutations, 1u);
-  EXPECT_EQ(execution.applied_fault_logical_identity, sequence->identity);
+  EXPECT_EQ(execution.mutation.fault.applied, 1u);
+  EXPECT_EQ(execution.mutation.applied_fault_logical_identity, sequence->identity);
   ASSERT_EQ(execution.patches.size(), 2u);
   EXPECT_EQ(execution.patches[0].anchor_offset, 0u);
   EXPECT_EQ(execution.patches[1].anchor_offset, 15u * sizeof(uint32_t));
@@ -938,7 +938,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCompletePairsAsOneMutation) {
   const ConSanResult dry_run = try_patch_consan(bytes, options);
   ASSERT_TRUE(dry_run.errors.empty()) << testing::PrintToString(dry_run.errors);
   ASSERT_EQ(dry_run.fault_plans.size(), 1u);
-  EXPECT_EQ(dry_run.planned_fault_mutations, 1u);
+  EXPECT_EQ(dry_run.mutation.fault.planned, 1u);
   ASSERT_EQ(dry_run.fault_plans.front().ordered_member_identities.size(), 4u);
   EXPECT_TRUE(dry_run.fault_plans.front().logical_sequence_identity->starts_with("barrier-group["));
 
@@ -947,7 +947,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCompletePairsAsOneMutation) {
   ASSERT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(execution.errors);
   EXPECT_TRUE(execution.final_validation_passed);
-  EXPECT_EQ(execution.applied_fault_mutations, 1u);
+  EXPECT_EQ(execution.mutation.fault.applied, 1u);
   ASSERT_EQ(execution.patches.size(), 4u);
   EXPECT_TRUE(std::ranges::all_of(execution.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
@@ -1005,7 +1005,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
   const ConSanResult duplicate = try_patch_consan(bytes, options);
   EXPECT_FALSE(duplicate.modified);
   EXPECT_TRUE(duplicate.patches.empty());
-  EXPECT_EQ(duplicate.applied_fault_mutations, 0u);
+  EXPECT_EQ(duplicate.mutation.fault.applied, 0u);
 
   options.fault_site_identity = second_site->identity;
   options.fault_barrier_sequence_identity = sequences[1]->identity;
@@ -1030,7 +1030,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRejectsDuplicateReversedAndPartialGroupsW
   const ConSanResult missing_primary = try_patch_consan(bytes, options);
   EXPECT_FALSE(missing_primary.modified);
   EXPECT_TRUE(missing_primary.patches.empty());
-  EXPECT_EQ(missing_primary.applied_fault_mutations, 0u);
+  EXPECT_EQ(missing_primary.mutation.fault.applied, 0u);
 }
 
 TEST(ConSan, FaultInventoryAssignsStableBarrierIdentities) {
@@ -1155,8 +1155,8 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarge
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.planned_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.planned, 1u);
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_EQ(result.fault_plans.size(), 1u);
@@ -1207,8 +1207,8 @@ TEST(ConSan, FaultBarrierIdScopePairsBoundedSignalWaitWithInterveningInstruction
   const ConSanResult selected = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(selected)) << testing::PrintToString(selected.errors);
-  EXPECT_EQ(selected.requested_fault_mutations, 1u);
-  EXPECT_EQ(selected.planned_fault_mutations, 1u);
+  EXPECT_EQ(selected.mutation.fault.requested, 1u);
+  EXPECT_EQ(selected.mutation.fault.planned, 1u);
   ASSERT_EQ(selected.fault_plans.size(), 1u);
   EXPECT_EQ(selected.fault_plans.front().kind, ConSanFaultMutationKind::BarrierIdScope);
 
@@ -1217,7 +1217,7 @@ TEST(ConSan, FaultBarrierIdScopePairsBoundedSignalWaitWithInterveningInstruction
 
   ASSERT_TRUE(consan_patch_succeeded(applied)) << testing::PrintToString(applied.errors);
   EXPECT_TRUE(applied.modified);
-  EXPECT_EQ(applied.applied_fault_mutations, 1u);
+  EXPECT_EQ(applied.mutation.fault.applied, 1u);
   EXPECT_TRUE(applied.final_validation_passed);
 }
 
@@ -1287,8 +1287,8 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
   EXPECT_FALSE(result.elf_bytes.empty());
-  EXPECT_EQ(result.requested_fault_mutations, 1u);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.requested, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(result.final_validation_passed);
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineBarrierIdScopeRewrite);
@@ -1336,7 +1336,7 @@ TEST(ConSan, FaultBarrierIdScopeExecutionRejectsUnsupportedForms) {
   const ConSanResult dynamic = try_patch_consan(make_rdna4_lds_code_object(dynamic_words), options);
   EXPECT_FALSE(dynamic.errors.empty());
   EXPECT_FALSE(dynamic.modified);
-  EXPECT_EQ(dynamic.applied_fault_mutations, 0u);
+  EXPECT_EQ(dynamic.mutation.fault.applied, 0u);
 }
 
 TEST(ConSan, FaultBarrierMoveDryRunPlansStableRealEarlierAndLaterDestinations) {
@@ -1524,7 +1524,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionRelocatesExactPairEarlierAndLater) {
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << (result.errors.empty() ? "" : result.errors.front());
     ASSERT_EQ(result.patches.size(), 3u);
-    EXPECT_EQ(result.applied_fault_mutations, 1u);
+    EXPECT_EQ(result.mutation.fault.applied, 1u);
     EXPECT_EQ(result.patches[0].anchor_offset, 8u);
     EXPECT_EQ(result.patches[1].anchor_offset, 12u);
     const ConSanPatchInfo &target = result.patches[2];

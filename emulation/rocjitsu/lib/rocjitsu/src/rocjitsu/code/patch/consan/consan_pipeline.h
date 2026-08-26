@@ -275,6 +275,9 @@ public:
   std::vector<ConSanTransformIssue> issues;
   /// Non-fatal diagnostics retained from analysis and lowering.
   std::vector<std::string> warnings;
+  /// Validation-only mutation facts produced by this static transform. These
+  /// counts do not imply that the runtime installed the replacement image.
+  ConSanMutationOutcome mutation;
 
   /// Return the record for one stage, or null for an invalid stage or malformed
   /// result that omitted it.
@@ -288,10 +291,11 @@ public:
   [[nodiscard]] ConSanInstallAction install_action(bool fail_closed) const;
 
   /// Read lowering telemetry whose typed production owner has not yet been
-  /// extracted. Runtime callers may use this for patch geometry, mutation
-  /// telemetry, and native-resource details only. Installation policy,
-  /// replacement bytes, diagnostics, inventory, observation policy, and
-  /// coverage are owned by this `TransformResult` and must be read here.
+  /// extracted. Runtime callers may use this for patch geometry, detailed
+  /// mutation site/plan records, and native-resource details only. Mutation
+  /// counts and stable applied identity, installation policy, replacement
+  /// bytes, diagnostics, inventory, observation policy, and coverage are owned
+  /// by this `TransformResult` and must be read here.
   [[nodiscard]] const ConSanResult &legacy_mechanism() const { return legacy_compatibility_; }
 
   /// Demote an otherwise installable transform after a runtime-owned resource

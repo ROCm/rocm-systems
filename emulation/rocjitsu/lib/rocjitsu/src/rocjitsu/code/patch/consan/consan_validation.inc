@@ -1896,7 +1896,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       const bool identities_match =
           target && !patch.fault_primary_identity.empty() &&
           patch.fault_sequence_identity == target->sequence->identity &&
-          result.applied_fault_logical_identity == patch.fault_sequence_identity &&
+          result.mutation.applied_fault_logical_identity == patch.fault_sequence_identity &&
           patch.owner_descriptor_file_offsets.size() == target->site->execution_owners.size() &&
           std::ranges::equal(patch.owner_descriptor_file_offsets, target->site->execution_owners,
                              {}, std::identity{}, &ConSanExecutionOwner::descriptor_file_offset);
@@ -1978,7 +1978,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       const bool identities_match =
           target != nullptr && !patch.fault_primary_identity.empty() &&
           patch.fault_primary_identity == target->identity &&
-          result.applied_fault_logical_identity == patch.fault_primary_identity &&
+          result.mutation.applied_fault_logical_identity == patch.fault_primary_identity &&
           patch.owner_descriptor_file_offsets.size() == target->execution_owners.size() &&
           std::ranges::equal(patch.owner_descriptor_file_offsets, target->execution_owners, {},
                              std::identity{}, &ConSanExecutionOwner::descriptor_file_offset);
@@ -2359,7 +2359,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         }
       }
     }
-    if (!result.applied_fault_logical_identity)
+    if (!result.mutation.applied_fault_logical_identity)
       errors.emplace_back("ConSan mutation proof lost the retained logical fault identity");
   }
 
@@ -2415,8 +2415,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       pairs.push_back(*pair);
     }
     if (pairs.size() == 1u) {
-      metadata_matches &= exact_barrier_drop_patches.size() == 2u &&
-                          result.applied_fault_logical_identity == pairs.front().sequence->identity;
+      metadata_matches &=
+          exact_barrier_drop_patches.size() == 2u &&
+          result.mutation.applied_fault_logical_identity == pairs.front().sequence->identity;
     } else if (pairs.size() == 2u) {
       ConSanOptions selection;
       selection.fault_site_identity = pairs[0].primary->identity;
@@ -2424,9 +2425,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       selection.fault_barrier_companion_site_identity = pairs[1].primary->identity;
       selection.fault_barrier_companion_sequence_identity = pairs[1].sequence->identity;
       const auto group = resolve_exact_barrier_drop_group(pristine_inventory, selection, &reason);
-      metadata_matches &=
-          exact_barrier_drop_patches.size() == 4u && group &&
-          result.applied_fault_logical_identity == exact_barrier_drop_group_identity(*group);
+      metadata_matches &= exact_barrier_drop_patches.size() == 4u && group &&
+                          result.mutation.applied_fault_logical_identity ==
+                              exact_barrier_drop_group_identity(*group);
     } else {
       metadata_matches = false;
     }
@@ -2645,7 +2646,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           "ConSan SC perturbation proof found semantic metadata on another patch kind");
     }
   }
-  if (result.applied_perturbations != perturbation_patch_count) {
+  if (result.mutation.perturbation.applied != perturbation_patch_count) {
     errors.emplace_back("ConSan SC perturbation proof found inconsistent applied patch count");
   }
   if (perturbation_patch_count == 0u)
@@ -4559,7 +4560,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
     result.modified = false;
     result.elf_bytes.clear();
     result.patches.clear();
-    result.applied_fault_logical_identity.reset();
+    result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
   if (!result.errors.empty()) {
@@ -4567,7 +4568,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
     result.modified = false;
     result.elf_bytes.clear();
     result.patches.clear();
-    result.applied_fault_logical_identity.reset();
+    result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
   // A required late transform (notably the owner/epoch entry prologue) may
@@ -4579,7 +4580,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
     result.final_validation_passed = false;
     result.elf_bytes.clear();
     result.patches.clear();
-    result.applied_fault_logical_identity.reset();
+    result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
   if (result.modified) {
@@ -4587,7 +4588,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       result.errors.emplace_back("ConSan modified result has no replacement ELF bytes");
       result.outcome = ConSanTransformOutcome::Invalid;
       result.modified = false;
-      result.applied_fault_logical_identity.reset();
+      result.mutation.applied_fault_logical_identity.reset();
     } else {
       std::vector<std::string> validation_errors =
           validate_final_consan_elf(original_bytes, result);
@@ -4599,7 +4600,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       } else {
         result.outcome = ConSanTransformOutcome::Invalid;
         result.modified = false;
-        result.applied_fault_logical_identity.reset();
+        result.mutation.applied_fault_logical_identity.reset();
         result.elf_bytes.clear();
         result.patches.clear();
       }
@@ -4609,7 +4610,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       result.resource_plan_summary.unsupported_plans != 0 || has_unsupported_preflight(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
-    result.applied_fault_logical_identity.reset();
+    result.mutation.applied_fault_logical_identity.reset();
   } else {
     result.outcome = ConSanTransformOutcome::Unchanged;
   }

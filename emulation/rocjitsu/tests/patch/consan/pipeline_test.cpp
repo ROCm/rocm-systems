@@ -168,6 +168,43 @@ TEST(ConSanPipeline, DefaultResultAndInvalidStageLookupFailClosed) {
   EXPECT_EQ(result.install_action(/*fail_closed=*/true), ConSanInstallAction::Reject);
 }
 
+TEST(ConSanPipeline, MutationTallyDistinguishesSelectionAmbiguityFromApplication) {
+  ConSanMutationTally tally;
+  EXPECT_FALSE(tally.has_plan());
+  EXPECT_FALSE(tally.has_ambiguous_plan());
+  EXPECT_FALSE(tally.has_application());
+
+  tally.requested = 1u;
+  tally.planned = 1u;
+  EXPECT_TRUE(tally.has_plan());
+  EXPECT_FALSE(tally.has_ambiguous_plan());
+  EXPECT_FALSE(tally.has_application());
+
+  tally.planned = 2u;
+  EXPECT_TRUE(tally.has_plan());
+  EXPECT_TRUE(tally.has_ambiguous_plan());
+  EXPECT_FALSE(tally.has_application());
+
+  tally.applied = 2u;
+  EXPECT_TRUE(tally.has_application());
+  EXPECT_EQ(tally, (ConSanMutationTally{.requested = 1u, .planned = 2u, .applied = 2u}));
+}
+
+TEST(ConSanPipeline, MutationOutcomeKeepsFaultAndPerturbationDomainsSeparate) {
+  const ConSanMutationOutcome outcome = {
+      .fault = {.requested = 1u, .planned = 2u, .applied = 0u},
+      .perturbation = {.requested = 3u, .planned = 1u, .applied = 1u},
+      .applied_fault_logical_identity = "fault-site",
+  };
+
+  EXPECT_TRUE(outcome.fault.has_ambiguous_plan());
+  EXPECT_FALSE(outcome.fault.has_application());
+  EXPECT_FALSE(outcome.perturbation.has_ambiguous_plan());
+  EXPECT_TRUE(outcome.perturbation.has_application());
+  EXPECT_EQ(outcome.applied_fault_logical_identity, "fault-site");
+  EXPECT_NE(outcome, ConSanMutationOutcome{});
+}
+
 TEST(ConSanPipeline, InvalidConfigurationStopsBeforeLegacyLoweringWithTypedIssue) {
   ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   request.moi_sample_stride = 0;
@@ -582,6 +619,7 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   EXPECT_EQ(first.replacement_bytes, second.replacement_bytes);
   EXPECT_EQ(first.issues, second.issues);
   EXPECT_EQ(first.warnings, second.warnings);
+  EXPECT_EQ(first.mutation, second.mutation);
   EXPECT_EQ(request, request_before);
   EXPECT_EQ(capabilities, capabilities_before);
 
@@ -592,7 +630,9 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   TransformResult mutated = transform_consan_with_mutation(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
   ASSERT_TRUE(mutated.well_formed()) << testing::PrintToString(mutated.issues);
-  EXPECT_GT(mutated.legacy_mechanism().requested_fault_mutations, 0u);
+  EXPECT_GT(mutated.mutation.fault.requested, 0u);
+  EXPECT_NE(mutated.mutation, ConSanMutationOutcome{});
+  EXPECT_EQ(mutated.legacy_mechanism().mutation, ConSanMutationOutcome{});
   EXPECT_EQ(first.code_object, mutated.program_inventory.code_object_id());
 }
 

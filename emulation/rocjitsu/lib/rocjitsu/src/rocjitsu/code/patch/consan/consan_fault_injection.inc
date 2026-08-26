@@ -799,11 +799,11 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
         append_ordinary(ConSanFaultMutationKind::OrdinaryWeakenScope, std::nullopt);
     }
   }
-  result.planned_fault_mutations = result.fault_plans.size();
+  result.mutation.fault.planned = result.fault_plans.size();
   if (options.fault_require_exactly_one && result.outcome != ConSanTransformOutcome::Unsupported &&
-      result.planned_fault_mutations != 1u) {
+      result.mutation.fault.planned != 1u) {
     result.errors.emplace_back("ConSan fault dry run required exactly one planned mutation, got " +
-                               std::to_string(result.planned_fault_mutations));
+                               std::to_string(result.mutation.fault.planned));
   }
 }
 
@@ -941,7 +941,7 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
       result.patches.push_back(std::move(info));
     }
     result.modified = true;
-    result.applied_fault_logical_identity =
+    result.mutation.applied_fault_logical_identity =
         group ? exact_barrier_drop_group_identity(*group) : pair->sequence->identity;
     result.warnings.emplace_back(group ? "ConSan exact grouped-barrier fault transactionally "
                                          "rewrote four physical members"
@@ -1156,7 +1156,7 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
     result.patches.push_back(std::move(patch));
   }
   result.modified = true;
-  result.applied_fault_logical_identity =
+  result.mutation.applied_fault_logical_identity =
       lifecycle_group != nullptr ? lifecycle_group->identity : selected->identity;
   result.warnings.emplace_back(
       std::string("ConSan barrier ID/scope mutation rewrote one logical ") +
@@ -1223,7 +1223,7 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
   patch.target_participant_count = options.fault_barrier_target_participant_count;
   result.patches.push_back(std::move(patch));
   result.modified = true;
-  result.applied_fault_logical_identity = group->identity;
+  result.mutation.applied_fault_logical_identity = group->identity;
   result.warnings.emplace_back("ConSan barrier participant mutation rewrote one proven static "
                                "lifecycle count from " +
                                std::to_string(*init->participant_count) + " to " +
@@ -1925,7 +1925,7 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
   for (const ConSanExecutionOwner &owner : selected->execution_owners)
     info.owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
   result.patches.push_back(std::move(info));
-  result.applied_fault_logical_identity = selected->identity;
+  result.mutation.applied_fault_logical_identity = selected->identity;
   result.modified = true;
   result.warnings.emplace_back("ConSan LDS fault rewrote " + selected->mnemonic +
                                " address from v" + std::to_string(*selected->address_vgpr) +
@@ -2037,7 +2037,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
   result.elf_bytes = std::move(candidate);
   result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
                         std::make_move_iterator(patches.end()));
-  result.applied_fault_logical_identity = target->sequence->identity;
+  result.mutation.applied_fault_logical_identity = target->sequence->identity;
   result.modified = true;
   if (options.fault_ordinary_wrong_address) {
     result.warnings.emplace_back("ConSan ordinary fault shifted global_load_b32 by validated " +

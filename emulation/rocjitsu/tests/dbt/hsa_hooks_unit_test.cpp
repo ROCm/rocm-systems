@@ -1026,10 +1026,10 @@ transform_override(std::span<const uint8_t>, const rocjitsu::ConSanRequest &requ
   result.flavor = *request.flavor;
   result.moi_engine = request.moi_engine;
   if (g_transform_override_models_fault_application) {
-    result.planned_fault_mutations = fault_mutation_enabled ? 1u : 0u;
-    result.applied_fault_mutations = fault_mutation_enabled && !mutation.fault_dry_run
-                                         ? g_transform_override_actual_fault_applications
-                                         : 0u;
+    result.mutation.fault.planned = fault_mutation_enabled ? 1u : 0u;
+    result.mutation.fault.applied = fault_mutation_enabled && !mutation.fault_dry_run
+                                        ? g_transform_override_actual_fault_applications
+                                        : 0u;
   }
   return result;
 }

@@ -349,7 +349,7 @@ namespace {
 [[nodiscard]] std::optional<ConSanCompositeProof>
 validated_composite_proof(const ConSanResult &dry_run, const ConSanResult &validated) {
   if (!validated.staged_composition_validated || !validated.final_validation_passed ||
-      validated.applied_fault_mutations != 1u || validated.applied_perturbations != 1u)
+      validated.mutation.fault.applied != 1u || validated.mutation.perturbation.applied != 1u)
     return std::nullopt;
   const ConSanPatchInfo *perturbation = nullptr;
   for (const ConSanPatchInfo &patch : validated.patches) {
@@ -472,7 +472,7 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the requested engine");
     if (inventory.modified || !inventory.elf_bytes.empty() || !inventory.patches.empty() ||
-        inventory.applied_fault_mutations != 0u || inventory.applied_perturbations != 0u ||
+        inventory.mutation.fault.applied != 0u || inventory.mutation.perturbation.applied != 0u ||
         !inventory.fault_plans.empty() || !inventory.perturbation_plans.empty()) {
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry requires an unmodified semantic inventory");

@@ -2527,6 +2527,46 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   gfx950, gfx1100, gfx1201, and gfx1250 passed in 71.72 seconds of wall time.
   E2E validation remains outside this deletion work.
 
+### Slice 4L: replace flat mutation telemetry with one typed outcome
+
+- **Completed ownership cutover:** `ConSanMutationOutcome` now owns the fault
+  and perturbation request, plan, and emission tallies plus the stable applied
+  fault identity. The compatibility lowerer constructs this value once and
+  publication moves it into `TransformResult`, clearing the compatibility
+  payload instead of retaining a second authoritative copy. The seven flat
+  counter/identity members of `ConSanResult` are gone.
+- **Runtime cutover:** dry-run load selection, ambiguity rejection, strict
+  exactly-one enforcement, fault and perturbation summaries, and post-load
+  fault-reservation commit all consume the typed outcome. The hook no longer
+  reads compatibility mechanism state for mutation counts or identity.
+  Detailed candidate, plan, and patch records remain on the temporary seam
+  because they describe lowering mechanics rather than this result-level
+  contract.
+- **Composition boundary:** the intermediate corruption stage is explicitly a
+  fault-only stage carrying a `ConSanMutationTally` and logical identity. It
+  cannot overwrite perturbation facts produced by the subsequent
+  instrumentation stage. The complete host gate caught and thereby guarded
+  this distinction across atomic-address, atomic-order, atomic-scope,
+  barrier-drop, and barrier-move compositions.
+- **Focused contract gate:** unit tests cover empty, unique, ambiguous, and
+  applied tallies; fault/perturbation separation; value semantics;
+  deterministic mutation entry; and the single-owner publication invariant.
+  Existing composition tests cover retained pristine plans, stable identities,
+  dry-run proofs, final validation, and rollback, while hook and device tests
+  cover selection and installation behavior.
+- **Size result:** production source grows by 48 net lines and source plus
+  tests by 89 net lines. The growth is the documented typed value and its
+  focused contracts; it replaces seven unstructured fields and deletes four
+  hook-side uses of compatibility state. Subsequent slices should reuse
+  this value rather than add another projection.
+- **Completed checked-in gate:** the complete RocJitsu host binary passed
+  5,602 of 5,606 tests with four intentional skips; the complete HSA-hook
+  binary passed all 196 tests. All 2,878 simulator device rows across gfx942,
+  gfx950, gfx1100, gfx1201, and gfx1250 passed in 69.15 seconds of wall time;
+  all 587 physical-gfx950 device rows also passed, accounting for 435.53
+  seconds of aggregate CTest test time. E2E validation remains outside this
+  deletion work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

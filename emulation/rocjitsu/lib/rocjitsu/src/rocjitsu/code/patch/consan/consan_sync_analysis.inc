@@ -3111,7 +3111,7 @@ struct CarriedPerturbationPlan {
 
 void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
                              std::span<const CarriedPerturbationPlan> carried_plans = {}) {
-  result.requested_perturbations =
+  result.mutation.perturbation.requested =
       options.sc_perturb_kind == ConSanPerturbationKind::None ? 0u : options.sc_perturb_max;
   if (options.sc_perturb_kind == ConSanPerturbationKind::None)
     return;
@@ -3202,12 +3202,12 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
            .overlaps_atomic_mutation = carried.overlaps_atomic_mutation,
            .removed_cache_boundary = carried.removed_cache_boundary});
     }
-    result.planned_perturbations = result.perturbation_plans.size();
+    result.mutation.perturbation.planned = result.perturbation_plans.size();
     if (options.sc_perturb_required_count != 0u &&
-        result.planned_perturbations != options.sc_perturb_required_count) {
-      result.errors.emplace_back("ConSan SC perturb required " +
-                                 std::to_string(options.sc_perturb_required_count) +
-                                 " plans, got " + std::to_string(result.planned_perturbations));
+        result.mutation.perturbation.planned != options.sc_perturb_required_count) {
+      result.errors.emplace_back(
+          "ConSan SC perturb required " + std::to_string(options.sc_perturb_required_count) +
+          " plans, got " + std::to_string(result.mutation.perturbation.planned));
     }
     return;
   }
@@ -3247,12 +3247,12 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
                                          .overlaps_atomic_mutation = false,
                                          .removed_cache_boundary = false});
   }
-  result.planned_perturbations = result.perturbation_plans.size();
+  result.mutation.perturbation.planned = result.perturbation_plans.size();
   if (options.sc_perturb_required_count != 0u &&
-      result.planned_perturbations != options.sc_perturb_required_count) {
+      result.mutation.perturbation.planned != options.sc_perturb_required_count) {
     result.errors.emplace_back("ConSan SC perturb required " +
                                std::to_string(options.sc_perturb_required_count) + " plans, got " +
-                               std::to_string(result.planned_perturbations));
+                               std::to_string(result.mutation.perturbation.planned));
   }
 }
 
@@ -3483,7 +3483,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     }
     result.patches.push_back(std::move(info));
   }
-  result.applied_perturbations = planned.size();
+  result.mutation.perturbation.applied = planned.size();
   result.modified = !result.patches.empty();
 }
 

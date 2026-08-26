@@ -377,6 +377,7 @@ TransformResult TransformResult::publish_optional(
   result.replacement_bytes = std::move(legacy.elf_bytes);
   result.outcome = legacy.outcome;
   result.final_validation_passed = legacy.final_validation_passed;
+  result.mutation = std::exchange(legacy.mutation, {});
   result.warnings = std::move(legacy.warnings);
   for (std::string &error : legacy.errors) {
     result.issues.push_back({

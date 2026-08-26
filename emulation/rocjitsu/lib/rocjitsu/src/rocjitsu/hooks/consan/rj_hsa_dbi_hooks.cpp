@@ -3844,13 +3844,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const rocjitsu::TransformResult probe_transform = run_consan_transform(
           std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
           debug_overrides, probe_mutation, runtime_capabilities, probe_resources);
-      const rocjitsu::ConSanResult &probe = probe_transform.legacy_mechanism();
-      const bool matched = probe.planned_fault_mutations != 0;
-      if (probe.planned_fault_mutations > 1) {
+      const rocjitsu::ConSanMutationTally &probe_fault = probe_transform.mutation.fault;
+      const bool matched = probe_fault.has_plan();
+      if (probe_fault.has_ambiguous_plan()) {
         std::fprintf(stderr,
                      "[rocjitsu-dbi-hooks] ConSan fault load selection is ambiguous: "
                      "one reader planned %zu mutations\n",
-                     probe.planned_fault_mutations);
+                     probe_fault.planned);
         return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
                                        code_object_reader.handle, "ambiguous-fault-load-selection",
                                        fault_installation_evidence);
@@ -4205,7 +4205,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     const rocjitsu::TransformResult &transform_result = *patch_result_storage;
     const rocjitsu::ConSanResult &patch_result = transform_result.legacy_mechanism();
-    fault_installation_evidence.record_applied_mutations(patch_result.applied_fault_mutations);
+    const rocjitsu::ConSanMutationOutcome &mutation = transform_result.mutation;
+    fault_installation_evidence.record_applied_mutations(mutation.fault.applied);
     if (live_fault_auto_report_capacity_inventory) {
       rocjitsu::ConSanMoiAutoReportInventory live_requirement;
       const bool live_evidence_available =
@@ -4596,9 +4597,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "completing_conditional_barrier_move=%s "
         "destructive_divergent_barrier_move=%s",
         static_cast<unsigned long long>(::getpid()),
-        static_cast<unsigned long long>(code_object_reader.handle),
-        patch_result.requested_fault_mutations, patch_result.planned_fault_mutations,
-        patch_result.applied_fault_mutations, process_prior_fault_applications,
+        static_cast<unsigned long long>(code_object_reader.handle), mutation.fault.requested,
+        mutation.fault.planned, mutation.fault.applied, process_prior_fault_applications,
         static_cast<int>(
             (process_fault_reservation_attempted
                  ? process_fault_reservation_outcome_name(process_fault_reservation_outcome)
@@ -4613,7 +4613,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->fault_allow_completing_conditional_barrier_move ? "true" : "false",
         config->fault_allow_destructive_divergent_barrier_move ? "true" : "false");
     if (config->fault_require_exactly_one && !config->fault_dry_run &&
-        patch_result.applied_fault_mutations > 1u) {
+        mutation.fault.applied > 1u) {
       return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
                                      code_object_reader.handle, "multiple-fault-mutations-applied",
                                      fault_installation_evidence);
@@ -4651,9 +4651,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         kLogInfo,
         "ConSan SC perturb summary reader=%llu requested=%zu planned=%zu applied=%zu max=%u "
         "required=%u sleep=%u",
-        static_cast<unsigned long long>(code_object_reader.handle),
-        patch_result.requested_perturbations, patch_result.planned_perturbations,
-        patch_result.applied_perturbations, config->sc_perturb_max,
+        static_cast<unsigned long long>(code_object_reader.handle), mutation.perturbation.requested,
+        mutation.perturbation.planned, mutation.perturbation.applied, config->sc_perturb_max,
         config->sc_perturb_required_count, config->sc_perturb_sleep);
     for (const rocjitsu::ConSanAccessPlan &plan : patch_result.access_plans) {
       log_message(kLogVerbose,
@@ -5747,7 +5746,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
   }
   if (load_status == HSA_STATUS_SUCCESS && using_replacement_reader && patch_result_storage) {
     auto_report_guard.bind_to_executable(executable);
-    if (patch_result_storage->legacy_mechanism().applied_fault_mutations != 0u) {
+    if (patch_result_storage->mutation.fault.has_application()) {
       fault_installation_evidence.mark_installed();
       process_fault_application_reservation.commit_applied_mutation();
     }

@@ -2526,7 +2526,7 @@ TEST(ConSanMoi, SampledAtomicWeakenedReleaseIsReinventoriedBeforeInstrumentation
 
   ASSERT_TRUE(fault.errors.empty()) << testing::PrintToString(fault.errors);
   EXPECT_EQ(fault.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(fault.applied_fault_mutations, 1u);
+  EXPECT_EQ(fault.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(fault.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
@@ -8488,7 +8488,7 @@ TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
       << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_TRUE(result.staged_composition_validated);
-  EXPECT_EQ(result.applied_fault_mutations, 1u);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
   for (const ConSanPatchInfo &mutation : result.patches) {
     if (mutation.phase != ConSanPatchPhase::Mutation)
       continue;
