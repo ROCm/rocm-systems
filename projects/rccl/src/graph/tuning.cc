@@ -1788,7 +1788,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    32ULL*1024*1024,     // [8] AlltoAll        -- 32 MiB
+    128ULL*1024*1024,    // [8] AlltoAll        -- 128 MiB (DDA/LL128 wins 32K-128M; covers 4M transition and 8M-128M)
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
@@ -1801,7 +1801,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    4ULL*1024*1024,      // [8] AlltoAll        -- 4 MiB (legacy cap)
+    128ULL*1024*1024,    // [8] AlltoAll        -- 128 MiB (LL128 covers through 128M; CE disabled below this)
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // RS fires DDA even when symEligible=true on gfx1250 (!symEligible || ddaFabricArch).
