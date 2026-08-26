@@ -67,6 +67,7 @@ This directory contains example applications demonstrating various profiling sce
 | Example | Description | Dependencies |
 | --------- | ------------- | -------------- |
 | [python](python/) | Python profiling with decorators, user regions, and selective tracing | Python 3, optional NumPy |
+| [pytorch](pytorch/) | MLP trained on GPU to fit a known function, scored on held-out points | Python 3, ROCm PyTorch wheel, AMD GPU |
 
 ## Building All Examples
 

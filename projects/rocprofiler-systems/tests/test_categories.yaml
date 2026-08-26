@@ -50,6 +50,7 @@ _common_therock_labels_exclude: &_common_therock_labels_exclude
   - "lulesh"
   - "network"
   - "overflow"
+  - "pytorch"
 
 test_categories:
   quick:

@@ -161,6 +161,7 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "10", "-n", "5"],
+            use_sys_mod=True,
         )
         self.assert_regex(result)
 
@@ -208,6 +209,7 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "10", "-n", "5"],
+            use_sys_mod=True,
         )
         self.assert_regex(result)
         if not annotated:
@@ -274,6 +276,7 @@ class TestPython(RocprofsysTest):
             annotated=annotated,
             python_version=python_version,
             run_args=["-v", "15", "-n", "5"],
+            use_sys_mod=True,
         )
         self.assert_regex(result)
         if not annotated:
