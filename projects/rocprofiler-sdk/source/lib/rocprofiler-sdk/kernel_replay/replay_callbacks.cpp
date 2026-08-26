@@ -79,6 +79,27 @@ set_replay_service_configured(bool enabled)
 }
 
 bool
+try_claim_replay_service()
+{
+    if(registration::get_fini_status() > 0) return false;
+
+    // Single atomic claim rather than "read has_registered_replay_context(), then set the flag
+    // later". Those were two separate operations, so two threads configuring KERNEL_REPLAY could
+    // both observe no owner and both register, which breaks the one-owner rule the replay planner
+    // depends on (pass_count_cb would be last-writer-wins across tools).
+    bool expected = false;
+    return replay_service_configured_flag().compare_exchange_strong(
+        expected, true, std::memory_order_acq_rel, std::memory_order_acquire);
+}
+
+void
+release_replay_service_claim()
+{
+    if(registration::get_fini_status() > 0) return;
+    replay_service_configured_flag().store(false, std::memory_order_release);
+}
+
+bool
 has_active_replay_contexts()
 {
     // Skip during finalization: the flag and the context registry are static_objects that may be

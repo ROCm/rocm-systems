@@ -77,6 +77,11 @@ struct module_variable_t
     size_t size     = 0;
 };
 
+// Upper bound on a single module-scope variable the snapshot will capture. This guards against a
+// mis-reported HSA symbol size turning into a huge host allocation; it is not a supported limit,
+// and exceeding it is reported rather than ignored (see collect_module_variable).
+constexpr uint64_t module_variable_size_cap = 1ULL << 30;  // 1 GiB
+
 // hsa_executable_iterate_agent_symbols callback: collect HSA_SYMBOL_KIND_VARIABLE symbols
 // (device address + size) into the vector passed via `data`. The HSA callback cannot capture, so
 // state is threaded through the void* argument.
@@ -101,8 +106,24 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
            symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size) != HSA_STATUS_SUCCESS)
         return HSA_STATUS_SUCCESS;
 
-    // Skip empties; 1 GiB per-variable sanity cap.
-    if(addr == 0 || size == 0 || size > (1ULL << 30)) return HSA_STATUS_SUCCESS;
+    if(addr == 0 || size == 0) return HSA_STATUS_SUCCESS;
+
+    // A variable above the cap is skipped, which means a kernel's writes to it leak across replay
+    // passes and passes 2..N see mutated inputs. That is a wrong-counters outcome, so it cannot be
+    // silent -- warn rather than drop it on the floor. The cap itself is a sanity bound against a
+    // mis-reported symbol size, not a supported limit.
+    if(size > module_variable_size_cap)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "kernel-replay snapshot: module-scope variable at 0x{:x} is {} bytes, above the {} "
+            "byte "
+            "per-variable cap, and is not captured. A kernel writing to it will observe values "
+            "accumulated across replay passes instead of identical inputs.",
+            addr,
+            size,
+            module_variable_size_cap);
+        return HSA_STATUS_SUCCESS;
+    }
 
     // HSA reports the variable's device address as an integer; converting to a pointer is required.
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
