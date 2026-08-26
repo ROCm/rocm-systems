@@ -5234,7 +5234,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     options.moi_owner_sgpr = static_cast<uint16_t>(sgpr);
     options.automatic_moi_owner_sgpr = true;
     result.resolved_moi_owner_sgpr = options.moi_owner_sgpr;
-    result.moi_owner_sgpr_automatic = true;
     result.warnings.emplace_back("ConSan MOI automatically assigned hw_id owner temporary s" +
                                  std::to_string(sgpr));
     return true;
@@ -5266,7 +5265,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     }
   }
   result.resolved_moi_owner_sgpr = resolved_owner;
-  result.moi_owner_sgpr_automatic = true;
   result.resolved_moi_transient_sgpr_assignments = options.moi_transient_sgpr_assignments;
   result.warnings.emplace_back(
       "ConSan MOI assigned its Inline resident-wave owner inside the saved scalar window");
@@ -5369,7 +5367,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
     options.moi_dispatch_id_sgpr = static_cast<uint16_t>(base);
     options.automatic_moi_dispatch_id_sgprs = true;
     result.resolved_moi_dispatch_id_sgpr = options.moi_dispatch_id_sgpr;
-    result.moi_dispatch_id_sgprs_automatic = true;
     qualify_owner_local_assignments(static_cast<uint16_t>(base));
     result.warnings.emplace_back("ConSan MOI automatically assigned persistent dispatch-ID "
                                  "state SGPRs s" +
@@ -5415,7 +5412,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
       options.moi_dispatch_id_sgpr = static_cast<uint16_t>(base);
       options.automatic_moi_dispatch_id_sgprs = true;
       result.resolved_moi_dispatch_id_sgpr = options.moi_dispatch_id_sgpr;
-      result.moi_dispatch_id_sgprs_automatic = true;
       qualify_owner_local_assignments(static_cast<uint16_t>(base));
       result.warnings.emplace_back(
           "ConSan MOI reserved a high dispatch-ID SGPR pair and excluded only "
@@ -5474,7 +5470,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
         options.moi_dispatch_id_sgpr = candidate;
         options.automatic_moi_dispatch_id_sgprs = true;
         result.resolved_moi_dispatch_id_sgpr = candidate;
-        result.moi_dispatch_id_sgprs_automatic = true;
         qualify_owner_local_assignments(candidate);
         result.warnings.emplace_back(
             "ConSan MOI assigned persistent dispatch-ID state to a proven-unused " +
@@ -6677,7 +6672,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       if (!assigned_private_component)
         options.automatic_moi_private_dispatch_id = false;
       options.automatic_moi_dispatch_id_vgprs = true;
-      result.moi_dispatch_id_vgprs_automatic = true;
     }
     result.resolved_moi_persistent_vgpr_assignments = options.moi_persistent_vgpr_assignments;
     result.moi_persistent_vgprs_automatic = options.automatic_moi_persistent_vgprs;
@@ -6952,7 +6946,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   result.resolved_moi_record_replay_workgroup_vgprs = options.moi_record_replay_workgroup_vgprs;
   result.resolved_moi_dispatch_id_vgpr = options.moi_dispatch_id_vgpr;
   result.moi_persistent_vgprs_automatic = true;
-  result.moi_dispatch_id_vgprs_automatic = options.automatic_moi_dispatch_id_vgprs;
   result.warnings.emplace_back(
       "ConSan MOI automatically assigned persistent " +
       std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +

@@ -2928,6 +2928,34 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   periodic physical gate remains applicable. E2E validation remains outside
   this work.
 
+### Slice 4X: delete mirrored owner and dispatch allocation flags
+
+- **Authoritative allocation facts:** The selected owner and dispatch-ID
+  registers are the resolved SGPR/VGPR optionals, while emitted prologue and
+  instrumentation patches prove their use. Resource plans and allocation
+  warnings retain the reason and source when that distinction is relevant.
+  A second boolean saying that the same resolved register was automatic is not
+  needed by lowering, validation, the hook, or diagnostics.
+- **Completed deletion:** `ConSanResult` no longer carries
+  `moi_owner_sgpr_automatic`, `moi_dispatch_id_sgprs_automatic`, or
+  `moi_dispatch_id_vgprs_automatic`. Automatic placement still records its
+  internal state in the live lowering options where later code needs it, but
+  it no longer copies that state into a write-only result flag at seven exits.
+- **Contract-test correction:** Tests continue to check the resolved register
+  values, mutually exclusive scalar/vector dispatch representations, emitted
+  initialization and instrumentation code, final validation, and allocation
+  warnings. Ten assertions that only restated how those registers were chosen
+  were deleted.
+- **Deletion result:** Production source is 13 lines smaller and source plus
+  tests is 23 lines smaller. No replacement state or adapter was added.
+- **Completed checked-in gate:** The ConSan host gate passed 1,508 of 1,510
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 69.52
+  seconds. This result-shape deletion does not change emitted device code; the
+  periodic physical gate remains applicable. E2E validation remains outside
+  this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

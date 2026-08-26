@@ -436,7 +436,6 @@ TEST(ConSanMoi, Rdna4RecordReplayRecordsHardwareDispatchIdentity) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_dispatch_id_sgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
@@ -1036,7 +1035,6 @@ TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScala
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_vgpr);
-  EXPECT_TRUE(result.moi_dispatch_id_vgprs_automatic);
   EXPECT_TRUE(result.final_validation_passed);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -1095,7 +1093,6 @@ TEST(ConSanMoi, Gfx1100AutoRecordReplayCapturesDispatchIdentityInPersistentVgprs
   ASSERT_TRUE(result.modified);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_TRUE(result.resolved_moi_dispatch_id_vgpr);
-  EXPECT_TRUE(result.moi_dispatch_id_vgprs_automatic);
   EXPECT_TRUE(result.final_validation_passed);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -1169,10 +1166,8 @@ TEST(ConSanMoi, Gfx1100FullVgprRecordReplayUsesPersistentScalarState) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(result.moi_dispatch_id_sgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_vgpr);
-  EXPECT_FALSE(result.moi_dispatch_id_vgprs_automatic);
   EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
   EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
@@ -1597,7 +1592,6 @@ TEST(ConSanMoi, AutomaticRecordReplayPreservesRuntimeWorkgroupTupleAcrossTargets
     const bool has_dispatch_register = result.resolved_moi_dispatch_id_sgpr.has_value() ||
                                        result.resolved_moi_dispatch_id_vgpr.has_value();
     if (has_dispatch_register) {
-      EXPECT_TRUE(result.moi_dispatch_id_sgprs_automatic || result.moi_dispatch_id_vgprs_automatic);
       ASSERT_NE(result.resolved_moi_dispatch_id_sgpr.has_value(),
                 result.resolved_moi_dispatch_id_vgpr.has_value());
     } else {

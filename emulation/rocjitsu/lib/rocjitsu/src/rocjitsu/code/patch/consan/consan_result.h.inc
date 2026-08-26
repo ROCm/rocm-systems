@@ -349,9 +349,6 @@ struct ConSanResult {
   bool moi_persistent_sgprs_automatic = false;
   bool moi_private_epoch_automatic = false;
   bool moi_exec_save_sgprs_automatic = false;
-  bool moi_owner_sgpr_automatic = false;
-  bool moi_dispatch_id_sgprs_automatic = false;
-  bool moi_dispatch_id_vgprs_automatic = false;
   /// Immutable semantic options captured before the first MOI planning pass.
   /// A report-buffer retry derives its options from this snapshot and can
   /// change only ConSanMoiReportRetryConfig fields plus the narrow live-fault

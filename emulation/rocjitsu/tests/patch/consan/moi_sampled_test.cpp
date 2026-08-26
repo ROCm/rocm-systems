@@ -4932,7 +4932,6 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
   EXPECT_EQ(result.patches[1].sampled_window_bank_count, 8u);
   EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  EXPECT_TRUE(result.moi_dispatch_id_sgprs_automatic);
   EXPECT_TRUE(result.resolved_moi_dispatch_id_sgpr.has_value());
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_FALSE(result.moi_private_epoch_automatic);

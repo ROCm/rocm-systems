@@ -514,9 +514,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.moi_persistent_sgprs_automatic = false;
   result.moi_private_epoch_automatic = false;
   result.moi_exec_save_sgprs_automatic = false;
-  result.moi_owner_sgpr_automatic = false;
-  result.moi_dispatch_id_sgprs_automatic = false;
-  result.moi_dispatch_id_vgprs_automatic = false;
   result.modified = false;
   result.final_validation_passed = false;
   result.elf_bytes.clear();

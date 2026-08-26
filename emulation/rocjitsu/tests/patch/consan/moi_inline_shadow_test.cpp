@@ -1444,7 +1444,6 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_FALSE(result.moi_private_epoch_automatic);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_vgpr);
-  EXPECT_TRUE(result.moi_dispatch_id_vgprs_automatic);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
 
   const auto atomic_patch = std::ranges::find(
@@ -5061,9 +5060,7 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesHwIdOwnerAndSpecialStateSgprs)
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified);
-  EXPECT_TRUE(result.moi_owner_sgpr_automatic);
   EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
-  EXPECT_TRUE(result.moi_dispatch_id_sgprs_automatic);
   EXPECT_EQ(result.resolved_moi_owner_sgpr, result.resolved_moi_exec_save_sgpr);
   EXPECT_EQ(result.resolved_moi_dispatch_id_sgpr, 20);
   EXPECT_EQ(result.resolved_moi_exec_save_sgpr, 22);
