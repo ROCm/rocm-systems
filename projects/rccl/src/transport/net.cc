@@ -2433,7 +2433,11 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
   int nSeg = 0;
   size_t remaining = totalSize;
 
-  if (proxyState->ncclNet != &ncclNetIb) {
+  if (proxyState->ncclNet != &ncclNetIb
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      && proxyState->ncclNet != &netIbCast
+#endif
+  ) {
     INFO(NCCL_NET | NCCL_REG, "Multi-segment (%d) NET registration only supported on the IB transport", numSegments);
     return ncclInvalidUsage;
   }
@@ -2493,8 +2497,19 @@ static ncclResult_t netIbRegMrMultiSeg(struct ncclProxyState* proxyState, void* 
     }
   }
 
-  NCCLCHECKGOTO(ncclIbRegMrDmaBufMultiSeg(netComm, nSeg, segAddrs, segLens, segOffsets, segFds, NCCL_PTR_CUDA, handle),
-                ret, fail);
+  if (proxyState->ncclNet == &ncclNetIb) {
+    NCCLCHECKGOTO(ncclIbRegMrDmaBufMultiSeg(netComm, nSeg, segAddrs, segLens, segOffsets, segFds, NCCL_PTR_CUDA, handle),
+                  ret, fail);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  } else if (proxyState->ncclNet == &netIbCast) {
+    NCCLCHECKGOTO(IbCastRegMrDmaBufMultiSeg(netComm, nSeg, segAddrs, segLens, segOffsets, segFds, NCCL_PTR_CUDA, handle),
+                  ret, fail);
+#endif
+  } else {
+    INFO(NCCL_NET | NCCL_REG, "Multi-segment (%d) NET registration only supported on the IB transport", numSegments);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
 
 fail:
   if (segFds)
