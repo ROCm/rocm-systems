@@ -267,7 +267,7 @@ def calc_unroll_and_pipeline_for_local_arch():
     elif "gfx1250" == gfx_name:
       # gfx1250 (MI450) benefits from larger unrolls; Unroll 8 required for FP8 launch;
       # 32 is the default (commSetUnrollFactor).
-      return (["8", "16", "32"], all_pipelines)
+      return (["1", "2", "4","8", "16", "32"], all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
