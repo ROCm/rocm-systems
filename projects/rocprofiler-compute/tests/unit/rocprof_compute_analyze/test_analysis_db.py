@@ -21,6 +21,8 @@ import pytest
 from sqlalchemy import text
 
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
+from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
+from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
 from utils import analysis_orm as orm
 from utils import schema
@@ -2998,3 +3000,82 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
+
+
+# =============================================================================
+# Static instruction type tests
+# =============================================================================
+
+
+def test_both_instruction_line_paths_share_one_instruction_type(db_session):
+    """The sampling and disassembly paths classify lines the same way, and a
+    pipeline seen twice is stored once."""
+    workload = orm.Workload(name="w", sub_name="s")
+    kernel = orm.Kernel(kernel_name="vecCopy", workload=workload)
+    code_object_store = orm.CodeObjectStore(
+        workload=workload, pid=42, code_object_id=5, load_base=0x1000
+    )
+    db_session.add_all([workload, kernel, code_object_store])
+    source_frames = make_source_frame_collector(workload)
+    kernel_symbols = {}
+
+    db_analysis._add_instruction_line(
+        InstructionLineRecord(
+            code_object_offset=0x10,
+            kernel_name="vecCopy",
+            instruction="v_mov_b32_e32 v1, 0",
+            source=SOURCE_LINE_MISSING,
+            total_count=1,
+            issue_count=1,
+            stall_count=0,
+            stall_reasons={},
+            inst_types={},
+        ),
+        code_object_store,
+        kernel,
+        kernel_symbols,
+        source_frames,
+    )
+    db_analysis._add_symbol_isa(
+        kernel_symbols[(42, 5, "vecCopy")],
+        CodeObjectSymbol(
+            name="vecCopy",
+            virtual_address=0x1020,
+            instructions=[
+                CodeObjectInstruction(
+                    virtual_address=0x1020,
+                    instruction="v_add_f32_e32 v0, v1, v2",
+                    source=None,
+                ),
+                CodeObjectInstruction(
+                    virtual_address=0x1028,
+                    instruction="s_waitcnt lgkmcnt(0)",
+                    source=None,
+                ),
+                CodeObjectInstruction(
+                    virtual_address=0x1030,
+                    instruction="not_an_instruction v0",
+                    source=None,
+                ),
+            ],
+        ),
+        source_frames,
+    )
+    db_session.commit()
+
+    pipeline_by_offset = {
+        line.code_object_offset: (
+            line.instruction_type_lookup.text
+            if line.instruction_type_lookup is not None
+            else None
+        )
+        for line in db_session.query(orm.InstructionLine).all()
+    }
+    assert pipeline_by_offset == {
+        0x10: "VALU",
+        0x20: "VALU",
+        0x28: "INTERNAL",
+        0x30: None,
+    }
+    # The two VALU lines share one lookup row.
+    assert db_session.query(orm.InstructionTypeLookup).count() == 2
