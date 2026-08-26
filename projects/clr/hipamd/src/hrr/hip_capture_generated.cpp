@@ -32,8 +32,8 @@
 #include "hip_capture.h"
 #include "hip_capture_writer.h"
 
-// hrr_api_args.h lives in the same directory (hipamd/src/hrr/)
-#include "hrr_api_args.h"
+// hrr_api_args.h now lives in projects/hrr/include/hrr (shared wire format)
+#include "hrr/hrr_api_args.h"
 
 #include "hip/amd_detail/hip_api_trace.hpp"
 
@@ -745,6 +745,20 @@ static hipError_t capture_hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limi
     a.pValue = reinterpret_cast<uint64_t>(pValue);
     a.limit = static_cast<decltype(a.limit)>(limit);
     hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETLIMIT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMask, hipDevice_t device) {
+  hipError_t r = g_real_table.hipDeviceGetLuid_fn(luid, deviceNodeMask, device);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetLuid a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.luid = reinterpret_cast<uint64_t>(luid);
+    a.deviceNodeMask = reinterpret_cast<uint64_t>(deviceNodeMask);
+    a.device = static_cast<uint64_t>(static_cast<int>(device));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETLUID, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -2834,6 +2848,20 @@ static hipError_t capture_hipInit(unsigned int flags) {
     a.ret         = static_cast<int32_t>(r);
     a.flags = static_cast<decltype(a.flags)>(flags);
     hrr_cap::writer::write_event_raw(HRR_API_HIPINIT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipInitDevice(int device, unsigned int deviceFlags, unsigned int flags) {
+  hipError_t r = g_real_table.hipInitDevice_fn(device, deviceFlags, flags);
+  if (r == hipSuccess) {
+    hrr_args_hipInitDevice a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.device = static_cast<decltype(a.device)>(device);
+    a.deviceFlags = static_cast<decltype(a.deviceFlags)>(deviceFlags);
+    a.flags = static_cast<decltype(a.flags)>(flags);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPINITDEVICE, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -7392,6 +7420,20 @@ static hipError_t capture_hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEve
   return r;
 }
 
+// Generated shim
+static hipError_t capture_hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location, hipMemAllocationType type) {
+  hipError_t r = g_real_table.hipMemGetDefaultMemPool_fn(memPool, location, type);
+  if (r == hipSuccess) {
+    hrr_args_hipMemGetDefaultMemPool a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.location = 0;  // non-castable type skipped
+    a.type = static_cast<decltype(a.type)>(type);
+    if (memPool) a.memPool = reinterpret_cast<uint64_t>(*memPool);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPMEMGETDEFAULTMEMPOOL, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
 // ============================================================
 // Table builders
 // ============================================================
@@ -7490,6 +7532,7 @@ void hip_capture_build_table() {
   g_cap_table.hipDeviceGetDefaultMemPool_fn = capture_hipDeviceGetDefaultMemPool;
   g_cap_table.hipDeviceGetGraphMemAttribute_fn = capture_hipDeviceGetGraphMemAttribute;
   g_cap_table.hipDeviceGetLimit_fn = capture_hipDeviceGetLimit;
+  g_cap_table.hipDeviceGetLuid_fn = capture_hipDeviceGetLuid;
   g_cap_table.hipDeviceGetMemPool_fn = capture_hipDeviceGetMemPool;
   g_cap_table.hipDeviceGetName_fn = capture_hipDeviceGetName;
   g_cap_table.hipDeviceGetP2PAttribute_fn = capture_hipDeviceGetP2PAttribute;
@@ -7646,6 +7689,7 @@ void hip_capture_build_table() {
   g_cap_table.hipImportExternalMemory_fn = capture_hipImportExternalMemory;
   g_cap_table.hipImportExternalSemaphore_fn = capture_hipImportExternalSemaphore;
   g_cap_table.hipInit_fn = capture_hipInit;
+  g_cap_table.hipInitDevice_fn = capture_hipInitDevice;
   g_cap_table.hipIpcCloseMemHandle_fn = capture_hipIpcCloseMemHandle;
   g_cap_table.hipIpcGetEventHandle_fn = capture_hipIpcGetEventHandle;
   g_cap_table.hipIpcGetMemHandle_fn = capture_hipIpcGetMemHandle;
@@ -7984,6 +8028,7 @@ void hip_capture_build_table() {
   g_cap_table.hipExecutionCtxRecordEvent_fn = capture_hipExecutionCtxRecordEvent;
   g_cap_table.hipExecutionCtxSynchronize_fn = capture_hipExecutionCtxSynchronize;
   g_cap_table.hipExecutionCtxWaitEvent_fn = capture_hipExecutionCtxWaitEvent;
+  g_cap_table.hipMemGetDefaultMemPool_fn = capture_hipMemGetDefaultMemPool;
 }
 
 void hip_capture_build_compiler_table() {
