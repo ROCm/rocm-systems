@@ -96,10 +96,12 @@ The HSA coordinator owns allocations and executable lifetimes; it does not
 choose sanitizer semantics.
 
 Today, every named contract in the upper half of the graph exists. Most native
-emission and placement still run inside the explicitly isolated
-`LegacyConSanLowering`. This is a migration boundary, not the intended shape of
-the final mechanism layer. New code must move responsibility out of that
-boundary component by component rather than create another path around it.
+emission and placement still run inside an explicitly isolated compatibility
+lowering path. The former `LegacyConSanLowering` wrapper type has been deleted;
+the remaining free operations name the ordinary transform, pristine MOI
+inventory, runtime-bound retry, and temporary hook-test publication directly.
+This path is still a migration boundary, not the intended final mechanism
+layer, and must shrink component by component.
 
 ## The four engines
 
@@ -294,11 +296,11 @@ caves, dense dispatchers, branch islands, or relays. It updates code and kernel
 resource metadata together, reparses and validates the result, and publishes
 replacement bytes only after final validation.
 
-Most of this mechanism is currently reached through `LegacyConSanLowering`.
-That class is the sole component allowed to adapt the typed inputs back to a
-fresh `ConSanOptions` and invoke `try_patch_consan`. Its name and narrow public
-surface make the remaining migration work searchable. It owns no public policy
-or installation decision.
+Most of this mechanism is currently reached through compatibility lowering
+inside `TransformResult` construction. That implementation is the sole place
+allowed to adapt typed inputs back to one fresh `ConSanOptions` and invoke
+`try_patch_consan`; there is no longer a public legacy-lowering object or raw
+production result entry point.
 
 ### Transformation result
 
@@ -333,8 +335,8 @@ is not a second source of control-plane truth.
 
 Automatic MOI report sizing also stays inside this boundary. The pristine
 inventory pass returns `TransformResult`, and the retry accepts that typed
-result plus the bound runtime resources. Only `LegacyConSanLowering` can unwrap
-the temporary mechanism state needed by the prototype retry implementation.
+result plus the bound runtime resources. Only the named typed retry operation
+can unwrap the temporary mechanism state needed by the prototype retry.
 
 ## Runtime component and lifecycle
 
@@ -547,7 +549,7 @@ fully dismantled. The current state is:
   but
 - shared decode/inventory construction, resource planning, per-engine native
   lowering, placement, and some lifecycle presentation still project through
-  `LegacyConSanLowering` and `ConSanResult`.
+  the compatibility `ConSanResult` mechanism record.
 
 The next extraction order follows dependency direction:
 

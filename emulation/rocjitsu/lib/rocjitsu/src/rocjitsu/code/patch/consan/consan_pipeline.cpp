@@ -257,7 +257,7 @@ void TransformResult::discard_replacement(std::string warning) {
       ConSanPipelineStageStatus::Unsupported;
 }
 
-TransformResult LegacyConSanLowering::run_pristine_moi_inventory(
+TransformResult transform_consan_pristine_moi_inventory(
     std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
@@ -272,12 +272,12 @@ TransformResult LegacyConSanLowering::run_pristine_moi_inventory(
   legacy_options.moi_report_generation = 0;
   legacy_options.moi_report_dispatch_id = 0;
   legacy_options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
-  return publish(code_object_bytes, request, transform_policy, runtime_policy, debug,
-                 disabled_mutation, capabilities, unbound_resources,
-                 try_patch_consan(code_object_bytes, legacy_options));
+  return publish_consan_mechanism_result(
+      code_object_bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
+      capabilities, unbound_resources, try_patch_consan(code_object_bytes, legacy_options));
 }
 
-TransformResult LegacyConSanLowering::retry_pristine_moi_inventory(
+TransformResult retry_transform_consan_pristine_moi_inventory(
     std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
@@ -298,8 +298,9 @@ TransformResult LegacyConSanLowering::retry_pristine_moi_inventory(
   };
   ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory.legacy_compatibility_), retry, code_object_bytes);
-  return publish(code_object_bytes, request, transform_policy, runtime_policy, debug, mutation,
-                 capabilities, resources, std::move(retried));
+  return publish_consan_mechanism_result(code_object_bytes, request, transform_policy,
+                                         runtime_policy, debug, mutation, capabilities, resources,
+                                         std::move(retried));
 }
 
 TransformResult
@@ -317,28 +318,28 @@ TransformResult transform_consan_with_mutation(
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources) {
-  return LegacyConSanLowering::publish_optional(code_object_bytes, request, transform_policy,
-                                                runtime_policy, debug, mutation, capabilities,
-                                                resources, std::nullopt);
+  return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
+                                           runtime_policy, debug, mutation, capabilities, resources,
+                                           std::nullopt);
 }
 
-TransformResult
-LegacyConSanLowering::publish(std::span<const uint8_t> code_object_bytes,
-                              const ConSanRequest &request, const TransformPolicy &transform_policy,
-                              const RuntimePolicy &runtime_policy,
-                              const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-                              const RuntimeCapabilities &capabilities,
-                              const BoundRuntimeResources &resources, ConSanResult legacy) {
-  return publish_optional(code_object_bytes, request, transform_policy, runtime_policy, debug,
-                          mutation, capabilities, resources, std::move(legacy));
-}
-
-TransformResult LegacyConSanLowering::publish_optional(
+TransformResult publish_consan_mechanism_result(
     std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-    std::optional<ConSanResult> supplied_legacy) {
+    ConSanResult mechanism_result) {
+  return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
+                                           runtime_policy, debug, mutation, capabilities, resources,
+                                           std::move(mechanism_result));
+}
+
+TransformResult TransformResult::publish_optional(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
+    std::optional<ConSanResult> supplied_mechanism) {
   TransformResult result;
   result.code_object = make_consan_code_object_id(code_object_bytes);
   initialize_stage_records(result);
@@ -377,8 +378,8 @@ TransformResult LegacyConSanLowering::publish_optional(
   }
 
   ConSanResult legacy;
-  if (supplied_legacy) {
-    legacy = std::move(*supplied_legacy);
+  if (supplied_mechanism) {
+    legacy = std::move(*supplied_mechanism);
   } else {
     const ConSanOptions legacy_options = LegacyOptionsAdapter::adapt(
         request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);

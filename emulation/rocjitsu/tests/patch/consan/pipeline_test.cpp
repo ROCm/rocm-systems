@@ -478,11 +478,11 @@ TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrie
   TransformPolicy transform_policy;
   transform_policy.max_patches = 16;
 
-  const TransformResult ordinary = LegacyConSanLowering::run_pristine_moi_inventory(
+  const TransformResult ordinary = transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
       MutationRequest{}, complete_runtime_capabilities(), BoundRuntimeResources{},
       /*preserve_extended_barrier_pairs=*/false);
-  const TransformResult preserved = LegacyConSanLowering::run_pristine_moi_inventory(
+  const TransformResult preserved = transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
       MutationRequest{}, complete_runtime_capabilities(), BoundRuntimeResources{},
       /*preserve_extended_barrier_pairs=*/true);
@@ -490,7 +490,7 @@ TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrie
   supplied_binding.scope = ConSanRuntimeResourceScope::Executable;
   supplied_binding.moi_report_buffer_address = 0x123456780000ull;
   supplied_binding.moi_report_buffer_size = 64u * 1024u * 1024u;
-  const TransformResult cleared_binding = LegacyConSanLowering::run_pristine_moi_inventory(
+  const TransformResult cleared_binding = transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
       MutationRequest{}, complete_runtime_capabilities(), supplied_binding,
       /*preserve_extended_barrier_pairs=*/true);
@@ -522,7 +522,7 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   const MutationRequest mutation;
   const RuntimeCapabilities capabilities = complete_runtime_capabilities();
 
-  TransformResult inventory = LegacyConSanLowering::run_pristine_moi_inventory(
+  TransformResult inventory = transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, {},
       /*preserve_extended_barrier_pairs=*/false);
   ASSERT_TRUE(inventory.well_formed()) << testing::PrintToString(inventory.issues);
@@ -534,7 +534,7 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   resources.scope = ConSanRuntimeResourceScope::Executable;
   resources.moi_report_buffer_address = 0x123456780000ull;
   resources.moi_report_buffer_size = requirements.abi_plan.required_bytes;
-  TransformResult retried = LegacyConSanLowering::retry_pristine_moi_inventory(
+  TransformResult retried = retry_transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
       std::move(inventory));
   const TransformResult direct = transform_consan(bytes, request, transform_policy, runtime_policy,

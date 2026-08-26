@@ -104,9 +104,9 @@ rocjitsu::TransformResult run_consan_transform(std::span<const uint8_t> bytes,
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
     const rocjitsu::ConSanOptions legacy_options = rocjitsu::LegacyOptionsAdapter::adapt(
         request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
-    return rocjitsu::LegacyConSanLowering::publish(bytes, request, transform_policy, runtime_policy,
-                                                   debug, mutation, capabilities, resources,
-                                                   override(bytes, legacy_options));
+    return rocjitsu::publish_consan_mechanism_result(bytes, request, transform_policy,
+                                                     runtime_policy, debug, mutation, capabilities,
+                                                     resources, override(bytes, legacy_options));
   }
   return mutation.has_mutation()
              ? rocjitsu::transform_consan_with_mutation(bytes, request, transform_policy,
@@ -138,11 +138,11 @@ rocjitsu::TransformResult run_consan_pristine_moi_inventory(
     options.moi_report_generation = 0;
     options.moi_report_dispatch_id = 0;
     options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
-    return rocjitsu::LegacyConSanLowering::publish(bytes, request, transform_policy, runtime_policy,
-                                                   debug, disabled_mutation, capabilities,
-                                                   unbound_resources, override(bytes, options));
+    return rocjitsu::publish_consan_mechanism_result(
+        bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
+        unbound_resources, override(bytes, options));
   }
-  return rocjitsu::LegacyConSanLowering::run_pristine_moi_inventory(
+  return rocjitsu::transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
       unbound_resources, preserve_extended_barrier_pairs);
 }
@@ -156,16 +156,16 @@ rocjitsu::TransformResult retry_consan_moi_transform(
   const rocjitsu::ConSanOptions legacy_options = rocjitsu::LegacyOptionsAdapter::adapt(
       request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
   // Unit tests replace the whole transform boundary and expect both phases to
-  // flow through that seam. Production keeps the compatibility retry private
-  // to `LegacyConSanLowering`.
+  // flow through that seam. Production keeps the raw retry inside the typed
+  // compatibility operation.
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
     g_test_consan_moi_retry_count.fetch_add(1, std::memory_order_relaxed);
-    return rocjitsu::LegacyConSanLowering::publish(bytes, request, transform_policy, runtime_policy,
-                                                   debug, mutation, capabilities, resources,
-                                                   override(bytes, legacy_options));
+    return rocjitsu::publish_consan_mechanism_result(bytes, request, transform_policy,
+                                                     runtime_policy, debug, mutation, capabilities,
+                                                     resources, override(bytes, legacy_options));
   }
-  return rocjitsu::LegacyConSanLowering::retry_pristine_moi_inventory(
+  return rocjitsu::retry_transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
       std::move(inventory));
 }

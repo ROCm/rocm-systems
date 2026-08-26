@@ -14,11 +14,11 @@ namespace rocjitsu {
 ///
 /// Production callers must enter through `transform_consan` or
 /// `transform_consan_with_mutation`. This declaration is intentionally kept
-/// out of `consan.h`: only `LegacyConSanLowering`, the HSA hook's temporary
-/// test-override seam, the mechanism-level host tests, and the transform fuzzer
-/// may bypass the typed production pipeline while the prototype lowerer is
-/// incrementally decomposed. The returned `ConSanResult` is the compatibility
-/// mechanism record, not the production control-plane contract.
+/// out of `consan.h`: only the typed pipeline implementation, the HSA hook's
+/// temporary test-override seam, the mechanism-level host tests, and the
+/// transform fuzzer may bypass the production entry while the prototype
+/// lowerer is incrementally decomposed. The returned `ConSanResult` is the
+/// compatibility mechanism record, not the production control-plane contract.
 [[nodiscard]] ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
                                             const ConSanOptions &options);
 

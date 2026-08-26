@@ -22,9 +22,9 @@ namespace rocjitsu {
 ///
 /// The order is the dependency order visible to callers, not a claim that the
 /// compatibility lowerer has already been physically split into one function
-/// per value. In particular, `LegacyConSanLowering` temporarily produces the
-/// inventory and observation artifacts that the pipeline publishes at their
-/// logical boundaries. Every pipeline result records every stage exactly once;
+/// per value. The compatibility lowerer temporarily produces the inventory and
+/// observation artifacts that the pipeline publishes at their logical
+/// boundaries. Every pipeline result records every stage exactly once;
 /// a stage that does not apply or awaits runtime binding still has an explicit
 /// status. `Count` is an iteration sentinel and never denotes work.
 enum class ConSanPipelineStage : uint8_t {
@@ -301,69 +301,22 @@ public:
   void discard_replacement(std::string warning);
 
 private:
-  friend class LegacyConSanLowering;
+  friend TransformResult publish_consan_mechanism_result(
+      std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
+      const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
+      const RuntimeCapabilities &, const BoundRuntimeResources &, ConSanResult);
+  friend TransformResult transform_consan_pristine_moi_inventory(
+      std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
+      const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
+      const RuntimeCapabilities &, const BoundRuntimeResources &, bool);
+  friend TransformResult retry_transform_consan_pristine_moi_inventory(
+      std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
+      const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
+      const RuntimeCapabilities &, const BoundRuntimeResources &, TransformResult);
   friend TransformResult transform_consan(std::span<const uint8_t>, const ConSanRequest &,
                                           const TransformPolicy &, const RuntimePolicy &,
                                           const ConSanDebugOverrides &, const RuntimeCapabilities &,
                                           const BoundRuntimeResources &);
-  friend TransformResult
-  transform_consan_with_mutation(std::span<const uint8_t>, const ConSanRequest &,
-                                 const TransformPolicy &, const RuntimePolicy &,
-                                 const ConSanDebugOverrides &, const MutationRequest &,
-                                 const RuntimeCapabilities &, const BoundRuntimeResources &);
-
-  /// Prototype mechanism result with migrated artifacts moved out.
-  ConSanResult legacy_compatibility_;
-};
-
-/// Sole compatibility component allowed to invoke the prototype patcher.
-///
-/// It converts immutable typed inputs into one fresh `ConSanOptions`, invokes
-/// the existing probe/resource/placement implementation, and returns its
-/// mutable result only to the new pipeline. It owns no semantic policy and no
-/// caller-visible installation decision. Keeping this boundary named makes
-/// every remaining legacy responsibility searchable and independently
-/// removable as lowerer components migrate.
-class LegacyConSanLowering {
-public:
-  /// Run the pristine MOI inventory pass used before the HSA adapter allocates
-  /// and binds an automatic report buffer.
-  ///
-  /// `preserve_extended_barrier_pairs` carries one fact computed from the live
-  /// mutation request before that request is deliberately disabled for the
-  /// pristine pass. It exists only because the prototype represents this
-  /// two-pass composition as a mutable option; the future inventory component
-  /// will receive the later mutation requirements directly. No caller may use
-  /// this entry for an installable transform.
-  [[nodiscard]] static TransformResult run_pristine_moi_inventory(
-      std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-      const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-      const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
-      const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources,
-      bool preserve_extended_barrier_pairs);
-
-  /// Bind runtime resources and re-run only MOI planning and lowering from a
-  /// pristine inventory returned by `run_pristine_moi_inventory`. The HSA
-  /// coordinator never sees or reconstructs the prototype retry value.
-  [[nodiscard]] static TransformResult retry_pristine_moi_inventory(
-      std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-      const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-      const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-      const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-      TransformResult inventory);
-
-  /// Publish a mechanism result already produced by the inventory-retry or
-  /// hook-test seam through the same typed pipeline contract as an ordinary
-  /// lowering. This is the only compatibility entry for results not produced
-  /// by `run()` and disappears with the legacy retry boundary.
-  [[nodiscard]] static TransformResult
-  publish(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-          const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-          const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-          const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-          ConSanResult legacy_result);
-
-private:
   friend TransformResult
   transform_consan_with_mutation(std::span<const uint8_t>, const ConSanRequest &,
                                  const TransformPolicy &, const RuntimePolicy &,
@@ -375,8 +328,35 @@ private:
                    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
                    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
                    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-                   std::optional<ConSanResult> legacy_result);
+                   std::optional<ConSanResult> mechanism_result);
+
+  /// Prototype mechanism result with migrated artifacts moved out.
+  ConSanResult legacy_compatibility_;
 };
+
+/// Run the non-installable MOI inventory pass before runtime resources exist.
+[[nodiscard]] TransformResult transform_consan_pristine_moi_inventory(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources,
+    bool preserve_extended_barrier_pairs);
+
+/// Bind runtime resources and lower a previously typed pristine MOI inventory.
+[[nodiscard]] TransformResult retry_transform_consan_pristine_moi_inventory(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
+    TransformResult inventory);
+
+/// Publish a mechanism result supplied by the temporary hook-test seam.
+[[nodiscard]] TransformResult publish_consan_mechanism_result(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
+    ConSanResult mechanism_result);
 
 /// Run the ordinary observation pipeline. Fault mutation and timing
 /// perturbation are deliberately absent from this entry point.

@@ -275,7 +275,7 @@ here so a name is meaningful on first use; section 5.2 gives the full contract.
 | `TargetLowerer` | Narrow target-dependent operation that maps probe intents and assigned resources to native instructions. |
 | `LegacyOptionsAdapter` | Temporary converter from the new immutable request/binding types to one fresh current-prototype `ConSanOptions` value. |
 | `LegacyInventoryView` | Temporary read-only projection from `ProgramInventory` into the container/candidate shapes expected by current lowerers. |
-| `LegacyConSanLowering` | Explicit boundary containing current probe emission, resource, and placement machinery after semantic policy moves out of it. |
+| Compatibility lowering operations | Explicit temporary boundary containing current probe emission, resource, and placement machinery after semantic policy moves out of it. The former wrapper class has been deleted. |
 
 These names describe responsibilities, not a requirement that each become a
 class. Most should be plain structures, enum variants, and pure functions.
@@ -1782,8 +1782,8 @@ execution, not only by a test or old/new comparison harness:
    `EvidenceRequirements`, then bound explicitly by the current HSA runtime;
 7. a small top-level pipeline passes typed stage outputs in one direction and
    returns a split `TransformResult`;
-8. current probe/resource/placement code is reachable only through a named
-   `LegacyConSanLowering` adapter that consumes the new plan and reports typed
+8. current probe/resource/placement code is reachable only through named
+   compatibility operations that consume the new plan and report typed
    lowering outcomes; and
 9. each new component has focused tests and the design documentation described
    above.
@@ -1823,8 +1823,7 @@ At the start and end of Stage 2 record:
 - references to target IDs outside profile/classifier/lowerer code;
 - engine-specific copies of site admission and coverage logic;
 - direct hook dependencies on patch geometry; and
-- remaining consumers of `LegacyConSanLowering` and its compatibility
-  projection.
+- remaining consumers of the compatibility mechanism projection.
 
 The week succeeds by establishing dependency direction and deleting displaced
 policy, not by moving the same lines behind new filenames. New type or adapter
@@ -2375,8 +2374,8 @@ analysis completed.
   derivable from `TransformResult`; an rvalue compatibility projection remains
   for the hook lifecycle code that has not yet migrated. Hook test overrides
   retain their deliberately narrow legacy seam.
-- **Temporary seam and remaining responsibility:** `LegacyConSanLowering` is
-  the sole typed-to-`ConSanOptions` entry. The prototype parser/inventory,
+- **Temporary seam and remaining responsibility:** `TransformResult`
+  construction is the sole typed-to-`ConSanOptions` entry. The prototype parser/inventory,
   lowerer, resource/placement machinery, finalizer, ABI retry, and recursive
   staged-mutation mechanics still execute inside that named boundary. The
   pipeline republishes their already-produced inventory and observation values
@@ -2404,7 +2403,7 @@ analysis completed.
 - **Slice-7 deletion boundary:** Remove both overloads from the public
   `consan.h` surface, keep the mutable-options implementation in an explicitly
   internal header for mechanism tests and fuzzing, and retain recursive
-  mutation only inside `LegacyConSanLowering`.
+  mutation only inside the compatibility lowering implementation.
 - **Prerequisite:** Slices 1--5B.
 
 ### Slice 7: endpoint cleanup and design reconciliation
@@ -2417,8 +2416,8 @@ analysis completed.
   projection test retains exact compatibility coverage.
 - **Completed production routing:** Every ordinary or mutated installable HSA
   transform enters the typed pipeline. The pre-allocation MOI inventory pass
-  and its runtime-bound retry both enter explicitly named
-  `LegacyConSanLowering` operations and return `TransformResult`. The HSA
+  and its runtime-bound retry both enter explicitly named typed operations and
+  return `TransformResult`. The HSA
   coordinator no longer stores, publishes, or passes a mutable `ConSanResult`
   between the two phases. One documented extended-barrier preservation fact
   remains, and its focused unit test proves that it controls only incomplete
@@ -2429,8 +2428,8 @@ analysis completed.
 - **Control-plane endpoint:** Configuration, capability validation, immutable
   program identity, observation policy, evidence requirements, runtime-binding
   status, static outcome, and installation policy have typed owners outside the
-  prototype. `LegacyConSanLowering` may translate those values into mechanism
-  shape, but may not originate target-neutral admission, report sizing,
+  prototype. The compatibility lowering may translate those values into
+  mechanism shape, but may not originate target-neutral admission, report sizing,
   runtime allocation, or trust policy.
 - **Honest deviations from the end-state diagrams:** The HSA adapter consumes
   `TransformResult` directly, and automatic allocation retry remains typed at
@@ -2884,7 +2883,7 @@ Stage 1 is complete only when reviewers can answer “yes” to every item below
   exact-register/patch/word assertions that may constrain only a legacy
   component?
 - Is the one-week endpoint credible given the current implementation size, and
-  is what remains behind `LegacyConSanLowering` explicit?
+  is what remains behind the compatibility mechanism explicit?
 - For every migration slice, are current responsibility, new contract,
   temporary seam, affected consumers, test gate, cutover, deletion, and
   prerequisite named?
