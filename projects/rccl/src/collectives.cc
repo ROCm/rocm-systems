@@ -18,6 +18,7 @@
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/gin/gin_alltoall.h"
+#include "algorithms/gin/gin_all_reduce.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
 #include "ce_coll.h"
@@ -625,6 +626,16 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
                           chunkSteps,        sliceSteps,  nullptr};
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
+
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (ncclAllReduceGinSdmaEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+   printf("Here\n");
+    INFO(NCCL_COLL, "AllReduce: taking GIN SDMA path: nRanks=%d count=%zu bytes=%zu", comm->nRanks, count,
+         count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  }
+#endif
 
   // Select the implementation once, in one place (rccl_wrap.cc). The returned
   // decision drives dispatch here (CE 2-shot / DDA return early) and is carried
