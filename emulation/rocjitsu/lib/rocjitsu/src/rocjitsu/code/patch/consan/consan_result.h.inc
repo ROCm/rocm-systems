@@ -135,15 +135,11 @@ struct ConSanBranchOnlyReservoirTelemetry {
   size_t planned_appended_bytes = 0;
   size_t used_appended_bytes = 0;
   size_t unused_appended_bytes = 0;
-  /// Release-visible defensive signal owned by the LDS reservoir replay loop.
-  /// Correct convergence leaves this zero; other reservoir producers cannot
-  /// set it and do not log it.
-  size_t lds_replay_limit_reached_count = 0;
 
   bool operator==(const ConSanBranchOnlyReservoirTelemetry &) const = default;
 };
 
-static_assert(sizeof(ConSanBranchOnlyReservoirTelemetry) == 7u * sizeof(size_t),
+static_assert(sizeof(ConSanBranchOnlyReservoirTelemetry) == 6u * sizeof(size_t),
               "update the reservoir telemetry schema tests");
 
 /// Records one complete reserved appended footprint. Keeping the payload and

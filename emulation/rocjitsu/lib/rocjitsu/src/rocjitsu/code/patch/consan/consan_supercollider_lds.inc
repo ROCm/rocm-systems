@@ -3157,10 +3157,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           "ConSan LDS check/trap branch-only reservoir replay lost its termination state");
       return;
     }
-    // Preserve the legacy LDS-specific signal as a mirror of the shared
-    // planning meter; the structured exhaustion counter is authoritative.
-    result.lds_relay_reservoir_telemetry.lds_replay_limit_reached_count =
-        convergence_work.exhausted() ? 1u : 0u;
     assert(!convergence_work.exhausted() && convergence_terminated &&
            "branch-only reservoir replay must converge before its defensive limit");
     std::optional<ScSelectedSpillState> accepted_spills;

@@ -3089,6 +3089,31 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   seconds. The periodic physical gate remains applicable. E2E validation
   remains outside this work.
 
+### Slice 4AC: delete the mirrored LDS replay-limit signal
+
+- **Single authoritative result:** The shared bounded-planning meter owns LDS
+  convergence work and exhaustion, while the convergence loop also requires
+  successful termination before emission. A second value embedded in retained
+  reservoir-footprint telemetry cannot add another supported outcome.
+- **Completed deletion:** `ConSanBranchOnlyReservoirTelemetry` no longer carries
+  `lds_replay_limit_reached_count`, and the LDS lowerer no longer copies the
+  planning meter's exhaustion bit into it. No production or test consumer read
+  the mirror. Reservoir telemetry is again only retained footprint; planning
+  telemetry is only bounded-work behavior.
+- **Retained behavioral proof:** Thirty-one focused reservoir, routing, and
+  convergence tests continue to prove bounded exhaustion, transaction rollback,
+  used and unused footprint, recursive routing, and successful convergence.
+  No test or observable behavior was weakened.
+- **Deletion result:** Production source is nine lines smaller. No replacement
+  field, adapter, or test-only mechanism was added.
+- **Completed checked-in gate:** The ConSan host gate passed 1,509 of 1,511
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 72.80
+  seconds. This mirror deletion does not change emitted device code; the
+  periodic physical gate remains applicable. E2E validation remains outside
+  this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner
