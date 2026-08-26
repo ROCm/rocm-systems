@@ -197,9 +197,10 @@ if(BUILD_CUID)
         set(CUID_LIB_DIR "${CUID_FETCH_DIR}/projects/cuid/lib")
     endif()
 
-    # cuid's lib/CMakeLists.txt normally inherits these two from cuid's top-level
+    # cuid's lib/CMakeLists.txt normally inherits following variables from cuid's top-level
     # CMakeLists.txt; set them directly since only cuid's lib/ is added below
-    set(LIB_COMPONENT "cuid_library")
+    set(AMDCUID "amdcuid")
+    set(LIB_COMPONENT "dev")
     if(WIN32)
         set(AMDCUID_SHARED_CONFIG_DIR "C:/ProgramData/AMD/AMDCUID/config")
     else()
