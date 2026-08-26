@@ -266,8 +266,6 @@ struct ConSanResult {
   /// independently structurally and semantically validated before their patch
   /// inventories were composed.
   bool staged_composition_validated = false;
-  /// Internal second-stage proof over a mutation image using a pristine plan.
-  bool carried_composite_instrumentation_stage = false;
   ConSanBranchOnlyRoutingTelemetry moi_branch_only_routing_telemetry;
   /// Reservoir footprint retained in a successfully emitted MOI patch. A
   /// rejected transform retains no output image, so this remains zero; any

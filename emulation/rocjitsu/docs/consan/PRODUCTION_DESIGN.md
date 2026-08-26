@@ -3026,6 +3026,34 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   periodic physical gate remains applicable. E2E validation remains outside
   this work.
 
+### Slice 4AA: keep carried-composition phase state out of results
+
+- **Phase-local contract:** Validation of an intermediate instrumentation image
+  over a fault-mutated input may consume the carried pristine perturbation plan.
+  That is a property of the internal finalization call, not a persistent fact
+  about the transform result. Public validation always proves a complete result
+  from its public inventory and composed-stage proof.
+- **Completed cutover:** `ConSanResult` no longer carries the mutable
+  `carried_composite_instrumentation_stage` phase flag. The composition
+  coordinator passes the internal validation purpose directly to finalization,
+  and only the carried intermediate stage can select that path. Complete
+  results therefore cannot leak, retain, or have callers alter an internal
+  phase marker.
+- **Retained behavioral proof:** Existing atomic and barrier fault-composition,
+  carried perturbation, rollback, corruption, and public revalidation tests
+  exercise both validation purposes. The checked-in device workloads continue
+  to cover fault-only and ordinary complete-result validation. No assertion was
+  weakened or removed for this cutover.
+- **Size result:** Production and test line counts are unchanged: the internal
+  parameter replaces the public field and its reads without adding a
+  compatibility adapter. The result shape and ownership boundary are simpler.
+- **Completed checked-in gate:** The ConSan host gate passed 1,508 of 1,510
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 67.35
+  seconds. The periodic physical gate remains applicable. E2E validation
+  remains outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

@@ -37,7 +37,8 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
 }
 
 [[nodiscard]] ConSanResult finalize_consan_result(ConSanResult result,
-                                                  std::span<const uint8_t> original_bytes);
+                                                  std::span<const uint8_t> original_bytes,
+                                                  bool validating_carried_composite_stage = false);
 
 template <typename Site>
 void move_sites_in_range(std::vector<Site> &source, std::vector<Site> &destination, uint64_t begin,
@@ -356,7 +357,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   ConSanResult result;
   result.flavor = options.flavor;
   result.moi_engine = options.moi_engine;
-  result.carried_composite_instrumentation_stage = !carried_plans.empty();
   result.mutation.fault.requested = requested_fault_mutation_count(options);
   ProgramInventoryBuilder inventory_builder(code_object_bytes);
   result.program_inventory = inventory_builder.view();
@@ -518,7 +518,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
     ConSanResult instrument_result = finalize_consan_result(
         try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried),
-        mutation_stage.image);
+        mutation_stage.image, /*validating_carried_composite_stage=*/!instrument_carried.empty());
     const major_image_ownership::ScopedOwner instrument_result_owner(
         major_image_ownership::OwnerKind::ResultImage, instrument_result.elf_bytes);
     // Resource ownership is a logical kernel identity, but instrumentation of
