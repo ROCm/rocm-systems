@@ -1142,9 +1142,12 @@ TEST(MfmaExecTest, ResolveAccAccVgpr) {
 
 TEST(MfmaExecTest, ScalarF32ReadsEachMatrixOperandOnce) {
   constexpr uint32_t wf_size = 64;
-  constexpr uint32_t M = 16, N = 16, K = 4, B = 1;
+  constexpr uint32_t M = 16, N = 16, K = 4, B = 2;
   constexpr uint32_t sgprs_per_wf = 106, vgprs_per_wf = 256;
   constexpr uint32_t source_a = 0, source_b = 16, accumulator = 32, destination = 48;
+  constexpr uint32_t source_a_regs = (M * K * B + wf_size - 1) / wf_size;
+  constexpr uint32_t source_b_regs = (N * K * B + wf_size - 1) / wf_size;
+  constexpr uint32_t destination_regs = (M * N * B + wf_size - 1) / wf_size;
 
   amdgpu::GpuMemory gpu_mem("mfma_scalar_snapshot_mem");
   amdgpu::L2Cache l2("mfma_scalar_snapshot_l2");
@@ -1161,11 +1164,13 @@ TEST(MfmaExecTest, ScalarF32ReadsEachMatrixOperandOnce) {
   ASSERT_EQ(wf->wf_size(), wf_size);
   const uint32_t vb = wf->vgpr_alloc().base;
 
-  for (uint32_t lane = 0; lane < wf_size; ++lane) {
-    cu->write_vgpr(vb + source_a, lane, std::bit_cast<uint32_t>(1.0f));
-    cu->write_vgpr(vb + source_b, lane, std::bit_cast<uint32_t>(2.0f));
-  }
-  for (uint32_t reg = 0; reg < 4; ++reg)
+  for (uint32_t reg = 0; reg < source_a_regs; ++reg)
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      cu->write_vgpr(vb + source_a + reg, lane, std::bit_cast<uint32_t>(1.0f));
+  for (uint32_t reg = 0; reg < source_b_regs; ++reg)
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      cu->write_vgpr(vb + source_b + reg, lane, std::bit_cast<uint32_t>(2.0f));
+  for (uint32_t reg = 0; reg < destination_regs; ++reg)
     for (uint32_t lane = 0; lane < wf_size; ++lane)
       cu->write_vgpr(vb + accumulator + reg, lane, std::bit_cast<uint32_t>(3.0f));
 
@@ -1182,11 +1187,12 @@ TEST(MfmaExecTest, ScalarF32ReadsEachMatrixOperandOnce) {
 
   ForceScalarGuard force_scalar(/*force_scalar=*/true);
   amdgpu::exec_f32(*cu, M, N, K, B, /*in_bits=*/32, vb + destination, vb + source_a, vb + source_b,
-                   vb + accumulator, extract_a, extract_b);
+                   vb + accumulator, extract_a, extract_b, amdgpu::ACC_FROM_VGPR,
+                   /*cbsz=*/1, /*abid=*/0, /*blgp=*/1);
 
   EXPECT_EQ(source_a_reads, static_cast<size_t>(M) * K * B);
   EXPECT_EQ(source_b_reads, static_cast<size_t>(N) * K * B);
-  for (uint32_t reg = 0; reg < 4; ++reg)
+  for (uint32_t reg = 0; reg < destination_regs; ++reg)
     for (uint32_t lane = 0; lane < wf_size; ++lane)
       EXPECT_FLOAT_EQ(std::bit_cast<float>(cu->read_vgpr(vb + destination + reg, lane)), 11.0f);
 }

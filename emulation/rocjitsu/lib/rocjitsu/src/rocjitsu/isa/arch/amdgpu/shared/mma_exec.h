@@ -1349,37 +1349,51 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
   std::vector<Result> results;
   results.reserve(M * N * B);
 
+  constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
+  constexpr size_t MAX_BSTRIDE = 4096; // max K*stride over all MFMA shapes
+  constexpr size_t MAX_C = 1024;       // max M*stride over all MFMA shapes
+  static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
+                "MFMA staging buffers exceed the 48 KiB stack budget");
+
+  auto stage_operands = [&](uint32_t block, uint32_t b_stride, float *a_values, float *b_values) {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = input_loc(M, K, B, row, k, block, a_bits);
+        if (cbsz != 0)
+          al.lane = permute_a_lane(al.lane, cbsz, abid);
+        a_values[static_cast<size_t>(row) * K + k] = ea(cu, s0, physicalize_loc(al, wf));
+      }
+    }
+    for (uint32_t k = 0; k < K; ++k) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = input_loc(N, K, B, col, k, block, b_bits);
+        if (blgp != 0)
+          bl.lane = permute_b_lane(bl.lane, blgp);
+        b_values[static_cast<size_t>(k) * b_stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
+      }
+    }
+  };
+
   // Scalar reference: D[i][j] = C[i][j] + sum_k A[i][k] * B[k][j], accumulated
   // per output in K order (non-fused multiply-add).
   auto run_scalar = [&]() {
-    const size_t a_count = static_cast<size_t>(M) * K * B;
-    const size_t b_count = static_cast<size_t>(N) * K * B;
-    std::vector<float> operand_values(a_count + b_count);
-    std::span<float> a_values(operand_values.data(), a_count);
-    std::span<float> b_values(operand_values.data() + a_count, b_count);
-
-    for (uint32_t b = 0; b < B; ++b) {
-      for (uint32_t row = 0; row < M; ++row) {
-        for (uint32_t k = 0; k < K; ++k) {
-          auto al = input_loc(M, K, B, row, k, b, a_bits);
-          if (cbsz != 0)
-            al.lane = permute_a_lane(al.lane, cbsz, abid);
-          a_values[(static_cast<size_t>(b) * M + row) * K + k] =
-              ea(cu, s0, physicalize_loc(al, wf));
-        }
-      }
-      for (uint32_t col = 0; col < N; ++col) {
-        for (uint32_t k = 0; k < K; ++k) {
-          auto bl = input_loc(N, K, B, col, k, b, b_bits);
-          if (blgp != 0)
-            bl.lane = permute_b_lane(bl.lane, blgp);
-          b_values[(static_cast<size_t>(b) * N + col) * K + k] =
-              eb(cu, s1, physicalize_loc(bl, wf));
-        }
-      }
+    const size_t a_count = static_cast<size_t>(M) * K;
+    const size_t b_count = static_cast<size_t>(K) * N;
+    // Real ISA shapes use bounded per-block stack storage. Preserve support
+    // for direct callers with larger dimensions through one overflow buffer.
+    alignas(64) float a_stack[MAX_AB];
+    alignas(64) float b_stack[MAX_BSTRIDE];
+    std::vector<float> overflow;
+    float *a_values = a_stack;
+    float *b_values = b_stack;
+    if (a_count > MAX_AB || b_count > MAX_BSTRIDE) {
+      overflow.resize(a_count + b_count);
+      a_values = overflow.data();
+      b_values = overflow.data() + a_count;
     }
 
     for (uint32_t b = 0; b < B; ++b) {
+      stage_operands(b, N, a_values, b_values);
       for (uint32_t row = 0; row < M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
           // AMD convention: i=row (register dimension), j=col (lane dimension).
@@ -1389,8 +1403,8 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                   ? std::bit_cast<float>(const_acc)
                   : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
           for (uint32_t k = 0; k < K; ++k) {
-            acc += a_values[(static_cast<size_t>(b) * M + row) * K + k] *
-                   b_values[(static_cast<size_t>(b) * N + col) * K + k];
+            acc += a_values[static_cast<size_t>(row) * K + k] *
+                   b_values[static_cast<size_t>(k) * N + col];
           }
           results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
         }
@@ -1413,13 +1427,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
     // (no per-call heap allocation). MAX_* bound every real MFMA shape;
     // anything larger (or a forced-scalar run) falls back to the scalar path.
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
-    constexpr size_t MAX_BSTRIDE = 4096; // max K*stride
-    constexpr size_t MAX_C = 1024;       // max M*stride
-    // Combined stack frame for the three staging buffers below (currently 28
-    // KiB); tripwire so an added/larger shape can't silently blow the stack.
-    static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
-                  "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
     if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
@@ -1432,6 +1439,7 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
       alignas(64) float Bbuf[MAX_BSTRIDE] = {};
       alignas(64) float Cbuf[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
+        stage_operands(b, stride, Abuf, Bbuf);
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
@@ -1439,20 +1447,6 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
                 (const_acc != ACC_FROM_VGPR)
                     ? std::bit_cast<float>(const_acc)
                     : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
-          }
-        for (uint32_t row = 0; row < M; ++row)
-          for (uint32_t k = 0; k < K; ++k) {
-            auto al = input_loc(M, K, B, row, k, b, a_bits);
-            if (cbsz != 0)
-              al.lane = permute_a_lane(al.lane, cbsz, abid);
-            Abuf[row * K + k] = ea(cu, s0, physicalize_loc(al, wf));
-          }
-        for (uint32_t k = 0; k < K; ++k)
-          for (uint32_t col = 0; col < N; ++col) {
-            auto bl = input_loc(N, K, B, col, k, b, b_bits);
-            if (blgp != 0)
-              bl.lane = permute_b_lane(bl.lane, blgp);
-            Bbuf[k * stride + col] = eb(cu, s1, physicalize_loc(bl, wf));
           }
         wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
         for (uint32_t row = 0; row < M; ++row)
