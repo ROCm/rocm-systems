@@ -16,7 +16,7 @@ from amdisa.isa_additions import (
     IsaAdditionError,
     apply_isa_additions,
 )
-from amdisa.isa_profile import Cdna5Profile
+from amdisa.isa_profile import Cdna1Profile, Cdna5Profile, Rdna4Profile
 from amdisa.parser import Parser
 
 _BASE_XML = '''\
@@ -54,17 +54,34 @@ _BASE_XML = '''\
     </Encodings>
     <Instructions>
       <Instruction>
+        <InstructionFlags>
+          <IsBranch>false</IsBranch>
+          <IsConditionalBranch>false</IsConditionalBranch>
+          <IsIndirectBranch>false</IsIndirectBranch>
+          <IsProgramTerminator>false</IsProgramTerminator>
+          <IsImmediatelyExecuted>false</IsImmediatelyExecuted>
+        </InstructionFlags>
         <InstructionName>BASE_INST</InstructionName>
+        <Description>Base test instruction.</Description>
         <InstructionEncodings>
           <InstructionEncoding>
             <EncodingName>ENC_TEST</EncodingName>
             <EncodingCondition>default</EncodingCondition>
-            <Opcode>1</Opcode>
+            <Opcode Radix="10">1</Opcode>
             <Operands>
-              <Operand><OperandType>OPR_TEST</OperandType></Operand>
+              <Operand Input="true" Output="false" IsImplicit="false"
+                       IsBinaryMicrocodeRequired="true" Order="1">
+                <DataFormatName>FMT_NUM_B32</DataFormatName>
+                <OperandType>OPR_TEST</OperandType>
+                <OperandSize>32</OperandSize>
+              </Operand>
             </Operands>
           </InstructionEncoding>
         </InstructionEncodings>
+        <FunctionalGroup>
+          <Name>TEST</Name>
+          <FunctionalSubgroups><Subgroup>TEST</Subgroup></FunctionalSubgroups>
+        </FunctionalGroup>
       </Instruction>
     </Instructions>
     <OperandTypes>
@@ -116,17 +133,34 @@ def _instruction(
 ) -> str:
     return f'''\
 <Instruction>
+  <InstructionFlags>
+    <IsBranch>false</IsBranch>
+    <IsConditionalBranch>false</IsConditionalBranch>
+    <IsIndirectBranch>false</IsIndirectBranch>
+    <IsProgramTerminator>false</IsProgramTerminator>
+    <IsImmediatelyExecuted>false</IsImmediatelyExecuted>
+  </InstructionFlags>
   <InstructionName>{name}</InstructionName>
+  <Description>Added test instruction.</Description>
   <InstructionEncodings>
     <InstructionEncoding>
       <EncodingName>{encoding}</EncodingName>
       <EncodingCondition>default</EncodingCondition>
-      <Opcode>{opcode}</Opcode>
+      <Opcode Radix="10">{opcode}</Opcode>
       <Operands>
-        <Operand><OperandType>{operand_type}</OperandType></Operand>
+        <Operand Input="true" Output="false" IsImplicit="false"
+                 IsBinaryMicrocodeRequired="true" Order="1">
+          <DataFormatName>FMT_NUM_B32</DataFormatName>
+          <OperandType>{operand_type}</OperandType>
+          <OperandSize>32</OperandSize>
+        </Operand>
       </Operands>
     </InstructionEncoding>
   </InstructionEncodings>
+  <FunctionalGroup>
+    <Name>TEST</Name>
+    <FunctionalSubgroups><Subgroup>TEST</Subgroup></FunctionalSubgroups>
+  </FunctionalGroup>
 </Instruction>
 '''
 
@@ -352,6 +386,65 @@ def test_duplicate_instruction_across_additions_is_rejected(tmp_path):
         apply_isa_additions(_base_root(), [str(first), str(second)], _PROFILE)
 
 
+def test_instruction_name_collision_after_codegen_normalization_is_rejected(tmp_path):
+    addition = _write_additions(tmp_path, _instruction('base_inst', opcode=2))
+
+    with pytest.raises(
+        IsaAdditionError,
+        match=r"base_inst.*/ENC_TEST.*symbol 'BaseInstTest'.*BASE_INST",
+    ):
+        apply_isa_additions(_base_root(), [str(addition)], _PROFILE)
+
+
+def test_opcode_constant_name_collision_after_normalization_is_rejected(tmp_path):
+    root = _base_root()
+    root.find('./ISA/Instructions/Instruction/InstructionName').text = 'S_GETPC_B64'
+    addition = _write_additions(tmp_path, _instruction('S_GET_PC_B64', opcode=2))
+
+    with pytest.raises(
+        IsaAdditionError,
+        match=r"S_GET_PC_B64.*/ENC_TEST.*opcode constant symbol "
+        r"'kSGetPcB64Test'.*S_GETPC_B64",
+    ):
+        apply_isa_additions(root, [str(addition)], _PROFILE)
+
+
+@pytest.mark.parametrize(
+    ('instruction', 'message'),
+    [
+        (
+            _instruction().replace('<Instruction>', '<Instruction Unexpected="1">'),
+            'unknown attributes: Unexpected',
+        ),
+        (
+            _instruction().replace(
+                '</Instruction>', '<UnexpectedNode /></Instruction>'
+            ),
+            r'unknown elements: <UnexpectedNode>',
+        ),
+        (
+            _instruction().replace(' Input="true"', ''),
+            'missing required attributes: Input',
+        ),
+        (
+            _instruction().replace('<OperandSize>32</OperandSize>', ''),
+            r'expected exactly 1 <OperandSize>',
+        ),
+    ],
+)
+def test_incomplete_or_unknown_instruction_structure_is_rejected_before_merge(
+    tmp_path, instruction, message
+):
+    root = _base_root()
+    before = elem_tree.tostring(root)
+    addition = _write_additions(tmp_path, instruction)
+
+    with pytest.raises(IsaAdditionError, match=message):
+        apply_isa_additions(root, [str(addition)], _PROFILE)
+
+    assert elem_tree.tostring(root) == before
+
+
 def test_same_instruction_may_repeat_slot_for_encoding_conditions(tmp_path):
     instructions = _instruction().replace(
         '  </InstructionEncodings>',
@@ -359,9 +452,14 @@ def test_same_instruction_may_repeat_slot_for_encoding_conditions(tmp_path):
       <InstructionEncoding>
         <EncodingName>ENC_TEST</EncodingName>
         <EncodingCondition>alternate</EncodingCondition>
-        <Opcode>2</Opcode>
+        <Opcode Radix="10">2</Opcode>
         <Operands>
-          <Operand><OperandType>OPR_TEST</OperandType></Operand>
+          <Operand Input="true" Output="false" IsImplicit="false"
+                   IsBinaryMicrocodeRequired="true" Order="1">
+            <DataFormatName>FMT_NUM_B32</DataFormatName>
+            <OperandType>OPR_TEST</OperandType>
+            <OperandSize>32</OperandSize>
+          </Operand>
         </Operands>
       </InstructionEncoding>
   </InstructionEncodings>''',
@@ -629,6 +727,168 @@ def test_cli_additions_argument_requires_name_and_path(entry):
         _group_isa_additions_args([entry])
 
 
+def _write_encoding_clone_additions(
+    tmp_path: Path,
+    base_xml: Path,
+    *,
+    encoding_name: str,
+    instruction_name: str,
+    opcode: int,
+) -> Path:
+    base_root = elem_tree.parse(base_xml).getroot()
+    original = next(
+        instruction
+        for instruction in base_root.findall('./ISA/Instructions/Instruction')
+        if any(
+            encoding.findtext('EncodingName') == encoding_name
+            for encoding in instruction.findall(
+                './InstructionEncodings/InstructionEncoding'
+            )
+        )
+    )
+    addition = deepcopy(original)
+    addition.find('InstructionName').text = instruction_name
+    instruction_encodings = addition.find('InstructionEncodings')
+    for encoding in list(instruction_encodings):
+        if encoding.findtext('EncodingName') != encoding_name:
+            instruction_encodings.remove(encoding)
+        else:
+            encoding.find('Opcode').text = str(opcode)
+
+    addition_root = elem_tree.Element(
+        'IsaAdditions',
+        {
+            'Id': 'compat-slot-test',
+            'BaseArchitecture': base_root.findtext(
+                './ISA/Architecture/ArchitectureName'
+            ),
+            'BaseSchemaVersion': base_root.findtext('./Document/SchemaVersion'),
+        },
+    )
+    instructions = elem_tree.SubElement(addition_root, 'InstructionAdditions')
+    instructions.append(addition)
+    path = tmp_path / 'compat-slot-test.xml'
+    elem_tree.ElementTree(addition_root).write(path, encoding='unicode')
+    return path
+
+
+@pytest.mark.parametrize(
+    ('base_filename', 'profile', 'encoding_name', 'opcode', 'owner'),
+    [
+        (
+            'amdgpu_isa_cdna5.xml',
+            Cdna5Profile(),
+            'ENC_VOP1',
+            103,
+            'V_PERMLANE64_B32',
+        ),
+        ('amdgpu_isa_rdna4.xml', Rdna4Profile(), 'ENC_SOPP', 9, 'S_WAITCNT'),
+    ],
+)
+def test_compatibility_instruction_slots_are_reserved_before_merge(
+    tmp_path, base_filename, profile, encoding_name, opcode, owner
+):
+    base_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / base_filename
+    )
+    addition = _write_encoding_clone_additions(
+        tmp_path,
+        base_xml,
+        encoding_name=encoding_name,
+        instruction_name='COLLIDING_ADDITION',
+        opcode=opcode,
+    )
+    root = elem_tree.parse(base_xml).getroot()
+    before = elem_tree.tostring(root)
+
+    with pytest.raises(
+        IsaAdditionError,
+        match=rf'opcode {opcode}.*already owned by instruction {owner!r}',
+    ):
+        apply_isa_additions(root, [str(addition)], profile)
+
+    assert elem_tree.tostring(root) == before
+
+
+def _cdna1_mimg_identifier(opcode: int) -> str:
+    value = list('00000000000000000000000000000000' '11110000000000000000000000000000')
+    value[39:46] = f'{opcode:07b}'
+    return ''.join(value)
+
+
+def _write_cdna1_mimg_opm_additions(tmp_path: Path, base_xml: Path) -> Path:
+    base_root = elem_tree.parse(base_xml).getroot()
+    original = next(
+        instruction
+        for instruction in base_root.findall('./ISA/Instructions/Instruction')
+        if any(
+            encoding.findtext('EncodingName') == 'ENC_MIMG'
+            for encoding in instruction.findall(
+                './InstructionEncodings/InstructionEncoding'
+            )
+        )
+    )
+    addition = deepcopy(original)
+    addition.find('InstructionName').text = 'IMAGE_ADDITION_TEST'
+    instruction_encodings = addition.find('InstructionEncodings')
+    for encoding in list(instruction_encodings):
+        if encoding.findtext('EncodingName') != 'ENC_MIMG':
+            instruction_encodings.remove(encoding)
+        else:
+            encoding.find('Opcode').text = '134'
+
+    addition_root = elem_tree.Element(
+        'IsaAdditions',
+        {
+            'Id': 'cdna1-mimg-opm-test',
+            'BaseArchitecture': 'AMD CDNA 1',
+            'BaseSchemaVersion': '1.1.1',
+        },
+    )
+    identifier_additions = elem_tree.SubElement(
+        addition_root, 'EncodingIdentifierAdditions'
+    )
+    identifier_addition = elem_tree.SubElement(
+        identifier_additions, 'EncodingIdentifierAddition'
+    )
+    elem_tree.SubElement(identifier_addition, 'EncodingName').text = 'ENC_MIMG'
+    elem_tree.SubElement(identifier_addition, 'Opcode').text = '6'
+    identifier = elem_tree.SubElement(
+        identifier_addition, 'EncodingIdentifier', {'Radix': '2'}
+    )
+    identifier.text = _cdna1_mimg_identifier(6)
+    instructions = elem_tree.SubElement(addition_root, 'InstructionAdditions')
+    instructions.append(addition)
+    path = tmp_path / 'cdna1-mimg-opm-test.xml'
+    elem_tree.ElementTree(addition_root).write(path, encoding='unicode')
+    return path
+
+
+def test_identifier_ownership_uses_expanded_opm_opcode(tmp_path):
+    base_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / 'amdgpu_isa_cdna1.xml'
+    )
+    addition = _write_cdna1_mimg_opm_additions(tmp_path, base_xml)
+
+    spec = Parser(str(base_xml), Cdna1Profile(), [str(addition)]).parse()
+
+    added = next(
+        instruction
+        for instruction in spec.encoding_map['ENC_MIMG'].insts
+        if instruction.name == 'IMAGE_ADDITION_TEST'
+    )
+    assert added.opcode == 134
+    assert spec.encoding_map['ENC_MIMG'].primary_dt_ptrs[134] != -1
+
+
 def _cdna5_sop1_identifier(opcode: int, *, implied_literal: bool = False) -> str:
     if implied_literal:
         value = list(
@@ -668,6 +928,7 @@ def _write_cdna5_clone_additions(
     base_xml: Path,
     *,
     opcode: int = 7,
+    instruction_name: str = 'S_ADDITION_TEST_B32',
     add_identifiers: bool = False,
     include_implied_literal: bool = False,
 ) -> Path:
@@ -678,7 +939,7 @@ def _write_cdna5_clone_additions(
         if instruction.findtext('InstructionName') == 'S_MOV_B32'
     )
     addition = deepcopy(original)
-    addition.find('InstructionName').text = 'S_ADDITION_TEST_B32'
+    addition.find('InstructionName').text = instruction_name
     retained_encodings = {'ENC_SOP1'}
     if include_implied_literal:
         retained_encodings.add('SOP1_INST_LITERAL')
@@ -727,6 +988,29 @@ def _write_cdna5_clone_additions(
     path = tmp_path / 'cdna5-test.xml'
     elem_tree.ElementTree(addition_root).write(path, encoding='unicode')
     return path
+
+
+def test_cdna5_normalized_instruction_name_collision_is_rejected(tmp_path):
+    base_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / 'amdgpu_isa_cdna5.xml'
+    )
+    addition = _write_cdna5_clone_additions(
+        tmp_path,
+        base_xml,
+        instruction_name='s_mov_b32',
+    )
+
+    with pytest.raises(
+        IsaAdditionError,
+        match=r"s_mov_b32.*/ENC_SOP1.*symbol 'SMovB32Sop1'.*S_MOV_B32",
+    ):
+        apply_isa_additions(
+            elem_tree.parse(base_xml).getroot(), [str(addition)], Cdna5Profile()
+        )
 
 
 def test_parser_retains_additions_provenance_on_added_instructions(tmp_path):

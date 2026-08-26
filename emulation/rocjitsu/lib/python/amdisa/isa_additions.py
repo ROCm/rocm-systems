@@ -17,7 +17,11 @@ import re
 import xml.etree.ElementTree as elem_tree
 
 from amdisa import xml_schema as xs
-from amdisa.gpuisa import IsaAdditionProvenance
+from amdisa.gpuisa import (
+    IsaAdditionProvenance,
+    format_instruction_name,
+    opcode_constant_name,
+)
 from amdisa.isa_profile import IsaProfile
 
 ADDITIONS_ROOT = 'IsaAdditions'
@@ -133,6 +137,255 @@ def _required_decimal(text: str, context: str) -> int:
     return value
 
 
+def _validate_node_shape(
+    node: elem_tree.Element,
+    context: str,
+    *,
+    allowed_attributes: frozenset[str] = frozenset(),
+    required_attributes: frozenset[str] = frozenset(),
+    child_counts: Mapping[str, tuple[int, int | None]] | None = None,
+) -> None:
+    unknown_attributes = set(node.attrib) - allowed_attributes
+    if unknown_attributes:
+        names = ', '.join(sorted(unknown_attributes))
+        raise IsaAdditionError(f'{context}: unknown attributes: {names}')
+    missing_attributes = required_attributes - set(node.attrib)
+    if missing_attributes:
+        names = ', '.join(sorted(missing_attributes))
+        raise IsaAdditionError(f'{context}: missing required attributes: {names}')
+
+    allowed_children = child_counts or {}
+    unknown_children = [
+        child.tag for child in node if child.tag not in allowed_children
+    ]
+    if unknown_children:
+        names = ', '.join(f'<{name}>' for name in unknown_children)
+        raise IsaAdditionError(f'{context}: unknown elements: {names}')
+    for tag, (minimum, maximum) in allowed_children.items():
+        count = sum(child.tag == tag for child in node)
+        if count < minimum or (maximum is not None and count > maximum):
+            if minimum == maximum:
+                expected = f'exactly {minimum}'
+            elif maximum is None:
+                expected = f'at least {minimum}'
+            else:
+                expected = f'between {minimum} and {maximum}'
+            raise IsaAdditionError(
+                f'{context}: expected {expected} <{tag}> element(s), found {count}'
+            )
+
+
+def _validate_text_leaf(
+    node: elem_tree.Element,
+    context: str,
+    *,
+    allowed_attributes: frozenset[str] = frozenset(),
+    required_attributes: frozenset[str] = frozenset(),
+) -> str:
+    _validate_node_shape(
+        node,
+        context,
+        allowed_attributes=allowed_attributes,
+        required_attributes=required_attributes,
+    )
+    if node.text is None or not node.text.strip():
+        raise IsaAdditionError(f'{context}: value must not be empty')
+    return node.text.strip()
+
+
+def _validate_boolean_text(node: elem_tree.Element, context: str) -> None:
+    value = _validate_text_leaf(node, context).lower()
+    if value not in {'true', 'false'}:
+        raise IsaAdditionError(
+            f'{context}: expected boolean true or false, found {value!r}'
+        )
+
+
+def _validate_instruction_structure(
+    instruction: elem_tree.Element, context: str
+) -> None:
+    """Validate one complete Instruction subtree accepted by Parser.parse_insts."""
+    _validate_node_shape(
+        instruction,
+        context,
+        child_counts={
+            xs.INST_FLAGS: (1, 1),
+            xs.INST_NAME: (1, 1),
+            'AliasedInstructionNames': (0, 1),
+            'Description': (1, 1),
+            xs.INST_ENCODINGS: (1, 1),
+            'FunctionalGroup': (1, 1),
+        },
+    )
+
+    flags = instruction.find(xs.INST_FLAGS)
+    assert flags is not None
+    flag_names = (
+        'IsBranch',
+        'IsConditionalBranch',
+        'IsIndirectBranch',
+        'IsProgramTerminator',
+        'IsImmediatelyExecuted',
+    )
+    _validate_node_shape(
+        flags,
+        f'{context}/<{xs.INST_FLAGS}>',
+        child_counts={name: (1, 1) for name in flag_names},
+    )
+    for name in flag_names:
+        node = flags.find(name)
+        assert node is not None
+        _validate_boolean_text(node, f'{context}/<{xs.INST_FLAGS}>/<{name}>')
+
+    name_node = instruction.find(xs.INST_NAME)
+    description = instruction.find('Description')
+    assert name_node is not None and description is not None
+    _validate_text_leaf(name_node, f'{context}/<{xs.INST_NAME}>')
+    _validate_text_leaf(description, f'{context}/<Description>')
+
+    aliases = instruction.find('AliasedInstructionNames')
+    if aliases is not None:
+        _validate_node_shape(
+            aliases,
+            f'{context}/<AliasedInstructionNames>',
+            child_counts={xs.INST_NAME: (1, None)},
+        )
+        for alias in aliases:
+            _validate_text_leaf(
+                alias, f'{context}/<AliasedInstructionNames>/<{xs.INST_NAME}>'
+            )
+
+    encodings = instruction.find(xs.INST_ENCODINGS)
+    assert encodings is not None
+    _validate_node_shape(
+        encodings,
+        f'{context}/<{xs.INST_ENCODINGS}>',
+        child_counts={xs.INST_ENCODING: (1, None)},
+    )
+    for encoding in encodings:
+        encoding_context = f'{context}/<{xs.INST_ENCODING}>'
+        _validate_node_shape(
+            encoding,
+            encoding_context,
+            child_counts={
+                xs.ENCODING_NAME: (1, 1),
+                xs.ENCODING_COND: (1, 1),
+                xs.OPCODE: (1, 1),
+                xs.OPERANDS: (1, 1),
+            },
+        )
+        encoding_name = encoding.find(xs.ENCODING_NAME)
+        condition = encoding.find(xs.ENCODING_COND)
+        opcode = encoding.find(xs.OPCODE)
+        operands = encoding.find(xs.OPERANDS)
+        assert (
+            encoding_name is not None
+            and condition is not None
+            and opcode is not None
+            and operands is not None
+        )
+        _validate_text_leaf(encoding_name, f'{encoding_context}/<{xs.ENCODING_NAME}>')
+        _validate_text_leaf(
+            condition,
+            f'{encoding_context}/<{xs.ENCODING_COND}>',
+            allowed_attributes=frozenset({'Id'}),
+        )
+        _validate_text_leaf(
+            opcode,
+            f'{encoding_context}/<{xs.OPCODE}>',
+            allowed_attributes=frozenset({xs.ENC_IDENTIFER_ATTR_RADIX}),
+            required_attributes=frozenset({xs.ENC_IDENTIFER_ATTR_RADIX}),
+        )
+        if opcode.attrib[xs.ENC_IDENTIFER_ATTR_RADIX] != '10':
+            raise IsaAdditionError(
+                f'{encoding_context}/<{xs.OPCODE}>: Radix must be 10'
+            )
+        _validate_node_shape(
+            operands,
+            f'{encoding_context}/<{xs.OPERANDS}>',
+            child_counts={xs.OPERAND: (0, None)},
+        )
+        for operand in operands:
+            operand_context = f'{encoding_context}/<{xs.OPERANDS}>/<{xs.OPERAND}>'
+            operand_attributes = frozenset(
+                {
+                    xs.OPERAND_ATTR_INPUT,
+                    xs.OPERAND_ATTR_OUTPUT,
+                    xs.OPERAND_ATTR_IS_IMPLICIT,
+                    xs.OPERAND_ATTR_IS_BINARY_MICROCODE_REQUIRED,
+                    xs.OPERAND_ATTR_ORDER,
+                }
+            )
+            _validate_node_shape(
+                operand,
+                operand_context,
+                allowed_attributes=operand_attributes,
+                required_attributes=operand_attributes,
+                child_counts={
+                    xs.FIELD_NAME: (0, 1),
+                    xs.DATA_FORMAT_NAME: (1, 1),
+                    xs.OPERAND_TYPE: (1, 1),
+                    xs.OPERAND_SIZE: (1, 1),
+                },
+            )
+            for attribute in (
+                xs.OPERAND_ATTR_INPUT,
+                xs.OPERAND_ATTR_OUTPUT,
+                xs.OPERAND_ATTR_IS_IMPLICIT,
+                xs.OPERAND_ATTR_IS_BINARY_MICROCODE_REQUIRED,
+            ):
+                value = operand.attrib[attribute].lower()
+                if value not in {'true', 'false'}:
+                    raise IsaAdditionError(
+                        f'{operand_context}: attribute {attribute} must be '
+                        f'true or false, found {value!r}'
+                    )
+            order = _required_decimal(
+                operand.attrib[xs.OPERAND_ATTR_ORDER],
+                f'{operand_context} Order',
+            )
+            if order < 1:
+                raise IsaAdditionError(f'{operand_context}: Order must be positive')
+            for tag in (xs.FIELD_NAME, xs.DATA_FORMAT_NAME, xs.OPERAND_TYPE):
+                node = operand.find(tag)
+                if node is not None:
+                    _validate_text_leaf(node, f'{operand_context}/<{tag}>')
+            size_node = operand.find(xs.OPERAND_SIZE)
+            assert size_node is not None
+            size = _required_decimal(
+                _validate_text_leaf(
+                    size_node, f'{operand_context}/<{xs.OPERAND_SIZE}>'
+                ),
+                f'{operand_context}/<{xs.OPERAND_SIZE}>',
+            )
+            if size < 1:
+                raise IsaAdditionError(
+                    f'{operand_context}/<{xs.OPERAND_SIZE}>: value must be positive'
+                )
+
+    functional_group = instruction.find('FunctionalGroup')
+    assert functional_group is not None
+    functional_context = f'{context}/<FunctionalGroup>'
+    _validate_node_shape(
+        functional_group,
+        functional_context,
+        child_counts={'Name': (1, 1), 'FunctionalSubgroups': (1, 1)},
+    )
+    functional_name = functional_group.find('Name')
+    subgroups = functional_group.find('FunctionalSubgroups')
+    assert functional_name is not None and subgroups is not None
+    _validate_text_leaf(functional_name, f'{functional_context}/<Name>')
+    _validate_node_shape(
+        subgroups,
+        f'{functional_context}/<FunctionalSubgroups>',
+        child_counts={'Subgroup': (1, None)},
+    )
+    for subgroup in subgroups:
+        _validate_text_leaf(
+            subgroup, f'{functional_context}/<FunctionalSubgroups>/<Subgroup>'
+        )
+
+
 def _binary_text(node: elem_tree.Element, bit_width: int, context: str) -> str:
     unknown_attributes = set(node.attrib) - {xs.ENC_IDENTIFER_ATTR_RADIX}
     if unknown_attributes:
@@ -236,6 +489,8 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
     dict[tuple[str, int], str],
     set[str],
     set[str],
+    dict[str, str],
+    dict[str, str],
 ]:
     isa_node = xs.get_node(root, xs.ISA)
     encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
@@ -344,6 +599,8 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
     }
     instruction_names: set[str] = set()
     opcode_owners: dict[tuple[str, int], str] = {}
+    instruction_symbol_owners: dict[str, str] = {}
+    opcode_symbol_owners: dict[str, str] = {}
     for instruction in instructions_node:
         name = _required_text(instruction, xs.INST_NAME, 'base instruction')
         instruction_names.add(name)
@@ -365,12 +622,66 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
                     f'{opcode_text!r}'
                 ) from error
             opcode_owners.setdefault((enc_name, opcode), name)
+            encoding_definition = encoding_definitions.get(enc_name)
+            condition = _required_text(
+                encoding,
+                xs.ENCODING_COND,
+                f'base instruction {name}/{enc_name}',
+            )
+            if encoding_definition is None or profile.skip_inst_encoding(
+                enc_name, condition
+            ):
+                continue
+            is_implied_literal = encoding_definition.is_implied_literal
+            instruction_symbol_owners.setdefault(
+                format_instruction_name(
+                    name,
+                    enc_name,
+                    is_implied_literal_enc=is_implied_literal,
+                ),
+                name,
+            )
+            opcode_symbol_owners.setdefault(
+                opcode_constant_name(
+                    name,
+                    enc_name,
+                    is_implied_literal_enc=is_implied_literal,
+                ),
+                name,
+            )
+
+    for slot, owner in profile.compatibility_instruction_slots.items():
+        enc_name, _ = slot
+        encoding_definition = encoding_definitions.get(enc_name)
+        if encoding_definition is None:
+            continue
+        opcode_owners.setdefault(slot, owner)
+        instruction_names.add(owner)
+        is_implied_literal = encoding_definition.is_implied_literal
+        instruction_symbol_owners.setdefault(
+            format_instruction_name(
+                owner,
+                enc_name,
+                is_implied_literal_enc=is_implied_literal,
+            ),
+            owner,
+        )
+        opcode_symbol_owners.setdefault(
+            opcode_constant_name(
+                owner,
+                enc_name,
+                is_implied_literal_enc=is_implied_literal,
+            ),
+            owner,
+        )
     return (
         encoding_definitions,
         encoding_names,
         opcode_owners,
         operand_types,
         instruction_names,
+        instruction_symbol_owners,
+        opcode_symbol_owners,
     )
 
 
@@ -463,11 +774,15 @@ def _validate_instruction_addition(
     *,
     path: str,
     addition_id: str,
+    encodings: Mapping[str, _EncodingDefinition],
     encoding_names: set[str],
     opcode_owners: dict[tuple[str, int], str],
     opcode_limits: Mapping[str, int],
     operand_types: set[str],
     instruction_names: set[str],
+    instruction_symbol_owners: dict[str, str],
+    opcode_symbol_owners: dict[str, str],
+    profile: IsaProfile,
 ) -> _InstructionAddition:
     if instruction.tag != xs.INST:
         raise IsaAdditionError(
@@ -476,6 +791,7 @@ def _validate_instruction_addition(
         )
 
     context = f'{path}: additions document {addition_id!r}'
+    _validate_instruction_structure(instruction, f'{context}: <{xs.INST}>')
     name = _required_text(instruction, xs.INST_NAME, context)
     if name in instruction_names:
         raise IsaAdditionError(f'{context}: instruction {name!r} already exists')
@@ -544,6 +860,41 @@ def _validate_instruction_addition(
             )
         forms.add(form)
         forms_in_order.append(form)
+
+        encoding_definition = encodings.get(enc_name)
+        if encoding_definition is not None and not profile.skip_inst_encoding(
+            enc_name, condition
+        ):
+            is_implied_literal = encoding_definition.is_implied_literal
+            generated_symbols = (
+                (
+                    'instruction',
+                    format_instruction_name(
+                        name,
+                        enc_name,
+                        is_implied_literal_enc=is_implied_literal,
+                    ),
+                    instruction_symbol_owners,
+                ),
+                (
+                    'opcode constant',
+                    opcode_constant_name(
+                        name,
+                        enc_name,
+                        is_implied_literal_enc=is_implied_literal,
+                    ),
+                    opcode_symbol_owners,
+                ),
+            )
+            for symbol_kind, symbol, owners in generated_symbols:
+                symbol_owner = owners.get(symbol)
+                if symbol_owner is not None and symbol_owner != name:
+                    raise IsaAdditionError(
+                        f'{context}: instruction {name!r}/{enc_name} normalizes '
+                        f'to {symbol_kind} symbol {symbol!r}, already owned by '
+                        f'instruction {symbol_owner!r}'
+                    )
+                owners[symbol] = name
 
         operands = encoding.find(xs.OPERANDS)
         if operands is None:
@@ -686,25 +1037,43 @@ def _validate_identifier_addition(
     )
 
 
+def _expanded_opcodes(encoding: _EncodingDefinition, base_opcode: int) -> set[int]:
+    """Return all complete opcodes represented by a decoded identifier opcode."""
+    base_count = 1 << encoding.opcode_bit_count
+    return {
+        base_opcode + modifier * base_count
+        for modifier in range(1 << encoding.opcode_modifier_bit_count)
+    }
+
+
+def _identifier_owners(
+    addition: _IdentifierAddition,
+    opcode_owners: Mapping[tuple[str, int], str],
+) -> set[str]:
+    return {
+        owner
+        for opcode in _expanded_opcodes(addition.encoding, addition.opcode)
+        if (owner := opcode_owners.get((addition.encoding.name, opcode))) is not None
+    }
+
+
 def _reachable_opcodes(
     encodings: Mapping[str, _EncodingDefinition],
     identifiers: Sequence[_IdentifierAddition],
 ) -> dict[str, set[int]]:
-    reachable = {
+    base_opcodes = {
         name: set(encoding.decoded_opcodes) for name, encoding in encodings.items()
     }
     for addition in identifiers:
-        reachable[addition.encoding.name].add(addition.opcode)
-    for name, encoding in encodings.items():
-        if encoding.opcode_modifier_bit_count == 0:
-            continue
-        base_count = 1 << encoding.opcode_bit_count
-        base_opcodes = tuple(reachable[name])
-        for modifier in range(1, 1 << encoding.opcode_modifier_bit_count):
-            reachable[name].update(
-                opcode + modifier * base_count for opcode in base_opcodes
-            )
-    return reachable
+        base_opcodes[addition.encoding.name].add(addition.opcode)
+    return {
+        name: {
+            expanded
+            for opcode in base_opcodes[name]
+            for expanded in _expanded_opcodes(encoding, opcode)
+        }
+        for name, encoding in encodings.items()
+    }
 
 
 def apply_isa_additions(
@@ -729,6 +1098,8 @@ def apply_isa_additions(
         opcode_owners,
         operand_types,
         instruction_names,
+        instruction_symbol_owners,
+        opcode_symbol_owners,
     ) = _base_definitions(base_root, profile)
     opcode_limits = {
         name: encoding.opcode_limit for name, encoding in encodings.items()
@@ -760,11 +1131,15 @@ def apply_isa_additions(
                 instruction,
                 path=path,
                 addition_id=addition_id,
+                encodings=encodings,
                 encoding_names=encoding_names,
                 opcode_owners=opcode_owners,
                 opcode_limits=opcode_limits,
                 operand_types=operand_types,
                 instruction_names=instruction_names,
+                instruction_symbol_owners=instruction_symbol_owners,
+                opcode_symbol_owners=opcode_symbol_owners,
+                profile=profile,
             )
             instruction_names.add(addition.name)
             for enc_name, opcode, _ in addition.forms:
@@ -790,10 +1165,8 @@ def apply_isa_additions(
                 occupied_texts=occupied_texts,
                 occupied_opcodes=occupied_opcodes,
             )
-            owner = addition_opcode_owners.get(
-                (addition.encoding.name, addition.opcode)
-            )
-            if owner is None:
+            owners = _identifier_owners(addition, addition_opcode_owners)
+            if not owners:
                 raise IsaAdditionError(
                     f'{path}: additions document {addition_id!r} identifier for encoding '
                     f'{addition.encoding.name!r} opcode {addition.opcode} is '
@@ -801,18 +1174,26 @@ def apply_isa_additions(
                 )
             if addition.encoding.is_implied_literal:
                 parent_name = addition.encoding.parent_name
-                parent_owner = addition_opcode_owners.get(
-                    (parent_name, addition.opcode)
-                )
-                if parent_owner != owner:
+                assert parent_name is not None
+                parent_encoding = encodings[parent_name]
+                parent_owners = {
+                    owner
+                    for opcode in _expanded_opcodes(parent_encoding, addition.opcode)
+                    if (owner := addition_opcode_owners.get((parent_name, opcode)))
+                    is not None
+                }
+                if parent_owners != owners:
+                    owner_text = ', '.join(sorted(owners))
                     parent_owner_text = (
-                        repr(parent_owner) if parent_owner is not None else 'no owner'
+                        ', '.join(sorted(parent_owners))
+                        if parent_owners
+                        else 'no owner'
                     )
                     raise IsaAdditionError(
                         f'{path}: additions document {addition_id!r} '
                         'implied-literal identifier '
                         f'for {addition.encoding.name!r} opcode {addition.opcode} '
-                        f'is owned by {owner!r}, but parent encoding '
+                        f'is owned by {owner_text!r}, but parent encoding '
                         f'{parent_name!r} has {parent_owner_text}'
                     )
             pending_identifiers.append(addition)

@@ -50,6 +50,60 @@ _FIELDLESS_NAME_MAP: dict[str, str] = {
 }
 
 
+def format_encoding_name(enc_name: str) -> str:
+    """Format an MR-ISA encoding name as a C++ PascalCase fragment."""
+    parts = enc_name.split('_')
+    if parts[0] == 'ENC':
+        parts = parts[1:]
+    return ''.join(part.capitalize() for part in parts)
+
+
+def format_true_encoding_name(
+    enc_name: str, *, is_implied_literal_enc: bool = False
+) -> str:
+    """Format the concrete C++ encoding class used by an instruction."""
+    if is_implied_literal_enc:
+        return enc_name.split('_')[0].capitalize()
+    return format_encoding_name(enc_name)
+
+
+def format_instruction_name(
+    name: str, enc_name: str, *, is_implied_literal_enc: bool = False
+) -> str:
+    """Format an instruction's generated C++ class/decode-function name."""
+    mnemonic = ''.join(part.capitalize() for part in name.split('_'))
+    encoding = format_true_encoding_name(
+        enc_name, is_implied_literal_enc=is_implied_literal_enc
+    )
+    return f'{mnemonic}{encoding}'
+
+
+def opcode_name_fragment(token: str) -> str:
+    """Return one C++ opcode-constant fragment for a mnemonic token."""
+    token = token.lower()
+    if token.endswith('exec') and len(token) > len('exec'):
+        return f'{token[:-4].capitalize()}Exec'
+    if token.endswith('pc') and len(token) > len('pc'):
+        return f'{token[:-2].capitalize()}Pc'
+    return token.capitalize()
+
+
+def opcode_constant_base_name(mnemonic: str) -> str:
+    """Return the generated C++ opcode-constant base for a mnemonic."""
+    return 'k' + ''.join(
+        opcode_name_fragment(token) for token in mnemonic.lower().split('_') if token
+    )
+
+
+def opcode_constant_name(
+    mnemonic: str, enc_name: str, *, is_implied_literal_enc: bool = False
+) -> str:
+    """Return the concrete encoding-qualified C++ opcode-constant name."""
+    return opcode_constant_base_name(mnemonic) + format_true_encoding_name(
+        enc_name, is_implied_literal_enc=is_implied_literal_enc
+    )
+
+
 def synthesize_fieldless_name(operand_type: str) -> str:
     """Return a stable, valid C++ base identifier for a fieldless operand.
 
@@ -162,9 +216,7 @@ class InstBase:
     @cached_property
     def fmt_enc_name(self) -> str:
         """Encoding name formatted to C++ PascalCase style."""
-        if self.enc_name.split('_')[0] == 'ENC':
-            return ''.join(x.capitalize() for x in self.enc_name.split('_')[1:])
-        return ''.join(x.capitalize() for x in self.enc_name.split('_'))
+        return format_encoding_name(self.enc_name)
 
     @cached_property
     def fmt_true_enc_name(self) -> str:
@@ -174,9 +226,9 @@ class InstBase:
         their parent encoding name (e.g., ``Vop2``) because the C++ class
         hierarchy inherits from the parent encoding class.
         """
-        if self.is_implied_literal_enc:
-            return self.enc_name.split('_')[0].capitalize()
-        return self.fmt_enc_name
+        return format_true_encoding_name(
+            self.enc_name, is_implied_literal_enc=self.is_implied_literal_enc
+        )
 
 
 class InstEncoding(InstBase):
@@ -267,9 +319,10 @@ class Instruction(InstBase):
     @cached_property
     def fmt_name(self) -> str:
         """Instruction name formatted to C++ PascalCase style."""
-        return (
-            f'{"".join(x.capitalize() for x in self.name.split("_"))}'
-            f'{self.fmt_true_enc_name}'
+        return format_instruction_name(
+            self.name,
+            self.enc_name,
+            is_implied_literal_enc=self.is_implied_literal_enc,
         )
 
     @cached_property
