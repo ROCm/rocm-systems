@@ -470,7 +470,9 @@ private:
   /// held simultaneously (allocate_scratch_backing and close() both release
   /// process_mutex_ before taking alloc_mutex_):
   ///   op_mutex_ < process_mutex_
-  ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_mutex_, owned_fds_mutex_}
+  ///   op_mutex_ < alloc_mutex_ < {ipc_mutex_, page_table_request_mutex_, owned_fds_mutex_}
+  ///   page_table_request_mutex_ < page_table_mutex_
+  ///   page_table_request_mutex_ < vmid_mutex_       (GpuMemory binding validation)
   ///   op_mutex_ < runtime_mutex_ < alloc_mutex_        (runtime_enable_ioctl)
   ///   op_mutex_ < debug_sessions_mutex_ < runtime_mutex_ (debug_trap_ioctl)
   ///   process_mutex_ < interrupt_mutex_                (open()/open_process())
