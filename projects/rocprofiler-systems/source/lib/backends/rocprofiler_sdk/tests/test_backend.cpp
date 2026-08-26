@@ -664,11 +664,17 @@ template <int Tag>
 struct tagged_mock_sdk : mock_sdk
 {};
 
-using version_cache_tag        = tagged_mock_sdk<1>;
-using callback_names_cache_tag = tagged_mock_sdk<2>;
-using buffer_names_cache_tag   = tagged_mock_sdk<3>;
-using version_match_tag        = tagged_mock_sdk<4>;
-using version_mismatch_tag     = tagged_mock_sdk<5>;
+constexpr int version_cache_tag_id        = 1;
+constexpr int callback_names_cache_tag_id = 2;
+constexpr int buffer_names_cache_tag_id   = 3;
+constexpr int version_match_tag_id        = 4;
+constexpr int version_mismatch_tag_id     = 5;
+
+using version_cache_tag        = tagged_mock_sdk<version_cache_tag_id>;
+using callback_names_cache_tag = tagged_mock_sdk<callback_names_cache_tag_id>;
+using buffer_names_cache_tag   = tagged_mock_sdk<buffer_names_cache_tag_id>;
+using version_match_tag        = tagged_mock_sdk<version_match_tag_id>;
+using version_mismatch_tag     = tagged_mock_sdk<version_mismatch_tag_id>;
 
 TEST_F(backend_test, get_version_caches_after_first_call)
 {

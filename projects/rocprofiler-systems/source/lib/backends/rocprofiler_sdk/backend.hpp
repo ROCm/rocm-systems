@@ -455,7 +455,10 @@ public:
         auto runtime_ver = common::version{};
         get_version(&runtime_ver.major, &runtime_ver.minor, &runtime_ver.patch);
 
-        if(runtime_ver == compile_time_ver) return;
+        if(runtime_ver == compile_time_ver)
+        {
+            return;
+        }
 
         throw std::runtime_error{ "rocprofiler-sdk version mismatch: compiled against " +
                                   std::to_string(compile_time_ver.major) + "." +
