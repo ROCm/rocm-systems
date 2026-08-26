@@ -324,6 +324,11 @@ read-only `legacy_mechanism()` view temporarily exposes patch geometry and
 lowering telemetry that have not yet acquired narrower production owners; it
 is not a second source of control-plane truth.
 
+Automatic MOI report sizing also stays inside this boundary. The pristine
+inventory pass returns `TransformResult`, and the retry accepts that typed
+result plus the bound runtime resources. Only `LegacyConSanLowering` can unwrap
+the temporary mechanism state needed by the prototype retry implementation.
+
 ## Runtime component and lifecycle
 
 The HSA hook is a coordinator around the transformation core:
@@ -539,9 +544,7 @@ fully dismantled. The current state is:
 
 The next extraction order follows dependency direction:
 
-1. make the HSA coordinator consume `TransformResult` without the legacy
-   projection;
-2. extract shared decode and inventory construction from the prototype
+1. extract shared decode and inventory construction from the prototype
    translation units;
 3. separate shared resource planning from engine evidence semantics, beginning
    with Record/Replay;

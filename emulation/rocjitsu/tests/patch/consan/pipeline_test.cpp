@@ -438,28 +438,27 @@ TEST(ConSanPipeline, ProductionResultOwnsArtifactsWithoutLegacyProjection) {
   const ConSanDebugOverrides debug;
   const MutationRequest mutation;
   const RuntimeCapabilities capabilities = complete_runtime_capabilities();
-  const BoundRuntimeResources resources;
+  BoundRuntimeResources resources;
+  resources.scope = ConSanRuntimeResourceScope::Executable;
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  resources.moi_report_buffer_size = 64u * 1024u * 1024u;
 
-  const ConSanResult direct = LegacyConSanLowering::run(
-      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
   TransformResult split = transform_consan(bytes, request, transform_policy, runtime_policy, debug,
                                            capabilities, resources);
   ASSERT_TRUE(split.well_formed()) << testing::PrintToString(split.issues);
   const ConSanResult &mechanism = split.legacy_mechanism();
 
-  EXPECT_EQ(mechanism.visited_code_object, direct.visited_code_object);
-  EXPECT_EQ(mechanism.parsed_code_object, direct.parsed_code_object);
-  EXPECT_EQ(mechanism.input_fingerprint, direct.input_fingerprint);
-  EXPECT_EQ(split.outcome, direct.outcome);
-  EXPECT_EQ(split.final_validation_passed, direct.final_validation_passed);
-  EXPECT_EQ(split.program_inventory.code_object_id(), direct.program_inventory.code_object_id());
-  EXPECT_EQ(split.observation_plan, direct.observation_plan);
-  EXPECT_EQ(split.coverage_ledger, direct.coverage_ledger);
-  EXPECT_EQ(split.replacement_bytes, direct.elf_bytes);
-  ASSERT_EQ(split.issues.size(), direct.errors.size());
-  for (size_t index = 0; index < split.issues.size(); ++index)
-    EXPECT_EQ(split.issues[index].detail, direct.errors[index]);
-  EXPECT_EQ(split.warnings, direct.warnings);
+  EXPECT_TRUE(mechanism.visited_code_object);
+  EXPECT_TRUE(mechanism.parsed_code_object);
+  EXPECT_EQ(mechanism.input_fingerprint, split.code_object.fingerprint);
+  EXPECT_EQ(split.program_inventory.code_object_id(), split.code_object);
+  EXPECT_FALSE(split.observation_plan.probe_intents.empty());
+  EXPECT_EQ(split.coverage_ledger.intent_entries().size(),
+            split.observation_plan.probe_intents.size());
+  EXPECT_FALSE(split.replacement_bytes.empty());
+  EXPECT_TRUE(mechanism.elf_bytes.empty());
+  EXPECT_TRUE(mechanism.errors.empty());
+  EXPECT_FALSE(mechanism.patches.empty());
   EXPECT_EQ(split.install_action(false), split.outcome == ConSanTransformOutcome::ModifiedValid
                                              ? ConSanInstallAction::LoadReplacement
                                              : ConSanInstallAction::LoadOriginal);
@@ -480,11 +479,11 @@ TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrie
   TransformPolicy transform_policy;
   transform_policy.max_patches = 16;
 
-  const ConSanResult ordinary = LegacyConSanLowering::run_pristine_moi_inventory(
+  const TransformResult ordinary = LegacyConSanLowering::run_pristine_moi_inventory(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
       MutationRequest{}, complete_runtime_capabilities(), BoundRuntimeResources{},
       /*preserve_extended_barrier_pairs=*/false);
-  const ConSanResult preserved = LegacyConSanLowering::run_pristine_moi_inventory(
+  const TransformResult preserved = LegacyConSanLowering::run_pristine_moi_inventory(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
       MutationRequest{}, complete_runtime_capabilities(), BoundRuntimeResources{},
       /*preserve_extended_barrier_pairs=*/true);
@@ -492,26 +491,63 @@ TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrie
   supplied_binding.scope = ConSanRuntimeResourceScope::Executable;
   supplied_binding.moi_report_buffer_address = 0x123456780000ull;
   supplied_binding.moi_report_buffer_size = 64u * 1024u * 1024u;
-  const ConSanResult cleared_binding = LegacyConSanLowering::run_pristine_moi_inventory(
+  const TransformResult cleared_binding = LegacyConSanLowering::run_pristine_moi_inventory(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
       MutationRequest{}, complete_runtime_capabilities(), supplied_binding,
       /*preserve_extended_barrier_pairs=*/true);
 
-  EXPECT_EQ(std::ranges::count(ordinary.sync_sequences, ConSanSyncOperation::BarrierFull,
+  const auto ordinary_sync = ordinary.program_inventory.synchronization_view().sync_sequences;
+  const auto preserved_sync = preserved.program_inventory.synchronization_view().sync_sequences;
+  const auto cleared_sync = cleared_binding.program_inventory.synchronization_view().sync_sequences;
+  EXPECT_EQ(std::ranges::count(ordinary_sync, ConSanSyncOperation::BarrierFull,
                                &ConSanSyncSequence::operation),
             0u);
-  EXPECT_EQ(std::ranges::count(preserved.sync_sequences, ConSanSyncOperation::BarrierFull,
+  EXPECT_EQ(std::ranges::count(preserved_sync, ConSanSyncOperation::BarrierFull,
                                &ConSanSyncSequence::operation),
             1u);
-  EXPECT_FALSE(ordinary.modified);
-  EXPECT_FALSE(preserved.modified);
-  EXPECT_FALSE(cleared_binding.modified);
-  ASSERT_EQ(cleared_binding.sync_sequences.size(), preserved.sync_sequences.size());
-  ASSERT_FALSE(cleared_binding.sync_sequences.empty());
-  EXPECT_EQ(cleared_binding.sync_sequences.front().identity,
-            preserved.sync_sequences.front().identity);
-  EXPECT_EQ(cleared_binding.sync_sequences.front().operation,
-            preserved.sync_sequences.front().operation);
+  EXPECT_TRUE(ordinary.replacement_bytes.empty());
+  EXPECT_TRUE(preserved.replacement_bytes.empty());
+  EXPECT_TRUE(cleared_binding.replacement_bytes.empty());
+  ASSERT_EQ(cleared_sync.size(), preserved_sync.size());
+  ASSERT_FALSE(cleared_sync.empty());
+  EXPECT_EQ(cleared_sync.front().identity, preserved_sync.front().identity);
+  EXPECT_EQ(cleared_sync.front().operation, preserved_sync.front().operation);
+}
+
+TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
+  const TransformPolicy transform_policy;
+  const RuntimePolicy runtime_policy = enabled_runtime_policy();
+  const ConSanDebugOverrides debug;
+  const MutationRequest mutation;
+  const RuntimeCapabilities capabilities = complete_runtime_capabilities();
+
+  TransformResult inventory = LegacyConSanLowering::run_pristine_moi_inventory(
+      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, {},
+      /*preserve_extended_barrier_pairs=*/false);
+  ASSERT_TRUE(inventory.well_formed()) << testing::PrintToString(inventory.issues);
+  ASSERT_TRUE(inventory.evidence_requirements);
+  const auto &requirements =
+      std::get<ConSanRecordReplayEvidenceRequirements>(*inventory.evidence_requirements);
+
+  BoundRuntimeResources resources;
+  resources.scope = ConSanRuntimeResourceScope::Executable;
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  resources.moi_report_buffer_size = requirements.abi_plan.required_bytes;
+  TransformResult retried = LegacyConSanLowering::retry_pristine_moi_inventory(
+      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
+      std::move(inventory));
+  const TransformResult direct = transform_consan(bytes, request, transform_policy, runtime_policy,
+                                                  debug, capabilities, resources);
+
+  ASSERT_TRUE(retried.well_formed()) << testing::PrintToString(retried.issues);
+  ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid);
+  EXPECT_EQ(retried.install_action(false), ConSanInstallAction::LoadReplacement);
+  EXPECT_EQ(retried.code_object, direct.code_object);
+  EXPECT_EQ(retried.observation_plan, direct.observation_plan);
+  EXPECT_EQ(retried.coverage_ledger, direct.coverage_ledger);
+  EXPECT_EQ(retried.replacement_bytes, direct.replacement_bytes);
 }
 
 TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) {

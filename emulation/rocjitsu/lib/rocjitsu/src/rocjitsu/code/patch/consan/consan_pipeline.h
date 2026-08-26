@@ -335,26 +335,22 @@ public:
   /// two-pass composition as a mutable option; the future inventory component
   /// will receive the later mutation requirements directly. No caller may use
   /// this entry for an installable transform.
-  [[nodiscard]] static ConSanResult run_pristine_moi_inventory(
+  [[nodiscard]] static TransformResult run_pristine_moi_inventory(
       std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
       const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
       const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
       const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources,
       bool preserve_extended_barrier_pairs);
 
-  [[nodiscard]] static ConSanResult
-  run(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+  /// Bind runtime resources and re-run only MOI planning and lowering from a
+  /// pristine inventory returned by `run_pristine_moi_inventory`. The HSA
+  /// coordinator never sees or reconstructs the prototype retry value.
+  [[nodiscard]] static TransformResult retry_pristine_moi_inventory(
+      std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
       const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
       const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-      const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources);
-
-  /// Validate the typed front end, invoke `run()` only when those contracts
-  /// admit lowering, and publish the result through `TransformResult`.
-  [[nodiscard]] static TransformResult
-  run_and_publish(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-                  const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-                  const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-                  const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources);
+      const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
+      TransformResult inventory);
 
   /// Publish a mechanism result already produced by the inventory-retry or
   /// hook-test seam through the same typed pipeline contract as an ordinary
@@ -368,6 +364,12 @@ public:
           ConSanResult legacy_result);
 
 private:
+  friend TransformResult
+  transform_consan_with_mutation(std::span<const uint8_t>, const ConSanRequest &,
+                                 const TransformPolicy &, const RuntimePolicy &,
+                                 const ConSanDebugOverrides &, const MutationRequest &,
+                                 const RuntimeCapabilities &, const BoundRuntimeResources &);
+
   [[nodiscard]] static TransformResult
   publish_optional(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
                    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,

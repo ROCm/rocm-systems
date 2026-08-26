@@ -2417,13 +2417,15 @@ analysis completed.
   projection test retains exact compatibility coverage.
 - **Completed production routing:** Every ordinary or mutated installable HSA
   transform enters the typed pipeline. The pre-allocation MOI inventory pass
-  enters the explicitly named
-  `LegacyConSanLowering::run_pristine_moi_inventory` seam with typed inputs and
-  one documented extended-barrier preservation fact. Its focused unit test
-  proves that the fact controls only incomplete extended-barrier-pair
-  inventory. Raw mutable options remain reachable only to the lowerer
-  implementation, 17 mechanism-test translation units, one hook-test
-  translation unit, and the transform fuzzer; they are not a production API.
+  and its runtime-bound retry both enter explicitly named
+  `LegacyConSanLowering` operations and return `TransformResult`. The HSA
+  coordinator no longer stores, publishes, or passes a mutable `ConSanResult`
+  between the two phases. One documented extended-barrier preservation fact
+  remains, and its focused unit test proves that it controls only incomplete
+  extended-barrier-pair inventory. Raw mutable options remain reachable only
+  to the lowerer implementation, 17 mechanism-test translation units, one
+  hook-test translation unit, and the transform fuzzer; they are not a
+  production API.
 - **Control-plane endpoint:** Configuration, capability validation, immutable
   program identity, observation policy, evidence requirements, runtime-binding
   status, static outcome, and installation policy have typed owners outside the
@@ -2431,9 +2433,9 @@ analysis completed.
   shape, but may not originate target-neutral admission, report sizing,
   runtime allocation, or trust policy.
 - **Honest deviations from the end-state diagrams:** The HSA adapter consumes
-  `TransformResult` directly, but automatic allocation retry, fault
-  installation telemetry, and reader registration still use its read-only
-  legacy mechanism view. The logical pipeline stages still wrap
+  `TransformResult` directly, and automatic allocation retry remains typed at
+  that boundary, but fault installation telemetry and reader registration
+  still use its read-only legacy mechanism view. The logical pipeline stages still wrap
   a monolithic lowerer rather than distinct parser, resource, emitter, and
   finalizer calls. `consan.h` still exposes prototype data structures used by
   mechanism helpers even though it exposes no transform function. These are
@@ -2450,7 +2452,7 @@ The remaining lowerer responsibilities are explicit:
 | Inline Shadow | Workgroup shadow layout, owner/epoch state, inline conflict checks, and device report lowering | Isolate the on-device state backend behind the same observation/resource boundaries while DBI support evolves |
 | Mutation and composition | Recursive dry-run/live composition, pristine mutation inventory, perturbation composition, and exact-one application telemetry | Make mutation an explicit consumer of immutable inventory and a separate transform composition layer |
 | Shared mechanism | Register allocation, spilling, wait preservation, branch reservoirs/relays, code-object growth, patch application, ABI retry, and final ELF validation | Extract resource planning, placement/emission, and transactional finalization in that order, shared by every engine and target |
-| HSA lifecycle compatibility | The runtime coordinator now consumes `TransformResult` directly; automatic allocation/retry and reader/executable metadata still read a bounded legacy mechanism view | Extract the remaining patch geometry and allocation/retry telemetry into narrowly owned values, then delete the mechanism view |
+| HSA lifecycle compatibility | The runtime coordinator and automatic allocation/retry path consume `TransformResult`; reader/executable metadata still reads a bounded legacy mechanism view | Extract the remaining patch geometry and registration telemetry into narrowly owned values, then delete the mechanism view |
 
 - **Next component order:** First extract shared decode/inventory. Second separate
   shared resource planning from engine-specific evidence semantics, beginning

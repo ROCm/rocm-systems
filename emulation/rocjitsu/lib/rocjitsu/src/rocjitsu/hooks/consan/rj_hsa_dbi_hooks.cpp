@@ -119,7 +119,7 @@ rocjitsu::TransformResult run_consan_transform(std::span<const uint8_t> bytes,
 /// Preserve the hook tests' historical transform-override ABI around the
 /// typed pristine-inventory entry. Production never enters the mutable-options
 /// branch; it calls the named legacy lowerer with typed values.
-rocjitsu::ConSanResult run_consan_pristine_moi_inventory(
+rocjitsu::TransformResult run_consan_pristine_moi_inventory(
     std::span<const uint8_t> bytes, const rocjitsu::ConSanRequest &request,
     const rocjitsu::TransformPolicy &transform_policy,
     const rocjitsu::RuntimePolicy &runtime_policy, const rocjitsu::ConSanDebugOverrides &debug,
@@ -138,36 +138,13 @@ rocjitsu::ConSanResult run_consan_pristine_moi_inventory(
     options.moi_report_generation = 0;
     options.moi_report_dispatch_id = 0;
     options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
-    return override(bytes, options);
+    return rocjitsu::LegacyConSanLowering::publish(bytes, request, transform_policy, runtime_policy,
+                                                   debug, disabled_mutation, capabilities,
+                                                   unbound_resources, override(bytes, options));
   }
   return rocjitsu::LegacyConSanLowering::run_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
       unbound_resources, preserve_extended_barrier_pairs);
-}
-
-rocjitsu::ConSanResult retry_consan_moi_transform(std::span<const uint8_t> bytes,
-                                                  const rocjitsu::ConSanOptions &options,
-                                                  rocjitsu::ConSanResult inventory) {
-  // Unit tests replace the whole transform boundary and expect both phases to
-  // flow through that seam. Production reuses the immutable semantic
-  // inventory and reruns only MOI planning/lowering with the allocated buffer.
-  if (const ConSanTransformOverride override =
-          g_test_consan_transform_override.load(std::memory_order_acquire)) {
-    g_test_consan_moi_retry_count.fetch_add(1, std::memory_order_relaxed);
-    return override(bytes, options);
-  }
-  const rocjitsu::ConSanMoiInventoryRetryConfig retry{
-      .report =
-          {
-              .buffer_address = options.moi_report_buffer_address,
-              .buffer_size = options.moi_report_buffer_size,
-              .layout = options.moi_report_layout,
-              .generation = options.moi_report_generation,
-              .dispatch_id = options.moi_report_dispatch_id,
-          },
-      .fault = rocjitsu::ConSanFaultMutationRetryConfig::from_options(options),
-  };
-  return rocjitsu::retry_patch_consan_moi_from_inventory(std::move(inventory), retry, bytes);
 }
 
 rocjitsu::TransformResult retry_consan_moi_transform(
@@ -175,12 +152,22 @@ rocjitsu::TransformResult retry_consan_moi_transform(
     const rocjitsu::TransformPolicy &transform_policy,
     const rocjitsu::RuntimePolicy &runtime_policy, const rocjitsu::ConSanDebugOverrides &debug,
     const rocjitsu::MutationRequest &mutation, const rocjitsu::RuntimeCapabilities &capabilities,
-    const rocjitsu::BoundRuntimeResources &resources, rocjitsu::ConSanResult inventory) {
+    const rocjitsu::BoundRuntimeResources &resources, rocjitsu::TransformResult inventory) {
   const rocjitsu::ConSanOptions legacy_options = rocjitsu::LegacyOptionsAdapter::adapt(
       request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
-  return rocjitsu::LegacyConSanLowering::publish(
+  // Unit tests replace the whole transform boundary and expect both phases to
+  // flow through that seam. Production keeps the compatibility retry private
+  // to `LegacyConSanLowering`.
+  if (const ConSanTransformOverride override =
+          g_test_consan_transform_override.load(std::memory_order_acquire)) {
+    g_test_consan_moi_retry_count.fetch_add(1, std::memory_order_relaxed);
+    return rocjitsu::LegacyConSanLowering::publish(bytes, request, transform_policy, runtime_policy,
+                                                   debug, mutation, capabilities, resources,
+                                                   override(bytes, legacy_options));
+  }
+  return rocjitsu::LegacyConSanLowering::retry_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
-      retry_consan_moi_transform(bytes, legacy_options, std::move(inventory)));
+      std::move(inventory));
 }
 
 /// Accumulator used by the HSA runtime-capability query adapter. It owns no HSA
@@ -1480,7 +1467,7 @@ public:
   std::shared_ptr<const std::vector<uint8_t>> replacement_storage;
   std::optional<rocjitsu::TransformResult> patch_result_storage;
   std::optional<ConSanStaticCoverage> static_coverage_storage;
-  std::optional<rocjitsu::ConSanResult> reusable_moi_inventory;
+  std::optional<rocjitsu::TransformResult> reusable_moi_inventory;
   std::optional<rocjitsu::ConSanMoiAutoReportInventory> live_fault_auto_report_capacity_inventory;
 };
 
@@ -4132,33 +4119,27 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       log_message(kLogInfo, "ConSan MOI inventory begin reader=%llu bytes=%zu",
                   static_cast<unsigned long long>(code_object_reader.handle), size);
       const auto inventory_begin = std::chrono::steady_clock::now();
-      rocjitsu::ConSanResult inventory = run_consan_pristine_moi_inventory(
+      rocjitsu::TransformResult inventory = run_consan_pristine_moi_inventory(
           std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
           debug_overrides, inventory_mutation, runtime_capabilities, inventory_resources,
           preserve_extended_barrier_pairs);
-      const auto publish_pristine_inventory = [&](rocjitsu::ConSanResult value) {
-        return rocjitsu::LegacyConSanLowering::publish(
-            std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
-            debug_overrides, inventory_mutation, runtime_capabilities, inventory_resources,
-            std::move(value));
-      };
       log_message(kLogInfo, "ConSan MOI inventory end reader=%llu elapsed_ms=%.3f",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                             inventory_begin)
                       .count());
-      if (!rocjitsu::consan_result_has_resolved_semantic_arch(inventory))
+      if (!rocjitsu::consan_result_has_resolved_semantic_arch(inventory.legacy_mechanism()))
         return reject_unresolved_semantic_arch(*config, code_object_reader.handle,
                                                fault_installation_evidence);
       const bool inventory_requires_report_buffer =
-          moi_inventory_needs_report_buffer(inventory, *config);
+          moi_inventory_needs_report_buffer(inventory.legacy_mechanism(), *config);
       bool auto_report_plan_available = inventory_requires_report_buffer;
       if (!inventory_requires_report_buffer) {
         log_message(kLogInfo,
                     "ConSan MOI auto report buffer skipped reader=%llu: no MOI report sites",
                     static_cast<unsigned long long>(code_object_reader.handle));
         if (!live_fault_transform)
-          patch_result_storage = publish_pristine_inventory(std::move(inventory));
+          patch_result_storage = std::move(inventory);
       }
 
       uint64_t auto_report_address = 0;
@@ -4184,7 +4165,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                       "dynamic_replay_requires_explicit_cap");
           auto_report_plan_available = false;
           if (!live_fault_transform)
-            patch_result_storage = publish_pristine_inventory(std::move(inventory));
+            patch_result_storage = std::move(inventory);
         } else {
           required_report_size = config->moi_auto_report_buffer_size;
           requested_report_size = config->moi_auto_report_buffer_size;
@@ -4238,8 +4219,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           // Compatibility for hook unit tests that inject historical results
           // without a valid immutable observation plan.
           report_inventory = rocjitsu::inventory_consan_moi_auto_report(
-              inventory, inventory_options, std::span<const uint8_t>(bytes, size),
-              config->moi_auto_report_buffer_size);
+              inventory.legacy_mechanism(), inventory_options,
+              std::span<const uint8_t>(bytes, size), config->moi_auto_report_buffer_size);
           report_plan = rocjitsu::plan_consan_moi_auto_report(report_inventory,
                                                               config->moi_auto_report_buffer_size);
         }
@@ -4333,7 +4314,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                        fault_installation_evidence);
       } else if (auto_report_plan_available && !patch_result_storage) {
         if (!live_fault_transform)
-          patch_result_storage = publish_pristine_inventory(std::move(inventory));
+          patch_result_storage = std::move(inventory);
       }
     }
 
