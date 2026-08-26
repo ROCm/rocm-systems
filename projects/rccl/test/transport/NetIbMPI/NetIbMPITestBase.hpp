@@ -1484,15 +1484,21 @@ protected:
         }
 
         if (sharedFamily.empty()) {
-            // Every slot was comparable and no slot shared a family. That is a
-            // genuinely mixed pair of nodes -- and also what a misread GID table
-            // would look like, so the index-symmetric list is kept and the
-            // disagreement is reported rather than turned into a skip on the
-            // strength of this parser.
-            TEST_INFO("Rank %d: no agreed device index shares a GID address family with every "
-                      "rank; keeping the %zu index-symmetric device(s) and continuing",
-                      MPIEnvironment::world_rank, out->size());
-            return true;
+            // An uncomparable slot (localFamilies[dev] == 0 or peer == 0 on every
+            // peer) never sets anyDisjoint, so it is never excluded here -- it
+            // would still be sitting in sharedFamily if any such slot existed.
+            // Empty therefore means every agreed slot was comparable *and*
+            // disjoint: not a parser guess, but AF_INET-vs-AF_INET6 on every one
+            // of them, which the plugin cannot connect regardless of
+            // NCCL_IB_GID_INDEX or anything else it picks. Restoring the
+            // index-symmetric list here would send the threaded suites into
+            // connect/accept retries against devices already proven not to pair,
+            // instead of the synchronized skip this check exists to produce.
+            *reason = "every agreed device index has disjoint GID address families across "
+                      "ranks (AF_INET on one side, AF_INET6 on the other), so none of them "
+                      "can connect";
+            out->clear();
+            return false;
         }
         if (sharedFamily.size() != out->size()) {
             TEST_INFO("Rank %d: %zu of %zu agreed device index(es) dropped for having no GID "
