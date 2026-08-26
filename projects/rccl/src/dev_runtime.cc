@@ -1331,6 +1331,16 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
   // RCCL: when sym VMM is unavailable (no cuMem), route through the non-sym
   // helper which lays out IPC for intra-node and proxy/GIN MR for inter-node
   if (!comm->symmetricSupport) {
+    // Host-backed VMM cannot be exported through the non-symmetric IPC
+    // fallback. Probe its segment layout first so the common support check can
+    // reject it before windowRegisterNonSym attempts cudaIpcGetMemHandle.
+    // Ordinary non-VMM pointers are still handled by the existing fallback.
+    ncclResult_t probeRet =
+        ncclCuMemGetAddressRange(reinterpret_cast<CUdeviceptr>(userPtr), userSize, &memAddr, &memSize, &numSegments,
+                                 &hasSysmemSegment);
+    if (probeRet == ncclSuccess) {
+      NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
+    }
     NCCLCHECKGOTO(windowRegisterNonSym(comm, userPtr, userSize, winFlags, localRegHandle, outWinDev), ret, fail_locReg);
     return ncclSuccess;
   }
@@ -1347,31 +1357,7 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
                 ret, fail_locReg);
   NCCLCHECKGOTO(ncclCalloc(&memHandles, numSegments), ret, fail_locReg);
 
-  if (hasSysmemSegment) {
-    if (!ncclParamElasticBufferRegister()) {
-      WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but "
-           "NCCL_ELASTIC_BUFFER_REGISTER is set to 0. Please set NCCL_ELASTIC_BUFFER_REGISTER=1 and retry window "
-           "registration",
-           userPtr, userSize);
-      ret = ncclInvalidArgument;
-      goto fail_locReg;
-    }
-#if CUDART_VERSION >= 12080
-    else if (comm->MNNVL) {
-      int multiNodeLsaSupported = 0;
-      CUCHECKGOTO(cuDeviceGetAttribute(&multiNodeLsaSupported, CU_DEVICE_ATTRIBUTE_HOST_NUMA_MULTINODE_IPC_SUPPORTED,
-                                       comm->cudaDev),
-                  ret, fail_locReg);
-      if (!multiNodeLsaSupported) {
-        WARN("VA represented by {userPtr = %p, size = %zu} contains CPU-backed physical segments, but the LSA team "
-             "does not support multi-node IPC on CPU-backed buffers. Please retry by setting NCCL_MNNVL_ENABLE=0",
-             userPtr, userSize);
-        ret = ncclInvalidArgument;
-        goto fail_locReg;
-      }
-    }
-#endif
-  }
+  NCCLCHECKGOTO(ncclDevrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment), ret, fail_locReg);
 
   memOffset = reinterpret_cast<uintptr_t>(userPtr) - reinterpret_cast<uintptr_t>(memAddr);
   if (memOffset % NCCL_WIN_REQUIRED_ALIGNMENT != 0) {
