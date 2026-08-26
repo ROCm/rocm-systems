@@ -21,11 +21,12 @@ constexpr int kGinAllReduceLsaCtas = 56;
 constexpr int kGinAllReduceLsaTwoShotCtasPerPeer = 8;
 constexpr int kGinAllReduceLsaTwoShotMaxCtas = kGinAllReduceLsaTwoShotCtasPerPeer * 16;
 
+constexpr int kGinAllReduceMinBytes = 512ULL * 1024;
 constexpr int kGinAllReduceLsaThreadsPerCta = 512;
 constexpr size_t kGinAllReduceLsaOneShotMaxBytes = 8ULL * 1024 * 1024;
 constexpr size_t kGinAllReduceLsaTwoShotMidBytes = 32ULL * 1024 * 1024;
-
 constexpr size_t kGinAllReduceGinTwoShotMinBytes = 256ULL * 1024 * 1024;
+
 constexpr size_t kGinAllReduceTwoShotSyncBytes = 16;
 constexpr size_t kGinAllReduceMinPutBytes = 128;
 

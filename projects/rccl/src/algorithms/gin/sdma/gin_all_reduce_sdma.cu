@@ -19,7 +19,6 @@
 #include "comm.h"
 #include "debug.h"
 #include "dev_runtime.h"
-#include "sym_kernels.h"
 #include "param.h"
 
 #include <cuda_runtime.h>
@@ -34,7 +33,7 @@ NCCL_PARAM(GinAllReduceLsaTwoShotOverlap, "GIN_ALLREDUCE_LSA_TWOSHOT_OVERLAP", 0
 namespace {
 
 constexpr bool kSdmaDeviceBackendCompiled = (NCCL_GIN_ANVIL_SDMA_ENABLE != 0);
-constexpr int kGinAllReduceMaxRanks = 16;
+constexpr int kGinAllReduceMaxRanks = 8;
 
 static ncclResult_t ncclGinAllReduceInitOnce(ncclComm* comm) {
   NCCLCHECK(ncclDevrInitOnce(comm));
@@ -113,22 +112,10 @@ template <typename T, int NRANKS_CT>
 static void ginAllReduceLaunchLsaTwoShot(ncclComm* comm, cudaStream_t stream, struct ncclDevrWindow* sendWin,
                                          size_t sendOff, struct ncclDevrWindow* recvWin, size_t recvOff,
                                          size_t countPerRank, int gridCtas) {
-  gridCtas = 64;
   size_t msgSize = countPerRank * sizeof(T) * comm->nRanks;  
-  if (ncclParamGinAllReduceLsaTwoShotOverlap() != 0) {
-    gin::sdma::lsaAllReduceTwoShotOverlappedKernel<T, NRANKS_CT>
-      <<<gridCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
-        comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank,
-        comm->nRanks);
-  } else {
-    //if (msgSize <= kGinAllReduceLsaTwoShotMidBytes) {  	  
-    	gin::sdma::lsaAllReduceTwoShotKernel<T, NRANKS_CT><<<gridCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
+
+  gin::sdma::lsaAllReduceTwoShotKernel<T, NRANKS_CT><<<gridCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
       comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks);
-    /*} else {
-	 meta::comms::lsaAllReduceTwoShotLargeMsgKernel<T, NRANKS_CT><<<gridCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
-      comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank, comm->nRanks);
-    }*/
-  }
 }
 
 template <typename T>
@@ -155,9 +142,6 @@ static ncclResult_t ncclAllReduceGinSdmaLsaTwoShotTyped(const void* sendbuff, vo
   case 8:
     ginAllReduceLaunchLsaTwoShot<T, 8>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas);
     break;
-  case 16:
-    ginAllReduceLaunchLsaTwoShot<T, 16>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas);
-    break;
   default:
     ginAllReduceLaunchLsaTwoShot<T, 0>(comm, stream, sendWin, sendOff, recvWin, recvOff, countPerRank, gridCtas);
     break;
@@ -182,14 +166,10 @@ static ncclResult_t ncclAllReduceGinSdmaGinTwoShotTyped(const void* sendbuff, vo
   const uint64_t reduceTarget = ginAllReduceNextReduceTarget(comm);
   const uint64_t agTarget = ginAllReduceNextAgTarget(comm);
 
-  //if ((count * sizeof(T)) <= kGinAllReduceLsaTwoShotMidBtes) {
-  	gin::sdma::ginAllReduceTwoShotKernel<T><<<kGinAllReduceLsaCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
-    		comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank,
-    		comm->ginAllReduceState.twoShotSync, reduceTarget, comm->ginAllReduceState.twoShotSync + 1, agTarget,
-    		comm->nRanks);
-  /*} else {
-	
-  }*/
+  gin::sdma::ginAllReduceTwoShotKernel<T><<<kGinAllReduceLsaCtas, kGinAllReduceLsaThreadsPerCta, 0, stream>>>(
+    	comm->ginAllReduceState.devComm, sendWin->vidmem, sendOff, recvWin->vidmem, recvOff, countPerRank,
+    	comm->ginAllReduceState.twoShotSync, reduceTarget, comm->ginAllReduceState.twoShotSync + 1, agTarget,
+    	comm->nRanks);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }
@@ -228,22 +208,6 @@ static bool ginAllReduceGinTwoShotEligible(size_t count, ncclDataType_t datatype
   return chunkBytes >= kGinAllReduceMinPutBytes;
 }
 
-// Check if symmteric kernels is requested for this collective
-static bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
-                                       size_t nElts, const void* sendbuff, void* recvbuff) {
-  if (comm == nullptr || !comm->symmetricSupport) return false;
-  if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
-  if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
-
-  struct ncclDevrWindow* sendWin = nullptr;
-  struct ncclDevrWindow* recvWin = nullptr;
-  ncclDevrFindWindow(comm, sendbuff, &sendWin);
-  ncclDevrFindWindow(comm, recvbuff, &recvWin);
-  return sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
-         (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
-}
-
-
 } // namespace
 
 
@@ -270,6 +234,9 @@ bool ncclAllReduceGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* re
 
 
   const size_t bytes = count * ncclTypeSize(datatype);
+  if (bytes < kGinAllReduceMinBytes) {
+    return false;
+  } 
   if (bytes <= kGinAllReduceLsaOneShotMaxBytes) {
     return true;
   }
