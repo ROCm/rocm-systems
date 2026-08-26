@@ -40,9 +40,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
 // Resolved NCCL_MAX_P2P_NCHANNELS (MAXCHANNELS when unset, else clamped user value).
 int ncclMaxP2pNchannels();
-// Topology upper bound for p2pnChannels: 64 unless the user explicitly set
-// NCCL_MAX_P2P_NCHANNELS above 64, in which case up to MAXCHANNELS applies.
-int ncclP2pChannelsUpperBound(bool* userOptedHigherOut);
+// Upper bound for p2pnChannels: 64, MAXCHANNELS on single-node gfx1250, or the
+// user's NCCL_MAX_P2P_NCHANNELS above that. Always a power of two.
+int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut);
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks);
 ncclResult_t ncclTopoPathAllNVLink(struct ncclTopoSystem* system, int* allNvLink);
 ncclResult_t ncclTopoPathAllDirectNVLink(struct ncclTopoSystem* system, bool* allNvlinkConnected);

@@ -14,6 +14,7 @@
 #include "ce_coll.h"
 #include "comm.h"
 #include "common/ErrCode.hpp"
+#include "common/MockComm.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "debug.h"
 #include "enqueue.h"
@@ -94,55 +95,8 @@ ncclResult_t testStaticExposeCheck()
     return ncclSuccess;
 }
 
-// Helper function to create and initialize mock communicator
-static void CreateMockComm(
-    ncclComm_t&            mockComm,
-    struct ncclTopoSystem& mockTopo,
-    struct ncclTopoNode&   mockGpuNode,
-    const char*            arch,
-    int                    nRanks
-)
-{
-    // Allocate memory for the communicator
-    mockComm = new ncclComm();
-    memset(mockComm, 0, sizeof(ncclComm));
-
-    // Initialize basic communicator fields
-    mockComm->nRanks = nRanks;
-    mockComm->nNodes = 1; // Default to single node for P2P tests
-    mockComm->rank   = 0; // Default rank
-
-    mockComm->pxnDisable      = RCCL_VALUE_UNSET;
-    mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
-
-    // Initialize topology
-    memset(&mockTopo, 0, sizeof(mockTopo));
-    mockComm->topo = &mockTopo;
-
-    // Initialize GPU node
-    mockTopo.nodes[GPU].count = 1;
-    memset(&mockGpuNode, 0, sizeof(mockGpuNode));
-
-    // Set GPU architecture
-    strncpy(mockGpuNode.gpu.gcn, arch, sizeof(mockGpuNode.gpu.gcn) - 1);
-    mockGpuNode.gpu.gcn[sizeof(mockGpuNode.gpu.gcn) - 1] = '\0';
-
-    // Copy the node into the topology array
-    mockTopo.nodes[GPU].nodes[0] = mockGpuNode;
-
-    // Initialize other required fields for tests
-    memset(mockComm->minMaxLLRange, 0, sizeof(mockComm->minMaxLLRange));
-}
-
-// Helper function to cleanup mock communicator
-static void CleanupMockComm(ncclComm_t& mockComm)
-{
-    if(mockComm)
-    {
-        delete mockComm;
-        mockComm = nullptr;
-    }
-}
+// CreateMockComm / CleanupMockComm moved to common/MockComm.hpp so other fixtures
+// can reuse them.
 
 // Helper function to determine if rcclSetPipelining test should be skipped
 static bool ShouldSkipRcclSetPipeliningTests()
@@ -2628,6 +2582,47 @@ TEST(RcclAllReduceDdaDecision, SymEligible_YieldsToSymmetricKernel)
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
                                                 /*symEligible=*/true, /*ceAllReduceAllowed=*/true));
+}
+
+// ---------------------------------------------------------------------------
+// Tests for skipPresetTopoMatching: gfx1250 skips Rome model matching.
+// Runs on real GPU, initializes a communicator, and checks internal state.
+// ---------------------------------------------------------------------------
+
+TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
+{
+    RUN_ISOLATED_TEST("Gfx1250_SkipsRomeModelMatching", []()
+    {
+        int numDevices = 0;
+        ASSERT_EQ(hipGetDeviceCount(&numDevices), hipSuccess);
+        if (numDevices < 1) {
+            GTEST_SKIP() << "No devices available.";
+        }
+
+        // Check if this is gfx1250
+        hipDeviceProp_t prop{};
+        ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+        bool isGfx1250 = (strncmp(prop.gcnArchName, "gfx1250", 7) == 0);
+        if (!isGfx1250) {
+            GTEST_SKIP() << "Test only applicable on gfx1250 hardware.";
+        }
+
+        ncclComm_t commHandle{};
+        ncclUniqueId id{};
+        ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
+        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        ASSERT_EQ(ncclCommInitRank(&commHandle, 1, id, 0), ncclSuccess);
+
+        // Cast to internal struct to access topo
+        ncclComm* comm = commHandle;
+
+        // gfx1250 should skip preset topo matching
+        EXPECT_TRUE(comm->topo->skipPresetTopoMatching);
+        // Rome model index should be NONE (no preset matched)
+        EXPECT_EQ(comm->topo->romeTopoModelIdx, RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE);
+
+        ASSERT_EQ(ncclCommDestroy(commHandle), ncclSuccess);
+    });
 }
 
 } // namespace RcclUnitTesting

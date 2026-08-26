@@ -20,7 +20,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -206,9 +205,10 @@ struct VectorMemState : DynamicInstState {
   bool cluster_multicast = false;  ///< Cluster async-to-LDS load: multicast LDS writes by M0 mask.
   uint32_t cluster_mcast_mask = 0; ///< Cluster workgroup destination mask captured at issue time.
   uint64_t issue_pc = 0;           ///< PC at which the instruction was issued (debug).
-  uint32_t wg_id = 0;              ///< Workgroup ID (for trace output).
-  uint32_t wf_id = 0;              ///< Wavefront ID within WG (for trace output).
-  std::string cu_path;             ///< CU full path (for trace output).
+  // Snapshot dispatch identity at issue time for deferred trace output. The CU
+  // is stable for the slot, so its path is materialized only inside log lambdas.
+  uint32_t wg_id = 0; ///< Workgroup ID (for trace output).
+  uint32_t wf_id = 0; ///< Wavefront ID within WG (for trace output).
   std::vector<uint8_t> response_data;
   std::vector<uint8_t> store_data;
   uint8_t transpose = 0; ///< Transpose-load kind (0=none, see ds_transpose.h).

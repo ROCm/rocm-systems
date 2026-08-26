@@ -119,10 +119,6 @@ inline constexpr uint16_t kVop2 = 4;
 inline constexpr uint16_t kVop2OpHi1 = 5;
 inline constexpr uint16_t kVop2OpHi2 = 6;
 inline constexpr uint16_t kVop2OpHi3 = 7;
-inline constexpr uint16_t kVop2OpHi4 = 8;
-inline constexpr uint16_t kVop2OpHi5 = 9;
-inline constexpr uint16_t kVop2OpHi6 = 10;
-inline constexpr uint16_t kVop2OpHi7 = 11;
 inline constexpr uint16_t kVop2OpHi8 = 12;
 inline constexpr uint16_t kVop2OpHi9 = 13;
 inline constexpr uint16_t kVop2OpHi10 = 14;
@@ -163,10 +159,6 @@ inline constexpr uint16_t kVop2OpHi44 = 48;
 inline constexpr uint16_t kVop2OpHi45 = 49;
 inline constexpr uint16_t kVop2OpHi46 = 50;
 inline constexpr uint16_t kVop2OpHi47 = 51;
-inline constexpr uint16_t kVop2OpHi48 = 52;
-inline constexpr uint16_t kVop2OpHi49 = 53;
-inline constexpr uint16_t kVop2OpHi50 = 54;
-inline constexpr uint16_t kVop2OpHi51 = 55;
 inline constexpr uint16_t kVop2OpHi56 = 60;
 inline constexpr uint16_t kVop2OpHi57 = 61;
 inline constexpr uint16_t kVop2OpHi58 = 62;
@@ -396,6 +388,7 @@ public:
   bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
@@ -440,6 +433,9 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
+  bool has_dpp8();
+  bool has_dpp16();
   using OpEncoding = Vop1MachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -476,6 +472,7 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
   using OpEncoding = VopcMachineInst;
   const OpEncoding inst_;
   std::array<uint32_t, 2> raw_words_{};
@@ -510,6 +507,9 @@ public:
   void build_modifiers(std::string &out) const override;
   bool default_encoding();
   bool has_lit();
+  bool has_sdwa();
+  bool has_dpp8();
+  bool has_dpp16();
   bool hasImpliedLiteral();
   using OpEncoding = Vop2MachineInst;
   const OpEncoding inst_;
@@ -545,6 +545,7 @@ public:
   bool default_encoding();
   using OpEncoding = VintrpMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Vop3 : public IsaInstruction<Isa> {
@@ -582,6 +583,8 @@ public:
 class Ds : public IsaInstruction<Isa> {
 public:
   Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn);
+  bool uses_split_ds_offsets() const;
+  void build_modifiers(std::string &out) const override;
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
 };
