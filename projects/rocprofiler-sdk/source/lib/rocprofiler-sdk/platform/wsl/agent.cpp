@@ -370,7 +370,7 @@ struct DxcoreHandle
         if(handle) ::dlclose(handle);
     }
 
-    DxcoreHandle(const DxcoreHandle&)            = delete;
+    DxcoreHandle(const DxcoreHandle&) = delete;
     DxcoreHandle& operator=(const DxcoreHandle&) = delete;
 
     bool ready() const

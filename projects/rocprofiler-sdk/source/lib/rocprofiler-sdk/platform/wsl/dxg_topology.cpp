@@ -83,7 +83,7 @@ struct RocdxgHandle
         if(handle) ops.close(handle);
     }
 
-    RocdxgHandle(const RocdxgHandle&)            = delete;
+    RocdxgHandle(const RocdxgHandle&) = delete;
     RocdxgHandle& operator=(const RocdxgHandle&) = delete;
 
     bool ready() const { return handle != nullptr && thunk.complete(); }
