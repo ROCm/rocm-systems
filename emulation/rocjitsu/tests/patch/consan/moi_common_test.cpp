@@ -1710,12 +1710,10 @@ TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
   ASSERT_EQ(result.kernels.front().flat_sites.size(), 2u);
   EXPECT_TRUE(result.moi_candidates.empty());
 
-  bool saw_skip_warning = false;
-  for (const std::string &warning : result.warnings) {
-    saw_skip_warning |= warning.find("skipped flat sites") != std::string::npos &&
-                        warning.find("unknown=2") != std::string::npos;
-  }
-  EXPECT_TRUE(saw_skip_warning);
+  EXPECT_EQ(std::ranges::count(result.observation_plan.site_decisions,
+                               ConSanAccessPolicyReason::FlatProvenancePolicyExcluded,
+                               &ConSanSiteDecision::reason),
+            2u);
 }
 
 TEST(ConSanMoi, DispatchIdPreloadPlanPreservesShiftedGuestSgprs) {
@@ -2219,13 +2217,10 @@ TEST(ConSanMoi, InventorySkipsUnsupportedNativeLdsSites) {
   ASSERT_EQ(result.moi_candidates.size(), 2u);
   EXPECT_EQ(result.moi_candidates[0].mnemonic, "ds_store_b32");
   EXPECT_EQ(result.moi_candidates[1].mnemonic, "ds_load_b32");
-  bool saw_skipped_lds_warning = false;
-  for (const std::string &warning : result.warnings) {
-    saw_skipped_lds_warning |= warning.find("skipped native LDS sites") != std::string::npos &&
-                               warning.find("unsupported_kind=1") != std::string::npos &&
-                               warning.find("unsupported_mnemonic=0") != std::string::npos;
-  }
-  EXPECT_TRUE(saw_skipped_lds_warning);
+  EXPECT_EQ(std::ranges::count(result.observation_plan.site_decisions,
+                               ConSanAccessPolicyReason::OperationKindExcluded,
+                               &ConSanSiteDecision::reason),
+            1u);
 }
 
 TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
@@ -3169,9 +3164,9 @@ TEST(ConSanMoi, StrictFlatProvenanceExcludesMaybeGroupCandidates) {
   const auto strict_result = try_patch_consan(bytes, strict_options);
   ASSERT_TRUE(strict_result.errors.empty());
   EXPECT_TRUE(strict_result.moi_candidates.empty());
-  EXPECT_TRUE(std::ranges::any_of(strict_result.warnings, [](const std::string &warning) {
-    return warning.find("excluded_maybe_group=1") != std::string::npos;
-  }));
+  ASSERT_EQ(strict_result.observation_plan.site_decisions.size(), 1u);
+  EXPECT_EQ(strict_result.observation_plan.site_decisions.front().reason,
+            ConSanAccessPolicyReason::FlatProvenancePolicyExcluded);
 }
 
 } // namespace

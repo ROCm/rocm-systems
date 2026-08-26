@@ -296,33 +296,6 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
 [[nodiscard]] std::optional<uint32_t>
 two_address_native_lds_offset_scale(std::string_view mnemonic);
 
-struct SkippedMoiLdsCounts {
-  uint32_t unsupported_kind = 0;
-  uint32_t unsupported_mnemonic = 0;
-
-  [[nodiscard]] bool any() const { return unsupported_kind != 0 || unsupported_mnemonic != 0; }
-};
-
-void count_skipped_moi_lds_candidate(const ConSanAccessInventorySite &site,
-                                     SkippedMoiLdsCounts &counts) {
-  if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write) {
-    ++counts.unsupported_kind;
-    return;
-  }
-  ++counts.unsupported_mnemonic;
-}
-
-void warn_skipped_moi_lds_candidates(std::string_view container_name, bool in_kernel,
-                                     const SkippedMoiLdsCounts &counts, ConSanResult &result) {
-  if (!counts.any())
-    return;
-  result.warnings.emplace_back(
-      "ConSan MOI skipped native LDS sites in " + std::string(in_kernel ? "kernel " : "function ") +
-      std::string(container_name) +
-      ": unsupported_kind=" + std::to_string(counts.unsupported_kind) +
-      " unsupported_mnemonic=" + std::to_string(counts.unsupported_mnemonic));
-}
-
 [[nodiscard]] bool is_supported_moi_flat_access_mnemonic(std::string_view mnemonic) {
   if (consan_flat_load_subword_semantics(mnemonic) || consan_flat_store_subword_semantics(mnemonic))
     return true;
@@ -332,20 +305,6 @@ void warn_skipped_moi_lds_candidates(std::string_view container_name, bool in_ke
                                "flat_store_dwordx2", "flat_store_dwordx4", "flat_load_ushort",
                                "flat_store_short", "flat_load_u16", "flat_store_b16"});
 }
-
-struct SkippedMoiFlatCounts {
-  uint32_t other_kind = 0;
-  uint32_t unknown = 0;
-  uint32_t private_hint = 0;
-  uint32_t maybe_private = 0;
-  uint32_t global = 0;
-  uint32_t excluded_maybe_group = 0;
-
-  [[nodiscard]] bool any() const {
-    return other_kind != 0 || unknown != 0 || private_hint != 0 || maybe_private != 0 ||
-           global != 0 || excluded_maybe_group != 0;
-  }
-};
 
 using OrderedOrdinarySyncSiteKey = std::tuple<bool, std::string, uint64_t>;
 
@@ -393,46 +352,6 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
                               uint64_t text_offset) {
   return ordered_sync_sites.contains(
       OrderedOrdinarySyncSiteKey{in_kernel, std::string(container_name), text_offset});
-}
-
-void count_skipped_moi_flat_candidate(const ConSanAccessInventorySite &site,
-                                      SkippedMoiFlatCounts &counts) {
-  if (site.kind == ConSanLdsAccessKind::Other) {
-    ++counts.other_kind;
-    return;
-  }
-
-  switch (site.flat_address_space_hint) {
-  case ConSanFlatAddressSpaceHint::Unknown:
-    ++counts.unknown;
-    return;
-  case ConSanFlatAddressSpaceHint::Private:
-    ++counts.private_hint;
-    return;
-  case ConSanFlatAddressSpaceHint::MaybePrivate:
-    ++counts.maybe_private;
-    return;
-  case ConSanFlatAddressSpaceHint::Global:
-    ++counts.global;
-    return;
-  case ConSanFlatAddressSpaceHint::Group:
-  case ConSanFlatAddressSpaceHint::MaybeGroup:
-    return;
-  }
-}
-
-void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_kernel,
-                                      const SkippedMoiFlatCounts &counts, ConSanResult &result) {
-  if (!counts.any())
-    return;
-  result.warnings.emplace_back(
-      "ConSan MOI skipped flat sites in " + std::string(in_kernel ? "kernel " : "function ") +
-      std::string(container_name) + " because the flat provenance policy did not admit them: " +
-      "unknown=" + std::to_string(counts.unknown) +
-      " private=" + std::to_string(counts.private_hint) + " maybe_private=" +
-      std::to_string(counts.maybe_private) + " global=" + std::to_string(counts.global) +
-      " excluded_maybe_group=" + std::to_string(counts.excluded_maybe_group) +
-      " unsupported_kind=" + std::to_string(counts.other_kind));
 }
 
 /// Temporary Slice-3A compatibility projection from normalized access facts
@@ -537,8 +456,6 @@ legacy_access_disposition_reason(ConSanAccessPolicyReason reason) {
 /// by current lowerers. Policy is the sole candidate selector; this adapter
 /// copies the matching normalized facts and cannot reclassify a site.
 void append_moi_candidates(const ProgramInventory &inventory, const ConSanObservationPlan &plan,
-                           ConSanFlatProvenanceMode mode, rj_code_arch_t arch,
-                           const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
                            ConSanResult &result) {
   std::unordered_set<uint64_t> admitted_offsets;
   for (const ConSanProbeIntent &intent : plan.probe_intents) {
@@ -556,69 +473,6 @@ void append_moi_candidates(const ProgramInventory &inventory, const ConSanObserv
     }
     if (admitted_offsets.insert(access->physical_id.original_text_offset).second)
       result.moi_candidates.push_back(make_moi_candidate(*access));
-  }
-
-  /// Compatibility-only warning state for one attributed program container.
-  /// It groups the current prototype's per-family skipped-site counters
-  /// without becoming part of normalized inventory or engine policy.
-  struct ContainerCounts {
-    ConSanProgramContainerRef container;
-    SkippedMoiLdsCounts lds;
-    SkippedMoiFlatCounts flat;
-  };
-  std::vector<ContainerCounts> counts;
-  for (const ConSanAccessInventorySite &access : inventory.access_sites()) {
-    auto state = std::ranges::find_if(
-        counts, [&](const ContainerCounts &entry) { return entry.container == access.container; });
-    if (state == counts.end()) {
-      counts.emplace_back();
-      counts.back().container = access.container;
-      state = std::prev(counts.end());
-    }
-
-    if (access.origin != ConSanAccessOrigin::Flat) {
-      const bool supported_atomic =
-          access.kind == ConSanLdsAccessKind::Atomic &&
-          consan_arch_supports_capability_form(arch,
-                                               ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
-          ((arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-            equals_any(access.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
-                                         "ds_cmpstore_rtn_b32"})) ||
-           (consan_uses_gfx9_cdna_encoding(arch) &&
-            equals_any(access.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
-                                         "ds_cmpst_rtn_b32"})));
-      const bool access_kind = access.kind == ConSanLdsAccessKind::Read ||
-                               access.kind == ConSanLdsAccessKind::Write || supported_atomic;
-      const bool supported_shape = access.origin == ConSanAccessOrigin::DirectToLds ||
-                                   is_single_range_native_lds_mnemonic(access.mnemonic, arch) ||
-                                   two_address_native_lds_offset_scale(access.mnemonic).has_value();
-      if (!access_kind || !supported_shape)
-        count_skipped_moi_lds_candidate(access, state->lds);
-      continue;
-    }
-
-    const bool in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
-    if (is_ordered_ordinary_sync_site(ordered_sync_sites, access.container.name, in_kernel,
-                                      access.physical_id.original_text_offset))
-      continue;
-    const bool candidate =
-        access.kind != ConSanLdsAccessKind::Other &&
-        (access.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group ||
-         (mode == ConSanFlatProvenanceMode::Likely &&
-          access.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup));
-    if (candidate) {
-      continue;
-    } else if (access.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup &&
-               mode == ConSanFlatProvenanceMode::Strict) {
-      ++state->flat.excluded_maybe_group;
-    } else {
-      count_skipped_moi_flat_candidate(access, state->flat);
-    }
-  }
-  for (const ContainerCounts &state : counts) {
-    const bool in_kernel = state.container.kind == ConSanProgramContainerKind::Kernel;
-    warn_skipped_moi_lds_candidates(state.container.name, in_kernel, state.lds, result);
-    warn_skipped_moi_flat_candidates(state.container.name, in_kernel, state.flat, result);
   }
 }
 

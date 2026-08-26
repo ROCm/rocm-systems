@@ -229,10 +229,12 @@ The current MOI emitters still consume a temporary operand-shaped
 access intent and its matching normalized inventory site. The former second
 support classifier, alias canonicalizer, and post-hoc intent filter have been
 deleted. Consequently policy is the only component that can decide whether an
-access becomes a lowering candidate. The projection also carries the site's
-normalized byte ranges. Emitters consume those ranges directly instead of
-reopening pristine instruction bytes and independently decoding offsets and
-widths.
+access becomes a lowering candidate. Exclusions remain available through typed
+site decisions; the adapter no longer rescans excluded sites to reconstruct
+target-, mnemonic-, and provenance-specific warning counters. The projection
+also carries the site's normalized byte ranges. Emitters consume those ranges
+directly instead of reopening pristine instruction bytes and independently
+decoding offsets and widths.
 
 `ConSanObservationPlan` combines the domain decisions and intents.
 `ConSanCoverageLedger` keeps policy separate from mechanism: for each admitted

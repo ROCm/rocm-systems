@@ -542,8 +542,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
                                               effective_options, ordered_sync_sites, result)) {
     return result;
   }
-  append_moi_candidates(result.program_inventory, result.observation_plan,
-                        effective_options.flat_provenance_mode, arch, ordered_sync_sites, result);
+  append_moi_candidates(result.program_inventory, result.observation_plan, result);
   if (!result.errors.empty())
     return result;
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
