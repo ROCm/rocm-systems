@@ -220,13 +220,13 @@ private:
       std::memset(dst + backed, 0, size - backed);
   }
 
-  void write_backing(size_t addr, const uint8_t *src, size_t size) {
-    assert(addr <= capacity_bytes_ && size <= capacity_bytes_ - addr);
-    ensure_materialized(addr + size);
+  void write_backing(size_t offset, const uint8_t *src, size_t size) {
+    assert(offset <= capacity_bytes_ && size <= capacity_bytes_ - offset);
+    ensure_materialized(offset + size);
     // Keep the checked loop explicit: GCC 15 can retain the vector's old object
     // size across resize and report a false stringop-overflow for memcpy here.
     for (size_t i = 0; i < size; ++i)
-      data_[addr + i] = src[i];
+      data_[offset + i] = src[i];
   }
 
   void ensure_materialized(size_t required) {
