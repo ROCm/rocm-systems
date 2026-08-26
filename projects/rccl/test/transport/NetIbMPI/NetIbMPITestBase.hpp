@@ -1964,9 +1964,19 @@ protected:
     // breaks the queue pairs mid-transfer, which needs an MPI handshake a worker cannot
     // make; both in-flight orders left the two sides a message apart, so the break here
     // happens while the connection is idle.
+    //
+    // The guards are taken rather than left to the caller because this helper is the one
+    // that knows a transfer was attempted. WorkerSendRecvPattern owns its request and a
+    // timed-out wait does not cancel it, so returning that failure straight up would let
+    // the caller's guards deregister and free memory the NIC may still be writing into --
+    // and a transfer that runs immediately after both queue pairs were driven to error is
+    // the likeliest one in the file to time out. Callers that pass no guards get the old
+    // behaviour, which is correct only when they hold no buffer of their own.
     ThreadResult WorkerTransferAcrossQpFailure(int rank, ConnectionPair& pair, void* buffer,
                                                size_t size, int tag, void* mhandle, int seed,
-                                               int timeoutMs) {
+                                               int timeoutMs,
+                                               NetMHandleWorkerGuard* registration = nullptr,
+                                               HostBufferAutoGuard* allocation = nullptr) {
         ThreadResult result;
         if (rank == 0) {
             if (ncclIbCastFaultDriveRecvQpToError(pair.recvComm, 0) != ncclSuccess) {
@@ -1978,7 +1988,11 @@ protected:
             result = WorkerCastDriveQpToError(pair.sendComm, 0);
             if (!result.ok) return result;
         }
-        return WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
+        // Nothing has been posted yet on either exit above, so those return unchanged.
+        result = WorkerSendRecvPattern(rank, pair, buffer, size, tag, mhandle, seed, timeoutMs);
+        if (!result.ok && (registration || allocation))
+            return WorkerRetainAfterAbandonedRequest(result, pair, rank, registration, allocation);
+        return result;
     }
 #endif /* ENABLE_FAULT_INJECTION */
 
