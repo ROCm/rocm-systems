@@ -74,6 +74,7 @@ set(COMMON_FILES
   common.h
   common.cu
   gin_sdma_devtime.h
+  gin_sdma_devtime_host.h
   nccl1_compat.h
   rccl_compat.h
   rccl_float8.h
