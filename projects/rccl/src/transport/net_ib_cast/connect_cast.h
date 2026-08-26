@@ -114,6 +114,10 @@ struct ncclIbConnectionMetadata {
   int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
   uint16_t commId;              // QP sharing comm ID (0 = not shared)
   int      senderIbDevIdx;      // sender's IB device index
+  // Trailing capability bits. nSegments>1 requires NCCL_IB_CAP_MULTISEG on both
+  // peers. QP-sharing fields already sit after isRMA, so mixed nSegments<=1
+  // with older CAST binaries that stop at isRMA is already a develop contract.
+  uint32_t caps;
 };
 
 // Initialize QP sharing fields to defaults (sharing disabled)
