@@ -21,28 +21,23 @@ set(rocprofv3-validate-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY conftest.py validate.py
-                                                          validate_perf.py
-                                                          test_kernel_replay_cli.py)
+rocprofiler_configure_pytest_files(
+    CONFIG pytest.ini COPY conftest.py validate.py validate_perf.py
+                           test_kernel_replay_cli.py)
 
-# Unit test for the rocprofv3 kernel-replay CLI logic. Imports rocprofv3.py directly, so it needs
-# no GPU, no application run and no fixtures -- it guards the input-file collapse, where every
-# job's counter groups are merged but only one job's remaining settings can survive. Run as a
-# plain script rather than under pytest because conftest.py in this directory requires the
-# integration-test arguments (--json-input, --passes).
+# Unit test for the rocprofv3 kernel-replay CLI logic. Imports rocprofv3.py directly, so
+# it needs no GPU, no application run and no fixtures -- it guards the input-file
+# collapse, where every job's counter groups are merged but only one job's remaining
+# settings can survive. Run as a plain script rather than under pytest because conftest.py
+# in this directory requires the integration-test arguments (--json-input, --passes).
 add_test(
     NAME rocprofv3-test-kernel-replay-cli-unit
-    COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_cli.py --script
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../source/bin/rocprofv3.py)
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_cli.py
+            --script ${CMAKE_CURRENT_SOURCE_DIR}/../../../source/bin/rocprofv3.py)
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-cli-unit
-    PROPERTIES TIMEOUT
-               60
-               LABELS
-               "unit-tests;kernel-replay"
-               FAIL_REGULAR_EXPRESSION
+    PROPERTIES TIMEOUT 60 LABELS "unit-tests;kernel-replay" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 # Collect counters via in-process kernel replay. The number of --pmc groups drives the
