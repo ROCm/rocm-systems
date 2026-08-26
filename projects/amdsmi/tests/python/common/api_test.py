@@ -185,16 +185,38 @@ def _leaf(path):
     return path.rsplit(".", 1)[-1].split("[", 1)[0]
 
 
-def _unpopulated_required(sentinels, required):
-    """Sentinel paths the caller declared must carry real data."""
-    if not required or not sentinels:
+def _field_names(value, prefix="result", names=None):
+    """Leaf field names reachable in a payload."""
+    names = set() if names is None else names
+    if isinstance(value, dict):
+        for key, item in value.items():
+            names.add(key)
+            _field_names(item, key, names)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _field_names(item, prefix, names)
+    else:
+        names.add(prefix)
+    return names
+
+
+def _unpopulated_required(data, sentinels, required):
+    """Fields the caller declared must carry real data but do not."""
+    if not required:
         return []
     if required is True:
-        matched = sentinels
-    else:
-        wanted = set(required)
-        matched = [path for path in sentinels if _leaf(path) in wanted]
-    return [f"{path} is a sentinel, not data" for path in matched]
+        return [f"{path} is a sentinel, not data" for path in sentinels]
+    # A named field that is absent means the requirement stopped applying, so
+    # report it rather than letting a typo pass as coverage.
+    present = _field_names(data)
+    unfilled = {_leaf(path) for path in sentinels}
+    problems = []
+    for name in required:
+        if name not in present:
+            problems.append(f"required field {name!r} is not in the payload")
+        elif name in unfilled:
+            problems.append(f"{name} is a sentinel, not data")
+    return problems
 
 
 def _call_label(func_name, names, slots):
@@ -314,7 +336,7 @@ class ApiTest:
             problems, sentinels = _inspect(data) if validate else ([], [])
             if sentinels:
                 self.common.print(f"\tNOT POPULATED ({len(sentinels)}): {', '.join(sentinels[:8])}")
-            problems += _unpopulated_required(sentinels, require_populated)
+            problems += _unpopulated_required(data, sentinels, require_populated)
             if problems:
                 for problem in problems:
                     self.common.print(f"\tTEST FAILURE, invalid payload: {problem}")
@@ -333,7 +355,10 @@ class ApiTest:
             raise AssertionError(f"{func_name} failed:\n  " + "\n  ".join(failures))
         # A run that asserted nothing must never report as a pass.
         if attempted == 0:
-            raise unittest.SkipTest(f"{func_name}: every argument combination was excluded")
+            message = f"{func_name}: every argument combination was excluded"
+            if require_success:
+                raise AssertionError(message)
+            raise unittest.SkipTest(message)
         if succeeded == 0:
             message = f"{func_name} is not supported on this platform"
             if require_success:
