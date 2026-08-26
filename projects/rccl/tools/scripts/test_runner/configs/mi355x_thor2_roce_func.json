@@ -535,7 +535,7 @@
         },
         {
           "name": "Cast_SplitDataThresholdBoundary",
-          "description": "Exact threshold boundary: size>=splitDataMin*nqps \u2192 split path (0 tokens); size<threshold \u2192 WRR path (1 token)",
+          "description": "Exact threshold boundary: size>=splitDataMin*nqps → split path (0 tokens); size<threshold → WRR path (1 token)",
           "test_filter": "NetIbMPITest.CastSplitDataThresholdBoundary"
         },
         {
@@ -548,7 +548,7 @@
         },
         {
           "name": "Cast_SendRecvMultipleSizes",
-          "description": "Sizes across split/WRR threshold: below threshold\u21921 token each; at/above threshold\u21920 tokens; data integrity verified",
+          "description": "Sizes across split/WRR threshold: below threshold→1 token each; at/above threshold→0 tokens; data integrity verified",
           "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
         },
         {
@@ -573,7 +573,7 @@
       "tests": [
         {
           "name": "Cast_WeightsDistributionOneRound",
-          "description": "Two-phase WRR distribution: equal then triangular weights \u2014 both exhaust all active tokens after one full round",
+          "description": "Two-phase WRR distribution: equal then triangular weights — both exhaust all active tokens after one full round",
           "test_filter": "NetIbMPITest.CastWeightsDistributionOneRound",
           "env_variables": {
             "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
@@ -586,7 +586,7 @@
         },
         {
           "name": "Cast_AlternatingWrrNonWrr",
-          "description": "Toggle doWrr mid-connection (3\u00d710 sends): WRR consumes tokens in phases 1&3, zero in phase 2",
+          "description": "Toggle doWrr mid-connection (3×10 sends): WRR consumes tokens in phases 1&3, zero in phase 2",
           "test_filter": "NetIbMPITest.CastAlternatingWrrNonWrr",
           "env_variables": {
             "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
@@ -678,7 +678,7 @@
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
         "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
-        "RCCL_IB_FAULT_INJECTION":     "1"
+        "RCCL_IB_FAULT_INJECTION": "1"
       },
       "tests": [
         {
@@ -2444,22 +2444,22 @@
       "tests": [
         {
           "name": "CE_AllGather_8Ranks",
-          "description": "AllGather CE correctness \u2014 default production topology (8 ranks)",
+          "description": "AllGather CE correctness — default production topology (8 ranks)",
           "test_filter": "CeMPI_AllGather.EightRanks"
         },
         {
           "name": "CE_AlltoAll_8Ranks",
-          "description": "AlltoAll CE correctness \u2014 default production topology (8 ranks)",
+          "description": "AlltoAll CE correctness — default production topology (8 ranks)",
           "test_filter": "CeMPI_AlltoAll.EightRanks"
         },
         {
           "name": "CE_Scatter_8Ranks",
-          "description": "Scatter CE correctness, root=0 \u2014 default production topology (8 ranks)",
+          "description": "Scatter CE correctness, root=0 — default production topology (8 ranks)",
           "test_filter": "CeMPI_Scatter.EightRanksRoot0"
         },
         {
           "name": "CE_Gather_8Ranks",
-          "description": "Gather CE correctness, root=0 \u2014 default production topology (8 ranks)",
+          "description": "Gather CE correctness, root=0 — default production topology (8 ranks)",
           "test_filter": "CeMPI_Gather.EightRanksRoot0"
         }
       ]
@@ -2743,7 +2743,7 @@
       "test_dir": "test/nccl4py",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 0,
+      "num_gpus": "auto",
       "timeout": 600,
       "tests": [
         {
@@ -2772,6 +2772,171 @@
           "test_filter": "ALL"
         }
       ]
+    },
+    "multisegment_host_boundary_math": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "MultiSegment_HostBoundaryMath_All",
+          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*"
+        }
+      ]
+    },
+    "ubr_multisegment_comprehensive": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_All_Core",
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*"
+        },
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa_AFTER",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_Lsa_BEFORE",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1",
+            "NCCL_CTA_POLICY": "2"
+          }
+        },
+        {
+          "name": "UBR_MultiSegment_Elastic_Gating",
+          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Gating",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        }
+      ]
+    },
+    "ubr_multisegment_ce_before": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1",
+        "NCCL_CTA_POLICY": "2"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache"
+        }
+      ]
+    },
+    "ubr_multisegment_lsagin_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_NET": "IB",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
+        },
+        {
+          "name": "DeepEP_Hybrid_Positive_And_Stress",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse:RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+        },
+        {
+          "name": "DeepEP_Hybrid_Elastic_Gating",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridElasticRegistrationDisabled",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        },
+        {
+          "name": "DeepEP_Elastic_Window_Registration",
+          "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+        }
+      ]
+    },
+    "multisegment_transport_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_NET": "IB",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_Transport_All_MultiNode",
+          "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -2785,6 +2950,31 @@
       "name": "P2P Tests - Complete Suite",
       "description": "All peer-to-peer transport tests (single node)",
       "config": "p2p_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Host Boundary Math",
+      "config": "multisegment_host_boundary_math",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Registration and LSA",
+      "config": "ubr_multisegment_comprehensive",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - CE BEFORE registration cache",
+      "config": "ubr_multisegment_ce_before",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
+      "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
+      "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
     {
@@ -3173,7 +3363,7 @@
     },
     {
       "name": "CE Tests - 8-Rank (AllGather, AlltoAll, Scatter, Gather)",
-      "description": "CE collective tests on 8 GPUs/ranks \u2014 default production topology. Skips automatically on unsupported driver version.",
+      "description": "CE collective tests on 8 GPUs/ranks — default production topology. Skips automatically on unsupported driver version.",
       "config": "ce_8rank",
       "enabled": true
     },
