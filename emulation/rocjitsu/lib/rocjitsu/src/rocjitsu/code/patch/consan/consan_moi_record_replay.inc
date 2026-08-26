@@ -1392,9 +1392,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         !tentative_router.commit(route_plan.routes, &relay_error)) {
       for (BranchOnlyRelayPairRejection rejection : route_plan.rejection_reasons)
         record_branch_only_relay_rejection(result.moi_branch_only_routing_telemetry, rejection);
-      if (route_plan.failure == BranchOnlyRelayPlanFailure::Reservation || route_plan.complete())
-        record_branch_only_relay_failure(result.moi_branch_only_routing_telemetry,
-                                         BranchOnlyRelayPlanFailure::Reservation);
       result.warnings.emplace_back(
           "ConSan MOI first-light branch-only scalar-spill route batch was rejected" +
           (relay_error.empty() ? std::string{} : ": " + relay_error));

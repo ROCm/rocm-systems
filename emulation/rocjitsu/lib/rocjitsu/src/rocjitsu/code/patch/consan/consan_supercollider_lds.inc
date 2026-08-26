@@ -3082,8 +3082,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         branch_only_route_error = route_error;
         for (BranchOnlyRelayPairRejection rejection : route_plan.rejection_reasons)
           record_branch_only_relay_rejection(routing_telemetry, rejection);
-        if (route_plan.failure == BranchOnlyRelayPlanFailure::Reservation)
-          record_branch_only_relay_failure(routing_telemetry, route_plan.failure);
       }
       for (const BranchOnlyRelayRoute &route : route_plan.routes) {
         for (const BranchOnlyRelayClaim &claim : route.claims) {
@@ -3097,8 +3095,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       bool committed = false;
       if (complete && used_optimistic_reservoirs.empty()) {
         committed = branch_router.commit(route_plan.routes, &route_error);
-        if (!committed)
-          ++routing_telemetry.reservation_failure_count;
       }
       if (committed) {
         for (size_t index = 0; index < tentative_candidates.size(); ++index) {

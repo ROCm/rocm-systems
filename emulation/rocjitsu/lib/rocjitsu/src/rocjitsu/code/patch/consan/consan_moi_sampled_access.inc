@@ -873,8 +873,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
             record_branch_only_relay_failure(result.moi_branch_only_routing_telemetry,
                                              relay_outcome.failure);
           } else if (!tentative_router.commit(*branch_only_route, &relay_error)) {
-            record_branch_only_relay_failure(result.moi_branch_only_routing_telemetry,
-                                             BranchOnlyRelayPlanFailure::Reservation);
             branch_only_route.reset();
           } else {
             for (const BranchOnlyRelayClaim &claim : branch_only_route->claims) {

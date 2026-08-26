@@ -1525,20 +1525,6 @@ void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
   accumulate_saturated(telemetry.plan_call_count, 1u);
   if (outcome.work_budget_exhausted())
     accumulate_saturated(telemetry.work_budget_exhaustion_count, 1u);
-  if (outcome.relay_qualification_exhausted)
-    accumulate_saturated(telemetry.relay_qualification_exhaustion_count, 1u);
-  if (outcome.routing_work_exhausted)
-    accumulate_saturated(telemetry.routing_work_exhaustion_count, 1u);
-  if (outcome.routing_invariant_failed)
-    accumulate_saturated(telemetry.routing_invariant_failure_count, 1u);
-  if (outcome.route_optimization_exhausted)
-    accumulate_saturated(telemetry.route_optimization_exhaustion_count, 1u);
-  if (outcome.route_optimization_invariant_failed)
-    accumulate_saturated(telemetry.route_optimization_invariant_failure_count, 1u);
-  accumulate_saturated(telemetry.pristine_relay_occupancy_rejection_count,
-                       outcome.pristine_relay_occupancy_rejection_count);
-  accumulate_saturated(telemetry.route_optimization_excess_relay_claim_count,
-                       outcome.route_optimization_excess_relay_claim_count);
   accumulate_saturated(telemetry.route_optimization_search_work_count,
                        outcome.route_optimization_search_work_consumed);
   accumulate_saturated(telemetry.route_optimization_scan_work_count,
@@ -1562,21 +1548,17 @@ void record_branch_only_relay_failure(ConSanBranchOnlyRoutingTelemetry &telemetr
                                       BranchOnlyRelayPlanFailure failure) {
   switch (failure) {
   case BranchOnlyRelayPlanFailure::None:
+  case BranchOnlyRelayPlanFailure::ReturnRoute:
+  case BranchOnlyRelayPlanFailure::Reservation:
     break;
   case BranchOnlyRelayPlanFailure::EntryRoute:
     accumulate_saturated(telemetry.entry_route_failure_count, 1u);
-    break;
-  case BranchOnlyRelayPlanFailure::ReturnRoute:
-    accumulate_saturated(telemetry.return_route_failure_count, 1u);
     break;
   case BranchOnlyRelayPlanFailure::RelayContention:
     accumulate_saturated(telemetry.relay_contention_failure_count, 1u);
     break;
   case BranchOnlyRelayPlanFailure::WorkBudget:
     accumulate_saturated(telemetry.work_budget_failure_count, 1u);
-    break;
-  case BranchOnlyRelayPlanFailure::Reservation:
-    accumulate_saturated(telemetry.reservation_failure_count, 1u);
     break;
   }
 }
@@ -1592,7 +1574,6 @@ void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &teleme
     break;
   case BranchOnlyRelayPairRejection::InvalidReturnCoordinates:
   case BranchOnlyRelayPairRejection::ReturnUnreachable:
-    accumulate_saturated(telemetry.return_route_failure_count, 1u);
     break;
   case BranchOnlyRelayPairRejection::RelayContention:
     accumulate_saturated(telemetry.relay_contention_failure_count, 1u);

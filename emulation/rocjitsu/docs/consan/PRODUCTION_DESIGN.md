@@ -3172,6 +3172,38 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   periodic physical gate remains applicable. E2E validation remains outside
   this work.
 
+### Slice 4AF: retain only integration-level routing telemetry
+
+- **Ownership boundary:** `BranchOnlyRelayPlanOutcome` is the authoritative
+  per-call solver result. Its focused tests cover return and reservation
+  failures, phase exhaustion, invariant fallback, pristine-relay rejection,
+  and optimization quality directly. A completed transform retains only the
+  much smaller observation set needed to prove integration behavior: batched
+  invocation shape, exercised fallback tier, selected rejection classes, and
+  phase work.
+- **Completed deletion:** `ConSanBranchOnlyRoutingTelemetry` no longer copies
+  nine per-call incident fields that had no policy, diagnostic, or integration
+  consumer. Recording no longer mirrors return or reservation failures, phase
+  and optimizer exhaustion, invariant failures, pristine occupancy rejection,
+  or excess optimization claims. MOI and LDS lowering no longer make no-op
+  reservation-failure recording calls after commits fail.
+- **Retained contract:** Integration tests still detect accidental per-site
+  inventory construction through exact pair and plan-call counts, prove the
+  fallback and optimizer paths used by generated layouts, and retain the
+  rejection classes they consume. The router's unit suite still proves every
+  removed fact on the direct outcome. The narrowed recorder has direct unit
+  coverage for every retained failure and rejection class.
+- **Deletion result:** Production source is 66 net lines smaller and source
+  plus tests is 75 net lines smaller. No replacement result type, adapter, or
+  derived copy was added.
+- **Completed checked-in gate:** All 90 focused branch-only router tests pass.
+  The ConSan host gate passed 1,509 of 1,511 tests with two external-object
+  benchmarks intentionally skipped, and the complete HSA-hook binary passed
+  all 194 tests. All 2,878 simulator device rows across gfx942, gfx950,
+  gfx1100, gfx1201, and gfx1250 passed in 65.49 seconds. Emitted code and
+  routing decisions are unchanged; the periodic physical gate remains
+  applicable. E2E validation remains outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

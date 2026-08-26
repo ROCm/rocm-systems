@@ -2893,9 +2893,6 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
         !tentative_router.commit(route_plan.routes, &relay_error)) {
       for (BranchOnlyRelayPairRejection rejection : route_plan.rejection_reasons)
         record_branch_only_relay_rejection(result.moi_branch_only_routing_telemetry, rejection);
-      if (route_plan.failure == BranchOnlyRelayPlanFailure::Reservation || route_plan.complete())
-        record_branch_only_relay_failure(result.moi_branch_only_routing_telemetry,
-                                         BranchOnlyRelayPlanFailure::Reservation);
       result.warnings.emplace_back(
           "ConSan MOI barrier record patch found no complete routed register-free batch for " +
           std::to_string(branch_only_requests.size()) + " barrier(s)" +

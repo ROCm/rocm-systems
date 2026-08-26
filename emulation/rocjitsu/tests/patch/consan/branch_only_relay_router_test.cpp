@@ -1797,24 +1797,18 @@ TEST(ConSanBranchOnlyRelayRouter, TinyLimitsExerciseObservableGreedyFallback) {
   EXPECT_EQ(batch.pair_strategies, (std::vector{BranchOnlyRelayPlanStrategy::GreedyPairFallback}));
 }
 
-TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithSharedUnits) {
+TEST(ConSanBranchOnlyRelayRouter, RecordsRetainedIntegrationTelemetryWithSharedUnits) {
   ConSanBranchOnlyRoutingTelemetry telemetry;
   BranchOnlyRelayPlanOutcome outcome;
   outcome.failure = BranchOnlyRelayPlanFailure::None;
   outcome.strategy = BranchOnlyRelayPlanStrategy::GreedyPairFallback;
   outcome.relay_qualification_exhausted = true;
   outcome.routing_work_exhausted = true;
-  outcome.routing_invariant_failed = true;
-  outcome.route_optimization_exhausted = true;
-  outcome.route_optimization_invariant_failed = true;
-  outcome.search_work_consumed = 17u;
   outcome.route_optimization_search_work_consumed = 29u;
   outcome.route_optimization_scan_work_consumed = 31u;
   outcome.relay_qualification_work_consumed = 5u;
   outcome.fallback_setup_work_consumed = 7u;
   outcome.feasibility_scan_work_consumed = 11u;
-  outcome.pristine_relay_occupancy_rejection_count = 13u;
-  outcome.route_optimization_excess_relay_claim_count = 17u;
   const std::array strategies = {
       BranchOnlyRelayPlanStrategy::ExactBatch,
       BranchOnlyRelayPlanStrategy::ExactPairFallback,
@@ -1822,19 +1816,16 @@ TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithShare
   };
 
   record_branch_only_relay_plan(telemetry, outcome, strategies);
-  record_branch_only_relay_failure(telemetry, BranchOnlyRelayPlanFailure::Reservation);
+  record_branch_only_relay_failure(telemetry, BranchOnlyRelayPlanFailure::EntryRoute);
+  record_branch_only_relay_failure(telemetry, BranchOnlyRelayPlanFailure::RelayContention);
+  record_branch_only_relay_failure(telemetry, BranchOnlyRelayPlanFailure::WorkBudget);
   record_branch_only_relay_rejection(telemetry, BranchOnlyRelayPairRejection::EntryUnreachable);
+  record_branch_only_relay_rejection(telemetry, BranchOnlyRelayPairRejection::RelayContention);
+  record_branch_only_relay_rejection(telemetry, BranchOnlyRelayPairRejection::WorkBudget);
 
   EXPECT_EQ(telemetry.pair_attempt_count, 3u);
   EXPECT_EQ(telemetry.plan_call_count, 1u);
   EXPECT_EQ(telemetry.work_budget_exhaustion_count, 1u);
-  EXPECT_EQ(telemetry.relay_qualification_exhaustion_count, 1u);
-  EXPECT_EQ(telemetry.routing_work_exhaustion_count, 1u);
-  EXPECT_EQ(telemetry.routing_invariant_failure_count, 1u);
-  EXPECT_EQ(telemetry.route_optimization_exhaustion_count, 1u);
-  EXPECT_EQ(telemetry.route_optimization_invariant_failure_count, 1u);
-  EXPECT_EQ(telemetry.pristine_relay_occupancy_rejection_count, 13u);
-  EXPECT_EQ(telemetry.route_optimization_excess_relay_claim_count, 17u);
   EXPECT_EQ(telemetry.exact_pair_fallback_attempt_count, 2u);
   EXPECT_EQ(telemetry.greedy_pair_fallback_attempt_count, 1u);
   EXPECT_EQ(telemetry.route_optimization_search_work_count, 29u);
@@ -1842,9 +1833,9 @@ TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithShare
   EXPECT_EQ(telemetry.relay_qualification_work_count, 5u);
   EXPECT_EQ(telemetry.fallback_setup_work_count, 7u);
   EXPECT_EQ(telemetry.feasibility_scan_work_count, 11u);
-  EXPECT_EQ(telemetry.reservation_failure_count, 1u);
-  EXPECT_EQ(telemetry.entry_route_failure_count, 1u);
-  EXPECT_EQ(telemetry.return_route_failure_count, 0u);
+  EXPECT_EQ(telemetry.entry_route_failure_count, 2u);
+  EXPECT_EQ(telemetry.relay_contention_failure_count, 2u);
+  EXPECT_EQ(telemetry.work_budget_failure_count, 2u);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, ZeroTierLimitsAreNormalizedInsteadOfDisablingRouting) {

@@ -1000,7 +1000,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           if (!branch_only_route) {
             record_branch_only_relay_failure(routing, relay_outcome.failure);
           } else if (!tentative_router.commit(*branch_only_route, &relay_error)) {
-            record_branch_only_relay_failure(routing, BranchOnlyRelayPlanFailure::Reservation);
             branch_only_route.reset();
           } else {
             for (const BranchOnlyRelayClaim &claim : branch_only_route->claims) {

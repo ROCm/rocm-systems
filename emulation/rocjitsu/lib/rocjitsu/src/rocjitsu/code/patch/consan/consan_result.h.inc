@@ -48,67 +48,33 @@ struct ConSanPatchedImageGrowthRejection {
   size_t limit_bytes = 0;
 };
 
-/// Aggregate branch-only routing activity. Pair attempts and route-failure
-/// counters count submitted and rejected request pairs, respectively. Plan
-/// calls count router invocations, including LDS convergence iterations.
+/// Retained branch-only routing activity used to verify integration behavior.
+/// Pair attempts count submitted requests and plan calls count router
+/// invocations, including LDS convergence iterations; together they detect an
+/// accidental return to per-site inventory construction. Entry-route, relay-
+/// contention, and work-budget failures retain the rejection classes exercised
+/// by integration tests. Detailed return, reservation, invariant, and
+/// optimizer outcomes remain on the router's direct result, where focused unit
+/// tests inspect them without copying them into every completed transform.
+///
 /// Fallback counters count pairs that reached the corresponding tier, whether
-/// or not that tier produced a route. Greedy fallback attempts are a subset of
-/// exact-pair fallback attempts; the two counters must not be summed.
-/// Work-limit exhaustion counts plan calls whose qualification, routing,
-/// setup, or greedy tier reached its configured limit, including calls
-/// recovered by fallback. Qualification and routing exhaustion are also
-/// counted separately; one call may increment both phase counters. The work
-/// counters may remain zero when an initial setup precharge exceeds the whole
-/// allowance. Pristine occupancy rejections count otherwise valid offers that
-/// the placement planner filtered before routing. Greedy fallback is owner-
-/// oblivious and therefore identifies pairs whose retained route has no exact
-/// minimization guarantee, even when an earlier exact-pair minimization ran
-/// before an independent removal limit forced fallback. Reservation failures
-/// count failed reservations and commits. Unavailable pristine relay storage
-/// is excluded during qualification, so it contributes to the appropriate
-/// unreachable route counter instead of a reservation failure. LDS convergence
-/// iterations remain in this aggregate. A losing FLAT direct-reservoir retry
-/// is transactionally discarded and does not contribute.
-///
-/// Route-optimization exhaustion separately counts plan calls in which at
-/// least one bounded lexicographic minimization pass reached its own limit and
-/// retained its best known feasible route, which may be the feasibility
-/// baseline or a partially proven improvement. The objective minimizes newly
-/// activated owner groups first and relay count for capped exact-pair
-/// fallback, including inventories with no owner tags. Its search/scan work
-/// has separate counters so routing work remains comparable with routing
-/// limits. Search counters measure charged work units, not physical relay
-/// inspections: a mixed owner inventory may perform one uncharged second cost
-/// tier, so physical inspections are at most twice the charged traversal
-/// units for both feasibility and optimization.
-/// Routing invariant failures count exact tiers abandoned after defensive
-/// validation rejected inconsistent solver inputs or output. A later
-/// exact-pair or greedy tier may recover the plan.
-/// Route-optimization invariant failures count defensive fallbacks that retain
-/// the feasibility route after detecting inconsistent minimizer inputs. They
-/// are distinct from work-budget exhaustion because raising a limit cannot
-/// repair them. Excess relay claims count only relays retained above the first
-/// exact feasibility route while improving the primary owner-group objective.
-///
-/// The work counters expose the individual routing phases rather than
-/// retaining aggregate compatibility totals. This keeps each observation
-/// attributable to the phase whose bound it validates.
+/// or not it produced a route. Greedy fallback attempts are a subset of exact-
+/// pair fallback attempts and the counters must not be summed. Work-budget
+/// exhaustion counts plan calls whose qualification, routing, setup, or greedy
+/// tier reached its configured limit, including calls recovered by fallback.
+/// The individual work counters identify qualification, setup, feasibility
+/// scanning, and route-optimization phases. Search counters measure charged
+/// work units rather than physical relay inspections: a mixed owner inventory
+/// may perform one uncharged second cost tier, so physical inspections are at
+/// most twice the charged traversal units for optimization. A losing FLAT
+/// direct-reservoir retry is transactionally discarded and does not contribute.
 struct ConSanBranchOnlyRoutingTelemetry {
   size_t pair_attempt_count = 0;
   size_t plan_call_count = 0;
   size_t entry_route_failure_count = 0;
-  size_t return_route_failure_count = 0;
   size_t relay_contention_failure_count = 0;
   size_t work_budget_failure_count = 0;
   size_t work_budget_exhaustion_count = 0;
-  size_t relay_qualification_exhaustion_count = 0;
-  size_t routing_work_exhaustion_count = 0;
-  size_t routing_invariant_failure_count = 0;
-  size_t route_optimization_exhaustion_count = 0;
-  size_t route_optimization_invariant_failure_count = 0;
-  size_t pristine_relay_occupancy_rejection_count = 0;
-  size_t route_optimization_excess_relay_claim_count = 0;
-  size_t reservation_failure_count = 0;
   size_t exact_pair_fallback_attempt_count = 0;
   size_t greedy_pair_fallback_attempt_count = 0;
   size_t route_optimization_search_work_count = 0;

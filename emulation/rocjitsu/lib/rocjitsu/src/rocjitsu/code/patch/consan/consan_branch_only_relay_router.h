@@ -319,9 +319,9 @@ void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
                                    const BranchOnlyRelayPlanOutcome &outcome,
                                    std::span<const BranchOnlyRelayPlanStrategy> pair_strategies);
 
-/// Records the aggregate failure for a single-pair call. Batch callers instead
-/// record per-pair causes with `record_branch_only_relay_rejection` and use
-/// this helper only for Reservation, which has no per-pair representation.
+/// Records a retained aggregate failure for a single-pair call. Batch callers
+/// record their retained per-pair causes with
+/// `record_branch_only_relay_rejection`.
 void record_branch_only_relay_failure(ConSanBranchOnlyRoutingTelemetry &telemetry,
                                       BranchOnlyRelayPlanFailure failure);
 
