@@ -308,7 +308,11 @@ const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
 hipError_t hipGetLastError(void) { return hipErrorInvalidValue; }
 
-hipError_t hipHostFree(void*) { return hipErrorInvalidValue; }
+hipError_t hipHostFree(void* ptr)
+{
+    std::free(ptr);
+    return hipSuccess;
+}
 
 hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
 {

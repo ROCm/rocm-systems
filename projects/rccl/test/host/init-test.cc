@@ -806,7 +806,7 @@ TEST_F(InitMicrotest, DevCommSetup_AsyncOpFails_ReturnsError) {
   EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
 }
 
-TEST_F(InitMicrotest, DevCommSetup_DevCommAllocFails_ReturnsError) {
+TEST_F(InitMicrotest, DevCommSetup_HostAllocFails_ReturnsError) {
   InstallDevCommSetupSuccess();
   std::unique_ptr<ncclComm> comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
