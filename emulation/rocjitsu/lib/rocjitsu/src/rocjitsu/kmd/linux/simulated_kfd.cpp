@@ -178,16 +178,6 @@ private:
   size_t size_ = 0;
 };
 
-struct PassthroughFdTraits {
-  using handle_type = int;
-
-  static handle_type invalid() noexcept { return -1; }
-  static bool is_valid(handle_type fd) noexcept { return fd >= 0; }
-  static void close(handle_type fd) noexcept { static_cast<void>(libc_passthrough().close(fd)); }
-};
-
-using UniqueDriverFd = util::BasicUniqueHandle<PassthroughFdTraits>;
-
 /// @brief fstat via the real libc, bypassing the interposer.
 /// @details Like safe_mmap: the interposer exports fstat with default visibility,
 /// so a bare fstat() from this TU binds to our own hook (which takes fd_mutex_ via
@@ -225,13 +215,16 @@ int pidfd_is_exited(int pidfd) {
 /// @retval 0 The target is still running.
 /// @retval <0 Negative errno; the state could not be determined.
 int procfd_is_zombie(int procfd) {
-  const int stat_fd = ::openat(procfd, "stat", O_RDONLY | O_CLOEXEC);
-  if (stat_fd < 0)
+  // Passthrough, not ::openat/::read/::close: these run inside driver ioctls that
+  // the interposer dispatched, so a bare ::close() here would re-enter the
+  // interposer's own close() hook mid-dispatch. See PassthroughFdTraits.
+  UniqueDriverFd stat_fd(libc_passthrough().openat(procfd, "stat", O_RDONLY | O_CLOEXEC, 0));
+  if (stat_fd.get() < 0)
     return errno == ENOENT ? 1 : -errno;
   char buffer[4096];
-  const ssize_t bytes = ::read(stat_fd, buffer, sizeof(buffer) - 1);
+  const ssize_t bytes = libc_passthrough().read(stat_fd.get(), buffer, sizeof(buffer) - 1);
   const int read_error = errno;
-  ::close(stat_fd);
+  stat_fd.reset();
   if (bytes < 0)
     return -read_error;
   buffer[bytes] = '\0';
@@ -241,34 +234,36 @@ int procfd_is_zombie(int procfd) {
   return name_end[2] == 'Z' || name_end[2] == 'X';
 }
 
-int pin_process_identity(pid_t pid, util::UniqueHandle &pidfd, util::UniqueHandle &procfd) {
+int pin_process_identity(pid_t pid, UniqueDriverFd &pidfd, UniqueDriverFd &procfd) {
   const int raw_pidfd = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
   if (raw_pidfd < 0)
     return errno == ESRCH ? -ESRCH : -errno;
-  pidfd = util::UniqueHandle(raw_pidfd);
+  pidfd = UniqueDriverFd(raw_pidfd);
 
   const std::string proc_path = "/proc/" + std::to_string(pid);
-  const int raw_procfd = ::open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  const int raw_procfd =
+      libc_passthrough().openat(AT_FDCWD, proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
   if (raw_procfd < 0) {
     const int open_error = errno;
     const int exited = pidfd_is_exited(pidfd.get());
     return exited == 1 ? -ESRCH : (exited < 0 ? exited : -open_error);
   }
-  procfd = util::UniqueHandle(raw_procfd);
+  procfd = UniqueDriverFd(raw_procfd);
 
   const int exited = pidfd_is_exited(pidfd.get());
   return exited == 0 ? 0 : (exited == 1 ? -ESRCH : exited);
 }
 
 /// @brief Read TracerPid through a procfs directory pinned to the pidfd identity.
-int tracer_pid_of(const util::UniqueHandle &pidfd, const util::UniqueHandle &procfd,
+int tracer_pid_of(const UniqueDriverFd &pidfd, const UniqueDriverFd &procfd,
                   const SimulatedKfd::DebugIdentityValidationHook &validation_hook,
                   pid_t &tracer_pid) {
   int exited = pidfd_is_exited(pidfd.get());
   if (exited != 0)
     return exited == 1 ? -ESRCH : exited;
 
-  util::UniqueHandle status_fd(::openat(procfd.get(), "status", O_RDONLY | O_CLOEXEC));
+  UniqueDriverFd status_fd(
+      libc_passthrough().openat(procfd.get(), "status", O_RDONLY | O_CLOEXEC, 0));
   if (status_fd.get() < 0) {
     const int open_error = errno;
     const int exited = pidfd_is_exited(pidfd.get());
@@ -278,7 +273,7 @@ int tracer_pid_of(const util::UniqueHandle &pidfd, const util::UniqueHandle &pro
   std::string status;
   char buffer[4096];
   for (;;) {
-    const ssize_t count = ::read(status_fd.get(), buffer, sizeof(buffer));
+    const ssize_t count = libc_passthrough().read(status_fd.get(), buffer, sizeof(buffer));
     if (count > 0) {
       status.append(buffer, static_cast<size_t>(count));
       continue;
@@ -736,9 +731,9 @@ int SimulatedKfd::open() {
   auto proc = std::make_shared<KfdProcess>(pid, static_cast<uint32_t>(gpus_.size()));
   // client_pid_ caches getpid() at open() time; DBG_TRAP uses it to resolve a
   // self-debug target, so it must match the caller's live pid. A fork() child
-  // inherits this cache stale, but the interposer's reset_after_fork() drops the
-  // driver so the child re-open()s (and re-caches here) before any ioctl —
-  // DBG_TRAP self-resolution therefore requires a post-fork re-open.
+  // inherits this cache stale, but under the fork-then-exec contract that child
+  // never reaches the driver at all (owner_pid_ gates every interposed entry
+  // point), so the stale value is unobservable until exec replaces the image.
   proc->set_client_pid(static_cast<pid_t>(getpid()));
   proc->event_state_.reset();
   for (auto &g : gpus_) {
@@ -867,6 +862,32 @@ uint32_t SimulatedKfd::local_open_ref_count() const {
     return 0;
   auto it = processes_.find(local_process_id_);
   return it != processes_.end() ? it->second->open_ref_count() : 0;
+}
+
+void SimulatedKfd::begin_local_shutdown() {
+  // Release an indefinite-timeout WAIT_EVENTS on the local process so it returns
+  // and drops the driver snapshot that would otherwise keep this object alive.
+  // Snapshot the process, then fire the wake with process_mutex_ RELEASED:
+  // begin_wait_cancel() takes the process's own event mutex, and WAIT_EVENTS does
+  // not take process_mutex_, so the parked thread can make progress.
+  //
+  // Deliberately NOT notify_closing()/signal_page_shutdown(): those turn live ioctls
+  // into -EBADF/-ESRCH and poison the signal page, which is the caller-visible part
+  // of teardown and belongs to close(). What this does instead is release the
+  // waiters, so the ordering is "wake, then destroy" rather than two half-teardowns.
+  // The wake is one-way for this driver's life: the interposer calls it only after
+  // it has committed to teardown, so nothing clears the flags and every subsequent
+  // wait reports the same benign timeout.
+  if (auto proc = find_local_process()) {
+    proc->event_state_.begin_wait_cancel();
+    // WAIT_EVENTS is not the only call that parks. RUNTIME_ENABLE waits on the
+    // debugger's acknowledgement, and is dispatched outside op_mutex_ precisely
+    // because it blocks -- so that thread holds a driver snapshot for the whole
+    // wait and teardown would sit behind it until the handshake deadline expired.
+    // Cancelling is equally pure: the waiter reports the handshake as cancelled
+    // and no event, page or process state is mutated.
+    cancel_runtime_handshake(proc->client_pid());
+  }
 }
 
 int SimulatedKfd::close() { return close(local_process_id_); }
@@ -1483,46 +1504,52 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   }
 
   if (type == KFD_MMAP_TYPE_EVENTS) {
-    if (proc.event_state_.memfd < 0) {
+    // Create-or-get the backing as ONE locked operation. Two concurrent event-page
+    // mmaps would otherwise both observe no backing, each build one, and hand
+    // different fds to different callers -- leaving one polling an object that
+    // never receives event updates -- besides racing the field itself.
+    const int events_fd = proc.event_state_.ensure_backing(length, [&](size_t size) -> int {
       auto raw_events_fd = memfd_create("rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING);
       if (raw_events_fd < 0)
-        return MAP_FAILED;
-      proc.event_state_.memfd = safe_fcntl(raw_events_fd, F_DUPFD_CLOEXEC, 4096);
-      if (proc.event_state_.memfd < 0)
-        proc.event_state_.memfd = raw_events_fd;
+        return -1;
+      int backing = safe_fcntl(raw_events_fd, F_DUPFD_CLOEXEC, 4096);
+      if (backing < 0)
+        backing = raw_events_fd;
       else
         libc_passthrough().close(raw_events_fd);
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.insert(proc.event_state_.memfd);
+        owned_fds_.insert(backing);
       }
-      if (ftruncate(proc.event_state_.memfd, static_cast<off_t>(length)) != 0) {
+      if (ftruncate(backing, static_cast<off_t>(size)) != 0) {
         const int ftruncate_errno = errno; // preserve across close() below
         {
           std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-          owned_fds_.erase(proc.event_state_.memfd);
+          owned_fds_.erase(backing);
         }
-        libc_passthrough().close(proc.event_state_.memfd);
-        proc.event_state_.memfd = -1;
+        libc_passthrough().close(backing);
         errno = ftruncate_errno;
-        return MAP_FAILED;
+        return -1;
       }
-      fallocate(proc.event_state_.memfd, 0, 0, static_cast<off_t>(length));
+      fallocate(backing, 0, 0, static_cast<off_t>(size));
       {
-        auto *init_ptr = static_cast<uint8_t *>(
-            safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, proc.event_state_.memfd, 0));
+        auto *init_ptr =
+            static_cast<uint8_t *>(safe_mmap(nullptr, size, PROT_WRITE, MAP_SHARED, backing, 0));
         if (init_ptr != MAP_FAILED) {
-          libc_passthrough().madvise(init_ptr, length, MADV_POPULATE_WRITE);
-          std::memset(init_ptr, 0xFF, length);
-          libc_passthrough().munmap(init_ptr, length);
+          libc_passthrough().madvise(init_ptr, size, MADV_POPULATE_WRITE);
+          std::memset(init_ptr, 0xFF, size);
+          libc_passthrough().munmap(init_ptr, size);
         }
       }
-      safe_fcntl(proc.event_state_.memfd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
-    }
+      safe_fcntl(backing, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
+      return backing;
+    });
+    if (events_fd < 0)
+      return MAP_FAILED;
     int mflags = MAP_SHARED;
     if (flags & MAP_FIXED)
       mflags |= MAP_FIXED;
-    void *ptr = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, proc.event_state_.memfd, 0);
+    void *ptr = safe_mmap(addr, length, PROT_READ | PROT_WRITE, mflags, events_fd, 0);
     if (ptr != MAP_FAILED)
       proc.event_state_.adopt_page(ptr, length);
     return ptr;
@@ -1709,7 +1736,7 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
       return 0;
     }
   }
-  // release_page() clears page/page_size under EventState::mutex_, the same lock
+  // release_page() clears page_/page_size_ under EventState::mutex_, the same lock
   // the CP interrupt thread holds when reading them in signal_interrupt, so the
   // munmap below cannot race a concurrent signal writing into the mapping.
   if (proc.event_state_.release_page(addr)) {
@@ -1948,6 +1975,25 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     return false;
 
   size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
+
+  // Every XCD of a fanned-out dispatch races here for the same process-wide pool
+  // VA, each having independently found it unbacked. Only the first may map it:
+  // mapping again would repoint the pool underneath waves the first XCD already
+  // launched and leak the original. The requested size is grid-scale and therefore
+  // identical for every XCD of one grid, so a pool already at least that large
+  // satisfies all of them and this covers the whole fan-out race.
+  //
+  // A later dispatch in the same process needing a LARGER pool still falls through
+  // and remaps, as it did before fan-out existed. That path is unchanged here.
+  std::lock_guard<std::mutex> scratch_lock(proc->scratch_backing_mutex_);
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    for (const auto &[handle, alloc] : proc->allocations_) {
+      if (alloc.gpu_va == gpu_va && alloc.size >= aligned_size)
+        return true;
+    }
+  }
+
   auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
   if (raw_fd < 0)
     return false;
@@ -2101,7 +2147,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // Queue IDs are process-local and start at one. Equivalent runtime queues in
   // different processes therefore share XCD resources while each process still
   // distributes additional queues across the device.
-  auto *target_cp = gpu->soc->assign_queue_cp(proc.next_queue_id_ - 1);
+  auto *target_cp = gpu->soc->assign_queue_owner_cp(proc.next_queue_id_ - 1);
   if (!target_cp)
     return -EINVAL;
 
@@ -2180,9 +2226,20 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     hw.doorbell_base = gs.doorbell_monitor_page;
     hw.last_doorbell = ~uint64_t(0);
     hw.host_accessible = true;
-    hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
-                  args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
-                  args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
+    hw.is_sdma = (args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
+                  args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
+                  args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID);
+    // The topology advertises every XCD's compute units as one agent, so a
+    // compute dispatch must be able to reach all of them. Without this a
+    // single-queue application would only ever use the XCD that
+    // assign_queue_owner_cp() happened to pick.
+    //
+    // Named types only, rather than "anything that is not SDMA". SDMA queues are
+    // per-engine and are not spread, but an unrecognized queue_type is not
+    // thereby a compute queue, and device-wide replication should not be what an
+    // unsupported value silently acquires.
+    hw.xcd_fanout = (args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE ||
+                     args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL);
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
     if (!hw.is_sdma)
       hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
@@ -2865,7 +2922,7 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
   auto proc = find_process(process_id);
   if (!proc)
     return false;
-  util::UniqueHandle target_mem = duplicate_debug_target_mem(proc->client_pid());
+  UniqueDriverFd target_mem = duplicate_debug_target_mem(proc->client_pid());
   bool publish_ok = true;
   const auto layout = kmd::serialize_queue_cwsr_bulk(
       ctx_base, ctx_size, waves, [&](uint64_t address, std::span<const uint8_t> bytes) {
@@ -3056,13 +3113,13 @@ void SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
 
   // Duplicate under the session lock so DISABLE/reaping cannot close and reuse
   // the descriptor, then perform notifier I/O without holding a driver lock.
-  util::UniqueHandle notifier;
+  UniqueDriverFd notifier;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
     if (session != debug_sessions_.end() && session->second.dbg_fd >= 0 &&
         (session->second.exception_enable_mask & exception_mask) != 0)
-      notifier = util::UniqueHandle(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+      notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
   }
   if (notifier.get() >= 0) {
     const uint64_t one = 1;
@@ -3386,12 +3443,12 @@ void SimulatedKfd::set_debug_active_on_all_cus(bool active) {
   }
 }
 
-util::UniqueHandle SimulatedKfd::duplicate_debug_target_mem(pid_t target_pid) const {
+UniqueDriverFd SimulatedKfd::duplicate_debug_target_mem(pid_t target_pid) const {
   std::lock_guard<std::mutex> lock(debug_sessions_mutex_);
   auto session = debug_sessions_.find(target_pid);
   if (session == debug_sessions_.end() || session->second.target_mem_fd.get() < 0)
     return {};
-  return util::UniqueHandle(safe_fcntl(session->second.target_mem_fd.get(), F_DUPFD_CLOEXEC, 0));
+  return UniqueDriverFd(safe_fcntl(session->second.target_mem_fd.get(), F_DUPFD_CLOEXEC, 0));
 }
 
 void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state) {
@@ -3553,7 +3610,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
           states[index].lds.clear();
       }
       auto *memory = gpu->soc->memory();
-      util::UniqueHandle target_mem = duplicate_debug_target_mem(proc->client_pid());
+      UniqueDriverFd target_mem = duplicate_debug_target_mem(proc->client_pid());
       bool read_ok = true;
       restored = kmd::deserialize_queue_cwsr_bulk(
           context.base, context.size, states, [&](uint64_t address, std::span<uint8_t> bytes) {
@@ -3825,14 +3882,14 @@ int SimulatedKfd::debug_query_event(pid_t target_pid, KfdProcess *target_proc,
 }
 
 void SimulatedKfd::raise_process_debug_event(pid_t target_pid, uint64_t exception_mask) {
-  util::UniqueHandle notifier;
+  UniqueDriverFd notifier;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(target_pid);
     if (session == debug_sessions_.end() || !session->second.enabled)
       return;
     if ((session->second.exception_enable_mask & exception_mask) != 0)
-      notifier = util::UniqueHandle(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
+      notifier = UniqueDriverFd(safe_fcntl(session->second.dbg_fd, F_DUPFD_CLOEXEC, 0));
   }
   {
     std::lock_guard<std::mutex> lk(debug_events_mutex_);
@@ -4084,8 +4141,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
 
   // Non-ENABLE ops require an active debug session (kernel: EINVAL).
   if (args->op != KFD_IOC_DBG_TRAP_ENABLE && !enabled) {
-    util::UniqueHandle probe_pidfd;
-    util::UniqueHandle probe_procfd;
+    UniqueDriverFd probe_pidfd;
+    UniqueDriverFd probe_procfd;
     const int probe_result = pin_process_identity(target_pid, probe_pidfd, probe_procfd);
     if (probe_result == -ESRCH)
       return -ESRCH;
@@ -4102,10 +4159,10 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
   // pidfd and the matching procfs directory now. The pidfd liveness checks on
   // both sides of the procfs read ensure a numeric-pid reuse can never authorize
   // a different task.
-  util::UniqueHandle new_target_pidfd;
-  util::UniqueHandle new_target_procfd;
-  util::UniqueHandle *target_pidfd;
-  util::UniqueHandle *target_procfd;
+  UniqueDriverFd new_target_pidfd;
+  UniqueDriverFd new_target_procfd;
+  UniqueDriverFd *target_pidfd;
+  UniqueDriverFd *target_procfd;
   if (enabled) {
     target_pidfd = &session_it->second.target_pidfd;
     target_procfd = &session_it->second.target_procfd;
@@ -4117,8 +4174,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     target_procfd = &new_target_procfd;
   }
 
-  util::UniqueHandle new_debugger_pidfd;
-  util::UniqueHandle new_debugger_procfd;
+  UniqueDriverFd new_debugger_pidfd;
+  UniqueDriverFd new_debugger_procfd;
   if (args->op == KFD_IOC_DBG_TRAP_ENABLE) {
     const int debugger_pin_result =
         pin_process_identity(caller.client_pid(), new_debugger_pidfd, new_debugger_procfd);
@@ -4332,8 +4389,8 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     // descriptor. In local mode dbg_fd is the debugger's own descriptor and
     // nothing is owned here.
     if (daemon_mode_) {
-      sess.owned_dbg_fd = util::UniqueHandle(dbg_fd);
-      sess.target_mem_fd = util::UniqueHandle(*target_mem_fd);
+      sess.owned_dbg_fd = UniqueDriverFd(dbg_fd);
+      sess.target_mem_fd = UniqueDriverFd(*target_mem_fd);
       *target_mem_fd = -1;
     }
     auto [inserted, _] = debug_sessions_.emplace(target_pid, std::move(sess));
@@ -4686,7 +4743,7 @@ int SimulatedKfd::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const 
   uint64_t type = static_cast<uint64_t>(offset) & KFD_MMAP_TYPE_MASK;
 
   if (type == KFD_MMAP_TYPE_EVENTS)
-    return proc.event_state_.memfd;
+    return proc.event_state_.backing_fd();
 
   if (type == KFD_MMAP_TYPE_DOORBELL) {
     uint64_t encoded_gpu =

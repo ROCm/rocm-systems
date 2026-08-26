@@ -99,9 +99,9 @@ Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exe
   raw_encoding_ = raw_words_.data();
 }
 
-bool Sop1::default_encoding() { return inst_.ssrc0 != 255; }
+bool Sop1::default_encoding() { return 1; }
 
-bool Sop1::has_lit_0() { return inst_.ssrc0 == 255; }
+bool Sop1::has_lit_0() { return (inst_.ssrc0 == 255); }
 
 bool Sopc::has_encoded_literal32() const {
   switch (inst_.op) {
@@ -141,13 +141,13 @@ Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exe
   raw_encoding_ = raw_words_.data();
 }
 
-bool Sopc::default_encoding() { return inst_.ssrc0 != 255 && inst_.ssrc1 != 255; }
+bool Sopc::default_encoding() { return ((inst_.ssrc0 != 255) && (inst_.ssrc1 != 255)); }
 
-bool Sopc::has_lit_0() { return inst_.ssrc0 == 255 && inst_.ssrc1 != 255; }
+bool Sopc::has_lit_0() { return ((inst_.ssrc0 == 255) && (inst_.ssrc1 != 255)); }
 
-bool Sopc::has_lit_1() { return inst_.ssrc0 != 255 && inst_.ssrc1 == 255; }
+bool Sopc::has_lit_1() { return ((inst_.ssrc0 != 255) && (inst_.ssrc1 == 255)); }
 
-bool Sopc::has_lit_0_has_lit_1() { return inst_.ssrc0 == 255 && inst_.ssrc1 == 255; }
+bool Sopc::has_lit_0_has_lit_1() { return ((inst_.ssrc0 == 255) && (inst_.ssrc1 == 255)); }
 
 Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
@@ -157,9 +157,11 @@ Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
   if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
-bool Sopp::default_encoding() { return true; }
+bool Sopp::default_encoding() { return 1; }
 
 Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
@@ -175,7 +177,7 @@ Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exe
   raw_encoding_ = raw_words_.data();
 }
 
-bool Sopk::default_encoding() { return true; }
+bool Sopk::default_encoding() { return 1; }
 
 bool Sopk::hasImpliedLiteral() { return inst_.op == 19; }
 
@@ -251,13 +253,13 @@ Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exe
   raw_encoding_ = raw_words_.data();
 }
 
-bool Sop2::default_encoding() { return inst_.ssrc0 != 255 && inst_.ssrc1 != 255; }
+bool Sop2::default_encoding() { return ((inst_.ssrc0 != 255) && (inst_.ssrc1 != 255)); }
 
-bool Sop2::has_lit_0() { return inst_.ssrc0 == 255 && inst_.ssrc1 != 255; }
+bool Sop2::has_lit_0() { return ((inst_.ssrc0 == 255) && (inst_.ssrc1 != 255)); }
 
-bool Sop2::has_lit_1() { return inst_.ssrc0 != 255 && inst_.ssrc1 == 255; }
+bool Sop2::has_lit_1() { return ((inst_.ssrc0 != 255) && (inst_.ssrc1 == 255)); }
 
-bool Sop2::has_lit_0_has_lit_1() { return inst_.ssrc0 == 255 && inst_.ssrc1 == 255; }
+bool Sop2::has_lit_0_has_lit_1() { return ((inst_.ssrc0 == 255) && (inst_.ssrc1 == 255)); }
 
 Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
@@ -394,10 +396,14 @@ void Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 bool Vop1::default_encoding() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255;
+  return (inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255);
 }
 
-bool Vop1::has_lit() { return inst_.src0 == 255; }
+bool Vop1::has_lit() { return (inst_.src0 == 255); }
+
+bool Vop1::has_dpp8() { return (inst_.src0 == 233 || inst_.src0 == 234); }
+
+bool Vop1::has_dpp16() { return (inst_.src0 == 250); }
 
 bool Vopc::has_encoded_literal32() const {
   switch (inst_.op) {
@@ -616,10 +622,14 @@ void Vopc::build_modifiers(std::string &out) const {
 }
 
 bool Vopc::default_encoding() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255;
+  return (inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255);
 }
 
-bool Vopc::has_lit() { return inst_.src0 == 255; }
+bool Vopc::has_lit() { return (inst_.src0 == 255); }
+
+bool Vopc::has_dpp8() { return (inst_.src0 == 233 || inst_.src0 == 234); }
+
+bool Vopc::has_dpp16() { return (inst_.src0 == 250); }
 
 bool Vop2::has_encoded_literal32() const {
   switch (inst_.op) {
@@ -711,10 +721,14 @@ void Vop2::implicit_uses(RegisterSet &uses) const {
 }
 
 bool Vop2::default_encoding() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255;
+  return (inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255);
 }
 
-bool Vop2::has_lit() { return inst_.src0 == 255; }
+bool Vop2::has_lit() { return (inst_.src0 == 255); }
+
+bool Vop2::has_dpp8() { return (inst_.src0 == 233 || inst_.src0 == 234); }
+
+bool Vop2::has_dpp16() { return (inst_.src0 == 250); }
 
 bool Vop2::hasImpliedLiteral() {
   return inst_.op == 44 || inst_.op == 45 || inst_.op == 55 || inst_.op == 56;
@@ -1185,33 +1199,46 @@ void Vop3::implicit_uses(RegisterSet &uses) const {
             uses.expand(*ref);
 }
 
-bool Vop3::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
+bool Vop3::has_lit_0() {
+  return (((inst_.src0 == 255) && (inst_.src1 != 255)) && (inst_.src2 != 255));
+}
 
 bool Vop3::has_lit_1() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 == 255 && inst_.src2 != 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 == 255)) &&
+          (inst_.src2 != 255));
 }
 
 bool Vop3::has_lit_0_has_lit_1() {
-  return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 != 255;
+  return (((inst_.src0 == 255) && (inst_.src1 == 255)) && (inst_.src2 != 255));
 }
 
 bool Vop3::has_lit_2() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 != 255 && inst_.src2 == 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 != 255)) &&
+          (inst_.src2 == 255));
 }
 
 bool Vop3::has_lit_0_has_lit_2() {
-  return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 == 255;
+  return (((inst_.src0 == 255) && (inst_.src1 != 255)) && (inst_.src2 == 255));
 }
 
 bool Vop3::has_lit_1_has_lit_2() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 == 255 && inst_.src2 == 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 == 255)) &&
+          (inst_.src2 == 255));
 }
 
 bool Vop3::has_lit_0_has_lit_1_has_lit_2() {
-  return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 == 255;
+  return (((inst_.src0 == 255) && (inst_.src1 == 255)) && (inst_.src2 == 255));
+}
+
+bool Vop3::has_dpp8() {
+  return (((inst_.src0 == 233 || inst_.src0 == 234) && (inst_.src1 != 255)) && (inst_.src2 != 255));
+}
+
+bool Vop3::has_dpp16() {
+  return (((inst_.src0 == 250) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
 bool Vop3p::has_encoded_literal32() const {
@@ -1283,33 +1310,46 @@ void Vop3p::implicit_uses(RegisterSet &uses) const {
             uses.expand(*ref);
 }
 
-bool Vop3p::has_lit_0() { return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255; }
+bool Vop3p::has_lit_0() {
+  return (((inst_.src0 == 255) && (inst_.src1 != 255)) && (inst_.src2 != 255));
+}
 
 bool Vop3p::has_lit_1() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 == 255 && inst_.src2 != 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 == 255)) &&
+          (inst_.src2 != 255));
 }
 
 bool Vop3p::has_lit_0_has_lit_1() {
-  return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 != 255;
+  return (((inst_.src0 == 255) && (inst_.src1 == 255)) && (inst_.src2 != 255));
 }
 
 bool Vop3p::has_lit_2() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 != 255 && inst_.src2 == 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 != 255)) &&
+          (inst_.src2 == 255));
 }
 
 bool Vop3p::has_lit_0_has_lit_2() {
-  return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 == 255;
+  return (((inst_.src0 == 255) && (inst_.src1 != 255)) && (inst_.src2 == 255));
 }
 
 bool Vop3p::has_lit_1_has_lit_2() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 == 255 && inst_.src2 == 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 == 255)) &&
+          (inst_.src2 == 255));
 }
 
 bool Vop3p::has_lit_0_has_lit_1_has_lit_2() {
-  return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 == 255;
+  return (((inst_.src0 == 255) && (inst_.src1 == 255)) && (inst_.src2 == 255));
+}
+
+bool Vop3p::has_dpp8() {
+  return (((inst_.src0 == 233 || inst_.src0 == 234) && (inst_.src1 != 255)) && (inst_.src2 != 255));
+}
+
+bool Vop3p::has_dpp16() {
+  return (((inst_.src0 == 250) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
 Vinterp::Vinterp(std::string_view mnemonic, const VinterpMachineInst *inst, ExecuteFn exec_fn)
@@ -1328,9 +1368,27 @@ Ldsdir::Ldsdir(std::string_view mnemonic, const LdsdirMachineInst *inst, Execute
   opcode_ = inst_.op;
   if (!default_encoding())
     size_ += sizeof(MachineInst);
+  std::memcpy(raw_words_.data(), inst, size_);
+  raw_encoding_ = raw_words_.data();
 }
 
-bool Ldsdir::default_encoding() { return true; }
+bool Ldsdir::default_encoding() { return 1; }
+
+bool Ds::uses_split_ds_offsets() const {
+  switch (inst_.op) {
+  case 14:
+  case 15:
+  case 55:
+  case 56:
+  case 78:
+  case 79:
+  case 119:
+  case 120:
+    return true;
+  default:
+    return false;
+  }
+}
 
 Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
@@ -1338,6 +1396,23 @@ Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
   opcode_ = inst_.op;
+}
+
+void Ds::build_modifiers(std::string &out) const {
+  auto *inst = &inst_;
+  (void)inst;
+  if (uses_split_ds_offsets()) {
+    if (inst->offset0)
+      out += " offset0:" + std::to_string(inst->offset0);
+    if (inst->offset1)
+      out += " offset1:" + std::to_string(inst->offset1);
+  } else {
+    const uint32_t offset = inst->offset0 | (inst->offset1 << 8);
+    if (offset)
+      out += " offset:" + std::to_string(offset);
+  }
+  if (inst->gds)
+    out += " gds";
 }
 
 Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn)
@@ -1396,7 +1471,7 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
   opcode_ = inst_.op;
 }
 
-bool Mimg::has_nsa() { return inst_.nsa == 1; }
+bool Mimg::has_nsa() { return (inst_.nsa == 1); }
 
 Exp::Exp(std::string_view mnemonic, const ExpMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
@@ -1491,34 +1566,45 @@ void Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
 }
 
 bool Vop3SdstEnc::has_lit_0() {
-  return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 != 255;
+  return (((inst_.src0 == 255) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
 bool Vop3SdstEnc::has_lit_1() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 == 255 && inst_.src2 != 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 == 255)) &&
+          (inst_.src2 != 255));
 }
 
 bool Vop3SdstEnc::has_lit_0_has_lit_1() {
-  return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 != 255;
+  return (((inst_.src0 == 255) && (inst_.src1 == 255)) && (inst_.src2 != 255));
 }
 
 bool Vop3SdstEnc::has_lit_2() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 != 255 && inst_.src2 == 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 != 255)) &&
+          (inst_.src2 == 255));
 }
 
 bool Vop3SdstEnc::has_lit_0_has_lit_2() {
-  return inst_.src0 == 255 && inst_.src1 != 255 && inst_.src2 == 255;
+  return (((inst_.src0 == 255) && (inst_.src1 != 255)) && (inst_.src2 == 255));
 }
 
 bool Vop3SdstEnc::has_lit_1_has_lit_2() {
-  return inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255 &&
-         inst_.src1 == 255 && inst_.src2 == 255;
+  return (((inst_.src0 != 250 && inst_.src0 != 233 && inst_.src0 != 234 && inst_.src0 != 255) &&
+           (inst_.src1 == 255)) &&
+          (inst_.src2 == 255));
 }
 
 bool Vop3SdstEnc::has_lit_0_has_lit_1_has_lit_2() {
-  return inst_.src0 == 255 && inst_.src1 == 255 && inst_.src2 == 255;
+  return (((inst_.src0 == 255) && (inst_.src1 == 255)) && (inst_.src2 == 255));
+}
+
+bool Vop3SdstEnc::has_dpp8() {
+  return (((inst_.src0 == 233 || inst_.src0 == 234) && (inst_.src1 != 255)) && (inst_.src2 != 255));
+}
+
+bool Vop3SdstEnc::has_dpp16() {
+  return (((inst_.src0 == 250) && (inst_.src1 != 255)) && (inst_.src2 != 255));
 }
 
 } // namespace rdna3
