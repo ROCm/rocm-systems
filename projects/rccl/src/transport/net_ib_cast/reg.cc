@@ -70,9 +70,11 @@ static ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void*
 ncclResult_t IbCastRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
-  // See the note in net_ib/reg.cc: a null comm here used to segfault inside the
-  // plugin rather than reporting the bad argument, and size == 0 met the same
-  // fate via the page-count math, so it is folded into the same check.
+  // A caller that lost its connection reaches here with a null comm, and reading
+  // the device list off it segfaults inside the plugin instead of telling the
+  // caller what was wrong. size == 0 hit the same fate below via the page-count
+  // math, so it is reported the same way rather than left as a release-build
+  // assert.
   if (comm == NULL || mhandle == NULL || size == 0) {
     WARN("NET/IB-CAST: regMr called with comm=%p mhandle=%p size=%zu", comm, (void*)mhandle, size);
     return ncclInvalidArgument;
