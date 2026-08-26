@@ -29,7 +29,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
