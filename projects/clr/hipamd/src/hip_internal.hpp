@@ -748,6 +748,18 @@ namespace hip {
 
   extern void setCurrentDevice(unsigned int index);
 
+  /// If we have the flush register set, we return the option
+  inline unsigned int ihipRdmaFlushWritesOptions(const uint32_t* hdpMemFlushCntl) {
+    return (hdpMemFlushCntl != nullptr)
+        ? static_cast<unsigned int>(hipFlushGPUDirectRDMAWritesOptionHost)
+        : 0u;
+  }
+
+  /// The hardware does not make the writes visible on its own. Hence it's none here
+  inline int ihipRdmaWritesOrdering() {
+    return static_cast<int>(hipGPUDirectRDMAWritesOrderingNone);  // i.e. 0
+  }
+
   /// Get ROCclr queue associated with hipStream
   /// Note: This follows the CUDA spec to sync with default streams
   ///       and Blocking streams

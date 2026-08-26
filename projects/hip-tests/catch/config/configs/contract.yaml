@@ -108,6 +108,18 @@ contract:
   Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties:
     <<: *level_0
     tags: [device]
+  Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToOwner_AcceptedOrUnsupported:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToAllDevices_AcceptedOrUnsupported:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_InvalidScope_IsRejected:
+    <<: *level_0
+    tags: [device]
+  Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_InvalidTarget_IsRejected:
+    <<: *level_0
+    tags: [device]
   Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount:
     <<: *level_0
     tags: [device]

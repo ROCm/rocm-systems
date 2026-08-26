@@ -19,6 +19,7 @@
 #define CUDA_10000 10000
 #define CUDA_10010 10010
 #define CUDA_10020 10020
+#define CUDA_11000 11000
 #define CUDA_11010 11010
 #define CUDA_11020 11020
 #define CUDA_11030 11030
@@ -3116,6 +3117,17 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, device));
+#if CUDA_VERSION >= CUDA_11000
+    case hipDeviceAttributeGPUDirectRDMASupported:
+      cdattr = cudaDevAttrGPUDirectRDMASupported;
+      break;
+    case hipDeviceAttributeGPUDirectRDMAFlushWritesOptions:
+      cdattr = cudaDevAttrGPUDirectRDMAFlushWritesOptions;
+      break;
+    case hipDeviceAttributeGPUDirectRDMAWritesOrdering:
+      cdattr = cudaDevAttrGPUDirectRDMAWritesOrdering;
+      break;
+#endif  // CUDA_VERSION >= CUDA_11000
 #if CUDA_VERSION >= CUDA_12040
     case hipDeviceAttributeHandleTypeFabricSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
@@ -3826,6 +3838,40 @@ inline static hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, hipDevice
 
 inline static hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
   return hipCUDAErrorTohipError(cudaDeviceGetByPCIBusId(device, pciBusId));
+}
+
+inline static hipError_t hipDeviceFlushGPUDirectRDMAWrites(
+    enum hipFlushGPUDirectRDMAWritesTarget target, enum hipFlushGPUDirectRDMAWritesScope scope) {
+  // Validate here rather than deferring to CUDA: cudaDeviceFlushGPUDirectRDMAWrites documents
+  // only cudaSuccess and cudaErrorNotSupported, so it is not specified to reject an
+  // out-of-domain target or scope. Checking first keeps the hipErrorInvalidValue contract
+  // identical on both backends.
+  if (target != hipFlushGPUDirectRDMAWritesTargetCurrentDevice) {
+    return hipErrorInvalidValue;
+  }
+
+#if CUDA_VERSION >= CUDA_11000
+  enum cudaFlushGPUDirectRDMAWritesScope cudaScope;
+  switch (scope) {
+    case hipFlushGPUDirectRDMAWritesToOwner:
+      cudaScope = cudaFlushGPUDirectRDMAWritesToOwner;
+      break;
+    case hipFlushGPUDirectRDMAWritesToAllDevices:
+      cudaScope = cudaFlushGPUDirectRDMAWritesToAllDevices;
+      break;
+    default:
+      return hipErrorInvalidValue;
+  }
+
+  return hipCUDAErrorTohipError(cudaDeviceFlushGPUDirectRDMAWrites(
+      cudaFlushGPUDirectRDMAWritesTargetCurrentDevice, cudaScope));
+#else
+  if (scope != hipFlushGPUDirectRDMAWritesToOwner &&
+      scope != hipFlushGPUDirectRDMAWritesToAllDevices) {
+    return hipErrorInvalidValue;
+  }
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_11000
 }
 
 inline static hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {
