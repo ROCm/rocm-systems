@@ -920,7 +920,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           remaining_pair_capacity >
               std::numeric_limits<uint64_t>::max() / (2u * sizeof(uint32_t)) ||
           patch_bytes > std::numeric_limits<uint64_t>::max() - sizeof(uint32_t)) {
-        ++result.moi_branch_only_placement_failure_count;
       } else {
         DbiPatchPlacementPlanner tentative_planner = placement_planner;
         BranchOnlyRelayRouter tentative_router = branch_router;
@@ -983,7 +982,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                  candidate.text_offset, candidate.size, body_reservation_bytes)
                            : std::nullopt;
         if (!reservation) {
-          ++result.moi_branch_only_placement_failure_count;
         } else {
           BranchOnlyRelayPlanOutcome relay_outcome;
           BranchOnlyRelaySearchLimits relay_limits;

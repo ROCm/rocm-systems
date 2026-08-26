@@ -1112,7 +1112,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         const auto reservation = tentative_planner.plan_indirect_appended(
             candidate.text_offset, displaced_original_size, reserved_body_bytes, &relay_error);
         if (!reservation) {
-          ++result.moi_branch_only_placement_failure_count;
           result.warnings.emplace_back(
               "ConSan MOI first-light branch-only scalar-spill body could not be placed" +
               (relay_error.empty() ? std::string{} : ": " + relay_error));
@@ -1130,7 +1129,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
              !direct_or_forward_relay(candidate.text_offset, reservation->body_offset)) ||
             !direct_or_backward_relay(reservation->body_offset + patch_bytes,
                                       candidate.text_offset + displaced_original_size)) {
-          ++result.moi_branch_only_placement_failure_count;
           result.warnings.emplace_back(
               "ConSan MOI first-light branch-only scalar-spill body has no first-hop relay");
           continue;
@@ -1397,7 +1395,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (route_plan.failure == BranchOnlyRelayPlanFailure::Reservation || route_plan.complete())
         record_branch_only_relay_failure(result.moi_branch_only_routing_telemetry,
                                          BranchOnlyRelayPlanFailure::Reservation);
-      result.moi_branch_only_placement_failure_count += requests.size();
       result.warnings.emplace_back(
           "ConSan MOI first-light branch-only scalar-spill route batch was rejected" +
           (relay_error.empty() ? std::string{} : ": " + relay_error));

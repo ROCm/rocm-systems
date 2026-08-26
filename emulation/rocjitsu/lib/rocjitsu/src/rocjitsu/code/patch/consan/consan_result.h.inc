@@ -411,9 +411,6 @@ struct ConSanResult {
   bool staged_composition_validated = false;
   /// Internal second-stage proof over a mutation image using a pristine plan.
   bool carried_composite_instrumentation_stage = false;
-  /// MOI branch-only candidates skipped because their appended body could not
-  /// be reserved without overlapping an accepted placement.
-  size_t moi_branch_only_placement_failure_count = 0;
   ConSanBranchOnlyRoutingTelemetry moi_branch_only_routing_telemetry;
   /// Reservoir footprint retained in a successfully emitted MOI patch. A
   /// rejected transform retains no output image, so this remains zero; any

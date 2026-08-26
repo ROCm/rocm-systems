@@ -897,7 +897,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           }
         }
         if (!placement || !branch_only_route) {
-          ++result.moi_branch_only_placement_failure_count;
           result.warnings.emplace_back(
               "ConSan MOI sampled probe could not route its branch-only scalar-spill body" +
               (relay_error.empty() ? std::string{} : ": " + relay_error));

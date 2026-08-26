@@ -2837,6 +2837,36 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   the periodic physical gate remains applicable. E2E validation remains
   outside this work.
 
+### Slice 4U: delete branch-only placement-failure telemetry
+
+- **Behavioral contract:** A branch-only body that cannot be placed is already
+  represented by the absence of its instrumentation patch and a specific
+  warning explaining the placement or routing failure. Successful transforms
+  are represented by their emitted patch plans and final-validation outcome.
+  Those are the facts consumed by production and exposed to users.
+- **Completed deletion:** `ConSanResult` no longer carries
+  `moi_branch_only_placement_failure_count`, and the four MOI lowerers no longer
+  maintain the counter at seven separate failure exits. The field influenced
+  no production decision and ceased to be hook output in Slice 4N, so retaining
+  it would preserve only a mutable prototype implementation detail.
+- **Contract-test correction:** Successful placement tests continue to check
+  concrete emitted patches, chosen routes, reservoir use where relevant, and
+  final validation. The unrouteable-body test continues to check that the
+  transform stays unmodified, emits no access-record patch, and reports the
+  `has no first-hop relay` warning. Ten assertions of the redundant counter
+  were deleted. The separate routing work telemetry remains for now because it
+  still guards batch construction and bounded-search complexity; it is not
+  conflated with this outcome counter.
+- **Deletion result:** Production source is 10 lines smaller and source plus
+  tests is 20 lines smaller. No replacement state or adapter was added.
+- **Completed checked-in gate:** The ConSan host gate passed 1,510 of 1,512
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 73.97
+  seconds. This telemetry-only deletion does not change emitted device code;
+  the periodic physical gate remains applicable. E2E validation remains
+  outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

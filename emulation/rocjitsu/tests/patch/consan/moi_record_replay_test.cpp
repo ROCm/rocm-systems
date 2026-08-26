@@ -8862,7 +8862,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessWithoutDeadTransientScalarRegist
                                &ConSanPatchInfo::kind),
             0u);
   EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
   // A many-site object must qualify and index its shared relay inventory once,
   // rather than rebuilding it for every far access.
   EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count, kAccessCount);
@@ -8926,7 +8925,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessThroughSelectedAnchorTails) {
   EXPECT_EQ(result.moi_branch_only_reservoir_telemetry.planned_reservoir_count, 0u);
   EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count, kAccessWords.size());
   EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 1u);
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
 
   std::set<uint64_t> anchor_tail_offsets;
   for (size_t access_word : kAccessWords) {
@@ -9019,7 +9017,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRecursivelyRoutesInstructionReservoirs) {
       });
   EXPECT_GE(routed_reservoir_count, 2u);
   EXPECT_GE(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, kDonorWords.size());
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -9124,7 +9121,6 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierConsumesReservoirOmittedByAccessSelectio
                                   relay_uses_direct_reservoir) ||
               std::ranges::any_of(barrier_patch->branch_only_return_relay_offsets,
                                   relay_uses_direct_reservoir));
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -9229,7 +9225,6 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierReturnRoutesThroughSelectedAccessAnchorT
   EXPECT_TRUE(barrier_patch->branch_only_entry_relay_offsets.empty());
   EXPECT_TRUE(
       std::ranges::any_of(barrier_patch->branch_only_return_relay_offsets, is_access_anchor_tail));
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -9327,7 +9322,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRelaySpineCrossesBarrierPrefixBeyondSoppReach) 
   };
   EXPECT_TRUE(std::ranges::any_of(routed_barrier->branch_only_entry_relay_offsets, is_donor_tail));
   EXPECT_TRUE(std::ranges::any_of(routed_barrier->branch_only_return_relay_offsets, is_donor_tail));
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
   // The access pass and the barrier pass each route their entire inventory in
   // one batch. A per-barrier plan call would make large E2E objects scale with
   // the product of barrier count and relay-index construction cost.
@@ -9460,7 +9454,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRejectsFarAccessWithoutFirstHopBeforeReservingB
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 1u);
   EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
@@ -9800,7 +9793,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesBarrierWithoutDeadTransientScalarRegister
   EXPECT_TRUE(barrier_patch->branch_only_continuation);
   EXPECT_TRUE(barrier_patch->branch_only_borrowed_indirect_entry);
   EXPECT_TRUE(barrier_patch->branch_only_entry_relay_offsets.empty());
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
   EXPECT_GT(result.moi_branch_only_routing_telemetry.plan_call_count, 0u);
   EXPECT_TRUE(result.final_validation_passed);
 }
@@ -11130,7 +11122,6 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
     EXPECT_NE(std::ranges::search(entry_body, *save_semantic_workgroup_x).begin(), entry_body.end())
         << "the private prologue must back up guest-semantic workgroup X, not the raw "
            "dispatch-preload value occupying its ABI slot";
-    EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
     EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count,
               uses_branch_only_scalar_spill ? kAccessCount : 0u);
     EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count,
@@ -11219,7 +11210,6 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
                                &ConSanPatchInfo::kind),
             2u * kAccessCountPerKernel)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.moi_branch_only_placement_failure_count, 0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
             1u)
