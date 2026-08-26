@@ -35,6 +35,7 @@ target_include_directories(
 add_library(rocjitsu_drm_headers INTERFACE)
 target_include_directories(
     rocjitsu_drm_headers
+    SYSTEM
     INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external_headers/drm_headers
 )
 
