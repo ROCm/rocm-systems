@@ -324,9 +324,13 @@ def build_type_lists():
             cond = FAIL
         link_types.append((member.name, amdsmi.AmdSmiLinkType(member.value), cond))
 
+    # The *_LAST members mark the end of a range -- AMDSMI_TEMPERATURE_TYPE__MAX
+    # is an alias of one -- so they are bounds, not sensors, and querying them is
+    # meaningless.
     temperature_types = [
         (member.name, amdsmi.AmdSmiTemperatureType(member.value), PASS)
         for member in amdsmi.AmdSmiTemperatureType
+        if not member.name.endswith("_LAST")
     ]
 
     temperature_metrics = [

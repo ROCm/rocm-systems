@@ -258,8 +258,7 @@ regression:
 
 | Status | Tests | Cause |
 | :--- | :--- | :--- |
-| `AMDSMI_STATUS_UNEXPECTED_DATA` | `test_get_clock_info`, `test_get_energy_count`, `test_get_gpu_activity`, `test_get_gpu_metrics_info`, `test_get_gpu_pci_bandwidth`, `test_get_gpu_xcd_counter`, `test_get_gpu_xgmi_link_status`, `test_get_link_metrics`, `test_get_pcie_info`, `test_get_utilization_count`, `test_get_violation_status` | The library returns a payload it cannot parse |
-| `AMDSMI_STATUS_INTERNAL_EXCEPTION` | `test_get_temp_metric` (HBM sensors) | A `std::map::at` throw inside the library, visible as `Exception caught: map::at` on stderr |
+| `AMDSMI_STATUS_UNEXPECTED_DATA` | `test_get_clock_info`, `test_get_energy_count`, `test_get_gpu_activity`, `test_get_gpu_metrics_info`, `test_get_gpu_pci_bandwidth`, `test_get_gpu_xcd_counter`, `test_get_gpu_xgmi_link_status`, `test_get_link_metrics`, `test_get_pcie_info`, `test_get_temp_metric` (HBM sensors), `test_get_utilization_count`, `test_get_violation_status` | The library returns a payload it cannot parse |
 | `AMDSMI_STATUS_NO_PERM` | `test_get_gpu_accelerator_partition_profile_config` | Only when run without root; the runners require `sudo`, so this passes normally |
 
 These are tracked as library defects rather than suppressed, so that a fix flips
