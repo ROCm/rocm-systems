@@ -320,8 +320,13 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
                     exit_toggle().store(false);
                     return;
                 }
+                // A failed start still leaves the context active, and starting an
+                // active context reports success without configuring the service,
+                // so the attempt has to be undone before retrying.
+                rocprofiler_stop_context(get_client_ctx());
                 if(start_status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
-                   start_status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
+                   start_status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR ||
+                   start_status == ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED)
                 {
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     continue;

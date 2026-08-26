@@ -200,12 +200,16 @@ rocprofiler_samples_get_preload_env(PRELOAD_ENV
 set(counter-collection-device-profiling-output
     "${CMAKE_CURRENT_BINARY_DIR}/counter-collection-device-profiling-async.log")
 set(counter-collection-device-profiling-env
-    "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
-    "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-output}")
+    "${PRELOAD_ENV}"
+    "${LIBRARY_PATH_ENV}"
+    "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-output}"
+    "ROCR_VISIBLE_DEVICES=0"
+    "HIP_VISIBLE_DEVICES=0")
 
-# Only the first visible agent is configured for device counting, so the workload is
-# pinned to one device. The sampler thread runs on a fixed interval, so the iteration
-# count must keep the run long enough to clear the validator's minimum sample count.
+# The sample configures the first visible agent, so a single visible device keeps that
+# agent and the workload's device the same one. The sampler thread runs on a fixed
+# interval, so the iteration count must keep the run long enough to clear the
+# validator's minimum sample count.
 add_test(NAME counter-collection-device-profiling
          COMMAND $<TARGET_FILE:counter-collection-device-profiling> 50000 50 1)
 
@@ -248,12 +252,16 @@ rocprofiler_samples_get_preload_env(PRELOAD_ENV
 set(counter-collection-device-profiling-sync-output
     "${CMAKE_CURRENT_BINARY_DIR}/counter-collection-device-profiling-sync.log")
 set(counter-collection-device-profiling-sync-env
-    "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
-    "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}")
+    "${PRELOAD_ENV}"
+    "${LIBRARY_PATH_ENV}"
+    "ROCPROFILER_SAMPLE_OUTPUT_FILE=${counter-collection-device-profiling-sync-output}"
+    "ROCR_VISIBLE_DEVICES=0"
+    "HIP_VISIBLE_DEVICES=0")
 
-# Only the first visible agent is configured for device counting, so the workload is
-# pinned to one device. The sampler thread runs on a fixed interval, so the iteration
-# count must keep the run long enough to clear the validator's minimum sample count.
+# The sample configures the first visible agent, so a single visible device keeps that
+# agent and the workload's device the same one. The sampler thread runs on a fixed
+# interval, so the iteration count must keep the run long enough to clear the
+# validator's minimum sample count.
 add_test(NAME counter-collection-device-profiling-sync
          COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync> 50000 50 1)
 

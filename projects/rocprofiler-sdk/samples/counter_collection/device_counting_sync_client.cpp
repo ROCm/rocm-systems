@@ -252,6 +252,11 @@ counter_sampler::sample_counter_values(const std::vector<std::string>&          
     auto start_status = rocprofiler_start_context(ctx_);
     if(start_status != ROCPROFILER_STATUS_SUCCESS)
     {
+        // A failed start still leaves the context active, and starting an active
+        // context reports success without configuring the service. Leaving it
+        // there also lets the library start the service itself once HSA
+        // registers, racing this loop, so undo the attempt before returning.
+        rocprofiler_stop_context(ctx_);
         out.clear();
         return start_status;
     }
@@ -416,9 +421,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                     {"SQ_WAVES", "GRBM_COUNT"}, records, {.value = count});
                 if(exit_toggle().load()) break;
                 if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
-                   status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR)
+                   status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR ||
+                   status == ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED)
                 {
-                    std::clog << "Device counting service not ready yet....\n";
+                    std::clog << "Device counting service unavailable, retrying....\n";
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     continue;
                 }
@@ -483,6 +489,7 @@ tool_fini(void* user_data)
 
     sampler.reset();
     delete sampler_thread;
+    sampler_thread = nullptr;
 
     std::clog << "Completed tool fini\n" << std::flush;
 }

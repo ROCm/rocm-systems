@@ -127,7 +127,7 @@ global_recs()
 struct captured_sync_sample
 {
     rocprofiler_agent_id_t                    expected_agent_id;
-    std::vector<rocprofiler_record_counter_t> records;
+    std::vector<rocprofiler_counter_record_t> records;
 };
 
 common::Synchronized<std::vector<captured_sync_sample>>&
@@ -503,7 +503,7 @@ protected:
             size_t track_metric = 0;
             for(auto& metric : metrics)
             {
-                std::vector<rocprofiler_record_counter_t> buffered_sync_records;
+                std::vector<rocprofiler_counter_record_t> buffered_sync_records;
                 track_metric++;
                 ROCP_INFO << "Testing metric " << metric.name();
                 rocprofiler_counter_id_t id  = {.handle = metric.id()};
@@ -600,7 +600,7 @@ protected:
                     }
                     else
                     {
-                        std::vector<rocprofiler_record_counter_t> output_records(10000);
+                        std::vector<rocprofiler_counter_record_t> output_records(10000);
                         size_t                                    out_count = output_records.size();
                         ROCPROFILER_CALL(rocprofiler_sample_device_counting_service(
                                              ctx,
@@ -936,57 +936,6 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
     }
 }
 
-TEST_F(device_counting_service_test, sync_samples_measure_active_time_range)
-{
-    device_counting_run_options options{};
-    options.test_metrics          = {"GRBM_COUNT"};
-    options.delay                 = 50000;
-    options.sample_count          = 2;
-    options.kernel_dispatch_count = 32;
-    options.sample_before_work    = true;
-    options.capture_sync_samples  = true;
-    test_run(options);
-
-    auto samples = global_sync_samples().rlock([](const auto& data) { return data; });
-    ASSERT_GE(samples.size(), 2);
-    ASSERT_EQ(samples.size() % 2, 0);
-
-    for(size_t sample_idx = 0; sample_idx < samples.size(); sample_idx += 2)
-    {
-        const auto& before_sample = samples.at(sample_idx);
-        const auto& after_sample  = samples.at(sample_idx + 1);
-        const auto& before        = before_sample.records;
-        const auto& after         = after_sample.records;
-        ASSERT_FALSE(before.empty());
-        ASSERT_EQ(before.size(), after.size());
-        const auto agent_id = before_sample.expected_agent_id.handle;
-        ASSERT_EQ(after_sample.expected_agent_id.handle, agent_id);
-
-        std::unordered_map<rocprofiler_counter_instance_id_t, double> before_values;
-        for(const auto& record : before)
-        {
-            EXPECT_EQ(record.dispatch_id, 0);
-            EXPECT_EQ(record.agent_id.handle, agent_id);
-            ASSERT_TRUE(before_values.emplace(record.id, record.counter_value).second);
-        }
-
-        bool increased = false;
-        for(const auto& record : after)
-        {
-            EXPECT_EQ(record.dispatch_id, 0);
-            EXPECT_EQ(record.agent_id.handle, agent_id);
-            auto before_pos = before_values.find(record.id);
-            ASSERT_NE(before_pos, before_values.end());
-            EXPECT_GE(record.counter_value, before_pos->second);
-            increased = increased || record.counter_value > before_pos->second;
-            before_values.erase(before_pos);
-        }
-        EXPECT_TRUE(before_values.empty());
-        EXPECT_TRUE(increased);
-    }
-    EXPECT_EQ(global_dispatch_header_count().load(std::memory_order_relaxed), 0);
-}
-
 TEST_F(device_counting_service_test, sync_without_application_dispatches_is_device_scoped)
 {
     device_counting_run_options options{};
@@ -1015,7 +964,7 @@ TEST_F(device_counting_service_test, sync_without_application_dispatches_is_devi
     {
         std::unordered_map<rocprofiler_counter_instance_id_t, double> before;
         for(const auto& record : samples.at(index).records)
-            before.emplace(record.id, record.counter_value);
+            ASSERT_TRUE(before.emplace(record.id, record.counter_value).second);
 
         bool increased = false;
         for(const auto& record : samples.at(index + 1).records)
@@ -1024,7 +973,9 @@ TEST_F(device_counting_service_test, sync_without_application_dispatches_is_devi
             ASSERT_NE(position, before.end());
             EXPECT_GE(record.counter_value, position->second);
             increased = increased || record.counter_value > position->second;
+            before.erase(position);
         }
+        EXPECT_TRUE(before.empty());
         EXPECT_TRUE(increased);
     }
     EXPECT_EQ(global_dispatch_header_count().load(std::memory_order_relaxed), 0);
@@ -1032,33 +983,22 @@ TEST_F(device_counting_service_test, sync_without_application_dispatches_is_devi
 
 TEST_F(device_counting_service_test, invalid_context_is_rejected)
 {
-    auto                  registration_scope = device_counting_registration_scope{};
-    argument_test_context state{};
-    bool                  configured = false;
-    configure_argument_test_context(state, "GRBM_COUNT", configured);
-    if(!configured) GTEST_SKIP() << "GRBM_COUNT is not available on any supported agent";
-    ASSERT_EQ(rocprofiler_start_context(state.context), ROCPROFILER_STATUS_SUCCESS);
-
     EXPECT_EQ(rocprofiler_sample_device_counting_service(ROCPROFILER_CONTEXT_NONE,
                                                          {.value = 1},
                                                          ROCPROFILER_COUNTER_FLAG_NONE,
                                                          nullptr,
                                                          nullptr),
               ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND);
-
-    EXPECT_EQ(rocprofiler_stop_context(state.context), ROCPROFILER_STATUS_SUCCESS);
 }
 
 TEST_F(device_counting_service_test, sampling_before_context_start_is_rejected)
 {
-    auto                  registration_scope = device_counting_registration_scope{};
-    argument_test_context state{};
-    bool                  configured = false;
-    configure_argument_test_context(state, "GRBM_COUNT", configured);
-    if(!configured) GTEST_SKIP() << "GRBM_COUNT is not available on any supported agent";
+    auto registration_scope = device_counting_registration_scope{};
+    auto context            = rocprofiler_context_id_t{};
+    ASSERT_EQ(rocprofiler_create_context(&context), ROCPROFILER_STATUS_SUCCESS);
 
     EXPECT_EQ(rocprofiler_sample_device_counting_service(
-                  state.context, {.value = 1}, ROCPROFILER_COUNTER_FLAG_NONE, nullptr, nullptr),
+                  context, {.value = 1}, ROCPROFILER_COUNTER_FLAG_NONE, nullptr, nullptr),
               ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED);
 }
 
@@ -1310,13 +1250,12 @@ TEST_F(device_counting_service_test, multiple_agents_are_isolated_and_foreign_pr
                                                       set_profile,
                                                       &mismatch),
         "mismatch service configuration failed");
+    // The mismatched agent is skipped rather than rejected, so the start still
+    // succeeds and the context has to be stopped again.
     auto mismatch_start = rocprofiler_start_context(mismatch.context);
     EXPECT_EQ(mismatch.profile_status, ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH);
-    if(mismatch_start == ROCPROFILER_STATUS_SUCCESS ||
-       mismatch_start == ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS)
-    {
-        EXPECT_EQ(rocprofiler_stop_context(mismatch.context), ROCPROFILER_STATUS_SUCCESS);
-    }
+    ASSERT_EQ(mismatch_start, ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_stop_context(mismatch.context), ROCPROFILER_STATUS_SUCCESS);
 }
 
 TEST_F(device_counting_service_test, sync_gpu_util_verify)

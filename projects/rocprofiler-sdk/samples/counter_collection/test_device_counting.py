@@ -155,41 +155,6 @@ def _assert_complete_dimension_coverage(records, counter_name):
     assert len(records) == len(expected_coordinates)
 
 
-def _visibility_environment():
-    return ", ".join(
-        f"{name}={os.environ[name]}"
-        for name in (
-            "HIP_VISIBLE_DEVICES",
-            "ROCR_VISIBLE_DEVICES",
-            "CUDA_VISIBLE_DEVICES",
-            "GPU_DEVICE_ORDINAL",
-        )
-        if name in os.environ
-    )
-
-
-# SQ_WAVES stays flat while GRBM_COUNT advances when the profiled agent never ran a kernel,
-# which happens if HIP device 0 is not the lowest-numbered visible agent. HIP_VISIBLE_DEVICES
-# entries name devices, or index the ROCR_VISIBLE_DEVICES list when that is set as well.
-def _inactive_counter_message(positive_counters):
-    missing = sorted(EXPECTED_COUNTER_NAMES - positive_counters)
-    message = "counters never reported a positive value: " + ", ".join(missing)
-    if missing != ["SQ_WAVES"]:
-        return message
-
-    message += (
-        f". {', '.join(sorted(positive_counters))} advanced, so the profiled agent was"
-        " alive but idle."
-    )
-    visibility = _visibility_environment()
-    if visibility:
-        message += (
-            " The samples profile the lowest-numbered visible agent while the workload"
-            f" runs on HIP device 0. Visibility variables: {visibility}."
-        )
-    return message
-
-
 def _validate_sync_samples(samples):
     sample_ids = sorted(samples)
     assert len(sample_ids) >= 2
@@ -227,8 +192,10 @@ def _validate_sync_samples(samples):
             if record["value"] > 0:
                 positive_counters.add(record["name"])
 
-    assert positive_counters == EXPECTED_COUNTER_NAMES, _inactive_counter_message(
-        positive_counters
+    assert (
+        positive_counters == EXPECTED_COUNTER_NAMES
+    ), "counters never reported a positive value: " + ", ".join(
+        sorted(EXPECTED_COUNTER_NAMES - positive_counters)
     )
 
 
@@ -243,24 +210,16 @@ def test_sync_device_counting_output():
     _validate_sync_output_file()
 
 
-def _validate_async_output(output, sync_record_ids):
+def _validate_async_output(output, sync_records):
     records_by_sample = {}
 
     for line in output.splitlines():
         assert line.startswith("[buffered_callback] "), f"unexpected async output: {line}"
         payload = line[len("[buffered_callback] ") :]
-        matches = list(ASYNC_RECORD_PATTERN.finditer(payload))
         assert not re.sub(
             r"\s+", "", ASYNC_RECORD_PATTERN.sub("", payload)
         ), "unparsed async callback content: {}".format(line)
-        # An asynchronous buffer callback can contain no value records while the service starts.
-        # Require multiple populated samples below instead of treating an empty callback as fatal.
-        if not matches:
-            assert (
-                not records_by_sample
-            ), "empty async callback after counter records became available"
-            continue
-        for match in matches:
+        for match in ASYNC_RECORD_PATTERN.finditer(payload):
             sample_id = int(match.group("user_data"))
             record_id = int(match.group("id"))
             records = records_by_sample.setdefault(sample_id, {})
@@ -273,24 +232,29 @@ def _validate_async_output(output, sync_record_ids):
 
     expected_record_ids = set(records_by_sample[sample_ids[0]])
     assert expected_record_ids
-    assert expected_record_ids == sync_record_ids
-    found_positive_value = False
+    # The async records carry no counter name, so the sync run's record ids supply
+    # the mapping needed to require a positive value from every counter.
+    assert expected_record_ids == set(sync_records)
+    positive_counters = set()
     for records in records_by_sample.values():
         assert set(records) == expected_record_ids
-        found_positive_value = found_positive_value or any(
-            value > 0 for value in records.values()
-        )
-    assert found_positive_value, "no async sample contained a positive counter value"
+        for record_id, value in records.items():
+            if value > 0:
+                positive_counters.add(sync_records[record_id]["name"])
+
+    assert (
+        positive_counters == EXPECTED_COUNTER_NAMES
+    ), "counters never reported a positive value: " + ", ".join(
+        sorted(EXPECTED_COUNTER_NAMES - positive_counters)
+    )
 
 
 def _validate_async_output_file():
     output = _read_output("ROCPROFILER_SAMPLE_ASYNC_OUTPUT_FILE")
     _skip_if_unavailable(output)
     sync_samples = _parse_sync_output(_read_output("ROCPROFILER_SAMPLE_SYNC_OUTPUT_FILE"))
-    sync_record_ids = next(
-        set(records) for _, records in sorted(sync_samples.items()) if records
-    )
-    _validate_async_output(output, sync_record_ids)
+    sync_records = next(records for _, records in sorted(sync_samples.items()) if records)
+    _validate_async_output(output, sync_records)
 
 
 def test_async_device_counting_output():
