@@ -874,7 +874,7 @@ class Runtime {
   /// @brief Get the highest used node id.
   uint32_t max_node_id() const { return agents_by_node_.rbegin()->first; }
 
-  // GPU matching KFD gpu_mem[0] (lowest topology node id).
+  // GPU matching libhsakmt first_gpu_mem (KFD GTT anchor for host memory).
   Agent* KfdGttAnchorGpu();
 
   // Mutex object to protect multithreaded access to ::allocation_map_.

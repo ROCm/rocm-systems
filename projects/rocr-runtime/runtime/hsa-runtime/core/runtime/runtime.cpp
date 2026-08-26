@@ -4108,15 +4108,18 @@ void Runtime::ReleaseMemoryHandle(Runtime::MemoryHandle* handle) {
 }
 
 Agent* Runtime::KfdGttAnchorGpu() {
-  core::Agent* selected = nullptr;
-  for (const auto* pool : {&gpu_agents_, &disabled_gpu_agents_}) {
-    for (auto* candidate : *pool) {
-      if (selected == nullptr || candidate->node_id() < selected->node_id()) {
-        selected = candidate;
-      }
-    }
+  HSAuint32 node_id = 0;
+  HSAuint32 gpu_id = 0;
+  if (HSAKMT_CALL(hsaKmtGetDefaultHostGpu)(&node_id, &gpu_id) != HSAKMT_STATUS_SUCCESS) {
+    return nullptr;
   }
-  return selected;
+
+  auto it = agents_by_node_.find(node_id);
+  if (it == agents_by_node_.end() || it->second.empty()) {
+    return nullptr;
+  }
+
+  return it->second[0];
 }
 
 hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t size,
@@ -4137,8 +4140,8 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     uint64_t offset;
     auto agentOwner = region->owner();
 
-    /* CPU-owned host memory: DRM import requires a GPU agent; use KFD GTT anchor.
-     * Device-owned: use owner agent. */
+    /* CPU-owned host memory: DRM import requires a GPU agent; use libhsakmt
+     * first_gpu_mem (KFD GTT anchor). Device-owned: use owner agent. */
     core::Agent* agent_for_drm = agentOwner;
     core::Agent* drm_owner = nullptr;
     if (agentOwner->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
