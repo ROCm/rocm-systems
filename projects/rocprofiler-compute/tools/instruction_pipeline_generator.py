@@ -262,19 +262,9 @@ def main() -> int:
         default=DEFAULT_OUTPUT_PATH,
         help="Where to write the generated table.",
     )
-    rocm_path = Path(os.getenv("ROCM_PATH", "/opt/rocm"))
-    parser.add_argument(
-        "--corpus-root",
-        type=Path,
-        default=rocm_path,
-        help=(
-            "Directory scanned for the code objects the coverage check reads. "
-            "Point it at the install root when ROCM_PATH holds only the "
-            "compiler, as it does in a ROCm Python wheel install."
-        ),
-    )
     args = parser.parse_args()
 
+    rocm_path = Path(os.getenv("ROCM_PATH", "/opt/rocm"))
     tblgen = rocm_path / "lib" / "llvm" / "bin" / "llvm-tblgen"
     objdump = rocm_path / "lib" / "llvm" / "bin" / "llvm-objdump"
     for binary in (tblgen, objdump):
@@ -282,10 +272,10 @@ def main() -> int:
             print(f"error: {binary} not found; set ROCM_PATH", file=sys.stderr)
             return 1
 
-    corpus_mnemonics = _collect_corpus_mnemonics(args.corpus_root, objdump)
+    corpus_mnemonics = _collect_corpus_mnemonics(rocm_path, objdump)
     if not corpus_mnemonics:
         print(
-            f"error: no code objects found under {args.corpus_root}; "
+            f"error: no code objects found under {rocm_path}; "
             "coverage cannot be checked",
             file=sys.stderr,
         )
@@ -451,11 +441,11 @@ def _run_tblgen(tblgen: Path, llvm_path: Path, dump_path: Path) -> dict:
         return json.load(dump_file)
 
 
-def _collect_corpus_mnemonics(corpus_root: Path, objdump: Path) -> set[str]:
+def _collect_corpus_mnemonics(rocm_path: Path, objdump: Path) -> set[str]:
     """Disassemble the code objects of a ROCm install to see what real code emits."""
     mnemonics: set[str] = set()
     for suffix in CODE_OBJECT_SUFFIXES:
-        for code_object in sorted(corpus_root.rglob(suffix)):
+        for code_object in sorted(rocm_path.rglob(suffix)):
             disassembly = subprocess.run(
                 [str(objdump), "-d", str(code_object)],
                 capture_output=True,
