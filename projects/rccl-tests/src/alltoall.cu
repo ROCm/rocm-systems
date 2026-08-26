@@ -99,7 +99,11 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
-      reqs->barrierCount = 1;
+      // barrierCount provisions per-CTA hybrid world barriers (LSA+rail+world) used
+      // by HybridAlltoAllTimedKernel to join CTA 0 (GIN) with LSA CTAs each iter.
+      // The production body still uses barrier index 0 on CTA 0 and lsaBarrier on
+      // CTAs 1..N; ginSignalCount stays 1 because only CTA 0 issues GIN puts.
+      reqs->barrierCount = deviceCtaCount;
       reqs->lsaBarrierCount = deviceCtaCount - 1;
       reqs->ginSignalCount = 1;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
@@ -131,7 +135,7 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       return true;
     case 4: // HybridAlltoAllKernel: CTA 0 = GIN, CTAs 1..N = LSA
       if (deviceCtaCount < 2) return false;
-      reqs->barrierCount = 1;
+      reqs->barrierCount = deviceCtaCount;
       reqs->lsaBarrierCount = deviceCtaCount - 1;
       reqs->ginSignalCount = 1;
       return true;
@@ -300,9 +304,9 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 
 // Hybrid LSA+GIN alltoall: CTA 0 handles remote peers via GIN,
 // CTAs 1..N handle intra-node peers via LSA.
-// GIN barrier is scoped to CTA 0 only (barrierCount=1), costing
-// O(nRanks) signals once, not O(nCTAs x nRanks).
-// LSA CTAs use their own lsaBarrier (pure intra-node, no GIN signals).
+// Production body: CTA 0 uses hybrid world barrier index 0; LSA CTAs use
+// lsaBarrier (blockIdx.x - 1). DevComm barrierCount == deviceCtaCount also
+// provisions per-CTA hybrid world barriers for HybridAlltoAllTimedKernel joins.
 template <typename T>
 __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclTeam world = ncclTeamWorld(devComm);
@@ -369,6 +373,17 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
   hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
 }
 
+// Join all CTAs (GIN CTA 0 + LSA CTAs 1..N) in the timed-kernel loop. The
+// production body uses split sync domains; ncclBarrierSession(world) spans LSA,
+// rail, and world GIN barriers so every CTA waits together (see NCCL hybrid
+// alltoall example). Requires barrierCount == gridDim.x in devComm setup.
+__device__ inline void hybridTimedGridJoin(struct ncclDevComm devComm) {
+  int ginContext = 0;
+  ncclGin gin { devComm, ginContext };
+  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, (uint32_t)blockIdx.x };
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
+}
+
 // Device-side timing kernels (rocSHMEM AllToAll methodology, AICOMRCCL-1459).
 // A single persistent launch runs (skip + loop) back-to-back collective bodies
 // and brackets only the timed region with the GPU fixed-frequency wall clock
@@ -398,16 +413,16 @@ __global__ void GinAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, 
 }
 
 template <typename T>
-__global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time, gin_devtime::GridBarrierState* gridSync) {
+__global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time) {
   for (int i = 0; i < skip + loop; i++) {
+    hybridTimedGridJoin(devComm);
     if (i == skip) {
-      if (gridSync) gin_devtime::gridIterJoin(gridSync, gridDim.x);
       __syncthreads();
       if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
     }
     hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
   }
-  if (gridSync) gin_devtime::gridIterJoin(gridSync, gridDim.x);
+  hybridTimedGridJoin(devComm);
   __syncthreads();
   if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
@@ -522,41 +537,16 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
 
   // Shared scaffold: allocates per-CTA start/end stamps, launches the timed kernel,
   // reduces min(start)..max(end) over CTAs and MPI-MAX across ranks -> per-iter us.
-  std::vector<gin_devtime::GridBarrierState*> d_gridSync(args->nGpus, nullptr);
-  if (hybrid) {
-    for (int i = 0; i < args->nGpus; i++) {
-      CUDACHECK(cudaSetDevice(args->gpus[i]));
-      CUDACHECK(cudaMalloc(&d_gridSync[i], sizeof(gin_devtime::GridBarrierState)));
-      CUDACHECK(cudaMemset(d_gridSync[i], 0, sizeof(gin_devtime::GridBarrierState)));
-    }
-  }
-
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
         ncclDevComm* devComm = args->devComms + i;
         ncclWindow_t sendwin = (ncclWindow_t)args->sendRegHandles[i];
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
-        if (hybrid) {
-          auto hybKernel = SPECIALIZE_KERNEL(HybridAlltoAllTimedKernel, type, op);
-          hybKernel<<<gridCtas, 512, 0, args->streams[i]>>>(
-              sendwin, 0, recvwin, 0, count, root, *devComm, loop, skip, d_start, d_end,
-              d_gridSync[i]);
-        } else {
-          kernel<<<gridCtas, 512, 0, args->streams[i]>>>(
-              sendwin, 0, recvwin, 0, count, root, *devComm, loop, skip, d_start, d_end);
-        }
+        kernel<<<gridCtas, 512, 0, args->streams[i]>>>(
+            sendwin, 0, recvwin, 0, count, root, *devComm, loop, skip, d_start, d_end);
       },
       &devUs));
-
-  if (hybrid) {
-    for (int i = 0; i < args->nGpus; i++) {
-      if (d_gridSync[i]) {
-        CUDACHECK(cudaSetDevice(args->gpus[i]));
-        CUDACHECK(cudaFree(d_gridSync[i]));
-      }
-    }
-  }
 
   int nRanksGlobal = args->nProcs * args->nThreads * args->nGpus;
 
