@@ -67,6 +67,10 @@ the stacked tool integration PR.
 - **[Memory snapshot and restore](kernel_replay_memory_snapshot.md)** — what is captured and what is
   excluded, the full in-memory copy (no dirty-page hashing), module-scope `__device__` variable
   capture, the decline-rather-than-corrupt failure policy, HIP graph behavior, and planned hashing.
+- **[Performance assessment](kernel_replay_performance.md)** — what replay costs and why: the
+  per-dispatch snapshot cost model, the range the regression tests actually cover, the specific
+  performance problems visible in the implementation, and how the cost behaves on MI250X, MI325X
+  and MI455X.
 - **[Callback tracing API design](kernel_replay_callback_api_design.md)** — the design rationale and
   history behind the callback API. Read the pages above for current behavior; this one records how
   the design got there and what remains open.
