@@ -468,9 +468,8 @@ void GlobalLoadAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_size = wf.wf_size();
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
-    int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+    int64_t offset = static_cast<int64_t>(signed_ioffset(inst_.ioffset));
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
@@ -496,9 +495,8 @@ void GlobalStoreAddtidB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_size = wf.wf_size();
     d->wg_id = wf.wg_id();
     d->wf_id = wf.wf_id();
-    d->cu_path = wf.cu().full_path();
     uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);
-    int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst_.ioffset << 8) >> 8);
+    int64_t offset = static_cast<int64_t>(signed_ioffset(inst_.ioffset));
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
@@ -1587,7 +1585,7 @@ void GlobalLoadTr8B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->transpose = 3;
+  d->transpose = 6;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1726,7 +1724,7 @@ void GlobalLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -1734,7 +1732,7 @@ void GlobalLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
+    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, 1);
   }
   set_data(std::move(d));
 }
@@ -1753,7 +1751,7 @@ void GlobalLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -1761,7 +1759,7 @@ void GlobalLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
+    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, 4);
   }
   set_data(std::move(d));
 }
@@ -1780,7 +1778,7 @@ void GlobalLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -1788,7 +1786,7 @@ void GlobalLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
+    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, 8);
   }
   set_data(std::move(d));
 }
@@ -1807,7 +1805,7 @@ void GlobalLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -1815,7 +1813,7 @@ void GlobalLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
+    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, 16);
   }
   set_data(std::move(d));
 }
@@ -1832,7 +1830,7 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -1840,7 +1838,9 @@ void GlobalStoreAsyncFromLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr = wf.lds_base() + amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
+    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
+    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 1);
+    // Out-of-range LDS reads return zero; the global store still issues.
     lds.read(lds_addr, &d->store_data[lane * 1], 1);
   }
   set_data(std::move(d));
@@ -1858,7 +1858,7 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -1866,7 +1866,9 @@ void GlobalStoreAsyncFromLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr = wf.lds_base() + amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
+    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
+    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 4);
+    // Out-of-range LDS reads return zero; the global store still issues.
     lds.read(lds_addr, &d->store_data[lane * 4], 4);
   }
   set_data(std::move(d));
@@ -1884,7 +1886,7 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -1892,7 +1894,9 @@ void GlobalStoreAsyncFromLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr = wf.lds_base() + amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
+    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
+    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 8);
+    // Out-of-range LDS reads return zero; the global store still issues.
     lds.read(lds_addr, &d->store_data[lane * 8], 8);
   }
   set_data(std::move(d));
@@ -1910,7 +1914,7 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   const auto &lds = cu.lds();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
@@ -1918,7 +1922,9 @@ void GlobalStoreAsyncFromLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t lds_addr = wf.lds_base() + amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
+    uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
+    uint32_t lds_addr = async_lds_lane_address(inst_, wf, lane_lds_addr, 16);
+    // Out-of-range LDS reads return zero; the global store still issues.
     lds.read(lds_addr, &d->store_data[lane * 16], 16);
   }
   set_data(std::move(d));
@@ -1989,7 +1995,7 @@ void ClusterLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -1997,7 +2003,7 @@ void ClusterLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
+    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, 1);
   }
   set_data(std::move(d));
 }
@@ -2019,7 +2025,7 @@ void ClusterLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -2027,7 +2033,7 @@ void ClusterLoadAsyncToLdsB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
+    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, 4);
   }
   set_data(std::move(d));
 }
@@ -2049,7 +2055,7 @@ void ClusterLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -2057,7 +2063,7 @@ void ClusterLoadAsyncToLdsB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
+    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, 8);
   }
   set_data(std::move(d));
 }
@@ -2079,7 +2085,7 @@ void ClusterLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   flat_calculate_addresses(inst_, wf, *d);
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
-  // flat_calculate_addresses applies ioffset to the global side; the LDS operand is independent.
+  // CDNA5 ISA 10.8.1 and expressions 95-102 and 106-109 add IOFFSET to global and LDS addresses.
   uint32_t lds_addr_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
@@ -2087,7 +2093,7 @@ void ClusterLoadAsyncToLdsB128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t lane_lds_addr = amdgpu::RegisterAccess(cu).read_vgpr(lds_addr_base, lane);
-    d->per_lane_lds_addr[lane] = wf.lds_base() + lane_lds_addr;
+    d->per_lane_lds_addr[lane] = async_lds_lane_address(inst_, wf, lane_lds_addr, 16);
   }
   set_data(std::move(d));
 }

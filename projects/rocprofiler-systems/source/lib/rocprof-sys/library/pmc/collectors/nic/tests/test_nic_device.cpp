@@ -109,7 +109,7 @@ TEST_F(NicDeviceTest, DeviceIsSupported_WhenRdmaAvailable)
 {
     SetupFullRdmaSupport();
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
     EXPECT_EQ(dev.get_index(), test_index);
@@ -122,7 +122,7 @@ TEST_F(NicDeviceTest, DeviceIsNotSupported_WhenNoRdma)
 {
     SetupNoRdmaSupport();
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.is_supported());
 }
@@ -131,8 +131,8 @@ TEST_F(NicDeviceTest, GetSupportedMetrics_AllEnabled)
 {
     SetupFullRdmaSupport();
 
-    device<MockBackend> dev(mock_backend, test_index);
-    auto                supported = dev.get_supported_metrics();
+    const device<MockBackend> dev(mock_backend, test_index);
+    auto                      supported = dev.get_supported_metrics();
 
     EXPECT_TRUE(supported.bits.rx_rdma_ucast_bytes);
     EXPECT_TRUE(supported.bits.tx_rdma_ucast_bytes);
@@ -150,8 +150,8 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
 {
     SetupStatisticsData();
 
-    device<MockBackend> dev(mock_backend, test_index);
-    auto                m = dev.get_nic_metrics();
+    const device<MockBackend> dev(mock_backend, test_index);
+    auto                      m = dev.get_nic_metrics();
 
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 1000000ULL);
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 2000000ULL);
@@ -179,7 +179,7 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
         .Times(AtLeast(1))
         .WillRepeatedly(Return(rdma_info{ 0 }));
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.is_supported());
 
@@ -213,7 +213,7 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenStatisticsQueryThrows)
         }))
         .WillOnce(Throw(std::runtime_error("stats query failed")));
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
     EXPECT_TRUE(dev.is_supported());
 
     auto m = dev.get_nic_metrics();
@@ -242,8 +242,8 @@ TEST_F(NicDeviceTest, GetNicMetrics_IgnoresUnknownStatNames)
             { "some_other_counter", 8888 },
         }));
 
-    device<MockBackend> dev(mock_backend, test_index);
-    auto                m = dev.get_nic_metrics();
+    const device<MockBackend> dev(mock_backend, test_index);
+    auto                      m = dev.get_nic_metrics();
 
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 1000ULL);
     EXPECT_EQ(m.tx_rdma_ucast_bytes, 2000ULL);
@@ -268,8 +268,8 @@ TEST_F(NicDeviceTest, GetNicMetrics_HandlesPartialStats)
             { "tx_rdma_cnp_pkts", 10 },
         }));
 
-    device<MockBackend> dev(mock_backend, test_index);
-    auto                m = dev.get_nic_metrics();
+    const device<MockBackend> dev(mock_backend, test_index);
+    auto                      m = dev.get_nic_metrics();
 
     EXPECT_EQ(m.rx_rdma_ucast_bytes, 500ULL);
     EXPECT_EQ(m.tx_rdma_cnp_pkts, 10ULL);
@@ -298,7 +298,7 @@ TEST_F(NicDeviceTest, DeviceInitializes_WhenAsicInfoThrows)
             { "rx_rdma_ucast_bytes", 0 },
         }));
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
     EXPECT_TRUE(dev.get_product_name().empty());
@@ -321,7 +321,7 @@ TEST_F(NicDeviceTest, DeviceInitializes_WhenPortInfoThrows)
             { "rx_rdma_ucast_bytes", 0 },
         }));
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
     EXPECT_TRUE(dev.get_name().empty());
@@ -337,7 +337,7 @@ TEST_F(NicDeviceTest, DeviceNotSupported_WhenStatsEmpty)
         .Times(AtLeast(1))
         .WillRepeatedly(Return(std::vector<stat_entry>{}));
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.is_supported());
 }

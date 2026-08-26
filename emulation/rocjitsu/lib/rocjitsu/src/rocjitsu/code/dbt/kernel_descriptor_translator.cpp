@@ -76,7 +76,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return supports_wave_size<rdna3_5::Isa>(wf);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return supports_wave_size<rdna4::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return supports_wave_size<cdna5::Isa>(wf);
   default:
     return false;
@@ -103,7 +103,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::WF_SIZE;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::Isa::WF_SIZE;
   default:
     return 64;
@@ -130,7 +130,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::MAX_VGPRS_PER_WF;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     // gfx1250 extends each encoded VGPR operand with dynamic high-bank bits.
     // Descriptor validation must allow the complete addressable register
     // range even though its inherited RDNA base describes one 256-VGPR bank.
@@ -160,7 +160,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return HasAccVgpr<rdna3_5::Isa>;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return HasAccVgpr<rdna4::Isa>;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return HasAccVgpr<cdna5::Isa>;
   default:
     return false;
@@ -311,7 +311,7 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
-  return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
+  return !arch_descriptor_encodes_sgpr_allocation(arch);
 }
 
 [[nodiscard]] std::optional<uint32_t>
@@ -423,7 +423,7 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   // - Scratch/private-segment initialization is descriptor-driven today. If a
   //   future target needs SGPR-based scratch setup, it should be appended here
   //   and represented in KdTranslation::prologue_words, not hidden in the patcher.
-  if (arch_is_cdna(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch_is_cdna_4_or_lower(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
     append_rdna4_workgroup_grid_prologue(words, src, host_arch);
 
   return words;
@@ -437,6 +437,7 @@ void append_descriptor_error(KdTranslation &result, std::string message) {
   result.diagnostics.push_back({.severity = DiagnosticSeverity::Error,
                                 .kind = DiagnosticKind::KernelDescriptor,
                                 .guest_offset = std::nullopt,
+                                .output_offset = std::nullopt,
                                 .mnemonic = {},
                                 .message = std::move(message),
                                 .required_work = {}});
@@ -833,7 +834,7 @@ Rsrc3Layout rsrc3_layout(rj_code_arch_t arch) {
     return Rsrc3Layout::Gfx11;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return Rsrc3Layout::Gfx120;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return Rsrc3Layout::Gfx125;
   default:
     return Rsrc3Layout::Incompatible;
@@ -884,12 +885,15 @@ void KdTranslation::configure_skipped_stub() {
   prologue_words.clear();
 }
 
-std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
-    std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
-    const KernelDescriptorTranslationOptions &options) const {
+std::vector<KdTranslation>
+KernelDescriptorTranslator::translate_image(std::span<const uint8_t> image, uint64_t text_offset,
+                                            uint64_t text_size,
+                                            const KernelDescriptorTranslationOptions &options,
+                                            std::optional<size_t> text_section_index) const {
   std::vector<KdTranslation> translations;
 
-  for (KernelDescriptorInfo &kd : scan_kernel_descriptors(image, text_offset, text_size)) {
+  for (KernelDescriptorInfo &kd :
+       scan_kernel_descriptors(image, text_offset, text_size, text_section_index)) {
     translations.push_back(translate_one_descriptor(
         guest_arch_, host_arch_, kd.descriptor_file_offset, std::move(kd.kernel_name),
         kd.entry_text_offset, kd.descriptor, options));

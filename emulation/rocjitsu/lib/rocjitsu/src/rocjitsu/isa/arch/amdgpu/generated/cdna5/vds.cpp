@@ -7,7 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vds.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
-#include "util/except.h"
+#include <memory>
 
 namespace rocjitsu {
 namespace cdna5 {
@@ -31,6 +31,16 @@ DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddU32Vds>(opcode);
+}
+} // namespace detail
+
 DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
     : Vds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubU32Vds)),
@@ -49,6 +59,16 @@ DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsSubU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubU32Vds>(opcode);
+}
+} // namespace detail
 
 DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
     : Vds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -69,6 +89,16 @@ DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsRsubU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_rsub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubU32Vds>(opcode);
+}
+} // namespace detail
+
 DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
     : Vds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsIncU32Vds)),
@@ -87,6 +117,16 @@ DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsIncU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_inc_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncU32Vds>(opcode);
+}
+} // namespace detail
 
 DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
     : Vds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -107,6 +147,16 @@ DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsDecU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_dec_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecU32Vds>(opcode);
+}
+} // namespace detail
+
 DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
     : Vds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinI32Vds)),
@@ -125,6 +175,16 @@ DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinI32Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
     : Vds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -145,6 +205,16 @@ DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxI32Vds>(opcode);
+}
+} // namespace detail
+
 DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
     : Vds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinU32Vds)),
@@ -163,6 +233,16 @@ DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinU32Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
     : Vds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -183,6 +263,16 @@ DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxU32Vds>(opcode);
+}
+} // namespace detail
+
 DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
     : Vds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAndB32Vds)),
@@ -201,6 +291,16 @@ DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAndB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_and_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndB32Vds>(opcode);
+}
+} // namespace detail
 
 DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
     : Vds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -221,6 +321,16 @@ DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsOrB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_or_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrB32Vds>(opcode);
+}
+} // namespace detail
+
 DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
     : Vds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsXorB32Vds)),
@@ -239,6 +349,16 @@ DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsXorB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_xor_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorB32Vds>(opcode);
+}
+} // namespace detail
 
 DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
     : Vds("ds_mskor_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -262,6 +382,16 @@ DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMskorB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_mskor_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorB32Vds>(opcode);
+}
+} // namespace detail
+
 DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
     : Vds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB32Vds)),
@@ -278,6 +408,16 @@ DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB32Vds>(opcode);
+}
+} // namespace detail
 
 DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -299,6 +439,17 @@ DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStore2addrB32Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_2addr_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrB32Vds>(opcode);
+}
+} // namespace detail
+
 DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B32Vds)),
@@ -318,6 +469,17 @@ DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStore2addrStride64B32Vds(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_2addr_stride64_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrStride64B32Vds>(opcode);
+}
+} // namespace detail
 
 DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -341,6 +503,17 @@ DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreB32Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cmpstore_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreB32Vds>(opcode);
+}
+} // namespace detail
+
 DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
     : Vds("ds_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinNumF32Vds)),
@@ -359,6 +532,16 @@ DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinNumF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_num_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinNumF32Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
     : Vds("ds_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -379,12 +562,32 @@ DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxNumF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_num_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxNumF32Vds>(opcode);
+}
+} // namespace detail
+
 DsNopVds::DsNopVds(const MachineInst *inst)
     : Vds("ds_nop", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsNopVds)) {
   num_src_ = 0;
   num_dst_ = 0;
 }
+
+namespace detail {
+DecodeResult decodeDsNopVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_nop", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsNopVds>(opcode);
+}
+} // namespace detail
 
 DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
     : Vds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -405,6 +608,16 @@ DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddF32Vds>(opcode);
+}
+} // namespace detail
+
 DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
     : Vds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB8Vds)),
@@ -422,6 +635,16 @@ DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStoreB8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB8Vds>(opcode);
+}
+} // namespace detail
+
 DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
     : Vds("ds_store_b16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB16Vds)),
@@ -438,6 +661,16 @@ DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB16Vds>(opcode);
+}
+} // namespace detail
 
 DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -461,6 +694,16 @@ DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnU32Vds>(opcode);
+}
+} // namespace detail
+
 DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubRtnU32Vds)),
@@ -482,6 +725,16 @@ DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsSubRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubRtnU32Vds>(opcode);
+}
+} // namespace detail
 
 DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -505,6 +758,17 @@ DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsRsubRtnU32Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_rsub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubRtnU32Vds>(opcode);
+}
+} // namespace detail
+
 DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
     : Vds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsIncRtnU32Vds)),
@@ -526,6 +790,16 @@ DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsIncRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_inc_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncRtnU32Vds>(opcode);
+}
+} // namespace detail
 
 DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
     : Vds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -549,6 +823,16 @@ DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsDecRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_dec_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecRtnU32Vds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinRtnI32Vds)),
@@ -570,6 +854,16 @@ DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_rtn_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnI32Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
@@ -593,6 +887,16 @@ DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnI32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_rtn_i32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnI32Vds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinRtnU32Vds)),
@@ -614,6 +918,16 @@ DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnU32Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -637,6 +951,16 @@ DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnU32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnU32Vds>(opcode);
+}
+} // namespace detail
+
 DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
     : Vds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAndRtnB32Vds)),
@@ -658,6 +982,16 @@ DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAndRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_and_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndRtnB32Vds>(opcode);
+}
+} // namespace detail
 
 DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
     : Vds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -681,6 +1015,16 @@ DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsOrRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_or_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrRtnB32Vds>(opcode);
+}
+} // namespace detail
+
 DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
     : Vds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsXorRtnB32Vds)),
@@ -702,6 +1046,16 @@ DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsXorRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_xor_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorRtnB32Vds>(opcode);
+}
+} // namespace detail
 
 DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
     : Vds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -728,6 +1082,17 @@ DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMskorRtnB32Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_mskor_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorRtnB32Vds>(opcode);
+}
+} // namespace detail
+
 DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB32Vds)),
@@ -749,6 +1114,17 @@ DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStorexchgRtnB32Vds(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_storexchg_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchgRtnB32Vds>(opcode);
+}
+} // namespace detail
 
 DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -775,6 +1151,17 @@ DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStorexchg2addrRtnB32Vds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_storexchg_2addr_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrRtnB32Vds>(opcode);
+}
+} // namespace detail
+
 DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_stride64_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB32Vds)),
@@ -799,6 +1186,18 @@ DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const Machi
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStorexchg2addrStride64RtnB32Vds(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_storexchg_2addr_stride64_rtn_b32",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrStride64RtnB32Vds>(opcode);
+}
+} // namespace detail
 
 DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -825,6 +1224,17 @@ DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreRtnB32Vds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cmpstore_rtn_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreRtnB32Vds>(opcode);
+}
+} // namespace detail
+
 DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
     : Vds("ds_min_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinNumRtnF32Vds)),
@@ -846,6 +1256,17 @@ DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinNumRtnF32Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_num_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinNumRtnF32Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
     : Vds("ds_max_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -869,6 +1290,17 @@ DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxNumRtnF32Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_num_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxNumRtnF32Vds>(opcode);
+}
+} // namespace detail
+
 DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
     : Vds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSwizzleB32Vds)),
@@ -881,6 +1313,17 @@ DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
+
+namespace detail {
+DecodeResult decodeDsSwizzleB32Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_swizzle_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSwizzleB32Vds>(opcode);
+}
+} // namespace detail
 
 DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
     : Vds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -899,6 +1342,16 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadB32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB32Vds>(opcode);
+}
+} // namespace detail
+
 DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoad2addrB32Vds)),
@@ -915,6 +1368,17 @@ DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoad2addrB32Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_2addr_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrB32Vds>(opcode);
+}
+} // namespace detail
 
 DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -933,6 +1397,17 @@ DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoad2addrStride64B32Vds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_2addr_stride64_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrStride64B32Vds>(opcode);
+}
+} // namespace detail
+
 DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
     : Vds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadI8Vds)),
@@ -949,6 +1424,16 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadI8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_i8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8Vds>(opcode);
+}
+} // namespace detail
 
 DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
     : Vds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst),
@@ -967,6 +1452,16 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadU8Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u8", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8Vds>(opcode);
+}
+} // namespace detail
+
 DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
     : Vds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadI16Vds)),
@@ -983,6 +1478,16 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadI16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_i16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI16Vds>(opcode);
+}
+} // namespace detail
 
 DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
     : Vds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst),
@@ -1001,6 +1506,16 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadU16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16Vds>(opcode);
+}
+} // namespace detail
+
 DsConsumeVds::DsConsumeVds(const MachineInst *inst)
     : Vds("ds_consume", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsConsumeVds)),
@@ -1017,6 +1532,16 @@ DsConsumeVds::DsConsumeVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsConsumeVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_consume", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsConsumeVds>(opcode);
+}
+} // namespace detail
+
 DsAppendVds::DsAppendVds(const MachineInst *inst)
     : Vds("ds_append", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAppendVds)),
@@ -1032,6 +1557,16 @@ DsAppendVds::DsAppendVds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAppendVds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_append", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAppendVds>(opcode);
+}
+} // namespace detail
 
 DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
     : Vds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1052,6 +1587,16 @@ DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddU64Vds>(opcode);
+}
+} // namespace detail
+
 DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
     : Vds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubU64Vds)),
@@ -1070,6 +1615,16 @@ DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsSubU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubU64Vds>(opcode);
+}
+} // namespace detail
 
 DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
     : Vds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1090,6 +1645,16 @@ DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsRsubU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_rsub_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubU64Vds>(opcode);
+}
+} // namespace detail
+
 DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
     : Vds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsIncU64Vds)),
@@ -1108,6 +1673,16 @@ DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsIncU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_inc_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncU64Vds>(opcode);
+}
+} // namespace detail
 
 DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
     : Vds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1128,6 +1703,16 @@ DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsDecU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_dec_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecU64Vds>(opcode);
+}
+} // namespace detail
+
 DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
     : Vds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinI64Vds)),
@@ -1146,6 +1731,16 @@ DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinI64Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
     : Vds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1166,6 +1761,16 @@ DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxI64Vds>(opcode);
+}
+} // namespace detail
+
 DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
     : Vds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinU64Vds)),
@@ -1184,6 +1789,16 @@ DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinU64Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
     : Vds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1204,6 +1819,16 @@ DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxU64Vds>(opcode);
+}
+} // namespace detail
+
 DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
     : Vds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAndB64Vds)),
@@ -1222,6 +1847,16 @@ DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAndB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_and_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndB64Vds>(opcode);
+}
+} // namespace detail
 
 DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
     : Vds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1242,6 +1877,16 @@ DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsOrB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_or_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrB64Vds>(opcode);
+}
+} // namespace detail
+
 DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
     : Vds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsXorB64Vds)),
@@ -1260,6 +1905,16 @@ DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsXorB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_xor_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorB64Vds>(opcode);
+}
+} // namespace detail
 
 DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
     : Vds("ds_mskor_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1283,6 +1938,16 @@ DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMskorB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_mskor_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorB64Vds>(opcode);
+}
+} // namespace detail
+
 DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
     : Vds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB64Vds)),
@@ -1299,6 +1964,16 @@ DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB64Vds>(opcode);
+}
+} // namespace detail
 
 DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1320,6 +1995,17 @@ DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStore2addrB64Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_2addr_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrB64Vds>(opcode);
+}
+} // namespace detail
+
 DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B64Vds)),
@@ -1339,6 +2025,17 @@ DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStore2addrStride64B64Vds(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_2addr_stride64_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStore2addrStride64B64Vds>(opcode);
+}
+} // namespace detail
 
 DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1362,6 +2059,17 @@ DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreB64Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cmpstore_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreB64Vds>(opcode);
+}
+} // namespace detail
+
 DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
     : Vds("ds_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinNumF64Vds)),
@@ -1380,6 +2088,16 @@ DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinNumF64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_num_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinNumF64Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
     : Vds("ds_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1400,6 +2118,16 @@ DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxNumF64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_num_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxNumF64Vds>(opcode);
+}
+} // namespace detail
+
 DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
     : Vds("ds_add_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddF64Vds)),
@@ -1419,6 +2147,16 @@ DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddF64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddF64Vds>(opcode);
+}
+} // namespace detail
+
 DsAtomicAsyncBarrierArriveB64Vds::DsAtomicAsyncBarrierArriveB64Vds(const MachineInst *inst)
     : Vds("ds_atomic_async_barrier_arrive_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAtomicAsyncBarrierArriveB64Vds)),
@@ -1434,6 +2172,18 @@ DsAtomicAsyncBarrierArriveB64Vds::DsAtomicAsyncBarrierArriveB64Vds(const Machine
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAtomicAsyncBarrierArriveB64Vds(const MachineInst *opcode,
+                                                    const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_atomic_async_barrier_arrive_b64",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAtomicAsyncBarrierArriveB64Vds>(opcode);
+}
+} // namespace detail
 
 DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1457,6 +2207,16 @@ DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnU64Vds>(opcode);
+}
+} // namespace detail
+
 DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
     : Vds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubRtnU64Vds)),
@@ -1478,6 +2238,16 @@ DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsSubRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubRtnU64Vds>(opcode);
+}
+} // namespace detail
 
 DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
     : Vds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1501,6 +2271,17 @@ DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsRsubRtnU64Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_rsub_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsRsubRtnU64Vds>(opcode);
+}
+} // namespace detail
+
 DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
     : Vds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsIncRtnU64Vds)),
@@ -1522,6 +2303,16 @@ DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsIncRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_inc_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsIncRtnU64Vds>(opcode);
+}
+} // namespace detail
 
 DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
     : Vds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1545,6 +2336,16 @@ DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsDecRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_dec_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsDecRtnU64Vds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinRtnI64Vds)),
@@ -1566,6 +2367,16 @@ DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_rtn_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnI64Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1589,6 +2400,16 @@ DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnI64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_rtn_i64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnI64Vds>(opcode);
+}
+} // namespace detail
+
 DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinRtnU64Vds)),
@@ -1610,6 +2431,16 @@ DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinRtnU64Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1633,6 +2464,16 @@ DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxRtnU64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_rtn_u64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxRtnU64Vds>(opcode);
+}
+} // namespace detail
+
 DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
     : Vds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAndRtnB64Vds)),
@@ -1654,6 +2495,16 @@ DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAndRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_and_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAndRtnB64Vds>(opcode);
+}
+} // namespace detail
 
 DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
     : Vds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1677,6 +2528,16 @@ DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsOrRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_or_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsOrRtnB64Vds>(opcode);
+}
+} // namespace detail
+
 DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
     : Vds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsXorRtnB64Vds)),
@@ -1698,6 +2559,16 @@ DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsXorRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_xor_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsXorRtnB64Vds>(opcode);
+}
+} // namespace detail
 
 DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
     : Vds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1724,6 +2595,17 @@ DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMskorRtnB64Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_mskor_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMskorRtnB64Vds>(opcode);
+}
+} // namespace detail
+
 DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB64Vds)),
@@ -1745,6 +2627,17 @@ DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStorexchgRtnB64Vds(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_storexchg_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchgRtnB64Vds>(opcode);
+}
+} // namespace detail
 
 DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1771,6 +2664,17 @@ DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStorexchg2addrRtnB64Vds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_storexchg_2addr_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrRtnB64Vds>(opcode);
+}
+} // namespace detail
+
 DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_stride64_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB64Vds)),
@@ -1795,6 +2699,18 @@ DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const Machi
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStorexchg2addrStride64RtnB64Vds(const MachineInst *opcode,
+                                                     const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_storexchg_2addr_stride64_rtn_b64",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStorexchg2addrStride64RtnB64Vds>(opcode);
+}
+} // namespace detail
 
 DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1821,6 +2737,17 @@ DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCmpstoreRtnB64Vds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cmpstore_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCmpstoreRtnB64Vds>(opcode);
+}
+} // namespace detail
+
 DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
     : Vds("ds_min_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinNumRtnF64Vds)),
@@ -1842,6 +2769,17 @@ DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsMinNumRtnF64Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_min_num_rtn_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMinNumRtnF64Vds>(opcode);
+}
+} // namespace detail
 
 DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
     : Vds("ds_max_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1865,6 +2803,17 @@ DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsMaxNumRtnF64Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_max_num_rtn_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsMaxNumRtnF64Vds>(opcode);
+}
+} // namespace detail
+
 DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddRtnF64Vds)),
@@ -1886,6 +2835,16 @@ DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsAddRtnF64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_rtn_f64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnF64Vds>(opcode);
+}
+} // namespace detail
 
 DsAtomicBarrierArriveRtnB64Vds::DsAtomicBarrierArriveRtnB64Vds(const MachineInst *inst)
     : Vds("ds_atomic_barrier_arrive_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1909,6 +2868,18 @@ DsAtomicBarrierArriveRtnB64Vds::DsAtomicBarrierArriveRtnB64Vds(const MachineInst
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAtomicBarrierArriveRtnB64Vds(const MachineInst *opcode,
+                                                  const DecodeErrorEmitter &emit_error) {
+  Result validation =
+      Vds::validate_encoding("ds_atomic_barrier_arrive_rtn_b64",
+                             reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAtomicBarrierArriveRtnB64Vds>(opcode);
+}
+} // namespace detail
+
 DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
     : Vds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadB64Vds)),
@@ -1925,6 +2896,16 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadB64Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB64Vds>(opcode);
+}
+} // namespace detail
 
 DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -1943,6 +2924,17 @@ DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoad2addrB64Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_2addr_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrB64Vds>(opcode);
+}
+} // namespace detail
+
 DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoad2addrStride64B64Vds)),
@@ -1959,6 +2951,17 @@ DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoad2addrStride64B64Vds(const MachineInst *opcode,
+                                             const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_2addr_stride64_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoad2addrStride64B64Vds>(opcode);
+}
+} // namespace detail
 
 DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -1982,6 +2985,16 @@ DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsAddRtnF32Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_add_rtn_f32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsAddRtnF32Vds>(opcode);
+}
+} // namespace detail
+
 DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
     : Vds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCondxchg32RtnB64Vds)),
@@ -2004,6 +3017,17 @@ DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCondxchg32RtnB64Vds(const MachineInst *opcode,
+                                         const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_condxchg32_rtn_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCondxchg32RtnB64Vds>(opcode);
+}
+} // namespace detail
+
 DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
     : Vds("ds_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCondSubU32Vds)),
@@ -2022,6 +3046,17 @@ DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsCondSubU32Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cond_sub_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCondSubU32Vds>(opcode);
+}
+} // namespace detail
 
 DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
     : Vds("ds_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2042,6 +3077,17 @@ DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsSubClampU32Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_clamp_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubClampU32Vds>(opcode);
+}
+} // namespace detail
+
 DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsPkAddF16Vds)),
@@ -2060,6 +3106,16 @@ DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsPkAddF16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_pk_add_f16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPkAddF16Vds>(opcode);
+}
+} // namespace detail
 
 DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2080,6 +3136,16 @@ DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsPkAddBf16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_pk_add_bf16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPkAddBf16Vds>(opcode);
+}
+} // namespace detail
+
 DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB8D16HiVds)),
@@ -2096,6 +3162,17 @@ DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB8D16HiVds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB8D16HiVds>(opcode);
+}
+} // namespace detail
 
 DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -2114,6 +3191,17 @@ DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStoreB16D16HiVds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b16_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB16D16HiVds>(opcode);
+}
+} // namespace detail
+
 DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
     : Vds("ds_load_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadU8D16Vds)),
@@ -2131,18 +3219,15 @@ DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadU8D16Vds::implicit_uses(RegisterSet &uses) const {
-  Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeDsLoadU8D16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u8_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8D16Vds>(opcode);
 }
-
-void DsLoadU8D16Vds::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vds::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -2161,18 +3246,16 @@ DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadU8D16HiVds::implicit_uses(RegisterSet &uses) const {
-  Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeDsLoadU8D16HiVds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU8D16HiVds>(opcode);
 }
-
-void DsLoadU8D16HiVds::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vds::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
     : Vds("ds_load_i8_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2191,18 +3274,15 @@ DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadI8D16Vds::implicit_uses(RegisterSet &uses) const {
-  Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeDsLoadI8D16Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_i8_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8D16Vds>(opcode);
 }
-
-void DsLoadI8D16Vds::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vds::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -2221,18 +3301,16 @@ DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadI8D16HiVds::implicit_uses(RegisterSet &uses) const {
-  Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeDsLoadI8D16HiVds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_i8_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadI8D16HiVds>(opcode);
 }
-
-void DsLoadI8D16HiVds::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vds::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
     : Vds("ds_load_u16_d16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2251,18 +3329,16 @@ DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadU16D16Vds::implicit_uses(RegisterSet &uses) const {
-  Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeDsLoadU16D16Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u16_d16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16D16Vds>(opcode);
 }
-
-void DsLoadU16D16Vds::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vds::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
@@ -2281,18 +3357,16 @@ DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
-void DsLoadU16D16HiVds::implicit_uses(RegisterSet &uses) const {
-  Vds::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
-    uses.expand(*r);
+namespace detail {
+DecodeResult decodeDsLoadU16D16HiVds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_u16_d16_hi", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadU16D16HiVds>(opcode);
 }
-
-void DsLoadU16D16HiVds::implicit_use_operands(
-    std::vector<const ::rocjitsu::Operand *> &operands) const {
-  Vds::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
-    operands.push_back(&vdst);
-}
+} // namespace detail
 
 DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_cond_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2316,6 +3390,17 @@ DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsCondSubRtnU32Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_cond_sub_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsCondSubRtnU32Vds>(opcode);
+}
+} // namespace detail
+
 DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
     : Vds("ds_sub_clamp_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubClampRtnU32Vds)),
@@ -2337,6 +3422,17 @@ DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsSubClampRtnU32Vds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_sub_clamp_rtn_u32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsSubClampRtnU32Vds>(opcode);
+}
+} // namespace detail
 
 DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_rtn_f16", reinterpret_cast<const OpEncoding *>(inst),
@@ -2360,6 +3456,17 @@ DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsPkAddRtnF16Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_pk_add_rtn_f16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPkAddRtnF16Vds>(opcode);
+}
+} // namespace detail
+
 DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_rtn_bf16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsPkAddRtnBf16Vds)),
@@ -2382,6 +3489,17 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsPkAddRtnBf16Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_pk_add_rtn_bf16", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPkAddRtnBf16Vds>(opcode);
+}
+} // namespace detail
+
 DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreAddtidB32Vds)),
@@ -2397,6 +3515,17 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreAddtidB32Vds(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_addtid_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreAddtidB32Vds>(opcode);
+}
+} // namespace detail
 
 DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2414,6 +3543,17 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadAddtidB32Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_addtid_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadAddtidB32Vds>(opcode);
+}
+} // namespace detail
+
 DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
     : Vds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsPermuteB32Vds)),
@@ -2429,6 +3569,17 @@ DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
+
+namespace detail {
+DecodeResult decodeDsPermuteB32Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_permute_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsPermuteB32Vds>(opcode);
+}
+} // namespace detail
 
 DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
     : Vds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst),
@@ -2446,6 +3597,17 @@ DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
+namespace detail {
+DecodeResult decodeDsBpermuteB32Vds(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_bpermute_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBpermuteB32Vds>(opcode);
+}
+} // namespace detail
+
 DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
     : Vds("ds_bpermute_fi_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsBpermuteFiB32Vds)),
@@ -2461,6 +3623,17 @@ DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
+
+namespace detail {
+DecodeResult decodeDsBpermuteFiB32Vds(const MachineInst *opcode,
+                                      const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_bpermute_fi_b32", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsBpermuteFiB32Vds>(opcode);
+}
+} // namespace detail
 
 DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
     : Vds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -2479,6 +3652,16 @@ DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsStoreB96Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b96", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB96Vds>(opcode);
+}
+} // namespace detail
+
 DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
     : Vds("ds_store_b128", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB128Vds)),
@@ -2495,6 +3678,16 @@ DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsStoreB128Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_store_b128", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsStoreB128Vds>(opcode);
+}
+} // namespace detail
 
 DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
     : Vds("ds_load_tr4_b64", reinterpret_cast<const OpEncoding *>(inst),
@@ -2513,6 +3706,17 @@ DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadTr4B64Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_tr4_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadTr4B64Vds>(opcode);
+}
+} // namespace detail
+
 DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
     : Vds("ds_load_tr6_b96", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadTr6B96Vds)),
@@ -2529,6 +3733,17 @@ DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadTr6B96Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_tr6_b96", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadTr6B96Vds>(opcode);
+}
+} // namespace detail
 
 DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
     : Vds("ds_load_tr16_b128", reinterpret_cast<const OpEncoding *>(inst),
@@ -2547,6 +3762,17 @@ DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadTr16B128Vds(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_tr16_b128", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadTr16B128Vds>(opcode);
+}
+} // namespace detail
+
 DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
     : Vds("ds_load_tr8_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadTr8B64Vds)),
@@ -2563,6 +3789,17 @@ DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadTr8B64Vds(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_tr8_b64", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadTr8B64Vds>(opcode);
+}
+} // namespace detail
 
 DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
     : Vds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst),
@@ -2581,6 +3818,16 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
   flags_ |= MEMORY_OP;
 }
 
+namespace detail {
+DecodeResult decodeDsLoadB96Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_b96", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB96Vds>(opcode);
+}
+} // namespace detail
+
 DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
     : Vds("ds_load_b128", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadB128Vds)),
@@ -2597,6 +3844,16 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_OP;
 }
+
+namespace detail {
+DecodeResult decodeDsLoadB128Vds(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Vds::validate_encoding(
+      "ds_load_b128", reinterpret_cast<const Vds::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<DsLoadB128Vds>(opcode);
+}
+} // namespace detail
 
 } // namespace cdna5
 } // namespace rocjitsu

@@ -426,7 +426,6 @@ struct tmp_file
 
     bool open(int, int);
     bool open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
-    bool fopen(const char* = "r+");
     bool flush();
     bool close();
     bool remove();
@@ -435,7 +434,6 @@ struct tmp_file
 
     std::string  filename = {};
     std::fstream stream   = {};
-    FILE*        file     = nullptr;
     int          fd       = -1;
 
 private:

@@ -20,7 +20,7 @@ Panel Config:
 
   - metric_table:
       id: 1001
-      title: "TXD Utilization"
+      title: TXD Utilization
       header:
         metric: Metric
         avg: Avg
@@ -29,39 +29,39 @@ Panel Config:
         unit: Unit
       metric:
         Utilization:
-          avg: AVG((100 * TX_VCD_TD_BUSY_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          min: MIN((100 * TX_VCD_TD_BUSY_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          max: MAX((100 * TX_VCD_TD_BUSY_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          avg: 100 * SUM(TX_VCD_TD_BUSY_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+          min: 100 * MIN(TX_VCD_TD_BUSY_sum / TX_VMW_VMW_BUSY_sum)
+          max: 100 * MAX(TX_VCD_TD_BUSY_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         TXD Stalled by GL0 Cache / LDS:
-          avg: AVG((100 * TX_VCD_VMW_DATA_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          min: MIN((100 * TX_VCD_VMW_DATA_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          max: MAX((100 * TX_VCD_VMW_DATA_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          avg: 100 * SUM(TX_VCD_VMW_DATA_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+          min: 100 * MIN(TX_VCD_VMW_DATA_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: 100 * MAX(TX_VCD_VMW_DATA_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         TXD Output Stalled by Shader:
-          avg: AVG((100 * TX_VCD_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          min: MIN((100 * TX_VCD_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          max: MAX((100 * TX_VCD_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          avg: 100 * SUM(TX_VCD_OUTPUT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+          min: 100 * MIN(TX_VCD_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: 100 * MAX(TX_VCD_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         TXD Output Stalled by SPI Write to Shader:
-          avg: AVG((100 * TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          min: MIN((100 * TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          max: MAX((100 * TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          avg: 100 * SUM(TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+          min: 100 * MIN(TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum / TX_VMW_VMW_BUSY_sum)
+          max: 100 * MAX(TX_VCD_LDS_SPI_VGPR_WRITE_STALL_TD_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         TXD-Shader Bus Util - LDS Return:
-          avg: AVG((100 * TX_VCD_LDS_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          min: MIN((100 * TX_VCD_LDS_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          max: MAX((100 * TX_VCD_LDS_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          avg: 100 * SUM(TX_VCD_LDS_VGPRS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+          min: 100 * MIN(TX_VCD_LDS_VGPRS_sum / TX_VMW_VMW_BUSY_sum)
+          max: 100 * MAX(TX_VCD_LDS_VGPRS_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         TXD-Shader Bus Util - GL0 Return:
-          avg: AVG((100 * TX_VCD_VC_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          min: MIN((100 * TX_VCD_VC_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          max: MAX((100 * TX_VCD_VC_VGPRS_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          avg: 100 * SUM(TX_VCD_VC_VGPRS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+          min: 100 * MIN(TX_VCD_VC_VGPRS_sum / TX_VMW_VMW_BUSY_sum)
+          max: 100 * MAX(TX_VCD_VC_VGPRS_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Cache Return Stalled by TXD:
-          avg: AVG((100 * TX_VCD_VC_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          min: MIN((100 * TX_VCD_VC_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
-          max: MAX((100 * TX_VCD_VC_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum) if (TX_VMW_VMW_BUSY_sum != 0) else None)
+          avg: 100 * SUM(TX_VCD_VC_OUTPUT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+          min: 100 * MIN(TX_VCD_VC_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: 100 * MAX(TX_VCD_VC_OUTPUT_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
 
   metrics_description:

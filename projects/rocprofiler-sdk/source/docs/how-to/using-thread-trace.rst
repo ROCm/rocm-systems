@@ -66,6 +66,8 @@ The following table lists the parameters relevant to thread tracing:
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-serialize-all           | Bool    |         | False     | If set to "True", turns on serialization for untraced kernels|
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-no-detail               | Bool    |         | False     | Collects occupancy data without instruction-level detail.    |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-perfcounter-ctrl        | Integer | 1 - 32  | 2~8       | Available only in gfx9. Streams SQ performance counters to   |
 |                             |         |         |           | the thread trace buffer in the given relative period. As     |
 |                             |         |         |           | this uses high bandwidth, a value too low can cause or worsen|

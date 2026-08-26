@@ -427,8 +427,17 @@ namespace RcclUnitTesting
       {
         CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
         CHECK_CALL(collArg.AllocateMem(inPlace, useManagedMem, userRegistered));
-        if (collArg.userRegistered && (collArg.funcType == ncclCollSend || collArg.funcType == ncclCollRecv))
-          CHILD_NCCL_CALL(ncclCommRegister(this->comms[localRank], collArg.inputGpu.ptr, collArg.numInputBytesAllocated, &(collArg.commRegHandle)),"ncclCommRegister");
+        if (collArg.userRegistered && collArg.funcType == ncclCollSend) {
+          CHILD_NCCL_CALL(ncclCommRegister(this->comms[localRank], collArg.inputGpu.ptr,
+                                           collArg.numInputBytesAllocated, &(collArg.commRegHandle)),
+                          "ncclCommRegister");
+        } else if (collArg.userRegistered && collArg.funcType == ncclCollRecv) {
+          // ncclRecv writes outputGpu; registering inputGpu leaves the recv buffer
+          // unregistered and SIMPLE/IPC can write into the wrong mapping (zeros + fault).
+          CHILD_NCCL_CALL(ncclCommRegister(this->comms[localRank], collArg.outputGpu.ptr,
+                                           collArg.numOutputBytesAllocated, &(collArg.commRegHandle)),
+                          "ncclCommRegister");
+        }
         if (this->verbose) TEST_INFO("Rank %d on child %d allocates memory for collective %d in group %d on device %d (%s,%s,%s) Input: %p Output %p",
                                 globalRank, this->childId, collIdx, groupId, this->deviceIds[localRank],
                                 inPlace ? "in-place" : "out-of-place",
@@ -843,6 +852,13 @@ namespace RcclUnitTesting
           CHECK_HIP(hipMemcpy(collArg.outputCpu.ptr, collArg.outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
           printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Output",
                  collArg.outputCpu.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
+
+          // Device-data mode builds the reference in expectedGpu; the host 'expected'
+          // buffer is unused there, so copy it back before printing.
+          if (collArg.expectedOnDevice)
+          {
+            CHECK_HIP(hipMemcpy(collArg.expected.ptr, collArg.expectedGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
+          }
 
           printf("[ DEBUG    ] Rank %02d Group %d Coll %d %-10s: %s\n", collArg.globalRank, groupId, collId, "Expected",
                  collArg.expected.ToString(collArg.dataType, numOutputElementsToPrint).c_str());
