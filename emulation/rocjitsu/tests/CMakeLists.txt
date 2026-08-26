@@ -136,12 +136,14 @@ if(RJ_INSTALL_TESTS)
     # an installed CTest fragment like rocjitsu_tests.cmake.
     function(rj_install_gtest_cases target)
         set(_fragment "${CMAKE_CURRENT_BINARY_DIR}/install/${target}.cmake")
+        cmake_parse_arguments(ARG "" "TEST_FILTER" "" ${ARGN})
         add_custom_command(
             OUTPUT "${_fragment}"
             COMMAND
                 ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:${target}>"
                 "-DINSTALLED_EXECUTABLE=bin/${target}"
-                "-DOUTPUT_FILE=${_fragment}" -P "${RJ_INSTALL_GTEST_GENERATOR}"
+                "-DTEST_FILTER=${ARG_TEST_FILTER}" "-DOUTPUT_FILE=${_fragment}"
+                -P "${RJ_INSTALL_GTEST_GENERATOR}"
             DEPENDS ${target} "${RJ_INSTALL_GTEST_GENERATOR}"
             COMMENT "Generating installed CTest entries for ${target}"
             VERBATIM
@@ -310,15 +312,29 @@ endfunction()
 # and installed CTest tree. Build-tree discovery delegates to
 # gtest_discover_tests(); installed discovery delegates to rj_install_gtest_cases
 # so parameterized TEST_P cases are expanded from the built executable.
+#
+# TEST_FILTER reaches BOTH paths. It used to reach only the build tree, while the
+# installed generator carried its own hard-coded copy, so a case excluded here to be
+# registered manually was still discovered on the installed side and ended up
+# registered twice under one name.
 function(rj_add_gtest_tests target)
+    cmake_parse_arguments(ARG "" "TEST_FILTER" "" ${ARGN})
     gtest_discover_tests(${target} ${ARGN})
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(${target})
-        rj_install_gtest_cases(${target})
+        rj_install_gtest_cases(${target} TEST_FILTER "${ARG_TEST_FILTER}")
     endif()
 endfunction()
 
 # --- Unit / integration test suite ---
+
+add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
+set_tests_properties(
+    RocjitsuVersion
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "rocjitsu ${PROJECT_VERSION}[\r\n]+git revision: .+[\r\n]+git commit: .+"
+)
 
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
@@ -404,6 +420,7 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     xcd_distribution_test.cpp
+    xcd_shard_test.cpp
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
@@ -411,7 +428,10 @@ add_executable(
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
     cdna5_tensor_dma_test.cpp
+    lds_test.cpp
     l2_cache_test.cpp
+    instruction_cache_test.cpp
+    scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
     simdojo_sim_test.cpp
     partitioning_test.cpp
@@ -511,6 +531,7 @@ add_executable(
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_int_simd_correctness_test.cpp
     simd_correctness/vop3p_pk_binary_fp16_simd_correctness_test.cpp
+    simd_correctness/vop3p_pk_inline_constant_correctness_test.cpp
     simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
@@ -576,10 +597,12 @@ endif()
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# is registered separately so CTest can bound a deadlocked child process.
+# and the concurrent-close wait test are registered separately so CTest can
+# bound a deadlocked child process.
 rj_add_gtest_tests(
     rocjitsu_tests
-    TEST_FILTER "-*Benchmark*:*RequestExitWakesAllPartitions*"
+    TEST_FILTER
+        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*"
 )
 
 # RequestExitWakesAllPartitions may require several runs to show regression
@@ -597,6 +620,22 @@ rj_add_test(
         "bin/rocjitsu_tests"
         "--gtest_filter=TerminationTest.RequestExitWakesAllPartitions"
         "--gtest_repeat=30"
+)
+
+# DispatchedWaitSurvivesAConcurrentFinalClose races an indefinite WAIT_EVENTS
+# against a final close. Its in-test recovery wake bounds a close that blocks
+# while releasing the driver mutex, but nothing in-process can bound one that
+# blocks while HOLDING it -- releasing the wait's lease needs that same mutex.
+# CTest is the only backstop there, so register it with an explicit timeout.
+rj_add_test(
+    NAME "SimulatedKfdTest.DispatchedWaitSurvivesAConcurrentFinalClose"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=SimulatedKfdTest.DispatchedWaitSurvivesAConcurrentFinalClose"
+    TIMEOUT 30
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=SimulatedKfdTest.DispatchedWaitSurvivesAConcurrentFinalClose"
 )
 
 # Exercise the Linux-only model ISA contract in a decoder-only final link.
@@ -1094,22 +1133,22 @@ rj_add_test(
 )
 if(RJ_HAS_GFX1201_GPU)
     add_test(
-        NAME "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
+        NAME
+            "GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact"
         COMMAND
             ${RJ_CLI} --config
             ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
             $<TARGET_FILE:guest_kfd_test>
-            --gtest_filter=GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay
+            --gtest_filter=GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
     add_test(
-        NAME
-            "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
+        NAME "GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver"
         COMMAND
             ${RJ_CLI} --config
             ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
             $<TARGET_FILE:guest_kfd_test>
-            --gtest_filter=GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen
+            --gtest_filter=GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
     add_test(
@@ -1149,8 +1188,8 @@ if(RJ_HAS_GFX1201_GPU)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
     set_tests_properties(
-        "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
-        "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
+        "GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact"
+        "GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver"
         "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
         "GuestKfdLifecycleTest.ReopensAfterLastClose"
         "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
@@ -1161,8 +1200,8 @@ if(RJ_HAS_GFX1201_GPU)
         _guest_kfd_test
         IN
         ITEMS
-            "GuestKfdMultiprocessTest.ForkedChildrenDoNotRemoveParentOverlay"
-            "GuestKfdMultiprocessTest.ForkedChildDropsInheritedGuestDriverBeforeReopen"
+            "GuestKfdMultiprocessTest.ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact"
+            "GuestKfdMultiprocessTest.ForkedChildCannotUseInheritedGuestDriver"
             "GuestKfdConcurrencyTest.ConcurrentOpenIoctlAndSysfsRedirect"
             "GuestKfdLifecycleTest.ReopensAfterLastClose"
             "GuestKfdMemoryTest.GuestAllocationMmapOffsetIsRejected"
@@ -1443,6 +1482,24 @@ rj_add_interposer_test_suite(
 )
 
 rj_add_interposer_test_suite(
+    InterposerForkTest
+    ChildRefusesGpuEndpointsBeforeExec
+    ChildRefusesEveryGpuEndpointSpelling
+    ChildRefusesAnEmulatedEndpointTheHostDoesNotHave
+    ChildFailsClosedOnAnUnclassifiablePath
+    ChildClassifiesGpuEndpointsByIdentityNotName
+    AppDescriptorCarriesNoRealHardwareAuthority
+    ChildRefusesOperationsOnInheritedRealGpuDescriptors
+    ChildCannotLaunderInheritedGpuFdAcrossExec
+    ChildRefusesMmap64OnInheritedGpuFd
+    ChildRefusesDup3OnInheritedGpuFd
+    ChildFopenPreservesLibcModeSemantics
+    MultithreadedForkExecAlwaysReachesExec
+    SystemAndPopenWorkFromAMultithreadedParent
+    PosixSpawnFromAMultithreadedParent
+)
+
+rj_add_interposer_test_suite(
     InterposerGemTest
     GemNamespaceIsPrivateButSharedByDuplicates
     IndependentDrmFilesRejectOverlappingMappings
@@ -1469,15 +1526,6 @@ set(_rj_interposer_syncobj_tests
     ConcurrentVmUpdatesShareTimeline
     OutOfOrderTimelinePointPreservesWatermark
 )
-# TSan cannot start new threads after a multithreaded fork. This regression
-# intentionally exercises inherited interposer state in that unsupported child,
-# so retain it for regular and ASan builds and omit it from TSan configurations.
-if(NOT RJ_ENABLE_TSAN)
-    list(
-        APPEND _rj_interposer_syncobj_tests
-        ForkedChildReinitializesTimelineFutexState
-    )
-endif()
 rj_add_interposer_test_suite(
     InterposerSyncobjTest
     ${_rj_interposer_syncobj_tests}
