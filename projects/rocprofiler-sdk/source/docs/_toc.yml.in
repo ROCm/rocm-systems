@@ -118,6 +118,8 @@ subtrees:
           title: Concurrency and isolation
         - file: conceptual/kernel_replay/kernel_replay_memory_snapshot
           title: Memory snapshot and restore
+        - file: conceptual/kernel_replay/kernel_replay_multi_service
+          title: Replay with services other than counters
         - file: conceptual/kernel_replay/kernel_replay_callback_api_design
           title: Design history
   - caption: License

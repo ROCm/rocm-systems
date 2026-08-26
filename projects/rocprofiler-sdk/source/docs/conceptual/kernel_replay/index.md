@@ -72,3 +72,7 @@ same domain for timing, PC sampling, or thread trace.
 - **[Callback tracing API design](kernel_replay_callback_api_design.md)** — the design rationale and
   history behind the callback API. Read the pages above for current behavior; this one records how
   the design got there and what remains open.
+- **[Replay with services other than counters](kernel_replay_multi_service.md)** — why
+  `rocprofv3 --kernel-replay-beta-enabled` collects counters only and rejects ATT, PC sampling and
+  SPM; what the SDK already supports for each; and what the remaining work is, separating the
+  integration work (ATT, SPM) from the hardware question (PC sampling).
