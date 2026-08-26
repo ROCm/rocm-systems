@@ -94,6 +94,10 @@ struct FakeNet {
 
     ncclResult_t testReq(void* request, int* done) {
         ++testCalls;
+        // A real plugin dereferences the handle; NULL means the progress code
+        // dropped its request-NULL skip (e.g. in the group-completion loop),
+        // which would fault or double-count in production. Demand a live handle.
+        EXPECT_NE(request, nullptr) << "test() called with a NULL request handle";
         auto* r = static_cast<FakeReq*>(request);
         *done = (r != nullptr && r->completed) ? 1 : 0;
         if (*done) {
