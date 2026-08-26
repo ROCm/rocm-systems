@@ -139,8 +139,7 @@ TEST(ConSanMoi, SampledEngineInventoriesCodeObjectWithoutModification) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
-  EXPECT_EQ(result.flavor, ConSanFlavor::Moi);
-  EXPECT_EQ(result.moi_engine, ConSanMoiEngine::Sampled);
+  EXPECT_EQ(result.observation_plan.engine, ConSanCapabilityEngine::Sampled);
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_TRUE(result.program_inventory.kernels().front().decoded);
@@ -998,7 +997,7 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   EXPECT_EQ(auto_plan.layout.sampled_sync_metadata_capacity, 9u);
   EXPECT_EQ(auto_plan.layout.sampled_pending_acquire_capacity,
             9u * kConSanMoiSampledPendingAcquireOwnerBankCount);
-  EXPECT_EQ(result.moi_engine, ConSanMoiEngine::Sampled);
+  EXPECT_EQ(result.observation_plan.engine, ConSanCapabilityEngine::Sampled);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);

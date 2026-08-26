@@ -246,8 +246,6 @@ struct ConSanResult {
   ConSanBranchOnlyReservoirTelemetry lds_relay_reservoir_telemetry;
   ConSanPlanningWorkTelemetry planning_work_telemetry;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
-  ConSanFlavor flavor = ConSanFlavor::None;
-  ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   std::optional<uint16_t> resolved_moi_workgroup_key_vgpr;

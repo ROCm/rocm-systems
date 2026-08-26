@@ -355,8 +355,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanResult result;
-  result.flavor = options.flavor;
-  result.moi_engine = options.moi_engine;
   result.mutation.fault.requested = requested_fault_mutation_count(options);
   ProgramInventoryBuilder inventory_builder(code_object_bytes);
   result.program_inventory = inventory_builder.view();

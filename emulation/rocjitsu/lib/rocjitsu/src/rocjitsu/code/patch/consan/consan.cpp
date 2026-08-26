@@ -280,11 +280,15 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
-  const ConSanMoiEngine inventory_engine = inventory.moi_engine;
   try {
     options.patched_image_growth_input_bytes = code_object_bytes.size();
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
+    if (inventory.observation_plan.engine !=
+        consan_capability_engine(ConSanFlavor::Moi, options.moi_engine)) {
+      inventory.errors.emplace_back(
+          "ConSan MOI inventory retry does not match the requested engine");
+    }
     const ConSanCodeObjectId &inventory_id = inventory.program_inventory.code_object_id();
     if (inventory_id.byte_size != code_object_bytes.size())
       inventory.errors.emplace_back(
@@ -293,9 +297,6 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the original code-object bytes");
     }
-    if (inventory.flavor != ConSanFlavor::Moi || inventory.moi_engine != options.moi_engine)
-      inventory.errors.emplace_back(
-          "ConSan MOI inventory retry does not match the requested engine");
     if (inventory.modified || !inventory.elf_bytes.empty() || !inventory.patches.empty() ||
         inventory.mutation.fault.applied != 0u || inventory.mutation.perturbation.applied != 0u ||
         !inventory.fault_plans.empty() || !inventory.perturbation_plans.empty()) {
@@ -364,15 +365,11 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (const std::exception &error) {
     ConSanResult result;
-    result.flavor = ConSanFlavor::Moi;
-    result.moi_engine = inventory_engine;
     result.errors.emplace_back(std::string("ConSan MOI inventory retry threw an exception: ") +
                                error.what());
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (...) {
     ConSanResult result;
-    result.flavor = ConSanFlavor::Moi;
-    result.moi_engine = inventory_engine;
     result.errors.emplace_back("ConSan MOI inventory retry threw a non-standard exception");
     return finalize_consan_result(std::move(result), code_object_bytes);
   }
@@ -392,14 +389,10 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
     return result;
   } catch (const std::exception &error) {
     ConSanResult result;
-    result.flavor = options.flavor;
-    result.moi_engine = options.moi_engine;
     result.errors.emplace_back(std::string("ConSan transform threw an exception: ") + error.what());
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (...) {
     ConSanResult result;
-    result.flavor = options.flavor;
-    result.moi_engine = options.moi_engine;
     result.errors.emplace_back("ConSan transform threw a non-standard exception");
     return finalize_consan_result(std::move(result), code_object_bytes);
   }

@@ -350,8 +350,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ASSERT_TRUE(coverage.set_lowering_outcome({1u}, ConSanLoweringOutcomeKind::Instrumented));
 
   ConSanResult mechanism;
-  mechanism.flavor = ConSanFlavor::Moi;
-  mechanism.moi_engine = ConSanMoiEngine::RecordReplay;
   mechanism.program_inventory = inventory;
   mechanism.observation_plan = plan;
   mechanism.coverage_ledger = coverage;

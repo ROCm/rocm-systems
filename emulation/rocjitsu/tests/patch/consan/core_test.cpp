@@ -1014,7 +1014,6 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
       make_rdna4_lds_code_object(text_words, "many_disjoint_patch_ranges");
 
   ConSanResult result;
-  result.flavor = ConSanFlavor::SuperCollider;
   result.modified = true;
   result.elf_bytes = bytes;
   AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());

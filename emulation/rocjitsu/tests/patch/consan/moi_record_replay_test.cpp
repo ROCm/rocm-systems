@@ -59,8 +59,7 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified);
-  EXPECT_EQ(result.flavor, ConSanFlavor::Moi);
-  EXPECT_EQ(result.moi_engine, ConSanMoiEngine::RecordReplay);
+  EXPECT_EQ(result.observation_plan.engine, ConSanCapabilityEngine::RecordReplay);
   EXPECT_TRUE(result.elf_bytes.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
@@ -594,7 +593,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   expect_invalid(pristine, wrong_bytes, "code-object bytes");
 
   ConSanResult wrong_engine = pristine;
-  wrong_engine.moi_engine = ConSanMoiEngine::Sampled;
+  wrong_engine.observation_plan.engine = ConSanCapabilityEngine::Sampled;
   expect_invalid(std::move(wrong_engine), bytes, "requested engine");
 
   ConSanResult wrong_target = pristine;

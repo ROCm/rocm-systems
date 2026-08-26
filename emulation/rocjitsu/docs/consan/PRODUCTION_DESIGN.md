@@ -3355,6 +3355,32 @@ analysis completed.
   all 194 hook tests pass; and all 2,878 simulator-device tests pass in 60.74
   seconds of wall time. E2E validation remains outside this work.
 
+### Slice 5E: delete mirrored transform-mode identity
+
+- **Authoritative owners:** `ConSanRequest` remains the sole owner of requested
+  flavor and MOI engine. Once semantic policy succeeds,
+  `ConSanObservationPlan::engine` is the immutable identity shared by its
+  decisions, intents, coverage ledger, evidence requirements, and retry
+  validation.
+- **Completed deletion:** The mutable `flavor` and `moi_engine` mirrors are gone
+  from `ConSanResult`, along with every production and synthetic-fixture write.
+  Exception paths no longer manufacture mode identity after a failed
+  transform. Raw retry now checks the requested engine against the retained
+  observation plan instead of comparing two mutable legacy enums.
+- **Contract coverage:** The Record/Replay, Sampled, and InlineShadow inventory
+  tests assert the selected observation-plan engine. Retry still rejects an
+  engine mismatch, but the negative test now corrupts the authoritative plan
+  identity. Pipeline publication and HSA-hook fixtures continue to cover
+  request-to-result behavior without populating deleted mirrors.
+- **Deletion result:** Production source is 13 net lines smaller and source plus
+  tests is 34 net lines smaller. Each raw result also loses the two redundant
+  enum fields.
+- **Completed checked-in gate:** All 25 focused inventory and retry tests pass.
+  The complete host gate passes 1,509 tests with the two expected
+  benchmark-object skips; all 194 hook tests pass; and all 2,878
+  simulator-device tests pass in 66.85 seconds of wall time. E2E validation
+  remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

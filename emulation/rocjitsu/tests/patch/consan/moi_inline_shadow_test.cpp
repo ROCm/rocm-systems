@@ -53,8 +53,7 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.flavor, ConSanFlavor::Moi);
-  EXPECT_EQ(result.moi_engine, ConSanMoiEngine::InlineShadow);
+  EXPECT_EQ(result.observation_plan.engine, ConSanCapabilityEngine::InlineShadow);
   ASSERT_FALSE(result.elf_bytes.empty());
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiExactShadowStore);

@@ -1029,8 +1029,6 @@ transform_override(std::span<const uint8_t>, const rocjitsu::ConSanRequest &requ
         result = *g_first_fault_application_result;
     }
   }
-  result.flavor = *request.flavor;
-  result.moi_engine = request.moi_engine;
   if (g_transform_override_models_fault_application) {
     result.mutation.fault.planned = fault_mutation_enabled ? 1u : 0u;
     result.mutation.fault.applied = fault_mutation_enabled && !mutation.fault_dry_run
@@ -4117,7 +4115,6 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchUsesTypedSuperColliderCoverageLedger) {
   rocjitsu::ConSanResult structural_only;
   install_consan_test_program_identity(structural_only, ROCJITSU_CODE_ARCH_CDNA4,
                                        ROCJITSU_CODE_TARGET_GFX950);
-  structural_only.flavor = rocjitsu::ConSanFlavor::SuperCollider;
   structural_only.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   structural_only.modified = true;
   structural_only.final_validation_passed = true;
@@ -4166,8 +4163,6 @@ rocjitsu::ConSanResult moi_fault_test_result_for_arch(rj_code_arch_t arch) {
   rocjitsu::ConSanResult result;
   install_consan_test_program_identity(result, arch, ROCJITSU_CODE_TARGET_GFX950,
                                        /*semantic_arch_required=*/true);
-  result.flavor = rocjitsu::ConSanFlavor::Moi;
-  result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   result.modified = true;
   result.final_validation_passed = true;
@@ -4689,8 +4684,6 @@ rocjitsu::ConSanResult diagnostic_coverage_transform_result() {
   rocjitsu::ConSanResult result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.flavor = rocjitsu::ConSanFlavor::Moi;
-  result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   result.modified = true;
   result.final_validation_passed = true;
@@ -4801,8 +4794,6 @@ rocjitsu::ConSanResult typed_coverage_transform_result() {
   rocjitsu::ConSanResult result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.flavor = rocjitsu::ConSanFlavor::Moi;
-  result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   result.modified = true;
   result.final_validation_passed = true;
@@ -4947,8 +4938,6 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
   rocjitsu::ConSanResult result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.flavor = profile.expected_flavor;
-  result.moi_engine = profile.expected_engine;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   result.modified = true;
   result.final_validation_passed = true;
@@ -5068,8 +5057,6 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
   rocjitsu::ConSanResult result;
   install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
                                        ROCJITSU_CODE_TARGET_GFX1201);
-  result.flavor = rocjitsu::ConSanFlavor::Moi;
-  result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
   result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   result.modified = true;
   result.final_validation_passed = true;
