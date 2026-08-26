@@ -454,6 +454,73 @@ TEST(AltRsmiTest, ARSMIInitDefault) {
   );
 }
 
+TEST(AltRsmiTest, ARSMIInitCalledTwiceIsShortCircuited) {
+  RUN_ISOLATED_TEST(
+    "ARSMIInitCalledTwiceIsShortCircuited",
+    []() {
+      setupTestEnvironment();
+
+      ASSERT_EQ(ARSMI_init(), 0);
+      uint32_t num_devices = 0;
+      ASSERT_EQ(ARSMI_get_num_devices(&num_devices), 0);
+      ASSERT_EQ(num_devices, 2);
+
+      // Add a third node behind ARSMI's back before calling init again.
+      // Without this the test cannot fail: ARSMI_allSystemNodes is a local
+      // rebuilt from scratch on every call, so a re-scan of an unchanged
+      // directory writes the same ARSMI_num_devices and is indistinguishable
+      // from the early return. Changing the directory is what makes "did not
+      // re-scan" observable -- a re-scan would report 3 devices here.
+      createDirectory("2");
+      createFile("2/gpu_id", "4098\n");
+      createFile("2/properties",
+                 "unique_id 16336014475442738427\n"
+                 "location_id 23554\n"
+                 "domain 0\n"
+                 "vendor_id 4098\n");
+
+      // Second call must hit the "already initialized" early return
+      // (ARSMI_num_devices > 0) without re-scanning the KFD nodes directory.
+      const int secondInit = ARSMI_init();
+      const int getRc = ARSMI_get_num_devices(&num_devices);
+
+      // Drop the extra node before asserting. kTestKFDPath is shared, not
+      // PID-scoped, and a failed ASSERT returns without reaching
+      // cleanupTestEnvironment -- leaving a third node behind would make every
+      // later test that expects 2 devices fail for an unrelated reason.
+      removeDirectoryImpl(std::string(kTestKFDPath) + "/2");
+
+      ASSERT_EQ(secondInit, 0);
+      ASSERT_EQ(getRc, 0);
+      ASSERT_EQ(num_devices, 2);
+
+      cleanupTestEnvironment();
+    }
+  );
+}
+
+TEST(AltRsmiTest, ARSMIInitBadKfdPathFailsToOpenDir) {
+  RUN_ISOLATED_TEST(
+    "ARSMIInitBadKfdPathFailsToOpenDir",
+    []() {
+      AltRsmiTestUtils::ResetState();
+
+      // PID-scoped like kTestDrmBasePath, and via temp_directory_path() rather
+      // than a hardcoded /tmp: the path must be guaranteed absent, including
+      // when several CI jobs share a node.
+      const std::string missingPath =
+          std::filesystem::temp_directory_path().string() +
+          "/rccl_alt_rsmi_missing_" + std::to_string(getpid());
+      ASSERT_FALSE(std::filesystem::exists(missingPath));
+      AltRsmiTestUtils::SetNodesPath(missingPath);
+
+      EXPECT_EQ(ARSMI_init(), 1);
+
+      AltRsmiTestUtils::ResetState();
+    }
+  );
+}
+
 TEST(AltRsmiTest, ARSMIInitMissingIoLinksPropertiesFile) {
   RUN_ISOLATED_TEST(
     "ARSMIInitMissingIoLinksPropertiesFile",

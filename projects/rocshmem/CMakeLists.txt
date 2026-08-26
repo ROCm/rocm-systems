@@ -92,7 +92,7 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.6.0)
+set(VERSION_STRING 3.7.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
@@ -123,9 +123,17 @@ if(TARGET amd_smi)
   check_library_exists(amd_smi amdsmi_get_gpu_fabric_info "" HAVE_AMDSMI_FABRIC_FUNC)
   cmake_pop_check_state()
 
-  # Check if HIP runtime has hipMemFabricHandle_t
+  find_path(_hip_include_dir
+    hip/hip_runtime_api.h
+    HINTS "${ROCM_PATH}"
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+  )
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+  if(_hip_include_dir)
+    set(CMAKE_REQUIRED_INCLUDES ${_hip_include_dir})
+  endif()
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
   check_cxx_source_compiles("
     #include <hip/hip_runtime_api.h>
     int main() {

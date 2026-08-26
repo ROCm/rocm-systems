@@ -130,7 +130,8 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
 // TODO: these two arch predicates duplicate logic that also lives in DBT
 // (kernel_descriptor_translator.cpp's arch_has_accvgpr / uses_gfx90a_accum_offset)
 // and code_object_patcher.cpp (target_uses_gfx90a_accum_offset). They should be
-// consolidated into isa/isa_traits.h alongside arch_is_cdna/arch_is_rdna, but the
+// consolidated into isa/isa_traits.h alongside arch_is_cdna_4_or_lower/arch_is_rdna,
+// but the
 // arch_has_accvgpr copies disagree on CDNA1 (this one follows the physical AGPR file;
 // DBT's follows the HasAccVgpr trait, which models CDNA1 as zero), so unifying needs a
 // deliberate CDNA1-semantics decision. Kept DBI-local until then.
@@ -165,7 +166,7 @@ bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
   case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return false;
   default:
     throw util::UnimplementedInst("unified VGPR allocation for target architecture");
@@ -584,7 +585,13 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
-  blocks_ = BasicBlock::build(obj_, *decoder_, arch_);
+  util::StringDiagnostic decode_error;
+  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  if (blocks.failed()) {
+    report(error_out, decode_error.message().c_str());
+    return false;
+  }
+  blocks_ = std::move(blocks).value();
   // BasicBlock::build returns blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
   // stream in the middle of a clause.

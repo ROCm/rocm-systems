@@ -11,7 +11,8 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -75,8 +76,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return supports_wave_size<rdna3_5::Isa>(wf);
   case ROCJITSU_CODE_ARCH_RDNA4:
     return supports_wave_size<rdna4::Isa>(wf);
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return supports_wave_size<gfx1250::Isa>(wf);
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return supports_wave_size<cdna5::Isa>(wf);
   default:
     return false;
   }
@@ -102,8 +103,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::WF_SIZE;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::WF_SIZE;
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return gfx1250::Isa::WF_SIZE;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return cdna5::Isa::WF_SIZE;
   default:
     return 64;
   }
@@ -129,11 +130,11 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return rdna3_5::Isa::MAX_VGPRS_PER_WF;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::Isa::MAX_VGPRS_PER_WF;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     // gfx1250 extends each encoded VGPR operand with dynamic high-bank bits.
     // Descriptor validation must allow the complete addressable register
     // range even though its inherited RDNA base describes one 256-VGPR bank.
-    return gfx1250::Isa::MAX_ADDRESSABLE_VGPRS_PER_WF;
+    return cdna5::Isa::MAX_ADDRESSABLE_VGPRS_PER_WF;
   default:
     return 0;
   }
@@ -159,8 +160,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
     return HasAccVgpr<rdna3_5::Isa>;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return HasAccVgpr<rdna4::Isa>;
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return HasAccVgpr<gfx1250::Isa>;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return HasAccVgpr<cdna5::Isa>;
   default:
     return false;
   }
@@ -310,7 +311,22 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] bool uses_gfx10_plus_rsrc3(rj_code_arch_t arch) {
-  return arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_GFX1250;
+  return !arch_descriptor_encodes_sgpr_allocation(arch);
+}
+
+[[nodiscard]] std::optional<uint32_t>
+descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefront_size) {
+  // This is the AMDHSA kernel-descriptor encoding granularity for
+  // COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT, not the physical VGPR
+  // allocation block from the ISA manuals. For example, RDNA3/RDNA4 manuals
+  // describe Wave64 physical allocation in blocks of 8 VGPRs (or 12 on
+  // 1536-VGPR/SIMD parts), while the AMDHSA descriptor table encodes
+  // GFX10-GFX12 Wave64 as max(0, ceil(vgprs_used / 4) - 1).
+  //
+  // If/when occupancy modeling needs the physical allocation block size, add a
+  // separate helper for that policy. Reusing this descriptor helper for
+  // occupancy would mix two different hardware contracts.
+  return descriptor_vgpr_count_granule_for_wavefront(arch, wavefront_size);
 }
 
 [[nodiscard]] uint32_t granulated_count_to_registers(uint32_t granulated, uint32_t granularity) {
@@ -407,7 +423,7 @@ build_kernel_entry_prologue(const KD &src, rj_code_arch_t guest_arch, rj_code_ar
   // - Scratch/private-segment initialization is descriptor-driven today. If a
   //   future target needs SGPR-based scratch setup, it should be appended here
   //   and represented in KdTranslation::prologue_words, not hidden in the patcher.
-  if (arch_is_cdna(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch_is_cdna_4_or_lower(guest_arch) && host_arch == ROCJITSU_CODE_ARCH_RDNA4)
     append_rdna4_workgroup_grid_prologue(words, src, host_arch);
 
   return words;
@@ -421,6 +437,7 @@ void append_descriptor_error(KdTranslation &result, std::string message) {
   result.diagnostics.push_back({.severity = DiagnosticSeverity::Error,
                                 .kind = DiagnosticKind::KernelDescriptor,
                                 .guest_offset = std::nullopt,
+                                .output_offset = std::nullopt,
                                 .mnemonic = {},
                                 .message = std::move(message),
                                 .required_work = {}});
@@ -540,15 +557,20 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   // rounded up. The granularity depends on both ISA family and wave size, so the
   // source count must be decoded with the guest granularity and re-encoded with
   // the host granularity.
-  const uint32_t guest_vgpr_granularity =
+  const auto guest_vgpr_granularity =
       descriptor_vgpr_granularity_for_wavefront(guest_arch, result.guest_wavefront_size);
-  const uint32_t host_vgpr_granularity =
+  const auto host_vgpr_granularity =
       descriptor_vgpr_granularity_for_wavefront(host_arch, result.host_wavefront_size);
+  if (!guest_vgpr_granularity || !host_vgpr_granularity) {
+    append_descriptor_error(
+        result, "guest or host architecture does not support the selected wavefront size");
+    return result;
+  }
 
   const uint32_t guest_vgpr_granulated =
       AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   result.guest_vgpr_allocation_count =
-      granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity);
+      granulated_count_to_registers(guest_vgpr_granulated, *guest_vgpr_granularity);
   result.guest_vgpr_count = result.guest_vgpr_allocation_count;
   if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
       result.guest_vgpr_allocation_count > result.accvgpr_base) {
@@ -664,7 +686,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   }
 
   result.target_vgpr_granulated = clamp_granulated(
-      register_count_to_granulated(required_vgpr_allocation, host_vgpr_granularity),
+      register_count_to_granulated(required_vgpr_allocation, *host_vgpr_granularity),
       kMaxVgprGranulatedField, result, "GRANULATED_WORKITEM_VGPR_COUNT");
 
   // SGPR counts are also stored as a granulated value, but the descriptor
@@ -812,7 +834,7 @@ Rsrc3Layout rsrc3_layout(rj_code_arch_t arch) {
     return Rsrc3Layout::Gfx11;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return Rsrc3Layout::Gfx120;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return Rsrc3Layout::Gfx125;
   default:
     return Rsrc3Layout::Incompatible;
@@ -863,12 +885,15 @@ void KdTranslation::configure_skipped_stub() {
   prologue_words.clear();
 }
 
-std::vector<KdTranslation> KernelDescriptorTranslator::translate_image(
-    std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
-    const KernelDescriptorTranslationOptions &options) const {
+std::vector<KdTranslation>
+KernelDescriptorTranslator::translate_image(std::span<const uint8_t> image, uint64_t text_offset,
+                                            uint64_t text_size,
+                                            const KernelDescriptorTranslationOptions &options,
+                                            std::optional<size_t> text_section_index) const {
   std::vector<KdTranslation> translations;
 
-  for (KernelDescriptorInfo &kd : scan_kernel_descriptors(image, text_offset, text_size)) {
+  for (KernelDescriptorInfo &kd :
+       scan_kernel_descriptors(image, text_offset, text_size, text_section_index)) {
     translations.push_back(translate_one_descriptor(
         guest_arch_, host_arch_, kd.descriptor_file_offset, std::move(kd.kernel_name),
         kd.entry_text_offset, kd.descriptor, options));
