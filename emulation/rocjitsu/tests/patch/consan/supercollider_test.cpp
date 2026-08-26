@@ -170,17 +170,6 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
                                &ConSanPatchInfo::kind),
             relay_count);
-  ASSERT_TRUE(result.flat_selection_telemetry);
-  const ConSanBranchOnlyRoutingTelemetry &routing =
-      result.flat_selection_telemetry->branch_only_routing;
-  EXPECT_EQ(routing.pair_attempt_count, 1u);
-  EXPECT_EQ(routing.plan_call_count, 1u);
-  EXPECT_EQ(routing.exact_pair_fallback_attempt_count, 0u);
-  EXPECT_EQ(routing.greedy_pair_fallback_attempt_count, 0u);
-  EXPECT_GT(routing.search_work_count, 0u);
-  EXPECT_GT(routing.scan_work_count, 0u);
-  EXPECT_TRUE(branch_only_reservoir_telemetry_is_empty(
-      result.flat_selection_telemetry->branch_only_reservoir_telemetry));
 }
 
 TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
@@ -224,22 +213,6 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   };
   EXPECT_TRUE(std::ranges::any_of(body->branch_only_entry_relay_offsets, inside_reservoir));
   EXPECT_TRUE(std::ranges::any_of(body->branch_only_return_relay_offsets, inside_reservoir));
-  ASSERT_TRUE(result.flat_selection_telemetry);
-  const ConSanBranchOnlyRoutingTelemetry &routing =
-      result.flat_selection_telemetry->branch_only_routing;
-  EXPECT_EQ(routing.pair_attempt_count, 2u);
-  EXPECT_EQ(routing.plan_call_count, 2u);
-  EXPECT_GT(routing.search_work_count, 0u);
-  EXPECT_GT(routing.scan_work_count, 0u);
-  const ConSanBranchOnlyReservoirTelemetry &inventory =
-      result.flat_selection_telemetry->branch_only_reservoir_telemetry;
-  EXPECT_GE(inventory.planned_reservoir_count, 1u);
-  EXPECT_EQ(inventory.used_reservoir_count, 1u);
-  EXPECT_EQ(inventory.planned_reservoir_count,
-            inventory.used_reservoir_count + inventory.unused_reservoir_count);
-  EXPECT_EQ(inventory.planned_appended_bytes,
-            inventory.used_appended_bytes + inventory.unused_appended_bytes);
-  EXPECT_EQ(inventory.used_appended_bytes, reservoir->trampoline_size);
   EXPECT_GT(result.planning_work_telemetry.direct_reservoir_work_count, 0u);
   EXPECT_EQ(result.planning_work_telemetry.direct_reservoir_exhaustion_count, 0u);
 
@@ -296,16 +269,9 @@ TEST(ConSan, FlatDirectReservoirLosingRetryRollsBackTransaction) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.patches.empty());
-  ASSERT_TRUE(result.flat_selection_telemetry);
-  const ConSanFlatSelectionTelemetry &selection = *result.flat_selection_telemetry;
-  EXPECT_EQ(selection.branch_only_selected_count, 0u);
-  EXPECT_EQ(selection.branch_only_routing.pair_attempt_count, 1u);
-  EXPECT_EQ(selection.branch_only_routing.plan_call_count, 1u);
-  EXPECT_EQ(selection.branch_only_routing.entry_route_failure_count, 1u);
-  EXPECT_TRUE(branch_only_reservoir_telemetry_is_empty(selection.branch_only_reservoir_telemetry));
 }
 
-TEST(ConSan, FlatDirectReservoirRetryRetainsEarlierRoutingTelemetry) {
+TEST(ConSan, FlatDirectReservoirRetryRoutesBothCandidates) {
   const std::array<uint32_t, 8> flat_access = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
@@ -345,19 +311,6 @@ TEST(ConSan, FlatDirectReservoirRetryRetainsEarlierRoutingTelemetry) {
   EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
             2u)
       << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.flat_selection_telemetry);
-  const ConSanFlatSelectionTelemetry &selection = *result.flat_selection_telemetry;
-  EXPECT_EQ(selection.branch_only_selected_count, 2u);
-  // Two first-pass calls plus one retry prove that the selected first-pass
-  // route is retained instead of being planned again.
-  EXPECT_EQ(selection.branch_only_routing.pair_attempt_count, 3u)
-      << " entry=" << selection.branch_only_routing.entry_route_failure_count
-      << " return=" << selection.branch_only_routing.return_route_failure_count
-      << " contention=" << selection.branch_only_routing.relay_contention_failure_count
-      << " work=" << selection.branch_only_routing.work_budget_failure_count
-      << " reservation=" << selection.branch_only_routing.reservation_failure_count
-      << " placement=" << selection.branch_only_placement_failure_count;
-  EXPECT_EQ(selection.branch_only_routing.plan_call_count, 3u);
 }
 
 TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {
@@ -417,7 +370,7 @@ TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {
             0u);
 }
 
-TEST(ConSan, FlatCheckTrapReportsStructuredPartialSelection) {
+TEST(ConSan, FlatCheckTrapReportsPartialSelectionReason) {
   std::vector<uint32_t> first_kernel_words =
       make_gfx1250_full_pressure_flat_store_words(/*append_endpgm=*/true);
   ASSERT_GE(first_kernel_words.size(), 6u);
@@ -446,15 +399,11 @@ TEST(ConSan, FlatCheckTrapReportsStructuredPartialSelection) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
-  ASSERT_TRUE(result.flat_selection_telemetry);
-  const ConSanFlatSelectionTelemetry &telemetry = *result.flat_selection_telemetry;
-  EXPECT_EQ(telemetry.supported_candidate_count, 2u);
-  EXPECT_EQ(telemetry.selection_target, 2u);
-  EXPECT_EQ(telemetry.selected_candidate_count, 1u);
-  EXPECT_EQ(telemetry.private_spill_encoding_failure_count, 1u);
-  EXPECT_EQ(telemetry.branch_only_selected_count, 0u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
-    return warning.find("structured selection telemetry is available") != std::string::npos;
+    return warning.find("selected only 1/2 supported sites") != std::string::npos &&
+           warning.find("private_spill_encoding_failures=1") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
 }
 

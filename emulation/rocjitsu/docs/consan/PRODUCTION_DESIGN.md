@@ -2873,14 +2873,14 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   commits its selected patches, routes, placement reservations, and reservoir
   footprint together or retains none of them. Failed speculative work is not a
   transform result and is not part of the supported observability contract.
-- **Completed deletion:** `ConSanFlatSelectionTelemetry` no longer publishes a
-  losing retry's placement count, routing aggregate, or reservoir inventory.
-  The FLAT lowerer no longer snapshots, subtracts, and stores those values
-  before rolling the retry back. With no remaining consumer for telemetry
-  subtraction, the shared 24-field delta helper, its parallel member-name
-  schema, its formatting function, and the empty-routing helper are also gone.
-  The router's per-plan outcome and retained aggregate work counters remain
-  available for bounded-work and selected-route tests.
+- **Completed deletion:** The FLAT lowerer no longer publishes a losing retry's
+  placement count, routing aggregate, or reservoir inventory. It no longer
+  snapshots, subtracts, and stores those values before rolling the retry back.
+  With no remaining consumer for telemetry subtraction, the shared 24-field
+  delta helper, its parallel member-name schema, its formatting function, and
+  the empty-routing helper are also gone. The router's per-plan outcome and
+  retained aggregate work counters remain available for bounded-work and
+  selected-route tests.
 - **Contract-test correction:** The losing-retry test is now explicitly a
   transaction rollback test. It checks that the result is unmodified, owns no
   patches or retained reservoir footprint, selects no branch-only site, and
@@ -2983,6 +2983,45 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   tests with two external-object benchmarks intentionally skipped, and the
   complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
   rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 67.75
+  seconds. This result-shape deletion does not change emitted device code; the
+  periodic physical gate remains applicable. E2E validation remains outside
+  this work.
+
+### Slice 4Z: delete the FLAT selection aggregate
+
+- **Single authoritative result:** A FLAT site is represented by its immutable
+  inventory identity, typed coverage-ledger outcome, emitted patches, and any
+  diagnostic explaining rejection. Successful relay and reservoir behavior is
+  visible in the actual patch and retained-route records. A parallel aggregate
+  of candidate categories, relay words, missing resources, routing totals, and
+  selected counts does not add a behavioral contract.
+- **Completed deletion:** `ConSanResult` no longer carries
+  `ConSanFlatSelectionTelemetry`. The FLAT lowerer no longer maintains its
+  candidate-category counts, routing and placement counters, relay-word total,
+  missing-VCC and missing-scratch counts, selected count, or final reservoir
+  snapshot. Speculative direct-reservoir retry rollback now uses the retained
+  candidate boundary it actually needs instead of snapshotting the aggregate.
+  Partial-selection diagnostics report the precise live rejection counters
+  rather than referring users to deleted structured telemetry.
+- **Coverage-ledger correction:** Removing the aggregate exposed that two
+  resource-failure exits did not publish a typed per-site outcome. A shared
+  SuperCollider helper now marks every intent for the rejected physical site
+  `ResourceRejected` when VCC-save or scratch/spill resources cannot be
+  encoded. This is a stronger and architecture-neutral result than retaining a
+  FLAT-specific result-wide count.
+- **Contract-test correction:** Tests continue to inspect emitted FLAT patches,
+  relay routes, retained reservoir footprint, retry commit and rollback, and
+  final validation. Rejection tests now assert exact `Instrumented` and
+  `ResourceRejected` ledger outcomes and the precise warning reason. Assertions
+  that merely mirrored the deleted aggregate were removed, and no behavioral
+  test case or device workload was removed.
+- **Deletion result:** Production source is 76 net lines smaller and source
+  plus tests is 127 net lines smaller. No compatibility adapter or replacement
+  aggregate was added.
+- **Completed checked-in gate:** The ConSan host gate passed 1,508 of 1,510
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 67.20
   seconds. This result-shape deletion does not change emitted device code; the
   periodic physical gate remains applicable. E2E validation remains outside
   this work.

@@ -209,35 +209,6 @@ consan_planning_work_telemetry_is_empty(const ConSanPlanningWorkTelemetry &telem
   return telemetry == ConSanPlanningWorkTelemetry{};
 }
 
-/// Machine-readable outcome of SuperCollider group-FLAT candidate selection.
-/// This remains available for successful partial transforms without forcing
-/// callers to parse a long warning string.
-struct ConSanFlatSelectionTelemetry {
-  size_t supported_candidate_count = 0;
-  size_t selection_target = 0;
-  size_t selected_candidate_count = 0;
-  size_t branch_only_candidate_count = 0;
-  size_t fixed_stack_candidate_count = 0;
-  size_t dynamic_stack_candidate_count = 0;
-  size_t mixed_stack_candidate_count = 0;
-  size_t missing_vcc_save_candidate_count = 0;
-  size_t missing_scratch_candidate_count = 0;
-  size_t spill_backed_candidate_count = 0;
-  size_t mixed_stack_spill_rejection_count = 0;
-  size_t dynamic_stack_spill_encoding_failure_count = 0;
-  size_t private_spill_encoding_failure_count = 0;
-  size_t branch_only_selected_count = 0;
-  size_t branch_only_placement_failure_count = 0;
-  ConSanBranchOnlyRoutingTelemetry branch_only_routing;
-  /// Direct-reservoir footprint retained in the emitted FLAT patch. This is
-  /// published only after successful final emission, so an earlier rejection
-  /// leaves it zero. A losing speculative retry is rolled back and therefore
-  /// contributes no retained footprint.
-  ConSanBranchOnlyReservoirTelemetry branch_only_reservoir_telemetry;
-  size_t original_nop_relay_slot_count = 0;
-  size_t selected_anchor_relay_slot_count = 0;
-};
-
 /// Counts one validation-only mutation domain as it moves from a user request
 /// through semantic selection to emitted replacement bytes.
 ///
@@ -375,7 +346,6 @@ struct ConSanResult {
   /// diagnostics while retaining parser and semantic-analysis warnings.
   size_t moi_stage_warning_begin = 0;
   std::vector<ConSanCandidateResourcePlan> resource_plans;
-  std::optional<ConSanFlatSelectionTelemetry> flat_selection_telemetry;
   std::vector<ConSanPatchInfo> patches;
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;

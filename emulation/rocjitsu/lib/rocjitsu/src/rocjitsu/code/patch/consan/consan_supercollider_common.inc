@@ -121,6 +121,18 @@ void publish_sc_access_coverage_support(ConSanResult &result, ConSanAccessOrigin
   }
 }
 
+void publish_sc_access_resource_rejection(ConSanResult &result, ConSanAccessOrigin origin,
+                                          uint64_t file_offset, std::string detail) {
+  const auto site = std::ranges::find_if(
+      result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &candidate) {
+        return candidate.origin == origin && candidate.file_offset == file_offset;
+      });
+  if (site == result.program_inventory.access_sites().end())
+    return;
+  (void)result.coverage_ledger.set_physical_lowering_outcome(
+      site->physical_id, ConSanLoweringOutcomeKind::ResourceRejected, std::move(detail));
+}
+
 /// Project final current-lowerer results into the production ledger. Patch
 /// kinds remain a temporary compatibility input; policy applicability has
 /// already been fixed by `ConSanObservationPlan` and is never inferred here.
