@@ -1126,8 +1126,9 @@ ib_recv_dev_list:
                                   sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE),
                   ret, fail);
 
-    // Prepare my CTS FIFO
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo, sizeof(comm->ctsFifo),
+    // Prepare my CTS FIFO + multi-seg side table (one covering MR).
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
+                                  sizeof(comm->ctsFifo) + sizeof(comm->segLayoutFifo),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     devInfo->rkey = commDev->ctsFifoMr->rkey;
@@ -1193,6 +1194,7 @@ ib_recv_dev_list:
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
+  meta.caps = NCCL_IB_CAP_MULTISEG;
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -1217,6 +1219,7 @@ ib_connect:
   if (stage->offset != sizeof(remMeta)) return ncclSuccess;
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
+  comm->peerCaps = remMeta.caps;
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -1669,6 +1672,7 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
+  rComm->peerCaps = remMeta.caps;
 
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
@@ -1817,6 +1821,7 @@ ib_recv:
 
   // Store the remote CTS FIFO info provided by the remote peer
   rComm->remCtsFifo.addr = remMeta.addr;
+  rComm->remSegLayout.addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
   for (int i = 0; i < rComm->base.nRemDevs; i++) {
     rComm->remCtsFifo.rkeys[i] = remMeta.devs[i].rkey;
   }
@@ -1829,6 +1834,10 @@ ib_recv:
                                   IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     rCommDev->sge.lkey = rCommDev->ctsFifoMr->lkey;
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, &rComm->remSegLayout.elems,
+                                  sizeof(rComm->remSegLayout.elems),
+                                  IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
+                  ret, fail);
 
     // Register completion records
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->cmplsRecordsMr, rCommDev->base.pd, &rComm->cmplsRecords,
@@ -1910,6 +1919,7 @@ ib_recv:
 
   meta.ndevs = rComm->base.vProps.ndevs;
   meta.isP2p = remMeta.isP2p;
+  meta.caps = NCCL_IB_CAP_MULTISEG;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = ncclIbCommStateSend;
@@ -2011,6 +2021,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
         if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
       }
       if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
+      if (commDev->segLayoutFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->segLayoutFifoMr));
       if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
       if (comm->base.resiliency) {
         IbCastResiliencyDevDestroy(comm->base.resiliency, i);
