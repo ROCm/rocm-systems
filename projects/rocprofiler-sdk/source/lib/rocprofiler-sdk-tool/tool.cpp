@@ -4971,6 +4971,19 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version)
         omp_version,
         runtime_version);
 
+    // The OpenMP runtime discovers tools while holding its initialization lock. Configuring
+    // rocprofiler-sdk here loads client tool libraries, and their constructors can call back into
+    // the OpenMP runtime and re-enter that lock on the same thread. Only proceed when the SDK is
+    // already initialized, so no client libraries need to be loaded.
+    if(int _status = 0;
+       rocprofiler_is_initialized(&_status) != ROCPROFILER_STATUS_SUCCESS || _status == 0)
+    {
+        ROCP_WARNING << "OMPT support is not enabled because the OpenMP runtime initialized "
+                        "before rocprofiler-sdk. Initialize rocprofiler-sdk before the first "
+                        "OpenMP call to enable OMPT.";
+        return nullptr;
+    }
+
     initialize_rocprofv3();
 
     // test force configure
