@@ -7,6 +7,7 @@
 #include "core/output_file_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/sample_type.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 
 #include <algorithm>
 #include <array>
@@ -172,6 +173,7 @@ public:
     void handle(const ainic_pmc_sample&) {}
     void handle(const cpu_pmc_sample&) {}
     void handle(const gpu_perf_counter_sample&) {}
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
     void handle(const hipfile_pmc_sample&) {}
     void handle(const backtrace_region_sample&) {}
 

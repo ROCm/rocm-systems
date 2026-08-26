@@ -153,7 +153,10 @@ private:
     [[nodiscard]] static double bandwidth(std::uint64_t current, std::uint64_t previous,
                                           std::uint64_t elapsed_ns) noexcept
     {
-        if(elapsed_ns == 0 || current < previous) return 0.0;
+        if(elapsed_ns == 0 || current < previous)
+        {
+            return 0.0;
+        }
 
         constexpr double NS_PER_SEC = 1e9;
         return static_cast<double>(current - previous) * NS_PER_SEC /
