@@ -474,7 +474,7 @@ protected:
                         if(hsa_signal_wait_relaxed(profiler_signal,
                                                    HSA_SIGNAL_CONDITION_EQ,
                                                    0,
-                                                   20000000,
+                                                   UINT64_MAX,
                                                    HSA_WAIT_STATE_BLOCKED) != 0)
                         {
                             ROCP_FATAL << "Failed to set profiling mode on queue";
@@ -643,7 +643,7 @@ protected:
                    hsa_signal_wait_relaxed(found_data,
                                            HSA_SIGNAL_CONDITION_EQ,
                                            static_cast<int64_t>(last_sample_user_data),
-                                           20000000,
+                                           UINT64_MAX,
                                            HSA_WAIT_STATE_BLOCKED) !=
                        static_cast<int64_t>(last_sample_user_data))
                 {
