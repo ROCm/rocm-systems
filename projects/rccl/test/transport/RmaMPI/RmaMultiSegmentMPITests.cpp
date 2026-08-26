@@ -157,8 +157,7 @@ protected:
         int dev = 0;
         if (hipGetDevice(&dev) != hipSuccess)
             return nullptr;
-        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(
-                dev, /*requireReexport=*/true, reason))
+        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason))
             return nullptr;
         auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
         if (!RCCLHybridVmmTests::AllocHybridVmm(
