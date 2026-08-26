@@ -895,7 +895,7 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
 
     /* make sure ncclGroupBlocking has been set. */
     assert(ncclGroupBlocking == 0 || ncclGroupBlocking == 1);
-    if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&ncclAsyncJobs))) {
+    if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&groupJob->asyncJobs))) {
       /* nonblocking group */
       if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
         ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
