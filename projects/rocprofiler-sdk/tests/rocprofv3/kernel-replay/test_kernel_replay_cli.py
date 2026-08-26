@@ -344,7 +344,13 @@ def test_nested_list_values_compare_by_value():
 
 def test_zero_and_false_are_not_treated_as_unset():
     """Only an explicit None means unset. A job that asked for 0 disagrees with one that asked
-    for 1, and treating 0 as absent would let that difference through."""
+    for 1, and treating 0 as absent would let that difference through.
+
+    The falsey value has to sit in the *later* job. conflicting_input_settings only skips a key
+    on the later job's own has_set_attr check; the first job's value reaching None just makes
+    the two differ, which still reports a conflict. Put the 0 in the first job instead and the
+    assertion holds whether has_set_attr tests `is not None` or truthiness, guarding nothing.
+    """
     assert "some_count" in conflicts(
         {"pmc": ["SQ_WAVES"], "some_count": 1},
         {"pmc": ["GRBM_COUNT"], "some_count": 0},
