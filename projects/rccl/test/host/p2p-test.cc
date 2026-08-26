@@ -110,16 +110,6 @@ protected:
 
 namespace {
 
-// RegRecordCleaner -- RAII guard that frees the allocations
-// ipcRegisterBuffer makes *into* a ncclReg on the fresh-registration path:
-//
-//   - regRecord.ipcInfos[i]                       (per-peer ncclCalloc'd newInfo)
-//   - regRecord.regIpcAddrs.hostPeerRmtAddrs      (lazily-ncclCalloc'd host table)
-//
-// regIpcAddrs.devPeerRmtAddrs is owned by g_fakeAllocations (the
-// ncclCudaCallocAsync default registers it there), so this guard
-// deliberately doesn't touch it.
-//
 // MakeHeapIpcInfo -- allocate a zeroed ncclIpcRegInfo the same way
 // ipcRegisterBuffer's fresh-registration arm does (ncclCalloc == malloc +
 // memset)
