@@ -14,9 +14,11 @@ import os
 import statistics
 from pathlib import Path
 
+_FALSY = frozenset(("", "0", "false", "no", "off"))
+
 
 def _env_flag(name: str, default: str = "0") -> bool:
-    return os.environ.get(name, default).strip().lower() not in ("0", "", "false", "no")
+    return os.environ.get(name, default).strip().lower() not in _FALSY
 
 
 def parse_marker(text: str, tag: str) -> dict:
@@ -65,13 +67,19 @@ def repeat_measure(run_once, repeat: int, warmup: int = 1, label: str = "") -> d
     run pays for ballast page faults, profiler attach and code-object load, and none of those
     repeat. Reports the median rather than the mean so one descheduled run cannot move it.
     """
-    for _ in range(max(0, warmup)):
+    # Silently clamping a bad repeat count to 1 would turn "this suite forgot to ask for
+    # repetition" into a single-sample measurement that still reports as if it were sampled.
+    assert repeat >= 1, f"repeat must be at least 1, got {repeat}"
+    assert warmup >= 0, f"warmup cannot be negative, got {warmup}"
+
+    for _ in range(warmup):
         run_once()
 
-    samples = [run_once() for _ in range(max(1, repeat))]
+    samples = [run_once() for _ in range(repeat)]
     low, high = min(samples), max(samples)
     stats = {
         "samples_ms": samples,
+        "runs": len(samples),
         "median_ms": statistics.median(samples),
         "min_ms": low,
         "max_ms": high,
