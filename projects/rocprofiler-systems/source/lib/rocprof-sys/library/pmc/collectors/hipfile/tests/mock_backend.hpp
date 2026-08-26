@@ -29,7 +29,7 @@ struct mock_backend
 
     /// Timestamps passed to get_stats, in order. Lets a test assert the backend saw
     /// exactly one query per interval.
-    std::vector<std::uint64_t> queried_timestamps{};
+    std::vector<std::uint64_t> queried_timestamps;
 
     [[nodiscard]] const stats_snapshot& get_stats(std::uint64_t timestamp)
     {
@@ -66,8 +66,10 @@ struct mock_provider
         std::vector<std::shared_ptr<Device>> devices;
         devices.reserve(type_indices.size());
         for(std::size_t slot = 0; slot < type_indices.size(); ++slot)
+        {
             devices.push_back(
                 std::make_shared<Device>(backend, slot, type_indices[slot]));
+        }
         return devices;
     }
 

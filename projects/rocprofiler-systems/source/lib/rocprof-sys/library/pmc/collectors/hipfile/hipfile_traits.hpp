@@ -3,13 +3,11 @@
 
 #pragma once
 
-#include "library/pmc/collectors/hipfile/device.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -41,7 +39,7 @@ struct hipfile_traits
 {
     using metrics_t         = pmc::collectors::hipfile::metrics;
     using enabled_metrics_t = pmc::collectors::hipfile::enabled_metrics;
-    using backend_t         = typename DeviceType::backend_type;
+    using backend_t         = DeviceType::backend_type;
     using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;

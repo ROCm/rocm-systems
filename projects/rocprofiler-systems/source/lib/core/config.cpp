@@ -3595,8 +3595,8 @@ get_ump_absolute_path()
             return std::string{ pwd };
         }
 
-        std::unique_ptr<char, decltype(&std::free)> current_dir(getcwd(nullptr, 0),
-                                                                std::free);
+        const std::unique_ptr<char, decltype(&std::free)> current_dir(getcwd(nullptr, 0),
+                                                                      std::free);
         if(current_dir == nullptr)
         {
             return std::string{ "." };
@@ -4145,6 +4145,7 @@ get_causal_mode()
         {
             auto mode = static_cast<tim::tsettings<std::string>&>(*value->second).get();
             throw std::runtime_error(
+                // NOLINTNEXTLINE(misc-include-cleaner)
                 fmt::format("[{}] invalid causal mode {}. Choices: {}", function_name,
                             mode, fmt::join(value->second->get_choices(), ", ")));
         }
