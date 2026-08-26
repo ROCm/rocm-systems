@@ -937,15 +937,16 @@ void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_
 void retire_auto_moi_report_buffers(CoreApiTable *core, hsa_executable_t executable);
 [[nodiscard]] AutoMoiReportSummary summarize_and_clear_auto_moi_report_buffers(CoreApiTable *core);
 
-/// Typed transform inputs observed by HSA-hook unit tests. The raw return is a
-/// temporary synthetic mechanism fixture; the hook publishes it through the
-/// same `TransformResult` boundary as the production lowerer.
-using ConSanTransformOverride = ConSanResult (*)(std::span<const uint8_t>, const ConSanRequest &,
-                                                 const TransformPolicy &, const RuntimePolicy &,
-                                                 const ConSanDebugOverrides &,
-                                                 const MutationRequest &,
-                                                 const RuntimeCapabilities &,
-                                                 const BoundRuntimeResources &);
+/// Fully typed transform seam observed by HSA-hook unit tests. A test double
+/// receives the same immutable contracts and returns the same production
+/// result as the real transformer; raw mechanism fixtures never cross this
+/// hook boundary.
+using ConSanTransformOverride = TransformResult (*)(std::span<const uint8_t>, const ConSanRequest &,
+                                                    const TransformPolicy &, const RuntimePolicy &,
+                                                    const ConSanDebugOverrides &,
+                                                    const MutationRequest &,
+                                                    const RuntimeCapabilities &,
+                                                    const BoundRuntimeResources &);
 using LogSinkOverride = void (*)(const char *, size_t);
 
 extern std::atomic<int> g_log_level;

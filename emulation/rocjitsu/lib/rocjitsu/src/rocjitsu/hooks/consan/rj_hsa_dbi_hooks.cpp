@@ -100,10 +100,8 @@ rocjitsu::TransformResult run_consan_transform(std::span<const uint8_t> bytes,
                                                const rocjitsu::BoundRuntimeResources &resources) {
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
-    return rocjitsu::publish_consan_mechanism_result(
-        bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
-        override(bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
-                 resources));
+    return override(bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
+                    resources);
   }
   return mutation.has_mutation()
              ? rocjitsu::transform_consan_with_mutation(bytes, request, transform_policy,
@@ -125,11 +123,8 @@ rocjitsu::TransformResult run_consan_pristine_moi_inventory(
     bool preserve_extended_barrier_pairs) {
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
-    return rocjitsu::publish_consan_mechanism_result(
-        bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
-        unbound_resources,
-        override(bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
-                 capabilities, unbound_resources));
+    return override(bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
+                    capabilities, unbound_resources);
   }
   return rocjitsu::transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
@@ -147,10 +142,8 @@ rocjitsu::TransformResult retry_consan_moi_transform(
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
     g_test_consan_moi_retry_count.fetch_add(1, std::memory_order_relaxed);
-    return rocjitsu::publish_consan_mechanism_result(
-        bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
-        override(bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
-                 resources));
+    return override(bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
+                    resources);
   }
   return rocjitsu::retry_transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
@@ -1307,7 +1300,7 @@ public:
 /// size even after the temporary reader used for loading has been destroyed.
 /// ROCProfiler consumes that storage when the executable is frozen, which can
 /// happen after hsa_executable_load_agent_code_object() returns. Therefore the
-/// hook must not tie replacement storage to the load call's ConSanResult. The
+/// hook must not tie replacement storage to the load call's transform result. The
 /// registry reserves configured process growth and full-image budgets in the
 /// same critical section that retains the storage, and refunds both when the
 /// storage is released.

@@ -32,6 +32,7 @@
 #include <dlfcn.h>
 
 #include "hsa/hsa_api_trace_minimal.h"
+#include "patch/consan/transform_result_test_access.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/patch/consan/consan.h"
@@ -972,12 +973,14 @@ hsa_status_t HSA_API fake_memory_assign_agent(void *, hsa_agent_t agent, hsa_acc
   return agent.handle == kHostAgent.handle ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
-rocjitsu::ConSanResult
-transform_override(std::span<const uint8_t>, const rocjitsu::ConSanRequest &request,
-                   const rocjitsu::TransformPolicy &transform_policy,
-                   const rocjitsu::RuntimePolicy &, const rocjitsu::ConSanDebugOverrides &debug,
-                   const rocjitsu::MutationRequest &mutation, const rocjitsu::RuntimeCapabilities &,
-                   const rocjitsu::BoundRuntimeResources &resources) {
+rocjitsu::TransformResult transform_override(std::span<const uint8_t> bytes,
+                                             const rocjitsu::ConSanRequest &request,
+                                             const rocjitsu::TransformPolicy &transform_policy,
+                                             const rocjitsu::RuntimePolicy &runtime_policy,
+                                             const rocjitsu::ConSanDebugOverrides &debug,
+                                             const rocjitsu::MutationRequest &mutation,
+                                             const rocjitsu::RuntimeCapabilities &capabilities,
+                                             const rocjitsu::BoundRuntimeResources &resources) {
   const bool fault_mutation_enabled = mutation.has_fault_mutation();
   std::optional<rocjitsu::ConSanResult> queued_result;
   {
@@ -1035,7 +1038,9 @@ transform_override(std::span<const uint8_t>, const rocjitsu::ConSanRequest &requ
                                         ? g_transform_override_actual_fault_applications
                                         : 0u;
   }
-  return result;
+  return rocjitsu::TransformResultTestAccess::publish(bytes, request, transform_policy,
+                                                      runtime_policy, debug, mutation, capabilities,
+                                                      resources, std::move(result));
 }
 
 hsa_status_t HSA_API fake_executable_load_agent_code_object(

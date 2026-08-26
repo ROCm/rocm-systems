@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "transform_result_test_access.h"
 
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 
@@ -382,7 +383,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   legacy_kernel_b_segments.owner_descriptor_file_offsets.clear();
   mechanism.patches.push_back(legacy_kernel_b_segments);
 
-  const TransformResult published = publish_consan_mechanism_result(
+  const TransformResult published = TransformResultTestAccess::publish(
       bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
       enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
       complete_runtime_capabilities(), BoundRuntimeResources{}, std::move(mechanism));

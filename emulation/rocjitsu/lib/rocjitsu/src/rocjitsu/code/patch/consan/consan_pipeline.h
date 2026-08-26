@@ -392,10 +392,7 @@ public:
   void discard_replacement(std::string warning);
 
 private:
-  friend TransformResult publish_consan_mechanism_result(
-      std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
-      const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
-      const RuntimeCapabilities &, const BoundRuntimeResources &, ConSanResult);
+  friend struct TransformResultTestAccess;
   friend TransformResult transform_consan_pristine_moi_inventory(
       std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
       const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
@@ -447,14 +444,6 @@ private:
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
     TransformResult inventory);
-
-/// Publish a mechanism result supplied by the temporary hook-test seam.
-[[nodiscard]] TransformResult publish_consan_mechanism_result(
-    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-    ConSanResult mechanism_result);
 
 /// Run the ordinary observation pipeline. Fault mutation and timing
 /// perturbation are deliberately absent from this entry point.

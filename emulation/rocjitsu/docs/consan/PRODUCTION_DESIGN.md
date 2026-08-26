@@ -3417,6 +3417,35 @@ analysis completed.
   preceding complete checked-in gate remains applicable because no executable
   behavior changed.
 
+### Slice 5H: remove raw results from the hook transform seam
+
+- **Typed production boundary:** The HSA hook's transform override now has the
+  same contract as the real transformer: it receives the immutable typed inputs
+  and returns a `TransformResult`. A raw `ConSanResult` no longer crosses the
+  hook transform boundary, and production no longer exposes a function that
+  publishes an arbitrary raw mechanism record.
+- **Narrow test fixture privilege:** Mechanism and HSA-hook tests still need to
+  construct synthetic lowering artifacts while the prototype lowerer is being
+  decomposed. A documented helper in the test tree alone may pass such a
+  fixture through `TransformResult`'s real validation and stage-publication
+  path. The helper is a friend only for that operation; it is not a production
+  adapter or API.
+- **Completed deletion:** The public raw-result publisher, its declaration,
+  definition, and all production calls are gone. Retry calls the private typed
+  publication operation directly, and each test override publishes its fixture
+  before returning to the hook. The existing pipeline publication test still
+  proves that joined coverage and segment-growth artifacts take the production
+  validation path.
+- **Deletion result:** Production source is 29 net lines smaller. The test-only
+  fixture helper is 34 lines; including its call-site conversion, source plus
+  tests grows by 11 net lines in exchange for removing the raw compatibility
+  type from a production integration boundary.
+- **Completed checked-in gate:** The complete host gate passes 1,508 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across gfx942, gfx950, gfx1100, gfx1201, and
+  gfx1250 pass in 69.26 seconds of wall time. E2E validation remains outside
+  this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -382,9 +382,9 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
   retry_inventory.patches = std::move(inventory.patches);
   ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(retry_inventory), std::move(inventory_options), retry, code_object_bytes);
-  return publish_consan_mechanism_result(code_object_bytes, request, transform_policy,
-                                         runtime_policy, debug, mutation, capabilities, resources,
-                                         std::move(retried));
+  return TransformResult::publish_optional(
+      code_object_bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
+      resources, std::move(retried), /*retain_moi_retry_inventory=*/false);
 }
 
 TransformResult
@@ -405,18 +405,6 @@ TransformResult transform_consan_with_mutation(
   return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
                                            runtime_policy, debug, mutation, capabilities, resources,
                                            std::nullopt, /*retain_moi_retry_inventory=*/false);
-}
-
-TransformResult publish_consan_mechanism_result(
-    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
-    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-    ConSanResult mechanism_result) {
-  return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
-                                           runtime_policy, debug, mutation, capabilities, resources,
-                                           std::move(mechanism_result),
-                                           /*retain_moi_retry_inventory=*/false);
 }
 
 TransformResult TransformResult::publish_optional(
