@@ -34,6 +34,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
@@ -2638,6 +2639,46 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   EXPECT_TRUE(opposite_half_read_reports_race("cdna4", /*wavefront_size=*/64));
   EXPECT_TRUE(opposite_half_read_reports_race("cdna5", /*wavefront_size=*/32));
   EXPECT_FALSE(opposite_half_read_reports_race("rdna4", /*wavefront_size=*/32));
+}
+
+TEST(RaceDetectorPluginTest, ScalarLoadToTtmpDoesNotRegisterOrdinarySgprHazard) {
+  PluginFixture f(/*num_wf_slots=*/2);
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto detector_plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *detector_plugin_ptr = detector_plugin.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(detector_plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(
+      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/256,
+      /*physical_sgpr_count=*/104, waves);
+
+  constexpr uint32_t kTtmp0Selector = amdgpu::kTtmpSelectorFirst;
+  auto state = std::make_unique<ScalarMemState>();
+  state->is_load = true;
+  state->num_dwords = 1;
+  state->dst_selector = kTtmp0Selector;
+  state->dst_reg_base = wf->sgpr_alloc().base + state->dst_selector;
+  TestMemoryInstruction load(std::move(state));
+  f.plugin_group_->onAmdgpuRouteMemoryInstruction(load, *wf);
+
+  auto *plugin_state =
+      static_cast<RaceWavefrontState *>(wf->plugin_state(detector_plugin_ptr->slot_index()));
+  ASSERT_NE(plugin_state, nullptr);
+  ASSERT_NE(plugin_state->race_state, nullptr);
+  const auto &events = plugin_state->race_state->getWaveMemoryEvents();
+  const auto &registry = plugin_state->race_state->getDetector()->events();
+  EXPECT_TRUE(std::none_of(events.begin(), events.end(), [&](EventId event) {
+    return registry.type(event) == MemoryEventType::GLOBAL_TO_SGPR;
+  }));
 }
 
 TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {

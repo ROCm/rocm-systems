@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
@@ -337,11 +338,19 @@ void RaceDetectorPlugin::onAmdgpuRouteMemoryInstruction(const Instruction &inst,
   if (inst.data()->tag() == amdgpu::SCALAR_MEM) {
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
-      uint32_t logicalBase = d.dst_reg_base - wf.sgpr_alloc().base;
-      std::vector<uint32_t> registers(d.num_dwords);
-      for (uint32_t i = 0; i < d.num_dwords; ++i)
-        registers[i] = logicalBase + i;
-      rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_SGPR, std::move(registers), wf.exec());
+      // TTMP destinations use the wave-private trap file. They do not produce
+      // ordinary-SGPR read callbacks, so registering a GLOBAL_TO_SGPR event for
+      // them would leave an event that no matching consumer can diagnose.
+      // Modeling pending scalar loads into TTMP is separate race-detector work.
+      std::vector<uint32_t> registers;
+      registers.reserve(d.num_dwords);
+      for (uint32_t i = 0; i < d.num_dwords; ++i) {
+        const uint32_t selector = d.dst_selector + i;
+        if (selector < amdgpu::kTtmpSelectorFirst || selector > amdgpu::kTtmpSelectorLast)
+          registers.push_back(selector);
+      }
+      if (!registers.empty())
+        rs->registerEvent(wf.pc, MemoryEventType::GLOBAL_TO_SGPR, std::move(registers), wf.exec());
     }
   }
 }

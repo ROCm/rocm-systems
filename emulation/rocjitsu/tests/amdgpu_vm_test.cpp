@@ -6,6 +6,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
@@ -2118,6 +2119,46 @@ TEST_P(IsaTest, DispatchWfReturnsNullWhenSlotsExhausted) {
   EXPECT_EQ(cu->num_wfs(), kSlots);
   // All slots are occupied by resident (non-halted) waves — the next dispatch fails.
   EXPECT_EQ(cu->dispatch_wf(0, 0x1040, 104, 256), nullptr);
+}
+
+TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {
+  amdgpu::GpuMemory mem("cdna4_setpc_ttmp_mem");
+  amdgpu::L2Cache l2("cdna4_setpc_ttmp_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.num_wf_slots = 2;
+  cfg.sgprs_per_wf = 104;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna4_setpc_ttmp_cu", cfg, &mem, &l2);
+  ASSERT_NE(cu, nullptr);
+
+  test::HaltSnapshotPlugin *snapshot = nullptr;
+  cu->set_plugin_group(test::make_halt_snapshot_group(&snapshot));
+  ASSERT_NE(snapshot, nullptr);
+
+  constexpr uint64_t kStartPc = 0x1000;
+  constexpr uint64_t kTargetPc = kStartPc + 2 * sizeof(uint32_t);
+  constexpr uint32_t kTtmp0Selector = 108;
+  const std::array<uint32_t, 4> code = {
+      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4),
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+  };
+  mem.load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kStartPc);
+
+  auto *wavefront = cu->dispatch_wf(/*wg_id=*/0, kStartPc, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+  ASSERT_NE(wavefront, nullptr);
+  wavefront->set_ttmp(/*TTMP0=*/0, static_cast<uint32_t>(kTargetPc));
+  wavefront->set_ttmp(/*TTMP1=*/1, static_cast<uint32_t>(kTargetPc >> 32));
+
+  for (uint32_t step = 0; step < code.size() && cu->has_active_wfs(); ++step)
+    static_cast<void>(cu->step());
+
+  ASSERT_FALSE(cu->has_active_wfs());
+  ASSERT_EQ(snapshot->snapshots().size(), 1u);
+  EXPECT_EQ(snapshot->snapshots()[0].sgpr(0), 1u);
 }
 
 TEST(CommandProcessorTest, DispatchToQuiescedDebugHaltedCuReactivatesEventLoop) {
