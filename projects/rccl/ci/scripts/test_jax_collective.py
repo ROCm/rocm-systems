@@ -8,7 +8,7 @@ This script handles:
   4. Running pytest on pmap_test.py and shard_map_test.py
 
 Usage from GitHub Actions:
-  python .github/scripts/test_jax_collective.py \
+  python projects/rccl/ci/scripts/test_jax_collective.py \
       --artifact-dir ./build \
       --jax-src ./jax-src \
       --results-log ./jax_collective_results.log
@@ -28,6 +28,7 @@ from rccl_ci_utils import (
     send_email_report,
     send_teams_webhook,
     set_github_output,
+    setup_kpack_device_code,
     verify_rccl_override,
     write_github_summary,
 )
@@ -387,6 +388,9 @@ def main() -> None:
     populate_rocm_lib_dir(lib_dirs)
     setup_ld_library_path(lib_dirs)
     verify_rccl_override(rccl_lib_dir)
+
+    # Step 2b: Configure kpack device code loading for TheRock-built RCCL
+    setup_kpack_device_code(args.artifact_dir)
 
     # Step 3: Set XLA environment variables
     setup_xla_environment()

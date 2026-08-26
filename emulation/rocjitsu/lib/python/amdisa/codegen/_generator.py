@@ -7738,8 +7738,8 @@ class CodeGenerator:
         raw read.
         """
         # amdgpu::TransposeKind: TR_B4=1, TR_B6=2, B64_TR_B8=3,
-        # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6. Defaults describe the
-        # B64 (num_elems=2) forms.
+        # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6,
+        # CDNA5_DS_TR_B8=7. Defaults describe the B64 (num_elems=2) forms.
         tr_map = {
             'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
             'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2

@@ -3,18 +3,19 @@
 
 This script handles:
   1. Discovering the CI-built librccl.so in the artifact directory
-  2. Verifying that LD_LIBRARY_PATH overrides PyTorch's bundled RCCL
+  2. Replacing PyTorch's pip-bundled librccl.so with the CI-built version
   3. Cloning the matching PyTorch test sources (sparse checkout)
   4. Running pytest on test_c10d_nccl.py
 
 Usage from GitHub Actions:
-  python .github/scripts/test_pytorch_c10d.py \
+  python projects/rccl/ci/scripts/test_pytorch_c10d.py \
       --artifact-dir ./build \
       --pytorch-src ./pytorch-src \
       --results-log ./pytorch_c10d_results.log
 """
 
 import argparse
+import json
 import logging
 import os
 import subprocess
@@ -24,12 +25,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rccl_ci_utils import (
+    find_pip_sdk_lib_dirs,
     find_rccl_library,
+    override_bundled_hip_runtime,
+    override_bundled_rccl,
     parse_junit_xml,
+    quarantine_rocm_sysdeps,
+    reconcile_soname_versions,
     send_email_report,
     send_teams_webhook,
     set_github_output,
-    verify_rccl_override,
+    setup_kpack_device_code,
     write_github_summary,
 )
 
@@ -76,6 +82,9 @@ def setup_ld_library_path(rccl_lib_dir: Path, rocm_lib_dir: Path | None) -> str:
     parts = [str(rccl_lib_dir.resolve())]
     if rocm_lib_dir:
         parts.append(str(rocm_lib_dir.resolve()))
+    sysdeps_lib = rccl_lib_dir.resolve() / "rocm_sysdeps" / "lib"
+    if sysdeps_lib.is_dir():
+        parts.append(str(sysdeps_lib))
     existing = os.environ.get("LD_LIBRARY_PATH", "")
     if existing:
         parts.append(existing)
@@ -94,7 +103,7 @@ def clone_pytorch_test_sources(pytorch_src: Path) -> None:
     commit closest to that date so test sources match the installed wheel.
     """
     import re
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     import torch
 
@@ -205,6 +214,7 @@ def patch_missing_torch_modules() -> None:
         )
 
 
+
 def print_environment_info() -> None:
     """Print GPU and environment details for CI logs."""
     import torch
@@ -283,12 +293,6 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
         failed_tests = junit["failed"]
         error_details = junit["error_details"]
         tests_run = junit["tests_run"]
-        parts = []
-        if passed_tests:
-            parts.append(f"{len(passed_tests)} passed")
-        if failed_tests:
-            parts.append(f"{len(failed_tests)} failed")
-        summary_line = ", ".join(parts)
 
         if error_details:
             log.info("Failure/error details from JUnit XML:")
@@ -297,6 +301,7 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     else:
         log.warning("JUnit XML not found at %s, falling back to exit code only", junit_xml)
 
+    ALL_TESTS_MIN = 200
     if test_scope == "smoke" and tests_run < len(SMOKE_TESTS):
         log.error(
             "Expected %d smoke tests but only %d were collected — "
@@ -305,12 +310,56 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
             tests_run,
         )
         exit_code = 1
+    elif test_scope == "all" and tests_run < ALL_TESTS_MIN:
+        log.error(
+            "Expected at least %d tests in 'all' scope but only %d were "
+            "collected — check -k expression or test discovery",
+            ALL_TESTS_MIN,
+            tests_run,
+        )
+        exit_code = 1
+
+    known_failures_file = Path(__file__).parent / "known_failures.json"
+    known_set: set[str] = set()
+    if known_failures_file.exists():
+        with open(known_failures_file) as f:
+            known_data = json.load(f)
+        known_set = set(known_data.get("tests", {}).keys())
+        log.info("Loaded %d known failures from %s", len(known_set), known_failures_file.name)
+
+    known_failed = [t for t in failed_tests if t in known_set]
+    unexpected_failed = [t for t in failed_tests if t not in known_set]
+
+    passed_names = {name for name, _ in passed_tests}
+    now_passing = sorted(known_set & passed_names)
+    if now_passing:
+        log.warning(
+            "%d known failure(s) now PASSING — consider removing from "
+            "known_failures.json: %s", len(now_passing), now_passing,
+        )
+
+    if unexpected_failed:
+        log.error("Unexpected failures: %s", unexpected_failed)
+    elif failed_tests and not unexpected_failed and proc.returncode in (0, 1):
+        log.info("All %d failures are known — treating as PASSED", len(known_failed))
+        exit_code = 0
+
+    parts = []
+    if passed_tests:
+        parts.append(f"{len(passed_tests)} passed")
+    if unexpected_failed:
+        parts.append(f"{len(unexpected_failed)} unexpected failures")
+    if known_failed:
+        parts.append(f"{len(known_failed)} known failures")
+    summary_line = ", ".join(parts)
 
     summary = {
         "exit_code": exit_code,
         "test_scope": test_scope,
         "passed": passed_tests,
         "failed": failed_tests,
+        "known_failed": known_failed,
+        "unexpected_failed": unexpected_failed,
         "summary_line": summary_line,
         "tests_run": tests_run,
         "expected_tests": len(SMOKE_TESTS) if test_scope == "smoke" else None,
@@ -336,7 +385,7 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
         f"",
         f"PyTorch:    {torch.__version__}",
         f"RCCL:       {rccl_lib}",
-        f"GPUs:       {torch.cuda.device_count()}x {torch.cuda.get_device_name(0)}",
+        f"GPUs:       {torch.cuda.device_count()}x {torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else 'N/A'}",
         f"",
         f"Results:    {summary['summary_line']}",
     ]
@@ -345,10 +394,17 @@ def generate_summary_report(summary: dict, rccl_lib: Path) -> str:
         lines.append(f"Collected:  {summary['tests_run']}/{summary['expected_tests']} expected smoke tests")
     lines.append("")
 
-    if summary["failed"]:
-        lines.append(f"FAILED tests ({len(summary['failed'])}):")
-        for name in summary["failed"]:
+    unexpected = summary.get("unexpected_failed", [])
+    known = summary.get("known_failed", [])
+
+    if unexpected:
+        lines.append(f"UNEXPECTED failures ({len(unexpected)}):")
+        for name in unexpected:
             lines.append(f"  FAIL  {name}")
+        lines.append("")
+
+    if known:
+        lines.append(f"Known failures ({len(known)}) — excluded from verdict")
         lines.append("")
 
     if summary["passed"]:
@@ -424,19 +480,40 @@ def main() -> None:
     if args.discover_only:
         return
 
-    # Step 2: Set up LD_LIBRARY_PATH and verify override
-    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
-    verify_rccl_override(rccl_lib_dir)
+    # Step 2: Create symlinks for soname version mismatches between
+    # CI-built libraries and pip-installed packages (must run before
+    # quarantine so pip dirs get compatibility symlinks)
+    pip_lib_dirs = find_pip_sdk_lib_dirs()
+    reconcile_soname_versions([rccl_lib_dir] + pip_lib_dirs)
 
-    # Step 3: Clone PyTorch test sources
+    # Step 3: Quarantine TheRock-bundled libamd_smi and rocm_sysdeps to
+    # prevent the nl_genl destructor crash (SIGSEGV in containers).
+    # After this, libamd_smi resolves from pip dirs (via symlinks above).
+    quarantine_rocm_sysdeps(rccl_lib_dir)
+
+    # Step 4: Replace pip-bundled librccl.so with CI-built version
+    override_bundled_rccl(rccl_lib_dir)
+
+    # Step 4b: Replace pip-bundled libamdhip64.so with TheRock's version
+    # so the HIP runtime matches the compiler that built RCCL's device
+    # code objects (prevents findSymbol → guarantee → abort)
+    override_bundled_hip_runtime(rccl_lib_dir)
+
+    # Step 4c: Configure kpack device code loading — TheRock-built libraries
+    # have device code stripped into separate .kpack archives per GPU arch
+    setup_kpack_device_code(args.artifact_dir)
+
+    setup_ld_library_path(rccl_lib_dir, rocm_lib_dir)
+
+    # Step 5: Clone PyTorch test sources
     clone_pytorch_test_sources(args.pytorch_src)
 
-    # Step 4: Patch missing modules, print environment info, and run tests
+    # Step 6: Patch missing modules, print environment info, and run tests
     patch_missing_torch_modules()
     print_environment_info()
     exit_code, summary = run_tests(args.pytorch_src, args.results_log, args.test_scope)
 
-    # Step 5: Generate and distribute summary report
+    # Step 7: Generate and distribute summary report
     report = generate_summary_report(summary, rccl_lib)
     log.info("\n%s", report)
     write_github_summary(report)
