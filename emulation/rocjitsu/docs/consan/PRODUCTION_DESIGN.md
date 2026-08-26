@@ -3504,6 +3504,38 @@ analysis completed.
   2,878 simulator-device tests across the five supported targets pass in 76.71
   seconds. E2E validation remains outside this work.
 
+### Slice 5K: localize the Record/Replay access-to-sync handoff
+
+- **Explicit stage contract:** `MoiRecordReplayAccessOutput` now carries the
+  exact synchronization-island reservation and generated relay ranges from
+  Record/Replay access placement to the immediately following synchronization
+  lowering. Its lifetime is one MOI pipeline invocation; it is not transform
+  output, telemetry, or a supported inspection interface.
+- **Completed deletion:** `ConSanResult` no longer exposes four mutable fields
+  used only as temporary communication between those two lowerings. Access
+  placement publishes its narrow output directly, and barrier placement
+  consumes it explicitly. Other engines receive an empty value rather than
+  inheriting unrelated Record/Replay state.
+- **Behavior-focused tests:** The access-heavy split-barrier test still
+  requires every selected access and every split-barrier member to be emitted.
+  The CDNA4 sparse/dense composition test still requires all 1,024 accesses,
+  its barrier, branch-only routes, and the generated-code route frontier to
+  succeed. Assertions that directly inspected the deleted reservation count
+  and private periodic-bank spacing were removed: they duplicated those
+  behavioral outcomes and unnecessarily made one placement algorithm part of
+  the test contract.
+- **Size result:** Production grows by 12 net lines for the documented typed
+  stage value and explicit dependency, while source plus tests shrinks by 14
+  net lines. Each ordinary `ConSanResult` loses an optional, two integers, and
+  a vector. The aggregate has no independent behavior to unit-test; the two
+  composition tests exercise both populated members through their real
+  consumer.
+- **Completed checked-in gate:** The two focused composition tests pass. The
+  complete host gate passes 1,508 tests with the two expected benchmark-object
+  skips; all 194 HSA-hook tests pass; and all 2,878 simulator-device tests
+  across the five supported targets pass in 62.93 seconds. E2E validation
+  remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

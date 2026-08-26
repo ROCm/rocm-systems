@@ -857,9 +857,11 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::InlineShadow)
     try_apply_inline_shadow_patch(code_object_bytes, effective_options, arch,
                                   resource_planning_state, result);
+  MoiRecordReplayAccessOutput record_replay_access_output;
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
     try_apply_first_light_access_record_patch(code_object_bytes, effective_options, arch,
-                                              resource_planning_state, result);
+                                              resource_planning_state, record_replay_access_output,
+                                              result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !explicit_persistent_state &&
       std::ranges::none_of(result.patches,
@@ -885,7 +887,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     try_apply_atomic_record_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())
     try_apply_barrier_epoch_patch(code_object_bytes, effective_options, arch,
-                                  resource_planning_state, result);
+                                  resource_planning_state, record_replay_access_output, result);
   if (result.errors.empty())
     try_apply_inline_atomic_ordering_patch(code_object_bytes, effective_options, arch, result);
   if (result.errors.empty())

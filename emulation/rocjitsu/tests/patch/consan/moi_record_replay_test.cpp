@@ -10893,7 +10893,6 @@ TEST(ConSanMoi, Rdna4AccessHeavyCompactSplitBarrierReservesEveryMemberEntry) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.moi_reserved_barrier_island_count, kBarrierCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount)
@@ -11176,31 +11175,6 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
             std::ranges::any_of(patch.branch_only_return_relay_offsets,
                                 [&](uint64_t relay) { return relay >= original_text_size; }));
   }));
-
-  const uint64_t relay_bank_bytes = 2u * (kAccessCountPerKernel + 1u) * sizeof(uint32_t);
-  std::vector<std::pair<uint64_t, uint64_t>> relay_banks;
-  std::ranges::copy_if(result.moi_generated_branch_relay_ranges, std::back_inserter(relay_banks),
-                       [&](const auto &range) {
-                         return range.first >= original_text_size &&
-                                range.second - range.first == relay_bank_bytes;
-                       });
-  ASSERT_GE(relay_banks.size(), 2u);
-  std::ranges::sort(relay_banks);
-  uint64_t maximum_reserved_body_bytes = 0u;
-  for (const ConSanPatchInfo &patch : result.patches) {
-    if (patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore) {
-      maximum_reserved_body_bytes = std::max<uint64_t>(
-          maximum_reserved_body_bytes, patch.trampoline_size + 9u * sizeof(uint32_t));
-    }
-  }
-  ASSERT_GT(maximum_reserved_body_bytes, 0u);
-  constexpr uint64_t kRelaySpineSpacing = kSoppBranchMaximumForwardReachBytes / 2u;
-  for (size_t bank = 1u; bank < relay_banks.size(); ++bank) {
-    ASSERT_LE(relay_banks[bank - 1u].second, relay_banks[bank].first);
-    EXPECT_GE(relay_banks[bank].first - relay_banks[bank - 1u].second + maximum_reserved_body_bytes,
-              kRelaySpineSpacing)
-        << "a demand-scaled bank must not consume its own following spacing interval";
-  }
 }
 
 TEST(ConSanMoi, Cdna4FarRecordReplayBarriersUseRelocatedRouterBelowCompactCountLimit) {

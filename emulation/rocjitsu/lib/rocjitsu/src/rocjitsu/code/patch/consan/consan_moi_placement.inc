@@ -36,6 +36,28 @@ constexpr uint32_t kMoiRecordReplayBarrierRelaySlotWords =
     kMoiRecordReplayIndirectIslandWords + kMoiRecordReplayBarrierRelayWords;
 constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
 
+// Describes the exact prefix reserved by Record/Replay access placement for a
+// later synchronization pass. The access and synchronization lowerings are
+// separate mutation stages, so the consumer must not rediscover this strided
+// layout from incidental patch ordering or from the generated instruction
+// bytes.
+struct MoiReservedBarrierIslandLayout {
+  uint64_t begin = 0u;
+  uint32_t slot_words = kMoiRecordReplayIndirectIslandWords;
+  uint64_t reserved_slot_count = 0u;
+};
+
+// Carries only the access-placement facts needed by the immediately following
+// Record/Replay synchronization lowering. Keeping this value local to the MOI
+// pipeline makes the stage dependency explicit and prevents temporary layout
+// state from becoming part of ConSanResult's externally visible transform
+// result. Relay ranges are half-open and contain generated storage that the
+// synchronization stage may use only while each word remains pristine.
+struct MoiRecordReplayAccessOutput {
+  std::optional<MoiReservedBarrierIslandLayout> reserved_sync_islands;
+  std::vector<std::pair<uint64_t, uint64_t>> generated_branch_relay_ranges;
+};
+
 [[nodiscard]] uint64_t moi_reserved_barrier_island_count(const ConSanResult &result,
                                                          const ConSanOptions &options) {
   const auto count_all = [](const auto &container) {

@@ -5,6 +5,7 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
 void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
                                                MoiResourcePlanningState &resource_state,
+                                               MoiRecordReplayAccessOutput &access_output,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
@@ -2206,12 +2207,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.moi_branch_only_reservoir_telemetry = direct_branch_reservoirs.telemetry();
     if (reserved_sync_island_count != 0u) {
-      result.moi_reserved_barrier_island_begin = original_text_size;
-      result.moi_reserved_barrier_island_slot_words =
-          static_cast<uint32_t>(reserved_sync_slot_words);
-      result.moi_reserved_barrier_island_count = reserved_sync_island_count;
+      access_output.reserved_sync_islands = MoiReservedBarrierIslandLayout{
+          .begin = original_text_size,
+          .slot_words = static_cast<uint32_t>(reserved_sync_slot_words),
+          .reserved_slot_count = reserved_sync_island_count,
+      };
     }
-    result.moi_generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
+    access_output.generated_branch_relay_ranges = std::move(generated_branch_relay_ranges);
     result.modified = true;
     return;
   }

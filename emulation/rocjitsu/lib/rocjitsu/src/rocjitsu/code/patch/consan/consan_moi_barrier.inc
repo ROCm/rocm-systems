@@ -679,12 +679,6 @@ build_inline_shadow_private_epoch_barrier_cave_words(
   return words;
 }
 
-struct MoiReservedBarrierIslandLayout {
-  uint64_t begin = 0u;
-  uint32_t slot_words = kMoiRecordReplayIndirectIslandWords;
-  uint64_t reserved_slot_count = 0u;
-};
-
 // Access planning may materialize a conservative direct-reservoir frontier
 // for the later Record/Replay barrier pass. Once barrier routes have been
 // emitted, restore every unclaimed reservoir and its recursive route while
@@ -782,6 +776,7 @@ struct MoiReservedBarrierIslandLayout {
 [[nodiscard]] std::optional<MoiReservedBarrierIslandLayout>
 find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
                                                  const ConSanResult &result, rj_code_arch_t arch,
+                                                 const MoiRecordReplayAccessOutput &access_output,
                                                  size_t barrier_count,
                                                  uint64_t reserved_barrier_count) {
   if (barrier_count == 0u || reserved_barrier_count < barrier_count)
@@ -812,19 +807,17 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
     access_island_end = std::max(
         access_island_end, patch.trampoline_offset + static_cast<uint64_t>(patch.trampoline_size));
   }
-  if (result.moi_reserved_barrier_island_begin &&
-      result.moi_reserved_barrier_island_count == reserved_barrier_count &&
-      (result.moi_reserved_barrier_island_slot_words == kMoiRecordReplayIndirectIslandWords ||
-       result.moi_reserved_barrier_island_slot_words == kMoiLocalIndirectIslandWords ||
-       result.moi_reserved_barrier_island_slot_words == kMoiRecordReplayBarrierRelaySlotWords) &&
+  const auto &explicit_layout = access_output.reserved_sync_islands;
+  if (explicit_layout && explicit_layout->reserved_slot_count == reserved_barrier_count &&
+      (explicit_layout->slot_words == kMoiRecordReplayIndirectIslandWords ||
+       explicit_layout->slot_words == kMoiLocalIndirectIslandWords ||
+       explicit_layout->slot_words == kMoiRecordReplayBarrierRelaySlotWords) &&
       reserved_barrier_count <=
-          std::numeric_limits<uint64_t>::max() /
-              (result.moi_reserved_barrier_island_slot_words * sizeof(uint32_t))) {
+          std::numeric_limits<uint64_t>::max() / (explicit_layout->slot_words * sizeof(uint32_t))) {
     const uint64_t reservation_bytes =
-        reserved_barrier_count * result.moi_reserved_barrier_island_slot_words * sizeof(uint32_t);
-    if (*result.moi_reserved_barrier_island_begin <=
-        std::numeric_limits<uint64_t>::max() - reservation_bytes) {
-      access_island_begin = *result.moi_reserved_barrier_island_begin + reservation_bytes;
+        reserved_barrier_count * explicit_layout->slot_words * sizeof(uint32_t);
+    if (explicit_layout->begin <= std::numeric_limits<uint64_t>::max() - reservation_bytes) {
+      access_island_begin = explicit_layout->begin + reservation_bytes;
     }
   }
 
@@ -882,9 +875,9 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
     }
     const uint64_t candidate_begin = access_island_begin - *required_bytes;
     const bool has_explicit_spined_layout =
-        result.moi_reserved_barrier_island_begin == candidate_begin &&
-        result.moi_reserved_barrier_island_slot_words == kMoiRecordReplayBarrierRelaySlotWords &&
-        result.moi_reserved_barrier_island_count == reserved_barrier_count;
+        explicit_layout && explicit_layout->begin == candidate_begin &&
+        explicit_layout->slot_words == kMoiRecordReplayBarrierRelaySlotWords &&
+        explicit_layout->reserved_slot_count == reserved_barrier_count;
     bool has_claimed_spine_word = false;
     for (uint64_t slot = 0u; slot < reserved_barrier_count; ++slot) {
       const uint64_t slot_begin =
@@ -915,7 +908,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
     return spined;
 
   const uint32_t plain_island_words =
-      result.moi_reserved_barrier_island_slot_words == kMoiLocalIndirectIslandWords
+      explicit_layout && explicit_layout->slot_words == kMoiLocalIndirectIslandWords
           ? kMoiLocalIndirectIslandWords
           : kMoiRecordReplayIndirectIslandWords;
   const std::optional<uint64_t> required_island_bytes = checked_reserved_bytes(plain_island_words);
@@ -957,6 +950,7 @@ find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
 void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                  const ConSanOptions &options, rj_code_arch_t arch,
                                                  MoiResourcePlanningState &resource_state,
+                                                 const MoiRecordReplayAccessOutput &access_output,
                                                  ConSanResult &result) {
   if (!options.moi_track_barriers)
     return;
@@ -1342,7 +1336,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   const std::optional<MoiReservedBarrierIslandLayout> barrier_island_layout =
       options.moi_exec_save_sgpr
           ? find_record_replay_reserved_barrier_island_begin(
-                old_text, result, arch, planned_candidates.size(),
+                old_text, result, arch, access_output, planned_candidates.size(),
                 moi_reserved_record_replay_sync_island_count(result, options))
           : std::nullopt;
   if (barrier_island_layout) {
@@ -2371,10 +2365,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
                                                   const ConSanOptions &options, rj_code_arch_t arch,
+                                                  const MoiRecordReplayAccessOutput &access_output,
                                                   ConSanResult &result);
 
 void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                   const MoiRecordReplayAccessOutput &access_output,
                                    ConSanResult &result) {
   if (!options.moi_track_barriers || options.moi_engine == ConSanMoiEngine::Sampled)
     return;
@@ -2383,12 +2379,12 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
     if (barrier_options.automatic_moi_inline_sgpr_spill)
       barrier_options.moi_exec_save_sgpr.reset();
     try_apply_inline_shadow_barrier_epoch_patch(bytes, barrier_options, arch, resource_state,
-                                                result);
+                                                access_output, result);
     return;
   }
 
   const size_t warning_count = result.warnings.size();
-  try_apply_record_replay_barrier_record_patch(bytes, options, arch, result);
+  try_apply_record_replay_barrier_record_patch(bytes, options, arch, access_output, result);
   if (!result.errors.empty())
     return;
   const bool needs_dense_fallback = std::ranges::any_of(
@@ -2404,7 +2400,8 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
         });
     const size_t barrier_count_before = std::ranges::count(
         result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
-    try_apply_inline_shadow_barrier_epoch_patch(bytes, options, arch, resource_state, result);
+    try_apply_inline_shadow_barrier_epoch_patch(bytes, options, arch, resource_state, access_output,
+                                                result);
     const size_t barrier_count_after = std::ranges::count(
         result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
     if (result.errors.empty() && barrier_count_after - barrier_count_before >= failed_entry_count) {
@@ -2424,6 +2421,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
 
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
                                                   const ConSanOptions &options, rj_code_arch_t arch,
+                                                  const MoiRecordReplayAccessOutput &access_output,
                                                   ConSanResult &result) {
   if (!options.moi_track_barriers)
     return;
@@ -2643,7 +2641,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
                                                 kMoiLocalIndirectIslandWords);
   if (options.moi_exec_save_sgpr) {
     const auto reserved_barrier_island_layout = find_record_replay_reserved_barrier_island_begin(
-        old_text, result, arch, selected_candidates.size(),
+        old_text, result, arch, access_output, selected_candidates.size(),
         moi_reserved_record_replay_sync_island_count(result, options));
     if (reserved_barrier_island_layout) {
       const uint64_t reserved_words = reserved_barrier_island_layout->reserved_slot_count *
@@ -2658,7 +2656,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   }
   BranchOnlyRelayRouter barrier_branch_router;
   const uint32_t pristine_nop = build_s_nop(0u, arch);
-  for (const auto &[begin, end] : result.moi_generated_branch_relay_ranges) {
+  for (const auto &[begin, end] : access_output.generated_branch_relay_ranges) {
     if (begin > end || begin % sizeof(uint32_t) != 0u || end % sizeof(uint32_t) != 0u ||
         begin > old_text.size() || end > old_text.size()) {
       result.errors.emplace_back("ConSan MOI generated barrier-relay range is invalid");
