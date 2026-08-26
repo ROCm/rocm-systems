@@ -27,8 +27,6 @@ void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOp
     require(!result.elf_bytes.empty());
     require(!result.patches.empty());
     require(rocjitsu::validate_consan_modified_elf(input, result).empty());
-    require(rocjitsu::consan_install_action(result, false) ==
-            rocjitsu::ConSanInstallAction::LoadReplacement);
 
     if (std::getenv("RJ_CONSAN_FUZZ_REQUIRE_UNMATCHED_WAIT_ABORT")) {
       const rocjitsu::ConSanPatchInfo *abort_patch = nullptr;
@@ -57,8 +55,6 @@ void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOp
     require(!result.final_validation_passed);
     require(result.elf_bytes.empty());
     require(result.patches.empty());
-    require(rocjitsu::consan_install_action(result, false) ==
-            rocjitsu::ConSanInstallAction::LoadOriginal);
   }
 }
 

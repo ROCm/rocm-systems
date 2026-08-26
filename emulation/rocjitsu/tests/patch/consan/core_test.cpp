@@ -497,35 +497,6 @@ TEST(ConSan, StubRejectsEmptyCodeObject) {
   EXPECT_FALSE(result.errors.empty());
 }
 
-TEST(ConSan, InstallActionUsesTypedOutcomeAndValidatedReplacement) {
-  ConSanResult unchanged;
-  unchanged.outcome = ConSanTransformOutcome::Unchanged;
-  EXPECT_EQ(consan_install_action(unchanged, false), ConSanInstallAction::LoadOriginal);
-  EXPECT_EQ(consan_install_action(unchanged, true), ConSanInstallAction::LoadOriginal);
-
-  ConSanResult unsupported;
-  unsupported.outcome = ConSanTransformOutcome::Unsupported;
-  EXPECT_EQ(consan_install_action(unsupported, false), ConSanInstallAction::LoadOriginal);
-  EXPECT_EQ(consan_install_action(unsupported, true), ConSanInstallAction::Reject);
-
-  ConSanResult invalid;
-  invalid.outcome = ConSanTransformOutcome::Invalid;
-  EXPECT_EQ(consan_install_action(invalid, false), ConSanInstallAction::LoadOriginal);
-  EXPECT_EQ(consan_install_action(invalid, true), ConSanInstallAction::Reject);
-
-  ConSanResult replacement;
-  replacement.outcome = ConSanTransformOutcome::ModifiedValid;
-  replacement.modified = true;
-  replacement.final_validation_passed = true;
-  replacement.elf_bytes.push_back(1u);
-  EXPECT_EQ(consan_install_action(replacement, false), ConSanInstallAction::LoadReplacement);
-  EXPECT_EQ(consan_install_action(replacement, true), ConSanInstallAction::LoadReplacement);
-
-  replacement.final_validation_passed = false;
-  EXPECT_EQ(consan_install_action(replacement, false), ConSanInstallAction::Reject);
-  EXPECT_EQ(consan_install_action(replacement, true), ConSanInstallAction::Reject);
-}
-
 TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
   const std::array<uint32_t, 13> text_words = {
       0xD8340000u,
@@ -605,11 +576,6 @@ TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
       EXPECT_FALSE(result.final_validation_passed);
       EXPECT_TRUE(result.elf_bytes.empty());
       EXPECT_TRUE(result.patches.empty());
-      EXPECT_EQ(consan_install_action(result, false), ConSanInstallAction::LoadOriginal);
-      EXPECT_EQ(consan_install_action(result, true),
-                result.outcome == ConSanTransformOutcome::Unchanged
-                    ? ConSanInstallAction::LoadOriginal
-                    : ConSanInstallAction::Reject);
     }
   }
 }
@@ -699,8 +665,6 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
       EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
       ASSERT_EQ(result.errors.size(), 1u);
       EXPECT_EQ(result.errors.front(), damage.expected_error);
-      EXPECT_EQ(consan_install_action(result, false), ConSanInstallAction::LoadOriginal);
-      EXPECT_EQ(consan_install_action(result, true), ConSanInstallAction::Reject);
     }
   }
 }
@@ -911,17 +875,11 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
       EXPECT_FALSE(result.elf_bytes.empty());
       EXPECT_FALSE(result.patches.empty());
       EXPECT_TRUE(validate_consan_modified_elf(input, result).empty());
-      EXPECT_EQ(consan_install_action(result, false), ConSanInstallAction::LoadReplacement);
     } else {
       EXPECT_FALSE(result.modified);
       EXPECT_FALSE(result.final_validation_passed);
       EXPECT_TRUE(result.elf_bytes.empty());
       EXPECT_TRUE(result.patches.empty());
-      EXPECT_EQ(consan_install_action(result, false), ConSanInstallAction::LoadOriginal);
-      EXPECT_EQ(consan_install_action(result, true),
-                result.outcome == ConSanTransformOutcome::Unchanged
-                    ? ConSanInstallAction::LoadOriginal
-                    : ConSanInstallAction::Reject);
     }
   };
 

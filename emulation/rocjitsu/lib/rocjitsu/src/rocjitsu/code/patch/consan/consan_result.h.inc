@@ -332,8 +332,6 @@ consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
 [[nodiscard]] const char *consan_moi_candidate_source_name(ConSanMoiCandidateSource source);
 [[nodiscard]] const char *consan_lds_access_kind_name(ConSanLdsAccessKind kind);
 [[nodiscard]] const char *consan_flat_address_space_hint_name(ConSanFlatAddressSpaceHint hint);
-[[nodiscard]] ConSanInstallAction consan_install_action(const ConSanResult &result,
-                                                        bool fail_closed);
 
 [[nodiscard]] std::optional<ConSanFlavor> parse_consan_flavor(std::string_view value);
 [[nodiscard]] std::optional<ConSanMoiEngine> parse_consan_moi_engine(std::string_view value);

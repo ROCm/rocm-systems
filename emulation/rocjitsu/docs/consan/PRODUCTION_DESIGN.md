@@ -3381,6 +3381,31 @@ analysis completed.
   simulator-device tests pass in 66.85 seconds of wall time. E2E validation
   remains outside this work.
 
+### Slice 5F: delete legacy loader-admission policy
+
+- **Single policy owner:** `TransformResult::install_action` is now the only
+  implementation that maps a static transform outcome, final-validation fact,
+  replacement storage, and fail-closed policy to a loader action. The HSA
+  adapter already consumed that typed method; production had no remaining raw
+  caller.
+- **Completed deletion:** The duplicate
+  `consan_install_action(const ConSanResult &, bool)` declaration and
+  implementation are gone. Raw mechanism and fuzz tests retain their stronger
+  structural assertions but no longer retest loader policy through the
+  compatibility record. The redundant raw truth-table test is also gone.
+- **Preserved contract coverage:**
+  `InstallActionTruthTableUsesOnlySplitStaticResult` covers unchanged,
+  unsupported, invalid, validated replacement, missing validation, missing
+  bytes, fail-open, and fail-closed cases on the production result. Additional
+  typed pipeline and hook tests exercise policy on real transformations.
+- **Deletion result:** Production source is 17 lines smaller and duplicate
+  test/fuzz code is 46 lines smaller.
+- **Completed checked-in gate:** The complete host gate passes 1,508 tests with
+  the two expected benchmark-object skips; all 194 hook tests pass; and all
+  2,878 simulator-device tests pass in 70.03 seconds of wall time. The removed
+  raw truth table accounts for the one-test decrease. E2E validation remains
+  outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

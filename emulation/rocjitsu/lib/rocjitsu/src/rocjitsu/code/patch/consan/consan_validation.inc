@@ -4627,18 +4627,3 @@ std::vector<std::string> validate_consan_modified_elf(std::span<const uint8_t> o
                                                       const ConSanResult &modified_result) {
   return validate_final_consan_elf(original_bytes, modified_result);
 }
-
-ConSanInstallAction consan_install_action(const ConSanResult &result, bool fail_closed) {
-  switch (result.outcome) {
-  case ConSanTransformOutcome::ModifiedValid:
-    if (result.modified && result.final_validation_passed && !result.elf_bytes.empty())
-      return ConSanInstallAction::LoadReplacement;
-    return ConSanInstallAction::Reject;
-  case ConSanTransformOutcome::Unchanged:
-    return ConSanInstallAction::LoadOriginal;
-  case ConSanTransformOutcome::Unsupported:
-  case ConSanTransformOutcome::Invalid:
-    return fail_closed ? ConSanInstallAction::Reject : ConSanInstallAction::LoadOriginal;
-  }
-  return ConSanInstallAction::Reject;
-}
