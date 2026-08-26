@@ -22,7 +22,7 @@ namespace rocprofsys::backends::hipfile
  */
 template <typename T>
 concept wrapper_policy =
-    requires { typename T::stats_l3_t; } && requires(typename T::stats_l3_t* out) {
+    requires { typename T::stats_l3_t; } && requires(T::stats_l3_t* out) {
         { T::get_stats_l3(out) } -> std::convertible_to<bool>;
         { T::runtime_version_supported() } -> std::convertible_to<bool>;
         { T::MAX_GPU_SLOTS } -> std::convertible_to<std::size_t>;
@@ -90,7 +90,10 @@ private:
 
         m_available = Wrapper::get_stats_l3(&raw);
 
-        if(!m_available) return out;
+        if(!m_available)
+        {
+            return out;
+        }
 
         const auto slots = std::min<std::size_t>(Wrapper::MAX_GPU_SLOTS, MAX_GPUS);
         for(std::size_t i = 0; i < slots; ++i)

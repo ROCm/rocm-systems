@@ -166,11 +166,14 @@ struct settings_policy
         // does it, so "All" and " fastpath, fallback " behave as written.
         std::string normalized;
         normalized.reserve(setting.size());
-        for(const char ch : setting)
+        for(const char character : setting)
         {
-            if(ch == ' ' || ch == '\t') continue;
+            if(character == ' ' || character == '\t')
+            {
+                continue;
+            }
             normalized.push_back(
-                static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+                static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
         }
 
         hipfile::enabled_metrics metrics;

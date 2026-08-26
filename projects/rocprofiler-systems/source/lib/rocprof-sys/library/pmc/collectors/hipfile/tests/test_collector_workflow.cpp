@@ -14,6 +14,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -70,14 +71,22 @@ struct stub_cache
                              const enabled_metrics& supported, const metrics& values,
                              std::uint64_t timestamp)
     {
-        if(values.query_failed) return;
+        if(values.query_failed)
+        {
+            return;
+        }
 
         const std::uint32_t active = enabled_cfg.value & supported.value;
         for(const auto& metric : METRIC_TABLE)
         {
-            if((active & (1U << metric.bit)) == 0U) continue;
-            samples.push_back(recorded_sample{ device_id, metric.suffix,
-                                               metric.value(values), timestamp });
+            if((active & (1U << metric.bit)) == 0U)
+            {
+                continue;
+            }
+            samples.push_back(recorded_sample{ .device_id = device_id,
+                                               .metric    = metric.suffix,
+                                               .value     = metric.value(values),
+                                               .timestamp = timestamp });
         }
     }
 
@@ -85,7 +94,9 @@ struct stub_cache
     {
         std::vector<recorded_sample> out;
         std::copy_if(samples.begin(), samples.end(), std::back_inserter(out),
-                     [&name](const auto& s) { return s.metric == name; });
+                     [&name](const recorded_sample& sample_rec) {
+                         return sample_rec.metric == name;
+                     });
         return out;
     }
 };
@@ -100,8 +111,10 @@ struct stub_settings
     static void set_visible_identity(std::size_t n)
     {
         visible_type_indices.resize(n);
-        for(std::size_t i = 0; i < n; ++i)
-            visible_type_indices[i] = i;
+        for(std::size_t idx = 0; idx < n; ++idx)
+        {
+            visible_type_indices[idx] = idx;
+        }
     }
 
     static void reset()
@@ -149,6 +162,14 @@ using collector_t = collector<mock_provider, device_t, stub_config>;
 constexpr std::uint64_t NS_PER_SEC = 1'000'000'000;
 constexpr std::uint64_t TS_1       = 1 * NS_PER_SEC;
 constexpr std::uint64_t TS_2       = 2 * NS_PER_SEC;
+
+namespace test_bytes
+{
+constexpr std::uint64_t kb512 = 512;
+constexpr std::uint64_t kb4   = 4096;
+constexpr std::uint64_t b1000 = 1000;
+constexpr std::uint64_t b3000 = 3000;
+}  // namespace test_bytes
 
 class HipFileCollectorTest : public ::testing::Test
 {
@@ -228,7 +249,9 @@ TEST_F(HipFileCollectorTest, every_track_is_gpu_indexed)
     // No sample may arrive without a GPU it belongs to. The process-scoped counters that
     // used to ride along on GPU 0 are gone entirely.
     for(const auto& sample : stub_cache::samples)
+    {
         EXPECT_LT(sample.device_id, 2U);
+    }
 }
 
 TEST_F(HipFileCollectorTest, no_registration_tracks_are_emitted)
@@ -293,7 +316,9 @@ constexpr std::array<const char*, 7> ALL_GROUPS{ "bytes",    "ops",    "fastpath
 TEST(HipFileMetricGroups, each_group_covers_exactly_one_read_and_one_write)
 {
     for(const auto* group : ALL_GROUPS)
+    {
         EXPECT_EQ(std::popcount(metric_group_mask(group)), 2) << group;
+    }
 }
 
 TEST(HipFileMetricGroups, groups_partition_the_metric_table)
@@ -354,16 +379,16 @@ TEST_F(HipFileCollectorTest, cumulative_values_reach_the_cache)
     stub_settings::set_visible_identity(1);
     setup_and_config();
 
-    backend().gpu(0).read_bytes = 1000;
+    backend().gpu(0).read_bytes = test_bytes::b1000;
     m_collector->sample(static_cast<std::int64_t>(TS_1));
 
-    backend().gpu(0).read_bytes = 3000;
+    backend().gpu(0).read_bytes = test_bytes::b3000;
     m_collector->sample(static_cast<std::int64_t>(TS_2));
 
     const auto read_bytes = stub_cache::for_metric("Read Bytes");
     ASSERT_EQ(read_bytes.size(), 2U);
-    EXPECT_DOUBLE_EQ(read_bytes[0].value, 1000.0);
-    EXPECT_DOUBLE_EQ(read_bytes[1].value, 3000.0);
+    EXPECT_DOUBLE_EQ(read_bytes[0].value, static_cast<double>(test_bytes::b1000));
+    EXPECT_DOUBLE_EQ(read_bytes[1].value, static_cast<double>(test_bytes::b3000));
 }
 
 TEST_F(HipFileCollectorTest, bandwidth_reaches_the_cache_wall_clock_normalised)
@@ -374,13 +399,13 @@ TEST_F(HipFileCollectorTest, bandwidth_reaches_the_cache_wall_clock_normalised)
     backend().gpu(0).read_bytes = 0;
     m_collector->sample(static_cast<std::int64_t>(TS_1));
 
-    backend().gpu(0).read_bytes = 4096;
+    backend().gpu(0).read_bytes = test_bytes::kb4;
     m_collector->sample(static_cast<std::int64_t>(TS_2));
 
     const auto bandwidth = stub_cache::for_metric("Read Bandwidth");
     ASSERT_EQ(bandwidth.size(), 2U);
     EXPECT_DOUBLE_EQ(bandwidth[0].value, 0.0);
-    EXPECT_DOUBLE_EQ(bandwidth[1].value, 4096.0);
+    EXPECT_DOUBLE_EQ(bandwidth[1].value, static_cast<double>(test_bytes::kb4));
 }
 
 // ── Unavailable backend ─────────────────────────────────────────────────────
@@ -410,7 +435,7 @@ TEST_F(HipFileCollectorTest, devices_survive_an_unavailable_interval)
     EXPECT_EQ(m_collector->get_device_count(), before);
 
     backend().available         = true;
-    backend().gpu(0).read_bytes = 512;
+    backend().gpu(0).read_bytes = test_bytes::kb512;
     m_collector->sample(static_cast<std::int64_t>(TS_2));
 
     EXPECT_FALSE(stub_cache::samples.empty());
@@ -438,7 +463,7 @@ TEST_F(HipFileCollectorTest, production_perfetto_policy_is_inert)
 {
     // Compiles against the same call base::collector makes, and does nothing.
     metrics values{};
-    values.read_bytes = 4096;
+    values.read_bytes = test_bytes::kb4;
 
     perfetto_policy::store_sample(0, values, TS_1);
 
@@ -452,7 +477,7 @@ TEST_F(HipFileCollectorTest, pause_emits_zeros_for_every_track)
     stub_settings::set_visible_identity(1);
     setup_and_config();
 
-    backend().gpu(0).read_bytes = 4096;
+    backend().gpu(0).read_bytes = test_bytes::kb4;
     m_collector->sample(static_cast<std::int64_t>(TS_1));
     stub_cache::reset();
 
@@ -460,7 +485,9 @@ TEST_F(HipFileCollectorTest, pause_emits_zeros_for_every_track)
 
     ASSERT_EQ(stub_cache::samples.size(), HIPFILE_METRICS_COUNT);
     for(const auto& sample : stub_cache::samples)
+    {
         EXPECT_DOUBLE_EQ(sample.value, 0.0) << sample.metric;
+    }
 }
 
 TEST_F(HipFileCollectorTest, pause_is_not_suppressed_as_a_failed_query)

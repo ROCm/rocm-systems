@@ -3,18 +3,14 @@
 
 #pragma once
 
-#include "core/agent.hpp"
 #include "core/categories.hpp"
 #include "core/trace_cache/cache_manager.hpp"
-#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
-#include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <string>
 
 namespace rocprofsys::pmc::collectors::hipfile
@@ -94,7 +90,10 @@ struct cache_policy
         // A failed hipFile query is not a measurement of zero, so it produces no sample.
         // Note this is not the paused path: pause() emits a value-initialized metrics,
         // which has query_failed false and so still drops the tracks to zero.
-        if(metric_values.query_failed) return;
+        if(metric_values.query_failed)
+        {
+            return;
+        }
 
         enabled_metrics active;
         active.value = enabled_metrics_cfg.value & supported_metrics.value;

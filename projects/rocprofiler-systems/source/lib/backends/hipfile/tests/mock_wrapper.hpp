@@ -4,6 +4,7 @@
 #pragma once
 
 #include "backends/hipfile/backend.hpp"
+#include "backends/hipfile/types.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -79,7 +80,10 @@ struct mock_wrapper
     static bool get_stats_l3(stats_l3_t* out) noexcept
     {
         ++call_count;
-        if(!query_succeeds) return false;
+        if(!query_succeeds)
+        {
+            return false;
+        }
         *out = next_stats;
         return true;
     }

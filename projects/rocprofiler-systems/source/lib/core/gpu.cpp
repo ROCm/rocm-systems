@@ -42,7 +42,6 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -164,10 +163,16 @@ visibility_mask_is_ordered_subset(std::string_view value)
     while(std::getline(stream, token, ','))
     {
         const auto first = token.find_first_not_of(" \t");
-        if(first == std::string::npos) continue;
+        if(first == std::string::npos)
+        {
+            continue;
+        }
         const auto last = token.find_last_not_of(" \t");
         token           = token.substr(first, last - first + 1);
-        if(token.find_first_not_of("0123456789") != std::string::npos) return false;
+        if(token.find_first_not_of("0123456789") != std::string::npos)
+        {
+            return false;
+        }
         const auto ordinal = std::stoull(token);
         if(have_previous && ordinal <= previous) return false;
         previous      = ordinal;
@@ -199,11 +204,17 @@ warn_if_visibility_mask_permutes()
         const auto gpu_ordinal =
             rocprofsys::get_env<std::string>("GPU_DEVICE_ORDINAL", "");
         if(!hip.empty())
+        {
             check("HIP_VISIBLE_DEVICES");
+        }
         else if(!cuda.empty())
+        {
             check("CUDA_VISIBLE_DEVICES");
+        }
         else
+        {
             check("GPU_DEVICE_ORDINAL");
+        }
     });
 }
 }  // namespace
@@ -221,14 +232,23 @@ get_visible_gpu_bdfs()
     // Ensure the rocprofiler-sdk agents (and their runtime_visibility) are populated.
     // No GPU agents means the query found nothing to report on (or failed), so runtime
     // visibility is unknown rather than empty.
-    if(device_count() == 0) return std::nullopt;
+    if(device_count() == 0)
+    {
+        return std::nullopt;
+    }
 
     std::set<std::string> _bdfs;
     for(const auto& _agent :
         get_agent_manager_instance().get_agents_by_type(agent_type::GPU))
     {
-        if(!_agent) continue;
-        if(!_agent->hip_visible) continue;
+        if(!_agent)
+        {
+            continue;
+        }
+        if(!_agent->hip_visible)
+        {
+            continue;
+        }
         _bdfs.insert(
             common::format_pci_bdf_from_location_id(_agent->domain, _agent->location_id));
     }
@@ -239,7 +259,10 @@ std::vector<std::size_t>
 get_visible_gpu_type_indices()
 {
     // Ensure agents (and runtime_visibility.hip) are populated.
-    if(device_count() == 0) return {};
+    if(device_count() == 0)
+    {
+        return {};
+    }
 
     warn_if_visibility_mask_permutes();
 
@@ -247,7 +270,10 @@ get_visible_gpu_type_indices()
     for(const auto& gpu_agent :
         get_agent_manager_instance().get_agents_by_type(agent_type::GPU))
     {
-        if(!gpu_agent || !gpu_agent->hip_visible) continue;
+        if(!gpu_agent || !gpu_agent->hip_visible)
+        {
+            continue;
+        }
         indices.push_back(gpu_agent->device_type_index);
     }
     return indices;

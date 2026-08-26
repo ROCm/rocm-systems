@@ -8,6 +8,7 @@
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include "trace_cache/sample_type.hpp"
 
 #include <profiler-hub/storage.hpp>
@@ -41,6 +42,7 @@ public:
     void handle(const ainic_pmc_sample& sample);
     void handle(const cpu_pmc_sample& sample);
     void handle(const gpu_perf_counter_sample& sample);
+    // NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method)
     void handle(const hipfile_pmc_sample& sample);
     void handle(const kfd_sample& sample);
 

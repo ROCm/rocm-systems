@@ -16,6 +16,7 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/pmc/collectors/nic/sample.hpp"
 #include "library/thread_info.hpp"
@@ -613,7 +614,10 @@ rocpd_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& hipfile_sam
 
     for(const auto& metric : collector::METRIC_TABLE)
     {
-        if((enabled & (1U << metric.bit)) == 0U) continue;
+        if((enabled & (1U << metric.bit)) == 0U)
+        {
+            continue;
+        }
 
         // track_info_t::name and pmc_info_unique_id_t::name are string_views, so both
         // strings must outlive the insert call rather than being built in place.

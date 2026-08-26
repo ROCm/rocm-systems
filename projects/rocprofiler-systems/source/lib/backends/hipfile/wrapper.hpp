@@ -34,11 +34,8 @@
 namespace rocprofsys::backends::hipfile
 {
 
-namespace
-{
-constexpr unsigned long k_version_major_factor = 1000000UL;
-constexpr unsigned long k_version_minor_factor = 1000UL;
-}  // namespace
+inline constexpr unsigned long k_version_major_factor = 1000000UL;
+inline constexpr unsigned long k_version_minor_factor = 1000UL;
 
 /// @brief Collapse a version triple into one comparable number.
 [[nodiscard]] constexpr unsigned long

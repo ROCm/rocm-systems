@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace rocprofsys::pmc::collectors::hipfile

@@ -74,15 +74,21 @@ parse_int(const char* text, int minimum, int& out)
 class scratch_file
 {
 public:
-    scratch_file(const char* path, int fd)
+    scratch_file(const char* path, int file_descriptor)
     : m_path{ path }
-    , m_fd{ fd }
+    , m_fd{ file_descriptor }
     {}
 
     ~scratch_file()
     {
-        if(m_fd >= 0) close(m_fd);
-        if(m_path != nullptr) unlink(m_path);
+        if(m_fd >= 0)
+        {
+            close(m_fd);
+        }
+        if(m_path != nullptr)
+        {
+            unlink(m_path);
+        }
     }
 
     scratch_file(const scratch_file&)            = delete;
@@ -153,7 +159,7 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    scratch_file file{ path, raw_fd };
+    const scratch_file file{ path, raw_fd };
 
     if(ftruncate(file.fd(), static_cast<off_t>(bytes)) != 0)
     {
@@ -182,16 +188,16 @@ main(int argc, char** argv)
     std::uint64_t iters = 0;
     while(std::chrono::steady_clock::now() < deadline)
     {
-        ssize_t nw = hipFileWrite(handle, devbuf, bytes, 0, 0);
-        if(nw < 0)
+        const ssize_t bytes_written = hipFileWrite(handle, devbuf, bytes, 0, 0);
+        if(bytes_written < 0)
         {
-            fprintf(stderr, "hipFileWrite failed (%zd)\n", nw);
+            fprintf(stderr, "hipFileWrite failed (%zd)\n", bytes_written);
             break;
         }
-        ssize_t nr = hipFileRead(handle, devbuf, bytes, 0, 0);
-        if(nr < 0)
+        const ssize_t bytes_read = hipFileRead(handle, devbuf, bytes, 0, 0);
+        if(bytes_read < 0)
         {
-            fprintf(stderr, "hipFileRead failed (%zd)\n", nr);
+            fprintf(stderr, "hipFileRead failed (%zd)\n", bytes_read);
             break;
         }
         ++iters;

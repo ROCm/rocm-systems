@@ -5,10 +5,12 @@
 
 #include "library/pmc/collectors/hipfile/device.hpp"
 #include "library/pmc/collectors/hipfile/hipfile_traits.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -18,6 +20,20 @@ namespace
 {
 using device_t = device<mock_backend>;
 using traits_t = hipfile_traits<mock_provider, device_t>;
+
+namespace test_values
+{
+constexpr std::size_t   out_of_range_ordinal = 99;
+constexpr std::size_t   extra_visible_gpus   = 8;
+constexpr std::uint64_t read_bytes_gpu0      = 10;
+constexpr std::uint64_t read_bytes_gpu1      = 20;
+constexpr std::uint64_t read_bytes_slot0     = 111;
+constexpr std::uint64_t read_bytes_slot1     = 222;
+constexpr std::uint64_t read_bytes_filtered  = 333;
+constexpr std::uint64_t read_bytes_excluded  = 444;
+constexpr std::uint64_t read_bytes_single    = 2048;
+constexpr std::size_t   filter_index         = 5;
+}  // namespace test_values
 
 /**
  * @brief Settings stand-in, so enumeration is testable without env vars or a ROCm
@@ -32,8 +48,10 @@ struct stub_settings
     static void set_visible_identity(std::size_t n)
     {
         visible_type_indices.resize(n);
-        for(std::size_t i = 0; i < n; ++i)
-            visible_type_indices[i] = i;
+        for(std::size_t idx = 0; idx < n; ++idx)
+        {
+            visible_type_indices[idx] = idx;
+        }
     }
 
     static void reset()
@@ -137,7 +155,7 @@ TEST_F(HipFileTraitsTest, specific_filter_ignores_out_of_range_ordinals)
 {
     stub_settings::set_visible_identity(2);
     stub_settings::gpu_filter.mode    = device_selection_mode::SPECIFIC;
-    stub_settings::gpu_filter.indices = { 0, 99 };
+    stub_settings::gpu_filter.indices = { 0, test_values::out_of_range_ordinal };
 
     const auto entries = enumerate();
 
@@ -147,7 +165,7 @@ TEST_F(HipFileTraitsTest, specific_filter_ignores_out_of_range_ordinals)
 
 TEST_F(HipFileTraitsTest, visible_gpus_clamped_to_snapshot_capacity)
 {
-    stub_settings::set_visible_identity(MAX_GPUS + 8);
+    stub_settings::set_visible_identity(MAX_GPUS + test_values::extra_visible_gpus);
 
     const auto entries = enumerate();
 
@@ -170,7 +188,7 @@ TEST_F(HipFileTraitsTest, enabled_metrics_come_from_settings)
 TEST_F(HipFileTraitsTest, get_metrics_delegates_to_device)
 {
     stub_settings::set_visible_identity(1);
-    m_provider->backend->gpu(0).read_bytes = 2048;
+    m_provider->backend->gpu(0).read_bytes = test_values::read_bytes_single;
 
     const auto entries = enumerate();
     ASSERT_EQ(entries.size(), 1U);
@@ -179,14 +197,14 @@ TEST_F(HipFileTraitsTest, get_metrics_delegates_to_device)
     enabled.value = ALL_HIPFILE_METRICS;
 
     EXPECT_EQ(traits_t::get_metrics(entries[0].device, enabled, 1'000'000'000).read_bytes,
-              2048U);
+              test_values::read_bytes_single);
 }
 
 TEST_F(HipFileTraitsTest, identity_mapping_is_unchanged_without_a_visibility_mask)
 {
     stub_settings::set_visible_identity(2);
-    m_provider->backend->gpu(0).read_bytes = 10;
-    m_provider->backend->gpu(1).read_bytes = 20;
+    m_provider->backend->gpu(0).read_bytes = test_values::read_bytes_gpu0;
+    m_provider->backend->gpu(1).read_bytes = test_values::read_bytes_gpu1;
 
     const auto entries = enumerate();
 
@@ -198,16 +216,18 @@ TEST_F(HipFileTraitsTest, identity_mapping_is_unchanged_without_a_visibility_mas
 
     enabled_metrics enabled;
     enabled.value = ALL_HIPFILE_METRICS;
-    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes, 10U);
-    EXPECT_EQ(entries[1].device->get_metrics(enabled, 1'000'000'000).read_bytes, 20U);
+    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes,
+              test_values::read_bytes_gpu0);
+    EXPECT_EQ(entries[1].device->get_metrics(enabled, 1'000'000'000).read_bytes,
+              test_values::read_bytes_gpu1);
 }
 
 TEST_F(HipFileTraitsTest, subset_mask_maps_hipfile_slots_onto_profiler_indices)
 {
     // HIP_VISIBLE_DEVICES=4,5: hipFile ordinal 0 is physical GPU 4, ordinal 1 is GPU 5.
     stub_settings::visible_type_indices    = { 4, 5 };
-    m_provider->backend->gpu(0).read_bytes = 111;
-    m_provider->backend->gpu(1).read_bytes = 222;
+    m_provider->backend->gpu(0).read_bytes = test_values::read_bytes_slot0;
+    m_provider->backend->gpu(1).read_bytes = test_values::read_bytes_slot1;
 
     const auto entries = enumerate();
 
@@ -225,8 +245,10 @@ TEST_F(HipFileTraitsTest, subset_mask_maps_hipfile_slots_onto_profiler_indices)
 
     enabled_metrics enabled;
     enabled.value = ALL_HIPFILE_METRICS;
-    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes, 111U);
-    EXPECT_EQ(entries[1].device->get_metrics(enabled, 1'000'000'000).read_bytes, 222U);
+    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes,
+              test_values::read_bytes_slot0);
+    EXPECT_EQ(entries[1].device->get_metrics(enabled, 1'000'000'000).read_bytes,
+              test_values::read_bytes_slot1);
 }
 
 TEST_F(HipFileTraitsTest, sampling_gpus_filter_uses_profiler_index_not_hipfile_slot)
@@ -234,8 +256,8 @@ TEST_F(HipFileTraitsTest, sampling_gpus_filter_uses_profiler_index_not_hipfile_s
     stub_settings::visible_type_indices    = { 4, 5 };
     stub_settings::gpu_filter.mode         = device_selection_mode::SPECIFIC;
     stub_settings::gpu_filter.indices      = { 4 };
-    m_provider->backend->gpu(0).read_bytes = 333;
-    m_provider->backend->gpu(1).read_bytes = 444;
+    m_provider->backend->gpu(0).read_bytes = test_values::read_bytes_filtered;
+    m_provider->backend->gpu(1).read_bytes = test_values::read_bytes_excluded;
 
     const auto entries = enumerate();
 
@@ -245,7 +267,8 @@ TEST_F(HipFileTraitsTest, sampling_gpus_filter_uses_profiler_index_not_hipfile_s
 
     enabled_metrics enabled;
     enabled.value = ALL_HIPFILE_METRICS;
-    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes, 333U);
+    EXPECT_EQ(entries[0].device->get_metrics(enabled, 1'000'000'000).read_bytes,
+              test_values::read_bytes_filtered);
 }
 
 }  // namespace
