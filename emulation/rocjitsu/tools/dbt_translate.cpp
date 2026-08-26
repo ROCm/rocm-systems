@@ -90,7 +90,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
       // Linked gfx1250 objects use zero-filled holes between independently
       // aligned function bodies. BasicBlock::build() treats these words as
       // padding rather than instructions, so host validation must do the same.
-      if (arch == ROCJITSU_CODE_ARCH_GFX1250 && words[pc] == 0) {
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && words[pc] == 0) {
         ++pc;
         continue;
       }
@@ -420,24 +420,24 @@ struct SelectedInput {
 } // namespace
 
 std::optional<std::string_view> translation_request_error(const TranslateOptions &options) {
-  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+  if (options.guest_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       options.input_revision == ProcessorRevision::Unspecified) {
     return "--input-revision is required when --input-target is gfx1250";
   }
-  if (options.guest_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+  if (options.guest_arch != ROCJITSU_CODE_ARCH_CDNA5 &&
       options.input_revision != ProcessorRevision::Unspecified) {
     return "--input-revision is only valid when --input-target is gfx1250";
   }
-  if (options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+  if (options.host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       options.output_revision == ProcessorRevision::Unspecified) {
     return "--output-revision is required when --output-target is gfx1250";
   }
-  if (options.host_arch != ROCJITSU_CODE_ARCH_GFX1250 &&
+  if (options.host_arch != ROCJITSU_CODE_ARCH_CDNA5 &&
       options.output_revision != ProcessorRevision::Unspecified) {
     return "--output-revision is only valid when --output-target is gfx1250";
   }
-  if (options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-      options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+  if (options.guest_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      options.host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       options.input_revision == ProcessorRevision::Gfx1250A0 &&
       options.output_revision == ProcessorRevision::Gfx1250B0) {
     return "gfx1250 A0-to-B0 translation is not supported";
@@ -447,8 +447,8 @@ std::optional<std::string_view> translation_request_error(const TranslateOptions
   if (options.verify_idempotence && options.skip_failed_kernels)
     return "--verify-idempotence cannot be combined with --skip-failed-kernels";
   if (options.verify_rewrite_discharge &&
-      !(options.guest_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
-        options.host_arch == ROCJITSU_CODE_ARCH_GFX1250 &&
+      !(options.guest_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        options.host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
         options.input_revision == ProcessorRevision::Gfx1250B0 &&
         options.output_revision == ProcessorRevision::Gfx1250A0)) {
     return "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation";

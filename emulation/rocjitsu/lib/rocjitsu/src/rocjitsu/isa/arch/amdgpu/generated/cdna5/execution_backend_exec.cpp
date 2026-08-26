@@ -403,6 +403,7 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VCvtNormU16F16Vop1>,
     &execute_with_backend<VSwapB32Vop1>,
     &execute_with_backend<VSwapB16Vop1>,
+    &execute_with_backend<VPermlane64B32Vop1>,
     &execute_with_backend<VSwaprelB32Vop1>,
     &execute_with_backend<VNotB16Vop1>,
     &execute_with_backend<VCvtI32I16Vop1>,
