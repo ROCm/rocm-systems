@@ -3,7 +3,8 @@
 
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
-#include "rocjitsu/code/patch/instruction_builder.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
 
@@ -407,6 +408,41 @@ TEST(TrampolineBuilderPlan, NoSccPreserveSkipsSccTemp) {
   EXPECT_EQ(plan.builder_clobbers.size(), 4u);
 }
 
+// Envelope temps must not be selected past the kernel's own SGPR allocation. A
+// 32-SGPR kernel owns s0..s31; the link pair s[30:31] fits, but with s0..s29 live
+// only the link pair remains dead within the allocation. Under the kernel_sgpr_count
+// cap the target-pair search fails closed instead of reaching for s32:33 (dead in
+// the conservative 102-SGPR scan but absent from this kernel).
+TEST(TrampolineBuilderPlan, TempPastKernelAllocationFailsClosed) {
+  RegisterSet live;
+  for (uint16_t i = 0; i < 30; ++i)
+    live.expand(RegisterRef{RegClass::SGPR, i, 1});
+
+  TrampolinePlan plan;
+  plan.kernel_sgpr_count = 32; // kernel owns s0..s31 only.
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, live,
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("target"), std::string::npos);
+  EXPECT_FALSE(plan.is_probe_call); // plan left unmodified on failure.
+}
+
+// Companion: the same register-starved anchor plans successfully under the default
+// (conservative) bound, placing the target pair above the 32-SGPR line -- the exact
+// out-of-allocation pick the cap above prevents.
+TEST(TrampolineBuilderPlan, TempAboveKernelLineAllowedWithoutCap) {
+  RegisterSet live;
+  for (uint16_t i = 0; i < 30; ++i)
+    live.expand(RegisterRef{RegClass::SGPR, i, 1});
+
+  TrampolinePlan plan; // default kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS.
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kNoArgsCc, live,
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_GE(plan.target_pair_base, 32u); // absent from a 32-SGPR kernel.
+}
+
 // Happy path: dead resources selected, distinct, and reported as builder clobbers.
 TEST(TrampolineBuilderPlan, SelectsDeadResourcesAndReportsClobbers) {
   TrampolinePlan plan;
@@ -521,12 +557,15 @@ TEST(TrampolineBuilderEmit, ContainsTargetMaterialization) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  // preserve_scc default: [cselect, getpc, add (2 words), addc (2 words), swappc, cmp_lg, original,
-  // branch].
-  EXPECT_EQ(w[1], build_s_getpc_b64(plan.target_pair_base, plan.arch));
-  EXPECT_EQ(w[2], build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xFF, plan.arch));
-  EXPECT_EQ(w[4], build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xFF,
-                                   plan.arch));
+  // A boundary load drain opens the envelope, then preserve_scc default:
+  // [drain, cselect, getpc, add (2 words), addc (2 words), swappc, drain, cmp_lg,
+  // original, branch].
+  const size_t d = build_wait_all_loads_complete(plan.arch).size();
+  EXPECT_EQ(w[d + 1], build_s_getpc_b64(plan.target_pair_base, plan.arch));
+  EXPECT_EQ(w[d + 2],
+            build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xFF, plan.arch));
+  EXPECT_EQ(w[d + 4], build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xFF,
+                                       plan.arch));
 }
 
 // The envelope calls the probe via s_swappc_b64 through the cc-derived link pair,
@@ -537,9 +576,11 @@ TEST(TrampolineBuilderEmit, SwappcUsesCcLinkPairAndTargetPair) {
   const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
   ASSERT_TRUE(bytes.has_value()) << err;
 
-  // The swappc precedes the SCC restore, which precedes the relocated original.
+  // The swappc precedes the post-return drain and SCC restore, which precede the
+  // relocated original. A boundary drain opens the envelope, shifting swappc by d.
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  const uint32_t swappc = w[6];
+  const size_t d = build_wait_all_loads_complete(plan.arch).size();
+  const uint32_t swappc = w[d + 6];
   EXPECT_EQ(decode_sop1_op(swappc), sop1_op_swappc_b64(plan.arch));
 
   // sdst is the link pair; it must equal the pair link_pair_for(cc) reports, the
@@ -564,10 +605,11 @@ TEST(TrampolineBuilderEmit, OriginalAppearsOnceAfterCall) {
   ASSERT_NE(first, w.end());
   // Exactly one occurrence.
   EXPECT_EQ(std::count(w.begin(), w.end(), plan.original_words[0]), 1);
-  // It sits after the swappc (the call is at index before_word_count - 1 when
-  // SCC is preserved, but the original is always after the whole envelope).
+  // It sits after the whole envelope: the arch-agnostic before_word_count plus the
+  // two boundary drains (top of envelope and immediately after the call return).
+  const size_t d = build_wait_all_loads_complete(plan.arch).size();
   const size_t original_index = static_cast<size_t>(first - w.begin());
-  EXPECT_EQ(original_index, plan.before_word_count);
+  EXPECT_EQ(original_index, plan.before_word_count + 2 * d);
 }
 
 // The return branch (trailing word) targets anchor + original_size.
@@ -597,12 +639,14 @@ TEST(TrampolineBuilderEmit, NoSccPreserveShrinksEnvelope) {
   const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
   ASSERT_TRUE(bytes.has_value()) << err;
 
-  // getpc is now the first word; swappc is the last envelope word.
+  // A boundary drain opens the envelope, so getpc is at index d; swappc is the last
+  // envelope word before the post-return drain.
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  EXPECT_EQ(decode_sop1_op(w[0]), sop1_op_getpc_b64(plan.arch));
-  EXPECT_EQ(decode_sop1_op(w[5]), sop1_op_swappc_b64(plan.arch));
-  // Envelope (6) + original (1) + return branch (1).
-  EXPECT_EQ(w.size(), plan.before_word_count + 1u + 1u);
+  const size_t d = build_wait_all_loads_complete(plan.arch).size();
+  EXPECT_EQ(decode_sop1_op(w[d]), sop1_op_getpc_b64(plan.arch));
+  EXPECT_EQ(decode_sop1_op(w[d + 5]), sop1_op_swappc_b64(plan.arch));
+  // Envelope (6) + two boundary drains (2*d) + original (1) + return branch (1).
+  EXPECT_EQ(w.size(), plan.before_word_count + 2 * d + 1u + 1u);
 }
 
 // A plan that was never planned as a probe call cannot be emitted.

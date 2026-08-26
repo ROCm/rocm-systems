@@ -87,6 +87,9 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
     return;
   }
 
+  if (device_info_.max_scratch_slots_per_cu == 0)
+    device_info_.max_scratch_slots_per_cu = 32;
+
   unsigned ver = static_cast<unsigned>(dxg_runtime->wddm_version);
   if (ver)
     pr_rocr_info("WDDM version %u.%u\n", ver / 1000, (ver % 1000) / 100);
