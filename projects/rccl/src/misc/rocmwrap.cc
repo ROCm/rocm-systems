@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
+#include <mutex>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
@@ -42,6 +43,9 @@ NCCL_PARAM(CuMemHostEnable, "CUMEM_HOST_ENABLE", -1);
 CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
 
 static int ncclCuMemSupported = 0;
+// Distinct from ncclCuMemSupported: that folds in the gfx1250 auto-enable policy, which an explicit
+// NCCL_CUMEM_ENABLE=1 may legitimately override. This records only whether the runtime works.
+static int ncclCuMemFunctional = 0;
 
 #define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
 
@@ -129,6 +133,10 @@ int ncclIsCuMemSupported() {
   // Auto-detect (NCCL_CUMEM_ENABLE=-2) only turns cuMem on where the VMM path is
   // required; NCCL_CUMEM_ENABLE=1 bypasses this gate.
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
+  CUCHECKGOTO(cuDeviceGet(&currentDev, cudaDev), ret, error);
+  // Record the runtime verdict first: the arch policy below returns early, and an explicit
+  // NCCL_CUMEM_ENABLE=1 still needs to know whether cuMem actually works here.
+  ncclCuMemFunctional = ncclCuMemFunctionalProbe(currentDev, cudaDev);
   if (GetGcnArchName(cudaDev, gcnArch) != 0 || !IsArchMatch(gcnArch, "gfx1250")) {
     INFO(NCCL_INIT, "cuMem auto-enable is limited to gfx1250 (detected %s); set NCCL_CUMEM_ENABLE=1 to override",
          gcnArch);
@@ -149,7 +157,6 @@ int ncclIsCuMemSupported() {
     }
   }
   if (CUPFN(cuMemCreate) == NULL) supported = 0;
-  CUCHECKGOTO(cuDeviceGet(&currentDev, cudaDev), ret, error);
   // Query device to see if CUMEM VMM support is available
   CUCHECKGOTO(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, currentDev), ret,
               error);
@@ -158,8 +165,8 @@ int ncclIsCuMemSupported() {
     supported = 0;
   }
 
-  // Cheap gates passed — confirm the driver actually implements the VMM path at runtime.
-  if (supported && !ncclCuMemFunctionalProbe(currentDev, cudaDev)) supported = 0;
+  // Cheap gates passed — the runtime probe ran above.
+  if (supported && !ncclCuMemFunctional) supported = 0;
 
   return supported;
 error:
@@ -170,6 +177,15 @@ int ncclCuMemEnable() {
 #if NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
   // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
+  // HIP_VERSION cannot separate a 7.0.2.x build carrying the cuMem backport from one that is not: both
+  // report 70051831. Only the functional probe can, so an explicit =1 must not be allowed to skip it.
+  if (param > 0 && !ncclCuMemFunctional) {
+    static std::once_flag warnOnce;
+    std::call_once(warnOnce, []() {
+      WARN("NCCL_CUMEM_ENABLE=1 is set but this runtime fails the cuMem functional probe; disabling cuMem");
+    });
+    return 0;
+  }
   return param >= 0 ? param : (param == -2 && ncclCuMemSupported);
 #else
   if (ncclParamCuMemEnable() > 0)
