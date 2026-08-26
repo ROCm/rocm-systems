@@ -153,16 +153,6 @@ TEST(ConSan, AtomicFaultRollsBackWhenCarriedPerturbationIsUnreachable) {
   EXPECT_TRUE(result.patches.empty());
   EXPECT_EQ(result.mutation.fault.applied, 0u);
   EXPECT_EQ(result.mutation.perturbation.applied, 0u);
-
-  ConSanOptions discovery = options;
-  discovery.fault_dry_run = true;
-  discovery.probe_lds_check_trap = true;
-  discovery.max_patches = 2;
-  const ConSanResult dry_run =
-      try_patch_consan(make_rdna4_lds_code_object(words, "atomic_composite_far"), discovery);
-  EXPECT_FALSE(dry_run.modified);
-  EXPECT_TRUE(dry_run.access_plans.empty());
-  EXPECT_FALSE(dry_run.composite_proof);
 }
 
 TEST(ConSan, AtomicAddressFaultComposesWithExactFlatUnknownCasReleaseEdge) {

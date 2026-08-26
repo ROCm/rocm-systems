@@ -2708,6 +2708,40 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   physical qualification remains covered by the immediately preceding
   physical tranche. E2E validation remains outside this work.
 
+### Slice 4Q: delete dry-run composite-proof reconstruction
+
+- **Prototype mechanism removed:** A SuperCollider fault/perturbation dry run
+  used to invoke a second, live full transformation solely to reverse-engineer
+  one selected access and a `ConSanCompositeProof` from emitted patch records.
+  Neither value affected the dry-run outcome or a later live transform. Their
+  hook rendering was deleted in Slice 4O, leaving only mechanism tests as
+  consumers of this expensive recursive path.
+- **Completed deletion:** The recursive live transform, patch-kind-to-access
+  reconstruction, translated-anchor proof builder, `ConSanAccessPlan`,
+  `ConSanCompositeProof`, their two compatibility-result fields, and retry
+  cleanup are gone. A dry run now performs only the requested semantic
+  inventory and mutation planning; it no longer executes hidden live
+  instrumentation to manufacture an otherwise unobservable proof object.
+- **Behavioral test replacement:** The affected tests now exercise the actual
+  live barrier, atomic-order, and atomic-scope compositions. They require a
+  validated replacement, exactly one applied fault and perturbation, the
+  expected fault rewrite, the perturbation probe, the access probe, and a
+  structurally valid modified ELF. The existing rollback test continues to
+  prove that an unreachable carried perturbation produces no replacement or
+  applied mutation. Thus the retained oracle covers composition behavior
+  rather than the deleted patch-derived representation.
+- **Deletion result:** Production source is 228 net lines smaller and the
+  focused tests are 28 net lines smaller, for 256 net deleted lines. No
+  replacement proof type or compatibility seam was introduced.
+- **Completed checked-in gate:** The selected ConSan host suite passed 1,508
+  of 1,510 tests with two external-object benchmarks intentionally skipped,
+  and the complete HSA-hook binary passed all 194 tests. All 2,878 simulator
+  device rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in
+  72.16 seconds. The deleted path existed only during a dry-run request and
+  never supplied device execution, so the immediately preceding physical
+  tranche remains the proportional physical gate. E2E validation remains
+  outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

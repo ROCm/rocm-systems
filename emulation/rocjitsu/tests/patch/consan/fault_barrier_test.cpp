@@ -153,23 +153,6 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
   EXPECT_NE(perturb_patch.perturbation_sequence_identity,
             perturb_patch.perturbation_source_sequence_identity);
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
-
-  ConSanOptions discovery = options;
-  discovery.fault_dry_run = true;
-  discovery.probe_lds_check_trap = true;
-  discovery.max_patches = 2;
-  const ConSanResult dry_run = try_patch_consan(bytes, discovery);
-  ASSERT_TRUE(dry_run.errors.empty()) << testing::PrintToString(dry_run.errors);
-  EXPECT_FALSE(dry_run.modified);
-  ASSERT_EQ(dry_run.access_plans.size(), 1u);
-  ASSERT_TRUE(dry_run.composite_proof);
-  EXPECT_EQ(dry_run.composite_proof->pristine_identity, perturb->identity);
-  EXPECT_EQ(dry_run.composite_proof->pristine_sequence, perturb->sequence_identity);
-  EXPECT_EQ(dry_run.composite_proof->pristine_anchor, perturb->anchor_event_identity);
-  EXPECT_EQ(dry_run.composite_proof->anchor_relation, "move-target+0");
-  EXPECT_EQ(dry_run.composite_proof->translated_anchor_text_offset, destination->text_offset);
-  EXPECT_FALSE(dry_run.composite_proof->atomic_overlap);
-  EXPECT_FALSE(dry_run.composite_proof->removed_cache_non_resurrection_applicable);
 }
 
 TEST(ConSan, SyncSequencesRejectLiteralBarrierIdMarkers) {

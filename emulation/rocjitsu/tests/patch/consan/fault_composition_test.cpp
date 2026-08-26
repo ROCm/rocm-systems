@@ -228,7 +228,7 @@ TEST(ConSan, PerturbationEmissionRelocatesTwelveAndEightByteAtomicEdges) {
   EXPECT_EQ(acquire_body[2], build_s_sleep(3, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
-TEST(ConSan, AtomicCompositeDryRunExportsOnlyValidatedAccessAndProof) {
+TEST(ConSan, AtomicOrderFaultComposesWithPerturbationAndAccessInstrumentation) {
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);
   const std::vector<uint32_t> words = {
@@ -240,7 +240,6 @@ TEST(ConSan, AtomicCompositeDryRunExportsOnlyValidatedAccessAndProof) {
   const auto bytes = make_rdna4_lds_code_object(words);
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  options.fault_dry_run = true;
   options.fault_atomic_weaken_order = true;
   options.fault_require_exactly_one = true;
   options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
@@ -248,30 +247,27 @@ TEST(ConSan, AtomicCompositeDryRunExportsOnlyValidatedAccessAndProof) {
   options.sc_perturb_required_count = 1;
   options.probe_lds_check_trap = true;
   options.max_patches = 2;
-  ConSanOptions live_options = options;
-  live_options.fault_dry_run = false;
-  const ConSanResult live = try_patch_consan(bytes, live_options);
-  ASSERT_EQ(live.outcome, ConSanTransformOutcome::ModifiedValid)
-      << testing::PrintToString(live.errors) << testing::PrintToString(live.warnings);
   const ConSanResult result = try_patch_consan(bytes, options);
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_FALSE(result.modified);
-  ASSERT_EQ(result.access_plans.size(), 1u);
-  EXPECT_EQ(result.access_plans.front().kind, "lds-check-trap");
-  EXPECT_TRUE(result.access_plans.front().in_kernel);
-  ASSERT_TRUE(result.composite_proof);
-  const ConSanCompositeProof &proof = *result.composite_proof;
-  EXPECT_TRUE(proof.atomic_overlap);
-  EXPECT_TRUE(proof.removed_cache_boundary);
-  EXPECT_TRUE(proof.removed_cache_non_resurrection_applicable);
-  EXPECT_TRUE(proof.removed_cache_non_resurrection_validated);
-  EXPECT_EQ(proof.anchor_relation, "removed-cache-boundary");
-  EXPECT_NE(proof.cache_companion_identity, "-");
-  ASSERT_TRUE(proof.atomic_mutation_anchor_text_offset);
-  EXPECT_EQ(*proof.atomic_mutation_anchor_text_offset, proof.translated_anchor_text_offset);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.staged_composition_validated);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  EXPECT_EQ(result.mutation.perturbation.applied, 1u);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+           patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
+  }));
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
 }
 
-TEST(ConSan, AtomicScopeCompositeDryRunExportsValidatedAccessAndProof) {
+TEST(ConSan, AtomicScopeFaultComposesWithPerturbationAndAccessInstrumentation) {
   const auto wait_store = build_s_wait_storecnt0(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(wait_store);
   const std::vector<uint32_t> words = {
@@ -283,7 +279,6 @@ TEST(ConSan, AtomicScopeCompositeDryRunExportsValidatedAccessAndProof) {
   const auto bytes = make_rdna4_lds_code_object(words);
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  options.fault_dry_run = true;
   options.fault_atomic_weaken_scope = true;
   options.fault_require_exactly_one = true;
   options.sc_perturb_kind = ConSanPerturbationKind::Atomic;
@@ -291,20 +286,24 @@ TEST(ConSan, AtomicScopeCompositeDryRunExportsValidatedAccessAndProof) {
   options.sc_perturb_required_count = 1;
   options.probe_lds_check_trap = true;
   options.max_patches = 2;
-  ConSanOptions live_options = options;
-  live_options.fault_dry_run = false;
-  const ConSanResult live = try_patch_consan(bytes, live_options);
-  ASSERT_EQ(live.outcome, ConSanTransformOutcome::ModifiedValid)
-      << testing::PrintToString(live.errors) << testing::PrintToString(live.warnings);
   const ConSanResult result = try_patch_consan(bytes, options);
-  ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.access_plans.size(), 1u) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.composite_proof) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(result.composite_proof->atomic_overlap);
-  EXPECT_FALSE(result.composite_proof->removed_cache_boundary);
-  EXPECT_EQ(result.composite_proof->anchor_relation, "unchanged");
-  ASSERT_TRUE(result.composite_proof->atomic_mutation_anchor_text_offset);
-  EXPECT_EQ(*result.composite_proof->atomic_mutation_anchor_text_offset, 4u * sizeof(uint32_t));
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_TRUE(result.staged_composition_validated);
+  EXPECT_EQ(result.mutation.fault.applied, 1u);
+  EXPECT_EQ(result.mutation.perturbation.applied, 1u);
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::TrampolineScPerturbation;
+  }));
+  EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
+    return patch.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
+           patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
+  }));
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
 }
 
 TEST(ConSan, PerturbationEmissionPrefersLocalCaveAndReservesMultipleAppendedBodies) {

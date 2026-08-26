@@ -509,8 +509,6 @@ struct ConSanResult {
   std::vector<ConSanCandidateResourcePlan> resource_plans;
   ConSanResourcePlanSummary resource_plan_summary;
   std::optional<ConSanFlatSelectionTelemetry> flat_selection_telemetry;
-  std::vector<ConSanAccessPlan> access_plans;
-  std::optional<ConSanCompositeProof> composite_proof;
   std::vector<ConSanPatchInfo> patches;
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;

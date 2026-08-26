@@ -90,38 +90,3 @@ struct ConSanResourcePlanSummary {
   size_t alternative_contributed = 0;
   size_t alternative_vetoed = 0;
 };
-
-/// Exact redundant-access selection proven by an internal validated composite
-/// transform while the externally visible invocation remains a dry run.
-struct ConSanAccessPlan {
-  std::string identity;
-  std::string container_name;
-  bool in_kernel = true;
-  std::string kind;
-  uint64_t text_offset = 0;
-};
-
-/// Source-to-translated perturbation evidence retained from one independently
-/// validated staged composite transform.
-struct ConSanCompositeProof {
-  std::string pristine_identity;
-  std::string pristine_sequence;
-  std::string pristine_container;
-  bool pristine_in_kernel = true;
-  uint64_t pristine_owner_descriptor = 0;
-  ConSanPerturbationEdge pristine_edge = ConSanPerturbationEdge::Release;
-  std::string pristine_anchor;
-  uint64_t pristine_anchor_text_offset = 0;
-  uint32_t pristine_anchor_size = 0;
-  std::string translated_identity;
-  ConSanPerturbationEdge translated_edge = ConSanPerturbationEdge::Release;
-  uint64_t translated_anchor_text_offset = 0;
-  uint32_t translated_anchor_size = 0;
-  std::string anchor_relation;
-  std::string cache_companion_identity = "-";
-  bool atomic_overlap = false;
-  bool removed_cache_boundary = false;
-  bool removed_cache_non_resurrection_validated = false;
-  bool removed_cache_non_resurrection_applicable = false;
-  std::optional<uint64_t> atomic_mutation_anchor_text_offset;
-};

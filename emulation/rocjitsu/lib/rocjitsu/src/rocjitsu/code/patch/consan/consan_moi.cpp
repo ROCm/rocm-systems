@@ -524,8 +524,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.moi_candidates.clear();
   result.resource_plans.clear();
   result.resource_plan_summary = {};
-  result.access_plans.clear();
-  result.composite_proof.reset();
   result.patches.clear();
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
       effective_options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId) {
