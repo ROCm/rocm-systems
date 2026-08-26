@@ -33,7 +33,7 @@ import sqlite3
 
 from .schema import RocpdSchema
 from . import libpyrocpd
-from .features import get_supported_features
+from .features import get_supported_features_from_version
 
 __all__ = ["RocpdImportData", "execute_statement"]
 
@@ -69,8 +69,6 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
         if isinstance(input, RocpdImportData):
             super(RocpdImportData, self).__init__(input)
             self.table_info = input.table_info
-            self.schema_version = input.schema_version
-            self.supported_features = list(input.supported_features)
         else:
 
             if isinstance(input, sqlite3.Connection):
@@ -88,9 +86,12 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 raise ValueError(
                     f"input is unsupported type. Expected sqlite3.Connection, string, or (non-empty) list of strings. type={type(input).__name__}"
                 )
-            super(RocpdImportData, self).__init__(_connection, _filenames)
-            self.schema_version = _schema_version
-            self.supported_features = list(get_supported_features(self))
+            _supported_features = list(
+                get_supported_features_from_version(_schema_version)
+            )
+            super(RocpdImportData, self).__init__(
+                _connection, _filenames, _schema_version, _supported_features
+            )
 
     def __getattr__(self, name):
         # any attribute or method not found in RocpdImportData will be looked up on self.connection

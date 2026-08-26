@@ -63,18 +63,21 @@ FEATURE_SCHEMA_VERSIONS: Dict[str, FeatureVersionRange] = {
 }
 
 
-def get_supported_features(importData) -> frozenset:
-    """Return the frozenset of feature names supported by importData's schema version.
+def get_supported_features_from_version(schema_version) -> frozenset:
+    """Return the frozenset of feature names supported by the given schema version.
 
     A feature is included if:
-        vrange.min_version <= importData.schema_version
-        and (vrange.max_version is None or importData.schema_version <= vrange.max_version)
+        vrange.min_version <= schema_version
+        and (vrange.max_version is None or schema_version <= vrange.max_version)
     """
     return frozenset(
         feature
         for feature, vrange in FEATURE_SCHEMA_VERSIONS.items()
-        if importData.schema_version >= vrange.min_version
-        and (
-            vrange.max_version is None or importData.schema_version <= vrange.max_version
-        )
+        if schema_version >= vrange.min_version
+        and (vrange.max_version is None or schema_version <= vrange.max_version)
     )
+
+
+def get_supported_features(importData) -> frozenset:
+    """Return the frozenset of feature names supported by importData's schema version."""
+    return get_supported_features_from_version(importData.schema_version)

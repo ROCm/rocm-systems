@@ -67,7 +67,6 @@
 #include <atomic>
 #include <future>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -147,8 +146,17 @@ struct RocpdImportData
     RocpdImportData& operator=(RocpdImportData&&) noexcept = default;
 
     RocpdImportData(const py::object& _obj, const std::vector<std::string>& _dbs)
+    : RocpdImportData{_obj, _dbs, {0, 0, 0}, {}}
+    {}
+
+    RocpdImportData(const py::object&               _obj,
+                    const std::vector<std::string>& _dbs,
+                    rocpd_version_triplet_t         _schema_version,
+                    std::vector<std::string>        _supported_features)
     : connection{_obj}
     , databases{_dbs}
+    , schema_version{_schema_version}
+    , supported_features{std::move(_supported_features)}
     {
         if(py::isinstance<RocpdImportData>(_obj))
         {
@@ -377,10 +385,14 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def(py::init<>())
         .def(py::init<rocpd::RocpdImportData>())
         .def(py::init<py::object, std::vector<std::string>>())
+        .def(py::init<py::object,
+                      std::vector<std::string>,
+                      rocpd_version_triplet_t,
+                      std::vector<std::string>>())
         .def_readonly("connection", &rocpd::RocpdImportData::connection)
         .def_readonly("databases", &rocpd::RocpdImportData::databases)
-        .def_readwrite("schema_version", &rocpd::RocpdImportData::schema_version)
-        .def_readwrite("supported_features", &rocpd::RocpdImportData::supported_features);
+        .def_readonly("schema_version", &rocpd::RocpdImportData::schema_version)
+        .def_readonly("supported_features", &rocpd::RocpdImportData::supported_features);
 
     pyrocpd.def("load_schema",
                 [](rocpd_sql_engine_t            engine,
