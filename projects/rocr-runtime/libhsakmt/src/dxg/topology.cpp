@@ -823,8 +823,14 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.Domain = device->Domain();
   props.UniqueID = device->Uuid();
   props.NumXcc = device->NumXcc();
-  /* KFDGpuID is a nonzero snapshot-local key, not the PCI device ID. The node
-   * ordinal is unique by construction even when two GPUs have the same model.
+  /*
+   * KFDGpuID is a nonzero snapshot-local key: not the PCI device ID, and not a
+   * kernel gpu_id, which only the native sysfs path supplies. Uniqueness and
+   * nonzeroness are all the DXG consumers require: a "node is a GPU" predicate
+   * and the gpuid<->nodeid lookups in this file. It becomes externally visible
+   * only through amd_core_dump.cpp, which writes it as the core dump's gpu_id,
+   * so a debugger correlating that field against kernel state will not match
+   * on WSL.
    */
   props.KFDGpuID = node_id + 1;
   props.FamilyID = device->GfxFamily();
