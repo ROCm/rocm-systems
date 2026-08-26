@@ -162,9 +162,9 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
     bool sequence_semantics_weakened = false;
     std::optional<uint64_t> source_owner_descriptor_file_offset;
     if (candidate->in_kernel) {
-      const auto owner = std::ranges::find(pristine_plan.kernels, candidate->container_name,
-                                           &ConSanKernelInfo::name);
-      if (owner == pristine_plan.kernels.end()) {
+      const auto owner = std::ranges::find(pristine_plan.program_inventory.kernels(),
+                                           candidate->container_name, &ConSanKernelInfo::name);
+      if (owner == pristine_plan.program_inventory.kernels().end()) {
         *error = "selected perturbation edge lost its pristine kernel owner";
         return std::nullopt;
       }
@@ -491,11 +491,12 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       if (patch.kind != ConSanPatchKind::InlineBarrierMoveTargetRewrite ||
           patch.trampoline_size == 0)
         continue;
-      const auto owner = std::ranges::find_if(fault_result.kernels, [&](const auto &kernel) {
-        return kernel.has_text_range && patch.anchor_offset >= kernel.entry_text_offset &&
-               patch.anchor_offset - kernel.entry_text_offset < kernel.code_size;
-      });
-      if (owner == fault_result.kernels.end()) {
+      const auto owner =
+          std::ranges::find_if(fault_result.program_inventory.kernels(), [&](const auto &kernel) {
+            return kernel.has_text_range && patch.anchor_offset >= kernel.entry_text_offset &&
+                   patch.anchor_offset - kernel.entry_text_offset < kernel.code_size;
+          });
+      if (owner == fault_result.program_inventory.kernels().end()) {
         fault_result.errors.emplace_back(
             "ConSan markerless barrier move could not retain fault-cave kernel ownership");
         return fault_result;
@@ -730,9 +731,9 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     result.install_program_inventory(inventory_builder.view());
   };
 
-  if (result.text_sections.empty())
+  if (result.program_inventory.text_sections().empty())
     result.warnings.emplace_back("ConSan found no .text sections");
-  if (result.kernels.empty())
+  if (result.program_inventory.kernels().empty())
     result.warnings.emplace_back("ConSan found no kernel descriptor symbols");
 
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
@@ -760,11 +761,12 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     decode_function_stats(code_object_bytes, *decoder, arch, function, result.warnings);
   const bool has_decode_error =
       std::ranges::any_of(
-          result.kernels,
+          result.program_inventory.kernels(),
           [](const ConSanKernelInfo &kernel) { return kernel.stats.decode_error_count != 0u; }) ||
-      std::ranges::any_of(result.functions, [](const ConSanFunctionInfo &function) {
-        return function.stats.decode_error_count != 0u;
-      });
+      std::ranges::any_of(result.program_inventory.functions(),
+                          [](const ConSanFunctionInfo &function) {
+                            return function.stats.decode_error_count != 0u;
+                          });
   if (has_decode_error) {
     publish_access_inventory();
     result.outcome = ConSanTransformOutcome::Unsupported;
@@ -828,9 +830,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     result.install_program_inventory(inventory_builder.view());
     build_perturbation_candidate_inventory(result);
     annotate_fault_sites_with_sync_sequences(result);
-  } else if (std::ranges::any_of(result.functions, [](const ConSanFunctionInfo &function) {
-               return !function.lds_sites.empty() || !function.flat_sites.empty();
-             })) {
+  } else if (std::ranges::any_of(
+                 result.program_inventory.functions(), [](const ConSanFunctionInfo &function) {
+                   return !function.lds_sites.empty() || !function.flat_sites.empty();
+                 })) {
     // SuperCollider's ordinary clean transform does not consume synchronization
     // semantics. Shared-function memory sites still need kernel ownership,
     // while kernel-local sites carry their descriptor directly.

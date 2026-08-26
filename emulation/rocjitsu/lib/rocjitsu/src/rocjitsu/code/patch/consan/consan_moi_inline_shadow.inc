@@ -197,9 +197,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       (candidates.size() >= 8u || has_function_candidate || has_branch_only_scalar_assignment);
   uint64_t reserved_barrier_island_count = 0u;
   if (use_indirect_appended && options.moi_track_barriers) {
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       reserved_barrier_island_count += kernel.barrier_sites.size();
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       reserved_barrier_island_count += function.barrier_sites.size();
     reserved_barrier_island_count =
         std::min<uint64_t>(reserved_barrier_island_count, options.max_patches);
@@ -225,12 +225,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         synchronization_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
     }
   };
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     append_synchronization_ranges(kernel.barrier_sites);
     append_synchronization_ranges(kernel.atomic_sites);
     append_synchronization_ranges(kernel.fence_sites);
   }
-  for (const ConSanFunctionInfo &function : result.functions) {
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
     append_synchronization_ranges(function.barrier_sites);
     append_synchronization_ranges(function.atomic_sites);
     append_synchronization_ranges(function.fence_sites);
@@ -422,14 +422,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         };
         std::optional<MoiDenseRelayHost> best_host;
         if (key.first) {
-          const auto kernel =
-              std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
-          if (kernel != result.kernels.end())
+          const auto kernel = std::ranges::find(result.program_inventory.kernels(), key.second,
+                                                &ConSanKernelInfo::name);
+          if (kernel != result.program_inventory.kernels().end())
             best_host = find_container_host(*kernel);
         } else {
-          const auto function =
-              std::ranges::find(result.functions, key.second, &ConSanFunctionInfo::name);
-          if (function != result.functions.end())
+          const auto function = std::ranges::find(result.program_inventory.functions(), key.second,
+                                                  &ConSanFunctionInfo::name);
+          if (function != result.program_inventory.functions().end())
             best_host = find_container_host(*function);
         }
         if (best_host) {
@@ -482,12 +482,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
   if (has_branch_only_scalar_assignment && use_indirect_appended && !original_text.empty()) {
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges = synchronization_ranges;
-    protected_ranges.reserve(protected_ranges.size() + candidates.size() + result.kernels.size() +
+    protected_ranges.reserve(protected_ranges.size() + candidates.size() +
+                             result.program_inventory.kernels().size() +
                              options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
     for (const ConSanMoiCandidate *candidate : candidates)
       protected_ranges.emplace_back(candidate->text_offset,
                                     candidate->text_offset + candidate->size);
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       protected_ranges.emplace_back(
           kernel.entry_text_offset,
           std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));

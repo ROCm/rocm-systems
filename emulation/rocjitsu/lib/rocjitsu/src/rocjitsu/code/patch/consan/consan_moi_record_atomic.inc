@@ -40,11 +40,11 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
           std::string(container_name));
     }
   };
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     retain_unavailable_cas(kernel.name, true, kernel.atomic_sites);
     append_atomic_record_candidates(kernel, result, sync_index, candidates);
   }
-  for (const ConSanFunctionInfo &function : result.functions) {
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
     retain_unavailable_cas(function.name, false, function.atomic_sites);
     append_atomic_record_candidates(function, result, sync_index, candidates);
   }

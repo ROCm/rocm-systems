@@ -198,13 +198,10 @@ TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
 TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLifetime) {
   static_assert(std::same_as<decltype(std::declval<const ProgramInventory &>().access_sites()),
                              std::span<const ConSanAccessInventorySite>>);
-  static_assert(std::same_as<typename decltype(LegacyInventoryView{}.kernels)::element_type,
-                             const ConSanKernelInfo>);
-  static_assert(std::same_as<decltype(std::declval<ConSanResult &>().kernels),
+  static_assert(std::same_as<decltype(std::declval<const ProgramInventory &>().kernels()),
                              std::span<const ConSanKernelInfo>>);
-  static_assert(
-      std::is_const_v<
-          std::remove_reference_t<decltype(std::declval<LegacyInventoryView>().kernels.front())>>);
+  static_assert(std::is_const_v<std::remove_reference_t<
+                    decltype(std::declval<const ProgramInventory &>().kernels().front())>>);
 
   ProgramInventory empty;
   EXPECT_TRUE(empty.empty());
@@ -215,10 +212,14 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   EXPECT_EQ(empty.target(), ROCJITSU_CODE_TARGET_INVALID);
   EXPECT_FALSE(empty.semantic_arch_required());
   EXPECT_TRUE(empty.access_sites().empty());
-  EXPECT_TRUE(empty.legacy_view().empty());
+  EXPECT_TRUE(empty.text_sections().empty());
+  EXPECT_TRUE(empty.kernels().empty());
+  EXPECT_TRUE(empty.functions().empty());
   ProgramInventoryBuilder empty_content_builder;
   EXPECT_FALSE(empty_content_builder.view().empty());
-  EXPECT_TRUE(empty_content_builder.view().legacy_view().empty());
+  EXPECT_TRUE(empty_content_builder.view().text_sections().empty());
+  EXPECT_TRUE(empty_content_builder.view().kernels().empty());
+  EXPECT_TRUE(empty_content_builder.view().functions().empty());
 
   const auto make_result = [] {
     const std::array<uint8_t, 4> bytes = {7, 8, 9, 10};
@@ -250,13 +251,12 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   EXPECT_EQ(moved.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_EQ(moved.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
   EXPECT_TRUE(moved.program_inventory.semantic_arch_required());
-  ASSERT_EQ(moved.text_sections.size(), 1u);
-  ASSERT_EQ(moved.kernels.size(), 1u);
-  ASSERT_EQ(moved.functions.size(), 1u);
-  EXPECT_FALSE(moved.program_inventory.legacy_view().empty());
+  ASSERT_EQ(moved.program_inventory.text_sections().size(), 1u);
+  ASSERT_EQ(moved.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(moved.program_inventory.functions().size(), 1u);
   ASSERT_EQ(moved.program_inventory.access_sites().size(), 1u);
-  EXPECT_EQ(moved.kernels.front().name, "inventory_kernel");
-  EXPECT_EQ(moved.kernels.front().declared_group_segment_bytes, 4096u);
+  EXPECT_EQ(moved.program_inventory.kernels().front().name, "inventory_kernel");
+  EXPECT_EQ(moved.program_inventory.kernels().front().declared_group_segment_bytes, 4096u);
   EXPECT_EQ(moved.program_inventory.access_sites().front().container.name, "inventory_kernel");
 }
 
@@ -367,7 +367,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   revised.moi_fence_candidates.front().association = ConSanFenceAssociation::Qualified;
 
   const SynchronizationInventoryView unchanged = published.synchronization_view();
-  EXPECT_EQ(published.legacy_view().kernels.front().name, "original");
+  EXPECT_EQ(published.kernels().front().name, "original");
   EXPECT_EQ(unchanged.sync_events.front().identity, "original-event");
   EXPECT_EQ(unchanged.sync_sequences.size(), 1u);
   EXPECT_EQ(unchanged.barrier_lifecycle_groups.size(), 1u);
@@ -375,7 +375,7 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   EXPECT_FALSE(unchanged.moi_fence_candidates.front().eligible());
 
   const ProgramInventory revised_inventory = revision.view();
-  EXPECT_EQ(revised_inventory.legacy_view().kernels.front().name, "revision");
+  EXPECT_EQ(revised_inventory.kernels().front().name, "revision");
   EXPECT_EQ(revised_inventory.synchronization_view().sync_events.front().identity,
             "revision-event");
   EXPECT_TRUE(revised_inventory.synchronization_view().sync_sequences.empty());
@@ -701,7 +701,7 @@ TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAt
   EXPECT_EQ(sites[1].container.kind, ConSanProgramContainerKind::Function);
 }
 
-TEST(ConSanProgramInventory, RealCodeObjectPublishesInventoryEquivalentToLegacyDecode) {
+TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormalizedAccesses) {
   std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   mutate_first_kernel_descriptor(
       bytes, [](KD &descriptor) { descriptor.group_segment_fixed_size = 1234u; });
@@ -720,36 +720,32 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesInventoryEquivalentToLegacyD
   EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(), 0u);
   EXPECT_TRUE(result.program_inventory.semantic_arch_required());
 
-  const LegacyInventoryView legacy = result.program_inventory.legacy_view();
-  EXPECT_EQ(legacy.text_sections.data(), result.text_sections.data());
-  EXPECT_EQ(legacy.kernels.data(), result.kernels.data());
-  EXPECT_EQ(legacy.functions.data(), result.functions.data());
-  size_t legacy_access_count = 0;
-  for (const ConSanKernelInfo &kernel : legacy.kernels)
-    legacy_access_count += kernel.lds_sites.size() + kernel.flat_sites.size();
-  for (const ConSanFunctionInfo &function : legacy.functions)
-    legacy_access_count += function.lds_sites.size() + function.flat_sites.size();
-  EXPECT_EQ(result.program_inventory.access_sites().size(), legacy_access_count);
+  size_t decoded_access_count = 0;
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+    decoded_access_count += kernel.lds_sites.size() + kernel.flat_sites.size();
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+    decoded_access_count += function.lds_sites.size() + function.flat_sites.size();
+  EXPECT_EQ(result.program_inventory.access_sites().size(), decoded_access_count);
 
-  ASSERT_EQ(legacy.kernels.size(), 1u);
-  EXPECT_EQ(legacy.kernels.front().declared_group_segment_bytes, 1234u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_EQ(result.program_inventory.kernels().front().declared_group_segment_bytes, 1234u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   for (const ConSanAccessInventorySite &site : result.program_inventory.access_sites()) {
-    const auto legacy_site =
-        std::ranges::find_if(legacy.kernels.front().lds_sites, [&](const ConSanLdsSite &candidate) {
+    const auto decoded_site = std::ranges::find_if(
+        result.program_inventory.kernels().front().lds_sites, [&](const ConSanLdsSite &candidate) {
           return candidate.text_offset == site.physical_id.original_text_offset;
         });
-    ASSERT_NE(legacy_site, legacy.kernels.front().lds_sites.end());
-    EXPECT_EQ(site.file_offset, legacy_site->file_offset);
-    EXPECT_EQ(site.instruction_size, legacy_site->size);
-    EXPECT_EQ(site.decoded_width_bits, legacy_site->width_bits);
-    EXPECT_EQ(site.kind, legacy_site->kind);
-    EXPECT_EQ(site.mnemonic, legacy_site->mnemonic);
-    EXPECT_EQ(site.operands.destination_vgpr, legacy_site->dst_vgpr);
-    EXPECT_EQ(site.operands.address_vgpr, legacy_site->addr_vgpr);
-    EXPECT_EQ(site.operands.data_vgpr, legacy_site->data_vgpr);
+    ASSERT_NE(decoded_site, result.program_inventory.kernels().front().lds_sites.end());
+    EXPECT_EQ(site.file_offset, decoded_site->file_offset);
+    EXPECT_EQ(site.instruction_size, decoded_site->size);
+    EXPECT_EQ(site.decoded_width_bits, decoded_site->width_bits);
+    EXPECT_EQ(site.kind, decoded_site->kind);
+    EXPECT_EQ(site.mnemonic, decoded_site->mnemonic);
+    EXPECT_EQ(site.operands.destination_vgpr, decoded_site->dst_vgpr);
+    EXPECT_EQ(site.operands.address_vgpr, decoded_site->addr_vgpr);
+    EXPECT_EQ(site.operands.data_vgpr, decoded_site->data_vgpr);
     EXPECT_EQ(site.execution_owner_descriptor_file_offsets,
-              legacy_site->owner_descriptor_file_offsets);
+              decoded_site->owner_descriptor_file_offsets);
   }
 }
 

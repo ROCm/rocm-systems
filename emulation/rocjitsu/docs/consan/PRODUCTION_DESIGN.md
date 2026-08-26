@@ -274,7 +274,6 @@ here so a name is meaningful on first use; section 5.2 gives the full contract.
 | `TargetClassifier` | Narrow target-dependent operation that maps decoded native instructions to shared semantic forms. |
 | `TargetLowerer` | Narrow target-dependent operation that maps probe intents and assigned resources to native instructions. |
 | `LegacyOptionsAdapter` | Temporary converter from the new immutable request/binding types to one fresh current-prototype `ConSanOptions` value. |
-| `LegacyInventoryView` | Temporary read-only projection from `ProgramInventory` into the container/candidate shapes expected by current lowerers. |
 | Compatibility lowering operations | Explicit temporary boundary containing current probe emission, resource, and placement machinery after semantic policy moves out of it. The former wrapper class has been deleted. |
 
 These names describe responsibilities, not a requirement that each become a
@@ -2008,11 +2007,11 @@ engines.
 
 **Implementation status:** complete. `ProgramInventory` now owns the decoded
 text-section, kernel, function, and normalized access inventory in shared const
-storage. `ConSanResult` owns that inventory and exposes only a read-only
-`LegacyInventoryView`; the former duplicate mutable container vectors have
-been deleted. Access candidate discovery and SuperCollider's coverage
-denominator consume normalized inventory, while compatibility adapters copy
-inventory facts into the current lowerers without rediscovering semantics.
+storage. `ConSanResult` owns that inventory, and every consumer reads its
+immutable container accessors directly; the former duplicate mutable
+containers and inherited compatibility spans have been deleted. Access
+candidate discovery and SuperCollider's coverage denominator consume
+normalized inventory without rediscovering semantics.
 
 `ConSanCodeObjectId` retains the existing `fnv1a64:<hex>` diagnostic spelling
 but combines it with byte size and an independently seeded reverse digest for
@@ -2026,7 +2025,7 @@ two-address LDS instructions.
 
 The focused `program_inventory_test.cpp` host suite exhaustively covers every
 new enum/name contract, identity validity and collision handling, immutable
-copy/move lifetime, builder facts and legacy-view binding, native LDS,
+copy/move lifetime, builder facts and const container access, native LDS,
 direct-to-LDS, subword and every supported two-address spelling, all FLAT
 provenance mappings and raw operands, every typed inventory exclusion,
 physical alias identity, and equivalence with a real decoded code object.
@@ -2042,17 +2041,16 @@ simulated targets.
   code-object/container facts, `PhysicalSiteId`, access `SemanticSiteId`,
   normalized access ranges, provenance/confidence, and typed exclusions.
   Construction remains backed by the current decoder and provenance analysis.
-- **Current temporary seam and consumers:** A read-only `LegacyInventoryView` projects
-  these facts into the exact shapes current candidate/resource/lowering code
-  expects. During producer cutover, a comparison test builds both views and
-  requires semantic equality.
+- **Retired temporary seam:** The read-only `LegacyInventoryView` projection
+  was deleted in Slice 4F. Candidate, resource, lowering, hook, and test
+  consumers now read the owning `ProgramInventory` directly.
 - **Test gate:** Analysis/provenance/physical-alias/two-address/subword tests,
   immutable-ID tests, capability conformance, common access device pairs on all
   five targets, and target-exclusive access pairs.
 - **Completed cutover and deletion:** Access candidate discovery and
   SuperCollider coverage use the new inventory. Duplicate access/container
-  vector ownership and mutation have been deleted from `ConSanResult`; only the
-  explicit legacy view remains for lowerers owned by later slices.
+  vector ownership, mutation, and compatibility projection have been deleted
+  from `ConSanResult`.
 - **Prerequisite:** Slices 1 and 2.
 
 ### Slice 3B: synchronization and ownership inventory
@@ -2311,6 +2309,38 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   tests and all 371 CPU-only validation-protocol tests passed; all 2,908
   simulator device rows passed in 68.64 seconds of wall time; and the complete
   593-row physical-gfx950 device matrix passed in 444.01 seconds of wall time.
+
+### Slice 4F: delete the legacy container-inventory projection
+
+- **Completed deletion:** `LegacyInventoryView`, its three borrowed fields,
+  `ProgramInventory::legacy_view()`, `ConSanResult` inheritance from the view,
+  and the associated binding step have been deleted. Production and test
+  consumers now name the owning `ProgramInventory` explicitly and read its
+  immutable text-section, kernel, and function ranges.
+- **Storage-independent contract:** The new accessors return const spans rather
+  than references to the backing vectors. Consumers can iterate and index the
+  immutable inventory without learning its storage type or acquiring mutation
+  authority. This keeps a later storage reorganization local to the inventory
+  component.
+- **Regression discovered by the device gate:** An intermediate accessor
+  returned a vector reference. Two policy consumers copied that vector into an
+  `auto` local while retaining pointers into it, so the pointers became
+  dangling when the local died. The checked-in gfx1250 full-bank Stream-K
+  correct/incorrect pair exposed the resulting loss of atomic/fence ordering
+  evidence. Returning spans restores the borrowing contract, and both paired
+  workloads pass.
+- **Deletion accounting:** The slice removes the compatibility type and its
+  binding path, but spelling the real owner at every consumer adds 30 net
+  production lines after formatting. This is an intentional, bounded cost:
+  the source now has one owner and one immutable container API instead of a
+  shorter inherited alias whose lifetime and authority were implicit.
+- **Completed checked-in gate:** all 1,519 selected ConSan host tests and all
+  86 focused HSA-hook tests passed. In the 2,908-row simulator matrix, 2,906
+  rows passed under 64-way load; the correct/incorrect gfx950 large-LDS
+  InlineShadow pair timed out, then both passed together in 57.86 seconds when
+  rerun without unrelated contention. In the 593-row physical-gfx950 matrix,
+  592 rows passed in the aggregate 501.60-second run; the sole timed-out
+  Sampled independent-scalar-proofs row then passed alone in 1.21 seconds.
 
 ### Slice 5A: Record/Replay evidence requirements
 

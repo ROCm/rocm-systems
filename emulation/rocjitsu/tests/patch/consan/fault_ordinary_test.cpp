@@ -44,8 +44,8 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
   const auto second_sites = ordinary(second);
   ASSERT_EQ(first_sites.size(), 4u);
   ASSERT_EQ(second_sites.size(), first_sites.size());
-  ASSERT_EQ(first.kernels.size(), 1u);
-  ASSERT_EQ(first.kernels.front().ordinary_memory_sites.size(), 4u);
+  ASSERT_EQ(first.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(first.program_inventory.kernels().front().ordinary_memory_sites.size(), 4u);
 
   for (size_t i = 0; i < first_sites.size(); ++i) {
     EXPECT_EQ(first_sites[i]->identity, second_sites[i]->identity);
@@ -758,8 +758,8 @@ TEST(ConSan, OrdinaryAcquireWeakenOrderRemovesOnlyGlobalInvAndPreservesLoadWait)
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineOrdinaryOrderRewrite);
   EXPECT_EQ(result.patches.front().anchor_offset, 4u * sizeof(uint32_t));
   EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_EQ(result.text_sections.size(), 1u);
-  const size_t text_file_offset = result.text_sections.front().file_offset;
+  ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
+  const size_t text_file_offset = result.program_inventory.text_sections().front().file_offset;
   EXPECT_TRUE(std::equal(bytes.begin() + static_cast<ptrdiff_t>(text_file_offset),
                          bytes.begin() + static_cast<ptrdiff_t>(text_file_offset + 16u),
                          result.elf_bytes.begin() + static_cast<ptrdiff_t>(text_file_offset)));
@@ -786,8 +786,8 @@ TEST(ConSan, OrdinaryAcquireWrongAddressChangesOnlyAlignedSignedIoffset) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineOrdinaryAddressRewrite);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_EQ(result.text_sections.size(), 1u);
-  const size_t text_file_offset = result.text_sections.front().file_offset;
+  ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
+  const size_t text_file_offset = result.program_inventory.text_sections().front().file_offset;
   std::array<uint32_t, 3> before{};
   std::array<uint32_t, 3> after{};
   std::memcpy(before.data(), bytes.data() + text_file_offset, sizeof(before));
@@ -833,8 +833,9 @@ TEST(ConSan, OrdinaryAcquireWeakenScopeChangesOnlyDeviceScopeBits) {
   ASSERT_TRUE(result.final_validation_passed);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineOrdinaryScopeRewrite);
-  ASSERT_EQ(result.text_sections.size(), 1u);
-  const size_t word1_file_offset = result.text_sections.front().file_offset + sizeof(uint32_t);
+  ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
+  const size_t word1_file_offset =
+      result.program_inventory.text_sections().front().file_offset + sizeof(uint32_t);
   uint32_t before = 0;
   uint32_t after = 0;
   std::memcpy(&before, bytes.data() + word1_file_offset, sizeof(before));
@@ -898,7 +899,7 @@ TEST(ConSan, FinalValidationRejectsCorruptedOrdinaryScopeMutation) {
   ASSERT_EQ(valid.patches.size(), 1u);
 
   ConSanResult corrupted = valid;
-  const size_t word1_file_offset = valid.text_sections.front().file_offset +
+  const size_t word1_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                    valid.patches.front().anchor_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
   std::memcpy(&word1, corrupted.elf_bytes.data() + word1_file_offset, sizeof(word1));

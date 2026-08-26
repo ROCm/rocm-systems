@@ -985,9 +985,9 @@ TEST(ConSanMoi, InventoriesDynamicStackMarker) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_TRUE(result.kernels.front().uses_dynamic_stack.has_value());
-  EXPECT_TRUE(*result.kernels.front().uses_dynamic_stack);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_TRUE(result.program_inventory.kernels().front().uses_dynamic_stack.has_value());
+  EXPECT_TRUE(*result.program_inventory.kernels().front().uses_dynamic_stack);
 }
 
 TEST(ConSanMoi, DynamicStackMetadataOverridesZeroValuedMarker) {
@@ -1007,11 +1007,11 @@ TEST(ConSanMoi, DynamicStackMetadataOverridesZeroValuedMarker) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_TRUE(result.kernels.front().uses_dynamic_stack.has_value());
-  EXPECT_TRUE(*result.kernels.front().uses_dynamic_stack);
-  ASSERT_TRUE(result.kernels.front().sgpr_count.has_value());
-  EXPECT_EQ(*result.kernels.front().sgpr_count, 83u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_TRUE(result.program_inventory.kernels().front().uses_dynamic_stack.has_value());
+  EXPECT_TRUE(*result.program_inventory.kernels().front().uses_dynamic_stack);
+  ASSERT_TRUE(result.program_inventory.kernels().front().sgpr_count.has_value());
+  EXPECT_EQ(*result.program_inventory.kernels().front().sgpr_count, 83u);
   ASSERT_FALSE(result.resource_plans.empty());
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
     EXPECT_EQ(plan.max_referenced_sgpr_count, 83u);
@@ -1033,8 +1033,8 @@ TEST(ConSanMoi, InventoriesHiddenDynamicLdsArgument) {
   const ConSanResult result = try_patch_consan(bytes, moi_options());
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().has_dynamic_lds);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().has_dynamic_lds);
 }
 
 TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
@@ -1055,8 +1055,8 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.functions.size(), 1u);
-  ASSERT_EQ(result.functions.front().flat_sites.size(), 1u);
+  ASSERT_EQ(result.program_inventory.functions().size(), 1u);
+  ASSERT_EQ(result.program_inventory.functions().front().flat_sites.size(), 1u);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   const ConSanMoiCandidate &candidate = result.moi_candidates.front();
   EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
@@ -1091,8 +1091,8 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 3u);
-  ASSERT_EQ(result.functions.size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 3u);
+  ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_FALSE(result.moi_candidates.front().in_kernel);
   EXPECT_EQ(result.moi_candidates.front().container_name, "shared_lds_helper");
@@ -1329,8 +1329,8 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.functions.size(), 1u);
-  ASSERT_EQ(result.functions.front().atomic_sites.size(), 1u);
+  ASSERT_EQ(result.program_inventory.functions().size(), 1u);
+  ASSERT_EQ(result.program_inventory.functions().front().atomic_sites.size(), 1u);
   ASSERT_EQ(result.resource_plans.size(), 2u);
   const auto plan_it = std::ranges::find_if(result.resource_plans, [](const auto &item) {
     return item.site_kind == ConSanResourceSiteKind::Atomic;
@@ -1683,8 +1683,8 @@ TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().flat_sites.size(), 2u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().flat_sites.size(), 2u);
   EXPECT_TRUE(result.moi_candidates.empty());
 
   EXPECT_EQ(std::ranges::count(result.observation_plan.site_decisions,
@@ -2145,7 +2145,8 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
       });
   ASSERT_NE(prologue, capture_corruption.patches.end());
   const size_t capture_file_offset =
-      capture_corruption.text_sections.front().file_offset + prologue->trampoline_offset;
+      capture_corruption.program_inventory.text_sections().front().file_offset +
+      prologue->trampoline_offset;
   const uint32_t wrong_capture = build_s_mov_b32(
       *prologue->dispatch_id_capture_sgpr,
       static_cast<uint16_t>(prologue->dispatch_id_source_sgpr + 1u), ROCJITSU_CODE_ARCH_RDNA4);
@@ -2502,8 +2503,8 @@ TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().has_dynamic_lds);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().has_dynamic_lds);
   const ConSanMoiAutoReportInventory inventory =
       inventory_consan_moi_auto_report(result, options, bytes);
   EXPECT_EQ(inventory.inline_lds_bytes,

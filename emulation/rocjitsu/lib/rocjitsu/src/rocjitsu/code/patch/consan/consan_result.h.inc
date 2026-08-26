@@ -352,7 +352,7 @@ struct ConSanFlatSelectionTelemetry {
   size_t selected_anchor_relay_slot_count = 0;
 };
 
-struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
+struct ConSanResult : SynchronizationInventoryView {
   bool visited_code_object = false;
   /// True after the input has been parsed as a structurally valid AMDGPU code
   /// object. This remains true when its machine target is not enumerated.
@@ -432,10 +432,7 @@ struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
   /// change only ConSanMoiReportRetryConfig fields plus the narrow live-fault
   /// selection carried by ConSanFaultMutationRetryConfig.
   std::optional<ConSanOptions> moi_inventory_options;
-  /// Immutable ownership of original code-object/container/access facts. The
-  /// inherited `LegacyInventoryView` is rebound whenever this value is
-  /// installed and remains only as a read-only compatibility projection for
-  /// lowerers not yet migrated to typed inventory.
+  /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;
   /// Target-neutral policy output retained independently of current lowering
   /// candidates and patch telemetry. Slice 4A initially populates access
@@ -475,12 +472,12 @@ struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
   std::vector<std::string> errors;
   std::vector<std::string> warnings;
 
-  /// Install one immutable program inventory and bind the inherited legacy
-  /// spans to its owned storage. Copies and moves remain valid because the
-  /// inventory shares const heap storage rather than borrowing this object.
+  /// Install one immutable program inventory and bind the temporary inherited
+  /// synchronization view to its owned storage. Copies and moves remain valid
+  /// because the inventory shares const heap storage rather than borrowing
+  /// this object.
   void install_program_inventory(ProgramInventory inventory) {
     program_inventory = std::move(inventory);
-    static_cast<LegacyInventoryView &>(*this) = program_inventory.legacy_view();
     static_cast<SynchronizationInventoryView &>(*this) = program_inventory.synchronization_view();
   }
 };

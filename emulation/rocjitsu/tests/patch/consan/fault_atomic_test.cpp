@@ -51,7 +51,7 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
             selected.perturbation_plans.front().candidate_identity);
   ASSERT_EQ(perturbation->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(perturbation->owner_descriptor_file_offsets.front(),
-            result.kernels.front().descriptor_file_offset);
+            result.program_inventory.kernels().front().descriptor_file_offset);
 
   ConSanResult wrong_owner = result;
   auto &owner_patch = *std::ranges::find(
@@ -231,12 +231,12 @@ TEST(ConSan, FaultAtomicExactIdentitySupersedesGlobalIndex) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().anchor_offset, inventory.fault_sites[1].text_offset);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 2u);
-  ASSERT_TRUE(result.kernels.front().atomic_sites[0].raw_ioffset);
-  ASSERT_TRUE(result.kernels.front().atomic_sites[1].raw_ioffset);
-  EXPECT_EQ(*result.kernels.front().atomic_sites[0].raw_ioffset, 0);
-  EXPECT_EQ(*result.kernels.front().atomic_sites[1].raw_ioffset, 8);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 2u);
+  ASSERT_TRUE(result.program_inventory.kernels().front().atomic_sites[0].raw_ioffset);
+  ASSERT_TRUE(result.program_inventory.kernels().front().atomic_sites[1].raw_ioffset);
+  EXPECT_EQ(*result.program_inventory.kernels().front().atomic_sites[0].raw_ioffset, 0);
+  EXPECT_EQ(*result.program_inventory.kernels().front().atomic_sites[1].raw_ioffset, 8);
   EXPECT_EQ(result.requested_fault_mutations, 1u);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
 }
@@ -370,7 +370,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
     return warning.find("removed associated buffer_wbl2") != std::string::npos;
   }));
   ASSERT_FALSE(order.elf_bytes.empty());
-  const uint64_t text_file_offset = inventory.kernels.front().text_file_offset;
+  const uint64_t text_file_offset = inventory.program_inventory.kernels().front().text_file_offset;
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
   for (uint64_t offset = 0; offset < release.size() * sizeof(uint32_t);
        offset += sizeof(uint32_t)) {
@@ -520,10 +520,10 @@ TEST(ConSan, FaultAtomicWrongAddressIsVisibleToSubsequentInventory) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineAtomicAddressRewrite);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels[0].atomic_sites.size(), 2u);
-  ASSERT_TRUE(result.kernels[0].atomic_sites[1].raw_ioffset);
-  EXPECT_EQ(*result.kernels[0].atomic_sites[1].raw_ioffset, 4);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 2u);
+  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[1].raw_ioffset);
+  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[1].raw_ioffset, 4);
 }
 
 TEST(ConSan, FaultAtomicWeakenOrderLeavesThReturnBehaviorUntouched) {
@@ -545,12 +545,12 @@ TEST(ConSan, FaultAtomicWeakenOrderLeavesThReturnBehaviorUntouched) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
   }));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels[0].atomic_sites.size(), 2u);
-  ASSERT_TRUE(result.kernels[0].atomic_sites[1].raw_th);
-  ASSERT_TRUE(result.kernels[0].atomic_sites[1].returns_old_value);
-  EXPECT_EQ(*result.kernels[0].atomic_sites[1].raw_th, 1u);
-  EXPECT_TRUE(*result.kernels[0].atomic_sites[1].returns_old_value);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 2u);
+  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[1].raw_th);
+  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[1].returns_old_value);
+  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[1].raw_th, 1u);
+  EXPECT_TRUE(*result.program_inventory.kernels()[0].atomic_sites[1].returns_old_value);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("removed associated global_inv") != std::string::npos;
   }));
@@ -576,9 +576,9 @@ TEST(ConSan, FaultAtomicWeakenOrderPreservesReturningCasDataOperation) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
   }));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels[0].atomic_sites.size(), 1u);
-  const ConSanAtomicSite &atomic = result.kernels[0].atomic_sites.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
+  const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "flat_atomic_cmpswap_b32");
   ASSERT_TRUE(atomic.returns_old_value);
   ASSERT_TRUE(atomic.raw_th);
@@ -612,9 +612,9 @@ TEST(ConSan, FaultAtomicWeakenScopeLeavesThReturnAndAddressUntouched) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
   }));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels[0].atomic_sites.size(), 2u);
-  const ConSanAtomicSite &atomic = result.kernels[0].atomic_sites[1];
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 2u);
+  const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites[1];
   ASSERT_TRUE(atomic.raw_scope);
   ASSERT_TRUE(atomic.raw_th);
   ASSERT_TRUE(atomic.returns_old_value);
@@ -636,16 +636,16 @@ TEST(ConSan, FaultGlobalAtomicWrongAddressIsVisibleToSubsequentInventory) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineAtomicAddressRewrite);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels[0].atomic_sites.size(), 1u);
-  ASSERT_TRUE(result.kernels[0].atomic_sites[0].raw_ioffset);
-  ASSERT_TRUE(result.kernels[0].atomic_sites[0].raw_scope);
-  ASSERT_TRUE(result.kernels[0].atomic_sites[0].raw_th);
-  ASSERT_TRUE(result.kernels[0].atomic_sites[0].returns_old_value);
-  EXPECT_EQ(*result.kernels[0].atomic_sites[0].raw_ioffset, 4);
-  EXPECT_EQ(*result.kernels[0].atomic_sites[0].raw_scope, 2u);
-  EXPECT_EQ(*result.kernels[0].atomic_sites[0].raw_th, 1u);
-  EXPECT_TRUE(*result.kernels[0].atomic_sites[0].returns_old_value);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
+  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].raw_ioffset);
+  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].raw_scope);
+  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].raw_th);
+  ASSERT_TRUE(result.program_inventory.kernels()[0].atomic_sites[0].returns_old_value);
+  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].raw_ioffset, 4);
+  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].raw_scope, 2u);
+  EXPECT_EQ(*result.program_inventory.kernels()[0].atomic_sites[0].raw_th, 1u);
+  EXPECT_TRUE(*result.program_inventory.kernels()[0].atomic_sites[0].returns_old_value);
 }
 
 TEST(ConSan, FaultGlobalAtomicWeakenScopePreservesReturnedValueAndAddress) {
@@ -659,9 +659,9 @@ TEST(ConSan, FaultGlobalAtomicWeakenScopePreservesReturnedValueAndAddress) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels[0].atomic_sites.size(), 1u);
-  const ConSanAtomicSite &atomic = result.kernels[0].atomic_sites.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
+  const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "global_atomic_add_f32");
   ASSERT_TRUE(atomic.raw_ioffset);
   ASSERT_TRUE(atomic.raw_scope);
@@ -684,9 +684,9 @@ TEST(ConSan, FaultGlobalAtomicWeakenOrderPreservesReturnedValue) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels[0].atomic_sites.size(), 1u);
-  const ConSanAtomicSite &atomic = result.kernels[0].atomic_sites.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels()[0].atomic_sites.size(), 1u);
+  const ConSanAtomicSite atomic = result.program_inventory.kernels()[0].atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "global_atomic_add_f32");
   ASSERT_TRUE(atomic.raw_scope);
   ASSERT_TRUE(atomic.raw_th);
@@ -820,9 +820,9 @@ TEST(ConSan, FaultBufferAtomicWrongAddressPreservesScopeAndReturnedValue) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite &atomic = result.kernels.front().atomic_sites.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "buffer_atomic_add_u32");
   ASSERT_TRUE(atomic.raw_ioffset);
   ASSERT_TRUE(atomic.raw_scope);
@@ -846,9 +846,9 @@ TEST(ConSan, FaultBufferAtomicWeakenScopePreservesAddressAndReturnedValue) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite &atomic = result.kernels.front().atomic_sites.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
   ASSERT_TRUE(atomic.raw_ioffset);
   ASSERT_TRUE(atomic.raw_scope);
   ASSERT_TRUE(atomic.raw_th);
@@ -874,9 +874,9 @@ TEST(ConSan, FaultBufferAtomicWeakenOrderPreservesDataOperationAndReturnedValue)
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
   }));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite &atomic = result.kernels.front().atomic_sites.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  const ConSanAtomicSite atomic = result.program_inventory.kernels().front().atomic_sites.front();
   EXPECT_EQ(atomic.mnemonic, "buffer_atomic_add_u32");
   ASSERT_TRUE(atomic.raw_scope);
   ASSERT_TRUE(atomic.raw_th);
@@ -901,9 +901,11 @@ TEST(ConSan, FaultDsAtomicWrongAddressUsesAlignedOffset0AndExactCardinality) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.applied_fault_mutations, 1u);
-  ASSERT_EQ(result.text_sections.size(), 1u);
+  ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
   uint32_t mutated_word0 = 0;
-  std::memcpy(&mutated_word0, result.elf_bytes.data() + result.text_sections.front().file_offset,
+  std::memcpy(&mutated_word0,
+              result.elf_bytes.data() +
+                  result.program_inventory.text_sections().front().file_offset,
               sizeof(mutated_word0));
   EXPECT_EQ(mutated_word0 & 0xffu, 4u);
   EXPECT_EQ(mutated_word0 & ~0xffu, 0xD8000000u);

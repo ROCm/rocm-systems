@@ -984,9 +984,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   }
 
   std::vector<BarrierRecordCandidate> candidates;
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     append_barrier_epoch_candidates(kernel, candidates);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_barrier_epoch_candidates(function, candidates);
   if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
     std::erase_if(candidates, [](const BarrierRecordCandidate &candidate) {
@@ -1232,7 +1232,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       }
     }
   } else if (!options.automatic_moi_private_epoch) {
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       persistent_epoch_vgpr_requirements.emplace(
           kernel.descriptor_file_offset, static_cast<uint32_t>(*options.moi_epoch_vgpr) + 1u);
     }
@@ -2468,9 +2468,9 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   }
 
   std::vector<BarrierRecordCandidate> candidates;
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     append_barrier_epoch_candidates(kernel, candidates);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_barrier_epoch_candidates(function, candidates);
   apply_test_container_filter(candidates, options);
   if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
@@ -2638,9 +2638,9 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       borrowed_barrier_protected_ranges.emplace_back(site.text_offset,
                                                      site.text_offset + site.size);
   };
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     append_borrowed_barrier_protected_ranges(kernel);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_borrowed_barrier_protected_ranges(function);
   std::ranges::sort(borrowed_barrier_protected_ranges);
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());

@@ -69,9 +69,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           ordering_atomic_offsets.insert(site.text_offset);
       }
     };
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       append_ordering_offsets(kernel, true);
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       append_ordering_offsets(function, false);
   }
   std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
@@ -348,15 +348,16 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       auto island =
           local_entry_islands->claim_reachable_from_all(anchors, group_entry_island_words);
       if (!island && group_resource != nullptr) {
-        const auto kernel =
-            key.first ? std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name)
-                      : result.kernels.end();
-        const auto function =
-            !key.first ? std::ranges::find(result.functions, key.second, &ConSanFunctionInfo::name)
-                       : result.functions.end();
+        const auto kernel = key.first ? std::ranges::find(result.program_inventory.kernels(),
+                                                          key.second, &ConSanKernelInfo::name)
+                                      : result.program_inventory.kernels().end();
+        const auto function = !key.first ? std::ranges::find(result.program_inventory.functions(),
+                                                             key.second, &ConSanFunctionInfo::name)
+                                         : result.program_inventory.functions().end();
         const bool has_owner_range =
-            (kernel != result.kernels.end() && kernel->has_text_range && kernel->code_size != 0u) ||
-            (function != result.functions.end() && function->code_size != 0u);
+            (kernel != result.program_inventory.kernels().end() && kernel->has_text_range &&
+             kernel->code_size != 0u) ||
+            (function != result.program_inventory.functions().end() && function->code_size != 0u);
         if (has_owner_range) {
           const std::vector<MoiSgprRange> host_bootstrap_ranges =
               moi_relocatable_host_scalar_ranges(group_options,
@@ -558,9 +559,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     const ConSanMoiCandidate *access = nullptr;
   };
   std::vector<BorrowedEntryProtectedRange> borrowed_entry_protected_ranges;
-  borrowed_entry_protected_ranges.reserve(candidates.size() + result.kernels.size() +
-                                          result.functions.size() +
-                                          options.preapplied_reserved_ranges.size());
+  borrowed_entry_protected_ranges.reserve(
+      candidates.size() + result.program_inventory.kernels().size() +
+      result.program_inventory.functions().size() + options.preapplied_reserved_ranges.size());
   for (const ConSanMoiCandidate *candidate : candidates) {
     borrowed_entry_protected_ranges.push_back(
         {candidate->text_offset, candidate->text_offset + candidate->size, candidate});
@@ -576,9 +577,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       borrowed_entry_protected_ranges.push_back(
           {site.text_offset, site.text_offset + site.size, nullptr});
   };
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     append_borrowed_entry_sync_ranges(kernel);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_borrowed_entry_sync_ranges(function);
   for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges) {
     borrowed_entry_protected_ranges.push_back(
@@ -636,7 +637,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       saturated_add(branch_only_candidate_count, branch_only_barrier_count);
   if (branch_only_routing_demand_count != 0u && use_indirect_appended && !original_text.empty()) {
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
-    protected_ranges.reserve(candidates.size() + result.kernels.size() + result.functions.size() +
+    protected_ranges.reserve(candidates.size() + result.program_inventory.kernels().size() +
+                             result.program_inventory.functions().size() +
                              options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
     const auto append_synchronization_ranges = [&](const auto &container) {
       for (const ConSanBarrierSite &site : container.barrier_sites)
@@ -646,9 +648,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       for (const ConSanAtomicSite &site : container.atomic_sites)
         protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
     };
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       append_synchronization_ranges(kernel);
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       append_synchronization_ranges(function);
     for (const ConSanMoiCandidate *candidate : candidates) {
       const auto borrowed_words = borrowed_entry_words_for_candidate(candidate);
@@ -657,7 +659,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           candidate->text_offset +
               (borrowed_words ? borrowed_words->size() * sizeof(uint32_t) : candidate->size));
     }
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       protected_ranges.emplace_back(
           kernel.entry_text_offset,
           std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));

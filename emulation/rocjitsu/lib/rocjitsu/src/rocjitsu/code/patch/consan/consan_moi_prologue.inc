@@ -1607,9 +1607,9 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
     }
     for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
       owner_descriptor_offsets.insert(descriptor_offset);
-      const auto owner = std::ranges::find(result.kernels, descriptor_offset,
+      const auto owner = std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
                                            &ConSanKernelInfo::descriptor_file_offset);
-      if (owner == result.kernels.end()) {
+      if (owner == result.program_inventory.kernels().end()) {
         result.errors.emplace_back(
             "ConSan MOI could not resolve an owner before enabling workgroup IDs");
         return false;
@@ -1865,7 +1865,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
   };
   std::vector<PlannedPrivateEpochPrologue> planned;
   MoiDescriptorPrivateRequirements private_requirements;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     const auto access_patch =
         std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
           return patch.persistent_epoch_private_offset && patch.scratch_vgpr &&
@@ -2386,7 +2386,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     result.errors.emplace_back("ConSan MOI hw_id owner source requires RJ_CONSAN_MOI_OWNER_SGPR");
     return;
   }
-  if (result.kernels.empty()) {
+  if (result.program_inventory.kernels().empty()) {
     result.warnings.emplace_back("ConSan MOI owner/epoch prologue found no kernel descriptors");
     return;
   }
@@ -2420,8 +2420,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     bool has_kernarg_preload = false;
   };
   std::vector<PlannedOwnerEpochPrologue> target_kernels;
-  target_kernels.reserve(result.kernels.size());
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  target_kernels.reserve(result.program_inventory.kernels().size());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!kernel.has_text_range)
       continue;
     const bool owns_emitted_patch =
@@ -2772,8 +2772,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
   for (const PlannedOwnerEpochPrologue &item : target_kernels) {
     const ConSanKernelInfo &kernel = item.kernel;
     const auto canonical_kernel =
-        std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
-    if (canonical_kernel == result.kernels.end()) {
+        std::ranges::find(result.program_inventory.kernels(), kernel.name, &ConSanKernelInfo::name);
+    if (canonical_kernel == result.program_inventory.kernels().end()) {
       result.errors.emplace_back("ConSan MOI owner/epoch prologue lost its canonical kernel owner");
       return;
     }
@@ -2813,7 +2813,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     bool indirect_at_entry = false;
     uint64_t prologue_return_target = kernel.entry_text_offset;
     const auto original_kernel =
-        std::ranges::find(result.kernels, kernel.name, &ConSanKernelInfo::name);
+        std::ranges::find(result.program_inventory.kernels(), kernel.name, &ConSanKernelInfo::name);
     const auto is_chainable_entry_patch = [](const ConSanPatchInfo &patch) {
       return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
              patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore ||
@@ -2831,7 +2831,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
         std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
           return is_chainable_entry_patch(patch) &&
                  patch.anchor_offset == kernel.entry_text_offset && patch.original_size != 0u &&
-                 patch.trampoline_size != 0u && original_kernel != result.kernels.end() &&
+                 patch.trampoline_size != 0u &&
+                 original_kernel != result.program_inventory.kernels().end() &&
                  kernel_owns_patch(*original_kernel, patch);
         });
     bool chains_existing_entry_trampoline =
@@ -2910,7 +2911,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                 std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
                   return is_chainable_entry_patch(patch) &&
                          patch.anchor_offset == displaced_offset && patch.original_size != 0u &&
-                         patch.trampoline_size != 0u && original_kernel != result.kernels.end() &&
+                         patch.trampoline_size != 0u &&
+                         original_kernel != result.program_inventory.kernels().end() &&
                          kernel_owns_patch(*original_kernel, patch);
                 });
             if (prefix_patch != result.patches.end()) {

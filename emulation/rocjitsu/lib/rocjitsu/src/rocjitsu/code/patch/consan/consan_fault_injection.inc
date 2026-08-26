@@ -265,7 +265,8 @@ find_static_participant_init(const ConSanResult &result, const ConSanBarrierLife
     }
     return nullptr;
   };
-  return group.in_kernel ? find_in(result.kernels) : find_in(result.functions);
+  return group.in_kernel ? find_in(result.program_inventory.kernels())
+                         : find_in(result.program_inventory.functions());
 }
 
 void mark_participant_mutation_unsupported(ConSanResult &result, std::string_view reason) {
@@ -803,7 +804,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
 }
 
 [[nodiscard]] bool has_proof_nop_candidate(const ConSanResult &result) {
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.preflight_action == ConSanPreflightAction::Candidate)
       return true;
   }
@@ -1492,7 +1493,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
   std::optional<uint64_t> marker_text_offset;
   std::optional<uint64_t> second_marker_file_offset;
   std::optional<uint64_t> second_marker_text_offset;
-  for (const ConSanTextSection &section : result.text_sections) {
+  for (const ConSanTextSection &section : result.program_inventory.text_sections()) {
     for (uint64_t offset = 0; offset + sizeof(uint32_t) <= section.size;
          offset += sizeof(uint32_t)) {
       uint32_t word = 0;
@@ -2073,7 +2074,7 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
 [[nodiscard]] const ConSanLdsSite *
 find_first_supported_lds_read_b32_site(const ConSanResult &result) {
   const ConSanLdsSite *best = nullptr;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.preflight_action == ConSanPreflightAction::Reject)
       continue;
     for (const ConSanLdsSite &site : kernel.lds_sites) {

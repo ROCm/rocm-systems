@@ -739,12 +739,12 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
   }
 
   std::unordered_map<std::string_view, const ConSanKernelInfo *> kernel_by_name;
-  kernel_by_name.reserve(result.kernels.size());
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  kernel_by_name.reserve(result.program_inventory.kernels().size());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     kernel_by_name.try_emplace(kernel.name, &kernel);
   std::unordered_map<std::string_view, const ConSanFunctionInfo *> function_by_name;
-  function_by_name.reserve(result.functions.size());
-  for (const ConSanFunctionInfo &function : result.functions)
+  function_by_name.reserve(result.program_inventory.functions().size());
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     function_by_name.try_emplace(function.name, &function);
 
   std::vector<SampledBarrierCandidate> candidates;
@@ -1301,16 +1301,16 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       uint64_t container_end = 0u;
       std::string_view container_name = container.second;
       if (container.first) {
-        const auto kernel =
-            std::ranges::find(result.kernels, container.second, &ConSanKernelInfo::name);
-        if (kernel == result.kernels.end())
+        const auto kernel = std::ranges::find(result.program_inventory.kernels(), container.second,
+                                              &ConSanKernelInfo::name);
+        if (kernel == result.program_inventory.kernels().end())
           continue;
         container_begin = kernel->entry_text_offset;
         container_end = container_begin + kernel->code_size;
       } else {
-        const auto function =
-            std::ranges::find(result.functions, container.second, &ConSanFunctionInfo::name);
-        if (function == result.functions.end())
+        const auto function = std::ranges::find(result.program_inventory.functions(),
+                                                container.second, &ConSanFunctionInfo::name);
+        if (function == result.program_inventory.functions().end())
           continue;
         container_begin = function->entry_text_offset;
         container_end = container_begin + function->code_size;
@@ -1756,11 +1756,11 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
            std::nullopt});
     }
   };
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
       append(kernel.name, true, kernel.descriptor_file_offset, kernel.atomic_sites);
   }
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append(function.name, false, std::nullopt, function.atomic_sites);
   std::vector<AtomicRecordCandidate> ordinary_candidates;
   append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
@@ -1854,9 +1854,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   // owner evidence canonical in the original inventory coordinate system.
   std::unordered_map<uint64_t, uint64_t> active_to_canonical_owner;
   for (const AmdGpuKernelInfo &active_kernel : code_object.kernels()) {
-    const auto canonical =
-        std::ranges::find(result.kernels, active_kernel.name, &ConSanKernelInfo::name);
-    if (canonical != result.kernels.end())
+    const auto canonical = std::ranges::find(result.program_inventory.kernels(), active_kernel.name,
+                                             &ConSanKernelInfo::name);
+    if (canonical != result.program_inventory.kernels().end())
       active_to_canonical_owner.emplace(active_kernel.descriptor_file_offset,
                                         canonical->descriptor_file_offset);
   }
@@ -2487,15 +2487,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       uint64_t owner_begin = 0u;
       uint64_t owner_end = 0u;
       if (in_kernel) {
-        const auto kernel = std::ranges::find(result.kernels, owner_name, &ConSanKernelInfo::name);
-        if (kernel == result.kernels.end())
+        const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner_name,
+                                              &ConSanKernelInfo::name);
+        if (kernel == result.program_inventory.kernels().end())
           continue;
         owner_begin = kernel->entry_text_offset;
         owner_end = owner_begin + kernel->code_size;
       } else {
-        const auto function =
-            std::ranges::find(result.functions, owner_name, &ConSanFunctionInfo::name);
-        if (function == result.functions.end())
+        const auto function = std::ranges::find(result.program_inventory.functions(), owner_name,
+                                                &ConSanFunctionInfo::name);
+        if (function == result.program_inventory.functions().end())
           continue;
         owner_begin = function->entry_text_offset;
         owner_end = owner_begin + function->code_size;

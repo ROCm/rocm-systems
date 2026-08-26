@@ -63,8 +63,8 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(result.flavor, ConSanFlavor::Moi);
   EXPECT_EQ(result.moi_engine, ConSanMoiEngine::RecordReplay);
   EXPECT_TRUE(result.elf_bytes.empty());
-  ASSERT_EQ(result.kernels.size(), 1u);
-  const ConSanKernelInfo &kernel = result.kernels.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
   ASSERT_TRUE(kernel.uses_dynamic_stack.has_value());
   EXPECT_FALSE(*kernel.uses_dynamic_stack);
   EXPECT_TRUE(kernel.decoded);
@@ -137,8 +137,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayZerosUnusedPersistentClusterCoordinate) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_FALSE(result.kernels.front().uses_gfx1250_cluster_workgroup_id);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_FALSE(result.program_inventory.kernels().front().uses_gfx1250_cluster_workgroup_id);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -1612,8 +1612,8 @@ TEST(ConSanMoi, AutomaticRecordReplayPreservesRuntimeWorkgroupTupleAcrossTargets
         scalar_selection ? *result.resolved_moi_record_replay_workgroup_sgprs.x
                          : *result.resolved_moi_record_replay_workgroup_vgprs.x;
     if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-      ASSERT_EQ(result.kernels.size(), 1u);
-      EXPECT_TRUE(result.kernels.front().uses_gfx1250_cluster_workgroup_id);
+      ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+      EXPECT_TRUE(result.program_inventory.kernels().front().uses_gfx1250_cluster_workgroup_id);
       EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_sgprs.cluster_workgroup_id ||
                   result.resolved_moi_record_replay_workgroup_vgprs.cluster_workgroup_id);
     }
@@ -1956,8 +1956,8 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
   const ConSanResult result = try_patch_consan(bytes, moi_options(ConSanMoiEngine::RecordReplay));
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().code_size_inferred_from_zero);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().code_size_inferred_from_zero);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_b16");
   EXPECT_EQ(result.moi_candidates.front().text_offset, 0u);
@@ -1985,9 +1985,10 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
   const ConSanResult result = try_patch_consan(bytes, moi_options(ConSanMoiEngine::RecordReplay));
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.kernels.size(), 2u);
-  const auto first_kernel = std::ranges::find(result.kernels, "lds_probe", &ConSanKernelInfo::name);
-  ASSERT_NE(first_kernel, result.kernels.end());
+  ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
+  const auto first_kernel =
+      std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
+  ASSERT_NE(first_kernel, result.program_inventory.kernels().end());
   EXPECT_TRUE(first_kernel->code_size_inferred_from_zero);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().container_name, "lds_probe");
@@ -2010,8 +2011,8 @@ TEST(ConSanMoi, RecordReplayDoesNotPruneExplicitSizedUnreachableTail) {
   const ConSanResult result = try_patch_consan(bytes, moi_options(ConSanMoiEngine::RecordReplay));
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_FALSE(result.kernels.front().code_size_inferred_from_zero);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_FALSE(result.program_inventory.kernels().front().code_size_inferred_from_zero);
   ASSERT_EQ(result.moi_candidates.size(), 2u);
   EXPECT_EQ(result.moi_candidates[0].mnemonic, "ds_store_b16");
   EXPECT_EQ(result.moi_candidates[1].mnemonic, "ds_load_b32");
@@ -3609,11 +3610,13 @@ TEST(ConSanMoi, UnrelatedDynamicStackKernelDoesNotDisablePrivateRecordReplayStat
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.kernels.size(), 2u);
-  const auto unrelated = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
-  const auto owner = std::ranges::find(result.kernels, "lds_probe", &ConSanKernelInfo::name);
-  ASSERT_NE(unrelated, result.kernels.end());
-  ASSERT_NE(owner, result.kernels.end());
+  ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
+  const auto unrelated =
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  const auto owner =
+      std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
+  ASSERT_NE(unrelated, result.program_inventory.kernels().end());
+  ASSERT_NE(owner, result.program_inventory.kernels().end());
   ASSERT_TRUE(unrelated->uses_dynamic_stack);
   EXPECT_TRUE(*unrelated->uses_dynamic_stack);
   EXPECT_TRUE(std::ranges::any_of(result.resource_plans, [&](const auto &plan) {
@@ -5603,8 +5606,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayKeepsDispatchOnlyFullPressureOwner) {
            plan.source != ConSanRegisterAllocationSource::Unsupported;
   }));
   const auto full_pressure_kernel =
-      std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
-  ASSERT_NE(full_pressure_kernel, result.kernels.end());
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(full_pressure_kernel, result.program_inventory.kernels().end());
   const auto full_pressure_assignment = std::ranges::find_if(
       result.resolved_moi_transient_sgpr_assignments, [&](const auto &assignment) {
         return assignment.descriptor_file_offset == full_pressure_kernel->descriptor_file_offset;
@@ -7010,8 +7013,8 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
       result.coverage_ledger.intent_entry(barrier_intent->id);
   ASSERT_NE(barrier_coverage, nullptr);
   EXPECT_EQ(barrier_coverage->lowering, ConSanLoweringOutcomeKind::Instrumented);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().barrier_sites.size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().barrier_sites.size(), 1u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).kind,
             ConSanPatchKind::TrampolineMoiBarrierRecord);
@@ -7128,14 +7131,16 @@ TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
       barriers.push_back(&patch);
   }
   ASSERT_EQ(barriers.size(), 1u);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels[0].barrier_sites.size(), 2u);
-  EXPECT_EQ(barriers[0]->anchor_offset, result.kernels[0].barrier_sites[0].text_offset);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels()[0].barrier_sites.size(), 2u);
+  EXPECT_EQ(barriers[0]->anchor_offset,
+            result.program_inventory.kernels()[0].barrier_sites[0].text_offset);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> second_barrier = text_words_at_offset(
-      patched, result.kernels[0].barrier_sites[1].text_offset, sizeof(uint32_t));
+      patched, result.program_inventory.kernels()[0].barrier_sites[1].text_offset,
+      sizeof(uint32_t));
   ASSERT_EQ(second_barrier.size(), 1u);
   EXPECT_EQ(second_barrier.front(), *barrier);
   ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
@@ -7393,9 +7398,10 @@ TEST(ConSanMoi, Cdna4BarrierRecordForcedSpillUsesNativePrivateWindows) {
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiBarrierRecord;
   });
-  ASSERT_NE(patch, result.patches.end()) << "patches=" << testing::PrintToString(result.patches)
-                                         << " warnings=" << testing::PrintToString(result.warnings)
-                                         << " kernels=" << testing::PrintToString(result.kernels);
+  ASSERT_NE(patch, result.patches.end())
+      << "patches=" << testing::PrintToString(result.patches)
+      << " warnings=" << testing::PrintToString(result.warnings)
+      << " kernels=" << testing::PrintToString(result.program_inventory.kernels());
   EXPECT_EQ(patch->spilled_vgpr_count, 6u);
   EXPECT_EQ(patch->required_private_segment_size, 32u);
   const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
@@ -8522,10 +8528,12 @@ TEST(ConSanMoi, Cdna4RecordReplayMixesPrivateAndDynamicStackPersistentStateByOwn
   EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
 
-  const auto fixed = std::ranges::find(result.kernels, "lds_probe", &ConSanKernelInfo::name);
-  const auto dynamic = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
-  ASSERT_NE(fixed, result.kernels.end());
-  ASSERT_NE(dynamic, result.kernels.end());
+  const auto fixed =
+      std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
+  const auto dynamic =
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(fixed, result.program_inventory.kernels().end());
+  ASSERT_NE(dynamic, result.program_inventory.kernels().end());
   ASSERT_TRUE(fixed->uses_dynamic_stack);
   ASSERT_TRUE(dynamic->uses_dynamic_stack);
   EXPECT_FALSE(*fixed->uses_dynamic_stack);
@@ -8594,8 +8602,9 @@ TEST(ConSanMoi, Cdna4RecordReplayRecoversDynamicOwnerAfterPrivateAbiResourceFail
   EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
 
-  const auto dynamic = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
-  ASSERT_NE(dynamic, result.kernels.end());
+  const auto dynamic =
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(dynamic, result.program_inventory.kernels().end());
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   EXPECT_EQ(result.resolved_moi_persistent_vgpr_assignments.front().descriptor_file_offset,
             dynamic->descriptor_file_offset);
@@ -8648,10 +8657,12 @@ TEST(ConSanMoi, Cdna4RecordReplayCarriesMixedPersistentStateAcrossAtomicAndFence
   EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
 
-  const auto fixed = std::ranges::find(result.kernels, "lds_probe", &ConSanKernelInfo::name);
-  const auto dynamic = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
-  ASSERT_NE(fixed, result.kernels.end());
-  ASSERT_NE(dynamic, result.kernels.end());
+  const auto fixed =
+      std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
+  const auto dynamic =
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(fixed, result.program_inventory.kernels().end());
+  ASSERT_NE(dynamic, result.program_inventory.kernels().end());
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   EXPECT_EQ(result.resolved_moi_persistent_vgpr_assignments.front().descriptor_file_offset,
             dynamic->descriptor_file_offset);
@@ -10162,8 +10173,8 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(atomic_patch, result.patches.end())
@@ -10307,9 +10318,9 @@ TEST(ConSanMoi, Gfx1250AtomicRecordPatchesOrderedFlatAtomic) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite &site = result.kernels.front().atomic_sites.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
   EXPECT_EQ(site.raw_saddr, kGfx1250FlatNoSaddrEncoding);
   EXPECT_EQ(site.raw_scope, 2u);
   EXPECT_EQ(site.raw_ioffset, 0);
@@ -10414,9 +10425,9 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
-  const ConSanAtomicSite &site = result.kernels.front().atomic_sites.front();
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  const ConSanAtomicSite site = result.program_inventory.kernels().front().atomic_sites.front();
   EXPECT_EQ(site.mnemonic, "ds_add_u32");
   EXPECT_EQ(site.raw_ioffset, 12);
   EXPECT_FALSE(site.raw_scope);
@@ -12198,10 +12209,10 @@ TEST(ConSanMoi, FenceRecordAcceptsSupportedRdna4OrdinaryAcquireAddress) {
 
   SCOPED_TRACE(testing::PrintToString(result.warnings));
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().ordinary_memory_sites.size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.size(), 1u);
   EXPECT_EQ(result.moi_fence_candidates.size(), 1u);
-  EXPECT_EQ(result.kernels.front().ordinary_memory_sites.front().support_reason,
+  EXPECT_EQ(result.program_inventory.kernels().front().ordinary_memory_sites.front().support_reason,
             ConSanOrdinaryMemorySupportReason::Supported);
   ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 1u);
   EXPECT_EQ(result.observation_plan.fence_site_decisions.front().kind,

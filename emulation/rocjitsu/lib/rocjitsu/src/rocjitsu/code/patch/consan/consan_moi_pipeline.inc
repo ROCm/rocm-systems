@@ -645,9 +645,9 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
   const MoiSyncInventoryIndex sync_index(result);
   if (options.moi_track_barriers) {
     std::vector<BarrierRecordCandidate> candidates;
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       append_barrier_epoch_candidates(kernel, candidates);
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       append_barrier_epoch_candidates(function, candidates);
     apply_test_container_filter(candidates, options);
     if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
@@ -695,9 +695,9 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
   if (options.moi_track_atomics) {
     std::vector<AtomicRecordCandidate> candidates;
     if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
-      for (const ConSanKernelInfo &kernel : result.kernels)
+      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
         append_inline_atomic_candidates(kernel, sync_index, candidates);
-      for (const ConSanFunctionInfo &function : result.functions)
+      for (const ConSanFunctionInfo &function : result.program_inventory.functions())
         append_inline_atomic_candidates(function, sync_index, candidates);
       candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
                                       [&](const auto &candidate) {
@@ -708,9 +708,9 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                       }),
                        candidates.end());
     } else {
-      for (const ConSanKernelInfo &kernel : result.kernels)
+      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
         append_atomic_record_candidates(kernel, result, sync_index, candidates);
-      for (const ConSanFunctionInfo &function : result.functions)
+      for (const ConSanFunctionInfo &function : result.program_inventory.functions())
         append_atomic_record_candidates(function, result, sync_index, candidates);
     }
     std::vector<AtomicRecordCandidate> ordinary_candidates;

@@ -68,8 +68,8 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
                                              &ConSanCandidateResourcePlan::site_kind);
   ASSERT_NE(access_plan, result.resource_plans.end());
   EXPECT_EQ(access_plan->scratch_vgpr_count, 16u);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().decoded);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().decoded);
   bool saw_inline_shadow_warning = false;
   for (const std::string &warning : result.warnings)
     saw_inline_shadow_warning |= warning.find("exact-shadow publish probe") != std::string::npos;
@@ -501,9 +501,9 @@ TEST(ConSanMoi, CdnaInlineShadowUsesTrustedMetadataToMoveRoundedEmptyAccumulator
       const ConSanResult result = try_patch_consan(bytes, options);
 
       ASSERT_TRUE(result.program_inventory.kernel_metadata_trustworthy());
-      ASSERT_EQ(result.kernels.size(), 1u);
-      EXPECT_EQ(result.kernels.front().vgpr_count, std::optional<uint16_t>(9u));
-      EXPECT_EQ(result.kernels.front().agpr_count,
+      ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+      EXPECT_EQ(result.program_inventory.kernels().front().vgpr_count, std::optional<uint16_t>(9u));
+      EXPECT_EQ(result.program_inventory.kernels().front().agpr_count,
                 std::optional<uint16_t>(static_cast<uint16_t>(agpr_count)));
       ASSERT_EQ(result.resource_plans.size(), 1u);
       if (agpr_count == 0u) {
@@ -1222,8 +1222,9 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
     return warning.find("owner-private hardware dispatch-ID state") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
   const auto full_kernel =
-      std::ranges::find(result.kernels, "full_pressure_private_dispatch", &ConSanKernelInfo::name);
-  ASSERT_NE(full_kernel, result.kernels.end());
+      std::ranges::find(result.program_inventory.kernels(), "full_pressure_private_dispatch",
+                        &ConSanKernelInfo::name);
+  ASSERT_NE(full_kernel, result.program_inventory.kernels().end());
   const auto full_assignment = std::ranges::find(
       result.resolved_moi_transient_sgpr_assignments, full_kernel->descriptor_file_offset,
       &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
@@ -2815,8 +2816,8 @@ TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().has_dynamic_lds);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().has_dynamic_lds);
   EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_TRUE(result.resolved_moi_owner_vgpr);
@@ -2946,7 +2947,8 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
   const size_t loop_byte_offset =
       static_cast<size_t>(std::distance(body.begin(), loop_branch)) * sizeof(uint32_t);
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
-  std::memcpy(broken_loop.elf_bytes.data() + result.text_sections.front().file_offset +
+  std::memcpy(broken_loop.elf_bytes.data() +
+                  result.program_inventory.text_sections().front().file_offset +
                   access->trampoline_offset + loop_byte_offset,
               &nop, sizeof(nop));
   const std::vector<std::string> loop_errors = validate_consan_modified_elf(bytes, broken_loop);
@@ -3053,8 +3055,8 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   const uint16_t initializer_address = *result.resolved_moi_owner_vgpr;
-  ASSERT_TRUE(result.kernels.front().required_workgroup_size);
-  EXPECT_EQ(*result.kernels.front().required_workgroup_size,
+  ASSERT_TRUE(result.program_inventory.kernels().front().required_workgroup_size);
+  EXPECT_EQ(*result.program_inventory.kernels().front().required_workgroup_size,
             (std::array<uint32_t, 3>{64u, 1u, 1u}));
   const uint16_t initializer_offset = static_cast<uint16_t>(*result.resolved_moi_epoch_vgpr + 1u);
   const auto extract_x = ib::build_v_and_b32_literal(
@@ -3594,8 +3596,8 @@ TEST(ConSanMoi, Rdna4InlineUnknownStackDoesNotSelectFixedStackBranchOnlySpill) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_FALSE(result.kernels.front().uses_dynamic_stack.has_value());
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_FALSE(result.program_inventory.kernels().front().uses_dynamic_stack.has_value());
   EXPECT_FALSE(std::ranges::any_of(result.resolved_moi_transient_sgpr_assignments,
                                    &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill))
       << testing::PrintToString(result.warnings);
@@ -4616,8 +4618,8 @@ TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   const auto analyzed_dynamic =
-      std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
-  ASSERT_NE(analyzed_dynamic, result.kernels.end());
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(analyzed_dynamic, result.program_inventory.kernels().end());
   ASSERT_TRUE(analyzed_dynamic->uses_dynamic_stack.has_value());
   EXPECT_TRUE(*analyzed_dynamic->uses_dynamic_stack);
   ASSERT_TRUE(consan_patch_succeeded(result))
@@ -6975,7 +6977,7 @@ TEST(ConSanMoi, AutomaticTransientPlanningScalesAcrossIndependentKernels) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.kernels.size(), kKernelCount);
+  EXPECT_EQ(result.program_inventory.kernels().size(), kKernelCount);
   EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), kAccessCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
@@ -8826,7 +8828,7 @@ TEST(ConSanMoi, FinalValidationPinsVersionedExactShadowPublication) {
   ASSERT_TRUE(valid.errors.empty()) << (valid.errors.empty() ? "" : valid.errors.front());
   ASSERT_TRUE(valid.modified);
   ASSERT_TRUE(valid.resolved_moi_dispatch_id_sgpr);
-  ASSERT_FALSE(valid.text_sections.empty());
+  ASSERT_FALSE(valid.program_inventory.text_sections().empty());
   const auto patch = std::ranges::find_if(valid.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -8835,7 +8837,7 @@ TEST(ConSanMoi, FinalValidationPinsVersionedExactShadowPublication) {
   EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());
 
   const size_t body_file_offset =
-      valid.text_sections.front().file_offset + patch->trampoline_offset;
+      valid.program_inventory.text_sections().front().file_offset + patch->trampoline_offset;
   ASSERT_LE(body_file_offset + patch->trampoline_size, valid.elf_bytes.size());
   std::vector<uint32_t> body(patch->trampoline_size / sizeof(uint32_t));
   std::memcpy(body.data(), valid.elf_bytes.data() + body_file_offset, patch->trampoline_size);
@@ -9090,9 +9092,9 @@ TEST(ConSanMoi, InlineBarrierOnlySharedOwnerSkipsUnobservedEntryPrologue) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                                &ConSanPatchInfo::kind),
             1);
-  const auto unrelated =
-      std::ranges::find(result.kernels, "unrelated_kernel", &ConSanKernelInfo::name);
-  ASSERT_NE(unrelated, result.kernels.end());
+  const auto unrelated = std::ranges::find(result.program_inventory.kernels(), "unrelated_kernel",
+                                           &ConSanKernelInfo::name);
+  ASSERT_NE(unrelated, result.program_inventory.kernels().end());
   const auto prologue = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
            std::ranges::find(patch.owner_descriptor_file_offsets,

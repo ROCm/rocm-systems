@@ -84,9 +84,9 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
   if (!options.abort_unmatched_barrier_wait || options.fault_dry_run || !result.errors.empty())
     return;
   std::vector<UnmatchedBarrierWait> waits;
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     append_unmatched_barrier_waits(kernel, true, options, result, waits);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_unmatched_barrier_waits(function, false, options, result, waits);
   if (waits.empty())
     return;
@@ -147,18 +147,20 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
 }
 
 [[nodiscard]] bool has_rejected_kernel(const ConSanResult &result) {
-  return std::ranges::any_of(result.kernels, [](const ConSanKernelInfo &kernel) {
-    return kernel.preflight_action == ConSanPreflightAction::Reject;
-  });
+  return std::ranges::any_of(result.program_inventory.kernels(),
+                             [](const ConSanKernelInfo &kernel) {
+                               return kernel.preflight_action == ConSanPreflightAction::Reject;
+                             });
 }
 
 [[nodiscard]] bool has_unsupported_preflight(const ConSanResult &result) {
-  return std::ranges::any_of(result.kernels, [](const ConSanKernelInfo &kernel) {
-    if (kernel.preflight_action != ConSanPreflightAction::Skip)
-      return false;
-    return !kernel.has_text_range || !kernel.decoded || kernel.stats.decode_error_count != 0 ||
-           kernel.stats.ds_other_count != 0;
-  });
+  return std::ranges::any_of(
+      result.program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
+        if (kernel.preflight_action != ConSanPreflightAction::Skip)
+          return false;
+        return !kernel.has_text_range || !kernel.decoded || kernel.stats.decode_error_count != 0 ||
+               kernel.stats.ds_other_count != 0;
+      });
 }
 
 template <typename Entity>
@@ -1328,7 +1330,7 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
   }
 
   std::vector<uint64_t> extra_leaders = kernel_entry_offsets(result);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     extra_leaders.push_back(function.entry_text_offset);
   std::ranges::sort(extra_leaders);
   extra_leaders.erase(std::ranges::unique(extra_leaders).begin(), extra_leaders.end());
@@ -2753,9 +2755,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       continue;
     }
     if (composite && candidate->in_kernel) {
-      const auto source_owner =
-          std::ranges::find(pristine.kernels, candidate->container_name, &ConSanKernelInfo::name);
-      if (source_owner == pristine.kernels.end() ||
+      const auto source_owner = std::ranges::find(
+          pristine.program_inventory.kernels(), candidate->container_name, &ConSanKernelInfo::name);
+      if (source_owner == pristine.program_inventory.kernels().end() ||
           patch.perturbation_source_owner_descriptor_file_offset !=
               source_owner->descriptor_file_offset) {
         errors.emplace_back(
@@ -2763,9 +2765,9 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         continue;
       }
     } else if (candidate->in_kernel) {
-      const auto owner = std::ranges::find(semantic_inventory.kernels, candidate->container_name,
-                                           &ConSanKernelInfo::name);
-      if (owner == semantic_inventory.kernels.end() ||
+      const auto owner = std::ranges::find(semantic_inventory.program_inventory.kernels(),
+                                           candidate->container_name, &ConSanKernelInfo::name);
+      if (owner == semantic_inventory.program_inventory.kernels().end() ||
           patch.owner_descriptor_file_offsets.size() != 1u ||
           patch.owner_descriptor_file_offsets.front() != owner->descriptor_file_offset) {
         errors.emplace_back("ConSan SC perturbation proof did not retain its exact kernel owner");
@@ -3618,13 +3620,13 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
                                       section->size());
 
   const auto atomic_site_for = [&](uint64_t text_offset) -> const ConSanAtomicSite * {
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       const auto site =
           std::ranges::find(kernel.atomic_sites, text_offset, &ConSanAtomicSite::text_offset);
       if (site != kernel.atomic_sites.end())
         return &*site;
     }
-    for (const ConSanFunctionInfo &function : result.functions) {
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
       const auto site =
           std::ranges::find(function.atomic_sites, text_offset, &ConSanAtomicSite::text_offset);
       if (site != function.atomic_sites.end())

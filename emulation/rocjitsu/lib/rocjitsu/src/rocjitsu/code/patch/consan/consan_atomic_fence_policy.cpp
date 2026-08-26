@@ -163,16 +163,17 @@ template <typename Container>
 
 [[nodiscard]] const ConSanAtomicSite *find_atomic_site(const ProgramInventory &inventory,
                                                        const ConSanSyncEvent &event) {
-  const LegacyInventoryView view = inventory.legacy_view();
   if (event.in_kernel) {
+    const auto kernels = inventory.kernels();
     const auto container =
-        std::ranges::find(view.kernels, event.container_name, &ConSanKernelInfo::name);
-    if (container != view.kernels.end())
+        std::ranges::find(kernels, event.container_name, &ConSanKernelInfo::name);
+    if (container != kernels.end())
       return atomic_site_in_container(*container, event.text_offset);
   } else {
+    const auto functions = inventory.functions();
     const auto container =
-        std::ranges::find(view.functions, event.container_name, &ConSanFunctionInfo::name);
-    if (container != view.functions.end())
+        std::ranges::find(functions, event.container_name, &ConSanFunctionInfo::name);
+    if (container != functions.end())
       return atomic_site_in_container(*container, event.text_offset);
   }
   return nullptr;
@@ -193,16 +194,17 @@ template <typename Container>
 
 [[nodiscard]] const ConSanOrdinaryMemorySite *find_ordinary_site(const ProgramInventory &inventory,
                                                                  const ConSanSyncEvent &event) {
-  const LegacyInventoryView view = inventory.legacy_view();
   if (event.in_kernel) {
+    const auto kernels = inventory.kernels();
     const auto container =
-        std::ranges::find(view.kernels, event.container_name, &ConSanKernelInfo::name);
-    if (container != view.kernels.end())
+        std::ranges::find(kernels, event.container_name, &ConSanKernelInfo::name);
+    if (container != kernels.end())
       return ordinary_site_in_container(*container, event.text_offset);
   } else {
+    const auto functions = inventory.functions();
     const auto container =
-        std::ranges::find(view.functions, event.container_name, &ConSanFunctionInfo::name);
-    if (container != view.functions.end())
+        std::ranges::find(functions, event.container_name, &ConSanFunctionInfo::name);
+    if (container != functions.end())
       return ordinary_site_in_container(*container, event.text_offset);
   }
   return nullptr;

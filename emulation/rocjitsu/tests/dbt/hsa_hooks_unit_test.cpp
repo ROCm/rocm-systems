@@ -4148,8 +4148,8 @@ TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpe
   ASSERT_EQ(direct.outcome, rocjitsu::ConSanTransformOutcome::Unsupported);
   ASSERT_TRUE(direct.parsed_code_object);
   ASSERT_EQ(direct.program_inventory.arch(), ROCJITSU_CODE_ARCH_INVALID);
-  ASSERT_FALSE(direct.text_sections.empty());
-  ASSERT_FALSE(direct.kernels.empty());
+  ASSERT_FALSE(direct.program_inventory.text_sections().empty());
+  ASSERT_FALSE(direct.program_inventory.kernels().empty());
   ASSERT_FALSE(direct.program_inventory.semantic_arch_required());
   ASSERT_TRUE(rocjitsu::consan_result_has_resolved_semantic_arch(direct));
 

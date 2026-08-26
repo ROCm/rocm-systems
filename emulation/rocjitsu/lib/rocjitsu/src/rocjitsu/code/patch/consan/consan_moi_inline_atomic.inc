@@ -31,9 +31,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
   std::vector<AtomicRecordCandidate> candidates;
   const MoiSyncInventoryIndex sync_index(result);
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     append_inline_atomic_candidates(kernel, sync_index, candidates);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_inline_atomic_candidates(function, sync_index, candidates);
   std::vector<AtomicRecordCandidate> ordinary_candidates;
   append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
@@ -476,14 +476,15 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                                 .substr(in_kernel     ? sizeof("kernel:") - 1u
                                                         : in_function ? sizeof("function:") - 1u
                                                                       : 0u);
-        const auto kernel = std::ranges::find(result.kernels, owner_name, &ConSanKernelInfo::name);
-        if (kernel != result.kernels.end()) {
+        const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner_name,
+                                              &ConSanKernelInfo::name);
+        if (kernel != result.program_inventory.kernels().end()) {
           owner_begin = kernel->entry_text_offset;
           owner_end = owner_begin + kernel->code_size;
         } else {
-          const auto function =
-              std::ranges::find(result.functions, owner_name, &ConSanFunctionInfo::name);
-          if (function == result.functions.end())
+          const auto function = std::ranges::find(result.program_inventory.functions(), owner_name,
+                                                  &ConSanFunctionInfo::name);
+          if (function == result.program_inventory.functions().end())
             continue;
           owner_begin = function->entry_text_offset;
           owner_end = owner_begin + function->code_size;

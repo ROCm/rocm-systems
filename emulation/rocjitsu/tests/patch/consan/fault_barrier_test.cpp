@@ -450,7 +450,7 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
   const auto init = std::ranges::find(inventory.sync_events, ConSanSyncOperation::BarrierInit,
                                       &ConSanSyncEvent::operation);
   ASSERT_NE(init, inventory.sync_events.end());
-  const auto owner = result.kernels.front().descriptor_file_offset;
+  const auto owner = result.program_inventory.kernels().front().descriptor_file_offset;
   size_t barrier_record_count = 0;
   size_t nested_instrumentation_count = 0;
   for (const ConSanPatchInfo &patch : result.patches) {

@@ -142,8 +142,8 @@ TEST(ConSanMoi, SampledEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(result.flavor, ConSanFlavor::Moi);
   EXPECT_EQ(result.moi_engine, ConSanMoiEngine::Sampled);
   EXPECT_TRUE(result.elf_bytes.empty());
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().decoded);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().decoded);
   ASSERT_EQ(result.resource_plans.size(), 2u);
   std::vector<uint16_t> scratch_counts;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
@@ -153,7 +153,8 @@ TEST(ConSanMoi, SampledEngineInventoriesCodeObjectWithoutModification) {
   }
   std::ranges::sort(scratch_counts);
   EXPECT_EQ(scratch_counts, (std::vector<uint16_t>{6u, 7u}));
-  EXPECT_EQ(result.kernels.front().preflight_action, ConSanPreflightAction::NotRun);
+  EXPECT_EQ(result.program_inventory.kernels().front().preflight_action,
+            ConSanPreflightAction::NotRun);
   bool saw_stub_warning = false;
   for (const std::string &warning : result.warnings)
     saw_stub_warning |= warning.find("sampled") != std::string::npos;
@@ -485,8 +486,8 @@ TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().uses_gfx1250_cluster_workgroup_id);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().uses_gfx1250_cluster_workgroup_id);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> patched_words = text_words_at_offset(
@@ -1002,8 +1003,8 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
             9u * kConSanMoiSampledPendingAcquireOwnerBankCount);
   EXPECT_EQ(result.moi_engine, ConSanMoiEngine::Sampled);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().atomic_sites.size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -2002,12 +2003,12 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-      ASSERT_EQ(result.kernels.size(), 1u);
+      ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
       const auto site = std::ranges::find_if(
-          result.kernels.front().atomic_sites,
+          result.program_inventory.kernels().front().atomic_sites,
           [](const ConSanAtomicSite &item) { return item.mnemonic.starts_with("global_atomic_"); });
-      ASSERT_NE(site, result.kernels.front().atomic_sites.end())
-          << testing::PrintToString(result.kernels.front().atomic_sites);
+      ASSERT_NE(site, result.program_inventory.kernels().front().atomic_sites.end())
+          << testing::PrintToString(result.program_inventory.kernels().front().atomic_sites);
       ASSERT_TRUE(site->raw_scope) << testing::PrintToString(*site);
       EXPECT_EQ(site->width_bits, 32u);
       EXPECT_EQ(site->saddr_sgpr, test_case.scalar_base_sgpr);
@@ -2800,8 +2801,9 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 96u);
-  const auto high_kernel = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
-  ASSERT_NE(high_kernel, result.kernels.end());
+  const auto high_kernel =
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(high_kernel, result.program_inventory.kernels().end());
   const auto assignment = std::ranges::find(
       result.resolved_moi_transient_sgpr_assignments, high_kernel->descriptor_file_offset,
       &ConSanMoiTransientSgprAssignment::descriptor_file_offset);

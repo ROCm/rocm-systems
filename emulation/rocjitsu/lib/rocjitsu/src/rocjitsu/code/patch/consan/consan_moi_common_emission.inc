@@ -544,8 +544,8 @@ build_moi_spill_sequence(const ConSanResult &result, const ResolvedMoiScratchPla
 class MoiActiveKernelResolver {
 public:
   MoiActiveKernelResolver(const ConSanResult &result, const AmdGpuCodeObject &code_object) {
-    result_kernels_by_descriptor_.reserve(result.kernels.size());
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    result_kernels_by_descriptor_.reserve(result.program_inventory.kernels().size());
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       result_kernels_by_descriptor_.emplace(kernel.descriptor_file_offset, &kernel);
     active_kernels_by_name_.reserve(code_object.kernels().size());
     for (const AmdGpuKernelInfo &kernel : code_object.kernels())

@@ -238,7 +238,7 @@ TEST(ConSan, LdsAddressFaultRejectsSameRegisterAndFinalProofRejectsOtherFieldDri
   const ConSanResult valid = try_patch_consan(bytes, options);
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(valid.errors);
-  ASSERT_EQ(valid.text_sections.size(), 1u);
+  ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
   const auto mutation = std::ranges::find_if(valid.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineLdsAddressRewrite;
@@ -253,7 +253,7 @@ TEST(ConSan, LdsAddressFaultRejectsSameRegisterAndFinalProofRejectsOtherFieldDri
   ASSERT_NE(instrumentation_patch, valid.patches.end());
 
   ConSanResult corrupted = valid;
-  const uint64_t word1_file_offset = valid.text_sections.front().file_offset +
+  const uint64_t word1_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                      *instrumentation_patch->relocated_guest_instruction_offset +
                                      sizeof(uint32_t);
   uint32_t word1 = 0;
@@ -391,10 +391,11 @@ TEST(ConSan, FinalValidationRejectsUnprovenBarrierMutation) {
   options.fault_drop_barrier = true;
   const ConSanResult valid = try_patch_consan(bytes, options);
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(valid.text_sections.size(), 1u);
+  ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
 
   ConSanResult corrupted = valid;
-  std::memcpy(corrupted.elf_bytes.data() + valid.text_sections.front().file_offset,
+  std::memcpy(corrupted.elf_bytes.data() +
+                  valid.program_inventory.text_sections().front().file_offset,
               text_words.data(), sizeof(uint32_t));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
 
@@ -411,10 +412,10 @@ TEST(ConSan, FinalValidationRejectsWrongAtomicMutationDisplacement) {
   const ConSanResult valid = try_patch_consan(bytes, options);
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(valid.patches.size(), 1u);
-  ASSERT_EQ(valid.text_sections.size(), 1u);
+  ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
 
   ConSanResult corrupted = valid;
-  const size_t word2_file_offset = valid.text_sections.front().file_offset +
+  const size_t word2_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                    valid.patches.front().anchor_offset + 2 * sizeof(uint32_t);
   uint32_t word2 = 0;
   std::memcpy(&word2, corrupted.elf_bytes.data() + word2_file_offset, sizeof(word2));
@@ -444,7 +445,7 @@ TEST(ConSan, FinalValidationRejectsScopeMutationThatChangesTh) {
   EXPECT_EQ(valid.applied_fault_mutations, 1u);
   ASSERT_EQ(valid.fault_plans.size(), 1u);
   EXPECT_EQ(valid.fault_plans.front().kind, ConSanFaultMutationKind::AtomicWeakenScope);
-  ASSERT_EQ(valid.text_sections.size(), 1u);
+  ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
   const auto scope_patch = std::ranges::find_if(valid.patches, [](const ConSanPatchInfo &patch) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineAtomicScopeRewrite;
@@ -452,8 +453,8 @@ TEST(ConSan, FinalValidationRejectsScopeMutationThatChangesTh) {
   ASSERT_NE(scope_patch, valid.patches.end());
 
   ConSanResult corrupted = valid;
-  const size_t word1_file_offset =
-      valid.text_sections.front().file_offset + scope_patch->anchor_offset + sizeof(uint32_t);
+  const size_t word1_file_offset = valid.program_inventory.text_sections().front().file_offset +
+                                   scope_patch->anchor_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
   std::memcpy(&word1, corrupted.elf_bytes.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u << 16u;
@@ -475,7 +476,8 @@ TEST(ConSan, FinalValidationRejectsCorruptedDsAtomicAddressMutation) {
   ASSERT_EQ(valid.patches.size(), 1u);
 
   ConSanResult corrupted = valid;
-  const size_t word1_file_offset = valid.text_sections.front().file_offset + sizeof(uint32_t);
+  const size_t word1_file_offset =
+      valid.program_inventory.text_sections().front().file_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
   std::memcpy(&word1, corrupted.elf_bytes.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u;

@@ -344,25 +344,6 @@ struct ConSanAccessInventorySite {
   bool operator==(const ConSanAccessInventorySite &) const = default;
 };
 
-/// Read-only compatibility projection of container shapes consumed by the
-/// current candidate, resource, and lowering implementation.
-///
-/// The spans borrow storage owned by a `ProgramInventory`. They cannot add,
-/// remove, or mutate containers, and remain valid while any copied inventory
-/// owning that storage remains alive. This is an explicit migration seam, not
-/// a second owner of access facts.
-struct LegacyInventoryView {
-  std::span<const ConSanTextSection> text_sections;
-  std::span<const ConSanKernelInfo> kernels;
-  std::span<const ConSanFunctionInfo> functions;
-
-  /// Return whether the projected code object contains no section or symbol
-  /// inventory.
-  [[nodiscard]] bool empty() const {
-    return text_sections.empty() && kernels.empty() && functions.empty();
-  }
-};
-
 /// Immutable synchronization and ownership projection produced by semantic
 /// analysis.
 ///
@@ -408,7 +389,7 @@ struct SynchronizationInventoryBuildView {
 ///
 /// This type is named so ownership is explicit in profiles and tests. It is
 /// not a semantic API: consumers use the immutable accessors on
-/// `ProgramInventory` or the deliberately narrow `LegacyInventoryView`.
+/// `ProgramInventory`.
 struct ConSanProgramInventoryStorage {
   ConSanCodeObjectId code_object_id;
   bool kernel_metadata_trustworthy = false;
@@ -461,18 +442,21 @@ public:
   [[nodiscard]] bool semantic_arch_required() const {
     return storage_ && storage_->semantic_arch_required;
   }
+  [[nodiscard]] std::span<const ConSanTextSection> text_sections() const {
+    return storage_ ? std::span<const ConSanTextSection>(storage_->text_sections)
+                    : std::span<const ConSanTextSection>{};
+  }
+  [[nodiscard]] std::span<const ConSanKernelInfo> kernels() const {
+    return storage_ ? std::span<const ConSanKernelInfo>(storage_->kernels)
+                    : std::span<const ConSanKernelInfo>{};
+  }
+  [[nodiscard]] std::span<const ConSanFunctionInfo> functions() const {
+    return storage_ ? std::span<const ConSanFunctionInfo>(storage_->functions)
+                    : std::span<const ConSanFunctionInfo>{};
+  }
   [[nodiscard]] std::span<const ConSanAccessInventorySite> access_sites() const {
     return storage_ ? std::span<const ConSanAccessInventorySite>(storage_->access_sites)
                     : std::span<const ConSanAccessInventorySite>{};
-  }
-  [[nodiscard]] LegacyInventoryView legacy_view() const {
-    if (!storage_)
-      return {};
-    return {
-        .text_sections = storage_->text_sections,
-        .kernels = storage_->kernels,
-        .functions = storage_->functions,
-    };
   }
   [[nodiscard]] SynchronizationInventoryView synchronization_view() const {
     if (!storage_)

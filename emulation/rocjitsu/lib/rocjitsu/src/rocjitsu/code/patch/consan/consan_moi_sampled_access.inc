@@ -7,9 +7,9 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
   if (!options.moi_track_barriers)
     return 0u;
   uint64_t count = 0u;
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     count += kernel.barrier_sites.size();
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     count += function.barrier_sites.size();
   return std::min<uint64_t>(count, options.max_patches);
 }
@@ -40,18 +40,18 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
         continue;
       const ConSanAtomicSite *site = nullptr;
       if (event->in_kernel) {
-        const auto kernel =
-            std::ranges::find(result.kernels, event->container_name, &ConSanKernelInfo::name);
-        if (kernel != result.kernels.end()) {
+        const auto kernel = std::ranges::find(result.program_inventory.kernels(),
+                                              event->container_name, &ConSanKernelInfo::name);
+        if (kernel != result.program_inventory.kernels().end()) {
           const auto found = std::ranges::find(kernel->atomic_sites, event->text_offset,
                                                &ConSanAtomicSite::text_offset);
           if (found != kernel->atomic_sites.end())
             site = &*found;
         }
       } else {
-        const auto function =
-            std::ranges::find(result.functions, event->container_name, &ConSanFunctionInfo::name);
-        if (function != result.functions.end()) {
+        const auto function = std::ranges::find(result.program_inventory.functions(),
+                                                event->container_name, &ConSanFunctionInfo::name);
+        if (function != result.program_inventory.functions().end()) {
           const auto found = std::ranges::find(function->atomic_sites, event->text_offset,
                                                &ConSanAtomicSite::text_offset);
           if (found != function->atomic_sites.end())
@@ -151,9 +151,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           ordering_atomic_offsets.insert(site.text_offset);
       }
     };
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       append_ordering_offsets(kernel, true);
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       append_ordering_offsets(function, false);
   }
   std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
@@ -466,14 +466,14 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         };
         std::optional<MoiDenseRelayHost> best_host;
         if (key.first) {
-          const auto kernel =
-              std::ranges::find(result.kernels, key.second, &ConSanKernelInfo::name);
-          if (kernel != result.kernels.end())
+          const auto kernel = std::ranges::find(result.program_inventory.kernels(), key.second,
+                                                &ConSanKernelInfo::name);
+          if (kernel != result.program_inventory.kernels().end())
             best_host = find_container_host(*kernel);
         } else {
-          const auto function =
-              std::ranges::find(result.functions, key.second, &ConSanFunctionInfo::name);
-          if (function != result.functions.end())
+          const auto function = std::ranges::find(result.program_inventory.functions(), key.second,
+                                                  &ConSanFunctionInfo::name);
+          if (function != result.program_inventory.functions().end())
             best_host = find_container_host(*function);
         }
         if (best_host) {
@@ -517,7 +517,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   }
   if (branch_only_candidate_count != 0u && use_indirect_appended && !original_text.empty()) {
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
-    protected_ranges.reserve(candidates.size() + result.kernels.size() + result.functions.size() +
+    protected_ranges.reserve(candidates.size() + result.program_inventory.kernels().size() +
+                             result.program_inventory.functions().size() +
                              options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
     const auto append_synchronization_ranges = [&](const auto &container) {
       for (const ConSanBarrierSite &site : container.barrier_sites)
@@ -527,15 +528,15 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       for (const ConSanAtomicSite &site : container.atomic_sites)
         protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
     };
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       append_synchronization_ranges(kernel);
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       append_synchronization_ranges(function);
     for (const ConSanMoiCandidate *candidate : candidates) {
       protected_ranges.emplace_back(candidate->text_offset,
                                     candidate->text_offset + candidate->size);
     }
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       protected_ranges.emplace_back(
           kernel.entry_text_offset,
           std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));

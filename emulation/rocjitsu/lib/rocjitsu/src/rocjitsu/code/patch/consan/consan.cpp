@@ -310,7 +310,7 @@ namespace {
   ConSanAccessPlan plan;
   plan.kind = std::move(kind);
   plan.text_offset = selected->anchor_offset;
-  for (const ConSanKernelInfo &kernel : validated.kernels) {
+  for (const ConSanKernelInfo &kernel : validated.program_inventory.kernels()) {
     const bool owns = std::ranges::any_of(kernel.lds_sites,
                                           [&](const ConSanLdsSite &site) {
                                             return site.text_offset == selected->anchor_offset;
@@ -325,7 +325,7 @@ namespace {
     plan.container_name = kernel.name;
     plan.in_kernel = true;
   }
-  for (const ConSanFunctionInfo &function : validated.functions) {
+  for (const ConSanFunctionInfo &function : validated.program_inventory.functions()) {
     const bool owns = std::ranges::any_of(function.lds_sites,
                                           [&](const ConSanLdsSite &site) {
                                             return site.text_offset == selected->anchor_offset;

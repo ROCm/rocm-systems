@@ -47,12 +47,13 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
 [[nodiscard]] std::vector<TextRange> covered_text_ranges(const ConSanResult &result,
                                                          uint64_t text_size) {
   std::vector<TextRange> ranges;
-  ranges.reserve(result.kernels.size() + result.functions.size());
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  ranges.reserve(result.program_inventory.kernels().size() +
+                 result.program_inventory.functions().size());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.has_text_range)
       add_covered_text_range(ranges, kernel.entry_text_offset, kernel.code_size, text_size);
   }
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     add_covered_text_range(ranges, function.entry_text_offset, function.code_size, text_size);
 
   std::ranges::sort(ranges, [](const TextRange &lhs, const TextRange &rhs) {
@@ -85,18 +86,19 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
 [[nodiscard]] std::vector<LocalCaveOwnerRange> local_cave_owner_ranges(const ConSanResult &result,
                                                                        uint64_t text_size) {
   std::vector<LocalCaveOwnerRange> owners;
-  owners.reserve(result.kernels.size() + result.functions.size());
+  owners.reserve(result.program_inventory.kernels().size() +
+                 result.program_inventory.functions().size());
   auto add_owner = [&](uint64_t entry, uint64_t code_size) {
     if (code_size == 0 || entry >= text_size)
       return;
     const uint64_t code_end = entry + std::min(code_size, text_size - entry);
     owners.push_back({entry, code_end, text_size});
   };
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.has_text_range)
       add_owner(kernel.entry_text_offset, kernel.code_size);
   }
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     add_owner(function.entry_text_offset, function.code_size);
 
   std::ranges::sort(owners, [](const LocalCaveOwnerRange &lhs, const LocalCaveOwnerRange &rhs) {
@@ -747,8 +749,8 @@ required_descriptor_vgpr_allocation_for_scratch(const ConSanLdsSite &site, uint1
 
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(const ConSanResult &result) {
   std::vector<uint64_t> offsets;
-  offsets.reserve(result.kernels.size());
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  offsets.reserve(result.program_inventory.kernels().size());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.has_text_range)
       offsets.push_back(kernel.entry_text_offset);
   }
@@ -883,9 +885,9 @@ void append_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) 
 }
 
 [[nodiscard]] bool has_only_rocclr_runtime_kernels(const ConSanResult &result) {
-  if (result.kernels.empty())
+  if (result.program_inventory.kernels().empty())
     return false;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
       return false;
   }

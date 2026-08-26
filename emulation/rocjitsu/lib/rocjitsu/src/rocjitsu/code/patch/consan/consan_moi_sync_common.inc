@@ -357,14 +357,15 @@ void append_fence_record_candidates(const ConSanResult &result,
       candidates.push_back(std::move(candidate));
     };
     if (fence.in_kernel) {
-      const auto kernel =
-          std::ranges::find(result.kernels, fence.container_name, &ConSanKernelInfo::name);
-      if (kernel != result.kernels.end() && !is_rocclr_runtime_kernel_name(kernel->name))
+      const auto kernel = std::ranges::find(result.program_inventory.kernels(),
+                                            fence.container_name, &ConSanKernelInfo::name);
+      if (kernel != result.program_inventory.kernels().end() &&
+          !is_rocclr_runtime_kernel_name(kernel->name))
         append_from(*kernel, kernel->descriptor_file_offset);
     } else {
-      const auto function =
-          std::ranges::find(result.functions, fence.container_name, &ConSanFunctionInfo::name);
-      if (function != result.functions.end())
+      const auto function = std::ranges::find(result.program_inventory.functions(),
+                                              fence.container_name, &ConSanFunctionInfo::name);
+      if (function != result.program_inventory.functions().end())
         append_from(*function, std::nullopt);
     }
   }
@@ -454,14 +455,16 @@ void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
       candidates.push_back(std::move(candidate));
     };
     if (communication->in_kernel) {
-      const auto kernel =
-          std::ranges::find(result.kernels, communication->container_name, &ConSanKernelInfo::name);
-      if (kernel != result.kernels.end() && !is_rocclr_runtime_kernel_name(kernel->name))
+      const auto kernel = std::ranges::find(result.program_inventory.kernels(),
+                                            communication->container_name, &ConSanKernelInfo::name);
+      if (kernel != result.program_inventory.kernels().end() &&
+          !is_rocclr_runtime_kernel_name(kernel->name))
         append_from(*kernel, kernel->descriptor_file_offset);
     } else {
-      const auto function = std::ranges::find(result.functions, communication->container_name,
-                                              &ConSanFunctionInfo::name);
-      if (function != result.functions.end())
+      const auto function =
+          std::ranges::find(result.program_inventory.functions(), communication->container_name,
+                            &ConSanFunctionInfo::name);
+      if (function != result.program_inventory.functions().end())
         append_from(*function, std::nullopt);
     }
   }

@@ -174,11 +174,11 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
                                 ConSanResult &result) {
   const std::string fingerprint = code_object_fingerprint(bytes);
   result.fault_sites.clear();
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
       append_fault_sites_for_container(bytes, fingerprint, kernel, true, arch, result.fault_sites);
   }
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_fault_sites_for_container(bytes, fingerprint, function, false, arch, result.fault_sites);
 }
 
@@ -442,11 +442,11 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
                                 const ConSanResult &result) {
   const ConSanCodeObjectId code_object_id = make_consan_code_object_id(bytes);
   inventory.sync_events.clear();
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
       append_sync_events_for_container(code_object_id, kernel, true, inventory.sync_events);
   }
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_sync_events_for_container(code_object_id, function, false, inventory.sync_events);
 }
 
@@ -475,11 +475,11 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
                                           ConSanResult &result) {
   std::unordered_map<std::string_view, uint64_t> kernel_entries;
   std::unordered_map<std::string_view, uint64_t> function_entries;
-  kernel_entries.reserve(result.kernels.size());
-  function_entries.reserve(result.functions.size());
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  kernel_entries.reserve(result.program_inventory.kernels().size());
+  function_entries.reserve(result.program_inventory.functions().size());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     kernel_entries.emplace(kernel.name, kernel.entry_text_offset);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     function_entries.emplace(function.name, function.entry_text_offset);
   const auto container_entry = [&](const ConSanSyncEvent &event) -> std::optional<uint64_t> {
     const auto &entries = event.in_kernel ? kernel_entries : function_entries;
@@ -522,12 +522,13 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
 build_sync_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
                         const ConSanResult &result) {
   std::vector<uint64_t> leaders;
-  leaders.reserve(result.kernels.size() + result.functions.size());
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  leaders.reserve(result.program_inventory.kernels().size() +
+                  result.program_inventory.functions().size());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.has_text_range)
       leaders.push_back(kernel.entry_text_offset);
   }
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     leaders.push_back(function.entry_text_offset);
   std::ranges::sort(leaders);
   leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
@@ -1330,18 +1331,18 @@ void build_barrier_move_destination_inventory(
     uint64_t text_file_offset = 0;
     bool found_container = false;
     if (sequence.in_kernel) {
-      const auto container =
-          std::ranges::find(result.kernels, sequence.container_name, &ConSanKernelInfo::name);
-      if (container != result.kernels.end() && container->has_text_range) {
+      const auto container = std::ranges::find(result.program_inventory.kernels(),
+                                               sequence.container_name, &ConSanKernelInfo::name);
+      if (container != result.program_inventory.kernels().end() && container->has_text_range) {
         container_begin = container->entry_text_offset;
         container_end = container_begin + container->code_size;
         text_file_offset = container->text_file_offset;
         found_container = true;
       }
     } else {
-      const auto container =
-          std::ranges::find(result.functions, sequence.container_name, &ConSanFunctionInfo::name);
-      if (container != result.functions.end()) {
+      const auto container = std::ranges::find(result.program_inventory.functions(),
+                                               sequence.container_name, &ConSanFunctionInfo::name);
+      if (container != result.program_inventory.functions().end()) {
         container_begin = container->entry_text_offset;
         container_end = container_begin + container->code_size;
         text_file_offset = container->text_file_offset;
@@ -1486,13 +1487,15 @@ template <typename Container>
   if (event.raw_scope == 1u)
     return true;
   if (event.in_kernel) {
-    return std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
-      return container_has_exact_group_flat_communication_site(kernel, event);
-    });
+    return std::ranges::any_of(
+        result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
+          return container_has_exact_group_flat_communication_site(kernel, event);
+        });
   }
-  return std::ranges::any_of(result.functions, [&](const ConSanFunctionInfo &function) {
-    return container_has_exact_group_flat_communication_site(function, event);
-  });
+  return std::ranges::any_of(
+      result.program_inventory.functions(), [&](const ConSanFunctionInfo &function) {
+        return container_has_exact_group_flat_communication_site(function, event);
+      });
 }
 
 template <typename Container>
@@ -1528,13 +1531,15 @@ template <typename Container>
                                                          const ConSanSyncEvent &event,
                                                          rj_code_arch_t arch) {
   if (event.in_kernel) {
-    return std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
-      return container_has_exact_group_flat_acquire_encoding(kernel, event, arch);
-    });
+    return std::ranges::any_of(
+        result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
+          return container_has_exact_group_flat_acquire_encoding(kernel, event, arch);
+        });
   }
-  return std::ranges::any_of(result.functions, [&](const ConSanFunctionInfo &function) {
-    return container_has_exact_group_flat_acquire_encoding(function, event, arch);
-  });
+  return std::ranges::any_of(
+      result.program_inventory.functions(), [&](const ConSanFunctionInfo &function) {
+        return container_has_exact_group_flat_acquire_encoding(function, event, arch);
+      });
 }
 
 [[nodiscard]] bool exact_zero_wait_word(uint32_t word, rj_code_arch_t arch, bool &drains_lds) {
@@ -2651,10 +2656,10 @@ void associate_ordinary_acquire_sync_sequences(
       ordered_encoding = exact_workgroup_flat_acquire_encoding(result, *load, arch);
     };
     if (load->in_kernel) {
-      for (const ConSanKernelInfo &kernel : result.kernels)
+      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
         visit(kernel);
     } else {
-      for (const ConSanFunctionInfo &function : result.functions)
+      for (const ConSanFunctionInfo &function : result.program_inventory.functions())
         visit(function);
     }
     if (!ordered_encoding)
@@ -2782,10 +2787,10 @@ communication_address_operands(const ConSanResult &result, const ConSanSyncEvent
     }
   };
   if (event.in_kernel) {
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       visit(kernel);
   } else {
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       visit(function);
   }
   if (match_count != 1)
@@ -3464,9 +3469,10 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     info.perturbation_composite_atomic_overlap = patch.plan->overlaps_atomic_mutation;
     info.perturbation_composite_removed_boundary = patch.plan->removed_cache_boundary;
     if (patch.candidate->in_kernel) {
-      const auto owner = std::ranges::find(result.kernels, patch.candidate->container_name,
-                                           &ConSanKernelInfo::name);
-      if (owner == result.kernels.end()) {
+      const auto owner =
+          std::ranges::find(result.program_inventory.kernels(), patch.candidate->container_name,
+                            &ConSanKernelInfo::name);
+      if (owner == result.program_inventory.kernels().end()) {
         result.errors.emplace_back("ConSan carried perturbation lost its exact kernel owner");
         result.elf_bytes.clear();
         return;
@@ -3684,13 +3690,13 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                                SynchronizationInventoryBuildView inventory, ConSanResult &result) {
   std::vector<uint64_t> leaders;
   std::vector<uint64_t> kernel_entries;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!kernel.has_text_range)
       continue;
     leaders.push_back(kernel.entry_text_offset);
     kernel_entries.push_back(kernel.entry_text_offset);
   }
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     leaders.push_back(function.entry_text_offset);
   for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
     leaders.push_back(range.text_offset);
@@ -3723,7 +3729,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   const std::span<const uint8_t> text = patcher.text_bytes();
   std::unordered_map<const BasicBlock *, std::vector<ConSanExecutionOwner>> owners_by_block;
   owners_by_block.reserve(blocks.size());
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!kernel.has_text_range)
       continue;
     std::vector<uint64_t> additional_entry_offsets;
@@ -3830,11 +3836,12 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                                                              std::string_view filter) {
   if (filter.empty())
     return nullptr;
-  const auto exact = std::ranges::find(result.kernels, filter, &ConSanKernelInfo::name);
-  if (exact != result.kernels.end())
+  const auto exact =
+      std::ranges::find(result.program_inventory.kernels(), filter, &ConSanKernelInfo::name);
+  if (exact != result.program_inventory.kernels().end())
     return &*exact;
   const ConSanKernelInfo *match = nullptr;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.name.find(filter) == std::string::npos)
       continue;
     if (match != nullptr)

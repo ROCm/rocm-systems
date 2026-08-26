@@ -16,9 +16,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     ConSanLdsSite site;
   };
   size_t discovered_site_count = 0;
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     discovered_site_count += kernel.lds_sites.size();
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     discovered_site_count += function.lds_sites.size();
   auto canonicalizer = consan_detail::make_physical_site_alias_canonicalizer<CanonicalLdsSite>(
       result.errors, "ConSan LDS physical site",
@@ -37,7 +37,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
             alias.site.owner_descriptor_file_offsets.end());
       },
       discovered_site_count);
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     for (const ConSanLdsSite &site : kernel.lds_sites) {
       CanonicalLdsSite candidate{
           .container_name = kernel.name,
@@ -49,7 +49,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         return;
     }
   }
-  for (const ConSanFunctionInfo &function : result.functions) {
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
     for (const ConSanLdsSite &site : function.lds_sites) {
       if (!canonicalizer.insert({
               .container_name = function.name,
@@ -72,7 +72,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
 
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   const bool has_plannable_supported_site = [&] {
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (kernel.preflight_action == ConSanPreflightAction::Reject)
         continue;
       if (std::ranges::any_of(kernel.lds_sites, [&](const auto &site) {
@@ -80,15 +80,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           }))
         return true;
     }
-    for (const ConSanFunctionInfo &function : result.functions) {
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
       for (const ConSanLdsSite &site : function.lds_sites) {
         if (!is_supported_check_trap_site(site, arch) || site.owner_descriptor_file_offsets.empty())
           continue;
         const bool every_owner_is_plannable =
             std::ranges::all_of(site.owner_descriptor_file_offsets, [&](uint64_t owner) {
-              const auto kernel = std::ranges::find(result.kernels, owner,
+              const auto kernel = std::ranges::find(result.program_inventory.kernels(), owner,
                                                     &ConSanKernelInfo::descriptor_file_offset);
-              return kernel != result.kernels.end() &&
+              return kernel != result.program_inventory.kernels().end() &&
                      kernel->preflight_action != ConSanPreflightAction::Reject;
             });
         if (every_owner_is_plannable)
@@ -170,20 +170,21 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     for (const Section *section : code_object.text_sections())
       executable_text_bytes = saturated_add(executable_text_bytes, section->size());
     const bool restrict_to_preflight_candidates =
-        result.functions.empty() && options.flavor == ConSanFlavor::SuperCollider &&
-        !options.fault_dry_run && options.sc_perturb_kind == ConSanPerturbationKind::None &&
+        result.program_inventory.functions().empty() &&
+        options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
+        options.sc_perturb_kind == ConSanPerturbationKind::None &&
         executable_text_bytes >= kScBoundedCfgMinimumTextBytes;
     std::vector<uint64_t> extra_leaders;
     if (restrict_to_preflight_candidates) {
-      for (const ConSanKernelInfo &kernel : result.kernels) {
+      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
         if (kernel.has_text_range && kernel.preflight_action == ConSanPreflightAction::Candidate)
           extra_leaders.push_back(kernel.entry_text_offset);
       }
     } else {
       extra_leaders = kernel_entry_offsets(result);
     }
-    extra_leaders.reserve(extra_leaders.size() + result.functions.size());
-    for (const ConSanFunctionInfo &function : result.functions)
+    extra_leaders.reserve(extra_leaders.size() + result.program_inventory.functions().size());
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       extra_leaders.push_back(function.entry_text_offset);
     std::ranges::sort(extra_leaders);
     extra_leaders.erase(std::ranges::unique(extra_leaders).begin(), extra_leaders.end());
@@ -191,7 +192,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     std::vector<BasicBlock::CodeRange> code_ranges;
     if (restrict_to_preflight_candidates) {
       code_ranges.reserve(extra_leaders.size());
-      for (const ConSanKernelInfo &kernel : result.kernels) {
+      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
         if (kernel.has_text_range && kernel.code_size != 0 &&
             kernel.preflight_action == ConSanPreflightAction::Candidate) {
           code_ranges.push_back(
@@ -211,15 +212,15 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
 
     const BlockOffsetIndex block_index = build_block_offset_index(blocks);
     std::vector<uint64_t> kernel_entries;
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (kernel.has_text_range && (!restrict_to_preflight_candidates ||
                                     kernel.preflight_action == ConSanPreflightAction::Candidate))
         kernel_entries.push_back(kernel.entry_text_offset);
     }
     std::ranges::sort(kernel_entries);
     kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
-    reservoir_owner_contexts.reserve(result.kernels.size());
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    reservoir_owner_contexts.reserve(result.program_inventory.kernels().size());
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       // With no shared functions, a preflight-skipped kernel cannot own a
       // supported access. Avoid constructing thousands of unused liveness
       // analyses for generated operator-library code objects.
@@ -413,9 +414,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         container.name.find(options.test_kernel_name_filter) != std::string::npos)
       return true;
     const auto owner_matches = [&](uint64_t descriptor_offset) {
-      const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
+      const auto kernel = std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
                                             &ConSanKernelInfo::descriptor_file_offset);
-      return kernel != result.kernels.end() &&
+      return kernel != result.program_inventory.kernels().end() &&
              kernel->name.find(options.test_kernel_name_filter) != std::string::npos;
     };
     const auto site_has_matching_owner = [&](const auto &site) {
@@ -440,9 +441,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         supported_lds_probe_ranges.add(site.text_offset, site.size);
     }
   };
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     index_container(kernel, kernel.preflight_action != ConSanPreflightAction::Reject);
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     index_container(function, true);
   selected_container_ranges.finalize();
   future_flat_probe_ranges.finalize();
@@ -764,9 +765,9 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   };
   std::unordered_map<uint64_t, const ConSanKernelInfo *> kernels_by_descriptor;
   std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_by_descriptor;
-  kernels_by_descriptor.reserve(result.kernels.size());
-  max_refs_by_descriptor.reserve(result.kernels.size());
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  kernels_by_descriptor.reserve(result.program_inventory.kernels().size());
+  max_refs_by_descriptor.reserve(result.program_inventory.kernels().size());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     kernels_by_descriptor.emplace(kernel.descriptor_file_offset, &kernel);
     const auto owner_context =
         std::ranges::find(reservoir_owner_contexts, kernel.descriptor_file_offset,
@@ -1685,15 +1686,16 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       ++dense_seed_group_count;
       uint64_t container_begin = 0;
       uint64_t container_size = 0;
-      const auto kernel = std::ranges::find(result.kernels, seed_group.container_entry_text_offset,
+      const auto kernel = std::ranges::find(result.program_inventory.kernels(),
+                                            seed_group.container_entry_text_offset,
                                             &ConSanKernelInfo::entry_text_offset);
-      const auto function =
-          std::ranges::find(result.functions, seed_group.container_entry_text_offset,
-                            &ConSanFunctionInfo::entry_text_offset);
-      if (kernel != result.kernels.end() && kernel->has_text_range) {
+      const auto function = std::ranges::find(result.program_inventory.functions(),
+                                              seed_group.container_entry_text_offset,
+                                              &ConSanFunctionInfo::entry_text_offset);
+      if (kernel != result.program_inventory.kernels().end() && kernel->has_text_range) {
         container_begin = kernel->entry_text_offset;
         container_size = kernel->code_size;
-      } else if (function != result.functions.end()) {
+      } else if (function != result.program_inventory.functions().end()) {
         container_begin = function->entry_text_offset;
         container_size = function->code_size;
       } else {
@@ -4310,10 +4312,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {
-      const auto original_kernel = std::ranges::find(result.kernels, descriptor_offset,
-                                                     &ConSanKernelInfo::descriptor_file_offset);
+      const auto original_kernel =
+          std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
+                            &ConSanKernelInfo::descriptor_file_offset);
       const auto moved_kernel =
-          original_kernel == result.kernels.end()
+          original_kernel == result.program_inventory.kernels().end()
               ? patched_probe.kernels().end()
               : std::ranges::find(patched_probe.kernels(), original_kernel->name,
                                   &AmdGpuKernelInfo::name);

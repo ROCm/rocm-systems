@@ -130,9 +130,9 @@ TEST(ConSan, PerturbationEmissionOrdersBarrierSleepAtSelectedEdge) {
   EXPECT_FALSE(release_patch.scratch_vgpr);
   EXPECT_EQ(release_patch.required_private_segment_size, 0u);
   ASSERT_EQ(release_patch.owner_descriptor_file_offsets.size(), 1u);
-  ASSERT_EQ(release.kernels.size(), 1u);
+  ASSERT_EQ(release.program_inventory.kernels().size(), 1u);
   EXPECT_EQ(release_patch.owner_descriptor_file_offsets.front(),
-            release.kernels.front().descriptor_file_offset);
+            release.program_inventory.kernels().front().descriptor_file_offset);
 
   AmdGpuCodeObject release_object(release.elf_bytes.data(), release.elf_bytes.size());
   ASSERT_EQ(release_object.text_sections().size(), 1u);

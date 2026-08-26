@@ -212,9 +212,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     ConSanFlatSite site;
   };
   size_t discovered_site_count = 0;
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     discovered_site_count += kernel.flat_sites.size();
-  for (const ConSanFunctionInfo &function : result.functions)
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     discovered_site_count += function.flat_sites.size();
   auto canonicalizer = consan_detail::make_physical_site_alias_canonicalizer<CanonicalFlatSite>(
       result.errors, "ConSan FLAT physical site",
@@ -231,7 +231,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
             alias.site.owner_descriptor_file_offsets.end());
       },
       discovered_site_count);
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     for (const ConSanFlatSite &site : kernel.flat_sites) {
       if (!sc_flat_site_is_applicable(site, options.flat_provenance_mode))
         continue;
@@ -245,7 +245,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
     }
   }
-  for (const ConSanFunctionInfo &function : result.functions) {
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
     for (const ConSanFlatSite &site : function.flat_sites) {
       if (!sc_flat_site_is_applicable(site, options.flat_provenance_mode))
         continue;
@@ -323,8 +323,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (decoder) {
     std::vector<uint64_t> extra_leaders = kernel_entry_offsets(result);
-    extra_leaders.reserve(extra_leaders.size() + result.functions.size());
-    for (const ConSanFunctionInfo &function : result.functions)
+    extra_leaders.reserve(extra_leaders.size() + result.program_inventory.functions().size());
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       extra_leaders.push_back(function.entry_text_offset);
     std::ranges::sort(extra_leaders);
     extra_leaders.erase(std::ranges::unique(extra_leaders).begin(), extra_leaders.end());
@@ -340,7 +340,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     block_ptrs = block_ptrs_for(blocks);
 
     block_index = build_block_offset_index(blocks);
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (kernel.has_text_range)
         kernel_entries.push_back(kernel.entry_text_offset);
     }
@@ -352,8 +352,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
           std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
     }
   }
-  owner_contexts.reserve(result.kernels.size());
-  failed_owner_contexts.reserve(result.kernels.size());
+  owner_contexts.reserve(result.program_inventory.kernels().size());
+  failed_owner_contexts.reserve(result.program_inventory.kernels().size());
 
   struct FlatCheckTrapCandidate {
     const ConSanFlatSite *site = nullptr;
@@ -722,9 +722,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   // shared-function candidates.
   std::unordered_map<uint64_t, const ConSanKernelInfo *> kernels_by_descriptor;
   std::unordered_map<uint64_t, KernelMaxRegisterRefs> max_refs_by_descriptor;
-  kernels_by_descriptor.reserve(result.kernels.size());
-  max_refs_by_descriptor.reserve(result.kernels.size());
-  for (const ConSanKernelInfo &kernel : result.kernels)
+  kernels_by_descriptor.reserve(result.program_inventory.kernels().size());
+  max_refs_by_descriptor.reserve(result.program_inventory.kernels().size());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
     kernels_by_descriptor.emplace(kernel.descriptor_file_offset, &kernel);
   const auto get_owner_context = [&](const ConSanKernelInfo &kernel) -> FlatOwnerPlanningContext * {
     const uint64_t descriptor_file_offset = kernel.descriptor_file_offset;
@@ -913,7 +913,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     }
     std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
     protected_ranges.reserve(canonical_sites.size() + local_nop_caves.size() +
-                             result.kernels.size() + result.functions.size() +
+                             result.program_inventory.kernels().size() +
+                             result.program_inventory.functions().size() +
                              options.preapplied_reserved_ranges.size() + result.patches.size());
     for (const CanonicalFlatSite &canonical : canonical_sites) {
       protected_ranges.emplace_back(canonical.site.text_offset,
@@ -933,13 +934,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       append(container.atomic_sites);
       append(container.fence_sites);
     };
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       protect_sync_sites(kernel);
       protected_ranges.emplace_back(
           kernel.entry_text_offset,
           std::min<uint64_t>(pristine_text.size(), kernel.entry_text_offset + 256u));
     }
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       protect_sync_sites(function);
     for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
       protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
@@ -2052,7 +2053,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
   }
 
   std::vector<const ConSanFlatSite *> candidates;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.preflight_action == ConSanPreflightAction::Reject)
       continue;
     for (const ConSanFlatSite &site : kernel.flat_sites) {
@@ -2060,7 +2061,7 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
         candidates.push_back(&site);
     }
   }
-  for (const ConSanFunctionInfo &function : result.functions) {
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
     for (const ConSanFlatSite &site : function.flat_sites) {
       if (is_supported_flat_trap_site(site, options.flat_provenance_mode))
         candidates.push_back(&site);

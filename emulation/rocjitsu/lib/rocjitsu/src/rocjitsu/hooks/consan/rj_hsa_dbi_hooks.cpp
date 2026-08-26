@@ -655,10 +655,10 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
             container.barrier_sites.begin(), container.barrier_sites.end(),
             [](const rocjitsu::ConSanBarrierSite &site) { return site.size == sizeof(uint32_t); }));
       };
-      for (const auto &kernel : result.kernels)
+      for (const auto &kernel : result.program_inventory.kernels())
         count_barriers(kernel);
       if (!result.moi_persistent_vgprs_automatic && !result.moi_private_epoch_automatic) {
-        for (const auto &function : result.functions)
+        for (const auto &function : result.program_inventory.functions())
           count_barriers(function);
       }
     }
@@ -771,8 +771,8 @@ private:
     return (config.moi_track_barriers && !container.barrier_sites.empty()) ||
            (config.moi_track_atomics && !container.atomic_sites.empty());
   };
-  return std::ranges::any_of(result.kernels, container_needs_buffer) ||
-         std::ranges::any_of(result.functions, container_needs_buffer);
+  return std::ranges::any_of(result.program_inventory.kernels(), container_needs_buffer) ||
+         std::ranges::any_of(result.program_inventory.functions(), container_needs_buffer);
 }
 
 [[nodiscard]] bool sc_inventory_needs_report_buffer(const rocjitsu::ConSanResult &result) {
@@ -2064,10 +2064,11 @@ public:
 
       if (!patch.owner_descriptor_file_offsets.empty()) {
         for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
-          const auto kernel = std::ranges::find_if(result.kernels, [&](const auto &candidate) {
-            return candidate.descriptor_file_offset == descriptor_offset;
-          });
-          if (kernel != result.kernels.end())
+          const auto kernel =
+              std::ranges::find_if(result.program_inventory.kernels(), [&](const auto &candidate) {
+                return candidate.descriptor_file_offset == descriptor_offset;
+              });
+          if (kernel != result.program_inventory.kernels().end())
             note_kernel(*kernel);
         }
         continue;
@@ -2075,11 +2076,12 @@ public:
 
       // Legacy single-owner patches predate explicit owner lists. Preserve the
       // anchor-range fallback for those kernel-local sites.
-      const auto kernel = std::ranges::find_if(result.kernels, [&](const auto &candidate) {
-        return candidate.has_text_range && patch.anchor_offset >= candidate.entry_text_offset &&
-               patch.anchor_offset - candidate.entry_text_offset < candidate.code_size;
-      });
-      if (kernel != result.kernels.end())
+      const auto kernel =
+          std::ranges::find_if(result.program_inventory.kernels(), [&](const auto &candidate) {
+            return candidate.has_text_range && patch.anchor_offset >= candidate.entry_text_offset &&
+                   patch.anchor_offset - candidate.entry_text_offset < candidate.code_size;
+          });
+      if (kernel != result.program_inventory.kernels().end())
         note_kernel(*kernel);
     }
   }
@@ -4639,14 +4641,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           static_cast<unsigned long long>(code_object_reader.handle),
           rj_code_target_name(transform_result.program_inventory.target()),
           rj_code_arch_name(rj_code_arch_for_target(transform_result.program_inventory.target())),
-          patch_result.text_sections.size(), patch_result.kernels.size(),
-          patch_result.functions.size());
+          patch_result.program_inventory.text_sections().size(),
+          patch_result.program_inventory.kernels().size(),
+          patch_result.program_inventory.functions().size());
     }
     log_message(kLogInfo, "ConSan fault inventory reader=%llu sites=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),
                 patch_result.fault_sites.size());
     for (const rocjitsu::ConSanFaultSite &site : patch_result.fault_sites) {
-      const OwnerLogFields owners = owner_log_fields(site.execution_owners, patch_result.kernels);
+      const OwnerLogFields owners =
+          owner_log_fields(site.execution_owners, patch_result.program_inventory.kernels());
       log_message(kLogVerbose,
                   "ConSan fault site reader=%llu identity=%s kind=%s container=%s "
                   "container_kind=%s occurrence=%u text_offset=0x%llx file_offset=0x%llx "
@@ -4672,7 +4676,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     for (const rocjitsu::ConSanBarrierMoveDestination &destination :
          patch_result.barrier_move_destinations) {
       const OwnerLogFields owners =
-          owner_log_fields(destination.execution_owners, patch_result.kernels);
+          owner_log_fields(destination.execution_owners, patch_result.program_inventory.kernels());
       std::string reason =
           destination.rejection_reason.empty() ? "-" : destination.rejection_reason;
       std::ranges::replace(reason, ' ', '-');
@@ -4842,7 +4846,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 static_cast<unsigned long long>(code_object_reader.handle),
                 patch_result.sync_events.size());
     for (const rocjitsu::ConSanSyncEvent &event : patch_result.sync_events) {
-      const OwnerLogFields owners = owner_log_fields(event.execution_owners, patch_result.kernels);
+      const OwnerLogFields owners =
+          owner_log_fields(event.execution_owners, patch_result.program_inventory.kernels());
       std::string reason = event.confidence_reason;
       std::ranges::replace(reason, ' ', '-');
       const std::string static_offset =
@@ -4895,7 +4900,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 patch_result.sync_sequences.size());
     for (const rocjitsu::ConSanSyncSequence &sequence : patch_result.sync_sequences) {
       const OwnerLogFields owners =
-          owner_log_fields(sequence.execution_owners, patch_result.kernels);
+          owner_log_fields(sequence.execution_owners, patch_result.program_inventory.kernels());
       std::string reason = sequence.confidence_reason;
       std::ranges::replace(reason, ' ', '-');
       std::string members;
@@ -5120,11 +5125,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
           if (logged_owners == kMaxLoggedResourceOwners)
             break;
-          const auto kernel = std::ranges::find_if(
-              patch_result.kernels, [descriptor_offset](const rocjitsu::ConSanKernelInfo &item) {
-                return item.descriptor_file_offset == descriptor_offset;
-              });
-          if (kernel == patch_result.kernels.end())
+          const auto kernel =
+              std::ranges::find_if(patch_result.program_inventory.kernels(),
+                                   [descriptor_offset](const rocjitsu::ConSanKernelInfo &item) {
+                                     return item.descriptor_file_offset == descriptor_offset;
+                                   });
+          if (kernel == patch_result.program_inventory.kernels().end())
             continue;
           if (!owner_names.empty())
             owner_names += ',';
@@ -5264,7 +5270,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     size_t function_flat_maybe_private_hint_count = 0;
     size_t function_flat_global_hint_count = 0;
     size_t function_flat_unknown_hint_count = 0;
-    for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.kernels) {
+    for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.program_inventory.kernels()) {
       switch (kernel.preflight_action) {
       case rocjitsu::ConSanPreflightAction::Candidate:
         ++candidate_kernel_count;
@@ -5290,7 +5296,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       flat_global_hint_count += kernel.stats.flat_global_hint_count;
       flat_unknown_hint_count += kernel.stats.flat_unknown_hint_count;
     }
-    for (const rocjitsu::ConSanFunctionInfo &function : patch_result.functions) {
+    for (const rocjitsu::ConSanFunctionInfo &function :
+         patch_result.program_inventory.functions()) {
       function_lds_site_count += function.lds_sites.size();
       for (const rocjitsu::ConSanLdsSite &site : function.lds_sites) {
         if (site.supported_mvp)
@@ -5316,11 +5323,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "function_flat_maybe_group_hints=%zu function_flat_maybe_private_hints=%zu "
         "function_flat_global_hints=%zu function_flat_unknown_hints=%zu patches=%zu "
         "modified=%s",
-        static_cast<unsigned long long>(code_object_reader.handle), patch_result.kernels.size(),
-        candidate_kernel_count, skipped_kernel_count, rejected_kernel_count,
-        supported_lds_site_count, flat_site_count, flat_group_hint_count, flat_private_hint_count,
-        flat_maybe_group_hint_count, flat_maybe_private_hint_count, flat_global_hint_count,
-        flat_unknown_hint_count, patch_result.functions.size(), function_lds_site_count,
+        static_cast<unsigned long long>(code_object_reader.handle),
+        patch_result.program_inventory.kernels().size(), candidate_kernel_count,
+        skipped_kernel_count, rejected_kernel_count, supported_lds_site_count, flat_site_count,
+        flat_group_hint_count, flat_private_hint_count, flat_maybe_group_hint_count,
+        flat_maybe_private_hint_count, flat_global_hint_count, flat_unknown_hint_count,
+        patch_result.program_inventory.functions().size(), function_lds_site_count,
         function_supported_lds_site_count, function_flat_site_count, function_flat_group_hint_count,
         function_flat_private_hint_count, function_flat_maybe_group_hint_count,
         function_flat_maybe_private_hint_count, function_flat_global_hint_count,
@@ -5479,14 +5487,14 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                              [](rocjitsu::ConSanFencePolicyReason reason) {
                                return rocjitsu::consan_fence_policy_reason_name(reason);
                              });
-    for (const rocjitsu::ConSanTextSection &text : patch_result.text_sections) {
+    for (const rocjitsu::ConSanTextSection &text : patch_result.program_inventory.text_sections()) {
       log_message(kLogVerbose, "ConSan text reader=%llu name=%s file=0x%llx vaddr=0x%llx size=%llu",
                   static_cast<unsigned long long>(code_object_reader.handle), text.name.c_str(),
                   static_cast<unsigned long long>(text.file_offset),
                   static_cast<unsigned long long>(text.virtual_address),
                   static_cast<unsigned long long>(text.size));
     }
-    for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.kernels) {
+    for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.program_inventory.kernels()) {
       if (kernel.has_text_range) {
         log_message(
             kLogDebug,
@@ -5582,7 +5590,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                     site.raw_th ? std::to_string(*site.raw_th).c_str() : "-");
       }
     }
-    for (const rocjitsu::ConSanFunctionInfo &function : patch_result.functions) {
+    for (const rocjitsu::ConSanFunctionInfo &function :
+         patch_result.program_inventory.functions()) {
       log_message(kLogVerbose,
                   "ConSan function reader=%llu name=%s text_file=0x%llx "
                   "entry_text=0x%llx code_size=%llu decoded=%s insts=%llu lds_reads=%llu "

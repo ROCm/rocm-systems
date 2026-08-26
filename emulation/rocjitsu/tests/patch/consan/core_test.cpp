@@ -246,7 +246,7 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   EXPECT_TRUE(result.errors.empty());
   EXPECT_TRUE(result.warnings.empty());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
-  EXPECT_TRUE(result.kernels.empty());
+  EXPECT_TRUE(result.program_inventory.kernels().empty());
 }
 
 TEST(ConSan, ParsesFlavorNames) {
@@ -418,7 +418,7 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_FALSE(result.errors.empty());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
-  EXPECT_TRUE(result.kernels.empty());
+  EXPECT_TRUE(result.program_inventory.kernels().empty());
 }
 
 TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
@@ -761,11 +761,12 @@ TEST(ConSan, InfersZeroSizedKernelFunctionThroughTextEnd) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().has_text_range);
-  EXPECT_TRUE(result.kernels.front().decoded);
-  EXPECT_EQ(result.kernels.front().code_size, text_words.size() * sizeof(uint32_t));
-  EXPECT_EQ(result.kernels.front().stats.lds_write_count, 1u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().has_text_range);
+  EXPECT_TRUE(result.program_inventory.kernels().front().decoded);
+  EXPECT_EQ(result.program_inventory.kernels().front().code_size,
+            text_words.size() * sizeof(uint32_t));
+  EXPECT_EQ(result.program_inventory.kernels().front().stats.lds_write_count, 1u);
 }
 
 TEST(ConSan, UsesExplicitAliasedFunctionSizeForZeroSizedKernelSymbol) {
@@ -785,12 +786,13 @@ TEST(ConSan, UsesExplicitAliasedFunctionSizeForZeroSizedKernelSymbol) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().has_text_range);
-  EXPECT_TRUE(result.kernels.front().decoded);
-  EXPECT_EQ(result.kernels.front().code_size, kernel_words.size() * sizeof(uint32_t));
-  EXPECT_FALSE(result.kernels.front().code_size_inferred_from_zero);
-  EXPECT_EQ(result.kernels.front().stats.lds_write_count, 1u);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().has_text_range);
+  EXPECT_TRUE(result.program_inventory.kernels().front().decoded);
+  EXPECT_EQ(result.program_inventory.kernels().front().code_size,
+            kernel_words.size() * sizeof(uint32_t));
+  EXPECT_FALSE(result.program_inventory.kernels().front().code_size_inferred_from_zero);
+  EXPECT_EQ(result.program_inventory.kernels().front().stats.lds_write_count, 1u);
 }
 
 TEST(ConSan, ConflictingAliasedFunctionSizesFallBackToNextDistinctEntry) {
@@ -848,9 +850,10 @@ TEST(ConSan, SkipsEmptyTargetSelectionKernelAtTextEnd) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.kernels.size(), 2u);
-  const auto empty = std::ranges::find(result.kernels, "lds_helper", &ConSanKernelInfo::name);
-  ASSERT_NE(empty, result.kernels.end());
+  ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
+  const auto empty =
+      std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
+  ASSERT_NE(empty, result.program_inventory.kernels().end());
   EXPECT_TRUE(empty->has_text_range);
   EXPECT_EQ(empty->code_size, 0u);
   EXPECT_TRUE(empty->decoded);

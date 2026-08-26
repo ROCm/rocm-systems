@@ -48,7 +48,7 @@ constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
         }));
   };
   uint64_t count = 0u;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (options.moi_engine == ConSanMoiEngine::RecordReplay &&
         kernel.name.starts_with("__amd_rocclr_")) {
       continue;
@@ -58,7 +58,7 @@ constexpr uint32_t kMoiDenseBarrierEntryKeyPrologueWords = 6u;
                  ? count_record_replay(kernel)
                  : count_all(kernel);
   }
-  for (const ConSanFunctionInfo &function : result.functions) {
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
     count += options.moi_engine == ConSanMoiEngine::RecordReplay &&
                      options.moi_record_replay_dense_barrier_router
                  ? count_record_replay(function)
@@ -116,17 +116,18 @@ public:
       uint64_t code_end = 0;
     };
     std::vector<OwnerRange> owners;
-    owners.reserve(result.kernels.size() + result.functions.size());
+    owners.reserve(result.program_inventory.kernels().size() +
+                   result.program_inventory.functions().size());
     const auto append_owner = [&](uint64_t entry, uint64_t code_size) {
       if (code_size == 0 || entry >= text.size())
         return;
       owners.push_back({entry, entry + std::min<uint64_t>(code_size, text.size() - entry)});
     };
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (kernel.has_text_range)
         append_owner(kernel.entry_text_offset, kernel.code_size);
     }
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       append_owner(function.entry_text_offset, function.code_size);
     std::ranges::sort(owners, {}, &OwnerRange::entry);
     std::vector<OwnerRange> unique;
@@ -1509,9 +1510,10 @@ find_moi_transient_sgpr_assignment(const ConSanOptions &options, uint64_t descri
 automatic_moi_scalar_spill_needs_dynamic_stack_planning(const ConSanOptions &options,
                                                         const ConSanResult &result) {
   const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) {
-    const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
+    const auto kernel = std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
                                           &ConSanKernelInfo::descriptor_file_offset);
-    return kernel != result.kernels.end() && kernel->uses_dynamic_stack.value_or(false);
+    return kernel != result.program_inventory.kernels().end() &&
+           kernel->uses_dynamic_stack.value_or(false);
   };
   if (std::ranges::any_of(options.moi_transient_sgpr_assignments,
                           [&](const ConSanMoiTransientSgprAssignment &assignment) {
@@ -1955,16 +1957,17 @@ struct MoiResourcePlanningState {
       return;
 
     std::vector<uint64_t> leaders;
-    leaders.reserve(result.kernels.size() + result.functions.size());
+    leaders.reserve(result.program_inventory.kernels().size() +
+                    result.program_inventory.functions().size());
     std::vector<uint64_t> kernel_entries;
-    kernel_entries.reserve(result.kernels.size());
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    kernel_entries.reserve(result.program_inventory.kernels().size());
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range)
         continue;
       leaders.push_back(kernel.entry_text_offset);
       kernel_entries.push_back(kernel.entry_text_offset);
     }
-    for (const ConSanFunctionInfo &function : result.functions)
+    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
       leaders.push_back(function.entry_text_offset);
     for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
       leaders.push_back(range.text_offset);
@@ -2003,9 +2006,9 @@ struct MoiResourcePlanningState {
     std::unordered_map<BasicBlock *, std::vector<const Instruction *>> liveness_queries_by_block;
     if (restrict_liveness_queries) {
       std::unordered_set<uint64_t> query_offsets;
-      query_offsets.reserve(result.moi_candidates.size() + result.sync_events.size() +
-                            result.resource_plans.size() +
-                            result.observation_plan.probe_intents.size() + result.kernels.size());
+      query_offsets.reserve(
+          result.moi_candidates.size() + result.sync_events.size() + result.resource_plans.size() +
+          result.observation_plan.probe_intents.size() + result.program_inventory.kernels().size());
       for (const ConSanMoiCandidate &candidate : result.moi_candidates)
         query_offsets.insert(candidate.text_offset);
       for (const ConSanSyncEvent &event : result.sync_events)
@@ -2016,7 +2019,7 @@ struct MoiResourcePlanningState {
         query_offsets.insert(intent.physical_site.original_text_offset);
       for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates)
         query_offsets.insert(fence.text_offset);
-      for (const ConSanKernelInfo &kernel : result.kernels) {
+      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
         if (kernel.has_text_range)
           query_offsets.insert(kernel.entry_text_offset);
       }
@@ -2027,8 +2030,8 @@ struct MoiResourcePlanningState {
       }
     }
 
-    contexts.reserve(result.kernels.size());
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    contexts.reserve(result.program_inventory.kernels().size());
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range)
         continue;
       std::vector<uint64_t> additional_entry_offsets;
@@ -4057,7 +4060,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   std::unordered_set<uint64_t> included_site_offsets;
   included_site_offsets.reserve(result.moi_candidates.size() + result.resource_plans.size() +
                                 result.observation_plan.probe_intents.size() +
-                                result.kernels.size());
+                                result.program_inventory.kernels().size());
   const auto include_site = [&](uint64_t text_offset) {
     // Several semantic intents can name one physical instruction. Liveness and
     // def/use are set unions and need only be incorporated once per instruction.
@@ -4095,7 +4098,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   // turn entry ABI inputs into false live-through constraints for that
   // site-local window.
   if (options.moi_init_owner_epoch && options.moi_engine != ConSanMoiEngine::InlineShadow) {
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       include_site(kernel.entry_text_offset);
   }
 
@@ -4341,9 +4344,9 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
       // every owner's existing allocation and is derived from
       // descriptor/runtime ABI state rather than a fixed range.
       const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) -> std::optional<bool> {
-        const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
+        const auto kernel = std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
                                               &ConSanKernelInfo::descriptor_file_offset);
-        if (kernel == result.kernels.end())
+        if (kernel == result.program_inventory.kernels().end())
           return std::nullopt;
         if (kernel->uses_dynamic_stack)
           return kernel->uses_dynamic_stack;
@@ -4545,9 +4548,10 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         consan_address_free_private_limit(arch)) {
       const bool all_owners_use_fixed_stack =
           !owners.empty() && std::ranges::all_of(owners, [&](uint64_t descriptor_offset) {
-            const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
-                                                  &ConSanKernelInfo::descriptor_file_offset);
-            if (kernel != result.kernels.end() && kernel->uses_dynamic_stack)
+            const auto kernel =
+                std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
+                                  &ConSanKernelInfo::descriptor_file_offset);
+            if (kernel != result.program_inventory.kernels().end() && kernel->uses_dynamic_stack)
               return !*kernel->uses_dynamic_stack;
             if (descriptor_offset > state.bytes.size() ||
                 sizeof(KD) > state.bytes.size() - descriptor_offset) {
@@ -4912,7 +4916,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   std::unordered_set<uint64_t> included_site_offsets;
   included_site_offsets.reserve(result.moi_candidates.size() + result.resource_plans.size() +
                                 result.observation_plan.probe_intents.size() +
-                                result.kernels.size());
+                                result.program_inventory.kernels().size());
   const auto include_site = [&](uint64_t text_offset) {
     if (!included_site_offsets.insert(text_offset).second)
       return;
@@ -4943,7 +4947,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       include_site(plan.text_offset);
   }
   if (options.moi_init_owner_epoch) {
-    for (const ConSanKernelInfo &kernel : result.kernels)
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       include_site(kernel.entry_text_offset);
   }
   if (state.valid && saw_site) {
@@ -5436,7 +5440,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
       }
     }
     const bool has_dynamic_stack_owner =
-        std::ranges::any_of(result.kernels, [](const ConSanKernelInfo &kernel) {
+        std::ranges::any_of(result.program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
           return kernel.uses_dynamic_stack.value_or(false);
         });
     const auto referenced = [&](uint16_t base) {
@@ -5497,8 +5501,8 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       })) {
-    const bool has_dynamic_stack_access_owner =
-        std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+    const bool has_dynamic_stack_access_owner = std::ranges::any_of(
+        result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
           return kernel.uses_dynamic_stack.value_or(false) &&
                  std::ranges::any_of(
                      result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -5867,7 +5871,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       !record_replay_has_entry_workgroup_capture(options);
   const bool needs_gfx1250_cluster_workgroup_id =
       needs_record_replay_workgroup_tuple && consan_arch_has_cluster_facilities(arch) &&
-      std::ranges::any_of(result.kernels, [](const ConSanKernelInfo &kernel) {
+      std::ranges::any_of(result.program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
         return kernel.uses_gfx1250_cluster_workgroup_id;
       });
   const bool has_supported_record_replay_access =
@@ -5882,7 +5886,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   const bool private_inline_dispatch_incompatible_with_dynamic_stack =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
       options.automatic_moi_private_dispatch_id &&
-      std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+      std::ranges::any_of(result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
         return kernel.uses_dynamic_stack.value_or(false) &&
                std::ranges::any_of(
                    result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -5994,24 +5998,25 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           : named_persistent_count;
   const uint32_t persistent_end = persistent_base + persistent_count;
   const auto has_dynamic_stack_resource_owner = [&] {
-    return std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
-      return kernel.uses_dynamic_stack.value_or(false) &&
-             std::ranges::any_of(
-                 result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-                   // Resource planning precedes persistent-state placement.
-                   // A full-pressure site can therefore be provisionally
-                   // unsupported only because the code-object-wide fallback
-                   // ABI is larger than its eventual owner-local ABI. Keep
-                   // every semantically admitted, resolved owner in this
-                   // query so placement can recover that site on the rebuild.
-                   return (plan.source != ConSanRegisterAllocationSource::Unsupported ||
-                           moi_resource_plan_can_be_recovered_by_persistent_placement(plan, options,
-                                                                                      arch)) &&
-                          std::ranges::find(plan.owner_descriptor_file_offsets,
-                                            kernel.descriptor_file_offset) !=
-                              plan.owner_descriptor_file_offsets.end();
-                 });
-    });
+    return std::ranges::any_of(
+        result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
+          return kernel.uses_dynamic_stack.value_or(false) &&
+                 std::ranges::any_of(
+                     result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+                       // Resource planning precedes persistent-state placement.
+                       // A full-pressure site can therefore be provisionally
+                       // unsupported only because the code-object-wide fallback
+                       // ABI is larger than its eventual owner-local ABI. Keep
+                       // every semantically admitted, resolved owner in this
+                       // query so placement can recover that site on the rebuild.
+                       return (plan.source != ConSanRegisterAllocationSource::Unsupported ||
+                               moi_resource_plan_can_be_recovered_by_persistent_placement(
+                                   plan, options, arch)) &&
+                              std::ranges::find(plan.owner_descriptor_file_offsets,
+                                                kernel.descriptor_file_offset) !=
+                                  plan.owner_descriptor_file_offsets.end();
+                     });
+        });
   };
   const auto assign_scalar_persistent_state = [&](uint16_t base) {
     uint16_t next = base;
@@ -6127,7 +6132,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         // placeholder for every possible kernel owner so a site admitted by
         // that rebuild can still receive its scalar prologue. Prologue
         // lowering itself filters this list to kernels with emitted patches.
-        for (const ConSanKernelInfo &kernel : result.kernels) {
+        for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
           if (kernel.has_text_range)
             prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
         }
@@ -6232,7 +6237,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         // kernel that the rebuild can newly admit. Record/Replay initializes
         // its persistent values directly in SGPRs, so the shared prologue API
         // does not actually clobber this placeholder VGPR pair.
-        for (const ConSanKernelInfo &kernel : result.kernels) {
+        for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
           if (kernel.has_text_range)
             prologue_scratch.push_back({kernel.descriptor_file_offset, 0u});
         }
@@ -6574,9 +6579,11 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       if (component_base + component_persistent_count > component_limit) {
         const bool has_dynamic_stack_owner =
             std::ranges::any_of(component, [&](uint64_t descriptor_offset) {
-              const auto kernel = std::ranges::find(result.kernels, descriptor_offset,
-                                                    &ConSanKernelInfo::descriptor_file_offset);
-              return kernel != result.kernels.end() && kernel->uses_dynamic_stack.value_or(false);
+              const auto kernel =
+                  std::ranges::find(result.program_inventory.kernels(), descriptor_offset,
+                                    &ConSanKernelInfo::descriptor_file_offset);
+              return kernel != result.program_inventory.kernels().end() &&
+                     kernel->uses_dynamic_stack.value_or(false);
             });
         if (!crosses_encoded_component_boundary &&
             (options.moi_engine == ConSanMoiEngine::InlineShadow ||
@@ -6692,7 +6699,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   const bool has_dynamic_stack_owner = has_dynamic_stack_resource_owner();
   const bool has_dynamic_lds_owner =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      std::ranges::any_of(result.kernels, [&](const ConSanKernelInfo &kernel) {
+      std::ranges::any_of(result.program_inventory.kernels(), [&](const ConSanKernelInfo &kernel) {
         if (!kernel.has_dynamic_lds)
           return false;
         return std::ranges::any_of(
@@ -7068,8 +7075,9 @@ void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,
 
 [[nodiscard]] const ConSanKernelInfo *kernel_for_descriptor(const ConSanResult &result,
                                                             uint64_t descriptor_offset) {
-  const auto it = std::ranges::find_if(result.kernels, [descriptor_offset](const auto &kernel) {
-    return kernel.descriptor_file_offset == descriptor_offset;
-  });
-  return it == result.kernels.end() ? nullptr : &*it;
+  const auto it = std::ranges::find_if(result.program_inventory.kernels(),
+                                       [descriptor_offset](const auto &kernel) {
+                                         return kernel.descriptor_file_offset == descriptor_offset;
+                                       });
+  return it == result.program_inventory.kernels().end() ? nullptr : &*it;
 }

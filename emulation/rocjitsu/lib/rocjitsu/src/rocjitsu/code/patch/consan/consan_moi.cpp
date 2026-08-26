@@ -636,9 +636,9 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   append_ordered_ordinary_atomic_candidates(result, sync_index, operational_ordinary_atomics);
   const bool has_operational_atomic_or_fence =
       std::ranges::any_of(
-          result.kernels,
+          result.program_inventory.kernels(),
           [&](const ConSanKernelInfo &kernel) { return has_operational_atomic(kernel, true); }) ||
-      std::ranges::any_of(result.functions,
+      std::ranges::any_of(result.program_inventory.functions(),
                           [&](const ConSanFunctionInfo &function) {
                             return has_operational_atomic(function, false);
                           }) ||
@@ -781,7 +781,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   }
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
       effective_options.moi_init_owner_epoch) {
-    for (const ConSanKernelInfo &kernel : result.kernels) {
+    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
       if (!kernel.has_text_range || !kernel.uses_dynamic_stack.value_or(false))
         continue;
       const bool entry_already_reserved = std::ranges::any_of(
@@ -1047,7 +1047,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
   bool selected_dynamic_lds_owner = false;
   uint64_t selected_native_lds_extent = 0;
   std::unordered_set<uint64_t> dynamic_lds_descriptors;
-  for (const ConSanKernelInfo &kernel : result.kernels) {
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.has_dynamic_lds)
       dynamic_lds_descriptors.insert(kernel.descriptor_file_offset);
   }

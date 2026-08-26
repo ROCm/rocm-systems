@@ -1613,9 +1613,9 @@ TEST(ConSan, FlatStoreCheckTrapProofRuntimeGatesGfx1250Wave64MaybeGroupReadback)
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().flat_sites.size(), 1u);
-  EXPECT_EQ(result.kernels.front().flat_sites.front().address_space_hint,
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().flat_sites.size(), 1u);
+  EXPECT_EQ(result.program_inventory.kernels().front().flat_sites.front().address_space_hint,
             ConSanFlatAddressSpaceHint::MaybeGroup);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
@@ -2667,9 +2667,10 @@ TEST(ConSan, ProbeNopModeEmitsPatchedElfForCandidate) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.text_sections.size(), 1u);
-  EXPECT_EQ(result.kernels.front().preflight_action, ConSanPreflightAction::Candidate);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
+  EXPECT_EQ(result.program_inventory.kernels().front().preflight_action,
+            ConSanPreflightAction::Candidate);
   EXPECT_TRUE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.elf_bytes.empty());
@@ -2682,7 +2683,8 @@ TEST(ConSan, ProbeNopModeEmitsPatchedElfForCandidate) {
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
-  EXPECT_GT(patched.text_sections().front()->size(), result.text_sections.front().size);
+  EXPECT_GT(patched.text_sections().front()->size(),
+            result.program_inventory.text_sections().front().size);
 }
 
 TEST(ConSan, ProbeNopModeRewritesExistingNopInPlace) {
@@ -3183,7 +3185,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250TransposeLoadWithSymbolPadding)
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.kernels.front().stats.decode_error_count, 0u);
+  EXPECT_EQ(result.program_inventory.kernels().front().stats.decode_error_count, 0u);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250U16VdsLoadInPlace) {
@@ -3316,9 +3318,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().lds_sites.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().lds_sites.front().supported_mvp);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().lds_sites.size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().lds_sites.front().supported_mvp);
   EXPECT_TRUE(result.final_validation_passed);
   const auto rewritten_words = patched_words_at_file_offset<6>(result, 0x100);
   constexpr auto duplicate = cdna5::build_vds(cdna5::kDsLoadB96Vds, {.addr = 10, .vdst = 6});
@@ -3367,7 +3369,7 @@ TEST(ConSan, LdsAddressFaultTracksGuestAfterGfx1250PrivateSpillPrologue) {
   ASSERT_EQ(patched.kernels().size(), 1u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(patch->owner_descriptor_file_offsets.front(),
-            result.kernels.front().descriptor_file_offset);
+            result.program_inventory.kernels().front().descriptor_file_offset);
   KD descriptor{};
   std::memcpy(&descriptor,
               result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
@@ -3602,9 +3604,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
     EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     EXPECT_TRUE(result.final_validation_passed);
-    ASSERT_EQ(result.kernels.size(), 1u);
-    ASSERT_EQ(result.kernels.front().lds_sites.size(), 1u);
-    EXPECT_TRUE(result.kernels.front().lds_sites.front().supported_mvp);
+    ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+    ASSERT_EQ(result.program_inventory.kernels().front().lds_sites.size(), 1u);
+    EXPECT_TRUE(result.program_inventory.kernels().front().lds_sites.front().supported_mvp);
     if (!result.modified)
       return;
     const auto rewritten_words = patched_words_at_file_offset<11>(result, 0x100);
@@ -3885,10 +3887,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesCdna4AccvgprB128Reads) {
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     ASSERT_TRUE(result.final_validation_passed);
     ASSERT_EQ(result.patches.size(), 1u);
-    ASSERT_EQ(result.kernels.size(), 1u);
-    ASSERT_EQ(result.kernels.front().lds_sites.size(), 1u);
-    EXPECT_FALSE(result.kernels.front().lds_sites.front().dst_vgpr);
-    EXPECT_EQ(result.kernels.front().lds_sites.front().dst_accvgpr, test_case.acc_base);
+    ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+    ASSERT_EQ(result.program_inventory.kernels().front().lds_sites.size(), 1u);
+    EXPECT_FALSE(result.program_inventory.kernels().front().lds_sites.front().dst_vgpr);
+    EXPECT_EQ(result.program_inventory.kernels().front().lds_sites.front().dst_accvgpr,
+              test_case.acc_base);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());
@@ -4222,9 +4225,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackAndMasksCdna4B16Write) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.kernels.size(), 1u);
-  ASSERT_EQ(result.kernels.front().lds_sites.size(), 1u);
-  EXPECT_TRUE(result.kernels.front().lds_sites.front().supported_mvp);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().lds_sites.size(), 1u);
+  EXPECT_TRUE(result.program_inventory.kernels().front().lds_sites.front().supported_mvp);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
@@ -7935,8 +7938,9 @@ TEST(ConSan, ProbeLdsEndpgmModeCanRewriteCandidateWithExcludedAtomic) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_EQ(result.kernels.front().preflight_action, ConSanPreflightAction::Candidate);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  EXPECT_EQ(result.program_inventory.kernels().front().preflight_action,
+            ConSanPreflightAction::Candidate);
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsEndpgmRewrite);
