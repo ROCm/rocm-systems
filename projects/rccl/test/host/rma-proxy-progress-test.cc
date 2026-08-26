@@ -125,18 +125,31 @@ struct FakeNet {
         return v;
     }
 
+    // Production's rmaCtx and rmaCollComm are distinct objects: rmaCollComm
+    // from connect(), rmaCtx from createContext(collComm, ...) (rma_v14.h:33,36).
+    // Tag them so a swapped handle (rmaCtx passed where rmaCollComm is expected,
+    // or vice-versa) fails loudly instead of silently passing.
+    struct Handle { FakeNet* net; enum Kind { Ctx, CollComm } kind; };
+    Handle ctxH{this, Handle::Ctx};
+    Handle collH{this, Handle::CollComm};
+
 private:
+    static FakeNet* Net(void* h, Handle::Kind want) {
+        auto* handle = static_cast<Handle*>(h);
+        EXPECT_EQ(handle->kind, want) << "RMA handle passed to the wrong entry point";
+        return handle->net;
+    }
     static ncclResult_t TrampIput(void* rmaCtx, int, uint64_t, void*, size_t,
                                   uint64_t, void*, uint32_t rank, void** request) {
-        return static_cast<FakeNet*>(rmaCtx)->issue(rank, request);
+        return Net(rmaCtx, Handle::Ctx)->issue(rank, request);
     }
     static ncclResult_t TrampIputSignal(void* rmaCtx, int, uint64_t, void*, size_t,
                                         uint64_t, void*, uint32_t rank, uint64_t,
                                         void*, uint64_t, uint32_t, bool, void** request) {
-        return static_cast<FakeNet*>(rmaCtx)->issue(rank, request);
+        return Net(rmaCtx, Handle::Ctx)->issue(rank, request);
     }
     static ncclResult_t TrampTest(void* collComm, void* request, int* done) {
-        return static_cast<FakeNet*>(collComm)->testReq(request, done);
+        return Net(collComm, Handle::CollComm)->testReq(request, done);
     }
 };
 
@@ -197,8 +210,8 @@ protected:
         ctx_->inProgressQueues = inProgress_.data();
         ctx_->inflightRequests = inflight_.data();
         ctx_->maxInflightRequests = 256;
-        ctx_->rmaCtx = &net_;
-        ctx_->rmaCollComm = &net_;
+        ctx_->rmaCtx = &net_.ctxH;
+        ctx_->rmaCollComm = &net_.collH;
 
         net_.poolSize = 256;
         rma_ = net_.vtable();
