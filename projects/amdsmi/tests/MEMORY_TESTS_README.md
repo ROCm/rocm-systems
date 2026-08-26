@@ -97,7 +97,7 @@ cd build/tests/amd_smi_test
 
 ### Python Integration Tests
 
-**Location:** `tests/python_unittest/integration_test.py`
+**Location:** `tests/python_unittest/functional_test.py`
 
 **Test Functions:**
 - `test_uma_carveout_info()` - Read-only UMA carveout info test
@@ -116,10 +116,10 @@ cd build/tests/amd_smi_test
 **Running Python Integration Tests:**
 ```bash
 # All tests
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
+/opt/rocm/share/amd_smi/tests/python_unittest/functional_test.py -v
 
 # Memory tests only
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "uma\|ttm" -v
+/opt/rocm/share/amd_smi/tests/python_unittest/functional_test.py -k "uma\|ttm" -v
 ```
 
 ### Python CLI Tests

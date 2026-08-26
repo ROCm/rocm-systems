@@ -8,9 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added per-API Python test coverage under `tests/python/unit/`**.
+- **Added per-API Python test coverage under `tests/python/integration/`**.
   - Every public API is driven with one deliberately invalid argument at a time and must reject it, and every getter is additionally called with valid arguments, printed, payload-checked, and required to return `AMDSMI_STATUS_SUCCESS`.
-  - A coverage guard (`tests/python/unit/test_api_coverage.py`) fails when a public API has no test, so new APIs cannot land untested.
+  - A coverage guard (`tests/python/integration/test_api_coverage.py`) fails when a public API has no test, so new APIs cannot land untested.
 
 ### Changed
 
@@ -19,9 +19,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Added `tests/python/run_tests.py`, which takes `--unit`, `--integration`, `--functional` and `--cli` and runs any combination in one report; naming no tier runs them all.
   - `integration_test.py` now discovers `integration/` rather than `functional/`, and the new `functional_test.py` discovers `functional/`.
 
-- **`unit_tests.py` now requires a live device for the per-component API suites**.
-  - The logic-only suites still run anywhere. Suites for a processor kind the platform lacks skip their read path but still verify argument rejection.
-  - Positive getter coverage moved from `tests/python/functional/` into `tests/python/unit/`; 88 duplicated functional getter tests were removed. Any CI filter naming those test IDs needs updating.
+- **The per-API suites require a live device**.
+  - Suites for a processor kind the platform lacks skip their read path but still verify argument rejection.
+  - Positive getter coverage moved from `tests/python/functional/` into `tests/python/integration/`; 88 duplicated functional getter tests were removed. Any CI filter naming those test IDs needs updating.
 
 ### Optimized
 

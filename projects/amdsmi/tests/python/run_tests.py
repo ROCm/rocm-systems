@@ -58,9 +58,38 @@ sys.path.insert(0, _here)
 import common.common as common  # noqa: E402  (sys.path bootstrapped above)
 
 TIERS = ("unit", "integration", "functional", "cli")
+_LONG_OPTIONS = frozenset(
+    {"--all", "--verbose", "--quiet", "--buffer", "--keyword", "--exclude", "--list", "--help"}
+)
+
+
+def _unknown_options(argv):
+    """Long options this runner does not define.
+
+    Naming no tier runs every tier, so a mistyped tier would silently widen the
+    run to the device-driven suites instead of narrowing it.
+    """
+    known = _LONG_OPTIONS | {f"--{tier}" for tier in TIERS}
+    unknown = []
+    skip = False
+    for arg in argv[1:]:
+        if skip:
+            skip = False
+        elif arg in ("-k", "--keyword", "-x", "--exclude"):
+            skip = True
+        elif arg.startswith("--") and arg not in known:
+            unknown.append(arg)
+    return unknown
+
 
 if "-h" in sys.argv or "--help" in sys.argv:
     print(__doc__)
+
+_bad = _unknown_options(sys.argv)
+if _bad:
+    print(f"error: unknown option(s): {', '.join(_bad)}", file=sys.stderr)
+    print(f"tiers: {', '.join('--' + tier for tier in TIERS)}", file=sys.stderr)
+    sys.exit(2)
 
 selected = [tier for tier in TIERS if f"--{tier}" in sys.argv]
 if not selected or "--all" in sys.argv:
