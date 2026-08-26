@@ -367,24 +367,11 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     """Apply dispatch ID filters."""
     # NB: support ignoring the 1st n dispatched execution by '> n'
     #     The better way may be parsing python slice string
-    available_dispatch_ids = set(df["Dispatch_ID"].astype(int))
-    if available_dispatch_ids:
-        available_ids_hint = (
-            f"Dispatch ids run from {min(available_dispatch_ids)} to "
-            f"{max(available_dispatch_ids)}."
-        )
-    else:
-        available_ids_hint = "This workload has no dispatches."
-
     for dispatch_id in workload.filter_dispatch_ids:
         if isinstance(dispatch_id, str) and ">" in dispatch_id:
             dispatch_id = re.match(r"\>\s*(\d+)", dispatch_id).group(1)
-        if int(dispatch_id) not in available_dispatch_ids:
-            console_error(
-                "analysis",
-                f"{dispatch_id} is not a dispatch id in this workload. "
-                f"{available_ids_hint}",
-            )
+        if not 1 <= int(dispatch_id) <= len(df):
+            console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
 
     if (
         isinstance(workload.filter_dispatch_ids[0], str)

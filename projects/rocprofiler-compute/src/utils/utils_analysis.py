@@ -809,7 +809,7 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     df = pd.DataFrame(data)
     # Rank GPU IDs, map lowest number to 0, next to 1, etc.
     df["GPU_ID"] = df["GPU_ID"].rank(method="dense").astype(int) - 1
-    # Reset dispatch IDs, numbered from 1 to match rocprofv3
+    # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
     return df
 

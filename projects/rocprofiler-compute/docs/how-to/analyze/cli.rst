@@ -552,8 +552,7 @@ For both the Current Workload and the Baseline Workload, you can independently s
 * Workload Name with ``--path``
 * GPU ID filtering (multi-selection) with ``--gpu-id``
 * Kernel Name filtering (multi-selection) with ``--kernel``
-* Dispatch ID filtering (regex filtering) with ``--dispatch``. Dispatch IDs
-  start at 1 and match the ``Dispatch_Id`` column of a rocprofv3 kernel trace.
+* Dispatch ID filtering (regex filtering) with ``--dispatch``
 * ROCm Compute Profiler panels/blocks (multi-selection) with ``--block``
 
 .. code-block:: shell

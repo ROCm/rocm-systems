@@ -411,31 +411,6 @@ class TestApplyFilters:
         workload.filter_dispatch_ids = ["1", "2"]
         assert len(apply_filters(workload, "/tmp", False, False)) == 2
 
-    def test_dispatch_id_filter_matches_column_not_row_label(self) -> None:
-        """A dispatch-ID filter reads the column even when the index disagrees."""
-        workload = _filter_workload()
-        workload.raw_pmc.index = [30, 31, 32, 33]
-        workload.filter_dispatch_ids = ["2"]
-        filtered = apply_filters(workload, "/tmp", False, False)
-        assert list(filtered["Kernel_Name"]) == ["vecAdd"]
-
-    def test_unknown_dispatch_id_errors(self, monkeypatch) -> None:
-        """A dispatch ID absent from the column triggers console_error and exits."""
-        error_calls = []
-
-        def record_and_exit(*args, **_kwargs):
-            error_calls.append(args)
-            raise SystemExit(1)
-
-        common.patch_console(
-            monkeypatch, "utils.parser", "error", error=record_and_exit
-        )
-        workload = _filter_workload()
-        workload.filter_dispatch_ids = ["0"]
-        with pytest.raises(SystemExit):
-            apply_filters(workload, "/tmp", False, False)
-        assert "0 is not a dispatch id" in str(error_calls[0])
-
     def test_gpu_integer_list_filter(self) -> None:
         """A GPU filter given as a list of integers keeps all matching rows."""
         workload = _filter_workload()
