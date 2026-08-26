@@ -67,8 +67,8 @@ struct ConSanPatchedImageGrowthRejection {
 /// count failed reservations and commits. Unavailable pristine relay storage
 /// is excluded during qualification, so it contributes to the appropriate
 /// unreachable route counter instead of a reservation failure. LDS convergence
-/// iterations remain in this aggregate; a losing FLAT direct-reservoir retry
-/// is moved to `discarded_branch_only_routing`.
+/// iterations remain in this aggregate. A losing FLAT direct-reservoir retry
+/// is transactionally discarded and does not contribute.
 ///
 /// Route-optimization exhaustion separately counts plan calls in which at
 /// least one bounded lexicographic minimization pass reached its own limit and
@@ -121,107 +121,6 @@ struct ConSanBranchOnlyRoutingTelemetry {
 
   bool operator==(const ConSanBranchOnlyRoutingTelemetry &) const = default;
 };
-
-struct ConSanBranchOnlyRoutingTelemetryField {
-  std::string_view log_name;
-  size_t ConSanBranchOnlyRoutingTelemetry::*member = nullptr;
-};
-
-inline constexpr std::array kConSanBranchOnlyRoutingTelemetryFields = {
-    ConSanBranchOnlyRoutingTelemetryField{"pair_attempts",
-                                          &ConSanBranchOnlyRoutingTelemetry::pair_attempt_count},
-    ConSanBranchOnlyRoutingTelemetryField{"plan_calls",
-                                          &ConSanBranchOnlyRoutingTelemetry::plan_call_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "entry_route_failed", &ConSanBranchOnlyRoutingTelemetry::entry_route_failure_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "return_route_failed", &ConSanBranchOnlyRoutingTelemetry::return_route_failure_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "relay_contention_failed",
-        &ConSanBranchOnlyRoutingTelemetry::relay_contention_failure_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "work_budget_failed", &ConSanBranchOnlyRoutingTelemetry::work_budget_failure_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "work_budget_exhaustions", &ConSanBranchOnlyRoutingTelemetry::work_budget_exhaustion_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "relay_qualification_exhaustions",
-        &ConSanBranchOnlyRoutingTelemetry::relay_qualification_exhaustion_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "routing_work_exhaustions",
-        &ConSanBranchOnlyRoutingTelemetry::routing_work_exhaustion_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "routing_invariant_failures",
-        &ConSanBranchOnlyRoutingTelemetry::routing_invariant_failure_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "route_optimization_exhaustions",
-        &ConSanBranchOnlyRoutingTelemetry::route_optimization_exhaustion_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "route_optimization_invariant_failures",
-        &ConSanBranchOnlyRoutingTelemetry::route_optimization_invariant_failure_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "pristine_relay_occupancy_rejections",
-        &ConSanBranchOnlyRoutingTelemetry::pristine_relay_occupancy_rejection_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "route_optimization_excess_relay_claims",
-        &ConSanBranchOnlyRoutingTelemetry::route_optimization_excess_relay_claim_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "reservation_failed", &ConSanBranchOnlyRoutingTelemetry::reservation_failure_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "exact_pair_fallback_attempts",
-        &ConSanBranchOnlyRoutingTelemetry::exact_pair_fallback_attempt_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "greedy_pair_fallback_attempts",
-        &ConSanBranchOnlyRoutingTelemetry::greedy_pair_fallback_attempt_count},
-    ConSanBranchOnlyRoutingTelemetryField{"search_work",
-                                          &ConSanBranchOnlyRoutingTelemetry::search_work_count},
-    ConSanBranchOnlyRoutingTelemetryField{"scan_work",
-                                          &ConSanBranchOnlyRoutingTelemetry::scan_work_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "route_optimization_search_work",
-        &ConSanBranchOnlyRoutingTelemetry::route_optimization_search_work_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "route_optimization_scan_work",
-        &ConSanBranchOnlyRoutingTelemetry::route_optimization_scan_work_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "relay_qualification_work",
-        &ConSanBranchOnlyRoutingTelemetry::relay_qualification_work_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "fallback_setup_work", &ConSanBranchOnlyRoutingTelemetry::fallback_setup_work_count},
-    ConSanBranchOnlyRoutingTelemetryField{
-        "feasibility_scan_work", &ConSanBranchOnlyRoutingTelemetry::feasibility_scan_work_count},
-};
-
-static_assert(kConSanBranchOnlyRoutingTelemetryFields.size() == 24u);
-static_assert(sizeof(ConSanBranchOnlyRoutingTelemetry) ==
-                  kConSanBranchOnlyRoutingTelemetryFields.size() * sizeof(size_t),
-              "add every routing counter to the typed telemetry field table");
-static_assert(
-    [] {
-      for (size_t lhs = 0u; lhs < kConSanBranchOnlyRoutingTelemetryFields.size(); ++lhs) {
-        for (size_t rhs = lhs + 1u; rhs < kConSanBranchOnlyRoutingTelemetryFields.size(); ++rhs) {
-          if (kConSanBranchOnlyRoutingTelemetryFields[lhs].member ==
-                  kConSanBranchOnlyRoutingTelemetryFields[rhs].member ||
-              kConSanBranchOnlyRoutingTelemetryFields[lhs].log_name ==
-                  kConSanBranchOnlyRoutingTelemetryFields[rhs].log_name)
-            return false;
-        }
-      }
-      return true;
-    }(),
-    "routing telemetry field table must name every counter exactly once");
-
-[[nodiscard]] inline std::string
-format_consan_branch_only_routing_telemetry(const ConSanBranchOnlyRoutingTelemetry &telemetry) {
-  std::string result;
-  for (const auto &[name, member] : kConSanBranchOnlyRoutingTelemetryFields) {
-    if (!result.empty())
-      result.push_back(' ');
-    result.append(name);
-    result.push_back('=');
-    result.append(std::to_string(telemetry.*member));
-  }
-  return result;
-}
 
 /// Instruction reservoirs retained for shared relay routing, including both
 /// branch-only and legacy indirect relay consumers. Appended byte counts
@@ -282,11 +181,6 @@ accumulate_branch_only_reservoir_telemetry(ConSanBranchOnlyReservoirTelemetry &t
 }
 
 [[nodiscard]] inline bool
-branch_only_relay_telemetry_is_empty(const ConSanBranchOnlyRoutingTelemetry &telemetry) {
-  return telemetry == ConSanBranchOnlyRoutingTelemetry{};
-}
-
-[[nodiscard]] inline bool
 branch_only_reservoir_telemetry_is_empty(const ConSanBranchOnlyReservoirTelemetry &telemetry) {
   return telemetry == ConSanBranchOnlyReservoirTelemetry{};
 }
@@ -340,14 +234,6 @@ struct ConSanFlatSelectionTelemetry {
   /// leaves it zero. A losing speculative retry is rolled back and therefore
   /// contributes no retained footprint.
   ConSanBranchOnlyReservoirTelemetry branch_only_reservoir_telemetry;
-  /// Placement failures and routing activity from a losing direct-reservoir
-  /// retry that was transactionally discarded. Kept separate so primary
-  /// attempt/failure rates describe the selection path retained in the
-  /// emitted patch. The reservoir inventory records the speculative appended
-  /// footprint before rollback.
-  size_t discarded_branch_only_placement_failure_count = 0;
-  ConSanBranchOnlyRoutingTelemetry discarded_branch_only_routing;
-  ConSanBranchOnlyReservoirTelemetry discarded_branch_only_reservoir_telemetry;
   size_t original_nop_relay_slot_count = 0;
   size_t selected_anchor_relay_slot_count = 0;
 };

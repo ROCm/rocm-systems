@@ -1608,21 +1608,6 @@ void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &teleme
   }
 }
 
-ConSanBranchOnlyRoutingTelemetry
-branch_only_relay_telemetry_delta(const ConSanBranchOnlyRoutingTelemetry &after,
-                                  const ConSanBranchOnlyRoutingTelemetry &before) {
-  const auto delta = [](size_t after_value, size_t before_value) {
-    assert(after_value >= before_value && "routing telemetry must accumulate monotonically");
-    return after_value >= before_value ? after_value - before_value : 0u;
-  };
-  ConSanBranchOnlyRoutingTelemetry result;
-  for (const auto &[name, member] : kConSanBranchOnlyRoutingTelemetryFields) {
-    (void)name;
-    result.*member = delta(after.*member, before.*member);
-  }
-  return result;
-}
-
 bool is_consan_branch_relay_reservoir_instruction(const Instruction &instruction, uint64_t offset,
                                                   std::span<const uint8_t> text,
                                                   rj_code_arch_t arch) {

@@ -2867,6 +2867,38 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   the periodic physical gate remains applicable. E2E validation remains
   outside this work.
 
+### Slice 4V: delete telemetry for transactionally discarded routing
+
+- **Transactional contract:** A speculative FLAT direct-reservoir retry either
+  commits its selected patches, routes, placement reservations, and reservoir
+  footprint together or retains none of them. Failed speculative work is not a
+  transform result and is not part of the supported observability contract.
+- **Completed deletion:** `ConSanFlatSelectionTelemetry` no longer publishes a
+  losing retry's placement count, routing aggregate, or reservoir inventory.
+  The FLAT lowerer no longer snapshots, subtracts, and stores those values
+  before rolling the retry back. With no remaining consumer for telemetry
+  subtraction, the shared 24-field delta helper, its parallel member-name
+  schema, its formatting function, and the empty-routing helper are also gone.
+  The router's per-plan outcome and retained aggregate work counters remain
+  available for bounded-work and selected-route tests.
+- **Contract-test correction:** The losing-retry test is now explicitly a
+  transaction rollback test. It checks that the result is unmodified, owns no
+  patches or retained reservoir footprint, selects no branch-only site, and
+  preserves the first-pass failure outcome. Successful-retry tests continue
+  to check emitted reservoir patches, relay ownership, retained footprint,
+  final validation, and reuse of an earlier selected route. Two tests that
+  existed only to exercise the deleted delta/formatter mechanism were removed.
+- **Deletion result:** Production source is 151 net lines smaller and source
+  plus tests is 213 net lines smaller. No replacement state or compatibility
+  adapter was added.
+- **Completed checked-in gate:** The ConSan host gate passed 1,508 of 1,510
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 68.90
+  seconds. This discarded-state deletion does not change emitted device code;
+  the periodic physical gate remains applicable. E2E validation remains
+  outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

@@ -229,8 +229,6 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
       result.flat_selection_telemetry->branch_only_routing;
   EXPECT_EQ(routing.pair_attempt_count, 2u);
   EXPECT_EQ(routing.plan_call_count, 2u);
-  EXPECT_EQ(result.flat_selection_telemetry->discarded_branch_only_routing.pair_attempt_count, 0u);
-  EXPECT_EQ(result.flat_selection_telemetry->discarded_branch_only_routing.plan_call_count, 0u);
   EXPECT_GT(routing.search_work_count, 0u);
   EXPECT_GT(routing.scan_work_count, 0u);
   const ConSanBranchOnlyReservoirTelemetry &inventory =
@@ -259,7 +257,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   })) << testing::PrintToString(malformed_errors);
 }
 
-TEST(ConSan, FlatDirectReservoirLosingRetryReportsDiscardedRouting) {
+TEST(ConSan, FlatDirectReservoirLosingRetryRollsBackTransaction) {
   std::vector<uint32_t> first_kernel_words = {
       0xBE8001EBu,                           // s_mov_b64 s[0:1], src_shared_base
       0xD5810000u, 0x00000000u,              // v_mov_b32_e64 v0, s0
@@ -274,7 +272,7 @@ TEST(ConSan, FlatDirectReservoirLosingRetryReportsDiscardedRouting) {
   }
   // Recursive planning has exactly one legal donor close enough to appended
   // storage. Its relay tail remains more than one SOPP hop from the access, so
-  // the retry must lose and publish its discarded routing/inventory evidence.
+  // the retry must lose without retaining any of its speculative changes.
   first_kernel_words.resize(100'000u, ineligible_reservoir_word);
   constexpr size_t kOnlyDonorWord = 70'000u;
   constexpr size_t kOnlyDonorWords = 64u;
@@ -297,26 +295,14 @@ TEST(ConSan, FlatDirectReservoirLosingRetryReportsDiscardedRouting) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.patches.empty());
   ASSERT_TRUE(result.flat_selection_telemetry);
   const ConSanFlatSelectionTelemetry &selection = *result.flat_selection_telemetry;
   EXPECT_EQ(selection.branch_only_selected_count, 0u);
   EXPECT_EQ(selection.branch_only_routing.pair_attempt_count, 1u);
   EXPECT_EQ(selection.branch_only_routing.plan_call_count, 1u);
   EXPECT_EQ(selection.branch_only_routing.entry_route_failure_count, 1u);
-  EXPECT_EQ(selection.discarded_branch_only_routing.pair_attempt_count, 1u);
-  EXPECT_EQ(selection.discarded_branch_only_routing.plan_call_count, 1u);
-  EXPECT_EQ(selection.discarded_branch_only_routing.entry_route_failure_count, 1u);
-  EXPECT_GT(selection.discarded_branch_only_routing.search_work_count, 0u);
-  EXPECT_GT(selection.discarded_branch_only_routing.scan_work_count, 0u);
   EXPECT_TRUE(branch_only_reservoir_telemetry_is_empty(selection.branch_only_reservoir_telemetry));
-  const ConSanBranchOnlyReservoirTelemetry &discarded_reservoirs =
-      selection.discarded_branch_only_reservoir_telemetry;
-  EXPECT_GT(discarded_reservoirs.planned_reservoir_count, 0u);
-  EXPECT_EQ(discarded_reservoirs.used_reservoir_count, 0u);
-  EXPECT_EQ(discarded_reservoirs.planned_reservoir_count,
-            discarded_reservoirs.unused_reservoir_count);
-  EXPECT_EQ(discarded_reservoirs.planned_appended_bytes,
-            discarded_reservoirs.unused_appended_bytes);
 }
 
 TEST(ConSan, FlatDirectReservoirRetryRetainsEarlierRoutingTelemetry) {
@@ -372,8 +358,6 @@ TEST(ConSan, FlatDirectReservoirRetryRetainsEarlierRoutingTelemetry) {
       << " reservation=" << selection.branch_only_routing.reservation_failure_count
       << " placement=" << selection.branch_only_placement_failure_count;
   EXPECT_EQ(selection.branch_only_routing.plan_call_count, 3u);
-  EXPECT_EQ(selection.discarded_branch_only_routing.pair_attempt_count, 0u);
-  EXPECT_EQ(selection.discarded_branch_only_routing.plan_call_count, 0u);
 }
 
 TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {

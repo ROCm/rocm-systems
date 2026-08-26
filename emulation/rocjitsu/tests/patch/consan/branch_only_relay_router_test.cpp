@@ -1849,52 +1849,6 @@ TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithShare
   EXPECT_EQ(telemetry.return_route_failure_count, 0u);
 }
 
-TEST(ConSanBranchOnlyRelayRouter, ComputesTelemetryDeltaAcrossEveryCounter) {
-  ConSanBranchOnlyRoutingTelemetry before;
-  ConSanBranchOnlyRoutingTelemetry after;
-  for (size_t index = 0u; index < kConSanBranchOnlyRoutingTelemetryFields.size(); ++index) {
-    const auto member = kConSanBranchOnlyRoutingTelemetryFields[index].member;
-    before.*member = index + 1u;
-    after.*member = 101u + 2u * index;
-  }
-
-  const ConSanBranchOnlyRoutingTelemetry delta = branch_only_relay_telemetry_delta(after, before);
-
-  for (size_t index = 0u; index < kConSanBranchOnlyRoutingTelemetryFields.size(); ++index) {
-    const auto member = kConSanBranchOnlyRoutingTelemetryFields[index].member;
-    EXPECT_EQ(delta.*member, 100u + index);
-  }
-  EXPECT_FALSE(branch_only_relay_telemetry_is_empty(delta));
-  EXPECT_TRUE(branch_only_relay_telemetry_is_empty({}));
-
-  const std::string formatted = format_consan_branch_only_routing_telemetry(delta);
-  for (const auto &[name, member] : kConSanBranchOnlyRoutingTelemetryFields) {
-    EXPECT_NE(formatted.find(std::string(name) + "=" + std::to_string(delta.*member)),
-              std::string::npos);
-  }
-}
-
-#ifdef NDEBUG
-TEST(ConSanBranchOnlyRelayRouter, ClampsRegressiveTelemetryDeltaFieldsInReleaseBuilds) {
-  const ConSanBranchOnlyRoutingTelemetry before{
-      .plan_call_count = 7u,
-      .scan_work_count = 100u,
-      .relay_qualification_work_count = 100u,
-  };
-  const ConSanBranchOnlyRoutingTelemetry after{
-      .pair_attempt_count = 3u,
-      .plan_call_count = 3u,
-  };
-
-  const ConSanBranchOnlyRoutingTelemetry delta = branch_only_relay_telemetry_delta(after, before);
-
-  EXPECT_EQ(delta.pair_attempt_count, 3u);
-  EXPECT_EQ(delta.plan_call_count, 0u);
-  EXPECT_EQ(delta.scan_work_count, 0u);
-  EXPECT_EQ(delta.relay_qualification_work_count, 0u);
-}
-#endif
-
 TEST(ConSanBranchOnlyRelayRouter, ZeroTierLimitsAreNormalizedInsteadOfDisablingRouting) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   BranchOnlyRelayRouter router;

@@ -328,13 +328,6 @@ void record_branch_only_relay_failure(ConSanBranchOnlyRoutingTelemetry &telemetr
 void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &telemetry,
                                         BranchOnlyRelayPairRejection rejection);
 
-/// Returns the component-wise activity accumulated after a prior snapshot.
-/// Every telemetry field is kept here so speculative producers share the same
-/// delta definition.
-[[nodiscard]] ConSanBranchOnlyRoutingTelemetry
-branch_only_relay_telemetry_delta(const ConSanBranchOnlyRoutingTelemetry &after,
-                                  const ConSanBranchOnlyRoutingTelemetry &before);
-
 struct BranchOnlyDirectRelayReservoir {
   uint64_t anchor_offset = 0;
   std::vector<uint32_t> original_words;

@@ -985,9 +985,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   };
   std::unordered_set<uint64_t> selected_flat_anchor_relay_offsets;
   ConSanBranchOnlyRoutingTelemetry branch_only_routing;
-  size_t discarded_branch_only_placement_failures = 0u;
-  ConSanBranchOnlyRoutingTelemetry discarded_branch_only_routing;
-  ConSanBranchOnlyReservoirTelemetry discarded_branch_only_reservoir_telemetry;
   size_t branch_only_placement_failures = 0u;
   size_t branch_only_selected = 0;
   const auto publish_flat_anchor_relays = [&](const FlatCheckTrapCandidate &candidate,
@@ -1173,15 +1170,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
 
     if (branch_only_selected == selected_before_direct_reservoirs) {
       assert(branch_only_placement_failures >= branch_placement_failures_after_first_pass);
-      discarded_branch_only_placement_failures =
-          branch_only_placement_failures >= branch_placement_failures_after_first_pass
-              ? branch_only_placement_failures - branch_placement_failures_after_first_pass
-              : 0u;
-      discarded_branch_only_routing =
-          branch_only_relay_telemetry_delta(branch_only_routing, branch_routing_after_first_pass);
-      // This is the full speculative inventory, not a delta: the reservoir
-      // set is cleared immediately below when the entire retry is rolled back.
-      discarded_branch_only_reservoir_telemetry = direct_branch_reservoirs.telemetry();
       branch_router = std::move(router_without_direct_reservoirs);
       placement_planner = std::move(planner_without_direct_reservoirs);
       direct_branch_reservoirs = {};
@@ -1211,9 +1199,6 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       .branch_only_placement_failure_count = branch_only_placement_failures,
       .branch_only_routing = branch_only_routing,
       .branch_only_reservoir_telemetry = {},
-      .discarded_branch_only_placement_failure_count = discarded_branch_only_placement_failures,
-      .discarded_branch_only_routing = discarded_branch_only_routing,
-      .discarded_branch_only_reservoir_telemetry = discarded_branch_only_reservoir_telemetry,
       .original_nop_relay_slot_count = branch_relay_word_count,
       .selected_anchor_relay_slot_count = selected_flat_anchor_relay_offsets.size(),
   };
