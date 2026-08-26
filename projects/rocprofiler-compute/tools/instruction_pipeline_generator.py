@@ -98,15 +98,15 @@ def run_git(repository_path: Path, *arguments: str) -> str:
 class TableGen:
     """Reads the AMDGPU instruction definitions out of LLVM."""
 
-    THEROCK_REPO = "https://github.com/ROCm/TheRock.git"
-    THEROCK_LLVM_SUBMODULE = "compiler/amd-llvm"
-    LLVM_REPO = "https://github.com/ROCm/llvm-project"
-    SPARSE_PATHS = ("llvm/lib/Target/AMDGPU", "llvm/include/llvm")
+    therock_repo = "https://github.com/ROCm/TheRock.git"
+    therock_llvm_submodule = "compiler/amd-llvm"
+    llvm_repo = "https://github.com/ROCm/llvm-project"
+    sparse_paths = ("llvm/lib/Target/AMDGPU", "llvm/include/llvm")
 
     # Printed encoding suffixes, appended to a record's base mnemonic so it can
     # be looked up just as it is printed, with nothing to strip off.
-    ENCODING_SUFFIX_TOKENS = ("e32", "e64", "sdwa", "dpp", "dpp8")
-    MNEMONIC_PATTERN = re.compile(r"^[a-z][a-z0-9_]*")
+    encoding_suffix_tokens = ("e32", "e64", "sdwa", "dpp", "dpp8")
+    mnemonic_pattern = re.compile(r"^[a-z][a-z0-9_]*")
 
     @staticmethod
     def fetch_sources(work_path: Path) -> tuple:
@@ -121,21 +121,21 @@ class TableGen:
         therock_path = work_path / "therock"
         therock_path.mkdir(parents=True)
         run_git(therock_path, "init", "--quiet")
-        run_git(therock_path, "remote", "add", "origin", TableGen.THEROCK_REPO)
-        print(f"Reading the compiler pin from {TableGen.THEROCK_REPO}")
+        run_git(therock_path, "remote", "add", "origin", TableGen.therock_repo)
+        print(f"Reading the compiler pin from {TableGen.therock_repo}")
         run_git(therock_path, "fetch", "--quiet", "--depth", "1", "origin", "main")
         listing = run_git(
-            therock_path, "ls-tree", "FETCH_HEAD", TableGen.THEROCK_LLVM_SUBMODULE
+            therock_path, "ls-tree", "FETCH_HEAD", TableGen.therock_llvm_submodule
         )
         commit = listing.split()[2]
 
         llvm_path = work_path / "llvm"
         llvm_path.mkdir(parents=True)
         run_git(llvm_path, "init", "--quiet")
-        run_git(llvm_path, "remote", "add", "origin", f"{TableGen.LLVM_REPO}.git")
+        run_git(llvm_path, "remote", "add", "origin", f"{TableGen.llvm_repo}.git")
         run_git(llvm_path, "sparse-checkout", "init", "--cone")
-        run_git(llvm_path, "sparse-checkout", "set", *TableGen.SPARSE_PATHS)
-        print(f"Fetching {commit[:12]} of {TableGen.LLVM_REPO}")
+        run_git(llvm_path, "sparse-checkout", "set", *TableGen.sparse_paths)
+        print(f"Fetching {commit[:12]} of {TableGen.llvm_repo}")
         run_git(
             llvm_path,
             "fetch",
@@ -189,7 +189,7 @@ class TableGen:
                     record_name=record_name,
                     mnemonics=frozenset(mnemonics),
                     flags=frozenset(
-                        flag for flag in Rules.FLAG_TO_PIPELINE if record.get(flag)
+                        flag for flag in Rules.flag_to_pipeline if record.get(flag)
                     ),
                 )
             )
@@ -228,7 +228,7 @@ class TableGen:
         """
         if not isinstance(value, str):
             return None
-        match = TableGen.MNEMONIC_PATTERN.match(value.strip().lower())
+        match = TableGen.mnemonic_pattern.match(value.strip().lower())
         return match.group(0) if match else None
 
     @staticmethod
@@ -241,7 +241,7 @@ class TableGen:
         tokens = [
             token
             for token in record_name.lower().split("_")
-            if token in TableGen.ENCODING_SUFFIX_TOKENS
+            if token in TableGen.encoding_suffix_tokens
         ]
         return "_".join(tokens) if tokens else None
 
@@ -251,7 +251,7 @@ class Rules:
 
     # TableGen encoding-class flag -> execution pipeline. SCALAR covers scalar
     # ALU and scalar memory because the hardware serves both from one pipeline.
-    FLAG_TO_PIPELINE = {
+    flag_to_pipeline = {
         "IsMAI": Pipeline.MATRIX,
         "IsWMMA": Pipeline.MATRIX,
         "IsSWMMAC": Pipeline.MATRIX,
@@ -269,7 +269,7 @@ class Rules:
     }
 
     # Mnemonic prefixes, for the pipelines no TableGen flag can tell apart.
-    MNEMONIC_PREFIXES = {
+    mnemonic_prefixes = {
         Pipeline.BARRIER: ("s_barrier", "s_wakeup_barrier", "s_get_barrier_state"),
         Pipeline.EXP: ("s_sendmsg",),
         Pipeline.INTERNAL: (
@@ -311,9 +311,9 @@ class Rules:
         flag_set = set(flags)
         for pipeline in Pipeline:
             by_flag = any(
-                Rules.FLAG_TO_PIPELINE.get(flag) == pipeline for flag in flag_set
+                Rules.flag_to_pipeline.get(flag) == pipeline for flag in flag_set
             )
-            by_prefix = mnemonic.startswith(Rules.MNEMONIC_PREFIXES.get(pipeline, ()))
+            by_prefix = mnemonic.startswith(Rules.mnemonic_prefixes.get(pipeline, ()))
             if by_flag or by_prefix:
                 return pipeline
         return None
@@ -343,16 +343,16 @@ class Rules:
 class Corpus:
     """What the code objects of the local ROCm install actually contain."""
 
-    CODE_OBJECT_SUFFIXES = ("*.hsaco", "*.co")
+    code_object_suffixes = ("*.hsaco", "*.co")
     # A disassembly line is "<mnemonic> <operands>" possibly followed by an
     # encoding comment; the mnemonic is always the first token.
-    DISASSEMBLY_LINE_PATTERN = re.compile(r"^([a-z][a-z0-9_]*)\s")
+    disassembly_line_pattern = re.compile(r"^([a-z][a-z0-9_]*)\s")
 
     @staticmethod
     def collect(rocm_path: Path, objdump: Path) -> set[str]:
         """Disassemble a ROCm install to see what mnemonics real code emits."""
         mnemonics: set[str] = set()
-        for suffix in Corpus.CODE_OBJECT_SUFFIXES:
+        for suffix in Corpus.code_object_suffixes:
             for code_object in sorted(rocm_path.rglob(suffix)):
                 disassembly = subprocess.run(
                     [str(objdump), "-d", str(code_object)],
@@ -373,7 +373,7 @@ class Corpus:
         """
         mnemonics: set[str] = set()
         for line in disassembly.splitlines():
-            match = Corpus.DISASSEMBLY_LINE_PATTERN.match(line.strip())
+            match = Corpus.disassembly_line_pattern.match(line.strip())
             if match:
                 mnemonics.add(match.group(1))
         return mnemonics
@@ -396,16 +396,16 @@ class Table:
             if mnemonics:
                 by_pipeline[pipeline.value] = mnemonics
         return {
-            "repo": TableGen.LLVM_REPO,
+            "repo": TableGen.llvm_repo,
             "commit": commit,
             "rules": {
                 "flags": {
                     flag: pipeline.value
-                    for flag, pipeline in Rules.FLAG_TO_PIPELINE.items()
+                    for flag, pipeline in Rules.flag_to_pipeline.items()
                 },
                 "prefixes": {
                     pipeline.value: list(prefixes)
-                    for pipeline, prefixes in Rules.MNEMONIC_PREFIXES.items()
+                    for pipeline, prefixes in Rules.mnemonic_prefixes.items()
                 },
             },
             "pipelines": by_pipeline,

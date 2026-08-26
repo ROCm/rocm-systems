@@ -14,7 +14,7 @@ from pc_sampling.code_object_analysis import (
     CodeObjectDisassembly,
     CodeObjectInstruction,
     CodeObjectSymbol,
-    instruction_pipeline,
+    InstructionPipelines,
     load_code_object_disassemblies,
     parse_code_object_info,
 )
@@ -185,10 +185,10 @@ def test_load_skips_malformed_json():
 
 @pytest.fixture(autouse=True)
 def clear_table_cache():
-    """Drop the per-process table cache so each test loads it again."""
-    code_object_analysis._instruction_pipelines.cache_clear()
+    """Drop the kept table so each test loads it again."""
+    InstructionPipelines.table = None
     yield
-    code_object_analysis._instruction_pipelines.cache_clear()
+    InstructionPipelines.table = None
 
 
 @pytest.fixture
@@ -196,7 +196,7 @@ def pipeline_table(tmp_path):
     """Point the loader at a small generated table."""
     analysis_configs = tmp_path / "rocprof_compute_soc" / "analysis_configs"
     analysis_configs.mkdir(parents=True)
-    (analysis_configs / code_object_analysis.INSTRUCTION_PIPELINES_FILE).write_text(
+    (analysis_configs / "instruction_pipelines.yaml").write_text(
         yaml.safe_dump({
             "commit": "0" * 40,
             "pipelines": {
@@ -223,17 +223,12 @@ def pipeline_table(tmp_path):
         ("", None),
     ],
 )
-def test_instruction_pipeline_reads_the_leading_mnemonic(
-    pipeline_table, instruction, expected
-):
-    assert instruction_pipeline(instruction) == expected
+def test_lookup_reads_the_leading_mnemonic(pipeline_table, instruction, expected):
+    assert InstructionPipelines.lookup(instruction) == expected
 
 
-def test_instruction_pipeline_without_a_table_warns_once(tmp_path):
-    """A missing table leaves every type unset instead of failing analyze."""
+def test_lookup_without_a_table_leaves_every_type_unset(tmp_path):
+    """A missing table degrades to empty types instead of failing analyze."""
     with patch.object(code_object_analysis.config, "rocprof_compute_home", tmp_path):
-        with patch.object(code_object_analysis, "console_warning") as console_warning:
-            assert instruction_pipeline("v_mov_b32_e32 v1, 0") is None
-            assert instruction_pipeline("s_waitcnt") is None
-
-    console_warning.assert_called_once()
+        assert InstructionPipelines.lookup("v_mov_b32_e32 v1, 0") is None
+        assert InstructionPipelines.lookup("s_waitcnt") is None
