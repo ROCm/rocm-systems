@@ -3,8 +3,12 @@
 
 #include "mock_wrapper.hpp"
 
+#include "backends/hipfile/backend.hpp"
+#include "backends/hipfile/types.hpp"
+
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace rocprofsys::backends::hipfile::testing
@@ -250,7 +254,7 @@ TEST_F(HipFileBackendTest, availability_recovers_after_failure)
     EXPECT_TRUE(backend.is_available());
 }
 
-// ── Runtime version guard ───────────────────────────────────────────────────
+// ?? Runtime version guard ???????????????????????????????????????????????????
 
 TEST_F(HipFileBackendTest, old_runtime_reports_unavailable_and_zeros)
 {
@@ -309,14 +313,18 @@ TEST_F(HipFileBackendTest, inactive_gpu_slots_are_zero_filled)
 TEST_F(HipFileBackendTest, all_gpu_slots_are_readable)
 {
     for(std::size_t i = 0; i < MAX_GPUS; ++i)
+    {
         gpu(i).read_bytes = static_cast<std::uint64_t>(i) + 1;
+    }
 
     mock_backend backend{};
     const auto&  snapshot = backend.get_stats(TS_1);
 
     for(std::size_t i = 0; i < MAX_GPUS; ++i)
+    {
         EXPECT_EQ(snapshot.per_gpu[i].read_bytes, static_cast<std::uint64_t>(i) + 1)
             << "GPU ordinal " << i;
+    }
 }
 
 TEST_F(HipFileBackendTest, factory_produces_usable_backend)

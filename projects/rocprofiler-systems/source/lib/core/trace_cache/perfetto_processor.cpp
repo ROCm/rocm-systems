@@ -17,8 +17,10 @@
 #include "core/perfetto/engine.hpp"
 #include "core/track_registry.hpp"
 #include "core/utility.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/thread_info.hpp"
+#include "rocprofiler-systems/categories.h"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
 
@@ -630,8 +632,9 @@ perfetto_processor_t::handle(const scratch_memory_sample& _sms)
     auto        _corr_id         = _sms.correlation_id_internal;
     auto        _stream_id       = _sms.stream_handle;
     auto        _queue_id_handle = _sms.queue_id_handle;
-    const auto& _t_info          = thread_info::get(_sms.thread_id, SystemTID);
-    const auto  _thread_id_sequent =
+    const auto& _t_info =
+        thread_info::get(static_cast<std::int64_t>(_sms.thread_id), SystemTID);
+    const auto _thread_id_sequent =
         (_t_info && _t_info->index_data) ? _t_info->index_data->sequent_value : 0U;
     auto _beg_ts = _sms.start_timestamp;
     auto _end_ts = _sms.end_timestamp;
@@ -1211,12 +1214,21 @@ perfetto_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
             } } },
 
         { ROCPROFSYS_CATEGORY_HIPFILE,
-          { "", [](auto id) { return hipfile_track::exists(id); },
-            [](auto id, auto& n, auto& u) { hipfile_track::emplace(id, n, u.c_str()); },
-            [](auto id, auto idx, auto ts, auto val) {
-                TRACE_COUNTER(trait::name<category::hipfile>::value,
-                              hipfile_track::at(id, idx), ts, val);
-            } } }
+          { .default_units = "",
+            .exists_fn =
+                [](std::uint64_t track_id) { return hipfile_track::exists(track_id); },
+            .emplace_fn =
+                [](std::uint64_t track_id, const std::string& name,
+                   const std::string& units) {
+                    hipfile_track::emplace(track_id, name, units.c_str());
+                },
+            .trace_fn =
+                [](std::uint64_t track_id, std::uint64_t track_idx,
+                   std::uint64_t timestamp_ns, double val) {
+                    TRACE_COUNTER(trait::name<category::hipfile>::value,
+                                  hipfile_track::at(track_id, track_idx), timestamp_ns,
+                                  val);
+                } } }
     };
 
     const auto _track_name = _pmc.track_name;
@@ -1450,6 +1462,7 @@ perfetto_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sampl
     }
 }
 
+// NOLINTBEGIN(readability-function-size)
 void
 perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile_sample)
 {
@@ -1462,7 +1475,10 @@ perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile
 
     for(const auto& _metric : collector::METRIC_TABLE)
     {
-        if((_enabled & (1U << _metric.bit)) == 0U) continue;
+        if((_enabled & (1U << _metric.bit)) == 0U)
+        {
+            continue;
+        }
 
         auto _name = collector::track_name(_device_id, _metric.suffix);
 
@@ -1472,13 +1488,16 @@ perfetto_processor_t::handle([[maybe_unused]] const hipfile_pmc_sample& _hipfile
             std::hash<std::string>{}(_name + std::to_string(_device_id));
 
         if(!hipfile_track::exists(_track_key))
+        {
             hipfile_track::emplace(_track_key, _name, "");
+        }
 
         TRACE_COUNTER(trait::name<category::hipfile>::value,
                       hipfile_track::at(_track_key, 0), _ts,
-                      _metric.value(_hipfile_sample.metric_values));
+                      static_cast<double>(_metric.value(_hipfile_sample.metric_values)));
     }
 }
+// NOLINTEND(readability-function-size)
 
 void
 perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)

@@ -114,34 +114,116 @@ struct metric_desc
 // accumulator and the NIC byte counters use, `bytes/s` as AMD SMI's instantaneous PCIe
 // bandwidth uses, `count` as the CPU collector's context switches and page faults use.
 inline constexpr std::array<metric_desc, HIPFILE_METRICS_COUNT> METRIC_TABLE{
-    { { "Read Bytes", "bytes", "bytes", 0,
-        [](const metrics& m) { return static_cast<double>(m.read_bytes); } },
-      { "Write Bytes", "bytes", "bytes", 1,
-        [](const metrics& m) { return static_cast<double>(m.write_bytes); } },
-      { "Read Ops", "count", "ops", 2,
-        [](const metrics& m) { return static_cast<double>(m.read_ops); } },
-      { "Write Ops", "count", "ops", 3,
-        [](const metrics& m) { return static_cast<double>(m.write_ops); } },
-      { "Fastpath Reads", "count", "fastpath", 4,
-        [](const metrics& m) { return static_cast<double>(m.fastpath_reads); } },
-      { "Fastpath Writes", "count", "fastpath", 5,
-        [](const metrics& m) { return static_cast<double>(m.fastpath_writes); } },
-      { "Fallback Reads", "count", "fallback", 6,
-        [](const metrics& m) { return static_cast<double>(m.fallback_reads); } },
-      { "Fallback Writes", "count", "fallback", 7,
-        [](const metrics& m) { return static_cast<double>(m.fallback_writes); } },
-      { "Unaligned Reads", "count", "unaligned", 8,
-        [](const metrics& m) { return static_cast<double>(m.unaligned_reads); } },
-      { "Unaligned Writes", "count", "unaligned", 9,
-        [](const metrics& m) { return static_cast<double>(m.unaligned_writes); } },
-      { "Read Errors", "count", "errors", 10,
-        [](const metrics& m) { return static_cast<double>(m.read_errors); } },
-      { "Write Errors", "count", "errors", 11,
-        [](const metrics& m) { return static_cast<double>(m.write_errors); } },
-      { "Read Bandwidth", "bytes/s", "bandwidth", 12,
-        [](const metrics& m) { return m.read_bandwidth; } },
-      { "Write Bandwidth", "bytes/s", "bandwidth", 13,
-        [](const metrics& m) { return m.write_bandwidth; } } }
+    { { .suffix = "Read Bytes",
+        .unit   = "bytes",
+        .key    = "bytes",
+        .bit    = 0,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.read_bytes);
+            } },
+      { .suffix = "Write Bytes",
+        .unit   = "bytes",
+        .key    = "bytes",
+        .bit    = 1,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.write_bytes);
+            } },
+      { .suffix = "Read Ops",
+        .unit   = "count",
+        .key    = "ops",
+        .bit    = 2,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.read_ops);
+            } },
+      { .suffix = "Write Ops",
+        .unit   = "count",
+        .key    = "ops",
+        .bit    = 3,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.write_ops);
+            } },
+      { .suffix = "Fastpath Reads",
+        .unit   = "count",
+        .key    = "fastpath",
+        .bit    = 4,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.fastpath_reads);
+            } },
+      { .suffix = "Fastpath Writes",
+        .unit   = "count",
+        .key    = "fastpath",
+        .bit    = 5,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.fastpath_writes);
+            } },
+      { .suffix = "Fallback Reads",
+        .unit   = "count",
+        .key    = "fallback",
+        .bit    = 6,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.fallback_reads);
+            } },
+      { .suffix = "Fallback Writes",
+        .unit   = "count",
+        .key    = "fallback",
+        .bit    = 7,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.fallback_writes);
+            } },
+      { .suffix = "Unaligned Reads",
+        .unit   = "count",
+        .key    = "unaligned",
+        .bit    = 8,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.unaligned_reads);
+            } },
+      { .suffix = "Unaligned Writes",
+        .unit   = "count",
+        .key    = "unaligned",
+        .bit    = 9,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.unaligned_writes);
+            } },
+      { .suffix = "Read Errors",
+        .unit   = "count",
+        .key    = "errors",
+        .bit    = 10,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.read_errors);
+            } },
+      { .suffix = "Write Errors",
+        .unit   = "count",
+        .key    = "errors",
+        .bit    = 11,
+        .value =
+            [](const metrics& sample_metrics) {
+                return static_cast<double>(sample_metrics.write_errors);
+            } },
+      { .suffix = "Read Bandwidth",
+        .unit   = "bytes/s",
+        .key    = "bandwidth",
+        .bit    = 12,
+        .value =
+            [](const metrics& sample_metrics) { return sample_metrics.read_bandwidth; } },
+      { .suffix = "Write Bandwidth",
+        .unit   = "bytes/s",
+        .key    = "bandwidth",
+        .bit    = 13,
+        .value =
+            [](const metrics& sample_metrics) {
+                return sample_metrics.write_bandwidth;
+            } } }
 };
 
 /**
@@ -158,7 +240,10 @@ metric_group_mask(std::string_view group) noexcept
     std::uint32_t mask = 0;
     for(const auto& metric : METRIC_TABLE)
     {
-        if(group == metric.key) mask |= (1U << metric.bit);
+        if(group == metric.key)
+        {
+            mask |= (1U << metric.bit);
+        }
     }
     return mask;
 }
@@ -177,11 +262,12 @@ track_name(std::size_t gpu_id, const char* suffix)
 pmc_name(const char* suffix)
 {
     std::string out = "device_storage_";
-    for(const char* c = suffix; *c != '\0'; ++c)
+    for(const char* character = suffix; *character != '\0'; ++character)
     {
-        out += (*c == ' ')
-                   ? '_'
-                   : static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
+        out +=
+            (*character == ' ')
+                ? '_'
+                : static_cast<char>(std::tolower(static_cast<unsigned char>(*character)));
     }
     return out;
 }

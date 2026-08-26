@@ -142,13 +142,33 @@ def hipfile_telemetry_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.fixture
 def require_hipfile_io(rocprof_config: RocprofsysConfig) -> None:
-    """Skip telemetry tests when the hipfile-io example was not built."""
+    """Skip when the hipfile-io example binary was not built."""
     try:
         rocprof_config.get_target_executable("hipfile-io")
     except FileNotFoundError:
         pytest.skip(
-            "hipfile-io example not found — binaries built without hipFile support "
-            "(ROCPROFSYS_BUILD_HIPFILE=OFF, or AUTO with no new enough package)"
+            "hipfile-io example not found — hipFile runtime not available at configure time"
+        )
+
+
+@pytest.fixture
+def require_hipfile_collector(rocprof_config: RocprofsysConfig) -> None:
+    """Skip runtime telemetry tests when the hipFile collector was not compiled in."""
+    result = subprocess.run(
+        [str(rocprof_config.rocprofsys_avail), "--settings"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"rocprof-sys-avail failed: {result.stderr}")
+
+    missing = [s for s in HIPFILE_SETTINGS if s not in result.stdout]
+    if missing:
+        pytest.skip(
+            "hipFile collector not compiled in (ROCPROFSYS_BUILD_HIPFILE=OFF, "
+            "or AUTO with no new enough package) — "
+            f"missing settings: {missing}"
         )
 
 
@@ -182,6 +202,7 @@ class TestHipFileTelemetry(RocprofsysTest):
         )
 
     @pytest.mark.timeout(180)
+    @pytest.mark.usefixtures("require_hipfile_collector")
     @pytest.mark.parametrize(
         "mode",
         [pytest.param("sys_run", marks=pytest.mark.rocpd("hipfile_telemetry_env"))],
@@ -213,6 +234,7 @@ class TestHipFileTelemetry(RocprofsysTest):
             )
 
     @pytest.mark.timeout(180)
+    @pytest.mark.usefixtures("require_hipfile_collector")
     @pytest.mark.rocpd("hipfile_default_metrics_env")
     def test_default_metric_selection(self, hipfile_default_metrics_env):
         """
@@ -257,6 +279,7 @@ class TestHipFileTelemetry(RocprofsysTest):
         )
 
     @pytest.mark.timeout(180)
+    @pytest.mark.usefixtures("require_hipfile_collector")
     @pytest.mark.rocpd("hipfile_fallback_env")
     def test_telemetry_fallback_path(self, hipfile_fallback_env, hipfile_telemetry_rules):
         """

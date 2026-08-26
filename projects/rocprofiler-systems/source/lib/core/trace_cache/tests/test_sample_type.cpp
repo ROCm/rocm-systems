@@ -3,6 +3,7 @@
 
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 
 #include <array>
 #include <cstdint>
@@ -335,7 +336,9 @@ TEST_F(sample_type_test, size_consistency_with_system_tid)
     std::uint8_t* buffer_ptr   = buf.data();
     auto          deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
     ASSERT_TRUE(deserialized.system_tid.has_value());
-    EXPECT_EQ(*deserialized.system_tid, 12345);
+    const auto system_tid = deserialized.system_tid.value_or(-1);
+    ASSERT_NE(system_tid, -1);
+    EXPECT_EQ(system_tid, 12345);
     // Verify we consumed exactly calculated_size bytes
     EXPECT_EQ(buffer_ptr - buf.data(), static_cast<std::ptrdiff_t>(calculated_size));
 }
@@ -540,24 +543,24 @@ TEST_F(sample_type_test, hipfile_pmc_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.device_id, original.device_id);
     EXPECT_EQ(deserialized.timestamp, original.timestamp);
 
-    const auto& m = deserialized.metric_values;
-    EXPECT_EQ(m.read_bytes, 4096U);
-    EXPECT_EQ(m.write_bytes, 8192U);
-    EXPECT_EQ(m.read_ops, 10U);
-    EXPECT_EQ(m.write_ops, 20U);
-    EXPECT_EQ(m.fastpath_reads, 7U);
-    EXPECT_EQ(m.fastpath_writes, 13U);
-    EXPECT_EQ(m.fallback_reads, 3U);
-    EXPECT_EQ(m.fallback_writes, 5U);
-    EXPECT_EQ(m.unaligned_reads, 1U);
-    EXPECT_EQ(m.unaligned_writes, 2U);
-    EXPECT_EQ(m.read_errors, 11U);
-    EXPECT_EQ(m.write_errors, 17U);
-    EXPECT_DOUBLE_EQ(m.read_bandwidth, 1234.5);
-    EXPECT_DOUBLE_EQ(m.write_bandwidth, 6789.25);
+    const auto& metric_values = deserialized.metric_values;
+    EXPECT_EQ(metric_values.read_bytes, hipfile_values::read_bytes);
+    EXPECT_EQ(metric_values.write_bytes, hipfile_values::write_bytes);
+    EXPECT_EQ(metric_values.read_ops, hipfile_values::read_ops);
+    EXPECT_EQ(metric_values.write_ops, hipfile_values::write_ops);
+    EXPECT_EQ(metric_values.fastpath_reads, hipfile_values::fastpath_reads);
+    EXPECT_EQ(metric_values.fastpath_writes, hipfile_values::fastpath_writes);
+    EXPECT_EQ(metric_values.fallback_reads, hipfile_values::fallback_reads);
+    EXPECT_EQ(metric_values.fallback_writes, hipfile_values::fallback_writes);
+    EXPECT_EQ(metric_values.unaligned_reads, hipfile_values::unaligned_reads);
+    EXPECT_EQ(metric_values.unaligned_writes, hipfile_values::unaligned_writes);
+    EXPECT_EQ(metric_values.read_errors, hipfile_values::read_errors);
+    EXPECT_EQ(metric_values.write_errors, hipfile_values::write_errors);
+    EXPECT_DOUBLE_EQ(metric_values.read_bandwidth, hipfile_values::read_bandwidth);
+    EXPECT_DOUBLE_EQ(metric_values.write_bandwidth, hipfile_values::write_bandwidth);
 
     // A stored sample is never a failed query, so the default must survive the trip.
-    EXPECT_FALSE(m.query_failed);
+    EXPECT_FALSE(metric_values.query_failed);
 
     EXPECT_EQ(buffer_ptr - buffer.data(),
               static_cast<std::ptrdiff_t>(get_size(original)));

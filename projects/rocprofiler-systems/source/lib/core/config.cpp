@@ -3247,8 +3247,8 @@ get_ump_absolute_path()
         const auto* pwd = getenv("PWD");
         if(pwd != nullptr && pwd[0] != '\0') return std::string{ pwd };
 
-        std::unique_ptr<char, decltype(&std::free)> current_dir(getcwd(nullptr, 0),
-                                                                std::free);
+        const std::unique_ptr<char, decltype(&std::free)> current_dir(getcwd(nullptr, 0),
+                                                                      std::free);
         if(current_dir == nullptr) return std::string{ "." };
 
         return std::string{ current_dir.get() };
@@ -3753,8 +3753,14 @@ get_causal_mode()
         {
             auto mode = static_cast<tim::tsettings<std::string>&>(*value->second).get();
             throw std::runtime_error(
+<<<<<<< HEAD
                 fmt::format("[{}] invalid causal mode {}. Choices: {}", function_name,
                             mode, fmt::join(value->second->get_choices(), ", ")));
+=======
+                // NOLINTNEXTLINE(misc-include-cleaner)
+                fmt::format("[get_causal_mode] invalid causal mode {}. Choices: {}",
+                            _mode, fmt::join(_v->second->get_choices(), ", ")));
+>>>>>>> b8bec21474 (Fix clang-tidy Part 3)
         }
         return state::process::CausalMode::function;
     }();
