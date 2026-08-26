@@ -39,20 +39,25 @@ char* real_getenv(const char* name) {
 }
 }  // namespace
 
+// Strict: a name the fixture has not scripted reads as unset, so no test can
+// depend on the ambient environment. ncclGetEnv routes here.
 const char* micro_getenv(const char* name) {
+  if (name == nullptr) return nullptr;
+  auto& m = microEnvMap();
+  auto it = m.find(name);
+  return (it != m.end() && it->second) ? it->second->c_str() : nullptr;
+}
+
+// Link-level override rather than a scoped macro: init.cc:2721 uses std::getenv, which a macro cannot
+// catch. It is process-wide, so gtest/libstdc++ reads must still see the real environment -- unlike
+// micro_getenv it falls back. init.cc's three bare getenv() sites are masked by the fixture instead.
+extern "C" char* getenv(const char* name) {
   if (name != nullptr) {
     auto& m = microEnvMap();
     auto it = m.find(name);
-    if (it != m.end()) {
-      return it->second ? it->second->c_str() : nullptr;
-    }
+    if (it != m.end()) return it->second ? const_cast<char*>(it->second->c_str()) : nullptr;
   }
   return real_getenv(name);
-}
-
-// Link-level override rather than a scoped macro, so both getenv() and std::getenv() in the UUT are caught.
-extern "C" char* getenv(const char* name) {
-  return const_cast<char*>(micro_getenv(name));
 }
 
 // A null value means "absent", NOT "leave unmapped" -- leaving it unmapped would fall through to the real getenv.
