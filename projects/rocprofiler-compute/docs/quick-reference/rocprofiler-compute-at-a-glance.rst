@@ -47,7 +47,7 @@ The feature set is documented across several how-to and conceptual pages; this t
      - Compares two or more profiled runs of the same SoC side by side to check the effect of a code change.
      - :ref:`analysis-baseline-comparison`
    * - Multiple analysis interfaces
-     - The command line, an experimental standalone GUI, an experimental TUI, and ROCm Optiq all read the same profiling output.
+     - The command line and ROCm Optiq both read the same profiling output.
      - :doc:`../install/quickstart`
    * - Iteration multiplexing
      - Collects a large number of performance counters with minimal profiling overhead by splitting counter collection across kernel iterations instead of full application replays.
@@ -63,7 +63,7 @@ ROCm Compute Profiler is a Python-based tool that profiles an application in up 
 .. image:: /data/how_compute_profiler_works.png
    :width: 60%
    :align: center
-   :alt: Diagram of ROCm Compute Profiler replaying an application across multiple counter-collection passes, running roofline micro-benchmarks, deriving metrics, and producing analysis views consumed by rocpd, CSV, the standalone GUI, the CLI, and the TUI
+   :alt: Diagram of ROCm Compute Profiler replaying an application across multiple counter-collection passes, running roofline micro-benchmarks, deriving metrics, and producing analysis views available as CLI output by default, or as CSV, an analysis database, or an HTML roofline plot
 
 Counter collection is performed by injecting two libraries into the target process alongside :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`: a native tool (``librocprofiler-compute-tool.so``) that collects hardware performance counters per dispatch, and an SDK tool (``librocprofiler-sdk-tool.so``) that handles kernel tracing and output database generation. See :ref:`core-install-rocprof-var` for the full backend and library breakdown.
 
@@ -134,8 +134,8 @@ ROCm Compute Profiler exposes two primary modes on the ``rocprof-compute`` execu
      - Runs only the roofline micro-benchmarks, skipping standard counter collection.
    * - ``rocprof-compute analyze -p workloads/my_run/MI300X/``
      - Analyzes a profiled run in the terminal.
-   * - ``rocprof-compute analyze -p workloads/my_run/MI300X/ --experimental --gui``
-     - Launches the experimental standalone GUI against a profiled run.
+   * - ``rocprof-compute analyze -p workloads/my_run/MI300X/ --output-format db``
+     - Writes the analysis to a SQLite analysis database instead of printing to the terminal.
    * - ``rocprof-compute analyze -p run_a/MI300X/ run_b/MI300X/``
      - Compares two profiled runs of the same SoC side by side.
 
@@ -170,22 +170,19 @@ This isn't an exhaustive list of flags; run ``rocprof-compute profile -h`` or ``
    * - ``--roof-only``
      - profile
      - Runs only the roofline micro-benchmarks. Can't combine with ``--block``, ``--set``, or ``--bench-only``. See :ref:`standalone-roofline`.
-   * - ``--format-rocprof-output``
-     - profile
-     - Selects the raw counter output format: ``csv`` or ``rocpd`` (default). See :ref:`profiling-output-format`.
    * - ``-p``, ``--path``
      - analyze
      - Points analyze at one or more profiled output directories; repeat or space-separate for :ref:`baseline comparison <analysis-baseline-comparison>`.
-   * - ``--experimental``
+   * - ``--output-format``
      - analyze
-     - Required to enable the standalone GUI (``--gui``) or TUI (``--tui``).
+     - Selects the analysis report format: ``stdout`` (default), ``txt``, ``csv``, or ``db``. See :ref:`glance-output-formats`.
 
 .. _glance-output-formats:
 
 Output formats
 ================
 
-``profile`` and ``analyze`` each accept their own output-format option: ``--format-rocprof-output`` for raw counter data, and ``--output-format`` for the analysis report. The following table lists the available values for each:
+``analyze`` accepts an ``--output-format`` option for the analysis report. The following table lists the available values, plus the HTML roofline plots that ``analyze`` writes automatically, and the ``rocpd`` database that ``profile`` always writes:
 
 .. list-table::
    :header-rows: 1
@@ -194,12 +191,9 @@ Output formats
    * - Format
      - Produced by
      - Description
-   * - ``rocpd`` (default)
+   * - ``rocpd``
      - profile
-     - SQLite database of raw counters per dispatch. Required for ``analyze --output-format csv`` or ``db``. See :ref:`profiling-output-format`.
-   * - ``csv``
-     - profile
-     - Intermediate CSV counter files. Deprecated in favor of ``rocpd``. See :ref:`profiling-output-format`.
+     - SQLite database of raw counters per dispatch, written automatically. Required for ``analyze --output-format csv`` or ``db``.
    * - ``stdout`` (default)
      - analyze
      - Analysis results printed to the terminal only.
@@ -208,10 +202,13 @@ Output formats
      - Analysis results written to a ``rocprof_compute_<uuid>.txt`` file.
    * - ``csv``
      - analyze
-     - Analysis results written to a folder of CSV files. Requires the workload was profiled with ``--format-rocprof-output rocpd``.
+     - Analysis results written to a folder of CSV files. Requires the workload's ``rocpd`` database from profiling.
    * - ``db``
      - analyze
-     - Analysis results written to a ``rocprof_compute_<uuid>.db`` SQLite file. Same ``rocpd`` requirement as ``csv``.
+     - Analysis results written to a ``rocprof_compute_<uuid>.db`` SQLite analysis database. Same requirement as ``csv``.
+   * - ``html``
+     - analyze
+     - Standalone Plotly roofline plot(s) (``empirRoof_gpu-<id>...html``), written automatically whenever the workload includes roofline data, independent of ``--output-format``. See :ref:`standalone-roofline`.
 
 Select the analyze output format with ``--output-format`` and override the file name with ``--output-name``. See :ref:`analysis-output-format` for details.
 
@@ -246,14 +243,10 @@ Roofline micro-benchmark support varies by :ref:`SoC family <def-soc>` independe
      - ✅
      - ❌
      - Roofline micro-benchmarks require MI200 or later. See :ref:`standalone-roofline`.
-   * - AMD Ryzen™ AI Max / Ryzen AI Max+ 300 and 400 Series (Strix/Halo, Gorgon/Halo; gfx1150/gfx1151/gfx1152)
+   * - AMD Ryzen™ AI Max / Ryzen AI Max+ 300 and 400 Series and Ryzen AI 5/7 PRO 4xx Series (Strix/Halo, Gorgon/Halo; gfx1150/gfx1151/gfx1152/gfx1153)
      - ✅
      - ✅
      - Full feature support; roofline benchmarking for gfx1150 and gfx1152 was added in ROCm Compute Profiler 3.7.0, with the gfx1151 (Strix Halo) gap closed in 3.8.0. Uses Wave Matrix Multiply Accumulate (WMMA) in place of MFMA.
-   * - AMD Ryzen AI 5/7 PRO 4xx Series (gfx1153)
-     - ✅
-     - ❌
-     - GPU metrics support added in ROCm Compute Profiler 3.8.0; roofline benchmarking isn't yet available.
    * - AMD Instinct MI50, MI60 (Vega 20)
      - ❌
      - ❌
