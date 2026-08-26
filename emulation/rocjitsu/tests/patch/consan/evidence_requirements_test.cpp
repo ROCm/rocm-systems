@@ -382,17 +382,6 @@ TEST(ConSanEvidenceRequirements, ExpertAccessLimitCountsPhysicalIntentsButNotSyn
             kConSanMoiRecordReplayDynamicLaneEventHeadroom);
   EXPECT_EQ(requirements.sizing_inventory.fence_event_count,
             kConSanMoiRecordReplayDynamicLaneEventHeadroom);
-
-  ConSanOptions options;
-  options.max_patches = 7;
-  options.max_patches_is_expert_limit = false;
-  EXPECT_EQ(make_consan_record_replay_capacity_policy(options, 4096),
-            (ConSanRecordReplayCapacityPolicy{.caller_ceiling_bytes = 4096,
-                                              .maximum_access_probe_count = std::nullopt}));
-  options.max_patches_is_expert_limit = true;
-  EXPECT_EQ(make_consan_record_replay_capacity_policy(options, 4096),
-            (ConSanRecordReplayCapacityPolicy{.caller_ceiling_bytes = 4096,
-                                              .maximum_access_probe_count = 7}));
 }
 
 TEST(ConSanEvidenceRequirements, InvalidAndWrongEnginePlansHaveDistinctTypedReasons) {
@@ -508,29 +497,6 @@ TEST(ConSanEvidenceRequirements, WellFormedRejectsEveryCrossTypeContractMismatch
   expect_rejected([](auto &value) { ++value.abi_plan.layout.required_bytes; });
   expect_rejected(
       [](auto &value) { ++*value.runtime_requirements.minimum_report_allocation_bytes; });
-}
-
-TEST(ConSanEvidenceRequirements, CapacityPolicyAdaptersCarryOnlyExplicitLegacyBounds) {
-  ConSanOptions options;
-  options.max_patches = 11;
-  options.max_patches_is_expert_limit = false;
-  options.moi_max_workgroup_lds_bytes = 96u * 1024u;
-  EXPECT_EQ(make_consan_sampled_capacity_policy(options, 8192),
-            (ConSanSampledCapacityPolicy{.caller_ceiling_bytes = 8192,
-                                         .maximum_access_probe_count = std::nullopt}));
-  EXPECT_EQ(make_consan_inline_shadow_capacity_policy(options, 16384),
-            (ConSanInlineShadowCapacityPolicy{.caller_ceiling_bytes = 16384,
-                                              .maximum_access_probe_count = std::nullopt,
-                                              .maximum_workgroup_lds_bytes = 96u * 1024u}));
-
-  options.max_patches_is_expert_limit = true;
-  EXPECT_EQ(
-      make_consan_sampled_capacity_policy(options),
-      (ConSanSampledCapacityPolicy{.caller_ceiling_bytes = 0, .maximum_access_probe_count = 11}));
-  EXPECT_EQ(make_consan_inline_shadow_capacity_policy(options),
-            (ConSanInlineShadowCapacityPolicy{.caller_ceiling_bytes = 0,
-                                              .maximum_access_probe_count = 11,
-                                              .maximum_workgroup_lds_bytes = 96u * 1024u}));
 }
 
 TEST(ConSanEvidenceRequirements, CapacityPoliciesHaveNeutralAddressFreeDefaults) {

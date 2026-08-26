@@ -534,36 +534,6 @@ bool consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &
   return std::visit([](const auto &value) { return value.well_formed(); }, requirements);
 }
 
-ConSanRecordReplayCapacityPolicy
-make_consan_record_replay_capacity_policy(const ConSanOptions &options,
-                                          uint64_t caller_ceiling_bytes) {
-  ConSanRecordReplayCapacityPolicy policy;
-  policy.caller_ceiling_bytes = caller_ceiling_bytes;
-  if (options.max_patches_is_expert_limit)
-    policy.maximum_access_probe_count = options.max_patches;
-  return policy;
-}
-
-ConSanSampledCapacityPolicy make_consan_sampled_capacity_policy(const ConSanOptions &options,
-                                                                uint64_t caller_ceiling_bytes) {
-  ConSanSampledCapacityPolicy policy;
-  policy.caller_ceiling_bytes = caller_ceiling_bytes;
-  if (options.max_patches_is_expert_limit)
-    policy.maximum_access_probe_count = options.max_patches;
-  return policy;
-}
-
-ConSanInlineShadowCapacityPolicy
-make_consan_inline_shadow_capacity_policy(const ConSanOptions &options,
-                                          uint64_t caller_ceiling_bytes) {
-  ConSanInlineShadowCapacityPolicy policy;
-  policy.caller_ceiling_bytes = caller_ceiling_bytes;
-  policy.maximum_workgroup_lds_bytes = options.moi_max_workgroup_lds_bytes;
-  if (options.max_patches_is_expert_limit)
-    policy.maximum_access_probe_count = options.max_patches;
-  return policy;
-}
-
 ConSanRecordReplayEvidenceRequirements
 plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
                                    const ConSanRecordReplayCapacityPolicy &capacity_policy) {

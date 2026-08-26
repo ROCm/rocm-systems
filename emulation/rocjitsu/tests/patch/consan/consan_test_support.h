@@ -75,21 +75,26 @@ inline constexpr uint32_t kRdna4Wave64AllVgprsGranulated = 63;
 [[nodiscard]] ConSanMoiAutoReportInventory
 plan_test_moi_evidence_inventory(const ConSanResult &result, const ConSanOptions &options,
                                  uint64_t caller_ceiling_bytes = 0) {
+  const std::optional<uint64_t> maximum_access_probe_count =
+      options.max_patches_is_expert_limit ? std::optional<uint64_t>{options.max_patches}
+                                          : std::nullopt;
   switch (options.moi_engine) {
   case ConSanMoiEngine::RecordReplay:
     return plan_consan_record_replay_evidence(
-               result.observation_plan,
-               make_consan_record_replay_capacity_policy(options, caller_ceiling_bytes))
+               result.observation_plan, {.caller_ceiling_bytes = caller_ceiling_bytes,
+                                         .maximum_access_probe_count = maximum_access_probe_count})
         .sizing_inventory;
   case ConSanMoiEngine::Sampled:
-    return plan_consan_sampled_evidence(
-               result.observation_plan,
-               make_consan_sampled_capacity_policy(options, caller_ceiling_bytes))
+    return plan_consan_sampled_evidence(result.observation_plan,
+                                        {.caller_ceiling_bytes = caller_ceiling_bytes,
+                                         .maximum_access_probe_count = maximum_access_probe_count})
         .sizing_inventory;
   case ConSanMoiEngine::InlineShadow:
     return plan_consan_inline_shadow_evidence(
                result.program_inventory, result.observation_plan,
-               make_consan_inline_shadow_capacity_policy(options, caller_ceiling_bytes))
+               {.caller_ceiling_bytes = caller_ceiling_bytes,
+                .maximum_access_probe_count = maximum_access_probe_count,
+                .maximum_workgroup_lds_bytes = options.moi_max_workgroup_lds_bytes})
         .sizing_inventory;
   }
   return {};

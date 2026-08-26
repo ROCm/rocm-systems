@@ -3227,7 +3227,7 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   evidence-sizing path.
 - **Completed test gate:** Focused type tests exhaustively cover schema,
   boundedness, loss, construction-reason, layout-outcome, and layout-reason
-  enums; capacity-policy adaptation; empty and mixed intent plans; multi-range
+  enums; explicit capacity policies; empty and mixed intent plans; multi-range
   physical-intent limits; target-neutral record-dimension mapping; invalid and
   foreign plans; malformed intent payloads; capacity failure; every runtime
   fact; cross-type invariants; value semantics; deterministic non-mutation;
@@ -3271,8 +3271,8 @@ could complete.
   report or marker registry. Slice 4H subsequently deleted the old
   result/patch rescan and migrated the synthetic hook fixtures. ABI decoders
   and allocation mechanics remain implementation details for later slices.
-- **Completed type and unit gate:** Focused tests cover neutral and legacy-
-  adapted capacity policies; every schema/boundedness/loss/reason enum and
+- **Completed type and unit gate:** Focused tests cover neutral and directly
+  constructed capacity policies; every schema/boundedness/loss/reason enum and
   invalid sentinel; every intent-to-capacity mapping; expert limits; missing
   inventory relationships; descriptor/static-range/full-aperture selection;
   capacity failure; runtime capability admission; cross-type and
@@ -3295,6 +3295,35 @@ with 18/18 accesses and all applicable barriers. Record/Replay retained its
 pre-existing yellow bounded-capacity condition: static coverage was complete
 at 18/18 accesses and 8/8 barriers, but replay metadata filled before dynamic
 analysis completed.
+
+### Slice 5C: delete legacy evidence-capacity adapters
+
+- **Direct typed ownership:** The typed pipeline now constructs each MOI
+  capacity policy directly from the three values that own its semantics: the
+  automatic-allocation ceiling in `ConSanRequest`, the optional expert access
+  cap in `TransformPolicy`, and InlineShadow's LDS aperture in
+  `RuntimeCapabilities`. Evidence planning no longer constructs the prototype
+  `ConSanOptions` aggregate and then reads those values back out.
+- **Completed deletion:** The three production `ConSanOptions`-to-capacity
+  adapters and their declarations are gone, as is the adapter-only unit test.
+  Mechanism-focused legacy tests construct the same narrow policies locally in
+  test support until those tests migrate to the typed pipeline; production
+  evidence headers and planners no longer depend on the legacy aggregate.
+- **Contract test:** A pipeline test covers Record/Replay, Sampled, and
+  InlineShadow with and without an explicit expert access cap. It compares the
+  published requirement with direct planning from the typed request, policy,
+  capabilities, immutable observation plan, and program inventory, including
+  the allocation ceiling and InlineShadow aperture. Existing evidence-planner
+  tests continue to cover every individual capacity input and outcome.
+- **Deletion result:** Production source is 44 net lines smaller and source
+  plus tests is 22 net lines smaller. The added test checks the production
+  ownership boundary instead of retaining tests for deleted adapters.
+- **Completed checked-in gate:** All 54 focused evidence-requirement and
+  pipeline tests pass. The complete host gate passes 1,509 tests with the two
+  expected benchmark-object skips; all 194 hook tests pass; and all 2,878
+  simulator-device tests pass in 64.14 seconds of wall time. Evidence semantics
+  and emitted device code are unchanged; E2E validation remains outside this
+  work.
 
 ### Slice 6: explicit pipeline and result cutover
 

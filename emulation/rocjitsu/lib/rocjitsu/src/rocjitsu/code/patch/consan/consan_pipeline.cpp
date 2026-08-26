@@ -526,28 +526,31 @@ TransformResult TransformResult::publish_optional(
     observation_stage.status = ConSanPipelineStageStatus::NotApplicable;
   }
 
-  const ConSanOptions legacy_options = LegacyOptionsAdapter::adapt(
-      request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
   if (result.observation_plan.valid()) {
+    const std::optional<uint64_t> maximum_access_probe_count =
+        transform_policy.max_patches_is_expert_limit
+            ? std::optional<uint64_t>{transform_policy.max_patches}
+            : std::nullopt;
     if (flavor == ConSanFlavor::SuperCollider) {
       result.evidence_requirements = plan_consan_supercollider_evidence(result.observation_plan);
     } else if (flavor == ConSanFlavor::Moi) {
       switch (request.moi_engine) {
       case ConSanMoiEngine::RecordReplay:
         result.evidence_requirements = plan_consan_record_replay_evidence(
-            result.observation_plan, make_consan_record_replay_capacity_policy(
-                                         legacy_options, request.moi_auto_report_buffer_size));
+            result.observation_plan, {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
+                                      .maximum_access_probe_count = maximum_access_probe_count});
         break;
       case ConSanMoiEngine::Sampled:
         result.evidence_requirements = plan_consan_sampled_evidence(
-            result.observation_plan, make_consan_sampled_capacity_policy(
-                                         legacy_options, request.moi_auto_report_buffer_size));
+            result.observation_plan, {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
+                                      .maximum_access_probe_count = maximum_access_probe_count});
         break;
       case ConSanMoiEngine::InlineShadow:
         result.evidence_requirements = plan_consan_inline_shadow_evidence(
             result.program_inventory, result.observation_plan,
-            make_consan_inline_shadow_capacity_policy(legacy_options,
-                                                      request.moi_auto_report_buffer_size));
+            {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
+             .maximum_access_probe_count = maximum_access_probe_count,
+             .maximum_workgroup_lds_bytes = capabilities.max_workgroup_lds_bytes});
         break;
       }
     }

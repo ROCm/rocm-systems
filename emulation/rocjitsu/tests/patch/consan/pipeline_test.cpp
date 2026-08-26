@@ -516,6 +516,57 @@ TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) 
   }
 }
 
+TEST(ConSanPipeline, MoiEvidenceCapacityComesDirectlyFromTypedRequestPolicyAndCapabilities) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  RuntimeCapabilities capabilities = complete_runtime_capabilities();
+  capabilities.max_workgroup_lds_bytes = 96u * 1024u;
+
+  for (const bool expert_limit : {false, true}) {
+    TransformPolicy transform_policy;
+    transform_policy.max_patches = 7u;
+    transform_policy.max_patches_is_expert_limit = expert_limit;
+    const std::optional<uint64_t> maximum_access_probe_count =
+        expert_limit ? std::optional<uint64_t>{7u} : std::nullopt;
+
+    for (const ConSanMoiEngine engine :
+         {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::Sampled, ConSanMoiEngine::InlineShadow}) {
+      SCOPED_TRACE(consan_moi_engine_name(engine));
+      SCOPED_TRACE(expert_limit);
+      ConSanRequest request = moi_request(engine);
+      request.moi_auto_report_buffer_size = 4096u;
+      const TransformResult result =
+          transform_consan(bytes, request, transform_policy, enabled_runtime_policy(),
+                           ConSanDebugOverrides{}, capabilities, BoundRuntimeResources{});
+
+      ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.issues);
+      switch (engine) {
+      case ConSanMoiEngine::RecordReplay:
+        EXPECT_EQ(std::get<ConSanRecordReplayEvidenceRequirements>(*result.evidence_requirements),
+                  plan_consan_record_replay_evidence(
+                      result.observation_plan,
+                      {.caller_ceiling_bytes = 4096u,
+                       .maximum_access_probe_count = maximum_access_probe_count}));
+        break;
+      case ConSanMoiEngine::Sampled:
+        EXPECT_EQ(std::get<ConSanSampledEvidenceRequirements>(*result.evidence_requirements),
+                  plan_consan_sampled_evidence(
+                      result.observation_plan,
+                      {.caller_ceiling_bytes = 4096u,
+                       .maximum_access_probe_count = maximum_access_probe_count}));
+        break;
+      case ConSanMoiEngine::InlineShadow:
+        EXPECT_EQ(std::get<ConSanInlineShadowEvidenceRequirements>(*result.evidence_requirements),
+                  plan_consan_inline_shadow_evidence(
+                      result.program_inventory, result.observation_plan,
+                      {.caller_ceiling_bytes = 4096u,
+                       .maximum_access_probe_count = maximum_access_probe_count,
+                       .maximum_workgroup_lds_bytes = 96u * 1024u}));
+        break;
+      }
+    }
+  }
+}
+
 TEST(ConSanPipeline, EmptyPlansNeedNoRuntimeBindingForAnyEngine) {
   constexpr std::array<uint32_t, 1> kTextWords = {0xBFB00000u};
   const std::vector<uint8_t> bytes =

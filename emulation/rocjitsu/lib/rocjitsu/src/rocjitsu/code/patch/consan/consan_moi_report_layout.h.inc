@@ -773,23 +773,6 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
 [[nodiscard]] ConSanSuperColliderEvidenceRequirements
 plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan);
 
-/// Temporary adapter from the legacy option aggregate to the narrow capacity
-/// policy. This is the only Slice-5A boundary that knows the expert patch-limit
-/// spelling; the evidence planner itself never consumes `ConSanOptions`.
-[[nodiscard]] ConSanRecordReplayCapacityPolicy
-make_consan_record_replay_capacity_policy(const ConSanOptions &options,
-                                          uint64_t caller_ceiling_bytes = 0);
-
-/// Temporary adapters from legacy options to the narrow engine-specific
-/// capacity policies. The evidence planners themselves never consume the
-/// legacy aggregate.
-[[nodiscard]] ConSanSampledCapacityPolicy
-make_consan_sampled_capacity_policy(const ConSanOptions &options,
-                                    uint64_t caller_ceiling_bytes = 0);
-[[nodiscard]] ConSanInlineShadowCapacityPolicy
-make_consan_inline_shadow_capacity_policy(const ConSanOptions &options,
-                                          uint64_t caller_ceiling_bytes = 0);
-
 /// Converts a complete planner result into the caller-carried exact layout.
 /// An incomplete plan produces std::nullopt.
 [[nodiscard]] std::optional<ConSanMoiReportLayoutOverride>
