@@ -10,7 +10,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <sched.h>
+#include <string>
+#include <vector>
 
 #include "nccl.h"
 #include "os.h"
@@ -47,12 +50,44 @@ bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* maxStackSize) { ::abort(); }
-ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) { ::abort(); }
+// Controllable (was fail-loud). initTransportsRank:1508 calls this only when the MNNVL scope test at :1507 passes,
+// so the CALL COUNTER -- not the result -- is the oracle for that enable/auto/disable logic.
+extern ncclResult_t g_ncclMnnvlCheckResult;
+extern int g_ncclMnnvlCheckCalls;
+ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
+  g_ncclMnnvlCheckCalls++;
+  return g_ncclMnnvlCheckResult;
+}
 ncclResult_t ncclNetFinalize(struct ncclComm* comm) { return ncclSuccess; }
-int ncclOsCpuCount(const ncclAffinity& affinity) { ::abort(); }
-ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { ::abort(); }
-ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) { ::abort(); }
+// Controllable (was fail-loud). initTransportsRank's exit: block (:2403) calls ncclOsCpuCount on EVERY path, so
+// nothing in that function is testable until this is seamed; the counter separates exit: from the :1488 bare return.
+// Records the mask too: :1608 and exit::2403 both call this, and without the recorder either call site
+// could be handed the wrong affinity (affinitySave instead of comm->cpuAffinity) with nothing noticing.
+extern int g_ncclOsCpuCountValue;
+extern int g_ncclOsCpuCountCalls;
+extern std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
+int ncclOsCpuCount(const ncclAffinity& affinity) {
+  g_ncclOsCpuCountCalls++;
+  g_ncclOsCpuCountMasks.push_back(affinity);
+  return g_ncclOsCpuCountValue;
+}
+// Controllable (was fail-loud). A std::function because :1609 writes through the pointer -- though nothing
+// ever reads affinitySave back, which is what the AffinitySaveIsNeverRestored test pins.
+extern std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity;
+ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffinity(affinity); }
+// Controllable (was fail-loud). Records the affinity it was handed: without that, exit::2404 forwarding
+// comm->cpuAffinity vs any other mask is unobservable -- a fake that drops an argument untests it.
+// Keeps EVERY mask, not just the latest: :1610 and exit::2404 both call this, so a single "last"
+// slot lets the exit: write mask what :1610 forwarded -- which left a mutant swapping :1610 to
+// affinitySave alive. Tests index the call site they mean.
+extern ncclResult_t g_ncclOsSetAffinityResult;
+extern std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
+ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
+  g_ncclOsSetAffinityMasks.push_back(affinity);
+  return g_ncclOsSetAffinityResult;
+}
 // Must be non-empty and multi-token: ncclInit() strstr()s the strtok_r() of this, and strtok_r("") returns NULL.
+// Also not "1" and not the Hyper-V BIOS string, so numa_balancing / bios_version stay on their benign arms.
 ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen)
 {
     if (strValue && maxLen > 0) {
@@ -73,7 +108,14 @@ ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { ::abort(); }
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) { ::abort(); }
-int rcclGetTuningIndexForArch(const char* gfxarch) { ::abort(); }
+// Controllable (was fail-loud). Records gfxarch: :1577 forwards comm->archName into it and stores the
+// result in comm->topo->tuning, so without the recorder `IndexForArch(archName)` -> `IndexForArch("")` is invisible.
+extern int g_tuningIndexValue;
+extern std::string g_tuningIndexLastArch;
+int rcclGetTuningIndexForArch(const char* gfxarch) {
+  g_tuningIndexLastArch = gfxarch ? gfxarch : "<null>";
+  return g_tuningIndexValue;
+}
 bool rcclUseAinic() { ::abort(); }
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }

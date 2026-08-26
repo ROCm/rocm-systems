@@ -103,11 +103,12 @@ extern "C" int dladdr(const void* addr, Dl_info* info) {
 const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
 
 // ncclParam* referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover them.
-int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }
-int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
-int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }
-int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 2); }
-int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 1); }
+// Each default mirrors production; the trailing comment names the definition it copies, so drift is checkable here.
+int64_t ncclParamLaunchOrderImplicit() { return g_loadParam("LAUNCH_ORDER_IMPLICIT", 0); }  // enqueue.cc:1985
+int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }                     // transport/nvls.cc:159
+int64_t ncclParamNvtxDisable() { return g_loadParam("NVTX_DISABLE", 0); }                   // init_nvtx.cc:16
+int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }                       // graph/tuning.cc:1105
+int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_REG_ENABLE", 0); }  // group.cc:605
 
 // Recorder is pure instrumentation -> no-op fake.
 namespace rccl {
@@ -232,6 +233,62 @@ unsigned int g_rocmVersionMajor = 0;
 unsigned int g_rocmVersionMinor = 0;
 unsigned int g_rocmVersionPatch = 0;
 
+// initTransportsRank() seams; the stubs live in nccl_stubs.cc / transport_stubs.cc / topo_stubs.cc.
+// ncclOsCpuCount default 0 keeps exit::2404 from calling ncclOsSetAffinity unless a test asks for it.
+int g_ncclOsCpuCountValue                = 0;
+int g_ncclOsCpuCountCalls                = 0;
+std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
+ncclResult_t g_ncclOsSetAffinityResult   = ncclSuccess;
+std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
+ncclResult_t g_ncclMnnvlCheckResult      = ncclSuccess;
+int g_ncclMnnvlCheckCalls                = 0;
+// Non-zero default level: p2pLevel != 0 is what :1506 needs for the MNNVL auto scope to be reachable at all.
+std::function<ncclResult_t(int*)> g_ncclGetUserP2pLevel =
+    [](int* level) { *level = 3; return ncclSuccess; };
+// Defaults to FAILURE -- it is the rung-1 terminator, and no test drives its call sites to success by default.
+// ncclRemoteError is a SENTINEL: no init.cc path reachable from initTransportsRank produces it, so EXPECT_EQ
+// on it proves execution reached a terminator rather than dying at AllGather1 or the :1554 intra-proc guard.
+// The rung-2 terminator below shares it; see there for why the two cannot be confused.
+std::function<ncclResult_t(struct ncclComm*, struct ncclTopoSystem**, const char*)> g_ncclTopoGetSystem =
+    [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclRemoteError; };
+
+// Topology-detection and CPU-affinity seams (:1576-1618). All succeed by default so a test can walk the
+// block and inject exactly one failure; ncclTopoCompute is the exception -- it is the rung-2 terminator.
+int g_tuningIndexValue                      = 0;
+std::string g_tuningIndexLastArch;
+int g_ncclTopoComputePathsCalls             = 0;
+int g_ncclTopoComputePathsFailAt            = -1;
+ncclResult_t g_ncclTopoTrimSystemResult     = ncclSuccess;
+ncclResult_t g_ncclTopoSearchInitResult     = ncclSuccess;
+ncclResult_t g_ncclTopoComputeCommCPUResult = ncclSuccess;
+ncclResult_t g_ncclTopoPrintResult          = ncclSuccess;
+int g_ncclTopoGetCpuAffinityLastRank        = -1;
+// Writes an EMPTY mask by default, so ncclOsCpuCount's 0 default stays consistent and :1609-1610 are skipped.
+std::function<ncclResult_t(struct ncclTopoSystem*, int, ncclAffinity*)> g_ncclTopoGetCpuAffinity =
+    [](struct ncclTopoSystem*, int, ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity =
+    [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+ncclResult_t g_ncclNvlsInitResult           = ncclSuccess;
+int g_ncclNvlsInitCalls                     = 0;
+// Same sentinel as the rung-1 terminator, and unambiguous for the same reason it is a sentinel at all:
+// every rung-2 test calls installTopo(), which replaces g_ncclTopoGetSystem with a succeeding lambda,
+// so ncclRemoteError here can only have come from :1648.
+std::function<ncclResult_t(struct ncclTopoSystem*, struct ncclTopoGraph*)> g_ncclTopoCompute =
+    [](struct ncclTopoSystem*, struct ncclTopoGraph*) { return ncclRemoteError; };  // rung-2 terminator
+int g_ncclTopoComputeCalls                  = 0;
+std::vector<struct ncclTopoGraph*> g_ncclTopoComputeGraphs;
+
+// Graph-block seams (:1649-1774), rung 3. ncclTopoComputeP2pChannelsPerPeer is the terminator and uses
+// ncclTimeout, NOT the ncclRemoteError the earlier rungs share, so a rung-3 assertion cannot be
+// satisfied by a test that forgot to arm g_ncclTopoCompute and stopped at :1648 instead.
+ncclResult_t g_ncclTopoPrintGraphResult     = ncclSuccess;
+std::vector<struct ncclTopoGraph*> g_ncclTopoPrintGraphGraphs;
+ncclResult_t g_ncclTopoDumpGraphsResult     = ncclSuccess;
+int g_ncclTopoDumpGraphsCalls               = 0;
+int g_ncclTopoDumpGraphsNgraphs             = -1;
+std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
+ncclResult_t g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;  // rung-3 terminator
+
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
@@ -291,4 +348,36 @@ void ResetInitFakes() {
   g_rocmVersionMajor = 0;
   g_rocmVersionMinor = 0;
   g_rocmVersionPatch = 0;
+  g_ncclOsCpuCountValue = 0;
+  g_ncclOsCpuCountCalls = 0;
+  g_ncclOsCpuCountMasks.clear();
+  g_ncclOsSetAffinityResult = ncclSuccess;
+  g_ncclOsSetAffinityMasks.clear();
+  g_ncclMnnvlCheckResult = ncclSuccess;
+  g_ncclMnnvlCheckCalls = 0;
+  g_ncclGetUserP2pLevel = [](int* level) { *level = 3; return ncclSuccess; };
+  g_ncclTopoGetSystem = [](struct ncclComm*, struct ncclTopoSystem**, const char*) { return ncclRemoteError; };
+  g_tuningIndexValue = 0;
+  g_tuningIndexLastArch.clear();
+  g_ncclTopoComputePathsCalls = 0;
+  g_ncclTopoComputePathsFailAt = -1;
+  g_ncclTopoTrimSystemResult = ncclSuccess;
+  g_ncclTopoSearchInitResult = ncclSuccess;
+  g_ncclTopoComputeCommCPUResult = ncclSuccess;
+  g_ncclTopoPrintResult = ncclSuccess;
+  g_ncclTopoGetCpuAffinityLastRank = -1;
+  g_ncclTopoGetCpuAffinity = [](struct ncclTopoSystem*, int, ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+  g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+  g_ncclNvlsInitResult = ncclSuccess;
+  g_ncclNvlsInitCalls = 0;
+  g_ncclTopoCompute = [](struct ncclTopoSystem*, struct ncclTopoGraph*) { return ncclRemoteError; };
+  g_ncclTopoComputeCalls = 0;
+  g_ncclTopoComputeGraphs.clear();
+  g_ncclTopoPrintGraphResult = ncclSuccess;
+  g_ncclTopoPrintGraphGraphs.clear();
+  g_ncclTopoDumpGraphsResult = ncclSuccess;
+  g_ncclTopoDumpGraphsCalls = 0;
+  g_ncclTopoDumpGraphsNgraphs = -1;
+  g_ncclTopoDumpGraphsArray.clear();
+  g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;
 }
