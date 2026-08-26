@@ -1105,6 +1105,14 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // -w 0 (false fail) -- for a kernel that never executed. So WARN once and skip
     // the metric for this row rather than emit a bogus metric or a misleading check
     // verdict; datacheck still runs below.
+    // -H 1: zero recvbuff first so the check below observes the timed kernel's
+    // writes rather than the warmup's identical output already sitting there.
+    if (devtimeCheck && datacheck) {
+      for (int i = 0; i < args->nGpus; i++) {
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+        CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
+      }
+    }
     double deviceDeltaSec = -1.0;
     TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, &deviceDeltaSec));
     if (deviceDeltaSec <= 0.0) {
@@ -1414,6 +1422,9 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
     }
     for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
       setupArgs(size, type, args);
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+      args->devtimeAugmentLine[0] = '\0';
+#endif
       writeBenchmarkLinePreamble(std::max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       if (enable_out_of_place) {
         TESTCHECK(BenchTime(args, type, op, root, 0));
@@ -1463,6 +1474,12 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
         }
       }
       writeBenchmarkLineTerminator(iters, "");
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+      if (args->devtimeAugmentLine[0] != '\0') {
+        PRINT("%s", args->devtimeAugmentLine);
+        args->devtimeAugmentLine[0] = '\0';
+      }
+#endif
     }
     --repeat;
     ++iter;
@@ -2735,8 +2752,9 @@ testResult_t run() {
   }
   envstr = getenv("NCCL_TESTS_MIN_BW");
   const double check_avg_bw = envstr ? atof(envstr) : -1;
-  if (bw_count[0] > 0)
+  if (bw_count[0] > 0) {
     bw[0] /= bw_count[0];
+  }
 
   writeResultFooter(errors.data(), bw.data(), check_avg_bw, programName);
   if (memory_report) {
