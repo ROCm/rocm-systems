@@ -1783,7 +1783,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     1ULL*1024*1024,      // [2] AllGather       -- 1 MiB (LL128 wins to 1M total; VMM faster above)
-    32ULL*1024*1024,     // [3] ReduceScatter   -- 32 MiB per-rank shard
+    512ULL*1024,         // [3] ReduceScatter   -- 512 KiB per-rank (=2M total/4ranks; LL128 wins 256K-2M total, VMM faster above)
     32ULL*1024*1024,     // [4] AllReduce       -- 32 MiB
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used

@@ -1373,10 +1373,10 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
                                datatype, recvcount, sendbuff, recvbuff);
 
-  // (2) DDA fast paths. gfx1250 fabric may win over symmetric (cross-rank identical
-  // state); IPC keeps the strict !symEligible guard. No Blocks helpers -> nMaxChannels 0.
+  // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
+  // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
   const bool ddaFabricArch = IsArchMatch(comm->archName, "gfx1250");
-  if ((!symEligible || ddaFabricArch) &&
+  if (!symEligible &&
       rcclDdaEnabled(comm, totalBytes, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter))) {
     if (ddaFabricArch) {
       const size_t rsDdaLLMax    = rcclDdaLLThreshold(comm, ncclFuncReduceScatter);
