@@ -47,7 +47,8 @@ namespace RcclUnitTesting
     std::vector<int>            const& GetNumGpusList();
     std::vector<int>            const& GetIsMultiProcessList();
     std::vector<int>            const& GetGpuPriorityOrder();   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
-    int GetNumDetectedGpus() const { return numDetectedGpus; }  // Detected device count (computed HIP-clean via a forked probe)
+    // Detected device count (computed HIP-clean via a forked probe)
+    int GetNumDetectedGpus() const { return numDetectedGpus; }
     void ShowConfig();
 
   protected:

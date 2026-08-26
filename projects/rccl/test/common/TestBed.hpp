@@ -32,12 +32,8 @@ namespace RcclUnitTesting
     bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
     EnvVars                    ev;                    // Environment variables
 
-    // Communicator process pool (UT_COMM_POOL, default on). Reuse child processes
-    // across InitComms/DestroyComms so the (very expensive in -O0 debug) GPU device-code
-    // load is paid once per worker instead of once per config. poolChildren[d] is the
-    // persistent worker pinned to device d. Finalize() is the pool-reset boundary (real
-    // teardown), so env changes that tests make between sweeps (each bracketed by an
-    // explicit Finalize) are always picked up by a freshly-forked pool.
+    // Comm process pool: poolChildren[d] is pinned to device d; Finalize() is
+    // the pool-reset boundary (re-forks the pool with the current env).
     bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
     std::vector<TestBedChild*> poolChildren;          // persistent pool, index == pinned device id
     bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)

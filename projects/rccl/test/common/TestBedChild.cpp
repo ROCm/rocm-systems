@@ -71,9 +71,7 @@ namespace RcclUnitTesting
     this->verbose = verbose;
     this->printValues = printValues;
     this->useRankThreading = useRankThreading;
-    // Initialize pid/fds to -1 so a child that is never forked (or whose InitPipes fails) is
-    // distinguishable from a live worker: teardown skips waitpid() on pid < 0 and close(-1)
-    // is a harmless no-op. Prevents waitpid() on an uninitialized pid during pool teardown.
+    // -1 sentinel: teardown skips waitpid()/close() for a never-forked child.
     this->pid          = -1;
     this->parentWriteFd = -1;
     this->parentReadFd  = -1;
@@ -190,9 +188,7 @@ namespace RcclUnitTesting
     PIPE_READ(this->totalRanks);
     PIPE_READ(this->rankOffset);
     PIPE_READ(this->numGroupCalls);
-    // Read vectors BY VALUE (size + elements) to match TestBed::InitComms; the old
-    // PIPE_READ(vector) copied a 24-byte control block that only dereferenced correctly
-    // in a freshly-forked child (fork-COW). Reused pool workers need real values.
+    // Read by value to match TestBed::InitComms: no fork-COW in a pool worker.
     int numColls = 0;
     PIPE_READ(numColls);
     this->numCollectivesInGroup.resize(numColls);

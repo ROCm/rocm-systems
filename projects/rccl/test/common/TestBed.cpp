@@ -8,10 +8,6 @@
 #include "TestBed.hpp"
 #include <rccl/rccl.h>
 
-// Writes val by raw bytes, so val must be self-contained (POD / trivially copyable): a pointer
-// or std::vector control block would be meaningless in a reused pool worker. Serialize any
-// variable-length field by value (size + elements) instead - see the numStreamsPerGroup handling
-// in InitComms and the static_assert on OptionalColArgs in CollectiveArgs.hpp.
 #define PIPE_WRITE(childId, val)                                        \
   ASSERT_EQ(write(childList[childId]->parentWriteFd, &val, sizeof(val)), sizeof(val))
 
@@ -57,9 +53,8 @@ namespace RcclUnitTesting
     numActiveChildren(0),
     numActiveRanks(0)
   {
-    // Writing to a pipe whose read end has closed (a pool worker died) would otherwise raise
-    // SIGPIPE and terminate the parent. Ignore it so such a write fails with EPIPE and we can
-    // surface a diagnosable error instead of an abrupt death. Idempotent across TestBeds.
+    // Ignore SIGPIPE so a write to a dead pool worker fails with EPIPE instead
+    // of killing the parent.
     signal(SIGPIPE, SIG_IGN);
 
     // Collect the number of GPUs
@@ -101,41 +96,24 @@ namespace RcclUnitTesting
       }
     }
 
-    // A prior config must have been torn down (DestroyComms) before this call. In correct
-    // flow childList is always empty here (DestroyComms clears it on both the pool-reuse and
-    // fork-fresh paths); a non-empty childList means DestroyComms was skipped. Guard both
-    // paths here (the pool-reuse branch below would otherwise silently overwrite childList).
+    // Guards both paths: the pool-reuse branch below would silently overwrite
+    // a non-empty childList.
     if (childList.size() > 0)
     {
       FAIL() << "DestroyComms must be called prior to subsequent call to InitComms";
     }
 
-    // ---- Communicator process pool (UT_COMM_POOL): reuse persistent workers ----
-    // The 99MB -O0 debug librccl loads its GPU device-code object on a process's first
-    // GPU use (~15-30s); it then stays resident, so a second ncclCommInitRank in the same
-    // process is ~0.15s. Reusing workers across configs pays that load once per worker
-    // instead of once per config. Worker d is pinned to device d; a config child maps to
-    // the pool worker owning its representative device (MP: child j -> device-j worker;
-    // SP: the single child -> device-0 worker, which accumulates the other contexts).
+    // Comm pool (UT_COMM_POOL): worker d is pinned to device d and keeps its
+    // device-code object resident, so reuse skips the ~15-30s load per config.
     this->configUsedPool = false;
     if (this->poolMode)
     {
-      // Lazily fork the persistent pool once (one worker per device).
-      // INVARIANT: each worker's environment is snapshotted at this fork and RCCL's NCCL_PARAM
-      // system caches env in per-process statics on first read. A pooled worker therefore does
-      // NOT observe setenv() the parent performs later. A test that changes env between configs
-      // must call Finalize() (the pool-reset boundary) before the next InitComms so the pool is
-      // re-forked with the new env; otherwise the reused workers silently run under stale env.
+      // Each worker snapshots env at fork and NCCL_PARAM caches it; a test that
+      // changes env must call Finalize() to re-fork the pool.
       if (this->poolChildren.empty())
       {
-        // Size the pool to the devices that actually exist. numDevicesAvailable comes from
-        // UT_MAX_GPUS, which is an unclamped override; clamp it to the detected device count.
-        //
-        // CRITICAL: the parent test process must NEVER make a HIP call before forking children.
-        // HIP/HSA runtime state does not survive fork(), so a HIP-initialized parent yields pool
-        // workers that SEGV in libhsa-runtime on their first GPU use. The codebase enforces this
-        // (EnvVars runs every hipGetDeviceCount inside a forked probe). Use the already-computed,
-        // HIP-clean detected count here -- do NOT call hipGetDeviceCount in the parent.
+        // CRITICAL: no HIP call in the parent before fork -- HIP state does not
+        // survive fork() and workers SEGV. Use ev.GetNumDetectedGpus() instead.
         int poolSize = this->numDevicesAvailable;
         int const detectedGpus = ev.GetNumDetectedGpus();
         if (detectedGpus > 0 && detectedGpus < poolSize)
@@ -148,9 +126,8 @@ namespace RcclUnitTesting
           this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
           if (this->poolChildren[d]->InitPipes() != TEST_SUCCESS)
           {
-            // Reap whatever was already forked and fail the test: a half-built pool leaves
-            // childList empty, and TEST_ERROR alone would not register a gtest failure, so the
-            // sweep would march on to SetCollectiveArgs and index an empty childList -> SEGV.
+            // Reap the half-built pool; FAIL() (not TEST_ERROR) so the sweep
+            // stops instead of indexing an empty childList -> SEGV.
             TeardownPool();
             FAIL() << "Unable to create pipes to pool child process " << d;
           }
@@ -169,13 +146,8 @@ namespace RcclUnitTesting
           close(this->poolChildren[d]->childWriteFd);
           close(this->poolChildren[d]->childReadFd);
         }
-        // NOTE: workers are NOT pre-warmed. Each worker loads its device-code object lazily on
-        // its first real InitComms, then keeps it resident for reuse across configs. An earlier
-        // concurrent pre-warm (a throwaway ncclCommInitAll per worker at startup) was removed:
-        // under the test runner's --jobs N parallelism it made every test binary storm
-        // ncclCommInitAll across all GPUs at once, which failed intermittently with code 1. The
-        // reuse speedup does not depend on pre-warming; the runner's own parallelism overlaps
-        // the first-touch loads across binaries.
+        // Do NOT pre-warm workers: under the runner's --jobs N it storms
+        // ncclCommInitAll across all GPUs and fails intermittently.
       }
 
       // Map this config's children onto distinct pool workers by representative device.
@@ -282,10 +254,7 @@ namespace RcclUnitTesting
       // Send the total number of group calls for this child process
       PIPE_WRITE(childId, numGroupCalls);
 
-      // Send the number of collectives to be run per group call.
-      // Serialize the vector BY VALUE (size + elements), not the 24-byte control block:
-      // the old PIPE_WRITE(vector) shipped heap pointers that were only valid in the child
-      // via fork-time COW, which breaks for reused pool workers (stale COW snapshot).
+      // Serialize by value: a vector's heap pointer is stale in a pool worker.
       int const numColls = (int)numCollectivesInGroup.size();
       PIPE_WRITE(childId, numColls);
       for (int i = 0; i < numColls; ++i)
