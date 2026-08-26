@@ -30,6 +30,9 @@ THE SOFTWARE.
 #include <sstream>
 #include <string.h>
 #include <map>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "../api/rocdecode/rocdecode.h"
 #include <hip/hip_runtime.h>
 #include "vaapi/vaapi_videodecoder.h"
@@ -42,6 +45,9 @@ struct HipInteropDeviceMem {
     uint32_t offset[3]; // Offset of each plane
     uint32_t pitch[3]; // Pitch of each plane
     uint32_t num_layers; // Number of layers making up the surface
+#ifdef _WIN32
+    HANDLE nt_handle; // NT handle from vaExportSurfaceHandle; must CloseHandle after HIP import
+#endif
 };
 
 class RocDecoder {
