@@ -206,6 +206,215 @@ def test_unset_service_options_do_not_conflict():
     )
 
 
+def test_pc_sampling_env_set_to_zero_still_conflicts():
+    """The gate is presence, not truthiness.
+
+    rocprofv3 opens the PC sampling beta on the variable being set at all, so a user who exported
+    it as 0 still gets the service. If this check tested truthiness instead, that user would be
+    allowed into a replay run that silently collects N times the PC samples they asked for.
+    """
+    assert service_conflicts(environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "0"}) == [
+        "PC sampling"
+    ]
+
+
+def test_pc_sampling_env_set_to_empty_still_conflicts():
+    assert service_conflicts(environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": ""}) == [
+        "PC sampling"
+    ]
+
+
+def test_pc_sampling_flag_and_env_are_reported_once():
+    # Both routes reach the same service; naming it twice would read like two separate problems.
+    assert service_conflicts(
+        pc_sampling_beta_enabled=True,
+        environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1"},
+    ) == ["PC sampling"]
+
+
+def test_unrelated_environment_does_not_conflict():
+    assert (
+        service_conflicts(
+            environ={"ROCPROFILER_SOMETHING_ELSE": "1", "PATH": "/usr/bin"},
+            pmc=["SQ_WAVES"],
+        )
+        == []
+    )
+
+
+def test_empty_spm_list_does_not_conflict():
+    # An empty list means the option was not given a value; only a real request should conflict.
+    assert service_conflicts(spm=[]) == []
+
+
+def test_conflicts_are_reported_in_a_stable_order():
+    """The message joins these with " or ", so a varying order makes the same mistake produce
+    different text on different runs and defeats matching in tests and docs."""
+    for _ in range(5):
+        assert service_conflicts(
+            spm=["SQ_WAVES"], advanced_thread_trace=True, pc_sampling_beta_enabled=True
+        ) == ["--att", "PC sampling", "--spm"]
+
+
+def test_missing_attributes_are_treated_as_unset():
+    """Not every caller builds a fully populated namespace.
+
+    The helper reads options with getattr defaults, so an args object that never had these
+    attributes must behave like one where they are off, rather than raising.
+    """
+    assert service_conflicts() == []
+
+
+def test_att_alone_does_not_drag_in_other_services():
+    assert service_conflicts(advanced_thread_trace=True, spm=None) == ["--att"]
+
+
+def test_counter_collection_is_never_itself_a_conflict():
+    """Counter collection is the one pass-aware service, so no shape of it may be rejected --
+    including the list-of-lists form that replay itself builds."""
+    assert service_conflicts(pmc=[["SQ_WAVES"], ["GRBM_COUNT"]]) == []
+    assert service_conflicts(pmc_groups=[["SQ_WAVES"], ["GRBM_COUNT"]]) == []
+
+
+# ---------------------------------------------------------------------------
+# Input-file collapse: further edge cases
+#
+# Replay merges every job's counter groups into one application run, so the jobs must agree on
+# everything except pmc. These cover the shapes real input files take.
+# ---------------------------------------------------------------------------
+
+
+def test_three_jobs_agreeing_collapse_cleanly():
+    assert (
+        conflicts(
+            {"pmc": ["SQ_WAVES"], "output_format": "csv"},
+            {"pmc": ["GRBM_COUNT"], "output_format": "csv"},
+            {"pmc": ["SQ_INSTS"], "output_format": "csv"},
+        )
+        == []
+    )
+
+
+def test_conflict_between_the_first_and_last_job_is_found():
+    # A disagreement must be found wherever it is, not only between adjacent jobs.
+    assert "output_format" in conflicts(
+        {"pmc": ["SQ_WAVES"], "output_format": "csv"},
+        {"pmc": ["GRBM_COUNT"], "output_format": "csv"},
+        {"pmc": ["SQ_INSTS"], "output_format": "json"},
+    )
+
+
+def test_kernel_filters_that_differ_are_reported():
+    """Silently keeping the first job's filter would profile a different set of kernels than the
+    input file asked for."""
+    assert "kernel_include_regex" in conflicts(
+        {"pmc": ["SQ_WAVES"], "kernel_include_regex": "gemm.*"},
+        {"pmc": ["GRBM_COUNT"], "kernel_include_regex": "conv.*"},
+    )
+
+
+def test_matching_kernel_filters_are_not_reported():
+    assert (
+        conflicts(
+            {"pmc": ["SQ_WAVES"], "kernel_include_regex": "gemm.*"},
+            {"pmc": ["GRBM_COUNT"], "kernel_include_regex": "gemm.*"},
+        )
+        == []
+    )
+
+
+def test_lists_differing_only_in_order_are_a_conflict():
+    """Order is meaningful in the settings this compares (ranges, filters), so two orderings are
+    not interchangeable and picking one would change what the run does."""
+    assert "kernel_iteration_range" in conflicts(
+        {"pmc": ["SQ_WAVES"], "kernel_iteration_range": [1, 2]},
+        {"pmc": ["GRBM_COUNT"], "kernel_iteration_range": [2, 1]},
+    )
+
+
+def test_nested_list_values_compare_by_value():
+    assert (
+        conflicts(
+            {"pmc": ["SQ_WAVES"], "extra": [["a"], ["b"]]},
+            {"pmc": ["GRBM_COUNT"], "extra": [["a"], ["b"]]},
+        )
+        == []
+    )
+
+
+def test_zero_and_false_are_not_treated_as_unset():
+    """Only an explicit None means unset. A job that asked for 0 disagrees with one that asked
+    for 1, and treating 0 as absent would let that difference through."""
+    assert "some_count" in conflicts(
+        {"pmc": ["SQ_WAVES"], "some_count": 0},
+        {"pmc": ["GRBM_COUNT"], "some_count": 1},
+    )
+
+
+def test_a_setting_equal_to_none_in_both_jobs_is_not_a_conflict():
+    assert (
+        conflicts(
+            {"pmc": ["SQ_WAVES"], "output_format": None},
+            {"pmc": ["GRBM_COUNT"], "output_format": None},
+        )
+        == []
+    )
+
+
+def test_ignoring_more_than_one_setting_is_honored():
+    assert (
+        conflicts(
+            {"pmc": ["SQ_WAVES"], "output_format": "csv", "d": "one"},
+            {"pmc": ["GRBM_COUNT"], "output_format": "json", "d": "two"},
+            ignore=("pmc", "output_format", "d"),
+        )
+        == []
+    )
+
+
+def test_every_differing_setting_is_named_not_just_the_first():
+    """A user fixing an input file should learn about all of the disagreements at once."""
+    reported = conflicts(
+        {"pmc": ["SQ_WAVES"], "output_format": "csv", "output_directory": "a"},
+        {"pmc": ["GRBM_COUNT"], "output_format": "json", "output_directory": "b"},
+    )
+    assert "output_format" in reported
+    assert "output_directory" in reported
+
+
+def test_pmc_is_ignored_by_default_because_replay_merges_it():
+    """pmc is the one setting jobs are supposed to differ in: replay merges the groups and derives
+    its pass count from them. Reporting it would reject every valid multi-group input file.
+    """
+    assert (
+        conflicts(
+            {"pmc": ["SQ_WAVES"]},
+            {"pmc": ["GRBM_COUNT"]},
+        )
+        == []
+    )
+
+
+def test_pmc_becomes_a_conflict_when_not_ignored():
+    # Confirms the previous test passes because pmc is ignored, not because it compares equal.
+    assert "pmc" in conflicts(
+        {"pmc": ["SQ_WAVES"]},
+        {"pmc": ["GRBM_COUNT"]},
+        ignore=(),
+    )
+
+
+def test_many_jobs_are_handled():
+    """Input files with one job per counter group are the normal way to reach replay, and a
+    realistic counter list runs to dozens of groups."""
+    agreeing = [{"pmc": [f"COUNTER_{i}"], "output_format": "csv"} for i in range(32)]
+    assert conflicts(*agreeing) == []
+
+    disagreeing = list(agreeing)
+    disagreeing[-1] = {"pmc": ["COUNTER_31"], "output_format": "json"}
+    assert "output_format" in conflicts(*disagreeing)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
