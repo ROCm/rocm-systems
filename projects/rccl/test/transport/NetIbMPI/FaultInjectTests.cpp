@@ -2093,10 +2093,16 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
             mergedDev, MPIEnvironment::nThreads,
             [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
                 ThreadResult result;
-                // One message, not a run of them: with more, the two sides have been seen
-                // to drift a message apart. PostRecoveryPingPongHoldsSync carries that
-                // finding; one message here still proves traffic resumes.
-                static constexpr int kThreadedPostRecoveryMsgs = 1;
+                // Two messages, and the two do different jobs. The recovery thread
+                // publishes Recovered on its own, but activeQps is not restored until
+                // IbCastResiliencyProgress runs, and that runs only from a request poll
+                // (p2p.cc IbCastTest) -- ncclIbCastGetResiliencyState below merely reads
+                // the state and drives nothing. So message 0 is a progress kick, still
+                // posted on the failover queue pairs, and message 1 is the one that
+                // actually crosses the restored ones. Not more than two: beyond that the
+                // two sides have been seen to drift a message apart, which
+                // PostRecoveryPingPongHoldsSync carries as its own finding.
+                static constexpr int kThreadedPostRecoveryMsgs = 2;
                 static constexpr int kRecoveryPollIterations = 6000;  // 6000 * 10ms = 60s
                 // The receiver has no way to learn when the sender leaves the
                 // recovery poll: the serial body uses an MPI handshake, which a
@@ -2172,6 +2178,9 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
                         // it on its own would call the communicator recovered on a run where
                         // the injected failure was never observed -- and the traffic below
                         // would then prove nothing. recoveryCount separates the two.
+                        // Recovered means the recovery thread is done, not that the queue
+                        // pairs are back in rotation; the kick message below is what
+                        // finishes that, and the check after it is what confirms it.
                         if (lastState == kDevStateRecovered
                             || (lastState == kDevStateOk && recoveries > 0)) {
                             recovered = true;
@@ -2205,8 +2214,10 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
                         // in isolation, with both ranks bounded at their own budgets waiting for
                         // each other, so the device state at the moment of failure is what the
                         // next occurrence needs to be diagnosable.
-                        result.msg = "post-recovery traffic, message " + std::to_string(i) + ": "
-                                     + result.msg;
+                        result.msg = std::string("post-recovery traffic, ")
+                                     + ((i == 0) ? "progress kick" : "transfer on the restored "
+                                                                     "queue pairs")
+                                     + ": " + result.msg;
                         if (rank == 1) {
                             struct ncclIbCastResiliencyState state = {};
                             if (ncclIbCastGetResiliencyState(pair.sendComm, &state)
@@ -2219,6 +2230,30 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
                         // buffer and its registration outlive this worker.
                         return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
                                                                  &bufferGuard);
+                    }
+                    if (i == 0 && rank == 1) {
+                        // Polling message 0 to completion is what ran
+                        // IbCastResiliencyProgress, which restores activeQps and moves
+                        // device 0 from Recovered to Ok while counting the recovery. If
+                        // that has not happened by now, message 1 would go out on the
+                        // failover queue pairs as well and the test would report a
+                        // restored connection it never touched.
+                        struct ncclIbCastResiliencyState state = {};
+                        if (ncclIbCastGetResiliencyState(pair.sendComm, &state) != ncclSuccess) {
+                            result.ok = false;
+                            result.msg = "ncclIbCastGetResiliencyState failed after the "
+                                         "post-recovery progress kick";
+                            return result;
+                        }
+                        if (state.devState[0] != kDevStateOk || state.recoveryCount[0] < 1) {
+                            result.ok = false;
+                            result.msg = "recovery was not finalized by the first post-recovery "
+                                         "message, so the queue pairs were never restored: "
+                                         "devState[0]=" + std::to_string(state.devState[0])
+                                         + " recoveryCount[0]="
+                                         + std::to_string(state.recoveryCount[0]);
+                            return result;
+                        }
                     }
                 }
 
