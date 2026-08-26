@@ -398,14 +398,16 @@ __global__ void GinAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, 
 }
 
 template <typename T>
-__global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time) {
+__global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time, gin_devtime::GridBarrierState* gridSync) {
   for (int i = 0; i < skip + loop; i++) {
     if (i == skip) {
+      if (gridSync) gin_devtime::gridIterJoin(gridSync, gridDim.x);
       __syncthreads();
       if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
     }
     hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
   }
+  if (gridSync) gin_devtime::gridIterJoin(gridSync, gridDim.x);
   __syncthreads();
   if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
@@ -520,15 +522,41 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
 
   // Shared scaffold: allocates per-CTA start/end stamps, launches the timed kernel,
   // reduces min(start)..max(end) over CTAs and MPI-MAX across ranks -> per-iter us.
+  std::vector<gin_devtime::GridBarrierState*> d_gridSync(args->nGpus, nullptr);
+  if (hybrid) {
+    for (int i = 0; i < args->nGpus; i++) {
+      CUDACHECK(cudaSetDevice(args->gpus[i]));
+      CUDACHECK(cudaMalloc(&d_gridSync[i], sizeof(gin_devtime::GridBarrierState)));
+      CUDACHECK(cudaMemset(d_gridSync[i], 0, sizeof(gin_devtime::GridBarrierState)));
+    }
+  }
+
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
         ncclDevComm* devComm = args->devComms + i;
         ncclWindow_t sendwin = (ncclWindow_t)args->sendRegHandles[i];
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
-        kernel<<<gridCtas, 512, 0, args->streams[i]>>>(sendwin, 0, recvwin, 0, count, root, *devComm, loop, skip, d_start, d_end);
+        if (hybrid) {
+          auto hybKernel = SPECIALIZE_KERNEL(HybridAlltoAllTimedKernel, type, op);
+          hybKernel<<<gridCtas, 512, 0, args->streams[i]>>>(
+              sendwin, 0, recvwin, 0, count, root, *devComm, loop, skip, d_start, d_end,
+              d_gridSync[i]);
+        } else {
+          kernel<<<gridCtas, 512, 0, args->streams[i]>>>(
+              sendwin, 0, recvwin, 0, count, root, *devComm, loop, skip, d_start, d_end);
+        }
       },
       &devUs));
+
+  if (hybrid) {
+    for (int i = 0; i < args->nGpus; i++) {
+      if (d_gridSync[i]) {
+        CUDACHECK(cudaSetDevice(args->gpus[i]));
+        CUDACHECK(cudaFree(d_gridSync[i]));
+      }
+    }
+  }
 
   int nRanksGlobal = args->nProcs * args->nThreads * args->nGpus;
 
