@@ -26,7 +26,7 @@
 #include "recorder.h"
 
 namespace {
-// A nullopt entry means "absent": it masks whatever the real environment holds. Unmapped names fall through.
+// A nullopt entry means "absent". Unmapped names read as unset via micro_getenv, real via the getenv interposer.
 std::unordered_map<std::string, std::optional<std::string>>& microEnvMap() {
   static std::unordered_map<std::string, std::optional<std::string>> m;
   return m;
@@ -150,8 +150,11 @@ void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
 bool g_validHsaScratch = true;
 int g_firmwareVersion = 0;
-bool validHsaScratchEnvSetting(const char* /*hsaScratchEnv*/, int /*hipRuntimeVersion*/,
+// Records the argument so a test can observe that checkHsaEnvSetting actually read the environment.
+const char* g_lastHsaScratchEnv = nullptr;
+bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int /*hipRuntimeVersion*/,
                                int /*firmwareVersion*/, const char* /*gcnArchName*/) {
+  g_lastHsaScratchEnv = hsaScratchEnv;
   return g_validHsaScratch;
 }
 int getFirmwareVersion() { return g_firmwareVersion; }
@@ -263,6 +266,7 @@ void ResetInitFakes() {
   g_ginHasError = false;
   g_bootstrapNetInitFail = false;
   g_validHsaScratch = true;
+  g_lastHsaScratchEnv = nullptr;
   g_firmwareVersion = 0;
   g_gdrSupportValue = 0;
   g_gdrSupportCalls = 0;

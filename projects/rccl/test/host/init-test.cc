@@ -1224,7 +1224,10 @@ TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
 }
 
 TEST_F(InitMicrotest, CheckHsaEnvSetting_AllSucceed_ReturnsSuccess) {
-  EXPECT_EQ(ncclSuccess, checkHsaEnvSetting());  // defaults: gfx942, valid
+  ncclResult_t res = ncclUnhandledCudaError;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = checkHsaEnvSetting(); });
+  EXPECT_EQ(ncclSuccess, res);  // defaults: gfx942, valid
+  EXPECT_FALSE(LogHas(log, "HSA_NO_SCRATCH_RECLAIM=1 must be set")) << "actual log:\n" << log;
 }
 TEST_F(InitMicrotest, CheckHsaEnvSetting_RuntimeVersionFault_ReturnsUnhandledCudaError) {
   g_hipRuntimeGetVersion = [](int*) { return hipErrorInvalidValue; };
@@ -1239,8 +1242,14 @@ TEST_F(InitMicrotest, CheckHsaEnvSetting_PropertiesFault_ReturnsUnhandledCudaErr
   EXPECT_EQ(ncclUnhandledCudaError, checkHsaEnvSetting());
 }
 TEST_F(InitMicrotest, CheckHsaEnvSetting_InvalidSetting_WarnsButSucceeds) {
-  g_validHsaScratch = false;  // validator false -> WARN, still ncclSuccess
-  EXPECT_EQ(ncclSuccess, checkHsaEnvSetting());
+  SetMicroEnv("HSA_NO_SCRATCH_RECLAIM", "0");
+  g_validHsaScratch = false;
+  ncclResult_t res = ncclUnhandledCudaError;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = checkHsaEnvSetting(); });
+  EXPECT_EQ(ncclSuccess, res);  // the WARN arm still succeeds, so the log is the only observable
+  EXPECT_TRUE(LogHas(log, "HSA_NO_SCRATCH_RECLAIM=1 must be set")) << "actual log:\n" << log;
+  ASSERT_NE(nullptr, g_lastHsaScratchEnv) << "checkHsaEnvSetting must read the environment";
+  EXPECT_STREQ("0", g_lastHsaScratchEnv);
 }
 
 // The real IsArchMatch oracle reads comm->topo->nodes[GPU].nodes[0].gpu.gcn.
