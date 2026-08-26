@@ -537,22 +537,15 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     return result;
   const std::set<OrderedOrdinarySyncSiteKey> ordered_sync_sites =
       ordered_ordinary_sync_site_keys(result);
-  if (!initialize_moi_access_observation_plan(
-          code_object_bytes, result.program_inventory, effective_options.flat_provenance_mode,
-          effective_options, arch, ordered_sync_sites, result)) {
+  if (!initialize_moi_access_observation_plan(result.program_inventory,
+                                              effective_options.flat_provenance_mode,
+                                              effective_options, ordered_sync_sites, result)) {
     return result;
   }
-  append_moi_candidates(result.program_inventory, effective_options.flat_provenance_mode, arch,
-                        ordered_sync_sites, result);
-  if (!effective_options.test_kernel_name_filter.empty()) {
-    std::erase_if(result.moi_candidates, [&](const ConSanMoiCandidate &candidate) {
-      return candidate.container_name.find(effective_options.test_kernel_name_filter) ==
-             std::string::npos;
-    });
-  }
-  if (!canonicalize_moi_candidates_by_physical_site(result))
+  append_moi_candidates(result.program_inventory, result.observation_plan,
+                        effective_options.flat_provenance_mode, arch, ordered_sync_sites, result);
+  if (!result.errors.empty())
     return result;
-  retain_admitted_moi_access_candidates(result.observation_plan, result.moi_candidates);
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     for (ConSanMoiCandidate &candidate : result.moi_candidates) {
       if (candidate.text_offset < candidate.container_entry_text_offset ||

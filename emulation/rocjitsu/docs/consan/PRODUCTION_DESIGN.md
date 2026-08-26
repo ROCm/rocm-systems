@@ -2467,6 +2467,11 @@ formerly duplicated `ConSanResult` members and their independent mutation
 paths have been deleted. The same cutover subsequently deleted the duplicated
 input byte count and fingerprint; retries and runtime reports now consume the
 one `ConSanCodeObjectId` shared by `TransformResult` and `ProgramInventory`.
+MOI access lowering now likewise receives candidates only by projecting
+admitted access intents back to their normalized operand facts. The duplicate
+legacy support classifier, physical-alias canonicalizer, and post-hoc intent
+filter have been deleted, leaving one semantic admission decision across
+Record/Replay, Sampled, and Inline Shadow.
 Parser construction and decoded-container population remain inside the legacy
 boundary and are the next inventory responsibility to extract.
 - **Completed final gate:** All 1,502 selected ConSan host tests ran: 1,500

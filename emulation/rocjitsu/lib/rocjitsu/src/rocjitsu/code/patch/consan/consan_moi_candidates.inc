@@ -301,23 +301,6 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
 [[nodiscard]] std::optional<uint32_t>
 two_address_native_lds_offset_scale(std::string_view mnemonic);
 
-[[nodiscard]] bool is_moi_native_lds_candidate(const ConSanLdsSite &site, rj_code_arch_t arch) {
-  const bool supported_atomic =
-      site.kind == ConSanLdsAccessKind::Atomic &&
-      consan_arch_supports_capability_form(arch, ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
-      ((arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-        equals_any(site.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
-                                   "ds_cmpstore_rtn_b32"})) ||
-       ((consan_uses_gfx9_cdna_encoding(arch)) &&
-        equals_any(site.mnemonic,
-                   {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64", "ds_cmpst_rtn_b32"})));
-  if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write &&
-      !supported_atomic)
-    return false;
-  return site.direct_to_lds || is_single_range_native_lds_mnemonic(site.mnemonic, arch) ||
-         two_address_native_lds_offset_scale(site.mnemonic).has_value();
-}
-
 struct SkippedMoiLdsCounts {
   uint32_t unsupported_kind = 0;
   uint32_t unsupported_mnemonic = 0;
@@ -325,7 +308,8 @@ struct SkippedMoiLdsCounts {
   [[nodiscard]] bool any() const { return unsupported_kind != 0 || unsupported_mnemonic != 0; }
 };
 
-void count_skipped_moi_lds_candidate(const ConSanLdsSite &site, SkippedMoiLdsCounts &counts) {
+void count_skipped_moi_lds_candidate(const ConSanAccessInventorySite &site,
+                                     SkippedMoiLdsCounts &counts) {
   if (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write) {
     ++counts.unsupported_kind;
     return;
@@ -342,15 +326,6 @@ void warn_skipped_moi_lds_candidates(std::string_view container_name, bool in_ke
       std::string(container_name) +
       ": unsupported_kind=" + std::to_string(counts.unsupported_kind) +
       " unsupported_mnemonic=" + std::to_string(counts.unsupported_mnemonic));
-}
-
-[[nodiscard]] bool is_moi_flat_candidate(const ConSanFlatSite &site,
-                                         ConSanFlatProvenanceMode mode) {
-  if (site.kind == ConSanLdsAccessKind::Other)
-    return false;
-  return site.address_space_hint == ConSanFlatAddressSpaceHint::Group ||
-         (mode == ConSanFlatProvenanceMode::Likely &&
-          site.address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup);
 }
 
 [[nodiscard]] bool is_supported_moi_flat_access_mnemonic(std::string_view mnemonic) {
@@ -425,13 +400,14 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
       OrderedOrdinarySyncSiteKey{in_kernel, std::string(container_name), text_offset});
 }
 
-void count_skipped_moi_flat_candidate(const ConSanFlatSite &site, SkippedMoiFlatCounts &counts) {
+void count_skipped_moi_flat_candidate(const ConSanAccessInventorySite &site,
+                                      SkippedMoiFlatCounts &counts) {
   if (site.kind == ConSanLdsAccessKind::Other) {
     ++counts.other_kind;
     return;
   }
 
-  switch (site.address_space_hint) {
+  switch (site.flat_address_space_hint) {
   case ConSanFlatAddressSpaceHint::Unknown:
     ++counts.unknown;
     return;
@@ -489,7 +465,10 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.addr_vgpr = access.operands.address_vgpr;
   candidate.data_vgpr = access.operands.data_vgpr;
   candidate.second_data_vgpr = access.operands.second_data_vgpr;
-  candidate.kernel_descriptor_file_offset = access.container.kernel_descriptor_file_offset;
+  if (access.execution_owner_descriptor_file_offsets.size() == 1u) {
+    candidate.kernel_descriptor_file_offset =
+        access.execution_owner_descriptor_file_offsets.front();
+  }
   candidate.uses_gfx1250_cluster_workgroup_id = access.container.uses_gfx1250_cluster_workgroup_id;
   candidate.raw_op = access.operands.raw_op;
   candidate.raw_saddr = access.operands.raw_saddr;
@@ -503,101 +482,6 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.raw_th = access.operands.raw_th;
   candidate.mnemonic = access.mnemonic;
   return candidate;
-}
-
-[[nodiscard]] ConSanLdsSite legacy_lds_site(const ConSanAccessInventorySite &access) {
-  ConSanLdsSite site;
-  site.kind = access.kind;
-  site.supported_mvp = access.supported_mvp;
-  site.direct_to_lds = access.origin == ConSanAccessOrigin::DirectToLds;
-  site.text_offset = access.physical_id.original_text_offset;
-  site.file_offset = access.file_offset;
-  site.size = access.instruction_size;
-  site.width_bits = access.decoded_width_bits;
-  site.dst_vgpr = access.operands.destination_vgpr;
-  site.dst_accvgpr = access.operands.destination_accvgpr;
-  site.addr_vgpr = access.operands.address_vgpr;
-  site.data_vgpr = access.operands.data_vgpr;
-  site.second_data_vgpr = access.operands.second_data_vgpr;
-  site.mnemonic = access.mnemonic;
-  site.owner_descriptor_file_offsets = access.execution_owner_descriptor_file_offsets;
-  return site;
-}
-
-[[nodiscard]] ConSanFlatSite legacy_flat_site(const ConSanAccessInventorySite &access) {
-  ConSanFlatSite site;
-  site.kind = access.kind;
-  site.text_offset = access.physical_id.original_text_offset;
-  site.file_offset = access.file_offset;
-  site.size = access.instruction_size;
-  site.width_bits = access.decoded_width_bits;
-  site.dst_vgpr = access.operands.destination_vgpr;
-  site.addr_vgpr = access.operands.address_vgpr;
-  site.data_vgpr = access.operands.data_vgpr;
-  site.raw_op = access.operands.raw_op;
-  site.raw_saddr = access.operands.raw_saddr;
-  site.raw_scale_offset = access.operands.raw_scale_offset;
-  site.raw_vaddr = access.operands.raw_vaddr;
-  site.raw_vsrc = access.operands.raw_vsrc;
-  site.raw_vdst = access.operands.raw_vdst;
-  site.raw_ioffset = access.operands.raw_ioffset;
-  site.raw_segment = access.operands.raw_segment;
-  site.raw_scope = access.operands.raw_scope;
-  site.raw_th = access.operands.raw_th;
-  site.address_space_hint = access.flat_address_space_hint;
-  site.owner_descriptor_file_offsets = access.execution_owner_descriptor_file_offsets;
-  site.mnemonic = access.mnemonic;
-  return site;
-}
-
-[[nodiscard]] ConSanSiteDispositionReason
-classify_moi_access_candidate_support(std::span<const uint8_t> bytes,
-                                      const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
-  const bool supported_atomic =
-      candidate.kind == ConSanLdsAccessKind::Atomic &&
-      equals_any(candidate.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
-                                      "ds_cmpstore_rtn_b32", "ds_cmpst_rtn_b32"});
-  if (candidate.kind != ConSanLdsAccessKind::Read && candidate.kind != ConSanLdsAccessKind::Write &&
-      !supported_atomic)
-    return ConSanSiteDispositionReason::NonAccessInstruction;
-  if (candidate.size == 0 || candidate.size % sizeof(uint32_t) != 0)
-    return ConSanSiteDispositionReason::InvalidInstructionSize;
-  if (candidate.file_offset > bytes.size() || candidate.size > bytes.size() - candidate.file_offset)
-    return ConSanSiteDispositionReason::InstructionOutOfBounds;
-  if (candidate.width_bits == 0 || candidate.width_bits % 8u != 0)
-    return ConSanSiteDispositionReason::InvalidAccessWidth;
-  if (!candidate.direct_to_lds && !candidate.addr_vgpr)
-    return ConSanSiteDispositionReason::MissingAddressOperand;
-
-  if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
-    return candidate.direct_to_lds ||
-                   is_single_range_native_lds_mnemonic(candidate.mnemonic, arch) ||
-                   two_address_native_lds_offset_scale(candidate.mnemonic).has_value()
-               ? ConSanSiteDispositionReason::None
-               : ConSanSiteDispositionReason::UnsupportedMnemonic;
-  }
-
-  if (candidate.source != ConSanMoiCandidateSource::FlatGroup &&
-      candidate.source != ConSanMoiCandidateSource::FlatMaybeGroup)
-    return ConSanSiteDispositionReason::NonGroupAddressSpace;
-  const bool rdna4_encoding = candidate.size == 3u * sizeof(uint32_t);
-  const bool cdna4_encoding =
-      candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
-  if (!rdna4_encoding && !cdna4_encoding)
-    return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
-  if (!candidate.raw_ioffset)
-    return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
-  if (*candidate.raw_ioffset != 0 && !is_rdna4_family_arch(arch))
-    return ConSanSiteDispositionReason::NonzeroFlatOffset;
-  if (is_rdna4_family_arch(arch) && (!candidate.raw_saddr || !candidate.raw_scale_offset))
-    return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
-  const bool scalar_vector_address = is_rdna4_family_arch(arch) && candidate.raw_saddr &&
-                                     !is_vector_flat_no_saddr(*candidate.raw_saddr, arch);
-  if (*candidate.addr_vgpr >= 255 && !scalar_vector_address)
-    return ConSanSiteDispositionReason::ReservedFlatAddressRegister;
-  if (!is_supported_moi_flat_access_mnemonic(candidate.mnemonic))
-    return ConSanSiteDispositionReason::UnsupportedMnemonic;
-  return ConSanSiteDispositionReason::None;
 }
 
 [[nodiscard]] ConSanSiteDispositionReason
@@ -640,13 +524,31 @@ legacy_access_disposition_reason(ConSanAccessPolicyReason reason) {
   return ConSanSiteDispositionReason::UnsupportedMnemonic;
 }
 
-/// Discover current lowering candidates exclusively from normalized program
-/// inventory. Warning counters are retained as compatibility diagnostics, but
-/// no candidate is rediscovered by traversing the legacy container vectors.
-void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenanceMode mode,
-                           rj_code_arch_t arch,
+/// Project admitted access intents into the temporary operand shape consumed
+/// by current lowerers. Policy is the sole candidate selector; this adapter
+/// copies the matching normalized facts and cannot reclassify a site.
+void append_moi_candidates(const ProgramInventory &inventory, const ConSanObservationPlan &plan,
+                           ConSanFlatProvenanceMode mode, rj_code_arch_t arch,
                            const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
                            ConSanResult &result) {
+  std::unordered_set<uint64_t> admitted_offsets;
+  for (const ConSanProbeIntent &intent : plan.probe_intents) {
+    if (intent.kind != ConSanProbeIntentKind::AccessRecord &&
+        intent.kind != ConSanProbeIntentKind::SampledAccess &&
+        intent.kind != ConSanProbeIntentKind::ExactShadowAccess) {
+      continue;
+    }
+    const auto access = std::ranges::find_if(inventory.access_sites(), [&](const auto &candidate) {
+      return candidate.physical_id == intent.physical_site;
+    });
+    if (access == inventory.access_sites().end()) {
+      result.errors.emplace_back("ConSan MOI access intent lost its inventory site");
+      return;
+    }
+    if (admitted_offsets.insert(access->physical_id.original_text_offset).second)
+      result.moi_candidates.push_back(make_moi_candidate(*access));
+  }
+
   /// Compatibility-only warning state for one attributed program container.
   /// It groups the current prototype's per-family skipped-site counters
   /// without becoming part of normalized inventory or engine policy.
@@ -666,11 +568,23 @@ void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenan
     }
 
     if (access.origin != ConSanAccessOrigin::Flat) {
-      const ConSanLdsSite legacy = legacy_lds_site(access);
-      if (is_moi_native_lds_candidate(legacy, arch))
-        result.moi_candidates.push_back(make_moi_candidate(access));
-      else
-        count_skipped_moi_lds_candidate(legacy, state->lds);
+      const bool supported_atomic =
+          access.kind == ConSanLdsAccessKind::Atomic &&
+          consan_arch_supports_capability_form(arch,
+                                               ConSanCapabilityForm::RelaxedLdsAtomicAccess) &&
+          ((arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+            equals_any(access.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
+                                         "ds_cmpstore_rtn_b32"})) ||
+           (consan_uses_gfx9_cdna_encoding(arch) &&
+            equals_any(access.mnemonic, {"ds_add_f32", "ds_add_f64", "ds_add_u32", "ds_add_u64",
+                                         "ds_cmpst_rtn_b32"})));
+      const bool access_kind = access.kind == ConSanLdsAccessKind::Read ||
+                               access.kind == ConSanLdsAccessKind::Write || supported_atomic;
+      const bool supported_shape = access.origin == ConSanAccessOrigin::DirectToLds ||
+                                   is_single_range_native_lds_mnemonic(access.mnemonic, arch) ||
+                                   two_address_native_lds_offset_scale(access.mnemonic).has_value();
+      if (!access_kind || !supported_shape)
+        count_skipped_moi_lds_candidate(access, state->lds);
       continue;
     }
 
@@ -678,14 +592,18 @@ void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenan
     if (is_ordered_ordinary_sync_site(ordered_sync_sites, access.container.name, in_kernel,
                                       access.physical_id.original_text_offset))
       continue;
-    const ConSanFlatSite legacy = legacy_flat_site(access);
-    if (is_moi_flat_candidate(legacy, mode)) {
-      result.moi_candidates.push_back(make_moi_candidate(access));
+    const bool candidate =
+        access.kind != ConSanLdsAccessKind::Other &&
+        (access.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group ||
+         (mode == ConSanFlatProvenanceMode::Likely &&
+          access.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup));
+    if (candidate) {
+      continue;
     } else if (access.flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybeGroup &&
                mode == ConSanFlatProvenanceMode::Strict) {
       ++state->flat.excluded_maybe_group;
     } else {
-      count_skipped_moi_flat_candidate(legacy, state->flat);
+      count_skipped_moi_flat_candidate(access, state->flat);
     }
   }
   for (const ContainerCounts &state : counts) {
@@ -699,8 +617,7 @@ void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenan
 /// coverage ledger, and project one legacy disposition per physical access
 /// for lowerers that have not yet migrated to plan-local intent identifiers.
 [[nodiscard]] bool initialize_moi_access_observation_plan(
-    std::span<const uint8_t> bytes, const ProgramInventory &inventory,
-    ConSanFlatProvenanceMode mode, const ConSanOptions &options, rj_code_arch_t arch,
+    const ProgramInventory &inventory, ConSanFlatProvenanceMode mode, const ConSanOptions &options,
     const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites, ConSanResult &result) {
   std::vector<PhysicalSiteId> synchronization_sites;
   for (const ConSanAccessInventorySite &access : inventory.access_sites()) {
@@ -828,17 +745,6 @@ void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenan
       return false;
     }
     const ConSanSiteDispositionReason reason = legacy_access_disposition_reason(decision.reason);
-    if (access->complete()) {
-      const ConSanSiteDispositionReason legacy_reason =
-          classify_moi_access_candidate_support(bytes, make_moi_candidate(*access), arch);
-      if (legacy_reason != reason) {
-        result.errors.emplace_back(
-            "ConSan MOI access policy disagreed with the legacy support classifier at text "
-            "offset " +
-            std::to_string(access->physical_id.original_text_offset));
-        return false;
-      }
-    }
     ConSanSiteDispositionRecord record;
     record.site_kind = ConSanResourceSiteKind::Access;
     record.disposition = decision.kind == ConSanSiteDecisionKind::Admitted
@@ -858,51 +764,6 @@ void append_moi_candidates(const ProgramInventory &inventory, ConSanFlatProvenan
     result.site_dispositions.push_back(std::move(record));
   }
   return true;
-}
-
-/// Temporary lowering adapter: retain only current candidates requested by
-/// admitted production intents. The remaining candidate structure carries
-/// legacy operands and ownership into resource/placement code.
-void retain_admitted_moi_access_candidates(const ConSanObservationPlan &plan,
-                                           std::vector<ConSanMoiCandidate> &candidates) {
-  std::unordered_set<uint64_t> admitted_offsets;
-  admitted_offsets.reserve(plan.probe_intents.size());
-  for (const ConSanProbeIntent &intent : plan.probe_intents)
-    admitted_offsets.insert(intent.physical_site.original_text_offset);
-  std::erase_if(candidates, [&](const ConSanMoiCandidate &candidate) {
-    return !admitted_offsets.contains(candidate.text_offset);
-  });
-}
-
-[[nodiscard]] bool moi_candidate_semantics_equal(const ConSanMoiCandidate &lhs,
-                                                 const ConSanMoiCandidate &rhs) {
-  return std::tie(lhs.in_kernel, lhs.container_entry_text_offset, lhs.gfx1250_vgpr_msb_mode,
-                  lhs.source, lhs.kind, lhs.direct_to_lds, lhs.flat_address_space_hint,
-                  lhs.text_offset, lhs.file_offset, lhs.size, lhs.width_bits, lhs.dst_vgpr,
-                  lhs.addr_vgpr, lhs.data_vgpr, lhs.second_data_vgpr,
-                  lhs.uses_gfx1250_cluster_workgroup_id, lhs.raw_op, lhs.raw_saddr, lhs.raw_vaddr,
-                  lhs.raw_scale_offset, lhs.raw_vsrc, lhs.raw_vdst, lhs.raw_ioffset,
-                  lhs.raw_segment, lhs.raw_scope, lhs.raw_th, lhs.mnemonic) ==
-         std::tie(rhs.in_kernel, rhs.container_entry_text_offset, rhs.gfx1250_vgpr_msb_mode,
-                  rhs.source, rhs.kind, rhs.direct_to_lds, rhs.flat_address_space_hint,
-                  rhs.text_offset, rhs.file_offset, rhs.size, rhs.width_bits, rhs.dst_vgpr,
-                  rhs.addr_vgpr, rhs.data_vgpr, rhs.second_data_vgpr,
-                  rhs.uses_gfx1250_cluster_workgroup_id, rhs.raw_op, rhs.raw_saddr, rhs.raw_vaddr,
-                  rhs.raw_scale_offset, rhs.raw_vsrc, rhs.raw_vdst, rhs.raw_ioffset,
-                  rhs.raw_segment, rhs.raw_scope, rhs.raw_th, rhs.mnemonic);
-}
-
-[[nodiscard]] bool canonicalize_moi_candidates_by_physical_site(ConSanResult &result) {
-  return consan_detail::canonicalize_physical_site_aliases(
-      result.moi_candidates, result.errors, "ConSan MOI physical site",
-      [](const ConSanMoiCandidate &candidate) { return candidate.file_offset; },
-      [](const ConSanMoiCandidate &candidate) -> std::string_view {
-        return candidate.container_name;
-      },
-      moi_candidate_semantics_equal,
-      // Clearing the single-owner hint makes plan_moi_resource_site derive the
-      // complete owner set from the shared CFG block.
-      consan_detail::invalidate_physical_site_single_owner_hint);
 }
 
 [[nodiscard]] uint32_t count_nop_padding(std::span<const uint8_t> bytes, uint64_t offset,

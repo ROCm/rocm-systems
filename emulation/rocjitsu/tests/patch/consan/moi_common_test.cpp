@@ -2212,6 +2212,31 @@ TEST(ConSanMoi, InventorySkipsUnsupportedNativeLdsSites) {
   EXPECT_TRUE(saw_skipped_lds_warning);
 }
 
+TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
+  const std::vector<uint8_t> bytes = make_rdna4_unsupported_lds_code_object();
+  for (ConSanMoiEngine engine :
+       {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::Sampled, ConSanMoiEngine::InlineShadow}) {
+    SCOPED_TRACE(consan_moi_engine_name(engine));
+    const ConSanResult result = try_patch_consan(bytes, moi_options(engine));
+    ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
+
+    std::set<uint64_t> intended_offsets;
+    for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+      if (intent.kind == ConSanProbeIntentKind::AccessRecord ||
+          intent.kind == ConSanProbeIntentKind::SampledAccess ||
+          intent.kind == ConSanProbeIntentKind::ExactShadowAccess) {
+        intended_offsets.insert(intent.physical_site.original_text_offset);
+      }
+    }
+    std::set<uint64_t> candidate_offsets;
+    for (const ConSanMoiCandidate &candidate : result.moi_candidates)
+      candidate_offsets.insert(candidate.text_offset);
+
+    EXPECT_EQ(candidate_offsets, intended_offsets);
+    EXPECT_EQ(result.moi_candidates.size(), intended_offsets.size());
+  }
+}
+
 TEST(ConSanMoi, Gfx1201MoiEnginesAdmitNativeB96Accesses) {
   constexpr auto store =
       rdna4::build_vds(rdna4::kDsStoreB96Vds, {.offset0 = 12, .addr = 0, .data0 = 1});

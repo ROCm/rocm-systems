@@ -221,6 +221,13 @@ Probe intents describe the semantic action, before/after position, execution
 mask policy, dynamic-result requirement, and associated sites. They contain no
 selected registers, code addresses, or encoded instructions.
 
+The current MOI emitters still consume a temporary operand-shaped
+`ConSanMoiCandidate`, but that value is now only a projection of an admitted
+access intent and its matching normalized inventory site. The former second
+support classifier, alias canonicalizer, and post-hoc intent filter have been
+deleted. Consequently policy is the only component that can decide whether an
+access becomes a lowering candidate.
+
 `ConSanObservationPlan` combines the domain decisions and intents.
 `ConSanCoverageLedger` keeps policy separate from mechanism: for each admitted
 intent it records whether lowering instrumented it, excluded it for a typed
