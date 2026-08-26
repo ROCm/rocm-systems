@@ -105,6 +105,9 @@ struct ncclIbConnectionMetadata {
   int sl;
   int isP2p;
   bool isRMA;
+  // Trailing so mixed nSegments<=1 CAST stays compatible with older CAST
+  // binaries that stop at isRMA. nSegments>1 requires this bit on both peers.
+  uint32_t caps;
 };
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
