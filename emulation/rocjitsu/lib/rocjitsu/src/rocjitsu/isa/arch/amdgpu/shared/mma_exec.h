@@ -2329,10 +2329,11 @@ constexpr bool wmma_f32_f32_native_width_supported(uint32_t n, uint32_t width) {
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
 /// F16C convert — the hoist reads each operand word straight through observed
 /// register-access regions. Compile-time M/N/K fully unroll the matmul, looped
-/// over N in native-width chunks. The specialization requires a usable native
-/// SIMD width that evenly divides N. Otherwise it delegates to exec_wmma_f32,
-/// whose generic implementation may still use native-width SIMD with a scalar
-/// tail.
+/// over N in native-width chunks. The specialization is bypassed when host SIMD
+/// is unavailable, the native width is one or does not evenly divide N, or
+/// force-scalar is enabled. The generic exec_wmma_f32 path may still use
+/// native-width SIMD with a scalar tail when SIMD is available but N is not
+/// divisible by the native width.
 template <uint32_t M, uint32_t N, uint32_t K>
 void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
