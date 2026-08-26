@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <memory>
 
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
@@ -118,4 +119,15 @@ TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
   ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
 
   EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
+  ASSERT_EQ(setenv("NCCL_ELASTIC_BUFFER_REGISTER", "0", 1), 0);
+
+  ncclComm comm{};
+  EXPECT_EQ(ncclDevrCheckRegistrationSupport(reinterpret_cast<void*>(0x100000), 4096, &comm,
+                                             /*hasSysmemSegment=*/true),
+            ncclInvalidArgument);
+
+  unsetenv("NCCL_ELASTIC_BUFFER_REGISTER");
 }

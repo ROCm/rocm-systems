@@ -443,9 +443,16 @@ if(BUILD_TESTS)
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsDevRuntime)
 
+    set(DEV_RUNTIME_SEGMENTS_CC
+      ${PROJECT_BINARY_DIR}/hipify/src/dev_runtime_segments.cc)
+    set_source_files_properties(${DEV_RUNTIME_SEGMENTS_CC} PROPERTIES
+      GENERATED TRUE
+      LANGUAGE CXX)
+
     add_executable(rccl-UnitTestsDevRuntime
       DevRuntimeTests.cpp
       DevRuntimeTestsStubs.cc
+      ${DEV_RUNTIME_SEGMENTS_CC}
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
