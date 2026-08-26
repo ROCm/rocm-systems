@@ -22,14 +22,15 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
-class TestNicIdentity(common.ApiTestCase):
+class TestNicIdentity(api.ApiTestCase):
     HANDLE_KIND = "nic"
 
     def _sockets(self):
-        return common.Handle("socket", common.amdsmi.amdsmi_get_socket_handles())
+        return api.Handle("socket", common.amdsmi.amdsmi_get_socket_handles())
 
     def test_get_nic_processor_handles(self):
         self.both("amdsmi_get_nic_processor_handles", self._sockets())
@@ -74,7 +75,7 @@ class TestNicIdentity(common.ApiTestCase):
         self.both("amdsmi_get_nic_port_info", self.handle)
 
     def test_get_nic_port_statistics(self):
-        self.both("amdsmi_get_nic_port_statistics", self.handle, common.integer("port_index", 0))
+        self.both("amdsmi_get_nic_port_statistics", self.handle, api.integer("port_index", 0))
 
     def test_get_nic_vendor_statistics(self):
         self.both("amdsmi_get_nic_vendor_statistics", self.handle)
@@ -84,7 +85,7 @@ class TestNicIdentity(common.ApiTestCase):
 
     def test_get_nic_rdma_port_statistics(self):
         self.both(
-            "amdsmi_get_nic_rdma_port_statistics", self.handle, common.integer("rdma_port_index", 0)
+            "amdsmi_get_nic_rdma_port_statistics", self.handle, api.integer("rdma_port_index", 0)
         )
 
     def test_get_nic_topo_numa_affinity(self):
@@ -97,7 +98,7 @@ class TestNicIdentity(common.ApiTestCase):
         self.both(
             "amdsmi_get_nic_gpu_topo_info",
             self.handle,
-            common.Handle("gpu_dst", self.common.processors),
+            api.Handle("gpu_dst", self.common.processors),
         )
 
 

@@ -22,25 +22,24 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
-class TestGpuPower(common.ApiTestCase):
+class TestGpuPower(api.ApiTestCase):
     def test_get_power_info(self):
         self.both("amdsmi_get_power_info", self.handle)
 
     def test_get_power_cap_info(self):
         self.both(
-            "amdsmi_get_power_cap_info", self.handle, common.integer("sensor_ind", 0, bounds=True)
+            "amdsmi_get_power_cap_info", self.handle, api.integer("sensor_ind", 0, bounds=True)
         )
 
     def test_get_supported_power_cap(self):
         self.both("amdsmi_get_supported_power_cap", self.handle)
 
     def test_get_gpu_power_profile_presets(self):
-        self.both(
-            "amdsmi_get_gpu_power_profile_presets", self.handle, common.integer("sensor_idx", 0)
-        )
+        self.both("amdsmi_get_gpu_power_profile_presets", self.handle, api.integer("sensor_idx", 0))
 
     def test_is_gpu_power_management_enabled(self):
         self.both("amdsmi_is_gpu_power_management_enabled", self.handle)
@@ -50,18 +49,15 @@ class TestGpuPower(common.ApiTestCase):
 
     def test_set_power_cap(self):
         self.reject_only(
-            "amdsmi_set_power_cap",
-            self.handle,
-            common.integer("sensor_ind", 0),
-            common.integer("cap", 0),
+            "amdsmi_set_power_cap", self.handle, api.integer("sensor_ind", 0), api.integer("cap", 0)
         )
 
     def test_set_gpu_power_profile(self):
         self.reject_only(
             "amdsmi_set_gpu_power_profile",
             self.handle,
-            common.integer("reserved", 0),
-            common.enum("profile", common.POWER_PROFILE_PRESET_MASKS),
+            api.integer("reserved", 0),
+            api.enum("profile", common.POWER_PROFILE_PRESET_MASKS),
         )
 
 

@@ -22,24 +22,33 @@
 
 import unittest
 
-import common.common as common
+import common.api_test as api
 
 
-class TestGpuIdentity(common.ApiTestCase):
+class TestGpuIdentity(api.ApiTestCase):
     def test_get_fw_info(self):
-        self.assertTrue(self.both("amdsmi_get_fw_info", self.handle), "fw_info is empty")
+        self.assertTrue(
+            self.both("amdsmi_get_fw_info", self.handle, require_success=True), "fw_info is empty"
+        )
 
     def test_get_gpu_asic_info(self):
-        self.both("amdsmi_get_gpu_asic_info", self.handle)
+        self.both(
+            "amdsmi_get_gpu_asic_info",
+            self.handle,
+            require_success=True,
+            require_populated=("market_name", "vendor_id"),
+        )
 
     def test_get_gpu_bdf_id(self):
-        self.both("amdsmi_get_gpu_bdf_id", self.handle)
+        self.both("amdsmi_get_gpu_bdf_id", self.handle, require_success=True)
 
     def test_get_gpu_board_info(self):
         self.both("amdsmi_get_gpu_board_info", self.handle)
 
     def test_get_gpu_device_bdf(self):
-        self.both("amdsmi_get_gpu_device_bdf", self.handle)
+        self.both(
+            "amdsmi_get_gpu_device_bdf", self.handle, require_success=True, require_populated=True
+        )
 
     def test_get_gpu_device_bdf_bdf(self):
         self.both("amdsmi_get_gpu_device_bdf_bdf", self.handle)
@@ -48,16 +57,20 @@ class TestGpuIdentity(common.ApiTestCase):
         self.both("amdsmi_get_gpu_device_cuid", self.handle)
 
     def test_get_gpu_device_uuid(self):
-        self.both("amdsmi_get_gpu_device_uuid", self.handle)
+        self.both(
+            "amdsmi_get_gpu_device_uuid", self.handle, require_success=True, require_populated=True
+        )
 
     def test_get_gpu_driver_info(self):
-        self.both("amdsmi_get_gpu_driver_info", self.handle)
+        self.both(
+            "amdsmi_get_gpu_driver_info", self.handle, require_success=True, require_populated=True
+        )
 
     def test_get_gpu_enumeration_info(self):
         self.both("amdsmi_get_gpu_enumeration_info", self.handle)
 
     def test_get_gpu_id(self):
-        self.both("amdsmi_get_gpu_id", self.handle)
+        self.both("amdsmi_get_gpu_id", self.handle, require_success=True)
 
     def test_get_gpu_kfd_info(self):
         self.both("amdsmi_get_gpu_kfd_info", self.handle)

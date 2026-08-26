@@ -22,15 +22,16 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
-class TestGpuRas(common.ApiTestCase):
+class TestGpuRas(api.ApiTestCase):
     def test_get_gpu_ecc_count(self):
-        self.both("amdsmi_get_gpu_ecc_count", self.handle, common.enum("block", common.GPU_BLOCKS))
+        self.both("amdsmi_get_gpu_ecc_count", self.handle, api.enum("block", common.GPU_BLOCKS))
 
     def test_get_gpu_ecc_status(self):
-        self.both("amdsmi_get_gpu_ecc_status", self.handle, common.enum("block", common.GPU_BLOCKS))
+        self.both("amdsmi_get_gpu_ecc_status", self.handle, api.enum("block", common.GPU_BLOCKS))
 
     def test_get_gpu_ecc_enabled(self):
         self.both("amdsmi_get_gpu_ecc_enabled", self.handle)
@@ -56,16 +57,16 @@ class TestGpuRas(common.ApiTestCase):
         self.reject_only(
             "amdsmi_get_gpu_cper_entries",
             self.handle,
-            common.integer("severity_mask", 0),
-            common.integer("buffer_size", 4096),
-            common.integer("cursor", 0),
+            api.integer("severity_mask", 0),
+            api.integer("buffer_size", 4096),
+            api.integer("cursor", 0),
         )
 
     def test_get_afids_from_cper(self):
         # A positive decode needs a real CPER record to feed in.
         self.reject_only(
             "amdsmi_get_afids_from_cper",
-            common.Param("cper_afid_data", ("b''", b""), [("bad-type", common.BAD_BYTES)]),
+            api.Param("cper_afid_data", ("b''", b""), [("bad-type", api.BAD_BYTES)]),
         )
 
 

@@ -22,6 +22,7 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 _VALID_FORMATS = [
@@ -32,15 +33,15 @@ _VALID_FORMATS = [
 def _format_param(name):
     # AmdSmiPtlData.INVALID passes the isinstance guard but is rejected on its
     # own, so it belongs in the invalid set rather than the sweep.
-    return common.Param(
+    return api.Param(
         name,
         _VALID_FORMATS[0],
-        [("bad-type", common.BAD_ENUM), ("INVALID", common.amdsmi.AmdSmiPtlData.INVALID)],
+        [("bad-type", api.BAD_ENUM), ("INVALID", common.amdsmi.AmdSmiPtlData.INVALID)],
         sweep=_VALID_FORMATS,
     )
 
 
-class TestGpuPtl(common.ApiTestCase):
+class TestGpuPtl(api.ApiTestCase):
     def test_get_gpu_ptl_state(self):
         self.both("amdsmi_get_gpu_ptl_state", self.handle)
 

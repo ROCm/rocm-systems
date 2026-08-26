@@ -22,10 +22,11 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
-class TestGpuMetrics(common.ApiTestCase):
+class TestGpuMetrics(api.ApiTestCase):
     def test_get_gpu_activity(self):
         self.both("amdsmi_get_gpu_activity", self.handle)
 
@@ -51,13 +52,13 @@ class TestGpuMetrics(common.ApiTestCase):
         self.both("amdsmi_get_gpu_pm_metrics_info", self.handle)
 
     def test_get_utilization_count(self):
-        counters = common.Param(
+        counters = api.Param(
             "counter_types",
             (
                 "COARSE_GRAIN_GFX_ACTIVITY",
                 [common.amdsmi.AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY],
             ),
-            [("bad-type", common.BAD_SEQUENCE), ("empty", [])],
+            [("bad-type", api.BAD_SEQUENCE), ("empty", [])],
         )
         self.both("amdsmi_get_utilization_count", self.handle, counters)
 

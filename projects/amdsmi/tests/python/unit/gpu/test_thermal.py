@@ -22,10 +22,11 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
-class TestGpuThermal(common.ApiTestCase):
+class TestGpuThermal(api.ApiTestCase):
     @classmethod
     def _present_sensors(cls):
         """The sensor types this ASIC answers for.
@@ -55,10 +56,10 @@ class TestGpuThermal(common.ApiTestCase):
     def test_get_temp_metric(self):
         every_type = [(name, value) for name, value, _ in common.TEMPERATURE_TYPES]
         present = self._present_sensors()
-        sensor = common.Param(
+        sensor = api.Param(
             "sensor_type",
             (present or every_type)[0],
-            [("bad-type", common.BAD_ENUM)],
+            [("bad-type", api.BAD_ENUM)],
             sweep=every_type,
             accepted=present,
         )
@@ -66,37 +67,33 @@ class TestGpuThermal(common.ApiTestCase):
             "amdsmi_get_temp_metric",
             self.handle,
             sensor,
-            common.enum("metric", common.TEMPERATURE_METRICS),
+            api.enum("metric", common.TEMPERATURE_METRICS),
         )
 
     def test_get_gpu_fan_rpms(self):
-        self.both(
-            "amdsmi_get_gpu_fan_rpms", self.handle, common.integer("sensor_idx", 0, bounds=True)
-        )
+        self.both("amdsmi_get_gpu_fan_rpms", self.handle, api.integer("sensor_idx", 0, bounds=True))
 
     def test_get_gpu_fan_speed(self):
         self.both(
-            "amdsmi_get_gpu_fan_speed", self.handle, common.integer("sensor_idx", 0, bounds=True)
+            "amdsmi_get_gpu_fan_speed", self.handle, api.integer("sensor_idx", 0, bounds=True)
         )
 
     def test_get_gpu_fan_speed_max(self):
         self.both(
-            "amdsmi_get_gpu_fan_speed_max",
-            self.handle,
-            common.integer("sensor_idx", 0, bounds=True),
+            "amdsmi_get_gpu_fan_speed_max", self.handle, api.integer("sensor_idx", 0, bounds=True)
         )
 
     def test_set_gpu_fan_speed(self):
         self.reject_only(
             "amdsmi_set_gpu_fan_speed",
             self.handle,
-            common.integer("sensor_idx", 0),
-            common.integer("fan_speed", 0),
+            api.integer("sensor_idx", 0),
+            api.integer("fan_speed", 0),
         )
 
     def test_reset_gpu_fan(self):
         self.reject_only(
-            "amdsmi_reset_gpu_fan", self.handle, common.integer("sensor_idx", 0, bounds=True)
+            "amdsmi_reset_gpu_fan", self.handle, api.integer("sensor_idx", 0, bounds=True)
         )
 
 

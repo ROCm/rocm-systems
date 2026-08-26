@@ -22,10 +22,10 @@
 
 import unittest
 
-import common.common as common
+import common.api_test as api
 
 
-class TestCpuPower(common.ApiTestCase):
+class TestCpuPower(api.ApiTestCase):
     HANDLE_KIND = "cpu"
 
     def test_get_cpu_socket_power(self):
@@ -66,44 +66,42 @@ class TestCpuPower(common.ApiTestCase):
 
     def test_set_cpu_socket_power_cap(self):
         self.reject_only(
-            "amdsmi_set_cpu_socket_power_cap", self.handle, common.integer("power_cap", 0)
+            "amdsmi_set_cpu_socket_power_cap", self.handle, api.integer("power_cap", 0)
         )
 
     def test_set_cpu_pwr_efficiency_mode(self):
         self.reject_only(
             "amdsmi_set_cpu_pwr_efficiency_mode",
             self.handle,
-            common.integer("mode", 0),
-            common.integer("util", 0),
-            common.integer("ppt_limit", 0),
+            api.integer("mode", 0),
+            api.integer("util", 0),
+            api.integer("ppt_limit", 0),
         )
 
     def test_set_cpu_core_boostlimit(self):
         self.reject_only(
-            "amdsmi_set_cpu_core_boostlimit", self.handle, common.integer("boostlimit", 0)
+            "amdsmi_set_cpu_core_boostlimit", self.handle, api.integer("boostlimit", 0)
         )
 
     def test_set_cpu_socket_boostlimit(self):
         self.reject_only(
-            "amdsmi_set_cpu_socket_boostlimit", self.handle, common.integer("boostlimit", 0)
+            "amdsmi_set_cpu_socket_boostlimit", self.handle, api.integer("boostlimit", 0)
         )
 
     def test_set_cpu_sdps_limit(self):
-        self.reject_only("amdsmi_set_cpu_sdps_limit", self.handle, common.integer("sdps_limit", 0))
+        self.reject_only("amdsmi_set_cpu_sdps_limit", self.handle, api.integer("sdps_limit", 0))
 
     def test_set_cpu_rail_isofreq_policy(self):
-        self.reject_only(
-            "amdsmi_set_cpu_rail_isofreq_policy", self.handle, common.integer("value", 0)
-        )
+        self.reject_only("amdsmi_set_cpu_rail_isofreq_policy", self.handle, api.integer("value", 0))
 
     def test_set_cpu_dfc_ctrl(self):
-        self.reject_only("amdsmi_set_cpu_dfc_ctrl", self.handle, common.integer("value", 0))
+        self.reject_only("amdsmi_set_cpu_dfc_ctrl", self.handle, api.integer("value", 0))
 
     def test_set_cpu_pc6_enable(self):
-        self.reject_only("amdsmi_set_cpu_pc6_enable", self.handle, common.integer("value", 0))
+        self.reject_only("amdsmi_set_cpu_pc6_enable", self.handle, api.integer("value", 0))
 
     def test_set_cpu_cc6_enable(self):
-        self.reject_only("amdsmi_set_cpu_cc6_enable", self.handle, common.integer("value", 0))
+        self.reject_only("amdsmi_set_cpu_cc6_enable", self.handle, api.integer("value", 0))
 
 
 if __name__ == "__main__":

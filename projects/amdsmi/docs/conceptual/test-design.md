@@ -395,6 +395,7 @@ tests/python/
 │   │   └── test_switch.py
 │   ├── system/
 │   │   ├── test_bdf.py                # BDF string parsing and formatting (no hardware)
+│   │   ├── test_check_res.py          # amdsmi_check_res return-code validation
 │   │   ├── test_lifecycle.py          # init, discovery and version APIs
 │   │   └── test_topology.py           # topology, link and affinity APIs
 │   └── mock/                          # Suites that replace amdsmi or the CLI's imports
@@ -430,7 +431,6 @@ tests/python/
 │   │   ├── test_hsmp.py               # hsmp_driver_version, hsmp_proto_ver, esmi_err_msg
 │   │   ├── test_identity.py           # CPU socket identity
 │   │   ├── test_power.py              # socket_power, power_cap get/set, boostlimit set
-│   │   ├── test_thermal.py            # socket_temperature, prochot_status
 │   │   └── test_benchmark.py          # per-API latency benchmarks with timing assertions
 │   ├── nic/
 │   │   ├── test_discovery.py          # NIC and switch BDF/device discovery (live enumeration)
@@ -479,10 +479,16 @@ tests/python/
 
 **Classes**: One test class per file, named `Test{Component}{Feature}` (for example,
 `TestGpuPower`, `TestCpuClock`, `TestSystemInit`). Unit API suites subclass
-`common.common.ApiTestCase`, which enumerates devices and provides `both()`, `reject_only()` and
+`common.api_test.ApiTestCase`, which enumerates devices and provides `both()`, `reject_only()` and
 `expect_only()`; set its `HANDLE_KIND` class attribute to `"gpu"` (the default), `"cpu"` or `"nic"`.
 Functional and logic-only suites subclass `unittest.TestCase` and hold a `common.common.Common`
 instance for error-handling helpers.
+
+**Argument coverage**: `expect()` drives the full cross-product of every device and
+every accepted enum value. `reject()` deliberately sweeps one axis at a time: an
+invalid argument is refused by the first guard it reaches, so crossing it with the
+other axes multiplies calls without reaching new code. A pair API additionally
+declares `needs_peer=True` so that a single-device host reports why it skipped.
 
 **Methods**: `test_{operation}[_{qualifier}]` (for example, `test_get_power_cap`,
 `test_set_power_cap_dry_run`).
@@ -649,4 +655,5 @@ shown in parentheses.
 | `perf_tests.py` | `functional/gpu/test_benchmark.py` |
 | `perf_cputests.py` | `functional/cpu/test_benchmark.py` |
 | `common.py` | `common/common.py` |
+| `api_test.py` | `common/api_test.py` |
 | `runcmd.py` | `common/runcmd.py` |

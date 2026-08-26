@@ -22,10 +22,11 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
-class TestGpuOverdrive(common.ApiTestCase):
+class TestGpuOverdrive(api.ApiTestCase):
     def test_get_gpu_overdrive_level(self):
         self.both("amdsmi_get_gpu_overdrive_level", self.handle)
 
@@ -37,7 +38,7 @@ class TestGpuOverdrive(common.ApiTestCase):
 
     def test_get_gpu_od_volt_curve_regions(self):
         self.both(
-            "amdsmi_get_gpu_od_volt_curve_regions", self.handle, common.integer("num_regions", 1)
+            "amdsmi_get_gpu_od_volt_curve_regions", self.handle, api.integer("num_regions", 1)
         )
 
     def test_get_gpu_perf_level(self):
@@ -47,48 +48,46 @@ class TestGpuOverdrive(common.ApiTestCase):
         self.both(
             "amdsmi_get_gpu_volt_metric",
             self.handle,
-            common.enum("sensor_type", common.VOLTAGE_TYPES),
-            common.enum("metric", common.VOLTAGE_METRICS),
+            api.enum("sensor_type", common.VOLTAGE_TYPES),
+            api.enum("metric", common.VOLTAGE_METRICS),
         )
 
     def test_get_gpu_reg_table_info(self):
         self.both(
-            "amdsmi_get_gpu_reg_table_info", self.handle, common.enum("reg_type", common.REG_TYPES)
+            "amdsmi_get_gpu_reg_table_info", self.handle, api.enum("reg_type", common.REG_TYPES)
         )
 
     def test_set_gpu_overdrive_level(self):
         self.reject_only(
-            "amdsmi_set_gpu_overdrive_level", self.handle, common.integer("overdrive_value", 0)
+            "amdsmi_set_gpu_overdrive_level", self.handle, api.integer("overdrive_value", 0)
         )
 
     def test_set_gpu_od_volt_info(self):
         self.reject_only(
             "amdsmi_set_gpu_od_volt_info",
             self.handle,
-            common.integer("vpoint", 0),
-            common.integer("clk_value", 0),
-            common.integer("volt_value", 0),
+            api.integer("vpoint", 0),
+            api.integer("clk_value", 0),
+            api.integer("volt_value", 0),
         )
 
     def test_set_gpu_od_clk_info(self):
         self.reject_only(
             "amdsmi_set_gpu_od_clk_info",
             self.handle,
-            common.enum("level", common.FREQ_INDS),
-            common.integer("value", 0),
-            common.enum("clk_type", common.CLK_TYPES),
+            api.enum("level", common.FREQ_INDS),
+            api.integer("value", 0),
+            api.enum("clk_type", common.CLK_TYPES),
         )
 
     def test_set_gpu_perf_level(self):
         self.reject_only(
-            "amdsmi_set_gpu_perf_level",
-            self.handle,
-            common.enum("perf_level", common.DEV_PERF_LEVELS),
+            "amdsmi_set_gpu_perf_level", self.handle, api.enum("perf_level", common.DEV_PERF_LEVELS)
         )
 
     def test_set_gpu_perf_determinism_mode(self):
         self.reject_only(
-            "amdsmi_set_gpu_perf_determinism_mode", self.handle, common.integer("clkvalue", 0)
+            "amdsmi_set_gpu_perf_determinism_mode", self.handle, api.integer("clkvalue", 0)
         )
 
 

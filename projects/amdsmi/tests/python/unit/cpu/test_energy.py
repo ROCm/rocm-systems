@@ -22,10 +22,10 @@
 
 import unittest
 
-import common.common as common
+import common.api_test as api
 
 
-class TestCpuEnergy(common.ApiTestCase):
+class TestCpuEnergy(api.ApiTestCase):
     HANDLE_KIND = "cpu"
 
     def test_get_cpu_core_energy(self):

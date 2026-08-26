@@ -56,7 +56,7 @@ graph TD
     U -->|discovers| UU[unit/**/test_*.py<br/>logic + API suites]
     I -->|discovers| FF[functional/*/test_*.py<br/>live device]
     C -->|discovers| CC[cli/test_*.py<br/>amd-smi binary]
-    U -.imports.-> CM[common/common.py]
+    U -.imports.-> CM[common/api_test.py]
     I -.imports.-> CM
     C -.imports.-> CM
     C -.imports.-> RC[common/runcmd.py]
@@ -85,7 +85,7 @@ graph TD
 | `unit_tests.py` | `unit/` | For the API suites | BDF parsing, formatting and CLI logic against a stubbed C library, plus per-API argument rejection and payload validation |
 
 `unit/<component>/` holds one suite per API area, and each API gets a single test that drives
-it both ways via the driver in [common/common.py](common/common.py):
+it both ways via the driver in [common/api_test.py](common/api_test.py):
 
 - **`reject()`** — one deliberately invalid argument per call; the library must refuse it. Every
   invalid value is rejected by the Python interface before the C entry point, so no device state can
@@ -259,7 +259,7 @@ regression:
 | Status | Tests | Cause |
 | :--- | :--- | :--- |
 | `AMDSMI_STATUS_UNEXPECTED_DATA` | `test_get_clock_info`, `test_get_energy_count`, `test_get_gpu_activity`, `test_get_gpu_metrics_info`, `test_get_gpu_pci_bandwidth`, `test_get_gpu_xcd_counter`, `test_get_gpu_xgmi_link_status`, `test_get_link_metrics`, `test_get_pcie_info`, `test_get_temp_metric` (HBM sensors), `test_get_utilization_count`, `test_get_violation_status` | The library returns a payload it cannot parse |
-| `AMDSMI_STATUS_NO_PERM` | `test_get_gpu_accelerator_partition_profile_config` | Only when run without root; the runners require `sudo`, so this passes normally |
+| `AMDSMI_STATUS_NO_PERM` | `test_get_gpu_accelerator_partition_profile_config` | Appears only when a suite is invoked directly with `python3 -m unittest`; the runners require root, where it passes |
 
 These are tracked as library defects rather than suppressed, so that a fix flips
 the test green without anyone having to remember to unmark it.

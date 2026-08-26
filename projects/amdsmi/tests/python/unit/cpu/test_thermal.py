@@ -22,10 +22,10 @@
 
 import unittest
 
-import common.common as common
+import common.api_test as api
 
 
-class TestCpuThermal(common.ApiTestCase):
+class TestCpuThermal(api.ApiTestCase):
     HANDLE_KIND = "cpu"
 
     def test_get_cpu_socket_temperature(self):
@@ -41,8 +41,8 @@ class TestCpuThermal(common.ApiTestCase):
         self.both(
             "amdsmi_get_cpu_svi3_vr_controller_temp",
             self.handle,
-            common.integer("rail_selection", 0),
-            common.integer("rail_index", 0),
+            api.integer("rail_selection", 0),
+            api.integer("rail_index", 0),
         )
 
 

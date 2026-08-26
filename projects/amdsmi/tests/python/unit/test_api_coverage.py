@@ -28,6 +28,13 @@ import common.common as common
 
 _UNIT_DIR = pathlib.Path(__file__).resolve().parent
 
+# Naming an API in a comment or a message must not count as covering it, so
+# match only the drivers that actually call one.
+_DRIVEN = re.compile(
+    r"(?:both|reject_only|expect_only|reject|expect|prerequisite)"
+    r'\s*\(\s*"(amdsmi_\w+)"'
+)
+
 
 class TestApiCoverage(unittest.TestCase):
     """Hardware-free: introspects the binding and greps the suites."""
@@ -40,7 +47,7 @@ class TestApiCoverage(unittest.TestCase):
         }
         driven = set()
         for path in _UNIT_DIR.rglob("test_*.py"):
-            driven |= set(re.findall(r'"(amdsmi_\w+)"', path.read_text()))
+            driven |= set(_DRIVEN.findall(path.read_text()))
 
         missing = sorted(public - driven)
         self.assertEqual(

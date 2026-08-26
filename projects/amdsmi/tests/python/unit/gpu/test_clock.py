@@ -22,15 +22,16 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
-class TestGpuClock(common.ApiTestCase):
+class TestGpuClock(api.ApiTestCase):
     def test_get_clk_freq(self):
-        self.both("amdsmi_get_clk_freq", self.handle, common.enum("clk_type", common.CLK_TYPES))
+        self.both("amdsmi_get_clk_freq", self.handle, api.enum("clk_type", common.CLK_TYPES))
 
     def test_get_clock_info(self):
-        self.both("amdsmi_get_clock_info", self.handle, common.enum("clock_type", common.CLK_TYPES))
+        self.both("amdsmi_get_clock_info", self.handle, api.enum("clock_type", common.CLK_TYPES))
 
     def test_get_soc_pstate(self):
         self.both("amdsmi_get_soc_pstate", self.handle)
@@ -40,21 +41,21 @@ class TestGpuClock(common.ApiTestCase):
         self.reject_only(
             "amdsmi_set_clk_freq",
             self.handle,
-            common.text("clk_type", common.CLK_TYPES[0][0]),
-            common.integer("freq_bitmask", 0),
+            api.text("clk_type", common.CLK_TYPES[0][0]),
+            api.integer("freq_bitmask", 0),
         )
 
     def test_set_gpu_clk_limit(self):
         self.reject_only(
             "amdsmi_set_gpu_clk_limit",
             self.handle,
-            common.text("clk_type", common.CLK_TYPES[0][0]),
-            common.text("limit_type", common.CLK_LIMIT_TYPES[0][0]),
-            common.integer("value", 0),
+            api.text("clk_type", common.CLK_TYPES[0][0]),
+            api.text("limit_type", common.CLK_LIMIT_TYPES[0][0]),
+            api.integer("value", 0),
         )
 
     def test_set_soc_pstate(self):
-        self.reject_only("amdsmi_set_soc_pstate", self.handle, common.integer("policy_id", 0))
+        self.reject_only("amdsmi_set_soc_pstate", self.handle, api.integer("policy_id", 0))
 
 
 if __name__ == "__main__":

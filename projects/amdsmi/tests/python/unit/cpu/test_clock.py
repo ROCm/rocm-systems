@@ -22,6 +22,7 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 # amdsmi_get_cpu_current_io_bandwidth()/amdsmi_get_cpu_current_xgmi_bw() take a
@@ -29,7 +30,7 @@ import common.common as common
 _LINK_NAME, _BW_ENCODING = common.IO_BW_ENCODINGS[0][0], common.IO_BW_ENCODINGS[0][1]
 
 
-class TestCpuClock(common.ApiTestCase):
+class TestCpuClock(api.ApiTestCase):
     HANDLE_KIND = "cpu"
 
     def test_get_cpu_fclk_mclk(self):
@@ -63,7 +64,7 @@ class TestCpuClock(common.ApiTestCase):
         self.both("amdsmi_get_cpu_eff_floor_freq_limit", self.handle)
 
     def test_get_cpu_socket_lclk_dpm_level(self):
-        self.both("amdsmi_get_cpu_socket_lclk_dpm_level", self.handle, common.integer("nbio_id", 0))
+        self.both("amdsmi_get_cpu_socket_lclk_dpm_level", self.handle, api.integer("nbio_id", 0))
 
     def test_get_cpu_xgmi_pstate_range(self):
         self.both("amdsmi_get_cpu_xgmi_pstate_range", self.handle)
@@ -72,90 +73,86 @@ class TestCpuClock(common.ApiTestCase):
         self.both(
             "amdsmi_get_cpu_current_io_bandwidth",
             self.handle,
-            common.integer("encoding", _BW_ENCODING),
-            common.text("link_name", _LINK_NAME),
+            api.integer("encoding", _BW_ENCODING),
+            api.text("link_name", _LINK_NAME),
         )
 
     def test_get_cpu_current_xgmi_bw(self):
         self.both(
             "amdsmi_get_cpu_current_xgmi_bw",
             self.handle,
-            common.integer("encoding", _BW_ENCODING),
-            common.text("link_name", _LINK_NAME),
+            api.integer("encoding", _BW_ENCODING),
+            api.text("link_name", _LINK_NAME),
         )
 
     def test_set_cpu_core_floor_freq_limit(self):
         self.reject_only(
-            "amdsmi_set_cpu_core_floor_freq_limit", self.handle, common.integer("floorlimit", 0)
+            "amdsmi_set_cpu_core_floor_freq_limit", self.handle, api.integer("floorlimit", 0)
         )
 
     def test_set_cpu_floor_freq_limit(self):
         self.reject_only(
-            "amdsmi_set_cpu_floor_freq_limit", self.handle, common.integer("floorlimit", 0)
+            "amdsmi_set_cpu_floor_freq_limit", self.handle, api.integer("floorlimit", 0)
         )
 
     def test_set_cpu_msr_floor_freq_limit(self):
         self.reject_only(
-            "amdsmi_set_cpu_msr_floor_freq_limit", self.handle, common.integer("msrfloorlimit", 0)
+            "amdsmi_set_cpu_msr_floor_freq_limit", self.handle, api.integer("msrfloorlimit", 0)
         )
 
     def test_set_cpu_core_msr_floor_freq_limit(self):
         self.reject_only(
-            "amdsmi_set_cpu_core_msr_floor_freq_limit",
-            self.handle,
-            common.integer("msrfloorlimit", 0),
+            "amdsmi_set_cpu_core_msr_floor_freq_limit", self.handle, api.integer("msrfloorlimit", 0)
         )
 
     def test_cpu_apb_enable(self):
         self.reject_only("amdsmi_cpu_apb_enable", self.handle)
 
     def test_cpu_apb_disable(self):
-        self.reject_only("amdsmi_cpu_apb_disable", self.handle, common.integer("pstate", 0))
+        self.reject_only("amdsmi_cpu_apb_disable", self.handle, api.integer("pstate", 0))
 
     def test_set_cpu_socket_lclk_dpm_level(self):
         self.reject_only(
             "amdsmi_set_cpu_socket_lclk_dpm_level",
             self.handle,
-            common.integer("nbio_id", 0),
-            common.integer("min_val", 0),
-            common.integer("max_val", 0),
+            api.integer("nbio_id", 0),
+            api.integer("min_val", 0),
+            api.integer("max_val", 0),
         )
 
     def test_set_cpu_pcie_link_rate(self):
-        self.reject_only(
-            "amdsmi_set_cpu_pcie_link_rate", self.handle, common.integer("rate_ctrl", 0)
-        )
+        self.reject_only("amdsmi_set_cpu_pcie_link_rate", self.handle, api.integer("rate_ctrl", 0))
 
     def test_set_cpu_df_pstate_range(self):
         self.reject_only(
             "amdsmi_set_cpu_df_pstate_range",
             self.handle,
-            common.integer("min_pstate", 0),
-            common.integer("max_pstate", 0),
+            api.integer("min_pstate", 0),
+            api.integer("max_pstate", 0),
         )
 
     def test_set_cpu_xgmi_pstate_range(self):
         self.reject_only(
             "amdsmi_set_cpu_xgmi_pstate_range",
             self.handle,
-            common.integer("min_pstate", 0),
-            common.integer("max_pstate", 0),
+            api.integer("min_pstate", 0),
+            api.integer("max_pstate", 0),
         )
 
     def test_set_cpu_xgmi_width(self):
         self.reject_only(
             "amdsmi_set_cpu_xgmi_width",
             self.handle,
-            common.integer("min_width", 0),
-            common.integer("max_width", 0),
+            api.integer("min_width", 0),
+            api.integer("max_width", 0),
         )
 
     def test_set_cpu_gmi3_link_width_range(self):
         self.reject_only(
             "amdsmi_set_cpu_gmi3_link_width_range",
             self.handle,
-            common.integer("min_link_width", 0),
-            common.integer("max_link_width", 0),
+            api.integer("min_link_width", 0),
+            api.integer("max_link_width", 0),
         )
 
 

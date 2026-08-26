@@ -22,6 +22,7 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 _AFFINITY_SCOPES = [
@@ -29,7 +30,7 @@ _AFFINITY_SCOPES = [
 ]
 
 
-class TestCpuIdentity(common.ApiTestCase):
+class TestCpuIdentity(api.ApiTestCase):
     HANDLE_KIND = "cpu"
 
     def test_get_cpu_handles(self):
@@ -42,7 +43,7 @@ class TestCpuIdentity(common.ApiTestCase):
         self.expect_only("amdsmi_get_cpu_socket_count")
 
     def test_get_cpu_cores_per_socket(self):
-        self.both("amdsmi_get_cpu_cores_per_socket", common.integer("sock_count", 0))
+        self.both("amdsmi_get_cpu_cores_per_socket", api.integer("sock_count", 0))
 
     def test_get_cpu_model_name(self):
         self.both("amdsmi_get_cpu_model_name", self.handle)
@@ -61,8 +62,8 @@ class TestCpuIdentity(common.ApiTestCase):
         # CPU enumeration to answer.
         self.both(
             "amdsmi_get_cpu_affinity_with_scope",
-            common.Handle("gpu", self.common.processors),
-            common.enum("scope", _AFFINITY_SCOPES),
+            api.Handle("gpu", self.common.processors),
+            api.enum("scope", _AFFINITY_SCOPES),
         )
 
     def test_get_cpu_family(self):

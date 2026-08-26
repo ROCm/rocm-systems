@@ -22,10 +22,11 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
-class TestCpuHsmp(common.ApiTestCase):
+class TestCpuHsmp(api.ApiTestCase):
     HANDLE_KIND = "cpu"
 
     def test_get_cpu_hsmp_proto_ver(self):
@@ -44,7 +45,7 @@ class TestCpuHsmp(common.ApiTestCase):
         self.both("amdsmi_get_cpu_ddr_bw", self.handle)
 
     def test_get_esmi_err_msg(self):
-        self.both("amdsmi_get_esmi_err_msg", common.enum("status", common.STATUS_TYPES))
+        self.both("amdsmi_get_esmi_err_msg", api.enum("status", common.STATUS_TYPES))
 
 
 if __name__ == "__main__":

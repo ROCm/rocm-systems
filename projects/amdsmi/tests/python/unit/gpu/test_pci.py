@@ -22,10 +22,10 @@
 
 import unittest
 
-import common.common as common
+import common.api_test as api
 
 
-class TestGpuPci(common.ApiTestCase):
+class TestGpuPci(api.ApiTestCase):
     def test_get_gpu_pci_bandwidth(self):
         self.both("amdsmi_get_gpu_pci_bandwidth", self.handle)
 
@@ -39,7 +39,7 @@ class TestGpuPci(common.ApiTestCase):
         self.both("amdsmi_get_pcie_info", self.handle)
 
     def test_set_gpu_pci_bandwidth(self):
-        self.reject_only("amdsmi_set_gpu_pci_bandwidth", self.handle, common.integer("bitmask", 0))
+        self.reject_only("amdsmi_set_gpu_pci_bandwidth", self.handle, api.integer("bitmask", 0))
 
 
 if __name__ == "__main__":

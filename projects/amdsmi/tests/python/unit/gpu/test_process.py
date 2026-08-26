@@ -22,10 +22,10 @@
 
 import unittest
 
-import common.common as common
+import common.api_test as api
 
 
-class TestGpuProcess(common.ApiTestCase):
+class TestGpuProcess(api.ApiTestCase):
     def test_get_gpu_process_list(self):
         self.both("amdsmi_get_gpu_process_list", self.handle)
 
@@ -36,23 +36,23 @@ class TestGpuProcess(common.ApiTestCase):
         self.expect_only("amdsmi_get_gpu_compute_process_info")
 
     def test_get_gpu_process_list_by_pid(self):
-        handles = common.Param(
+        handles = api.Param(
             "processor_handles",
             ("[gpu=0]", [self.common.processors[0]]),
-            [("bad-type", common.BAD_SEQUENCE), ("bad-element", [common.BAD_HANDLE])],
+            [("bad-type", api.BAD_SEQUENCE), ("bad-element", [api.BAD_HANDLE])],
         )
         self.both("amdsmi_get_gpu_process_list_by_pid", handles)
 
     def test_get_gpu_compute_process_info_by_pid(self):
         # A positive read needs a PID that currently holds a compute context.
-        self.reject_only("amdsmi_get_gpu_compute_process_info_by_pid", common.integer("pid", 1))
+        self.reject_only("amdsmi_get_gpu_compute_process_info_by_pid", api.integer("pid", 1))
 
     def test_get_gpu_compute_process_gpus(self):
-        self.reject_only("amdsmi_get_gpu_compute_process_gpus", common.integer("pid", 1))
+        self.reject_only("amdsmi_get_gpu_compute_process_gpus", api.integer("pid", 1))
 
     def test_set_gpu_process_isolation(self):
         self.reject_only(
-            "amdsmi_set_gpu_process_isolation", self.handle, common.integer("pisolate", 0)
+            "amdsmi_set_gpu_process_isolation", self.handle, api.integer("pisolate", 0)
         )
 
     def test_clean_gpu_local_data(self):

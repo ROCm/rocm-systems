@@ -22,23 +22,22 @@
 
 import unittest
 
-import common.common as common
+import common.api_test as api
 
 
-class TestNicSwitch(common.ApiTestCase):
+class TestNicSwitch(api.ApiTestCase):
     HANDLE_KIND = "nic"
 
     def test_get_root_switch(self):
         # The rejection path needs no live BDF, so run it before fetching one.
-        bad = [("bad-type", common.BAD_STR), ("malformed", "not-a-bdf")]
+        bad = [("bad-type", api.BAD_STR), ("malformed", "not-a-bdf")]
         self._announce()
         self.api.reject(
-            "amdsmi_get_root_switch",
-            common.Param("amdsmi_bdf", ("0000:00:00.0", "0000:00:00.0"), bad),
+            "amdsmi_get_root_switch", api.Param("amdsmi_bdf", ("0000:00:00.0", "0000:00:00.0"), bad)
         )
         self._require_device("amdsmi_get_root_switch")
         bdf = self.prerequisite("amdsmi_get_switch_device_bdf", self.handle.accepted[0][1])
-        self.api.expect("amdsmi_get_root_switch", common.Param("amdsmi_bdf", (bdf, bdf), bad))
+        self.api.expect("amdsmi_get_root_switch", api.Param("amdsmi_bdf", (bdf, bdf), bad))
 
     def test_get_switch_device_bdf(self):
         self.both("amdsmi_get_switch_device_bdf", self.handle)

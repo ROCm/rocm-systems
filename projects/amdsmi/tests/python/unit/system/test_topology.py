@@ -22,6 +22,7 @@
 
 import unittest
 
+import common.api_test as api
 import common.common as common
 
 
@@ -30,36 +31,55 @@ def _same_device(labels):
     return labels[0] == labels[1]
 
 
-class TestSystemTopology(common.ApiTestCase):
+class TestSystemTopology(api.ApiTestCase):
     def _peer(self):
-        return common.Handle("gpu_dst", self.common.processors)
+        return api.Handle("gpu_dst", self.common.processors)
 
     def test_topo_get_numa_node_number(self):
         self.both("amdsmi_topo_get_numa_node_number", self.handle)
 
     def test_topo_get_link_weight(self):
-        self.both("amdsmi_topo_get_link_weight", self.handle, self._peer(), skip_when=_same_device)
+        self.both(
+            "amdsmi_topo_get_link_weight",
+            self.handle,
+            self._peer(),
+            needs_peer=True,
+            skip_when=_same_device,
+        )
 
     def test_topo_get_link_type(self):
-        self.both("amdsmi_topo_get_link_type", self.handle, self._peer(), skip_when=_same_device)
+        self.both(
+            "amdsmi_topo_get_link_type",
+            self.handle,
+            self._peer(),
+            needs_peer=True,
+            skip_when=_same_device,
+        )
 
     def test_topo_get_p2p_status(self):
-        self.both("amdsmi_topo_get_p2p_status", self.handle, self._peer(), skip_when=_same_device)
+        self.both(
+            "amdsmi_topo_get_p2p_status",
+            self.handle,
+            self._peer(),
+            needs_peer=True,
+            skip_when=_same_device,
+        )
 
     def test_is_P2P_accessible(self):
-        self.both("amdsmi_is_P2P_accessible", self.handle, self._peer(), skip_when=_same_device)
+        self.both(
+            "amdsmi_is_P2P_accessible",
+            self.handle,
+            self._peer(),
+            needs_peer=True,
+            skip_when=_same_device,
+        )
 
     def test_get_minmax_bandwidth_between_processors(self):
-        # Only defined between two distinct devices.
-        if len(self.common.processors) < 2:
-            self.reject_only(
-                "amdsmi_get_minmax_bandwidth_between_processors", self.handle, self._peer()
-            )
-            return
         self.both(
             "amdsmi_get_minmax_bandwidth_between_processors",
             self.handle,
             self._peer(),
+            needs_peer=True,
             skip_when=_same_device,
         )
 
@@ -70,7 +90,7 @@ class TestSystemTopology(common.ApiTestCase):
         self.both(
             "amdsmi_get_link_topology_nearest",
             self.handle,
-            common.enum("link_type", common.LINK_TYPES),
+            api.enum("link_type", common.LINK_TYPES),
         )
 
     def test_get_gpu_topo_numa_affinity(self):
