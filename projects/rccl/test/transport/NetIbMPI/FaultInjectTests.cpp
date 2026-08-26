@@ -3238,6 +3238,15 @@ TEST_F(NetIbMPITest, FaultInjCastOpsApiInvalidArgs) {
 // The probe: arming an ops-level fault looks up the device context in the
 // registry that install() fills in, so it returns ncclInvalidArgument while the
 // shims are absent and ncclSuccess once they are in place.
+//
+// That code is the only thing a registry miss can return -- ncclIbOpsFaultArm*
+// (net_ib_ops_fault.cc) has exactly two exits, ncclInvalidArgument on a null
+// context or an absent entry, and ncclSuccess otherwise -- so the expectation
+// cannot go stale into a false FAIL. The risk runs the other way: the same code
+// also comes back from a null comm, a qpIdx outside nqps, and a QP torn down by
+// recovery (p2p.cc), any of which would let this pass without having probed
+// anything. The transfer above rules all three out before the probe: it needs QP
+// 0 up on a live comm, and it asserts that it moved.
 // =============================================================================
 TEST_F(NetIbMPITest, FaultInjectionShimsAbsentUnlessRequested) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,

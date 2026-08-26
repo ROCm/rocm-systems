@@ -136,6 +136,18 @@ struct NetMHandleDeleter {
 // MR leak later, so the count is recorded here and the harness checks it on the
 // main thread once the workers have joined. The serial teardown asserts on the
 // same return value.
+//
+// Process-global, and deliberately so: it is written by every worker of every
+// threaded body, and a per-fixture member would need threading through helpers
+// that have no fixture. That makes it correct only under two properties, both of
+// which hold and neither of which is free. GTest runs the tests in a translation
+// unit one after another on the calling thread, so no two bodies are counting at
+// once; and every threaded body joins its workers before returning, so no worker
+// from a finished test can still be writing. Each run resets the counter first,
+// which limits a stray increment to the test that produced it rather than
+// blaming the next one -- but if either property is ever given up (a
+// GTest-parallel runner, or a body that abandons a worker on timeout), this
+// counter becomes wrong, not merely imprecise.
 inline std::atomic<int> g_workerDeregFailures{0};
 
 // Worker threads must not invoke TEST_INFO or any helper that can call MPI.
@@ -522,7 +534,8 @@ protected:
         return linkLayerRead && strcmp(linkLayer, "Ethernet") == 0;
     }
 
-    static bool PortHasRoutableGid(const char* portsPath, const char* port) {
+    static bool PortHasRoutableGid(const char* portsPath, const char* port,
+                                   uint8_t* gidOut = nullptr) {
         char path[PATH_MAX];
         if (snprintf(path, sizeof(path), "%s/%s/gids", portsPath, port) >= (int)sizeof(path))
             return false;
@@ -547,6 +560,10 @@ protected:
             bool allZero = (strcmp(gid, "0000:0000:0000:0000:0000:0000:0000:0000") == 0);
             bool linkLocal = (strncmp(gid, "fe80:", 5) == 0);
             found = !allZero && !linkLocal;
+            // A GID that cannot be parsed still counts as routable -- that is the
+            // decision this function has always made -- but it is not handed out
+            // for comparison, so the caller falls back to index symmetry alone.
+            if (found && gidOut && !ParseGidText(gid, gidOut)) memset(gidOut, 0, 16);
         }
         closedir(gidDir);
         return found;
@@ -560,7 +577,12 @@ protected:
     // The ports come from the device directory rather than ncclNetProperties_t::port, which the
     // plugin sets to portNum + realPort. realPort counts VF siblings on one PCI path, so for
     // every VF past the first it names a port that does not exist in sysfs.
-    static bool CanRouteCrossNode(const char* devName) {
+    // gidOut, when given, receives the routable GID this decision was made on, so
+    // the ranks can compare subnets rather than only agreeing that each end has
+    // something routable. It is left untouched when the answer is "routable" for
+    // any other reason -- no ports directory, or no Ethernet port at all, i.e. a
+    // real IB link -- and the caller treats an absent GID as "cannot tell".
+    static bool CanRouteCrossNode(const char* devName, uint8_t* gidOut = nullptr) {
         char portsPath[PATH_MAX];
         if (snprintf(portsPath, sizeof(portsPath), "/sys/class/infiniband/%s/ports", devName)
             >= (int)sizeof(portsPath))
@@ -576,11 +598,26 @@ protected:
             if (ent->d_name[0] == '.') continue;
             if (!PortIsEthernet(portsPath, ent->d_name)) continue;
             ethernetPorts++;
-            routable = PortHasRoutableGid(portsPath, ent->d_name);
+            routable = PortHasRoutableGid(portsPath, ent->d_name, gidOut);
         }
         closedir(portsDir);
 
         return routable || ethernetPorts == 0;
+    }
+
+    // sysfs writes a GID as eight colon-separated 16-bit groups. ibv_gid is those
+    // same sixteen bytes in network order, which is what the plugin's subnet
+    // comparison expects.
+    static bool ParseGidText(const char* text, uint8_t out[16]) {
+        unsigned g[8];
+        if (sscanf(text, "%4x:%4x:%4x:%4x:%4x:%4x:%4x:%4x", &g[0], &g[1], &g[2], &g[3], &g[4],
+                   &g[5], &g[6], &g[7]) != 8)
+            return false;
+        for (int i = 0; i < 8; i++) {
+            out[2 * i]     = static_cast<uint8_t>((g[i] >> 8) & 0xFF);
+            out[2 * i + 1] = static_cast<uint8_t>(g[i] & 0xFF);
+        }
+        return true;
     }
 
     // What CreateMergedDevice() tried before giving up. Empty after a success.
@@ -990,13 +1027,29 @@ protected:
         static constexpr int kResultTextBytes = 512;
 
         int localFailed = 0;
+        int localFailures = 0;
+        int omitted = 0;
         std::string localText;
         for (size_t threadIdx = 0; threadIdx < results.size(); ++threadIdx) {
             if (results[threadIdx].ok) continue;
             localFailed = 1;
-            if (localText.size() < kResultTextBytes / 2)
+            localFailures++;
+            // The text crosses in a fixed-size MPI_Allgather, so it has to be
+            // bounded. A mass failure is usually the same message N times, and the
+            // first few carry it -- but a reader must not mistake a truncated list
+            // for the whole one, so the number left out travels with it.
+            if (localText.size() < kResultTextBytes / 2) {
                 localText += "thread " + std::to_string(threadIdx) + ": "
                              + results[threadIdx].msg + "; ";
+            } else {
+                omitted++;
+            }
+        }
+        if (omitted > 0) {
+            // Prepended, not appended: the snprintf below cuts the tail, which is
+            // where a note about truncation would be the first thing lost.
+            localText = "[" + std::to_string(localFailures) + " worker(s) failed on this rank, "
+                        + std::to_string(omitted) + " message(s) not shown] " + localText;
         }
 
         int globalFailed = 0;
@@ -1290,18 +1343,39 @@ protected:
         return indices;
     }
 
+    // The cross-rank device agreement travels as one 64-bit mask, so it covers
+    // plugin device indices 0..63.
+    static constexpr int kAgreedDevMaskBits = 64;
+    // ::ffff:a.b.c.d, i.e. what the plugin's getGidAddrFamily() calls AF_INET.
+    static bool GidIsV4Mapped(const uint8_t gid[16]) {
+        static const uint8_t kV4Prefix[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+        return memcmp(gid, kV4Prefix, sizeof(kV4Prefix)) == 0;
+    }
+
     // Device indices both ranks agree on. PhysicalDeviceIndices() reads local
     // sysfs only, so where the two nodes have different NICs alive, slot k would
     // sit on different hardware per rank: connect and accept still succeed and
     // the traffic is then dropped, which surfaces as an unexplained completion
     // timeout -- the very failure the routability filter exists to prevent.
-    // Intersecting the two lists keeps every slot symmetric.
+    // Intersecting the two lists keeps every slot symmetric. Index symmetry is not
+    // subnet symmetry, though, so the surviving slots are then compared by GID:
+    // see the second half of this function.
     bool AgreedPhysicalDeviceIndices(std::vector<int>* out, std::string* reason) {
         out->clear();
         unsigned long long localMask = 0;
+        int aboveMask = 0;
         for (int dev : PhysicalDeviceIndices()) {
-            if (dev < 0 || dev >= 64) continue;
+            // The agreement mask is one 64-bit word, so an index at or above 64
+            // cannot take part. No machine has that many plugin-visible devices,
+            // but dropping one with nothing in the log would quietly narrow the
+            // spread, so say how many did not fit.
+            if (dev < 0 || dev >= kAgreedDevMaskBits) { aboveMask++; continue; }
             localMask |= (1ull << dev);
+        }
+        if (aboveMask > 0) {
+            TEST_INFO("Rank %d: %d device index(es) outside [0,%d) are left out of the "
+                      "cross-rank device agreement and will not be spread onto",
+                      MPIEnvironment::world_rank, aboveMask, kAgreedDevMaskBits);
         }
         unsigned long long agreed = 0;
         if (MPI_Allreduce(&localMask, &agreed, 1, MPI_UNSIGNED_LONG_LONG, MPI_BAND,
@@ -1309,12 +1383,94 @@ protected:
             *reason = "MPI_Allreduce of the routable device mask failed";
             return false;
         }
-        for (int dev = 0; dev < 64; ++dev)
+        for (int dev = 0; dev < kAgreedDevMaskBits; ++dev)
             if (agreed & (1ull << dev)) out->push_back(dev);
         if (out->empty()) {
             *reason = "no device index is routable on both ranks, so workers cannot be spread";
             return false;
         }
+
+        // CanRouteCrossNode() reads local sysfs, so an agreed index only means each
+        // rank has something routable in slot k -- not that the two ends can reach
+        // each other. So the ranks exchange the GID each decision was made on and
+        // compare address families, keeping only slots where both ends are the same
+        // kind of address.
+        //
+        // Family and not subnet, which is what one would reach for first. On this
+        // fabric a working link's two ends are deliberately on different subnets:
+        // every NIC on a node shares one /24 whose third octet is the node
+        // (10.101.43.x on mia1-p01-g43, all eight of rdma0..7), so any two nodes
+        // differ and the traffic is routed. Requiring a shared /24 -- the plugin's
+        // NCCL_IB_SUBNET_PREFIX_LEN default -- would therefore reject every
+        // cross-node pair that in fact works. That rule belongs to plane matching
+        // in connect.cc, not to reachability. Family still holds: gidSameSubnet()
+        // rejects AF_INET against AF_INET6 before it looks at any prefix, so a slot
+        // that is IPv4-mapped on one node and native IPv6 on the other cannot carry
+        // traffic whatever the subnets are.
+        std::vector<uint8_t> localGids(kAgreedDevMaskBits * 16, 0);
+        std::vector<uint8_t> localHave(kAgreedDevMaskBits, 0);
+        for (int dev : *out) {
+            ncclNetProperties_t props;
+            memset(&props, 0, sizeof(props));
+            if (GetDeviceProperties(dev, &props) != ncclSuccess || !props.name) continue;
+            uint8_t gid[16] = {};
+            if (!CanRouteCrossNode(props.name, gid)) continue;
+            bool haveGid = false;
+            for (int b = 0; b < 16; b++) haveGid = haveGid || gid[b] != 0;
+            if (!haveGid) continue;
+            memcpy(&localGids[dev * 16], gid, 16);
+            localHave[dev] = 1;
+        }
+
+        const int worldSize = MPIEnvironment::world_size;
+        std::vector<uint8_t> allGids(localGids.size() * worldSize, 0);
+        std::vector<uint8_t> allHave(localHave.size() * worldSize, 0);
+        if (MPI_Allgather(localGids.data(), (int)localGids.size(), MPI_BYTE, allGids.data(),
+                          (int)localGids.size(), MPI_BYTE, MPI_COMM_WORLD) != MPI_SUCCESS
+            || MPI_Allgather(localHave.data(), (int)localHave.size(), MPI_BYTE, allHave.data(),
+                             (int)localHave.size(), MPI_BYTE, MPI_COMM_WORLD) != MPI_SUCCESS) {
+            *reason = "MPI_Allgather of the per-device GIDs failed";
+            return false;
+        }
+
+        std::vector<int> sameFamily;
+        int unknown = 0;
+        for (int dev : *out) {
+            bool anyComparable = false;
+            bool anyMismatch   = false;
+            for (int r = 0; r < worldSize; ++r) {
+                if (r == MPIEnvironment::world_rank) continue;
+                // Either end without a usable GID -- an IB link, or a GID sysfs
+                // wrote in a form this parser does not know -- leaves that pair
+                // uncomparable. A slot no peer could be compared against is kept,
+                // which is the behaviour before this check existed.
+                if (!localHave[dev] || !allHave[r * kAgreedDevMaskBits + dev]) continue;
+                anyComparable = true;
+                if (GidIsV4Mapped(&localGids[dev * 16])
+                    != GidIsV4Mapped(&allGids[r * localGids.size() + dev * 16]))
+                    anyMismatch = true;
+            }
+            if (!anyComparable) unknown++;
+            if (!anyMismatch) sameFamily.push_back(dev);
+        }
+
+        if (sameFamily.empty()) {
+            // Every slot was comparable and every one disagreed. That is a genuinely
+            // mixed pair of nodes -- and also what a wrong GID would look like, so
+            // the index-symmetric list is kept and the disagreement is reported
+            // rather than turned into a skip on the strength of this parser.
+            TEST_INFO("Rank %d: no agreed device index has the same GID address family on "
+                      "every rank; keeping the %zu index-symmetric device(s) and continuing",
+                      MPIEnvironment::world_rank, out->size());
+            return true;
+        }
+        if (sameFamily.size() != out->size()) {
+            TEST_INFO("Rank %d: %zu of %zu agreed device index(es) dropped for a GID address "
+                      "family that differs across ranks (%d uncomparable and kept)",
+                      MPIEnvironment::world_rank, out->size() - sameFamily.size(), out->size(),
+                      unknown);
+        }
+        *out = sameFamily;
         return true;
     }
 

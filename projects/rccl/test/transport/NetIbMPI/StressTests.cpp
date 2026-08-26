@@ -13,6 +13,8 @@
 
 #include "NetIbMPITestBase.hpp"
 
+#include <sched.h>
+
 #ifdef MPI_TESTS_ENABLED
 
 // =====================================================================
@@ -1615,7 +1617,20 @@ TEST_F(NetIbMPITest, SetNetAttrNoOp) {
 // rather than the plugin, and nothing shorter than the interval can be seen at
 // all. Without it a transfer costs about 7 us, so contention has somewhere to
 // show up. The price is a core per waiting worker for the couple of seconds this
-// test runs, which is why the functional tests keep the sleeping waits.
+// test runs, which is why the functional tests keep the sleeping waits -- and why
+// this one skips rather than measures when the allocation has fewer cores than
+// workers, since below that line the parallel phase reports the machine.
+//
+// The self-check's own margin, since a gate that fails on a fast NIC is worse
+// than no gate. Locking the sending rank alone serializes the whole exchange --
+// the receiver can only complete what the sender was allowed to post -- so the
+// serialized factor comes out near N rather than at some fraction of it: 3.57 to
+// 4.17 at four workers against a budget of 2.40, and 15.18 to 17.79 at sixteen
+// against 9.60, over the mia1 runs recorded for this branch. The narrowest margin
+// is 1.49x, and it does not shrink with N, which is the property that matters
+// since the budget scales with N as well. Four and sixteen are the only counts
+// this runs at -- the threaded suites set 2, 4 and 16, and 2 skips above -- so
+// those are the counts the margin is claimed for.
 //
 // What it sees, measured on mia1 at two ranks: a healthy build reports 1.02 to
 // 1.16 at four workers and 1.65 to 2.11 at sixteen, the growth being the NIC and
@@ -1639,6 +1654,33 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
     if (nThreads < 4) {
         GTEST_SKIP() << "requires --net_ib_nthreads of at least 4 to separate contention "
                         "from noise";
+    }
+
+    // Both waits busy-poll, so a waiting worker holds a core for the whole phase.
+    // Given fewer cores than workers the parallel phase inflates toward the
+    // serialized one no matter what the plugin does, and the run reports a lock
+    // that is really the allocation. Nothing in the suite config reserves cores,
+    // so the test asks instead, and says so rather than measuring.
+    //
+    // The affinity mask, not hardware_concurrency(): the latter reports the
+    // machine, while the mask is what a batch system narrows. Reduced across
+    // ranks because the two run on different nodes and both must reach the same
+    // verdict -- a one-sided skip would leave the peer in the barrier below.
+    cpu_set_t cpuMask;
+    CPU_ZERO(&cpuMask);
+    const int localCpus =
+        (sched_getaffinity(0, sizeof(cpuMask), &cpuMask) == 0) ? CPU_COUNT(&cpuMask) : -1;
+    int fewestCpus = -1;
+    if (MPI_Allreduce(&localCpus, &fewestCpus, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD)
+        != MPI_SUCCESS)
+        fewestCpus = -1;
+    // A negative value means some rank could not read its mask; that is not a
+    // reason to skip, only a reason not to claim the check was made.
+    if (fewestCpus >= 0 && fewestCpus < nThreads) {
+        GTEST_SKIP() << "needs a core per worker and the narrowest rank has " << fewestCpus
+                     << " for " << nThreads
+                     << " workers: both waits busy-poll, so on fewer cores the parallel phase "
+                        "measures the allocation rather than the progress path";
     }
 
     AssertInitAndGetDevices(nullptr);
@@ -1683,14 +1725,10 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
             // ranks admit different workers at the same time, and each would then
             // wait for a peer that its own lock is keeping out -- a deadlock,
             // which is its own argument against a global lock on this path.
-            if (serialize && rank == 1) {
-                std::lock_guard<std::mutex> lock(serializeAll);
-                result = WorkerSendRecvRaw(rank, pair, buffer, kMsgSize, 950 + (i % 32), mhandle,
-                                           kTimeoutMs, nullptr, /*busyPoll=*/true);
-            } else {
-                result = WorkerSendRecvRaw(rank, pair, buffer, kMsgSize, 950 + (i % 32), mhandle,
-                                           kTimeoutMs, nullptr, /*busyPoll=*/true);
-            }
+            std::unique_lock<std::mutex> lock(serializeAll, std::defer_lock);
+            if (serialize && rank == 1) lock.lock();
+            result = WorkerSendRecvRaw(rank, pair, buffer, kMsgSize, 950 + (i % 32), mhandle,
+                                       kTimeoutMs, nullptr, /*busyPoll=*/true);
             if (!result.ok) return result;
         }
         const auto end = std::chrono::steady_clock::now();
