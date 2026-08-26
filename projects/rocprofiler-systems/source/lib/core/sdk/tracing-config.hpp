@@ -251,8 +251,10 @@ tracing_config<SdkBackend, Externals>::get_operation_settings()
             return;
         }
 
-        result.push_back(operation_setting_spec{
-            env_names, { domain_operations.begin(), domain_operations.end() } });
+        result.push_back(
+            operation_setting_spec{ .env_names         = env_names,
+                                    .operation_choices = { domain_operations.begin(),
+                                                           domain_operations.end() } });
     };
 
     for(const auto& itr : callback_tracing_info)
@@ -357,11 +359,19 @@ tracing_config<SdkBackend, Externals>::get_buffered_domains()
 
     for(const auto& itr : domains)
     {
-        const auto& domain_map_itr = domain_map.find(itr);
-        if(domain_map_itr != domain_map.end())
+        if(const auto domain_map_itr = domain_map.find(itr);
+           domain_map_itr != domain_map.end())
         {
-            const auto& domain_list = domain_map_itr->second;
-            data.insert(domain_list.begin(), domain_list.end());
+            data.insert(domain_map_itr->second.begin(), domain_map_itr->second.end());
+        }
+        else
+        {
+            // Domain passed validation but has no buffered-tracing equivalent:
+            // either it is a callback-only domain by design, or it isn't in the
+            // compile-time supported set (e.g. an older SDK header).
+            LOG_WARNING("ROCPROFSYS_ROCM_DOMAINS: domain '{}' has no buffered-tracing "
+                        "equivalent and will be ignored for buffer tracing.",
+                        itr);
         }
     }
 
@@ -390,21 +400,13 @@ tracing_config<SdkBackend, Externals>::get_operations(TracingKind kind)
     if(names.is_empty())
     {
         // NOLINTBEGIN(misc-include-cleaner) -- see operation_options_env_names ctor
-        if constexpr(std::same_as<TracingKind,
-                                  typename SdkBackend::callback_tracing_kind_t>)
-        {
-            finalize_and_throw(
-                fmt::format("tracing_config::get_operations: no options registered for "
-                            "callback tracing kind {}",
-                            static_cast<int>(kind)));
-        }
-        else
-        {
-            finalize_and_throw(
-                fmt::format("tracing_config::get_operations: no options registered for "
-                            "buffer tracing kind {}",
-                            static_cast<int>(kind)));
-        }
+        constexpr std::string_view kind_label =
+            std::same_as<TracingKind, typename SdkBackend::callback_tracing_kind_t>
+                ? std::string_view{ "callback" }
+                : std::string_view{ "buffer" };
+        finalize_and_throw(fmt::format("tracing_config::get_operations: no options "
+                                       "registered for {} tracing kind {}",
+                                       kind_label, static_cast<int>(kind)));
         // NOLINTEND(misc-include-cleaner)
     }
 

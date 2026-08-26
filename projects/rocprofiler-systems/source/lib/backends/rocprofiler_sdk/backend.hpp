@@ -8,6 +8,8 @@
 
 #include <rocprofiler-sdk/version.h>
 
+#include <spdlog/fmt/fmt.h>  // NOLINT(misc-include-cleaner)
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -460,14 +462,11 @@ public:
             return;
         }
 
-        throw std::runtime_error{ "rocprofiler-sdk version mismatch: compiled against " +
-                                  std::to_string(compile_time_ver.major) + "." +
-                                  std::to_string(compile_time_ver.minor) + "." +
-                                  std::to_string(compile_time_ver.patch) +
-                                  ", but runtime library reports " +
-                                  std::to_string(runtime_ver.major) + "." +
-                                  std::to_string(runtime_ver.minor) + "." +
-                                  std::to_string(runtime_ver.patch) };
+        throw std::runtime_error{ fmt::format(
+            "rocprofiler-sdk version mismatch: compiled against {}.{}.{}, but runtime "
+            "library reports {}.{}.{}",
+            compile_time_ver.major, compile_time_ver.minor, compile_time_ver.patch,
+            runtime_ver.major, runtime_ver.minor, runtime_ver.patch) };
     }
 
     [[nodiscard]] static const callback_name_info_t& get_callback_tracing_names()
