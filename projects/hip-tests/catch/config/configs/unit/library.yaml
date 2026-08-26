@@ -12,6 +12,8 @@ library:
   Unit_hip_library_load_rtc:
     <<: *level_2
     tags: [module]
+    # AIRUNTIME-2410
+    disabled: [asan]
   Unit_hipKernelGetAttribute_Positive_Basic:
     <<: *level_2
     tags: [module]

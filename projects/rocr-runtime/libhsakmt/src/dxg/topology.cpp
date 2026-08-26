@@ -767,8 +767,14 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   } else {
     props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
   }
-  props.NumSIMDPerCU = device->SimdPerCu();
+  props.NumSIMDPerCU = simd_per_cu;
   props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
+
+  // MaxWavesPerSIMD = (waves per CU) / (SIMDs per CU)
+  // WKMI provides wave_per_cu which is the total waves per CU.
+  // We need to divide by NumSIMDPerCU to get waves per SIMD.
+  props.MaxWavesPerSIMD = device->WavePerCu() / simd_per_cu;
+
   props.VendorId = 0x1002;
   props.DeviceId = device->DeviceId();
   props.LocationId = device->PciBusAddr();
@@ -870,12 +876,7 @@ HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id, uint32_t mem_id,
   assert(device);
 
   props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
-  props.SizeInBytes = device->LocalHeapSize();
-  // On APU, allocations can spill from local to non-local via the GART fallback,
-  // so the effective per-allocation cap is local + non-local.
-  if (!device->IsDgpu()) {
-    props.SizeInBytes += device->NonLocalHeapSize();
-  }
+  props.SizeInBytes = device->VramTotal();
   props.Width = device->MemoryBusWidth();
   props.MemoryClockMax = device->MaxMemoryClockMhz();
 

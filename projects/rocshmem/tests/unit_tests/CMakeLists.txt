@@ -66,6 +66,19 @@ target_sources(
     backend_bc_buffer_register_gtest.cpp
 )
 
+if (USE_SDMA)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      gin_anvil_sdma_factory_test.cpp
+  )
+  target_include_directories(
+    ${PROJECT_NAME}
+    PRIVATE
+      ${CMAKE_SOURCE_DIR}/include
+  )
+endif()
+
 if (USE_IPC)
   target_sources(
     ${PROJECT_NAME}
@@ -130,7 +143,7 @@ FetchContent_MakeAvailable(googletest)
 
 configure_file(../../scripts/unit_tests/driver.sh rocshmem_unit_driver.sh COPYONLY)
 rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_unit_driver.sh COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
-install(TARGETS rocshmem_unit_tests COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
+install(TARGETS rocshmem_unit_tests COMPONENT tests RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 target_link_libraries(
   ${PROJECT_NAME}
@@ -153,6 +166,31 @@ rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/unit_test_wrapper.sh
 
 # Include CTest-based unit tests
 # Set BUILD_CTESTS=ON to register unit tests
+if(BUILD_CTESTS)
+    # Probe for Python3 + PyYAML before registering tests. Tests rely on
+    # test_categories.yaml for tier labels (quick/standard/comprehensive/full);
+    # without those labels they would be invisible to `ctest -L <tier>` in CI.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(NOT Python3_FOUND)
+        message(WARNING
+            "Python3 not found — skipping CTest unit test registration. "
+            "Tests require PyYAML to apply tier labels from test_categories.yaml.")
+        set(BUILD_CTESTS OFF CACHE BOOL "CTests disabled: Python3 not found" FORCE)
+    else()
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import yaml"
+            RESULT_VARIABLE _pyyaml_result
+            ERROR_QUIET)
+        if(NOT _pyyaml_result EQUAL 0)
+            message(WARNING
+                "PyYAML not found for '${Python3_EXECUTABLE}' — skipping CTest unit "
+                "test registration. Tests require PyYAML to apply tier labels from "
+                "test_categories.yaml. Install with: pip install pyyaml")
+            set(BUILD_CTESTS OFF CACHE BOOL "CTests disabled: PyYAML not found" FORCE)
+        endif()
+    endif()
+endif()
+
 if(BUILD_CTESTS)
     message(STATUS "Registering CTest-based unit tests")
     include(${CMAKE_CURRENT_SOURCE_DIR}/CTestUnitTests.cmake OPTIONAL)

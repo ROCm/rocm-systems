@@ -141,9 +141,10 @@ class ElfVerifier(BinaryVerifier):
         """
         result = VerificationResult()
 
+        page_size = self._surgery.page_size
         for idx, phdr in self._surgery.iter_load_segments():
-            offset_mod = phdr.p_offset % PAGE_SIZE
-            vaddr_mod = phdr.p_vaddr % PAGE_SIZE
+            offset_mod = phdr.p_offset % page_size
+            vaddr_mod = phdr.p_vaddr % page_size
 
             if offset_mod != vaddr_mod:
                 result.add_error(

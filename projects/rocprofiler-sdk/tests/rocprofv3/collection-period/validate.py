@@ -41,56 +41,102 @@ class TimeWindow(object):
         return f"[{self.offset}:{self.offset+self.duration}]"
 
 
-def check_traces(data, valid_regions, invalid_regions, corrid_records=None):
-    for record in data:
-        corr_id = record.correlation_id.internal
-        rval = (
-            corrid_records[corr_id]
-            if corrid_records is not None and corr_id in corrid_records
-            else record
-        )
-        valid = [itr for itr in valid_regions if itr.in_region(rval.start_timestamp)]
-        assert (
-            len(valid) == 1
-        ), f"\nrval:\n\t{rval}\nrecord:\n\t{record}\nnot found in valid regions:\n{valid_regions}"
+def compute_guard(period, transition):
+    # Collection doesn't flip the instant start()/stop() is called, so exclude a guard
+    # band around each transition. The call duration is a rough proxy for machine load;
+    # 8x gives the runtime headroom to apply the change, while the 2 ms floor covers
+    # timestamp jitter on fast idle machines.
+    if period is None or transition not in period.keys():
+        return int(2e6)
 
-        invalid = [itr for itr in invalid_regions if itr.in_region(rval.start_timestamp)]
-        assert (
-            len(invalid) == 0
-        ), f"\nrval:\n\t{rval}\nrecord:\n\t{record}\nfound in invalid region(s):\n{invalid}"
+    call_span = period[transition].stop - period[transition].start
+    return max(8 * call_span, int(2e6))
 
 
 def test_collection_period_trace(json_data, collection_period_data):
-    # Adding 20 us error margin to handle the time taken for the start/stop context to affect the collection
-    time_error_margin = 20 * 1e4
-    valid_regions = []
-    invalid_regions = []
+    # off_cores: genuinely-off (delay) time, shrunk by guard -- must not contain
+    # sustained collection from any thread.
+    # on_cores: genuinely-on (collection) time, shrunk by guard -- records expected.
+    #
+    # Guards are local to each boundary. A single slow start/stop call can make its
+    # adjacent core untestable, but must not erase otherwise stable windows elsewhere.
+    off_cores = []
+    on_cores = []
+    guards = []
+    previous_period = None
     for period in collection_period_data:
-        _start = None
-        _stop = None
-        if "start" in period.keys():
-            _start = period.start.start - time_error_margin
-        if "stop" in period.keys():
-            _stop = period.stop.stop + time_error_margin
-
-        if _start and _stop:
-            valid_regions.append(TimeWindow(_start, _stop))
-        elif "duration" in period.keys():
-            valid_regions.append(TimeWindow(period.duration.start, period.duration.stop))
-        elif _start and not _stop:
-            valid_regions.append(TimeWindow(_start, _start + 10e9))  # add 10 seconds
+        start_guard = compute_guard(period, "start")
+        stop_guard = compute_guard(period, "stop")
+        previous_stop_guard = compute_guard(previous_period, "stop")
+        guards.append(
+            {
+                "previous_stop": previous_stop_guard,
+                "start": start_guard,
+                "stop": stop_guard,
+            }
+        )
 
         if "delay" in period.keys():
-            invalid_regions.append(TimeWindow(period.delay.start, period.delay.stop))
+            beg = period.delay.start + previous_stop_guard
+            end = period.delay.stop - start_guard
+            if end > beg:
+                off_cores.append(TimeWindow(beg, end))
+
+        if "duration" in period.keys():
+            beg = period.duration.start + start_guard
+            end = period.duration.stop - stop_guard
+            if end > beg:
+                on_cores.append(TimeWindow(beg, end))
+
+        previous_period = period
+
+    assert off_cores, f"no stable off-window cores (guards={guards})"
+    assert on_cores, f"no stable on-window cores (guards={guards})"
 
     data = json_data["rocprofiler-sdk-tool"]
-    corrid_records = {}
 
+    on_core_records = [0] * len(on_cores)
+    off_core_records = {}
     for itr in ["hsa_api", "hip_api", "marker_api", "rccl_api"]:
         grp = data.buffer_records[itr]
-        check_traces(grp, valid_regions, invalid_regions)
         for record in grp:
-            corrid_records[record.correlation_id.external] = record
+            ts = record.start_timestamp
+
+            for index, window in enumerate(off_cores):
+                if window.in_region(ts):
+                    key = (index, record.thread_id)
+                    off_core_records.setdefault(key, []).append((itr, record))
+
+            for index, window in enumerate(on_cores):
+                if window.in_region(ts):
+                    on_core_records[index] += 1
+
+    # A thread may read the active context just before stop_context and then be
+    # descheduled before recording the API call's start time. When it resumes, that one
+    # in-flight call can appear in the next off window. Each thread can have only one
+    # such call, so seeing another means tracing continued after the context stopped.
+    for (window_index, thread_id), records in off_core_records.items():
+        assert len(records) <= 1, (
+            "multiple records from one thread were collected while tracing was off "
+            f"(window={off_cores[window_index]}, thread_id={thread_id}, "
+            f"records={records}, guards={guards})"
+        )
+        itr, record = records[0]
+        offset = record.start_timestamp - off_cores[window_index].offset
+        print(
+            "tolerated in-flight record while tracing was off "
+            f"(window={off_cores[window_index]}, thread_id={thread_id}, "
+            f"category={itr}, offset={offset / 1e6:.3f} ms)"
+        )
+
+    # Collection must have captured data inside every active window.
+    empty_on_cores = [
+        window for window, count in zip(on_cores, on_core_records) if count == 0
+    ]
+    assert not empty_on_cores, (
+        f"no records were collected inside active collection window(s) {empty_on_cores} "
+        f"(counts={on_core_records}, guards={guards})"
+    )
 
 
 def test_perfetto_data(pftrace_data, json_data):

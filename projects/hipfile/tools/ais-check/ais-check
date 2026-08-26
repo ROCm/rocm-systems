@@ -36,7 +36,9 @@ import ctypes.util
 import errno
 import glob
 import gzip
+import json
 import os
+import subprocess
 import sys
 
 # Mounts backed by these (or any non-block source) can never use the fast path.
@@ -66,9 +68,119 @@ PSEUDO_FSTYPES = {
 }
 
 
-def kernel_supports_p2pdma():
+# amdgpu DKMS builds newer than this expose an authoritative AIS P2P-DMA state
+# through the KFD topology "capability" bit. On such drivers we trust that bit
+# instead of the kernel's CONFIG_PCI_P2PDMA, which only reports build-time
+# support, not whether AIS actually came up.
+KFD_AIS_CAPABILITY_MIN_VERSION = 2327936
+
+# Bit set in a KFD topology node's "capability" mask once AIS P2P-DMA is
+# initialized for that GPU.
+KFD_CAPABILITY_AIS = 0x40
+
+# Per-GPU topology directory the kernel's KFD driver publishes.
+KFD_TOPOLOGY_NODES = "/sys/class/kfd/kfd/topology/nodes"
+
+# amd-smi reports a virtual function's market name with a "VF" suffix (e.g.
+# "AMD Instinct MI300X VF"); see docs/troubleshooting/known-issues.rst.
+AMD_SMI = "amd-smi"
+
+
+def amdgpu_dkms_version():
     """
-    Check for P2P DMA support in the kernel
+    Return the amdgpu DKMS build number (e.g. 2278356 from a module version of
+    "6.16.13-2278356.24.04"), or None if it cannot be determined.
+
+    The build number is the integer immediately after the first '-' in the
+    module version. dkms lists one entry per installed kernel; the entry for the
+    running kernel is preferred, otherwise the highest build number is used.
+    """
+    try:
+        result = subprocess.run(
+            ["dkms", "status", "amdgpu"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+
+    running = os.uname().release
+    builds = []
+    running_build = None
+    for line in result.stdout.splitlines():
+        # Two dkms output shapes exist: "amdgpu/<ver>, <kernel>, ..." (newer)
+        # and "amdgpu, <ver>, <kernel>, ..." (older). Parse the status-free head
+        # by comma, then reconcile the version/kernel split.
+        head = line.split(":", 1)[0]
+        parts = [p.strip() for p in head.split(",")]
+        first = parts[0]
+        if "/" in first:
+            version = first.partition("/")[2]
+            kernel = parts[1] if len(parts) > 1 else None
+        else:
+            version = parts[1] if len(parts) > 1 else None
+            kernel = parts[2] if len(parts) > 2 else None
+
+        if not version or "-" not in version:
+            continue
+        token = version.split("-", 1)[1].split(".", 1)[0]
+        if not token.isdigit():
+            continue
+
+        build = int(token)
+        builds.append(build)
+        if kernel == running:
+            running_build = build
+
+    if running_build is not None:
+        return running_build
+    if builds:
+        return max(builds)
+    return None
+
+
+def topology_reports_ais():
+    """
+    True if any KFD topology GPU node reports AIS P2P-DMA initialized via its
+    "capability" bit (capability & KFD_CAPABILITY_AIS). Only GPU nodes are
+    considered, identified by a non-zero "simd_count"; CPU nodes (simd_count 0
+    or absent) are skipped.
+    """
+    try:
+        nodes = os.listdir(KFD_TOPOLOGY_NODES)
+    except OSError:
+        return False
+
+    for node in nodes:
+        path = os.path.join(KFD_TOPOLOGY_NODES, node, "properties")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                simd_count = 0
+                capability = 0
+                for line in f:
+                    key, _, value = line.partition(" ")
+                    if key not in ("simd_count", "capability"):
+                        continue
+                    try:
+                        parsed = int(value.strip())
+                    except ValueError:
+                        continue
+                    if key == "simd_count":
+                        simd_count = parsed
+                    else:
+                        capability = parsed
+                if simd_count and (capability & KFD_CAPABILITY_AIS):
+                    return True
+        except OSError:
+            continue
+
+    return False
+
+
+def config_supports_p2pdma():
+    """
+    Check for P2P DMA support via the kernel's CONFIG_PCI_P2PDMA config.
     """
 
     kr = os.uname().release
@@ -91,6 +203,21 @@ def kernel_supports_p2pdma():
     if not configs_found:
         print("No kernel config files found!", file=sys.stderr)
     return False
+
+
+def kernel_supports_p2pdma():
+    """
+    Check for P2P DMA support.
+
+    On amdgpu DKMS builds newer than KFD_AIS_CAPABILITY_MIN_VERSION the KFD
+    topology exposes an authoritative AIS capability bit, so it alone decides the
+    verdict. Older builds -- and any case where the driver version can't be
+    determined -- fall back to inspecting the kernel's CONFIG_PCI_P2PDMA.
+    """
+    version = amdgpu_dkms_version()
+    if version is not None and version > KFD_AIS_CAPABILITY_MIN_VERSION:
+        return topology_reports_ais()
+    return config_supports_p2pdma()
 
 
 def find_hip_runtimes():
@@ -275,6 +402,75 @@ def amdgpu_supports_ais():
             file=sys.stderr,
         )
     return False
+
+
+def sriov_vf_gpus():
+    """
+    Return a list of (bdf, market_name) for AMD GPUs that are SR-IOV virtual
+    functions (VFs), as reported by amd-smi.
+
+    hipFile's fastpath is only supported on GPU physical functions; on a VF it
+    falls back to the slower compatibility path. amd-smi names a VF with a "VF"
+    suffix (e.g. "AMD Instinct MI300X VF"), which is the authoritative signal --
+    it works inside SR-IOV guests where the physical function isn't visible in
+    sysfs. See docs/troubleshooting/known-issues.rst.
+
+    Returns [] when amd-smi is missing, exits non-zero, or emits output that
+    can't be parsed; VF status is treated as "not detected" rather than an error,
+    matching the tool's other best-effort probes.
+    """
+    try:
+        result = subprocess.run(
+            [AMD_SMI, "static", "--asic", "--bus", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return []
+
+    if result.returncode != 0:
+        return []
+
+    try:
+        data = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+    vfs = []
+    for entry in data.get("gpu_data", []):
+        if not isinstance(entry, dict):
+            continue
+        asic = entry.get("asic") or {}
+        market = (asic.get("market_name") or "").strip()
+        normalized = market.upper()
+        if normalized != "VF" and not normalized.endswith(" VF"):
+            continue
+        bus = entry.get("bus") or {}
+        bdf = bus.get("bdf") or f"gpu {entry.get('gpu', '?')}"
+        vfs.append((bdf, market))
+
+    return vfs
+
+
+def print_sriov_warning(vf_gpus):
+    """
+    Print a warning to stderr when any SR-IOV virtual function GPU is present.
+
+    Written to stderr (not stdout) so it remains visible in quiet mode. Does
+    nothing when vf_gpus is empty.
+    """
+    if not vf_gpus:
+        return
+
+    devices = ", ".join(f"{bdf} ({name})" for bdf, name in vf_gpus)
+    print(
+        f"WARNING: SR-IOV virtual function GPU(s) detected: {devices}.\n"
+        "hipFile's fast path is not available on GPU virtual functions; "
+        "I/O will fall back to the slower compatibility path. The fast path "
+        "requires a GPU physical function (PF).",
+        file=sys.stderr,
+    )
 
 
 class Mount:  # pylint: disable=too-few-public-methods
@@ -541,6 +737,7 @@ def capable_volumes():
     return rows, any(r["capable"] is True for r in rows)
 
 
+# Reimplemented in hipfile/test/common/ais-capability.h.
 def main():
     """
     Parse command-line arguments, check AIS support in kernel/libraries and
@@ -571,6 +768,7 @@ def main():
 
     hip_libraries = hip_runtime_supports_ais()
     volume_rows, volumes_ok = capable_volumes()
+    vf_gpus = sriov_vf_gpus()
 
     component_support = [
         ("Kernel P2PDMA support", kernel_supports_p2pdma()),
@@ -605,6 +803,10 @@ def main():
         print("AIS support in:")
         for name, supported in component_support:
             print(f"\t{name:<24}: {supported}")
+
+    # A VF is a performance caveat, not a missing component, so warn (always, even
+    # in quiet mode) without affecting the exit code.
+    print_sriov_warning(vf_gpus)
 
     return int(not all(supported for (_, supported) in component_support))
 

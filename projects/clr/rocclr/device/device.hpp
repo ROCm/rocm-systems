@@ -22,6 +22,7 @@
 #include "devkernel.hpp"
 #include "amdocl/cl_profile_amd.h"
 #include "devsignal.hpp"
+#include "utils/nontemporal.hpp"
 
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
@@ -654,6 +655,9 @@ struct Info : public amd::EmbeddedObject {
   //! large bar support.
   bool largeBar_;
 
+  //! CPU supports MOVDIR64B (atomic 64-byte write with WC buffer close).
+  bool movdir64b_;
+
   uint32_t hmmSupported_;            //!< ROCr supports HMM interfaces
   uint32_t hmmCpuMemoryAccessible_;  //!< CPU memory is accessible by GPU without pinning/register
   uint32_t hmmDirectHostAccess_;     //!< HMM memory is accessible from the host without migration
@@ -688,6 +692,7 @@ struct Info : public amd::EmbeddedObject {
   bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
 
   bool dmabufSupported_;  //!< DMABuf support flag
+  bool hostAllocDmabufSupported_;  //!< Host-alloc DMABuf support flag
   bool gpuDirectRdmaWithHipVmmSupported_;  //!< GPU Direct RDMA with HIP VMM (DMA-Buf + HIP VMM)
 
   uint32_t maxDynDataPrefetchRegions_;  //!< Max L2 prefetch regions (0 if unsupported)
@@ -700,10 +705,8 @@ class Settings {
     HostKernelArgs = 0,        //!< Kernel Arguments are put into host memory
     DeviceKernelArgs,          //!< Device memory kernel arguments with no memory
                                //!< ordering workaround (e.g. XGMI)
-    DeviceKernelArgsReadback,  //!< Device memory kernel arguments with kernel
+    DeviceKernelArgsReadback   //!< Device memory kernel arguments with kernel
                                //!< argument readback workaround
-    DeviceKernelArgsHDP        //!< Device memory kernel arguments with kernel
-                               //!< argument readback plus HDP flush workaround.
   };
 
   uint64_t extensions_;  //!< Supported OCL extensions
@@ -730,7 +733,8 @@ class Settings {
       uint sdma_swap_supported_ : 1;         //!< SDMA linear swap copy (gfx94x/gfx95x)
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
-      uint reserved_ : 9;
+      uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
+      uint reserved_ : 8;
     };
     uint value_;
   };
@@ -1375,11 +1379,10 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void HiddenHeapInit() = 0;
 
   //! Fast-path dispatch using a pre-built contiguous flat packet buffer.
-  virtual bool dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPacketData,
+  virtual bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                           const std::vector<uint32_t>& validFullHeaders,
                                           amd::AccumulateCommand* vcmd = nullptr,
                                           bool attach_signal = false,
-                                          const std::vector<const std::string*>* kernelNames = nullptr,
                                           bool pre_patched = false,
                                           bool blocking = false,
                                           const std::vector<uint8_t>* flatMetadataData = nullptr) {
@@ -1756,12 +1759,14 @@ class Device : public RuntimeObject {
     kHostNumaCurrent = 0x4
   };
 
+  enum class VmmExportStatus { kSuccess, kError, kResourceNotReady };
+
   typedef std::pair<LinkAttribute, int32_t /* value */> LinkAttrType;
 
   static constexpr size_t kP2PStagingSize = 4 * Mi;
   static constexpr size_t kMGSyncDataSize = sizeof(MGSyncData);
   static constexpr size_t kMGInfoSizePerDevice = kMGSyncDataSize + sizeof(MGSyncInfo);
-  static constexpr size_t kSGInfoSize = kMGSyncDataSize;
+  static constexpr size_t kSGInfoSize = sizeof(MGSyncInfo);
 
   // Max Scratch size is based on ISA and thus per device.
   // Def value is as per GFX9 being the least among supported devices.
@@ -2154,10 +2159,11 @@ class Device : public RuntimeObject {
    * @param flags any flags to be passed
    * @param shareableHandle exported handle, points to fdesc.
    */
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                        void* shareableHandle, amd::Memory::HandleType handle_type) {
+  virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
+                                                   void* shareableHandle,
+                                                   amd::Memory::HandleType handle_type) {
     ShouldNotCallThis();
-    return false;
+    return VmmExportStatus::kError;
   }
 
   /**
@@ -2251,6 +2257,12 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
+    // Segment that owns this patch (set at BuildSyncPlan time). At launch the
+    // graph layer resolves it to the actual stream's vGPU index into queue_index.
+    int segment_id = -1;
+    // vGPU (queue) index resolved at launch from segment_id. Read by
+    // ApplyHwEventPatches to attribute the signal to its execution stream.
+    uint32_t queue_index = std::numeric_limits<uint32_t>::max();
   };
 
   virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
@@ -2415,6 +2427,13 @@ class Device : public RuntimeObject {
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
   virtual device::UriLocator* createUriLocator() const = 0;
+#endif
+#endif
+
+#if defined(__linux__) && defined(__clang__)
+#if __has_feature(address_sanitizer)
+  void reportDeviceMemoryLeaks();
+  static void reportAllDeviceMemoryLeaks();
 #endif
 #endif
 

@@ -205,7 +205,7 @@ class IPCBackend : public Backend {
    *
    * @note Internal data ownership is managed by the proxy
    */
-  HdpProxy<HIPHostAllocator> hdp_proxy_{};
+  HdpProxy hdp_proxy_{};
 
   /**
    * @brief Holds a copy of the default context for host functions
@@ -336,25 +336,6 @@ class IPCBackend : public Backend {
    * @brief Unregister all symmetric buffers and free the registration table.
    */
   void cleanup_symm_registration();
-
-  /**
-   * @brief IPC-specific per-registration state.
-   *
-   * The common base/length bookkeeping lives in Backend::symm_buffer_regions;
-   * this map holds the transport-specific state needed to tear a registration
-   * down, keyed by the registered buffer's base address.
-   */
-  struct IpcSymmRecord {
-    int slot{-1};                       // index into the device symm_table
-    char** dev_peer_bases{nullptr};     // device array[num_pes] (published to table)
-    std::vector<char*> peer_bases{};    // host copy[num_pes] (for CloseIpcHandle)
-    std::vector<char> local_handle{};   // exported IPC handle (for cleanup)
-  };
-
-  /**
-   * @brief Host-side map of IPC-specific symmetric registration state.
-   */
-  std::map<uintptr_t, IpcSymmRecord> ipc_symm_records_{};
 
   /**
    * @brief

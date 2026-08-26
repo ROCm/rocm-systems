@@ -76,6 +76,7 @@ add_subdirectory(bin)
 # validation tests
 add_subdirectory(kernel-tracing)
 add_subdirectory(async-copy-tracing)
+add_subdirectory(rocshmem-trace)
 add_subdirectory(hsa-memory-allocation)
 add_subdirectory(scratch-memory-tracing)
 add_subdirectory(c-tool)
@@ -86,6 +87,7 @@ add_subdirectory(counter-collection)
 add_subdirectory(openmp-tools)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
+add_subdirectory(hipfile)
 add_subdirectory(hip-host-tracing)
 add_subdirectory(code-object-multi-threaded)
 add_subdirectory(spm)
@@ -105,6 +107,12 @@ add_subdirectory(rocprofv3)
 
 # late-start tracing validation tests
 add_subdirectory(late-start-tracing)
+
+# multiple anytime tool configuration validation tests
+add_subdirectory(multi-tool-test)
+
+# anytime tool configuration (force_configure) validation tests
+add_subdirectory(anytime-tool-config)
 
 # python bindings
 add_subdirectory(python-bindings)

@@ -67,6 +67,7 @@ class TestResult:
     extra_output: Optional[str] = None
     duration: Optional[float] = None
     _instrumented_files: list[Path] = field(default_factory=list)
+    __test__ = False
 
     @property
     def success(self) -> bool:
@@ -90,13 +91,11 @@ class TestResult:
         return protos[0] if protos else None
 
     @property
-    def rocpd_file(self) -> Optional[Path]:
+    def rocpd_files(self) -> list[Path]:
         candidate = self.output_dir / "rocpd.db"
         if candidate.exists():
-            return candidate
-        # Try globbing
-        dbs = list(self.output_dir.glob("*.db"))
-        return dbs[0] if dbs else None
+            return [candidate]
+        return sorted(self.output_dir.glob("*.db"))
 
     @property
     def timemory_files(self) -> list[Path]:
@@ -547,9 +546,14 @@ class BinaryRewriteRunner(BaseRunner):
         if self.cleanup_on_success and run_result.success:
             run_result.cleanup_instrumented_binaries()
 
-        # Combine rewrite and run output
+        # Combine rewrite and run output. Surface the rewrite command (the
+        # rocprof-sys-instrument invocation that produces the .inst) too, since
+        # the reported result only carries the run-phase command.
+        rewrite_cmd = " ".join(str(c) for c in rewrite_result.command)
         run_result.test_output = (
-            f"=== REWRITE PHASE ===\n{rewrite_result.test_output}\n"
+            f"=== REWRITE PHASE ===\n"
+            f"Command: {rewrite_cmd}\n\n"
+            f"{rewrite_result.test_output}\n"
             f"=== RUN PHASE ===\n{run_result.test_output}"
         )
         run_result.duration = rewrite_result.duration + run_result.duration

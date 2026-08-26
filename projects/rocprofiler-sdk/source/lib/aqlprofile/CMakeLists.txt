@@ -28,15 +28,18 @@ target_link_libraries(
     PRIVATE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
             # $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
-            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-memcheck>
+            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-sanitizer>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-abseil>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-fmt>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dl>
-            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-atomic>
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink>)
 set_target_properties(rocprofiler-sdk-aqlprofile PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(core)
 add_subdirectory(util)
 add_subdirectory(pm4)
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

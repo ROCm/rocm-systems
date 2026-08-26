@@ -50,13 +50,25 @@ jobs:
           sudo apt-get install -y python3-pip python3-venv
           python3 -m venv /tmp/awscli-venv
           /tmp/awscli-venv/bin/python -m pip install -U pip awscli
+          # Restrict to the standard release tarball under v4/tarball/:
+          #  - the --prefix excludes the v4/tarball-asan/ (AddressSanitizer) builds,
+          #    which are ~10x larger and ship ASan-instrumented ROCm libraries that
+          #    break non-ASan CI test binaries (e.g. rocdecode/rocjpeg tracing).
+          #  - !contains(Key, '-tests-') drops the larger test-bundle variant.
+          # Without these filters, sort_by(... LastModified)[-1] can pick the ASan
+          # tarball for gfx94X/gfx950 (published later in the day than the standard one).
           KEY=$(/tmp/awscli-venv/bin/aws s3api list-objects-v2 \
                 --bucket therock-nightly-tarball \
                 --no-sign-request \
+                --prefix "v4/tarball/" \
                 --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}')], &LastModified)[-1].Key")
+                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}') && !contains(Key, 'asan') && !contains(Key, '-tests-')], &LastModified)[-1].Key")
           KEY=${KEY//\"/}
-          test -n "$KEY" || { echo "No ${{ matrix.gpu }} tarball found"; exit 1; }
+          # A no-match filter returns the JSON literal "null" (or "None" for text
+          # output), which is a non-empty string, so guard against it explicitly.
+          if [[ -z "$KEY" || "$KEY" == "null" || "$KEY" == "None" ]]; then
+            echo "No ${{ matrix.gpu }} tarball found"; exit 1
+          fi
           echo "tarball=${KEY}" >> $GITHUB_OUTPUT
 
       - name: Login to Docker Hub

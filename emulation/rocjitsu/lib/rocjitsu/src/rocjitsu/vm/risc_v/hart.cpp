@@ -1,10 +1,12 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/risc_v/hart.h"
 #include "rocjitsu/isa/arch/risc_v/decoder.h"
 #include "rocjitsu/isa/arch/risc_v/isa.h"
 #include "rocjitsu/isa/instruction.h"
+
+#include <cassert>
 
 namespace rocjitsu {
 namespace risc_v {
@@ -27,6 +29,7 @@ bool Hart::advance(simdojo::Tick /*now*/) {
 
   set_current_memory(&memory_);
 
+  assert(inst->execute && "instruction execution backend is not linked");
   inst->execute(*inst, &state_);
 
   state_.pc = state_.next_pc;

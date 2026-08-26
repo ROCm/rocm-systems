@@ -1,21 +1,5 @@
 cmake_minimum_required(VERSION 3.16.0)
 
-if(NOT DEFINED VERSION_MAJOR)
-    set(VERSION_MAJOR 0)
-endif()
-
-if(NOT DEFINED VERSION_MINOR)
-    set(VERSION_MINOR 2)
-endif()
-
-if(NOT DEFINED VERSION_PATCH)
-    set(VERSION_PATCH 7)
-endif()
-
-project(
-    rocprof-trace-decoder
-    VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}
-    LANGUAGES C CXX)
 if(NOT DEFINED PROJECT_NAME)
     set(PROJECT_NAME "rocprof-trace-decoder")
 endif()
@@ -29,6 +13,8 @@ endif()
 if(NOT DEFINED CMAKE_MODULE_PATH)
     set(CMAKE_MODULE_PATH ${TTD_PROJECT_SOURCE_DIR} ${TTD_PROJECT_SOURCE_DIR}/cmake)
 endif()
+
+include(${TTD_PROJECT_SOURCE_DIR}/cmake/version.cmake)
 
 include(GNUInstallDirs) # install directories
 set(CMAKE_INSTALL_LIBDIR "lib") # rocm doesn't use lib64
@@ -78,7 +64,8 @@ set(TTD_PUBLIC_CXX_HEADERS
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/common.hpp
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/disassembly.hpp
     ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/funcmap.hpp
-    ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/segment.hpp)
+    ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/segment.hpp
+    ${TTD_PROJECT_SOURCE_DIR}/include/rocprof_trace_decoder/cxx/markers.hpp)
 
 # --- Disassembly backend selection -----------------------------------------
 #
@@ -201,7 +188,8 @@ endif()
 if(TTD_DISASM_COMPILE_DEFS)
     target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ${TTD_DISASM_COMPILE_DEFS})
 endif()
-target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
+target_compile_definitions(rocprof-trace-decoder-objects PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY
+                                                                 ${TTD_VERSION_COMPILE_DEFS})
 set_target_properties(rocprof-trace-decoder-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 option(ARCH_MODEL "Enable ARCH_MODEL stitcher path" OFF)
@@ -279,7 +267,8 @@ if(DEFINED BUILD_TESTS AND BUILD_TESTS)
     if(TTD_DISASM_COMPILE_DEFS)
         target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ${TTD_DISASM_COMPILE_DEFS})
     endif()
-    target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
+    target_compile_definitions(rocprof-trace-decoder-sanitized PRIVATE ROCPROF_TRACE_DECODER_BUILDING_LIBRARY
+                                                                       ${TTD_VERSION_COMPILE_DEFS})
     target_compile_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined -g -O1)
     target_link_options(rocprof-trace-decoder-sanitized PRIVATE -fsanitize=address,undefined)
     if(ARCH_MODEL)
@@ -304,11 +293,17 @@ install(
 #                PATHS /path/to/decoder/build/source)
 #   target_link_libraries(myapp PRIVATE rocprof-trace-decoder::rocprof-trace-decoder-static)
 #
-# Both shared and static targets are exported so the consumer picks. The
-# static target carries the PUBLIC LLVM dependency, so the consumer inherits
-# the right LLVM transitively without re-running find_package(LLVM).
+# Both shared and static decoder targets are exported so the consumer picks.
+# The static target carries the PUBLIC LLVM dependency, so the consumer
+# inherits the right LLVM transitively without re-running find_package(LLVM).
+# The SQTT marker pass plugin is exported when it is part of this build.
+set(TTD_BUILD_TREE_EXPORT_TARGETS rocprof-trace-decoder rocprof-trace-decoder-static)
+if(TARGET SQTTInstrumentPass)
+    list(APPEND TTD_BUILD_TREE_EXPORT_TARGETS SQTTInstrumentPass)
+endif()
+
 export(
-    TARGETS rocprof-trace-decoder rocprof-trace-decoder-static
+    TARGETS ${TTD_BUILD_TREE_EXPORT_TARGETS}
     NAMESPACE rocprof-trace-decoder::
     FILE "${CMAKE_CURRENT_BINARY_DIR}/rocprof-trace-decoder-targets.cmake")
 

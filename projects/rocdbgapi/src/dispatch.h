@@ -33,7 +33,7 @@ namespace amd::dbgapi
 
 class agent_t;
 class process_t;
-class compute_queue_t;
+class queue_t;
 
 /* AMD Debugger API Dispatch.  */
 
@@ -41,10 +41,10 @@ class dispatch_t : public detail::handle_object<amd_dbgapi_dispatch_id_t>
 {
 private:
   amd_dbgapi_os_queue_packet_id_t const m_os_queue_packet_id;
-  compute_queue_t &m_queue;
+  queue_t &m_queue;
 
 public:
-  dispatch_t (amd_dbgapi_dispatch_id_t dispatch_id, compute_queue_t &queue,
+  dispatch_t (amd_dbgapi_dispatch_id_t dispatch_id, queue_t &queue,
               amd_dbgapi_os_queue_packet_id_t os_queue_packet_id)
     : handle_object (dispatch_id), m_os_queue_packet_id (os_queue_packet_id),
       m_queue (queue)
@@ -65,7 +65,7 @@ public:
                          void *value) const
     = 0;
 
-  compute_queue_t &queue () const { return m_queue; }
+  queue_t &queue () const { return m_queue; }
   const agent_t &agent () const;
   process_t &process () const;
   const architecture_t &architecture () const;

@@ -29,7 +29,7 @@ rocprofiler_systems_custom_compilation(
     TARGET openmp-common
 )
 
-add_subdirectory(CG)
-add_subdirectory(LU)
+add_subdirectory(cg)
+add_subdirectory(lu)
 add_subdirectory(fortran)
 add_subdirectory(target)

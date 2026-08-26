@@ -4,6 +4,8 @@
 #include "avail.hpp"
 #include "common.hpp"
 #include "common/defines.h"
+#include "common/delimit.hpp"
+#include "common/environment.hpp"
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -11,13 +13,14 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 #include <cstdint>
+#include <spdlog/fmt/fmt.h>
 
 #include "hw_counter_query.hpp"
 
 #include "core/amd_smi.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
-#include "core/rocprofiler-sdk.hpp"
+#include "core/sdk-tracing-config.hpp"
 #include "core/state.hpp"
 
 #include <timemory/components.hpp>
@@ -125,25 +128,25 @@ main(int argc, char** argv)
     (void) timemory_hash_aliases;  //
 
     tim::unwind::set_bfd_verbose(3);
-    rocprofsys::set_state(rocprofsys::State::Init);
+    rocprofsys::state::process::set(rocprofsys::state::process::Init);
     rocprofsys::config::configure_settings(false);
 
     std::set<std::string> _category_options = component_categories{}();
     {
         auto _settings = tim::settings::shared_instance();
-        for(const auto& itr : *_settings)
+        for(const auto& setting : *_settings)
         {
-            if(exclude_setting(itr.second->get_env_name())) continue;
-            auto _categories = itr.second->get_categories();
+            if(exclude_setting(setting.second->get_env_name())) continue;
+            auto _categories = setting.second->get_categories();
             if(_categories.find("native") != _categories.end())
             {
                 _categories.erase("native");
                 _categories.emplace("timemory");
-                itr.second->set_categories(_categories);
+                setting.second->set_categories(_categories);
             }
-            for(const auto& eitr : itr.second->get_categories())
+            for(const auto& category : setting.second->get_categories())
             {
-                _category_options.emplace(TIMEMORY_JOIN("::", "settings", eitr));
+                _category_options.emplace(fmt::format("settings::{}", category));
             }
         }
     }
@@ -161,7 +164,7 @@ main(int argc, char** argv)
 
     std::string cols_via{};
     std::tie(fmt_opts.num_cols, cols_via) = tim::utility::console::get_columns();
-    std::string col_msg =
+    const std::string col_msg =
         ". default: " + std::to_string(fmt_opts.num_cols) + " [via " + cols_via + "]";
 
     fields[VAL]      = "VALUE_TYPE";
@@ -230,6 +233,22 @@ main(int argc, char** argv)
         .add_argument({ "-H", "--hw-counters", "--print-hw-counters" },
                       "Write the available hardware counters")
         .max_count(1);
+
+    parser
+        .add_argument({ "--max-threads" },
+                      "Print the compile-time limit on the total number of threads that "
+                      "can be profiled in a single process over its lifetime and exit. "
+                      "Thread slots are counted cumulatively and are not reused when a "
+                      "thread exits")
+        .count(0)
+        .action([](parser_t&) {
+            // NOTE: capabilities.py max_threads method depends on the wording here to
+            // capture the compile-time value. Any wording change must be reflected in
+            // that file.
+            std::cout << "Compile-time limit on the total number of threads "
+                         "(ROCPROFSYS_MAX_THREADS): "
+                      << ROCPROFSYS_MAX_THREADS << "\n";
+        });
 
     parser.add_argument({ "-a", "--all" }, "Print all available info")
         .max_count(1)
@@ -372,7 +391,7 @@ main(int argc, char** argv)
                         if(!is_selected(itr.key)) continue;
                         if(_show && !is_selected(itr.value)) continue;
                         _msg << "| " << std::setw(std::get<0>(_w) + 2)
-                             << TIMEMORY_JOIN("", "`", itr.key, "`");
+                             << fmt::format("`{}`", itr.key);
                         if(_show)
                             _msg << " | " << std::setw(std::get<1>(_w)) << itr.value;
                         _msg << " | " << std::setw(std::get<2>(_w)) << itr.description
@@ -519,7 +538,10 @@ main(int argc, char** argv)
             else
             {
                 _config_file = _p.get<std::string>("generate-config");
-                if(get_bool(_config_file, false) && !_out.empty()) _config_file = _out;
+                if(rocprofsys::to_bool(_config_file, false) && !_out.empty())
+                {
+                    _config_file = _out;
+                }
             }
         });
     parser.add_argument({ "-F", "--config-format" }, "Configuration file format")
@@ -670,7 +692,8 @@ main(int argc, char** argv)
     }
 
     if(parser.exists("list-categories") || parser.exists("list-keys") ||
-       parser.exists("list-operations") || parser.exists("list-domains"))
+       parser.exists("list-operations") || parser.exists("list-domains") ||
+       parser.exists("max-threads"))
         return EXIT_SUCCESS;
 
     std::string _pos_regex{};
@@ -784,12 +807,13 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                                        if(itr.name().find(nitr) != std::string::npos)
                                            return true;
                                    }
-                                   auto _categories = tim::delimit(
-                                       itr.categories(), ", ", [](const string_t& _v) {
-                                           return "component::" + _v;
-                                       });
-                                   for(const auto& citr : _categories)
-                                       if(category_view.count(citr) > 0) return false;
+                                   auto _categories =
+                                       rocprofsys::delimit(itr.categories(), ", ");
+                                   for(auto& _v : _categories)
+                                   {
+                                       _v = fmt::format("component::{}", _v);
+                                       if(category_view.count(_v) > 0) return false;
+                                   }
                                    return true;
                                }),
                 _info.end());
@@ -797,10 +821,10 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     using width_type = std::vector<std::int64_t>;
     using width_bool = std::array<bool, N + 2>;
 
-    auto         _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
-    width_type   _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
-    width_bool   _wusing           = width_bool{ true, _available_column };
-    std::int64_t pad               = fmt_opts.padding;
+    auto       _available_column = !fmt_opts.force_brief && !fmt_opts.available_only;
+    width_type _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
+    width_bool _wusing           = width_bool{ true, _available_column };
+    const std::int64_t pad       = fmt_opts.padding;
     for(size_t i = 0; i < options.size(); ++i)
         _wusing[i + 2] = options[i];
 
@@ -855,7 +879,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
             {
                 if(!options[i]) continue;
-                bool center = (i > 0) ? false : true;
+                const bool center = (i > 0) ? false : true;
                 _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                             _mark.at(i), fmt_opts);
@@ -928,7 +952,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
         {
             if(!options[i]) continue;
-            bool center = (i > 0) ? false : true;
+            const bool center = (i > 0) ? false : true;
             _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
             if(fields.at(i) == "DESCRIPTION")
                 write_wrap_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
@@ -1007,12 +1031,14 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         if(sitr != _settings->end())
         {
             str_set_t _categories{};
-            for(const auto& citr : sitr->second->get_categories())
-                _categories.emplace(TIMEMORY_JOIN("::", "settings", citr));
-            bool _found = false;
-            for(const auto& citr : _categories)
+            for(const auto& category : sitr->second->get_categories())
             {
-                if(category_view.count(citr) > 0) _found = true;
+                _categories.emplace(fmt::format("settings::{}", category));
+            }
+            bool _found = false;
+            for(const auto& category : _categories)
+            {
+                if(category_view.count(category) > 0) _found = true;
             }
             if(!fmt_opts.print_advanced && _categories.count("settings::advanced") > 0)
             {
@@ -1249,8 +1275,8 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
         for(const auto& itr : fitr.second)
         {
             if(fmt_opts.available_only && !itr.available()) continue;
-            std::stringstream ss;
-            int               _selected = 0;
+            const std::stringstream ss;
+            int                     _selected = 0;
             if(options[0])
             {
                 _selected += (is_selected(itr.symbol())) ? 1 : 0;
@@ -1424,9 +1450,9 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         if(_midx < _widths.size()) _widths.at(_midx) -= 1;
     };
 
-    std::int32_t _max_width = fmt_opts.num_cols;
-    size_t       _n         = 0;
-    size_t       _nmax      = std::numeric_limits<std::uint16_t>::max();
+    const std::int32_t _max_width = fmt_opts.num_cols;
+    size_t             _n         = 0;
+    const size_t       _nmax      = std::numeric_limits<std::uint16_t>::max();
     while(_n++ < _nmax)
     {
         if(debug_msg)
@@ -1443,7 +1469,7 @@ compute_max_columns(IntArrayT _widths, BoolArrayT _using, format_options& fmt_op
         _decrement_max();
     }
 
-    std::int32_t _maxw = _get_max().second;
+    const std::int32_t _maxw = _get_max().second;
     if(fmt_opts.max_width == 0 || _maxw < fmt_opts.max_width) fmt_opts.max_width = _maxw;
 
     if(debug_msg)

@@ -43,16 +43,40 @@ The output lists if ``rocprofv3`` supports SPM
       SPM                 :   Supported
       Dimensions          :   DIMENSION_INSTANCE[0:15] DIMENSION_XCC[0:7]
 
-The preceding output shows that the TCC_MISS counter can be sampled. 
+The preceding output shows that the TCC_MISS counter can be sampled.
+
+.. note::
+   For proper functioning, SPM requires AMD GPU Driver version **6.19.14.31400000** or later.
+   Before using SPM, verify the loaded ``amdgpu`` kernel module version.
+
+To check the driver version, use:
+
+.. code-block:: bash
+
+  cat /sys/module/amdgpu/version
+
+  # Example output:
+  # 6.19.14.31400000
+
+You can also check this driver version using ``amd-smi version`` command on DKMS-built systems.
 
 Use the following command to use SPM:
 
 .. code-block:: bash
 
-rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  --output-format json -- <application_path>
+ rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  --output-format json -- <application_path>
 
 The preceding command enables SPM for SQ_WAVES and sample interval with unit as sclk cycle counts. Replace ``<application_path>`` with the path to the application you want to profile.
 This generates a JSON results file prefixed with the process ID.
+
+.. code-block:: bash
+
+ rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  -- <application_path>
+
+The preceding command enables SPM for SQ_WAVES and sample interval with unit as sclk cycle counts. Replace ``<application_path>`` with the path to the application you want to profile.
+This generates a rocpd results file prefixed with the process ID.
+
+SPM is emitted directly only to the JSON and ``rocpd`` (default) output formats. Only CSV output is supported from the rocpd database via ``rocpd convert``.
 
 Input parameters
 ===================
@@ -66,4 +90,15 @@ Here are the input parameters used to configure SPM
 
 .. code-block:: bash
 
-  rocprofv3 --spm-beta-enabled --spm SQ_WAVES -spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  --output-format json -- <application_path>
+  rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200  --output-format json -- <application_path>
+  rocprofv3 --spm-beta-enabled --spm SQ_WAVES --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1200 -- <application_path>
+
+CSV format conversion
+=====================
+
+.. code-block:: bash
+
+  rocpd convert -i <input-file>.db --output-format csv
+
+The CSV conversion process generates a output file ``rocpd-output-data/out_spm_counter_collection_trace.csv`` path relative to the current working directory.
+
