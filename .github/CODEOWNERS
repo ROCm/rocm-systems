@@ -11,10 +11,11 @@
 /projects/hipfile/                                                    @ROCm/hipfile-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
-/projects/rccl/                                                       @ROCm/rccl-reviewers @ROCm/rccl-leads
-/projects/rccl/src/include/api_trace.h                                @ROCm/rccl-reviewers @ROCm/rccl-leads @ROCm/ROCM-DevTools-Team
+/projects/hrr/                                                        @andraghetti
+/projects/rccl/                                                       @ROCm/rccl-reviewers
+/projects/rccl/src/include/api_trace.h                                @ROCm/rccl-reviewers @ROCm/ROCM-DevTools-Team
 /projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json   @ROCm/rccl-ci
-/projects/rccl-tests/                                                 @ROCm/rccl-reviewers @ROCm/rccl-leads
+/projects/rccl-tests/                                                 @ROCm/rccl-reviewers
 /projects/rdc/                                                        @ROCm/rdc-reviewers
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-core/rdhc/                                             @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @solaiys
