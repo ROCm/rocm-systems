@@ -12,6 +12,7 @@
 
 #include DEV_RUNTIME_CC_PATH
 
+#include <cstdlib>
 #include <memory>
 
 #include <gtest/gtest.h>
@@ -286,4 +287,15 @@ TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
   EXPECT_EQ(ncclDevrGetRmaWin(nullptr, 0), nullptr);
   EXPECT_EQ(ncclDevrGetRmaWin(&win, -1), nullptr);
   EXPECT_EQ(ncclDevrGetRmaWin(&win, NCCL_GIN_MAX_CONNECTIONS), nullptr);
+}
+
+TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
+  ASSERT_EQ(setenv("NCCL_ELASTIC_BUFFER_REGISTER", "0", 1), 0);
+
+  ncclComm comm{};
+  EXPECT_EQ(ncclDevrCheckRegistrationSupport(reinterpret_cast<void*>(0x100000), 4096, &comm,
+                                             /*hasSysmemSegment=*/true),
+            ncclInvalidArgument);
+
+  unsetenv("NCCL_ELASTIC_BUFFER_REGISTER");
 }
