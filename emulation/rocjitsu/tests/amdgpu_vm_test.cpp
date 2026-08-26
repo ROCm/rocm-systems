@@ -3792,6 +3792,10 @@ constexpr uint32_t tr_b8_byte_value(uint32_t lane, uint32_t byte) {
   return (0x40u + lane * 7u + byte) & 0xffu;
 }
 
+constexpr uint32_t cdna5_tr_b8_matrix_value(uint32_t row, uint32_t col) {
+  return (0x20u + row * 17u + col * 3u) & 0xffu;
+}
+
 constexpr uint32_t pack_tr_b8_word(uint32_t source_base, uint32_t source_byte,
                                    uint32_t dest_byte_base) {
   uint32_t word = 0;
@@ -3800,7 +3804,7 @@ constexpr uint32_t pack_tr_b8_word(uint32_t source_base, uint32_t source_byte,
   return word;
 }
 
-void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
+void verify_ds_b8_transpose_lane_layout(std::string_view arch, uint32_t wave_size) {
   VmFixture f(arch, 1, 10);
   auto *snap = f.capture_halts();
 
@@ -3846,9 +3850,18 @@ void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
   for (uint32_t lane = 0; lane < wave_size; ++lane) {
     uint32_t lo = 0;
     uint32_t hi = 0;
-    for (uint32_t byte = 0; byte < 4; ++byte) {
-      lo |= tr_b8_byte_value(lane, byte) << (byte * 8);
-      hi |= tr_b8_byte_value(lane, byte + 4) << (byte * 8);
+    if (arch == "cdna5") {
+      const uint32_t row = 8u * (lane >> 4) + (lane & 3u) + 4u * ((lane >> 3) & 1u);
+      const uint32_t col_base = 8u * ((lane >> 2) & 1u);
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        lo |= cdna5_tr_b8_matrix_value(row, col_base + byte) << (byte * 8);
+        hi |= cdna5_tr_b8_matrix_value(row, col_base + byte + 4) << (byte * 8);
+      }
+    } else {
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        lo |= tr_b8_byte_value(lane, byte) << (byte * 8);
+        hi |= tr_b8_byte_value(lane, byte + 4) << (byte * 8);
+      }
     }
     cu->lds().write32(lane * BYTES_PER_LANE, lo);
     cu->lds().write32(lane * BYTES_PER_LANE + 4, hi);
@@ -3862,6 +3875,19 @@ void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
   const auto &wf = snap->snapshots().front();
 
   for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    if (arch == "cdna5") {
+      const uint32_t row_base = 8u * (lane >> 4);
+      const uint32_t col = lane & 15u;
+      uint32_t expected_lo = 0;
+      uint32_t expected_hi = 0;
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        expected_lo |= cdna5_tr_b8_matrix_value(row_base + byte, col) << (byte * 8);
+        expected_hi |= cdna5_tr_b8_matrix_value(row_base + byte + 4, col) << (byte * 8);
+      }
+      EXPECT_EQ(wf.vgpr(VDST, lane), expected_lo) << "lane " << lane << " v" << VDST;
+      EXPECT_EQ(wf.vgpr(VDST + 1, lane), expected_hi) << "lane " << lane << " v" << (VDST + 1);
+      continue;
+    }
     const uint32_t source_byte = lane & 7u;
     const uint32_t source_base = (lane & ~0xfu) | ((lane >> 3) & 1u);
     EXPECT_EQ(wf.vgpr(VDST, lane), pack_tr_b8_word(source_base, source_byte, 0))
@@ -3872,11 +3898,11 @@ void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
 }
 
 TEST(DsTransposeTest, ReadB64TrB8_LaneLayout) {
-  verify_b64_tr_b8_lane_layout("cdna4", /*wave_size=*/64);
+  verify_ds_b8_transpose_lane_layout("cdna4", /*wave_size=*/64);
 }
 
 TEST(DsTransposeTest, Gfx1250LoadTr8B64_LaneLayout) {
-  verify_b64_tr_b8_lane_layout("cdna5", /*wave_size=*/32);
+  verify_ds_b8_transpose_lane_layout("cdna5", /*wave_size=*/32);
 }
 
 // Verify the ds_read_b64_tr_b16 cross-lane layout: within each 16-lane group,
