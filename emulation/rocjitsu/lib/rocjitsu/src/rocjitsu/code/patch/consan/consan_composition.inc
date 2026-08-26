@@ -355,6 +355,14 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     std::optional<ConSanPristineMutationInventory> pristine_inventory = std::nullopt) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
+  ConSanResult result;
+  result.visited_code_object = true;
+  result.flavor = options.flavor;
+  result.moi_engine = options.moi_engine;
+  result.carried_composite_instrumentation_stage = !carried_plans.empty();
+  result.requested_fault_mutations = requested_fault_mutation_count(options);
+  ProgramInventoryBuilder inventory_builder(code_object_bytes);
+  result.install_program_inventory(inventory_builder.view());
   const bool has_fault = options.fault_drop_barrier || options.fault_move_barrier ||
                          options.fault_mutate_barrier_id_scope ||
                          options.fault_mutate_barrier_participants ||
@@ -370,10 +378,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
                                   options.fault_ordinary_weaken_order ||
                                   options.fault_ordinary_weaken_scope;
   if (has_ordinary_fault && has_perturbation) {
-    ConSanResult result;
-    result.visited_code_object = true;
-    result.input_size = code_object_bytes.size();
-    result.flavor = options.flavor;
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
         "ConSan ordinary fault/perturbation composition is not yet qualified");
@@ -383,10 +387,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       (options.sc_perturb_kind != ConSanPerturbationKind::Atomic || options.fault_drop_barrier ||
        options.fault_move_barrier || options.fault_mutate_barrier_id_scope ||
        options.fault_mutate_barrier_participants)) {
-    ConSanResult result;
-    result.visited_code_object = true;
-    result.input_size = code_object_bytes.size();
-    result.flavor = options.flavor;
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
         "ConSan atomic fault/perturbation composition requires the SC2D composite proof");
@@ -642,15 +642,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     return instrument_result;
   }
 
-  ConSanResult result;
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
-  result.visited_code_object = true;
-  result.flavor = options.flavor;
-  result.moi_engine = options.moi_engine;
-  result.carried_composite_instrumentation_stage = !carried_plans.empty();
-  result.input_size = code_object_bytes.size();
-  result.requested_fault_mutations = requested_fault_mutation_count(options);
 
   if (options.flavor == ConSanFlavor::None)
     return result;
@@ -659,10 +652,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     result.errors.emplace_back("ConSan received an empty code object");
     return result;
   }
-  result.input_fingerprint = code_object_fingerprint(code_object_bytes);
-  ProgramInventoryBuilder inventory_builder(code_object_bytes);
-  result.install_program_inventory(inventory_builder.view());
-
   auto code_object =
       std::make_unique<AmdGpuCodeObject>(code_object_bytes.data(), code_object_bytes.size());
   if (!code_object->is_valid()) {

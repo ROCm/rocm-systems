@@ -241,7 +241,7 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   EXPECT_FALSE(result.parsed_code_object);
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
-  EXPECT_EQ(result.input_size, bytes.size());
+  EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.errors.empty());
   EXPECT_TRUE(result.warnings.empty());
@@ -414,7 +414,7 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   EXPECT_FALSE(result.parsed_code_object);
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(result.input_size, bytes.size());
+  EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_FALSE(result.errors.empty());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
@@ -470,7 +470,6 @@ TEST(ConSan, SemanticArchitectureGateTracksAnalysisStageRatherThanResultMembers)
   inventory.kernels().push_back({});
   inventory.functions().push_back({});
   parse_only.install_program_inventory(inventory.view());
-  parse_only.input_fingerprint = "parsed";
   EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
 
   ProgramInventoryBuilder required_inventory(parse_only.program_inventory);
@@ -496,7 +495,7 @@ TEST(ConSan, StubRejectsEmptyCodeObject) {
   EXPECT_FALSE(result.parsed_code_object);
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(result.input_size, 0u);
+  EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_FALSE(result.errors.empty());
 }
@@ -906,7 +905,7 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
                                          const ConSanTransformProfile &profile) {
     const ConSanResult result = try_patch_consan(input, profile.options);
     EXPECT_TRUE(result.visited_code_object);
-    EXPECT_EQ(result.input_size, input.size());
+    EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(input));
     if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
       EXPECT_TRUE(result.modified);
       EXPECT_TRUE(result.final_validation_passed);
@@ -1017,7 +1016,6 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
 
   ConSanResult result;
   result.visited_code_object = true;
-  result.input_size = bytes.size();
   result.flavor = ConSanFlavor::SuperCollider;
   result.modified = true;
   result.elf_bytes = bytes;

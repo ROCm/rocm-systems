@@ -189,7 +189,7 @@ TEST(ConSanPipeline, InvalidConfigurationStopsBeforeLegacyLoweringWithTypedIssue
   const ConSanResult &legacy = result.legacy_mechanism();
   EXPECT_FALSE(legacy.visited_code_object);
   EXPECT_EQ(legacy.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(legacy.input_size, bytes.size());
+  EXPECT_EQ(legacy.program_inventory.code_object_id(), result.code_object);
   EXPECT_TRUE(legacy.errors.empty());
   EXPECT_EQ(result.issues.front().detail, "invalid-sample-stride");
 }
@@ -450,7 +450,6 @@ TEST(ConSanPipeline, ProductionResultOwnsArtifactsWithoutLegacyProjection) {
 
   EXPECT_TRUE(mechanism.visited_code_object);
   EXPECT_TRUE(mechanism.parsed_code_object);
-  EXPECT_EQ(mechanism.input_fingerprint, split.code_object.fingerprint);
   EXPECT_EQ(split.program_inventory.code_object_id(), split.code_object);
   EXPECT_FALSE(split.observation_plan.probe_intents.empty());
   EXPECT_EQ(split.coverage_ledger.intent_entries().size(),

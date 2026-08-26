@@ -113,13 +113,12 @@ void add_contract_issue(TransformResult &result, ConSanPipelineStage stage,
   });
 }
 
-[[nodiscard]] ConSanResult make_rejected_legacy_result(const ConSanCodeObjectId &code_object,
-                                                       const ConSanRequest &request,
+[[nodiscard]] ConSanResult make_rejected_legacy_result(const ConSanRequest &request,
                                                        std::span<const uint8_t> code_object_bytes) {
   ConSanResult result;
   result.visited_code_object = false;
-  result.input_size = code_object_bytes.size();
-  result.input_fingerprint = code_object.fingerprint;
+  ProgramInventoryBuilder inventory_builder(code_object_bytes);
+  result.install_program_inventory(inventory_builder.view());
   result.flavor = request.flavor.value_or(ConSanFlavor::None);
   result.moi_engine = request.moi_engine;
   result.outcome = ConSanTransformOutcome::Invalid;
@@ -357,8 +356,7 @@ TransformResult LegacyConSanLowering::publish_optional(
     stage_record(result, ConSanPipelineStage::FinalValidation).status =
         ConSanPipelineStageStatus::Invalid;
     stage_record(result, ConSanPipelineStage::Complete).status = ConSanPipelineStageStatus::Invalid;
-    result.legacy_compatibility_ =
-        make_rejected_legacy_result(result.code_object, request, code_object_bytes);
+    result.legacy_compatibility_ = make_rejected_legacy_result(request, code_object_bytes);
     return result;
   }
   configuration.status = ConSanPipelineStageStatus::Completed;
@@ -374,8 +372,7 @@ TransformResult LegacyConSanLowering::publish_optional(
     stage_record(result, ConSanPipelineStage::FinalValidation).status =
         ConSanPipelineStageStatus::Invalid;
     stage_record(result, ConSanPipelineStage::Complete).status = ConSanPipelineStageStatus::Invalid;
-    result.legacy_compatibility_ =
-        make_rejected_legacy_result(result.code_object, request, code_object_bytes);
+    result.legacy_compatibility_ = make_rejected_legacy_result(request, code_object_bytes);
     return result;
   }
 

@@ -3796,12 +3796,10 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              publication_begin < store_positions.front() &&
-             std::ranges::any_of(
-                 owner_positions,
-                 [&](size_t owner_position) {
-                   return store_positions.front() < owner_position &&
-                          owner_position < cas_positions.back();
-                 });
+             std::ranges::any_of(owner_positions, [&](size_t owner_position) {
+               return store_positions.front() < owner_position &&
+                      owner_position < cas_positions.back();
+             });
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
@@ -4546,6 +4544,10 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
                                                   std::span<const uint8_t> original_bytes) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
+  if (result.program_inventory.empty()) {
+    ProgramInventoryBuilder inventory_builder(original_bytes);
+    result.install_program_inventory(inventory_builder.view());
+  }
   if (has_rejected_kernel(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.modified = false;

@@ -445,8 +445,6 @@ struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
   bool moi_owner_sgpr_automatic = false;
   bool moi_dispatch_id_sgprs_automatic = false;
   bool moi_dispatch_id_vgprs_automatic = false;
-  size_t input_size = 0;
-  std::string input_fingerprint;
   /// Immutable semantic options captured before the first MOI planning pass.
   /// A report-buffer retry derives its options from this snapshot and can
   /// change only ConSanMoiReportRetryConfig fields plus the narrow live-fault

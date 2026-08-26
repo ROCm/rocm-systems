@@ -959,6 +959,7 @@ allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t 
                                 bool test_seed_inline_exact_odd, uint64_t *address,
                                 uint64_t *registered_size, uint64_t *registered_generation);
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
+                                       std::string_view input_fingerprint,
                                        const ConSanResult &result);
 void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generation,
                                                hsa_executable_t executable);

@@ -712,7 +712,7 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesInventoryEquivalentToLegacyD
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(result.program_inventory.code_object_id().fingerprint, result.input_fingerprint);
+  EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
   EXPECT_EQ(result.program_inventory.code_object_id().byte_size, bytes.size());
   EXPECT_EQ(result.program_inventory.arch(), result.program_inventory.arch());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);

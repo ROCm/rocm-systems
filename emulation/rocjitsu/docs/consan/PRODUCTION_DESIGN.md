@@ -2465,9 +2465,11 @@ The first deletion in that order is complete: `ProgramInventory` is now the
 only owner of target identity, semantic architecture, metadata trust,
 malformed-note count, and the semantic-classification-required state. The five
 formerly duplicated `ConSanResult` members and their independent mutation
-paths have been deleted. Parser construction and decoded-container population
-remain inside the legacy boundary and are the next inventory responsibility to
-extract.
+paths have been deleted. The same cutover subsequently deleted the duplicated
+input byte count and fingerprint; retries and runtime reports now consume the
+one `ConSanCodeObjectId` shared by `TransformResult` and `ProgramInventory`.
+Parser construction and decoded-container population remain inside the legacy
+boundary and are the next inventory responsibility to extract.
 - **Completed final gate:** All 1,502 selected ConSan host tests ran: 1,500
   passed and the two external-object benchmarks skipped as intended. All 98
   hook/transform-memory tests and all 16 focused pipeline tests passed. The

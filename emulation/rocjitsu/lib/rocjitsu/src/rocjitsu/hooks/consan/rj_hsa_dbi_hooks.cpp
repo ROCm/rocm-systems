@@ -4363,7 +4363,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                              fault_installation_evidence);
     if (registered_auto_moi_report_generation)
       register_auto_moi_report_metadata(code_object_reader.handle,
-                                        *registered_auto_moi_report_generation, patch_result);
+                                        *registered_auto_moi_report_generation,
+                                        transform_result.code_object.fingerprint, patch_result);
     install_action = transform_result.install_action(config->fail_closed);
     replacement_instrumentation_selected =
         install_action == rocjitsu::ConSanInstallAction::LoadReplacement;
@@ -4572,8 +4573,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "moi_auto_report_buffer_size=%llu require_patch=%s",
         static_cast<unsigned long long>(code_object_reader.handle),
         flavor_name(request.flavor.value_or(rocjitsu::ConSanFlavor::None)),
-        rocjitsu::consan_moi_engine_name(request.moi_engine), patch_result.input_size,
-        patch_result.visited_code_object ? "true" : "false",
+        rocjitsu::consan_moi_engine_name(request.moi_engine),
+        transform_result.code_object.byte_size, patch_result.visited_code_object ? "true" : "false",
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
                                                                                     : "false",
         config->delay_nops, config->fail_closed ? "true" : "false",
@@ -5637,7 +5638,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       return HSA_STATUS_ERROR;
     }
 
-    const size_t input_size = patch_result_storage->legacy_mechanism().input_size;
+    const size_t input_size = patch_result_storage->code_object.byte_size;
     const size_t replacement_size = patch_result_storage->replacement_bytes.size();
     const uint64_t replacement_growth_bytes =
         replacement_size > input_size ? static_cast<uint64_t>(replacement_size - input_size) : 0;

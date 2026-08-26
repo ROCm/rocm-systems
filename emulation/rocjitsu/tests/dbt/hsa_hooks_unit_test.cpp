@@ -1116,7 +1116,6 @@ rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
     }
   }
   result.visited_code_object = true;
-  result.input_size = bytes.size();
   result.flavor = options.flavor;
   result.moi_engine = options.moi_engine;
   if (g_transform_override_models_fault_application) {
@@ -5383,7 +5382,6 @@ enum class AutoReplayOwnerScope {
 rocjitsu::ConSanResult auto_report_replay_transform_result(
     AutoReplayOwnerScope owner_scope = AutoReplayOwnerScope::NoProvenance) {
   rocjitsu::ConSanResult result = auto_report_atomic_transform_result();
-  result.input_fingerprint = "fnv1a64:0123456789abcdef";
 
   rocjitsu::ConSanMoiCandidate candidate;
   candidate.source = rocjitsu::ConSanMoiCandidateSource::NativeLds;
@@ -6387,6 +6385,9 @@ TEST(HsaHooksUnitTest, RecordReplayProvenanceAcceptsAlreadyExactDiagnostic) {
 }
 
 TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotContracts) {
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  const std::string code_object =
+      "code_object=" + rocjitsu::make_consan_code_object_id(original).fingerprint;
   ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
@@ -6407,7 +6408,6 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotCo
     InstalledDbiHook hook(api);
     EXPECT_TRUE(hook.installed()) << hook.error();
     if (hook.installed()) {
-      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
       hsa_code_object_reader_t reader{};
       EXPECT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
                                                                       original.size(), &reader),
@@ -6422,11 +6422,11 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotCo
   EXPECT_TRUE(g_seed_auto_replay_report_succeeded) << log;
   EXPECT_EQ(g_core_memory_free_calls, 0);
   EXPECT_EQ(g_core_memory_runtime_reclaim_calls, 1);
+  EXPECT_NE(log.find(code_object), std::string::npos) << code_object << "\n" << log;
   for (std::string_view field :
-       {"reader=101", "generation=", "code_object=fnv1a64:0123456789abcdef", "diagnostics=1",
-        "replay_input_access=2", "conflict=true", "metadata_full=false",
-        "diagnostic_capacity_exhausted=false", "diagnostic_capacity=1", "provenance_repaired=0",
-        "provenance_unresolved=0", "coarse_grained_snapshot_bytes=0"}) {
+       {"reader=101", "generation=", "diagnostics=1", "replay_input_access=2", "conflict=true",
+        "metadata_full=false", "diagnostic_capacity_exhausted=false", "diagnostic_capacity=1",
+        "provenance_repaired=0", "provenance_unresolved=0", "coarse_grained_snapshot_bytes=0"}) {
     EXPECT_NE(log.find(field), std::string::npos) << field << "\n" << log;
   }
   ASSERT_FALSE(g_transform_override_report_sizes.empty());
@@ -6436,11 +6436,11 @@ TEST(HsaHooksUnitTest, AutoReplayProducerLogPinsCoverageAndFineGrainedSnapshotCo
   EXPECT_EQ(log.find(full_snapshot), std::string::npos) << full_snapshot << '\n' << log;
   const size_t detail = log.find("ConSan MOI auto replay diagnostic reader=101");
   ASSERT_NE(detail, std::string::npos) << log;
+  EXPECT_NE(log.find(code_object, detail), std::string::npos) << code_object << "\n" << log;
   for (std::string_view field :
-       {"index=0", "kind=1", "code_object=fnv1a64:0123456789abcdef",
-        "report_generation=", "generation=", "first_owner=", "second_owner=", "first_inst=0xfe96c",
-        "second_inst=0xfe974", "first_lds_known=true", "first_lds=[16,20)", "second_lds=[16,20)",
-        "first_kind=2", "second_kind=2"}) {
+       {"index=0", "kind=1", "report_generation=", "generation=", "first_owner=", "second_owner=",
+        "first_inst=0xfe96c", "second_inst=0xfe974", "first_lds_known=true", "first_lds=[16,20)",
+        "second_lds=[16,20)", "first_kind=2", "second_kind=2"}) {
     EXPECT_NE(log.find(field, detail), std::string::npos) << field << "\n" << log;
   }
 }
@@ -6641,6 +6641,9 @@ TEST(HsaHooksUnitTest, AutoReplayInvalidSiteTokensMakeDynamicEvidenceIncomplete)
 }
 
 TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  const std::string fingerprint =
+      "code_object=" + rocjitsu::make_consan_code_object_id(original).fingerprint;
   ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "1");
   ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
@@ -6658,7 +6661,6 @@ TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
     InstalledDbiHook hook(api);
     ASSERT_TRUE(hook.installed()) << hook.error();
 
-    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
     hsa_code_object_reader_t reader{};
     ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
                                                                     original.size(), &reader),
@@ -6672,7 +6674,6 @@ TEST(HsaHooksUnitTest, AutoReportMetadataMatchesReaderAndGeneration) {
   }
   const std::string log = testing::internal::GetCapturedStderr();
 
-  constexpr std::string_view fingerprint = "code_object=fnv1a64:0123456789abcdef";
   const size_t first_fingerprint = log.find(fingerprint);
   ASSERT_NE(first_fingerprint, std::string::npos) << log;
   const size_t second_fingerprint = log.find(fingerprint, first_fingerprint + fingerprint.size());

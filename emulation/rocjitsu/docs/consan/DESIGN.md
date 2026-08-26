@@ -195,9 +195,10 @@ facts it produces.
 
 The inventory is also the sole owner of the parsed target, semantic
 architecture, kernel-metadata trust state, malformed-note count, and the fact
-that architecture-dependent classification began. `ConSanResult` no longer
-duplicates those facts, so retry, policy, lowering, and the runtime coordinator
-cannot observe inconsistent identities.
+that architecture-dependent classification began. Its code-object identity is
+the sole owner of the pristine byte count and fingerprint as well.
+`ConSanResult` no longer duplicates those facts, so retry, policy, lowering,
+and the runtime coordinator cannot observe inconsistent identities.
 
 ### Engine policy and observation plan
 

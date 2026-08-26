@@ -460,11 +460,11 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
     options.patched_image_growth_input_bytes = code_object_bytes.size();
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
-    if (!inventory.visited_code_object || inventory.input_size != code_object_bytes.size())
+    const ConSanCodeObjectId &inventory_id = inventory.program_inventory.code_object_id();
+    if (!inventory.visited_code_object || inventory_id.byte_size != code_object_bytes.size())
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the original code-object size");
-    if (inventory.input_fingerprint.empty() ||
-        inventory.input_fingerprint != code_object_fingerprint(code_object_bytes)) {
+    if (!inventory_id.valid() || inventory_id != make_consan_code_object_id(code_object_bytes)) {
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the original code-object bytes");
     }
@@ -542,7 +542,6 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
     result.visited_code_object = true;
     result.flavor = ConSanFlavor::Moi;
     result.moi_engine = inventory_engine;
-    result.input_size = code_object_bytes.size();
     result.errors.emplace_back(std::string("ConSan MOI inventory retry threw an exception: ") +
                                error.what());
     return finalize_consan_result(std::move(result), code_object_bytes);
@@ -551,7 +550,6 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
     result.visited_code_object = true;
     result.flavor = ConSanFlavor::Moi;
     result.moi_engine = inventory_engine;
-    result.input_size = code_object_bytes.size();
     result.errors.emplace_back("ConSan MOI inventory retry threw a non-standard exception");
     return finalize_consan_result(std::move(result), code_object_bytes);
   }
@@ -593,7 +591,6 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
     result.visited_code_object = true;
     result.flavor = options.flavor;
     result.moi_engine = options.moi_engine;
-    result.input_size = code_object_bytes.size();
     result.errors.emplace_back(std::string("ConSan transform threw an exception: ") + error.what());
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (...) {
@@ -601,7 +598,6 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
     result.visited_code_object = true;
     result.flavor = options.flavor;
     result.moi_engine = options.moi_engine;
-    result.input_size = code_object_bytes.size();
     result.errors.emplace_back("ConSan transform threw a non-standard exception");
     return finalize_consan_result(std::move(result), code_object_bytes);
   }
