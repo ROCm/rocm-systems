@@ -158,7 +158,8 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     // them here or the producer aborts with small_vector::at out_of_range.
     control_packet->populate_before();
     control_packet->populate_after();
-    auto buffer_packet = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
+    auto buffer_packet    = std::make_unique<MockPackets>(control_packet->GetHandle(), query_fn);
+    buffer_packet->header = 1;
 
     auto mock_queue          = make_mock_queue(*agent);
     auto worker_data         = std::make_shared<triple_buffer_shared_data_t>();

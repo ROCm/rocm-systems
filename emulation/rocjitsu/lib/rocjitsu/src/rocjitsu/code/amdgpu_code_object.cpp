@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/file_io.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
 #include "rocjitsu/isa/target_registry.h"
 
@@ -12,8 +13,11 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <optional>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -36,17 +40,20 @@ private:
 
 class HsaSection : public Section {
 public:
-  HsaSection(std::string name, std::unique_ptr<char[]> data, const Elf64_Shdr &shdr)
-      : Section(std::move(name), std::move(data)), shdr_(shdr) {}
+  HsaSection(std::string name, std::unique_ptr<char[]> data, const Elf64_Shdr &shdr,
+             size_t section_index)
+      : Section(std::move(name), std::move(data)), shdr_(shdr), section_index_(section_index) {}
 
   std::size_t size() const override { return shdr_.sh_size; }
   uint64_t flags() const override { return shdr_.sh_flags; }
   uint64_t vaddr() const override { return shdr_.sh_addr; }
   uint32_t sectionHeaderNameIdx() const override { return shdr_.sh_name; }
+  std::optional<size_t> sectionHeaderIndex() const override { return section_index_; }
   uint64_t sectionOffset() const override { return shdr_.sh_offset; }
 
 private:
   Elf64_Shdr shdr_;
+  size_t section_index_;
 };
 
 bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC, EI_MAGIC_SIZE); }
@@ -75,6 +82,8 @@ AmdGpuCodeObject::AmdGpuCodeObject(AmdGpuCodeObject &&other) noexcept
   header_ = std::move(other.header_);
   sections_ = std::move(other.sections_);
   text_sections_ = std::move(other.text_sections_);
+  executable_nobits_sections_ = std::move(other.executable_nobits_sections_);
+  allocated_executable_sections_ = std::move(other.allocated_executable_sections_);
   rodata_sections_ = std::move(other.rodata_sections_);
 }
 
@@ -186,12 +195,23 @@ void AmdGpuCodeObject::load_sections() {
   }
   const char *shstrtab_data = image_.data() + shstrtab.sh_offset;
 
-  for (const auto &shdr : section_hdrs) {
-    if (shdr.sh_type == SHT_NULL || shdr.sh_type == SHT_NOBITS)
+  for (size_t section_index = 0; section_index < section_hdrs.size(); ++section_index) {
+    const Elf64_Shdr &shdr = section_hdrs[section_index];
+    if (shdr.sh_type == SHT_NULL)
       continue;
-    if (shdr.sh_name >= shstrtab.sh_size)
+    const bool allocated_executable =
+        (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
+    if (shdr.sh_type == SHT_NOBITS && !allocated_executable)
       continue;
-    if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
+    if (shdr.sh_name >= shstrtab.sh_size) {
+      if (allocated_executable) {
+        is_valid_ = false;
+        return;
+      }
+      continue;
+    }
+    if (shdr.sh_type != SHT_NOBITS &&
+        !fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
       is_valid_ = false;
       return;
     }
@@ -200,10 +220,26 @@ void AmdGpuCodeObject::load_sections() {
     std::string sec_name(shstrtab_data + shdr.sh_name,
                          strnlen(shstrtab_data + shdr.sh_name, max_len));
 
-    auto sec_data = std::make_unique<char[]>(shdr.sh_size);
-    std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
-    sections_.emplace_back(std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr));
+    std::unique_ptr<char[]> sec_data;
+    if (shdr.sh_type != SHT_NOBITS) {
+      sec_data = std::make_unique<char[]>(shdr.sh_size);
+      std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+    }
+    // SHT_NOBITS has no executable bytes to decode. Retain allocated executable
+    // metadata above so the translator's sole-PROGBITS-.text gate rejects the
+    // layout, but keep all_sections() restricted to readable section data.
+    if (shdr.sh_type == SHT_NOBITS) {
+      executable_nobits_sections_.emplace_back(
+          std::make_unique<HsaSection>(sec_name, nullptr, shdr, section_index));
+      allocated_executable_sections_.push_back(executable_nobits_sections_.back().get());
+      continue;
+    }
 
+    sections_.emplace_back(
+        std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr, section_index));
+
+    if (allocated_executable)
+      allocated_executable_sections_.push_back(sections_.back().get());
     if (sec_name == ".text")
       text_sections_.push_back(sections_.back().get());
     else if (sec_name == ".rodata")
@@ -285,123 +321,35 @@ namespace {
 
 } // namespace
 
-std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
+std::optional<uint32_t>
+AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
+                                        std::span<const KernelDescriptorInfo> kernels) {
   namespace kd = rocr::llvm::amdhsa;
-  using KD = kd::kernel_descriptor_t;
 
   std::optional<uint32_t> min_count;
-  for (const auto &[name, kd_vaddr] : kd_offsets_) {
-    // Locate the section whose address range covers the .kd symbol, then read the
-    // descriptor out of that section's own bytes (no ELF re-walk).
-    for (const auto &section : all_sections()) {
-      const uint64_t base = section->vaddr();
-      if (base == 0 || kd_vaddr < base)
-        continue;
-      const uint64_t off = kd_vaddr - base;
-      if (off + sizeof(KD) > section->size())
-        continue;
-      KD desc;
-      std::memcpy(&desc, section->data() + off, sizeof(desc));
-      const uint32_t granulated = AMDHSA_BITS_GET(
-          desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-      const uint32_t count = sgpr_count_from_granulated(granulated, arch);
-      min_count = min_count ? std::min(*min_count, count) : count;
-      break;
-    }
+  for (const KernelDescriptorInfo &kernel : kernels) {
+    const uint32_t granulated = AMDHSA_BITS_GET(
+        kernel.descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
+    const uint32_t count = sgpr_count_from_granulated(granulated, arch);
+    min_count = min_count ? std::min(*min_count, count) : count;
   }
   return min_count;
 }
 
-uint8_t AmdGpuCodeObject::kernel_wavefront_size(rj_code_arch_t arch) const {
-  namespace kd = rocr::llvm::amdhsa;
-  using KD = kd::kernel_descriptor_t;
-
-  // CDNA kernels are always Wave64.
-  if (is_cdna_arch(arch))
-    return 64;
-
-  // RDNA opts into Wave32 via ENABLE_WAVEFRONT_SIZE32; a clear bit means Wave64.
-  // Return Wave32 only when every kernel is provably Wave32.
-  bool saw_kernel = false;
-  bool all_wave32 = true;
-  for (const auto &[name, kd_vaddr] : kd_offsets_) {
-    bool readable = false;
-    for (const auto &section : all_sections()) {
-      const uint64_t base = section->vaddr();
-      if (base == 0 || kd_vaddr < base)
-        continue;
-      const uint64_t off = kd_vaddr - base;
-      if (off + sizeof(KD) > section->size())
-        continue;
-      KD desc;
-      std::memcpy(&desc, section->data() + off, sizeof(desc));
-      const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
-                                          kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
-      saw_kernel = true;
-      all_wave32 = all_wave32 && wave32;
-      readable = true;
-      break;
-    }
-    // An unreadable descriptor could be Wave64; fall back conservatively so a
-    // readable Wave32 kernel can't mislabel it and license unsound EXEC kills.
-    if (!readable)
-      return 64;
+std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
+  const std::span<const uint8_t> image{reinterpret_cast<const uint8_t *>(image_data()),
+                                       image_size()};
+  // Discover descriptors through the shared scanner rather than re-walking sections
+  // here. scan_kernel_descriptors() filters to a single .text extent, so visit each
+  // text section to cover every kernel, then reduce via the span overload.
+  std::vector<KernelDescriptorInfo> kernels;
+  for (const Section *text : text_sections()) {
+    std::vector<KernelDescriptorInfo> found =
+        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+    kernels.insert(kernels.end(), std::make_move_iterator(found.begin()),
+                   std::make_move_iterator(found.end()));
   }
-  return (saw_kernel && all_wave32) ? 32 : 64;
-}
-
-std::vector<uint64_t> AmdGpuCodeObject::kernel_entry_text_offsets(rj_code_arch_t arch) const {
-  namespace kd = rocr::llvm::amdhsa;
-  using KD = kd::kernel_descriptor_t;
-
-  // CDNA3/CDNA4 implement kernarg preloading through the legacy firmware
-  // compatibility window: compatible firmware enters 256 bytes past the
-  // descriptor entry, so a preload kernel has a second hardware entry there.
-  constexpr int64_t kKernargPreloadSkipBytes = 256;
-  const bool preload_firmware_skip =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-
-  std::vector<uint64_t> offsets;
-  for (const auto &[name, kd_vaddr] : kd_offsets_) {
-    for (const auto &section : all_sections()) {
-      const uint64_t base = section->vaddr();
-      if (base == 0 || kd_vaddr < base)
-        continue;
-      const uint64_t off = kd_vaddr - base;
-      if (off + sizeof(KD) > section->size())
-        continue;
-      KD desc;
-      std::memcpy(&desc, section->data() + off, sizeof(desc));
-      const int64_t entry_vaddr =
-          static_cast<int64_t>(kd_vaddr) + desc.kernel_code_entry_byte_offset;
-      if (entry_vaddr < 0)
-        break;
-      for (const Section *text : text_sections()) {
-        const uint64_t tbase = text->vaddr();
-        if (static_cast<uint64_t>(entry_vaddr) >= tbase &&
-            static_cast<uint64_t>(entry_vaddr) < tbase + text->size()) {
-          offsets.push_back(static_cast<uint64_t>(entry_vaddr) - tbase);
-          break;
-        }
-      }
-      // A nonzero KERNARG_PRELOAD_SPEC_LENGTH lets compatible firmware enter the
-      // +256 window directly with unknown EXEC, so seed that second entry too.
-      if (preload_firmware_skip &&
-          AMDHSA_BITS_GET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0) {
-        const int64_t firmware_vaddr = entry_vaddr + kKernargPreloadSkipBytes;
-        for (const Section *text : text_sections()) {
-          const uint64_t tbase = text->vaddr();
-          if (static_cast<uint64_t>(firmware_vaddr) >= tbase &&
-              static_cast<uint64_t>(firmware_vaddr) < tbase + text->size()) {
-            offsets.push_back(static_cast<uint64_t>(firmware_vaddr) - tbase);
-            break;
-          }
-        }
-      }
-      break;
-    }
-  }
-  return offsets;
+  return min_kernel_sgpr_count(arch, kernels);
 }
 
 } // namespace rocjitsu

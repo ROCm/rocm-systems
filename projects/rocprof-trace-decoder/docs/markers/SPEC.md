@@ -4,7 +4,7 @@
 
 SQTTInstrumentPass is an LLVM pass plugin for AMDGPU that injects
 `s_ttracedata` / `s_ttracedata_imm` markers into shader code at compile time.
-These markers appear in SQTT (Shader Queue Thread Trace) hardware trace buffers,
+These markers appear in SQTT (SeQuencer Thread Trace) hardware trace buffers,
 enabling correlation of trace timestamps with source-level events such as
 function entry/exit, barrier synchronization, and user-defined annotations.
 
