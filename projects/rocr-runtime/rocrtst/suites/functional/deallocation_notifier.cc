@@ -164,6 +164,7 @@ void DeallocationNotifierTest::Run(void) {
 
   TestBase::Run();
   TestDeallocationNotifier();
+  TestDeallocationNotifierVmem();
 }
 
 void DeallocationNotifierTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
@@ -300,4 +301,141 @@ void DeallocationNotifierTest::TestDeallocationNotifier(void) {
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Memory free failure.";
   DrainAsanQuarantine();
   ASSERT_EQ(1, notifiers[0].callback_status) << "Callback not executed.";
+}
+
+void DeallocationNotifierTest::TestDeallocationNotifierVmem(void) {
+  hsa_status_t status;
+
+  // Skip vmem tests if API not supported
+  bool vmem_supported = false;
+  status = hsa_system_get_info(HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED, &vmem_supported);
+  if (status != HSA_STATUS_SUCCESS || !vmem_supported) {
+    return;  // Vmem API not available or not supported on this platform
+  }
+
+  // Basic vmem callback test: reserve, register, free
+  hsa_amd_vmem_alloc_handle_t handle;
+  void* va = nullptr;
+  size_t size = 2 * 1024 * 1024;  // 2MB
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+  if (va == nullptr) {
+    FAIL() << "Vmem address is null.";
+    return;
+  }
+
+  REGISTER(va, call, 0);
+  status = hsa_amd_vmem_address_free(va, size);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem address free failure.";
+  ASSERT_EQ(1, notifiers[0].callback_status) << "Vmem callback not executed.";
+
+  // Vmem callback with mapping: full lifecycle
+  va = nullptr;
+  status = hsa_amd_vmem_handle_create(device_pool(), size, MEMORY_TYPE_NONE, 0, &handle);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem handle creation failure.";
+    return;
+  }
+
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+
+  status = hsa_amd_vmem_map(va, size, 0, handle, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_address_free(va, size);
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem map failure.";
+    return;
+  }
+
+  hsa_amd_memory_access_desc_t desc;
+  desc.permissions = HSA_ACCESS_PERMISSION_RW;
+  desc.agent_handle = *gpu_device1();
+  status = hsa_amd_vmem_set_access(va, size, &desc, 1);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_unmap(va, size);
+    hsa_amd_vmem_address_free(va, size);
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem set access failure.";
+    return;
+  }
+
+  REGISTER(va, call, 0);
+
+  status = hsa_amd_vmem_unmap(va, size);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_address_free(va, size);
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem unmap failure.";
+    return;
+  }
+
+  status = hsa_amd_vmem_address_free(va, size);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_handle_release(handle);
+    FAIL() << "Vmem address free failure.";
+    return;
+  }
+  ASSERT_EQ(1, notifiers[0].callback_status) << "Vmem callback not executed.";
+
+  status = hsa_amd_vmem_handle_release(handle);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem handle release failure.";
+
+  // Vmem callback deregister test
+  va = nullptr;
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+
+  REGISTER(va, call, 0);
+  status = hsa_amd_deregister_deallocation_callback(va, call);
+  if (status != HSA_STATUS_SUCCESS) {
+    hsa_amd_vmem_address_free(va, size);
+    FAIL() << "Vmem deregister callback failure.";
+    return;
+  }
+
+  status = hsa_amd_vmem_address_free(va, size);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem address free failure.";
+  ASSERT_EQ(0, notifiers[0].callback_status) << "Vmem callback executed after deregister.";
+
+  // Vmem callback with offset pointer
+  va = nullptr;
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+
+  void* offset_ptr = (char*)va + 65536;  // 64KB offset
+  REGISTER(offset_ptr, call, 0);
+
+  status = hsa_amd_vmem_address_free(va, size);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem address free failure.";
+  ASSERT_EQ(1, notifiers[0].callback_status) << "Vmem offset callback not executed.";
+
+  // Vmem multiple callbacks on same allocation
+  va = nullptr;
+  status = hsa_amd_vmem_address_reserve(&va, size, 0, 0);
+  if (status != HSA_STATUS_SUCCESS) {
+    FAIL() << "Vmem address reserve failure.";
+    return;
+  }
+
+  REGISTER(va, call, 0);
+  REGISTER((char*)va + 65536, call, 1);
+
+  status = hsa_amd_vmem_address_free(va, size);
+  ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Vmem address free failure.";
+  ASSERT_EQ(1, notifiers[0].callback_status) << "Vmem callback 0 not executed.";
+  ASSERT_EQ(1, notifiers[1].callback_status) << "Vmem callback 1 not executed.";
 }

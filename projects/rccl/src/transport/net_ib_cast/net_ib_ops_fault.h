@@ -59,8 +59,8 @@ ncclResult_t ncclIbOpsFaultArmPostRecv(struct ibv_context* ctx, uint32_t qpNum, 
  *  injectWhenIdle: if true, synthesize one error WC when the real poll_cq
  *                  returns 0 completions; if false, only rewrite the status of
  *                  real completions whose qp_num matches. */
-ncclResult_t ncclIbOpsFaultArmPollCq(struct ibv_context* ctx, uint32_t qpNum,
-                                     int wcStatus, int injectCount, bool injectWhenIdle);
+ncclResult_t ncclIbOpsFaultArmPollCq(struct ibv_context* ctx, uint32_t qpNum, int wcStatus, int injectCount,
+                                     bool injectWhenIdle);
 
 /* Clear all ops-fault config for ctx (does not uninstall the shims). */
 ncclResult_t ncclIbOpsFaultClear(struct ibv_context* ctx);

@@ -55,6 +55,11 @@ downstream consumer of the library.
   callers that need bundled builds can simply remove the system package or set
   `CMAKE_DISABLE_FIND_PACKAGE_<name>=ON`.
 
+### Changed
+
+- `libprofiler-hub.so` no longer exports the bundled `sqlite3_*` symbols (sealed via
+  hidden visibility + `--exclude-libs`), preventing collisions with other SQLite versions.
+
 ## [0.1.0] - 2026-05-05
 
 Initial release.

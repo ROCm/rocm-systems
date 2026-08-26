@@ -18,13 +18,13 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
-#include "common/join.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 #include "dl/dl.hpp"
 #include "rocprofiler-systems/categories.h"
 #include "rocprofiler-systems/types.h"
 
-#include <timemory/utility/filepath.hpp>
+#include <spdlog/fmt/fmt.h>
 
 #include <cassert>
 #include <gnu/libc-version.h>
@@ -108,7 +108,7 @@ get_rocprofsys_is_preloaded()
 inline bool
 get_rocprofsys_preload()
 {
-    static bool _v = []() {
+    static const bool _v = []() {
         auto&& _preload      = get_env(env_vars::PRELOAD, true);
         auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
         return (_preload &&
@@ -197,26 +197,44 @@ const char* _rocprofsys_dl_dlopen_descr = "RTLD_LAZY | RTLD_LOCAL";
 /// This class contains function pointers for rocprof-sys's instrumentation functions
 struct ROCPROFSYS_INTERNAL_API indirect
 {
+    /**
+     * Delegating constructor that uses the default lib search paths.
+     * @param _omnilib The path to the omnilib.
+     * @param _userlib The path to the userlib.
+     * @param _dllib The path to the dllib.
+     */
     ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
                                const std::string& _dllib)
-    : m_omnilib{ common::path::find_path(_omnilib, _rocprofsys_dl_verbose) }
-    , m_dllib{ common::path::find_path(_dllib, _rocprofsys_dl_verbose) }
-    , m_userlib{ common::path::find_path(_userlib, _rocprofsys_dl_verbose) }
+    : indirect{ _omnilib, _userlib, _dllib, common::get_default_lib_search_paths() }
+    {}
+
+    /**
+     * Constructor that uses the provided lib search paths.
+     * @param _omnilib The path to the omnilib.
+     * @param _userlib The path to the userlib.
+     * @param _dllib The path to the dllib.
+     * @param _lib_paths The lib search paths.
+     */
+    ROCPROFSYS_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
+                               const std::string& _dllib, const std::string& _lib_paths)
+    : m_omnilib{ path::find_library(_omnilib, _rocprofsys_dl_verbose, _lib_paths) }
+    , m_dllib{ path::find_library(_dllib, _rocprofsys_dl_verbose, _lib_paths) }
+    , m_userlib{ path::find_library(_userlib, _rocprofsys_dl_verbose, _lib_paths) }
     {
         if(_rocprofsys_dl_verbose >= 1)
         {
             ROCPROFSYS_COMMON_LIBRARY_LOG_START
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_omnilib.c_str()), m_omnilib.c_str());
+                    path::filename(_omnilib).c_str(), m_omnilib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_dllib.c_str()), m_dllib.c_str());
+                    path::filename(_dllib).c_str(), m_dllib.c_str());
             fprintf(stderr, "[rocprof-sys][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(_userlib.c_str()), m_userlib.c_str());
+                    path::filename(_userlib).c_str(), m_userlib.c_str());
             ROCPROFSYS_COMMON_LIBRARY_LOG_END
         }
 
-        auto _search_paths = common::join(':', common::path::dirname(_omnilib),
-                                          common::path::dirname(_dllib));
+        auto _search_paths =
+            fmt::format("{}:{}", path::parent_path(_omnilib), path::parent_path(_dllib));
         common::setup_environ(_rocprofsys_dl_verbose, _search_paths, _omnilib, _dllib);
 
         m_omnihandle = open(m_omnilib);
@@ -262,8 +280,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
     {
         if(!m_omnihandle) m_omnihandle = open(m_omnilib);
 
-        int _warn_verbose = 0;
-        int _info_verbose = 2;
+        int       _warn_verbose = 0;
+        const int _info_verbose = 2;
         // Initialize all pointers
         ROCPROFSYS_DLSYM(rocprofsys_init_library_f, m_omnihandle,
                          "rocprofsys_init_library");
@@ -384,7 +402,7 @@ public:
     void (*rocprofsys_init_f)(const char*, bool, const char*)                  = nullptr;
     void (*rocprofsys_finalize_f)(void)                                        = nullptr;
     void (*rocprofsys_set_env_f)(const char*, const char*)                     = nullptr;
-    void (*rocprofsys_set_mpi_f)(bool, bool)                                   = nullptr;
+    void (*rocprofsys_set_mpi_f)(bool)                                         = nullptr;
     void (*rocprofsys_register_source_f)(const char*, const char*, size_t, size_t,
                                          const char*)                          = nullptr;
     void (*rocprofsys_register_coverage_f)(const char*, const char*, size_t)   = nullptr;
@@ -611,16 +629,16 @@ extern "C"
     {
         if(dl::get_inited() && dl::get_finied())
         {
-            ROCPROFSYS_DL_LOG(
-                2, "%s(%s) ignored :: already initialized and finalized\n", __FUNCTION__,
-                ::rocprofsys::join(::rocprofsys::QuoteStrings{}, ", ", a, b, c).c_str());
+            ROCPROFSYS_DL_LOG(2, "%s(%s) ignored :: already initialized and finalized\n",
+                              __FUNCTION__,
+                              fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
             return;
         }
         else if(dl::get_inited() && dl::get_active())
         {
-            ROCPROFSYS_DL_LOG(
-                2, "%s(%s) ignored :: already initialized and active\n", __FUNCTION__,
-                ::rocprofsys::join(::rocprofsys::QuoteStrings{}, ", ", a, b, c).c_str());
+            ROCPROFSYS_DL_LOG(2, "%s(%s) ignored :: already initialized and active\n",
+                              __FUNCTION__,
+                              fmt::format(R"("{}", "{}", "{}")", a, b, c).c_str());
             return;
         }
 
@@ -789,14 +807,14 @@ extern "C"
         // ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_env_f, a, b);
     }
 
-    void rocprofsys_set_mpi(bool a, bool b)
+    void rocprofsys_set_mpi(bool a)
     {
         if(dl::get_inited() && dl::get_active())
         {
-            ROCPROFSYS_DL_IGNORE(2, "already initialized and active", a, b);
+            ROCPROFSYS_DL_IGNORE(2, "already initialized and active", a);
             return;
         }
-        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_mpi_f, a, b);
+        ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_set_mpi_f, a);
     }
 
     void rocprofsys_register_source(const char* file, const char* func, size_t line,
@@ -1205,7 +1223,6 @@ rocprofsys_preinit()
         case InstrumentMode::None:
         case InstrumentMode::BinaryRewrite:
         case InstrumentMode::ProcessCreate:
-        case InstrumentMode::ProcessAttach:
         {
             auto _use_mpip = get_env(env_vars::USE_MPIP, false);
             auto _use_mpi  = get_env(env_vars::USE_MPI, _use_mpip);
@@ -1220,8 +1237,7 @@ rocprofsys_preinit()
                 // If _use_mpi defaults to true above, calling this
                 // will override can current env or config value for
                 // ROCPROFSYS_USE_PID.
-                rocprofsys_set_mpi(_use_mpi, dl::get_instrumented() ==
-                                                 dl::InstrumentMode::ProcessAttach);
+                rocprofsys_set_mpi(_use_mpi);
             }
             break;
         }
@@ -1233,23 +1249,22 @@ rocprofsys_preinit()
 void
 rocprofsys_postinit(std::string _exe)
 {
-    InstrumentMode instrumentMode = get_instrumented();
+    const InstrumentMode instrumentMode = get_instrumented();
 
     switch(instrumentMode)
     {
         case InstrumentMode::None:
         case InstrumentMode::BinaryRewrite:
         case InstrumentMode::ProcessCreate:
-        case InstrumentMode::ProcessAttach:
         {
             if(_exe.empty())
-                _exe = tim::filepath::readlink(join('/', "/proc", getpid(), "exe"));
+                _exe = path::read_symlink(fmt::format("/proc/{}/exe", getpid()));
 
             rocprofsys_init_tooling();
             if(_exe.empty())
                 rocprofsys_push_trace("main");
             else
-                rocprofsys_push_trace(basename(_exe.c_str()));
+                rocprofsys_push_trace(path::filename(_exe).c_str());
             break;
         }
         case InstrumentMode::PythonProfile:
@@ -1309,7 +1324,6 @@ verify_instrumented_preloaded()
     switch(dl::get_instrumented())
     {
         case dl::InstrumentMode::None:
-        case dl::InstrumentMode::ProcessAttach:
         case dl::InstrumentMode::ProcessCreate:
         case dl::InstrumentMode::PythonProfile:
         {
@@ -1558,9 +1572,9 @@ extern "C"
                         dl::get_instrumented() == dl::InstrumentMode::BinaryRewrite,
                         argv[0]);
 
-        int ret = (*::rocprofsys::dl::main_real)(argc, argv, envp);
+        const int ret = (*::rocprofsys::dl::main_real)(argc, argv, envp);
 
-        rocprofsys_pop_trace(basename(argv[0]));
+        rocprofsys_pop_trace(rocprofsys::path::filename(argv[0]).c_str());
         rocprofsys_finalize();
 
         return ret;

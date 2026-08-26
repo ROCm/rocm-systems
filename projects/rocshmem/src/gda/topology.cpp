@@ -352,6 +352,12 @@ namespace rocshmem
     // Build list on first use
     if (!isInitialized) {
 
+      if (!ibv.is_initialized) {
+        LOG_WARN("libibverbs not available; no InfiniBand devices will be reported.");
+        isInitialized = true;
+        return ibvDeviceList;
+      }
+
       // Query the number of IBV devices
       int numIbvDevices = 0;
       ibv_device** deviceList = ibv.get_device_list(&numIbvDevices);

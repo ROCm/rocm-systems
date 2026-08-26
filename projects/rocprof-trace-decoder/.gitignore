@@ -27,3 +27,5 @@
 # VSCode Workspaces
 *.code-workspace
 /rocprofiler-sdk-build
+
+*__pycache__

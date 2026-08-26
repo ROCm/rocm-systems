@@ -48,8 +48,9 @@
 #   * torch/HIP dispatch  -> AMD_LOG_LEVEL=3 makes the ROCm runtime print every
 #     HIP kernel launch; PYTORCH_JIT_LOG_LEVEL / PYTORCH_SHOW_DISPATCH_TRACE add
 #     the aten dispatch trace on instrumented torch builds.
-#   * rocjitsu emulator   -> RJ_LOG=1 enables the interposer's kernel-logging
-#     plugin and RJ_SINKS=stderr streams each emulated kernel to stderr.
+#   * rocjitsu emulator   -> `--plugin logging` adds the logging plugin to the
+#     resolved profile config; its default stderr sink streams each emulated
+#     kernel to the server log.
 #
 # Why the vLLM init is constrained: the emulated MI350X advertises ~288
 # GiB of VRAM, and vLLM's engine-core init runs a memory-profiling
@@ -76,16 +77,17 @@ GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.2}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-2048}"
 LOG_KERNELS="${LOG_KERNELS:-0}"
 
-# Build the list of --env flags that enable kernel-execution logging. Only
+# Build the list of arguments that enable kernel-execution logging. Only
 # populated when LOG_KERNELS=1 so the default run stays quiet.
-KERNEL_LOG_ENV=()
+KERNEL_LOG_ARGS=()
 if [[ "$LOG_KERNELS" == "1" ]]; then
-  KERNEL_LOG_ENV+=(
+  KERNEL_LOG_ARGS+=(
     # torch / HIP kernel dispatch trace.
     --env AMD_LOG_LEVEL=3
     --env PYTORCH_JIT_LOG_LEVEL=kernels
     --env PYTORCH_SHOW_DISPATCH_TRACE=1
-    --env RJ_LOG=1
+    # rocjitsu kernel logging, merged into the runtime config by mirage.
+    --plugin logging
   )
 fi
 
@@ -142,7 +144,7 @@ cd "$MIRAGE_DIR"
   --container-provider "$PROVIDER" \
   --port "$PORT:$PORT" \
   --mount "$HF_CACHE:/root/.cache/huggingface" \
-  "${KERNEL_LOG_ENV[@]}" \
+  "${KERNEL_LOG_ARGS[@]}" \
   -- vllm serve "$MODEL" --host 0.0.0.0 --port "$PORT" \
        --enforce-eager \
        --gpu-memory-utilization "$GPU_MEM_UTIL" \

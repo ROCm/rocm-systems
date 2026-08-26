@@ -42,7 +42,7 @@ __global__ void AtomicFAddKernelKernel(float* data, size_t n) {
   size_t i = blockDim.x * blockIdx.x + threadIdx.x;
   if (i < n) {
 #if __has_builtin(__builtin_amdgcn_global_atomic_fadd_f32)
-    __builtin_amdgcn_global_atomic_fadd_f32(data, 1.0f);  // Only work on coarse grained buffer
+    __builtin_amdgcn_global_atomic_fadd_f32(data, 1.0f);
 #else
     if (i == 0) {
       *data = -1.0;
@@ -862,7 +862,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_Capture) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-HIP_TEST_CASE(Unit_hipHostRegister_with_hipExtHostRegisterCoarseGrained) {
+HIP_TEST_CASE(Unit_hipHostRegister_with_coarse_grain) {
 #if HT_AMD
   const size_t count = 65536;
   const size_t threadsPerBlock = 64;
@@ -878,7 +878,8 @@ HIP_TEST_CASE(Unit_hipHostRegister_with_hipExtHostRegisterCoarseGrained) {
   HIP_CHECK(hipHostUnregister(hostPtr));
   std::cout << "hostPtr=" << hostPtr << ", devicePtr=" << devicePtr << std::endl;
   if (*hostPtr == static_cast<float>(count)) {
-    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 works well!" << std::endl;
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 works well on coarse grain!"
+              << std::endl;
     REQUIRE(true);
   } else if (*hostPtr == -1.0f) {
     std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 not supported!" << std::endl;
@@ -891,6 +892,74 @@ HIP_TEST_CASE(Unit_hipHostRegister_with_hipExtHostRegisterCoarseGrained) {
 #endif
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *    - This testcase verifies hipHostRegisterDefault (fine-grain) flags of hipHostRegister
+ *    - with __builtin_amdgcn_global_atomic_fadd_f32.
+ *    - The builtin hardcodes agent scope. Behavior varies by chip:
+ *    - * Chips with AgentScopeFineGrainedRemoteMemoryAtomics (gfx942, gfx945, gfx950, GFX12+):
+ *    -   native global_atomic_add_f32 at agent scope is coherent on fine-grain host memory;
+ *    -   atomic succeeds and hostPtr equals count.
+ *    - * Chips without the native instruction (GFX9 consumer, GFX10):
+ *    -   backend expands to a CAS loop; global_atomic_cmpswap is PCIe-native so it
+ *    -   works on fine-grain host memory; atomic succeeds and hostPtr equals count.
+ *    - * Chips with the native instruction but without AgentScopeFineGrainedRemoteMemoryAtomics
+ *    -   (gfx908, gfx90a, GFX11): agent-scope coherency on PCIe host memory is not
+ *    -   guaranteed; result may be a partial sum.
+ * Test source
+ * ------------------------
+ *    - catch\unit\memory\hipHostRegister.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipHostRegister_with_fine_grain) {
+#if HT_AMD
+  const size_t count = 65536;
+  const size_t threadsPerBlock = 64;
+  size_t sizeBytes = sizeof(float);
+  float* hostPtr = reinterpret_cast<float*>(malloc(sizeBytes));
+  float* devicePtr = nullptr;
+  *hostPtr = 0;
+  HIP_CHECK(hipHostRegister(hostPtr, sizeBytes, hipHostRegisterDefault));
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&devicePtr), hostPtr, 0));
+  AtomicFAddKernelKernel<<<(count + threadsPerBlock - 1) / threadsPerBlock, threadsPerBlock>>>(
+      devicePtr, count);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipHostUnregister(hostPtr));
+  std::cout << "hostPtr=" << hostPtr << ", devicePtr=" << devicePtr << std::endl;
+
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  std::string archName(prop.gcnArchName);
+  // Chips with native global_atomic_add_f32 but without
+  // AgentScopeFineGrainedRemoteMemoryAtomics: agent-scope coherency on PCIe
+  // host memory is not guaranteed, so a partial/racy result is acceptable.
+  const bool partialResultExpected =
+      archName.find("gfx908") != std::string::npos ||
+      archName.find("gfx90a") != std::string::npos ||
+      archName.find("gfx11") != std::string::npos;
+
+  if (*hostPtr == static_cast<float>(count)) {
+    // Atomic succeeded: either via native global_atomic_add_f32 (chips with
+    // AgentScopeFineGrainedRemoteMemoryAtomics) or via CAS loop expansion
+    // (all other chips, since global_atomic_cmpswap is PCIe-native).
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 succeeded on fine grain!"
+              << std::endl;
+    REQUIRE(true);
+  } else if (*hostPtr == -1.0f) {
+    std::cout << "__builtin_amdgcn_global_atomic_fadd_f32 not supported!" << std::endl;
+    REQUIRE(true);
+  } else {
+    // Partial/racy result: only expected on chips where agent-scope coherency
+    // on PCIe host memory is not guaranteed (gfx908, gfx90a, GFX11 discrete).
+    std::cout << count << " -> " << *hostPtr << std::endl;
+    REQUIRE(partialResultExpected);
+  }
+  free(hostPtr);
+#endif
+}
 /**
  * End doxygen group MemoryTest.
  * @}

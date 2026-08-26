@@ -6,18 +6,17 @@
 Instrumenting and rewriting a binary application
 ****************************************************
 
-There are three ways to perform instrumentation with the ``rocprof-sys-instrument`` executable:
+There are two ways to perform instrumentation with the ``rocprof-sys-instrument`` executable:
 
 * Runtime instrumentation
-* Attaching to an already running process
 * Binary rewrite
 
-Here is a comparison of the three modes:
+Here is a comparison of the two modes:
 
 * Runtime instrumentation of the application using the ``rocprof-sys-instrument`` executable
   (analogous to ``gdb --args <program> <args>``)
 
-  * This mode is the default if neither the ``-p`` nor ``-o`` command-line options are used
+  * This mode is the default if the ``-o`` command-line option is not used
   * Runtime instrumentation supports instrumenting not only the target executable but also
     the shared libraries loaded by the target executable. Consequently, this mode consumes more memory,
     takes longer to perform the instrumentation, and tends to add more significant overhead to the
@@ -25,15 +24,10 @@ Here is a comparison of the three modes:
   * This mode is recommended if you want to analyze not only the performance of your executable and/or
     libraries but also the performance of the library dependencies
 
-* Attaching to a process that is currently running (analogous to ``gdb -p <PID>``)
-
-  * This mode is activated using ``-p <PID>``
-  * The same caveats from the first example apply with respect to memory and overhead
-
   .. note::
 
-     Attaching to a running process is an alpha feature and detaching from the target process
-     without ending the target process is not currently supported.
+     To attach to and profile an already running process, use the ``rocprof-sys-attach``
+     executable instead. See :doc:`Attaching to a running process <./attaching-to-running-process>`.
 
 * Binary rewrite to generate a new executable or library with the instrumentation built-in
 
@@ -58,307 +52,314 @@ view the help menu.
 
    $ rocprof-sys-instrument --help
    [rocprof-sys-instrument] Usage: rocprof-sys-instrument [ --help (count: 0, dtype: bool)
-                                                            --version (count: 0, dtype: bool)
-                                                            --verbose (max: 1, dtype: bool)
-                                                            --error (max: 1, dtype: boolean)
-                                                            --debug (max: 1, dtype: bool)
-                                                            --log (count: 1)
-                                                            --log-file (count: 1)
-                                                            --simulate (max: 1, dtype: boolean)
-                                                            --dump-info (max: 0)
-                                                            --print-format (min: 1, dtype: string)
-                                                            --print-dir (count: 1, dtype: string)
-                                                            --print-available (count: 1)
-                                                            --print-instrumented (count: 1)
-                                                            --print-coverage (count: 1)
-                                                            --print-excluded (count: 1)
-                                                            --print-overlapping (count: 1)
-                                                            --print-instructions (max: 1, dtype: bool)
-                                                            --output (min: 0, dtype: string)
-                                                            --pid (count: 1, dtype: int)
-                                                            --mode (count: 1)
-                                                            --force (max: 1, dtype: bool)
-                                                            --command (count: 1)
-                                                            --prefer (count: 1)
-                                                            --library (count: unlimited)
-                                                            --main-function (count: 1)
-                                                            --load (count: unlimited, dtype: string)
-                                                            --load-instr (count: unlimited, dtype: filepath)
-                                                            --init-functions (count: unlimited, dtype: string)
-                                                            --fini-functions (count: unlimited, dtype: string)
-                                                            --all-functions (max: 1, dtype: boolean)
-                                                            --function-include (count: unlimited)
-                                                            --function-exclude (count: unlimited)
-                                                            --function-restrict (count: unlimited)
-                                                            --caller-include (count: unlimited)
-                                                            --module-include (count: unlimited)
-                                                            --module-exclude (count: unlimited)
-                                                            --module-restrict (count: unlimited)
-                                                            --internal-function-include (count: unlimited)
-                                                            --internal-module-include (count: unlimited)
-                                                            --instruction-exclude (count: unlimited)
-                                                            --internal-library-deps (min: 0, dtype: boolean)
-                                                            --internal-library-append (count: unlimited)
-                                                            --internal-library-remove (count: unlimited)
-                                                            --linkage (min: 1)
-                                                            --visibility (min: 1)
-                                                            --label (count: unlimited, dtype: string)
-                                                            --config (min: 1, dtype: string)
-                                                            --env (count: unlimited)
-                                                            --mpi (max: 1, dtype: bool)
-                                                            --instrument-loops (max: 1, dtype: boolean)
-                                                            --min-instructions (count: 1, dtype: int)
-                                                            --min-address-range (count: 1, dtype: int)
-                                                            --min-instructions-loop (count: 1, dtype: int)
-                                                            --min-address-range-loop (count: 1, dtype: int)
-                                                            --coverage (max: 1, dtype: bool)
-                                                            --dynamic-callsites (max: 1, dtype: boolean)
-                                                            --traps (max: 1, dtype: boolean)
-                                                            --loop-traps (max: 1, dtype: boolean)
-                                                            --allow-overlapping (max: 1, dtype: bool)
-                                                            --parse-all-modules (max: 1, dtype: bool)
-                                                            --batch-size (count: 1, dtype: int)
-                                                            --dyninst-rt (min: 1, dtype: filepath)
-                                                            --dyninst-options (count: unlimited)
-                                                         ] -- <CMD> <ARGS>
+                                                         --version (count: 0, dtype: bool)
+                                                         --verbose (max: 1, dtype: bool)
+                                                         --error (max: 1, dtype: boolean)
+                                                         --debug (max: 1, dtype: bool)
+                                                         --log (count: 1)
+                                                         --log-file (count: 1)
+                                                         --simulate (max: 1, dtype: boolean)
+                                                         --dump-info (max: 0)
+                                                         --print-format (min: 1, dtype: string)
+                                                         --print-dir (count: 1, dtype: string)
+                                                         --print-available (count: 1)
+                                                         --print-instrumented (count: 1)
+                                                         --print-coverage (count: 1)
+                                                         --print-excluded (count: 1)
+                                                         --print-overlapping (count: 1)
+                                                         --print-instructions (max: 1, dtype: bool)
+                                                         --output (min: 0, dtype: string)
+                                                         --mode (count: 1)
+                                                         --force (max: 1, dtype: bool)
+                                                         --command (count: 1)
+                                                         --prefer (count: 1)
+                                                         --library (count: unlimited)
+                                                         --main-function (count: 1)
+                                                         --load (count: unlimited, dtype: string)
+                                                         --load-instr (count: unlimited, dtype: filepath)
+                                                         --init-functions (count: unlimited, dtype: string)
+                                                         --fini-functions (count: unlimited, dtype: string)
+                                                         --all-functions (max: 1, dtype: boolean)
+                                                         --function-include (count: unlimited)
+                                                         --function-exclude (count: unlimited)
+                                                         --function-restrict (count: unlimited)
+                                                         --caller-include (count: unlimited)
+                                                         --module-include (count: unlimited)
+                                                         --module-exclude (count: unlimited)
+                                                         --module-restrict (count: unlimited)
+                                                         --internal-function-include (count: unlimited)
+                                                         --internal-module-include (count: unlimited)
+                                                         --instruction-exclude (count: unlimited)
+                                                         --internal-library-deps (min: 0, dtype: boolean)
+                                                         --internal-library-append (count: unlimited)
+                                                         --internal-library-remove (count: unlimited)
+                                                         --linkage (min: 1)
+                                                         --visibility (min: 1)
+                                                         --label (count: unlimited, dtype: string)
+                                                         --config (min: 1, dtype: string)
+                                                         --env (count: unlimited)
+                                                         --mpi (max: 1, dtype: bool)
+                                                         --instrument-loops (max: 1, dtype: boolean)
+                                                         --min-instructions (count: 1, dtype: int)
+                                                         --min-address-range (count: 1, dtype: int)
+                                                         --min-instructions-loop (count: 1, dtype: int)
+                                                         --min-address-range-loop (count: 1, dtype: int)
+                                                         --max-library-functions (count: 1, dtype: int)
+                                                         --coverage (max: 1, dtype: bool)
+                                                         --dynamic-callsites (max: 1, dtype: boolean)
+                                                         --traps (max: 1, dtype: boolean)
+                                                         --loop-traps (max: 1, dtype: boolean)
+                                                         --allow-overlapping (max: 1, dtype: bool)
+                                                         --exclude-internal-lib-paths (max: 1, dtype: boolean)
+                                                         --exe-only (max: 1, dtype: boolean)
+                                                         --batch-size (count: 1, dtype: int)
+                                                         --dyninst-rt (min: 1, dtype: filepath)
+                                                         --dyninst-options (count: unlimited)
+                                                       ] -- <CMD> <ARGS>
 
-   Options:
-      -h, -?, --help                 Shows this page (count: 0, dtype: bool)
-      --version                      Prints the version and exit (count: 0, dtype: bool)
+Options:
+    -h, -?, --help                 Shows this page (count: 0, dtype: bool)
+    --version                      Prints the version and exit (count: 0, dtype: bool)
 
-      [DEBUG OPTIONS]
+    [DEBUG OPTIONS]
 
-      -v, --verbose                  Verbose output (max: 1, dtype: bool)
-      -e, --error                    All warnings produce runtime errors (max: 1, dtype: boolean)
-      --debug                        Debug output (max: 1, dtype: bool)
-      --log                          Number of log entries to display after an error. Any value < 0 will emit the entire log
-                                    (count: 1)
-      --log-file                     Write the log out the specified file during the run (count: 1)
-      --simulate                     Exit after outputting diagnostic {available,instrumented,excluded,overlapping} module
-                                    function lists, e.g. available.txt (max: 1, dtype: boolean)
-      --dump-info                    Write diagnostic module function reports (available, instrumented, excluded, coverage,
-                                    overlapping) to files in the output directory. Includes per-function heuristic constraint
-                                    results in JSON/XML formats (max: 0)
-      --print-format [ json | txt | xml ]
-                                    Output file format(s) for --dump-info diagnostic reports, e.g. {print-dir}/available.txt
-                                    (min: 1, dtype: string)
-      --print-dir                    Output directory for diagnostic {available,instrumented,excluded,overlapping} module
-                                    function lists, e.g. {print-dir}/available.txt (count: 1, dtype: string)
-      --print-available [ functions | functions+ | modules | pair | pair+ ]
-                                    Print the available entities for instrumentation (functions, modules, or module-function
-                                    pair) to stdout after applying regular expressions (count: 1)
-      --print-instrumented [ functions | functions+ | modules | pair | pair+ ]
-                                    Print the instrumented entities (functions, modules, or module-function pair) to stdout
-                                    after applying regular expressions (count: 1)
-      --print-coverage [ functions | functions+ | modules | pair | pair+ ]
-                                    Print the instrumented coverage entities (functions, modules, or module-function pair) to
-                                    stdout after applying regular expressions (count: 1)
-      --print-excluded [ functions | functions+ | modules | pair | pair+ ]
-                                    Print the entities for instrumentation (functions, modules, or module-function pair)
-                                    which are excluded from the instrumentation to stdout after applying regular expressions
-                                    (count: 1)
-      --print-overlapping [ functions | functions+ | modules | pair | pair+ ]
-                                    Print the entities for instrumentation (functions, modules, or module-function pair)
-                                    which overlap other function calls or have multiple entry points to stdout after applying
-                                    regular expressions (count: 1)
-      --print-instructions           Print the instructions for each basic-block in the JSON/XML outputs (max: 1, dtype: bool)
+    -v, --verbose                  Verbose output (max: 1, dtype: bool)
+    -e, --error                    All warnings produce runtime errors (max: 1, dtype: boolean)
+    --debug                        Debug output (max: 1, dtype: bool)
+    --log                          Number of log entries to display after an error. Any value < 0 will emit the entire log
+                                   (count: 1)
+    --log-file                     Write the log out the specified file during the run (count: 1)
+    --simulate                     Exit after outputting diagnostic {available,instrumented,excluded,overlapping} module
+                                   function lists, e.g. available.txt (max: 1, dtype: boolean)
+    --dump-info                    Write diagnostic module function reports (available, instrumented, excluded, coverage,
+                                   overlapping) to {print-dir}/instrumentation/. Includes per-function heuristic constraint
+                                   results in {print-format} formats (max: 0)
+    --print-format [ json | txt | xml ]
+                                   Output file format(s) for --dump-info diagnostic reports, e.g.
+                                   {print-dir}/instrumentation/available.txt (min: 1, dtype: string)
+    --print-dir                    Output directory for --dump-info diagnostic reports. Files are written to
+                                   {print-dir}/instrumentation/ (count: 1, dtype: string)
+    --print-available [ functions | functions+ | modules | pair | pair+ ]
+                                   Print the available entities for instrumentation (functions, modules, or module-function
+                                   pair) to stdout after applying regular expressions (count: 1)
+    --print-instrumented [ functions | functions+ | modules | pair | pair+ ]
+                                   Print the instrumented entities (functions, modules, or module-function pair) to stdout
+                                   after applying regular expressions (count: 1)
+    --print-coverage [ functions | functions+ | modules | pair | pair+ ]
+                                   Print the instrumented coverage entities (functions, modules, or module-function pair) to
+                                   stdout after applying regular expressions (count: 1)
+    --print-excluded [ functions | functions+ | modules | pair | pair+ ]
+                                   Print the entities for instrumentation (functions, modules, or module-function pair)
+                                   which are excluded from the instrumentation to stdout after applying regular expressions
+                                   (count: 1)
+    --print-overlapping [ functions | functions+ | modules | pair | pair+ ]
+                                   Print the entities for instrumentation (functions, modules, or module-function pair)
+                                   which overlap other function calls or have multiple entry points to stdout after applying
+                                   regular expressions (count: 1)
+    --print-instructions           Print the instructions for each basic-block in the JSON/XML outputs (max: 1, dtype: bool)
 
-      [MODE OPTIONS]
+    [MODE OPTIONS]
 
-      -o, --output                   Enable generation of a new executable (binary-rewrite). If a filename is not provided,
-                                    rocprof-sys will use the basename and output to the cwd, unless the target binary is in
-                                    the cwd. In the latter case, rocprof-sys will either use ${PWD}/<basename>.inst
-                                    (non-libraries) or ${PWD}/instrumented/<basename> (libraries) (min: 0, dtype: string)
-      -p, --pid                      Connect to running process (count: 1, dtype: int)
-      -M, --mode [ coverage | sampling | trace ]
-                                    Instrumentation mode. 'trace' mode instruments the selected functions, 'sampling' mode
-                                    only instruments the main function to start and stop the sampler. (count: 1)
-      -f, --force                    Force the command-line argument configuration, i.e. don’t get cute. Useful for forcing
-                                    runtime instrumentation of an executable that [A] Dyninst thinks is a library after
-                                    reading ELF and [B] whose name makes it look like a library (e.g. starts with 'lib'
-                                    and/or ends in '.so', '.so.*', or '.a') (max: 1, dtype: bool)
-      -c, --command                  Input executable and arguments (if '-- <CMD>' not provided) (count: 1)
+    -o, --output                   Enable generation of a new executable (binary-rewrite). If a filename is not provided,
+                                   rocprof-sys will use the basename and output to the cwd, unless the target binary is in
+                                   the cwd. In the latter case, rocprof-sys will either use ${PWD}/<basename>.inst
+                                   (non-libraries) or ${PWD}/instrumented/<basename> (libraries) (min: 0, dtype: string)
+    -M, --mode [ coverage | sampling | trace ]
+                                   Instrumentation mode. 'trace' mode instruments the selected functions, 'sampling' mode
+                                   only instruments the main function to start and stop the sampler. (count: 1)
+    -f, --force                    Force the command-line argument configuration, i.e. don't get cute. Useful for forcing
+                                   runtime instrumentation of an executable that [A] Dyninst thinks is a library after
+                                   reading ELF and [B] whose name makes it look like a library (e.g. starts with 'lib'
+                                   and/or ends in '.so', '.so.*', or '.a') (max: 1, dtype: bool)
+    -c, --command                  Input executable and arguments (if '-- <CMD>' not provided) (count: 1)
 
-      [LIBRARY OPTIONS]
+    [LIBRARY OPTIONS]
 
-      --prefer [ shared | static ]   Prefer this library types when available (count: 1)
-      -L, --library                  Libraries with instrumentation routines (default: "librocprof-sys-dl") (count: unlimited)
-      -m, --main-function            The primary function to instrument around, e.g. 'main' (count: 1)
-      --load                         Supplemental instrumentation library names w/o extension (e.g. 'libinstr' for
-                                    'libinstr.so' or 'libinstr.a') (count: unlimited, dtype: string)
-      --load-instr                   Load {available,instrumented,excluded,overlapping}-instr JSON or XML file(s) and override
-                                    what is read from the binary (count: unlimited, dtype: filepath)
-      --init-functions               Initialization function(s) for supplemental instrumentation libraries (see '--load'
-                                    option) (count: unlimited, dtype: string)
-      --fini-functions               Finalization function(s) for supplemental instrumentation libraries (see '--load' option)
-                                    (count: unlimited, dtype: string)
-      --all-functions                When finding functions, include the functions which are not instrumentable. This is
-                                    purely diagnostic for the available/excluded functions output (max: 1, dtype: boolean)
+    --prefer [ shared | static ]   Prefer this library types when available (count: 1)
+    -L, --library                  Libraries with instrumentation routines (default: "librocprof-sys-dl") (count: unlimited)
+    -m, --main-function            The primary function to instrument around, e.g. 'main' (count: 1)
+    --load                         Supplemental instrumentation library names w/o extension (e.g. 'libinstr' for
+                                   'libinstr.so' or 'libinstr.a') (count: unlimited, dtype: string)
+    --load-instr                   Load {available,instrumented,excluded,overlapping}-instr JSON or XML file(s) and override
+                                   what is read from the binary (count: unlimited, dtype: filepath)
+    --init-functions               Initialization function(s) for supplemental instrumentation libraries (see '--load'
+                                   option) (count: unlimited, dtype: string)
+    --fini-functions               Finalization function(s) for supplemental instrumentation libraries (see '--load' option)
+                                   (count: unlimited, dtype: string)
+    --all-functions                When finding functions, include the functions which are not instrumentable. This is
+                                   purely diagnostic for the available/excluded functions output (max: 1, dtype: boolean)
 
-      [SYMBOL SELECTION OPTIONS]
+    [SYMBOL SELECTION OPTIONS]
 
-      -I, --function-include         Regex(es) for including functions (despite heuristics) (count: unlimited)
-      -E, --function-exclude         Regex(es) for excluding functions (always applied) (count: unlimited)
-      -R, --function-restrict        Regex(es) for restricting functions only to those that match the provided
-                                    regular-expressions (count: unlimited)
-      --caller-include               Regex(es) for including functions that call the listed functions (despite heuristics)
-                                    (count: unlimited)
-      -MI, --module-include          Regex(es) for selecting modules/files/libraries (despite heuristics) (count: unlimited)
-      -ME, --module-exclude          Regex(es) for excluding modules/files/libraries (always applied) (count: unlimited)
-      -MR, --module-restrict         Regex(es) for restricting modules/files/libraries only to those that match the provided
-                                    regular-expressions (count: unlimited)
-      --internal-function-include    Regex(es) for including functions which are (likely) utilized by rocprof-sys itself. Use
-                                    this option with care. (count: unlimited)
-      --internal-module-include      Regex(es) for including modules/libraries which are (likely) utilized by rocprof-sys
-                                    itself. Use this option with care. (count: unlimited)
-      --instruction-exclude          Regex(es) for excluding functions containing certain instructions (count: unlimited)
-      --internal-library-deps        Treat the libraries linked to the internal libraries as internal libraries. This increase
-                                    the internal library processing time and consume more memory (so use with care) but may
-                                    be useful when the application uses Boost libraries and Dyninst is dynamically linked
-                                    against the same boost libraries (min: 0, dtype: boolean)
-      --internal-library-append      Append to the list of libraries which rocprof-sys treats as being used internally, e.g.
-                                    rocprof-sys will find all the symbols in this library and prevent them from being
-                                    instrumented. (count: unlimited)
-      --internal-library-remove [ ld-linux-x86-64.so.2
-                                 libBrokenLocale.so.1
-                                 libLLVM.so
-                                 libamd_comgr.so
-                                 libamd_smi.so
-                                 libanl.so.1
-                                 libbfd.so
-                                 libbz2.so
-                                 libc.so.6
-                                 libcaliper.so
-                                 libclang-cpp.so
-                                 libcommon.so
-                                 libdl.so.2
-                                 libdw.so
-                                 libdwarf.so
-                                 libdyninstAPI_RT.so
-                                 libelf.so
-                                 libgcc_s.so.1
-                                 libgotcha.so
-                                 libhsa-runtime64.so
-                                 liblikwid.so
-                                 liblzma.so
-                                 libnsl.so.1
-                                 libnss_compat.so.2
-                                 libnss_db.so.2
-                                 libnss_dns.so.2
-                                 libnss_files.so.2
-                                 libnss_hesiod.so.2
-                                 libnss_ldap.so.2
-                                 libpapi.so
-                                 libpfm.so
-                                 libprofiler.so
-                                 libpthread.so.0
-                                 libresolv.so.2
-                                 librocm_smi64.so
-                                 librocmtools.so
-                                 librocprofiler-register.so
-                                 librocprofiler-sdk-roctx.so
-                                 librocprofiler-sdk.so
-                                 librocprofiler64.so
-                                 libroctracer64.so
-                                 libroctx64.so
-                                 librt.so.1
-                                 libstdc++.so.6
-                                 libtbb.so
-                                 libtbbmalloc.so
-                                 libtbbmalloc_proxy.so
-                                 libtcmalloc.so
-                                 libtcmalloc_and_profiler.so
-                                 libtcmalloc_debug.so
-                                 libtcmalloc_minimal.so
-                                 libtcmalloc_minimal_debug.so
-                                 libthread_db.so.1
-                                 libunwind-coredump.so
-                                 libunwind-generic.so
-                                 libunwind-ptrace.so
-                                 libunwind-setjmp.so
-                                 libunwind-x86_64.so
-                                 libunwind.so
-                                 libutil.so.1
-                                 libz.so
-                                 libzstd.so ]
-                                    Remove the specified libraries from being treated as being used internally, e.g.
-                                    rocprof-sys will permit all the symbols in these libraries to be eligible for
-                                    instrumentation. (count: unlimited)
-      --linkage [ global | local | unique | unknown | weak ]
-                                    Only instrument functions with specified linkage (default: global, local, unique) (min:
-                                    1)
-      --visibility [ default | hidden | internal | protected | unknown ]
-                                    Only instrument functions with specified visibility (default: default, internal, hidden,
-                                    protected) (min: 1)
+    -I, --function-include         Regex(es) for including functions (despite heuristics) (count: unlimited)
+    -E, --function-exclude         Regex(es) for excluding functions (always applied) (count: unlimited)
+    -R, --function-restrict        Regex(es) for restricting functions only to those that match the provided
+                                   regular-expressions (count: unlimited)
+    --caller-include               Regex(es) for including functions that call the listed functions (despite heuristics)
+                                   (count: unlimited)
+    -MI, --module-include          Regex(es) for selecting modules/files/libraries (despite heuristics) (count: unlimited)
+    -ME, --module-exclude          Regex(es) for excluding modules/files/libraries (always applied) (count: unlimited)
+    -MR, --module-restrict         Regex(es) for restricting modules/files/libraries only to those that match the provided
+                                   regular-expressions (count: unlimited)
+    --internal-function-include    Regex(es) for including functions which are (likely) utilized by rocprof-sys itself. Use
+                                   this option with care. (count: unlimited)
+    --internal-module-include      Regex(es) for including modules/libraries which are (likely) utilized by rocprof-sys
+                                   itself. Use this option with care. (count: unlimited)
+    --instruction-exclude          Regex(es) for excluding functions containing certain instructions (count: unlimited)
+    --internal-library-deps        Treat the libraries linked to the internal libraries as internal libraries. This increase
+                                   the internal library processing time and consume more memory (so use with care) but may
+                                   be useful when the application uses Boost libraries and Dyninst is dynamically linked
+                                   against the same boost libraries (min: 0, dtype: boolean)
+    --internal-library-append      Append to the list of libraries which rocprof-sys treats as being used internally, e.g.
+                                   rocprof-sys will find all the symbols in this library and prevent them from being
+                                   instrumented. (count: unlimited)
+    --internal-library-remove [ ld-linux-x86-64.so.2
+                                libBrokenLocale.so.1
+                                libLLVM.so
+                                libamd_comgr.so
+                                libamd_smi.so
+                                libanl.so.1
+                                libbfd.so
+                                libbz2.so
+                                libc.so.6
+                                libcaliper.so
+                                libclang-cpp.so
+                                libcommon.so
+                                libdl.so.2
+                                libdw.so
+                                libdwarf.so
+                                libdyninstAPI_RT.so
+                                libelf.so
+                                libgcc_s.so.1
+                                libgotcha.so
+                                libhsa-runtime64.so
+                                liblikwid.so
+                                liblzma.so
+                                libnsl.so.1
+                                libnss_compat.so.2
+                                libnss_db.so.2
+                                libnss_dns.so.2
+                                libnss_files.so.2
+                                libnss_hesiod.so.2
+                                libnss_ldap.so.2
+                                libpapi.so
+                                libpfm.so
+                                libprofiler.so
+                                libpthread.so.0
+                                libresolv.so.2
+                                librocm_smi64.so
+                                librocmtools.so
+                                librocprofiler-register.so
+                                librocprofiler-sdk-roctx.so
+                                librocprofiler-sdk.so
+                                librocprofiler64.so
+                                libroctracer64.so
+                                libroctx64.so
+                                librt.so.1
+                                libstdc++.so.6
+                                libtbb.so
+                                libtbbmalloc.so
+                                libtbbmalloc_proxy.so
+                                libtcmalloc.so
+                                libtcmalloc_and_profiler.so
+                                libtcmalloc_debug.so
+                                libtcmalloc_minimal.so
+                                libtcmalloc_minimal_debug.so
+                                libthread_db.so.1
+                                libunwind-coredump.so
+                                libunwind-generic.so
+                                libunwind-ptrace.so
+                                libunwind-setjmp.so
+                                libunwind-x86_64.so
+                                libunwind.so
+                                libutil.so.1
+                                libz.so
+                                libzstd.so ]
+                                   Remove the specified libraries from being treated as being used internally, e.g.
+                                   rocprof-sys will permit all the symbols in these libraries to be eligible for
+                                   instrumentation. (count: unlimited)
+    --linkage [ global | local | unique | unknown | weak ]
+                                   Only instrument functions with specified linkage (default: global, local, unique) (min:
+                                   1)
+    --visibility [ default | hidden | internal | protected | unknown ]
+                                   Only instrument functions with specified visibility (default: default, internal, hidden,
+                                   protected) (min: 1)
 
-      [RUNTIME OPTIONS]
+    [RUNTIME OPTIONS]
 
-      --label [ args | file | line | return ]
-                                    Labeling info for functions. By default, just the function name is recorded. Use these
-                                    options to gain more information about the function signature or location of the
-                                    functions (count: unlimited, dtype: string)
-      -C, --config                   Read in a configuration file and encode these values as the defaults in the executable
-                                    (min: 1, dtype: string)
-      --env                          Environment variables to add to the runtime in form VARIABLE=VALUE. E.g. use '--env
-                                    ROCPROFSYS_PROFILE=ON' to default to using timemory instead of perfetto (count:
-                                    unlimited)
-      --mpi                          Enable MPI support (requires rocprof-sys built w/ full or partial MPI support). NOTE:
-                                    this will automatically be activated if MPI_Init, MPI_Init_thread, MPI_Finalize,
-                                    MPI_Comm_rank, or MPI_Comm_size are found in the symbol table of target (max: 1, dtype:
-                                    bool)
+    --label [ args | file | line | return ]
+                                   Labeling info for functions. By default, just the function name is recorded. Use these
+                                   options to gain more information about the function signature or location of the
+                                   functions (count: unlimited, dtype: string)
+    -C, --config                   Read in a configuration file and encode these values as the defaults in the executable
+                                   (min: 1, dtype: string)
+    --env                          Environment variables to add to the runtime in form VARIABLE=VALUE. E.g. use '--env
+                                   ROCPROFSYS_PROFILE=ON' to default to using timemory instead of perfetto (count:
+                                   unlimited)
+    --mpi                          Enable MPI support (requires rocprof-sys built w/ full or partial MPI support). NOTE:
+                                   this will automatically be activated if MPI_Init, MPI_Init_thread, MPI_Finalize,
+                                   MPI_Comm_rank, or MPI_Comm_size are found in the symbol table of target (max: 1, dtype:
+                                   bool)
 
-      [GRANULARITY OPTIONS]
+    [GRANULARITY OPTIONS]
 
-      -l, --instrument-loops         Instrument at the loop level (max: 1, dtype: boolean)
-      -i, --min-instructions         If the number of instructions in a function is less than this value, exclude it from
-                                    instrumentation (count: 1, dtype: int)
-      -r, --min-address-range        If the address range of a function is less than this value, exclude it from
-                                    instrumentation (count: 1, dtype: int)
-      --min-instructions-loop        If the number of instructions in a function containing a loop is less than this value,
-                                    exclude it from instrumentation (count: 1, dtype: int)
-      --min-address-range-loop       If the address range of a function containing a loop is less than this value, exclude it
-                                    from instrumentation (count: 1, dtype: int)
-      --coverage [ basic_block | function | none ]
-                                    Enable recording the code coverage. If instrumenting in coverage mode ('-M converage'),
-                                    this simply specifies the granularity. If instrumenting in trace or sampling mode, this
-                                    enables recording code-coverage in addition to the instrumentation of that mode (if any).
-                                    (max: 1, dtype: bool)
-      --dynamic-callsites            Force instrumentation if a function has dynamic callsites (e.g. function pointers) (max:
-                                    1, dtype: boolean)
-      --traps                        Instrument points which require using a trap. On the x86 architecture, because
-                                    instructions are of variable size, the instruction at a point may be too small for
-                                    Dyninst to replace it with the normal code sequence used to call instrumentation. Also,
-                                    when instrumentation is placed at points other than subroutine entry, exit, or call
-                                    points, traps may be used to ensure the instrumentation fits. In this case, Dyninst
-                                    replaces the instruction with a single-byte instruction that generates a trap. (max: 1,
-                                    dtype: boolean)
-      --loop-traps                   Instrument points within a loop which require using a trap (only relevant when
-                                    --instrument-loops is enabled). (max: 1, dtype: boolean)
-      --allow-overlapping            Allow dyninst to instrument either multiple functions which overlap (share part of same
-                                    function body) or single functions with multiple entry points. For more info, see Section
-                                    2 of the DyninstAPI documentation. (max: 1, dtype: bool)
-      --parse-all-modules            By default, rocprof-sys simply requests Dyninst to provide all the procedures in the
-                                    application image. If this option is enabled, rocprof-sys will iterate over all the
-                                    modules and extract the functions. Theoretically, it should be the same but the data is
-                                    slightly different, possibly due to weak binding scopes. In general, enabling option will
-                                    probably have no visible effect (max: 1, dtype: bool)
+    -l, --instrument-loops         Instrument at the loop level (max: 1, dtype: boolean)
+    -i, --min-instructions         If the number of instructions in a function is less than this value, exclude it from
+                                   instrumentation (count: 1, dtype: int)
+    -r, --min-address-range        If the address range of a function is less than this value, exclude it from
+                                   instrumentation (count: 1, dtype: int)
+    --min-instructions-loop        If the number of instructions in a function containing a loop is less than this value,
+                                   exclude it from instrumentation (count: 1, dtype: int)
+    --min-address-range-loop       If the address range of a function containing a loop is less than this value, exclude it
+                                   from instrumentation (count: 1, dtype: int)
+    --max-library-functions        Skip shared libraries whose procedure count exceeds this threshold. Useful for keeping
+                                   instrumentation overhead manageable. The target executable is never gated by this. This
+                                   check is bypassed by module include/restrict regexes (--module-include/-MI,
+                                   --module-restrict/-MR) and function include/restrict regexes (--function-include/-I,
+                                   --function-restrict/-R). 0 = disabled. (count: 1, dtype: int)
+    --coverage [ basic_block | function | none ]
+                                   Enable recording the code coverage. If instrumenting in coverage mode ('-M converage'),
+                                   this simply specifies the granularity. If instrumenting in trace or sampling mode, this
+                                   enables recording code-coverage in addition to the instrumentation of that mode (if any).
+                                   (max: 1, dtype: bool)
+    --dynamic-callsites            Force instrumentation if a function has dynamic callsites (e.g. function pointers) (max:
+                                   1, dtype: boolean)
+    --traps                        Instrument points which require using a trap. On the x86 architecture, because
+                                   instructions are of variable size, the instruction at a point may be too small for
+                                   Dyninst to replace it with the normal code sequence used to call instrumentation. Also,
+                                   when instrumentation is placed at points other than subroutine entry, exit, or call
+                                   points, traps may be used to ensure the instrumentation fits. In this case, Dyninst
+                                   replaces the instruction with a single-byte instruction that generates a trap. (max: 1,
+                                   dtype: boolean)
+    --loop-traps                   Instrument points within a loop which require using a trap (only relevant when
+                                   --instrument-loops is enabled). (max: 1, dtype: boolean)
+    --allow-overlapping            Allow dyninst to instrument either multiple functions which overlap (share part of same
+                                   function body) or single functions with multiple entry points. For more info, see Section
+                                   2 of the DyninstAPI documentation. (max: 1, dtype: bool)
+    --exclude-internal-lib-paths
+                                   By default, each internal library is excluded only at the path linked at startup. When
+                                   enabled, every on-disk path matching an internal library's filename is excluded. Useful
+                                   when the application dlopen()s a different copy at runtime. (max: 1, dtype: boolean)
+    --exe-only                     Shorthand for excluding every shared library from instrumentation, leaving only the main
+                                   executable. Only takes effect during runtime instrumentation; ignored in binary-rewrite
+                                   mode. (max: 1, dtype: boolean)
 
-      [DYNINST OPTIONS]
+    [DYNINST OPTIONS]
 
-      -b, --batch-size               Dyninst supports batch insertion of multiple points during runtime instrumentation. If
-                                    one large batch insertion fails, this value will be used to create smaller batches.
-                                    Larger batches generally decrease the instrumentation time (count: 1, dtype: int)
-      --dyninst-rt                   Path(s) to the dyninstAPI_RT library (min: 1, dtype: filepath)
-      --dyninst-options [ BaseTrampDeletion
-                           DebugParsing
-                           DelayedParsing
-                           InstrStackFrames
-                           MergeTramp
-                           SaveFPR
-                           TrampRecursive
-                           TypeChecking ]
-                                    Advanced dyninst options: BPatch::set<OPTION>(bool), e.g. bpatch->setTrampRecursive(true)
-                                    (count: unlimited)
+    -b, --batch-size               Dyninst supports batch insertion of multiple points during runtime instrumentation. If
+                                   one large batch insertion fails, this value will be used to create smaller batches.
+                                   Larger batches generally decrease the instrumentation time (count: 1, dtype: int)
+    --dyninst-rt                   Path(s) to the dyninstAPI_RT library (min: 1, dtype: filepath)
+    --dyninst-options [ BaseTrampDeletion
+                        DebugParsing
+                        DelayedParsing
+                        InstrStackFrames
+                        MergeTramp
+                        SaveFPR
+                        TrampRecursive
+                        TypeChecking ]
+                                   Advanced dyninst options: BPatch::set<OPTION>(bool), e.g. bpatch->setTrampRecursive(true)
+                                   (count: unlimited)
 
 ``rocprof-sys-instrument`` uses a similar syntax as LLVM to separate command-line arguments from the
 application's arguments. It uses a standalone
@@ -380,15 +381,6 @@ The following example shows how to enable runtime instrumentation.
 .. code-block:: shell
 
    rocprof-sys-instrument <rocprof-sys-options> -- <exe> [<exe-options>...]
-
-Attaching to a running process
-========================================
-
-Use the following command to attach to an active process.
-
-.. code-block:: shell
-
-   rocprof-sys-instrument <rocprof-sys-options> -p <PID> -- <exe-name>
 
 Binary rewrite
 ========================================
@@ -485,6 +477,12 @@ Selective instrumentation
 
 The default behavior of ``rocprof-sys-instrument`` does not instrument every symbol in the binary.
 The default rules are:
+
+* Skip instrumenting large shared libraries
+
+  * Processing a large amount of functions for instrumentation is expensive in time.
+    By default, to reduce this cost, libraries with more than 20000 functions are excluded.
+    This limit can be modified with the ``--max-library-functions`` option. Setting it to ``0`` disables the limit.
 
 * Skip instrumenting dynamic call-sites (such as function pointers)
 

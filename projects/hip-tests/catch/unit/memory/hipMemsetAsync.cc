@@ -103,9 +103,6 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMemsetDASyncMulti, int8_t, int16_t, uint32_t) {
  * test 2 async hipMemset2D's on the same memory at different offsets
  */
 HIP_TEST_CASE(Unit_hipMemset2DASyncMulti) {
-#if HT_AMD
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
-#endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memType memset_type = memType::hipMem2D;
@@ -124,9 +121,6 @@ HIP_TEST_CASE(Unit_hipMemset2DASyncMulti) {
  * test 2 async hipMemset3D's on the same memory at different offsets
  */
 HIP_TEST_CASE(Unit_hipMemset3DASyncMulti) {
-#if HT_AMD
-  HIP_SKIP_TEST("tracked issue EXSWCPHIPT-127.");
-#endif
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memType memset_type = memType::hipMem3D;

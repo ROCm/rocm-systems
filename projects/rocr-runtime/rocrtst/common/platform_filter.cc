@@ -10,6 +10,7 @@
 #include "common/platform_filter.h"
 #include "common/env_config.h"
 #include <yaml-cpp/yaml.h>
+#include <fnmatch.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -216,13 +217,13 @@ bool TestFilterManager::shouldRunTest(const std::string& testName,
 
   const PlatformConfig& pconfig = it->second;
 
-  // 1. Check explicit block list (exclusion overrides inclusion)
-  if (std::find(pconfig.blocked_tests.begin(),
-                pconfig.blocked_tests.end(),
-                testName) != pconfig.blocked_tests.end()) {
-    return skip("Test in blocked list for " +
-                std::string(PlatformDetector::platformName(
-                    currentPlatform_)));
+  // 1. Check explicit block list (exclusion overrides inclusion); supports fnmatch wildcards
+  for (const auto& pattern : pconfig.blocked_tests) {
+    if (fnmatch(pattern.c_str(), testName.c_str(), 0) == 0) {
+      return skip("Test in blocked list for " +
+                  std::string(PlatformDetector::platformName(
+                      currentPlatform_)));
+    }
   }
 
   // 2. Find all groups this test belongs to
@@ -346,6 +347,56 @@ std::vector<std::string> TestFilterManager::getActiveGroups() const {
   }
 
   return result;
+}
+
+// ============================================================================
+// SkippedTestTracker Implementation
+// ============================================================================
+
+SkippedTestTracker& SkippedTestTracker::getInstance() {
+  static SkippedTestTracker instance;
+  return instance;
+}
+
+void SkippedTestTracker::recordSkip(const std::string& testName,
+                                     const std::string& reason) {
+  skippedByReason_[reason].push_back(testName);
+}
+
+void SkippedTestTracker::clear() {
+  skippedByReason_.clear();
+}
+
+size_t SkippedTestTracker::getTotalCount() const {
+  size_t count = 0;
+  for (const auto& entry : skippedByReason_) {
+    count += entry.second.size();
+  }
+  return count;
+}
+
+void SkippedTestTracker::printSummary(const std::string& platformName) const {
+  if (skippedByReason_.empty()) {
+    return;
+  }
+
+  std::cout << "\n========================================================\n";
+  std::cout << "Platform filtering summary (" << platformName << "):\n";
+  std::cout << "========================================================\n";
+
+  for (const auto& entry : skippedByReason_) {
+    const std::string& reason = entry.first;
+    const std::vector<std::string>& tests = entry.second;
+
+    std::cout << "\n  " << reason << ":\n";
+    for (const auto& testName : tests) {
+      std::cout << "    - " << testName << "\n";
+    }
+  }
+
+  std::cout << "\n  (" << getTotalCount()
+            << " tests skipped due to platform filtering)\n";
+  std::cout << "========================================================\n";
 }
 
 }  // namespace rocrtst

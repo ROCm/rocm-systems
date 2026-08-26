@@ -26,9 +26,12 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/api_args.h>
+#include <rocprofiler-sdk/hipfile/api_args.h>
+#include <rocprofiler-sdk/hipfile/api_id.h>
 #include <rocprofiler-sdk/kfd/kfd_id.h>
 #include <rocprofiler-sdk/rocdecode/api_args.h>
 #include <rocprofiler-sdk/rocdecode/api_id.h>
+#include <rocprofiler-sdk/rocshmem/api_args.h>
 
 #include <stdint.h>
 
@@ -209,6 +212,48 @@ typedef struct rocprofiler_buffer_tracing_rccl_api_record_t
 } rocprofiler_buffer_tracing_rccl_api_record_t;
 
 /**
+ * @brief ROCProfiler Buffer rocSHMEM API Record.
+ */
+typedef struct rocprofiler_buffer_tracing_rocshmem_api_record_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_tracing_operation_t   operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API
+    /// @var operation
+    /// @brief Specification of the API function, e.g., ::rocprofiler_rocshmem_api_id_t
+} rocprofiler_buffer_tracing_rocshmem_api_record_t;
+
+/**
+ * @brief An extended ROCProfiler rocSHMEM API Tracer Record which includes function arguments.
+ * Pointers are not dereferenced.
+ */
+typedef struct rocprofiler_buffer_tracing_rocshmem_api_ext_record_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_tracing_operation_t   operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+    rocprofiler_rocshmem_api_args_t   args;             ///< arguments of function call
+    rocprofiler_rocshmem_api_retval_t retval;           ///< return value of function call
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_ROCSHMEM_API_EXT
+    /// @var operation
+    /// @brief Specification of the API function (@see
+    /// ::rocprofiler_rocshmem_api_id_t)
+} rocprofiler_buffer_tracing_rocshmem_api_ext_record_t;
+
+/**
  * @brief ROCProfiler Buffer rocDecode API Record.
  */
 typedef struct rocprofiler_buffer_tracing_rocdecode_api_record_t
@@ -269,6 +314,49 @@ typedef struct rocprofiler_buffer_tracing_rocjpeg_api_record_t
     /// @brief Specification of the API function (@see
     /// ::rocprofiler_rocjpeg_api_id_t)
 } rocprofiler_buffer_tracing_rocjpeg_api_record_t;
+
+/**
+ * @brief ROCProfiler Buffer hipFILE API Record.
+ */
+typedef struct rocprofiler_buffer_tracing_hipfile_api_record_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_hipfile_api_id_t      operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_HIPFILE_API
+    /// @var operation
+    /// @brief Specification of the API function (@see
+    /// ::rocprofiler_hipfile_api_id_t)
+} rocprofiler_buffer_tracing_hipfile_api_record_t;
+
+/**
+ * @brief An extended ROCProfiler hipFILE API Tracer Record which includes function
+ * arguments and return values. Pointers are not dereferenced.
+ */
+typedef struct rocprofiler_buffer_tracing_hipfile_api_ext_record_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_hipfile_api_id_t      operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+    rocprofiler_hipfile_api_args_t    args;             ///< arguments of function call
+    rocprofiler_hipfile_api_retval_t  retval;           ///< return value of function call
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT
+    /// @var operation
+    /// @brief Specification of the API function (@see
+    /// ::rocprofiler_hipfile_api_id_t)
+} rocprofiler_buffer_tracing_hipfile_api_ext_record_t;
 
 /**
  * @brief ROCProfiler Buffer Memory Copy Tracer Record.
@@ -337,6 +425,27 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
     /// operation because there are no "real" wrapper around the enqueuing of an individual kernel
     /// dispatch
 } rocprofiler_buffer_tracing_kernel_dispatch_record_t;
+
+/**
+ * @brief Summary record emitted once per successful hipGraphLaunch invocation.
+ *
+ * graph_exec_id is the process-monotonic ID delivered with EXEC_CREATE
+ * callbacks via the ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH domain.
+ */
+typedef struct rocprofiler_buffer_tracing_hip_graph_record_t
+{
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    uint32_t                          operation;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_thread_id_t           thread_id;
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_agent_id_t            agent_id;
+    rocprofiler_queue_id_t            queue_id;
+    rocprofiler_graph_exec_id_t       graph_exec_id;
+    uint64_t                          kernel_dispatch_count;
+} rocprofiler_buffer_tracing_hip_graph_record_t;
 
 /**
  * @brief ROCProfiler Buffer Page Migration event record from KFD.

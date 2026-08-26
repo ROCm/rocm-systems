@@ -342,7 +342,7 @@
   //                                                 -> WAVE_APERTURE_VIOLATION
   // - EXCP_FLAG_PRIV.ILLEGAL_INST                   -> WAVE_ILLEGAL_INSTRUCTION
   // - EXCP_FLAG_PRIV.WAVE_START                     -> WAVE_TRAP
-  // - EXCP_FLAG_PRIV.WAVE_END && TRAP_CTRL.WAVE_END -> WAVE_TRAP
+  // - EXCP_FLAG_PRIV.WAVE_END                       -> WAVE_TRAP
   // - TRAP_CTRL.TRAP_AFTER_INST                     -> WAVE_TRAP
   // - EXCP_FLAG_PRIV.ADDR_WATCH && TRAP_CTL.WATCH   -> WAVE_TRAP
   // - (EXCP_FLAG_USER[ALU] & TRAP_CTRL[ALU]) != 0   -> WAVE_MATH_ERROR
@@ -369,13 +369,11 @@
 
 .not_illegal_instruction:
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_WAVE_START_SHIFT
-  s_cbranch_scc0    .not_wave_end
+  s_cbranch_scc0    .not_wave_start
   s_or_b32          ttmp3, ttmp3, EC_QUEUE_WAVE_TRAP_M0
 
 .not_wave_start:
   s_bitcmp1_b32     ttmp2, SQ_WAVE_EXCP_FLAG_PRIV_WAVE_END_SHIFT
-  s_cbranch_scc0    .not_wave_end
-  s_bitcmp1_b32     ttmp13, SQ_WAVE_TRAP_CTRL_WAVE_END_SHIFT
   s_cbranch_scc0    .not_wave_end
   s_or_b32          ttmp3, ttmp3, EC_QUEUE_WAVE_TRAP_M0
 

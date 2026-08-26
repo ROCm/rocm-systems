@@ -127,6 +127,7 @@ OPERAND_TYPE_NAME = 'OperandTypeName'
 OPERAND_TYPES = 'OperandTypes'
 OPERANDS = 'Operands'
 PREDEFINED_VAL = 'PredefinedValue'
+DATA_FORMAT_NAME = 'DataFormatName'
 
 # Operand attributes.
 OPERAND_ATTR_INPUT = 'Input'

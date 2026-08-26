@@ -4,6 +4,7 @@
 #pragma once
 
 #include "backends/amd_smi/sdma_feature.hpp"
+#include "common/pci_bdf.hpp"
 
 #include <concepts>
 #include <cstdint>
@@ -40,6 +41,7 @@ concept wrapper_types = requires {
     typename T::processor_handle;
     typename T::gpu_metrics_t;
     typename T::asic_info_t;
+    typename T::bdf_t;
     typename T::memory_type_t;
     typename T::temperature_type_t;
     typename T::temperature_metric_t;
@@ -79,11 +81,13 @@ concept wrapper_enumeration =
 template <typename T>
 concept wrapper_gpu_queries =
     requires(T t, typename T::processor_handle ph, typename T::gpu_metrics_t* gmp,
-             typename T::asic_info_t* aip, typename T::memory_type_t mt,
-             std::uint64_t* u64p, typename T::temperature_type_t tt,
-             typename T::temperature_metric_t tm, std::int64_t* i64p) {
+             typename T::asic_info_t* aip, typename T::bdf_t* bdfp,
+             typename T::memory_type_t mt, std::uint64_t* u64p,
+             typename T::temperature_type_t tt, typename T::temperature_metric_t tm,
+             std::int64_t* i64p) {
         { t.get_metrics_info(ph, gmp) } -> std::convertible_to<typename T::status_t>;
         { t.get_gpu_asic_info(ph, aip) } -> std::convertible_to<typename T::status_t>;
+        { t.get_gpu_device_bdf(ph, bdfp) } -> std::convertible_to<typename T::status_t>;
         { t.get_memory_usage(ph, mt, u64p) } -> std::convertible_to<typename T::status_t>;
         {
             t.get_temp_metric(ph, tt, tm, i64p)
@@ -151,6 +155,7 @@ public:
     using processor_handle     = typename Wrapper::processor_handle;
     using gpu_metrics_t        = typename Wrapper::gpu_metrics_t;
     using asic_info_t          = typename Wrapper::asic_info_t;
+    using bdf_t                = typename Wrapper::bdf_t;
     using memory_type_t        = typename Wrapper::memory_type_t;
     using temperature_type_t   = typename Wrapper::temperature_type_t;
     using temperature_metric_t = typename Wrapper::temperature_metric_t;
@@ -244,6 +249,16 @@ public:
     void get_gpu_asic_info(processor_handle h, asic_info_t* out) const
     {
         check_status(m_amdsmi.get_gpu_asic_info(h, out), "amdsmi_get_gpu_asic_info");
+    }
+
+    // Canonical PCIe BDF string ("domain:bus:device.function"), used to correlate
+    // this AMD SMI device with a rocprofiler-sdk agent (see gpu::get_visible_gpu_bdfs).
+    [[nodiscard]] std::string get_device_bdf(processor_handle h) const
+    {
+        bdf_t raw{};
+        check_status(m_amdsmi.get_gpu_device_bdf(h, &raw), "amdsmi_get_gpu_device_bdf");
+        return common::format_pci_bdf(raw.domain_number, raw.bus_number,
+                                      raw.device_number, raw.function_number);
     }
 
     void get_memory_usage(processor_handle h, memory_type_t type,

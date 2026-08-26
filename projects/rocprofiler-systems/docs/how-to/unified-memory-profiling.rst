@@ -10,12 +10,12 @@ ROCm Systems Profiler can generate unified memory profiling reports from KFD
 page fault and page migration events. Use this feature with HIP managed memory workloads. For example, workloads that use:
 
 * ``hipMallocManaged`` for dynamic managed memory allocation
-* ``__managed__`` variables for static managed memory, or 
-* Managed memory abstractions built on those HIP features. 
+* ``__managed__`` variables for static managed memory, or
+* Managed memory abstractions built on those HIP features.
 
-This feature helps you understand: 
+This feature helps you understand:
 * Page faults
-* Migration triggers, and 
+* Migration triggers, and
 * Effective migration throughput between host and device memory.
 
 Unified memory profiling generates two summary files, in addition to the standard trace or database outputs. By default, ROCm Systems Profiler appends the process ID to the output file names. The reports are saved as: ``unified_memory-<pid>.txt``
@@ -153,9 +153,9 @@ is also written without a PID suffix as ``perfetto-trace.proto``.
 
 .. note::
 
-   ROCpd database output is optional and is generated only when
-   ``ROCPROFSYS_USE_ROCPD=ON`` is set. In that case, the output directory also
-   contains ``rocpd-<pid>.db``.
+  The ``rocpd`` database output is optional. When ``rocpd`` output is enabled (for
+  example, by including ``rocpd`` in ``--output-format``), the output directory
+  also contains ``rocpd-<pid>.db``.
 
 Sample text output
 ==================
@@ -332,10 +332,8 @@ For a memory-focused trace, enable the related domains explicitly:
 
    HSA_XNACK=1 \
    ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-   ROCPROFSYS_TRACE=ON \
-   ROCPROFSYS_USE_ROCPD=ON \
    ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,memory_allocation,scratch_memory \
-   rocprof-sys-run -- ./my_managed_memory_app
+   rocprof-sys-run --output-format proto rocpd -- ./my_managed_memory_app
 
 Troubleshooting
 ===============

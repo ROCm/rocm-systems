@@ -48,7 +48,7 @@ extern "C"
     void rocprofsys_finalize(void) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_set_env(const char* env_name,
                             const char* env_val) ROCPROFSYS_PUBLIC_API;
-    void rocprofsys_set_mpi(bool use, bool attached) ROCPROFSYS_PUBLIC_API;
+    void rocprofsys_set_mpi(bool use) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_set_instrumented(int) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_push_trace(const char* name) ROCPROFSYS_PUBLIC_API;
     void rocprofsys_push_trace_with_args(const char* name,
@@ -171,8 +171,7 @@ enum class InstrumentMode : int
     None          = -1,
     BinaryRewrite = 0,
     ProcessCreate = 1,  // runtime instrumentation at start of process
-    ProcessAttach = 2,  // runtime instrumentation of running process
-    PythonProfile = 3,  // python setprofile
+    PythonProfile = 2,  // python setprofile
     Last,
 };
 }

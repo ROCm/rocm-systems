@@ -4,7 +4,6 @@
 """CLI entry point: ``python -m amdisa``."""
 
 import argparse
-from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 import xml.etree.ElementTree as elem_tree
@@ -12,10 +11,11 @@ import xml.etree.ElementTree as elem_tree
 from amdisa import (
     Cdna1Profile,
     Cdna2Profile,
+    Cdna4Profile,
     CdnaProfile,
     CodegenConfig,
     CodeGenerator,
-    Gfx1250Profile,
+    Cdna5Profile,
     Parser,
     Rdna1Profile,
     Rdna2Profile,
@@ -31,6 +31,7 @@ from amdisa.encoding_translator_codegen import (
 )
 from amdisa.legalization import LegalizationGenerator
 from amdisa.legalization_codegen import emit_all as emit_legalization
+from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.semantics import derive_all_semantics
 
 _ENCODING_TRANSLATOR_PAIRS = [
@@ -44,13 +45,13 @@ _PROFILES = {
     'cdna1': Cdna1Profile,
     'cdna2': Cdna2Profile,
     'cdna3': CdnaProfile,
-    'cdna4': CdnaProfile,
+    'cdna4': Cdna4Profile,
     'rdna1': Rdna1Profile,
     'rdna2': Rdna2Profile,
     'rdna3': Rdna3Profile,
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
-    'gfx1250': Gfx1250Profile,
+    'cdna5': Cdna5Profile,
 }
 
 
@@ -109,16 +110,11 @@ def _merge_shared_execute_body(
 
 
 def _detect_profile(isa_xml: str) -> str:
-    """Detect the ISA profile from the XML filename and architecture name.
+    """Detect the ISA profile from the XML architecture name.
 
     Parses only the architecture name element to determine the profile
     without loading the full spec.
     """
-    # TODO: Remove this filename override once the gfx1250 XML carries a
-    # finalized architecture name that can be detected through the normal path.
-    if 'gfx1250' in Path(isa_xml).stem:
-        return 'gfx1250'
-
     root = elem_tree.parse(isa_xml).getroot()
     isa_node = xs.get_node(root, xs.ISA)
     arch_node = xs.get_node(isa_node, xs.ARCH)
@@ -175,6 +171,7 @@ def _run_multi(args) -> None:
 
     # Generate per-ISA files, accumulating shared execute bodies.
     if args.gen_isas:
+        emit_isa_properties(args.isa_output, specs)
         body_variants = _collect_shared_execute_body_variants(specs, plan)
         unshared_keys = _unshared_execute_keys_from_variants(body_variants)
         config = CodegenConfig(unshared_execute_keys=unshared_keys)

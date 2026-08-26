@@ -280,6 +280,81 @@ class MIOpenHandler(DatabaseHandler):
         return None
 
 
+class HipKernelProviderRockeHandler(DatabaseHandler):
+    """Handler for hipKernelProvider per-architecture kernel content.
+
+    Engines install ISA-specific content under a generic ``arch_content``
+    container in the plugin engines dir, keyed by an arch directory:
+        .../hipdnn_plugins/engines/arch_content/rocke/gfx942/rocke_client_gfx942.kpack
+        .../hipdnn_plugins/engines/arch_content/rocke/gfx950/rocke_client_gfx950.kpack
+    The container is ``arch_content`` (not ``hip_kernel_provider/``, whose name
+    would collide with the plugin file and shadow it from hipDNN's loader), so
+    future engines drop under ``arch_content/<engine>/`` with no handler change.
+    """
+
+    def name(self) -> str:
+        return "hipkernelprovider"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        """
+        Detect per-arch content by its arch directory.
+
+        Pattern: */engines/arch_content/[.../]<arch>/...  The ``engines`` parent
+        scopes the match to the plugin engines dir (matching TheRock's
+        ``**/engines/arch_content/**`` include).
+
+        Returns:
+            Bundle key (the gfx arch directory, e.g. 'gfx942') or None.
+        """
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        root = next(
+            (
+                i
+                for i in range(1, len(parts))
+                if parts[i] == "arch_content" and parts[i - 1] == "engines"
+            ),
+            None,
+        )
+        if root is None:
+            return None
+        # First arch dir under arch_content with a file beneath it is the key.
+        for i in range(root + 1, len(parts) - 1):
+            if _GFX_ARCH_PATTERN.fullmatch(parts[i]):
+                return parts[i]
+        return None
+
+
+class HotswapCacheHandler(DatabaseHandler):
+    """Handler for packaged RocJitsu ahead-of-time translations.
+
+    RocJitsu owns the directory-domain spelling. Keep the mapping explicit so
+    a new translator profile cannot accidentally be assigned to an architecture
+    merely because its directory happens to contain a gfx-looking substring.
+    """
+
+    _DOMAIN_TO_BUNDLE = {
+        "gfx1250-b0-a0": "gfx1250",
+    }
+    _ENTRY_PATTERN = re.compile(r"^[0-9a-f]{64}\.(?:man|obj)$")
+
+    def name(self) -> str:
+        return "hotswap_cache"
+
+    def detect(self, path: Path, prefix_root: Path) -> Optional[str]:
+        parts = Path(self._relative_path(path, prefix_root)).parts
+        if len(parts) != 6 or parts[:3] != (
+            "share",
+            "rocjitsu",
+            "translations",
+        ):
+            return None
+
+        domain, schema, filename = parts[3:]
+        if schema != "v1" or not self._ENTRY_PATTERN.fullmatch(filename):
+            return None
+        return self._DOMAIN_TO_BUNDLE.get(domain)
+
+
 # Registry of available handlers
 AVAILABLE_HANDLERS = {
     "rocblas": RocBLASHandler,
@@ -287,6 +362,8 @@ AVAILABLE_HANDLERS = {
     "hipsparselt": HipSparseLtHandler,
     "aotriton": AotritonHandler,
     "miopen": MIOpenHandler,
+    "hipkernelprovider": HipKernelProviderRockeHandler,
+    "hotswap_cache": HotswapCacheHandler,
 }
 
 

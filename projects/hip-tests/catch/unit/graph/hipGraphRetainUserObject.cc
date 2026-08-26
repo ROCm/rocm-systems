@@ -171,6 +171,10 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
+// This test releases the user object with a ref count more than the count
+// it was retained. The API is expected to return success in such cases
+// though the underlying user object is not released. This is most likely
+// done to match CUDA behavior, but this can cause undefined behavior.
 HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -195,6 +199,11 @@ HIP_TEST_CASE(Unit_hipGraphRetainUserObject_Negative_Basic) {
   // Release graph object with reference count 8
   HIP_CHECK(hipGraphReleaseUserObject(graph, hObject, 8));
 
+  // Release user object with reference count 2
   HIP_CHECK(hipUserObjectRelease(hObject, 2));
+
+  // Finally, release user object with reference count 1
+  // This will avoid memory leaks
+  HIP_CHECK(hipUserObjectRelease(hObject, 1));
   HIP_CHECK(hipGraphDestroy(graph));
 }
