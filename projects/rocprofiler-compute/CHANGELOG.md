@@ -11,6 +11,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Dispatch IDs now start at 1, so a dispatch has the same ID in `rocprof-compute analyze` as in a rocprofv3 kernel trace. `--dispatch 0` is no longer a valid selection, and `--dispatch "> n"` now skips the first n dispatches rather than the first n+1.
+
 * gfx115x Memory Chart improvements.
   * Renamed memory chart metric names for more clarity.
   * Each edge now reports the traffic measured at the interface it represents.

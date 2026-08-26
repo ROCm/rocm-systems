@@ -101,7 +101,7 @@ the analyze step on this kernel:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 --dispatch 1
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 --dispatch 2
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat
@@ -226,7 +226,7 @@ Analyzing this:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 --dispatch 3
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 --dispatch 4
    <...>
    --------------------------------------------------------------------------------
    2. System Speed-of-Light
@@ -351,7 +351,7 @@ Analyzing this workload yields:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 7.1.9 --dispatch 5
+   $ rocprof-compute analyze -p workloads/occupancy/mi200/ -b 2.1.15 6.2 7.1.5 7.1.6 7.1.7 7.1.8 7.1.9 --dispatch 6
    <...>
    --------------------------------------------------------------------------------
    0. Top Stat

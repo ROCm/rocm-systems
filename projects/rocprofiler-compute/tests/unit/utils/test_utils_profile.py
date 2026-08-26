@@ -244,7 +244,8 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
     results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
     results = pd.read_csv(results_csv)
     assert "PID" not in results.columns
-    assert results["Dispatch_ID"].tolist() == [0, 0, 1, 2]
+    # Dispatch_ID starts at 1 to match rocprofv3.
+    assert results["Dispatch_ID"].tolist() == [1, 1, 2, 3]
     # Kernel_ID keys off launch shape, so both kernel_a dispatches share one.
     assert results["Kernel_ID"].tolist() == [0, 0, 0, 1]
     assert results["Counter_Value"].tolist() == [1, 2, 3, 4]

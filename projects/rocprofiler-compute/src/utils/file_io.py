@@ -412,12 +412,13 @@ def _renumber_dispatch_ids_across_processes(
     workload repeats the same id once per process. Counter profiling already
     folds ``PID`` into ``Dispatch_ID`` via ``utils_profile``'s
     ``GroupIdAssigner``, so both analyze paths agree on what a dispatch id means.
+    The new ids start at 1, matching rocprofv3.
     """
     if combined_trace.empty:
         return combined_trace
 
     renumbered_trace = combined_trace.copy()
-    renumbered_trace["Dispatch_Id"] = range(len(renumbered_trace))
+    renumbered_trace["Dispatch_Id"] = range(1, len(renumbered_trace) + 1)
     return renumbered_trace
 
 

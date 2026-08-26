@@ -1687,7 +1687,7 @@ def test_pc_sampling_kernel_traces_renumber_colliding_dispatch_ids() -> None:
     )
 
     # Both records carry a process-local dispatch 0.
-    assert combined_trace["Dispatch_Id"].tolist() == [0, 1, 2]
+    assert combined_trace["Dispatch_Id"].tolist() == [1, 2, 3]
     assert combined_trace["PID"].tolist() == [101, 101, 202]
     assert combined_trace["Dispatch_Id"].is_unique
 
@@ -1698,7 +1698,7 @@ def test_pc_sampling_kernel_traces_preserve_single_process_ids() -> None:
 
     combined_trace = process_pc_sampling_kernel_traces(single_record)
 
-    assert combined_trace["Dispatch_Id"].tolist() == [0, 1]
+    assert combined_trace["Dispatch_Id"].tolist() == [1, 2]
 
 
 def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
@@ -1716,13 +1716,13 @@ def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
         make_multiprocess_dispatch_tool_data(),
     )
 
-    assert workload.raw_pmc["Dispatch_ID"].tolist() == [0, 1, 2]
+    assert workload.raw_pmc["Dispatch_ID"].tolist() == [1, 2, 3]
     assert workload.raw_pmc["PID"].tolist() == [101, 101, 202]
     kernel_top = workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]
     assert kernel_top["Count"] == 3
     assert kernel_top["Sum(ns)"] == 60
     dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
-    assert dispatch_info["Dispatch_ID"].tolist() == [0, 1, 2]
+    assert dispatch_info["Dispatch_ID"].tolist() == [1, 2, 3]
     assert dispatch_info["PID"].tolist() == [101, 101, 202]
 
 
@@ -1730,7 +1730,7 @@ def test_pc_sampling_dispatch_filter_selects_one_process(
     tmp_path: Path,
 ) -> None:
     """Resolve a filtered dispatch ID to exactly one process's dispatch."""
-    workload = schema.Workload(filter_dispatch_ids=["2"])
+    workload = schema.Workload(filter_dispatch_ids=["3"])
     args = argparse.Namespace(time_unit="ns")
     instance = make_db_analysis(str(tmp_path))
 
@@ -1741,13 +1741,13 @@ def test_pc_sampling_dispatch_filter_selects_one_process(
         make_multiprocess_dispatch_tool_data(),
     )
 
-    # Dispatch 2 is the second process's only dispatch; before renumbering it
-    # shared id 0 with the first process and both were selected.
+    # Dispatch 3 is the second process's only dispatch; before renumbering it
+    # shared id 1 with the first process and both were selected.
     kernel_top = workload.dfs[PMC_KERNEL_TOP_TABLE_ID].iloc[0]
     assert kernel_top["Count"] == 1
     assert kernel_top["Sum(ns)"] == 30
     dispatch_info = workload.dfs[PMC_DISPATCH_INFO_TABLE_ID]
-    assert dispatch_info["Dispatch_ID"].tolist() == [2]
+    assert dispatch_info["Dispatch_ID"].tolist() == [3]
     assert dispatch_info["PID"].tolist() == [202]
 
 
@@ -2015,4 +2015,4 @@ def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
 
     df = result[str(tmp_path)]
     assert df["kernel_name"].tolist() == ["vecCopy", "vecCopy", "vecCopy"]
-    assert df["dispatch_id"].tolist() == [0, 1, 2]
+    assert df["dispatch_id"].tolist() == [1, 2, 3]

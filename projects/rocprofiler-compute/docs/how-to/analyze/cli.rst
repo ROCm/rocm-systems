@@ -390,7 +390,7 @@ First, list the top kernels in your application using `--list-stats`.
    ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
    │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
    ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
-   │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
+   │  0 │             1 │ vecCopy(double*, double*, double*, int, int) │        0 │
    ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
 
 Second, select the index of the kernel you would like to filter; for example,
@@ -552,7 +552,8 @@ For both the Current Workload and the Baseline Workload, you can independently s
 * Workload Name with ``--path``
 * GPU ID filtering (multi-selection) with ``--gpu-id``
 * Kernel Name filtering (multi-selection) with ``--kernel``
-* Dispatch ID filtering (regex filtering) with ``--dispatch``
+* Dispatch ID filtering (regex filtering) with ``--dispatch``. Dispatch IDs
+  start at 1 and match the ``Dispatch_Id`` column of a rocprofv3 kernel trace.
 * ROCm Compute Profiler panels/blocks (multi-selection) with ``--block``
 
 .. code-block:: shell
