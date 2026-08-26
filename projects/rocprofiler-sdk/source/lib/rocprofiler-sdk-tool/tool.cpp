@@ -4966,8 +4966,7 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version)
     initialize_logging();
 
     ROCP_WARNING << fmt::format(
-        "ompt_start_tool(omp_version={}, runtime_version=\"{}\") was invoked in rocprofv3 tool... "
-        "returning rocprofiler_ompt_start_tool(...) result",
+        "ompt_start_tool(omp_version={}, runtime_version=\"{}\") was invoked in rocprofv3 tool",
         omp_version,
         runtime_version);
 
