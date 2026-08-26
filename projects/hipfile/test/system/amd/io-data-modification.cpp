@@ -174,8 +174,6 @@ TEST_P(HipFileVerifyCombined, RoundTripGuardsAllRegions)
 }
 
 HIPFILE_WARN_NO_EXIT_DTOR_OFF
-const std::array<Axis<GridMode>, 1> kGridAuto{{{GridMode::Default, "auto"}}};
-
 const std::array<Axis<GridMode>, 2> kGridSweep{{
     {GridMode::OneWorkgroup, "1wg"},
     {GridMode::ManyWorkgroups, "300wg"},
@@ -186,27 +184,22 @@ const std::array<Axis<size_t>, 2> kStridesWide{{{2, "stride2"}, {512, "stride512
 const std::array<Axis<size_t>, 1> kMultiChunkOnly{{{2 * kChunkBytes, "multi_chunk"}}};
 HIPFILE_WARN_NO_EXIT_DTOR_ON
 
-INSTANTIATE_TEST_SUITE_P(Sizes, HipFileVerifyCombined,
-                         testing::ValuesIn(IoTestScenarioSet{
-                             IoTestScenario{.file_off = kCombinedFileOff, .buf_off = kFourKiBOff}}
-                                               .over(&IoTestScenario::backend, kBackends)
-                                               .over(&IoTestScenario::io_bytes, kCombinedSizes)
-                                               .over(&IoTestScenario::grid, kGridAuto)
-                                               .over(&IoTestScenario::stride, kStrides)
-                                               .build()),
-                         ioTestScenarioName);
-
-// Use a large sweep in combination with many workgroups to exercise the behaviour of only some CUs modify
-// data.
-INSTANTIATE_TEST_SUITE_P(Workgroups, HipFileVerifyCombined,
-                         testing::ValuesIn(IoTestScenarioSet{
-                             IoTestScenario{.file_off = kCombinedFileOff, .buf_off = kFourKiBOff}}
-                                               .over(&IoTestScenario::backend, kBackends)
-                                               .over(&IoTestScenario::io_bytes, kMultiChunkOnly)
-                                               .over(&IoTestScenario::grid, kGridSweep)
-                                               .over(&IoTestScenario::stride, kStridesWide)
-                                               .build()),
-                         ioTestScenarioName);
+INSTANTIATE_TEST_SUITE_P(
+    , HipFileVerifyCombined,
+    testing::ValuesIn(IoTestScenarioSet{IoTestScenario{.file_off = kCombinedFileOff, .buf_off = kFourKiBOff}}
+                          .over(&IoTestScenario::backend, kBackends)
+                          .over(&IoTestScenario::io_bytes, kCombinedSizes)
+                          .over(&IoTestScenario::stride, kStrides)
+                          // A large sweep with many workgroups, exercising the behaviour of only some CUs
+                          // modifying the data.
+                          .add(IoTestScenarioSet{
+                              IoTestScenario{.file_off = kCombinedFileOff, .buf_off = kFourKiBOff}}
+                                   .over(&IoTestScenario::backend, kBackends)
+                                   .over(&IoTestScenario::io_bytes, kMultiChunkOnly)
+                                   .over(&IoTestScenario::grid, kGridSweep)
+                                   .over(&IoTestScenario::stride, kStridesWide))
+                          .build()),
+    ioTestScenarioName);
 
 // ---------------------------------------------------------------------------
 // This test suite exercises the same hipFileRead + hipFileWrite behaviour, in combination with the behaviour
