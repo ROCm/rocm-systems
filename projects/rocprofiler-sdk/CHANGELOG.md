@@ -25,6 +25,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- `librocprofiler-sdk` no longer exports an `ompt_start_tool` symbol; OMPT is now engaged only via the rocprofv3 tool library.
+- OMPT is enabled only when rocprofiler-sdk is initialized before the OpenMP runtime; otherwise a warning is emitted and OMPT is left disabled.
 
 ### Resolved issues
 
