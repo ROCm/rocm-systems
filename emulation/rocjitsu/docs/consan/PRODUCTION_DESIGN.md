@@ -3536,6 +3536,33 @@ analysis completed.
   across the five supported targets pass in 62.93 seconds. E2E validation
   remains outside this work.
 
+### Slice 5L: derive staged composition from typed patch provenance
+
+- **Single state contract:** A composite result is identified by the presence
+  of both `Mutation` and `Instrumentation` patch phases. Final validation
+  consumes those typed records directly; it no longer trusts a separately
+  writable boolean that can contradict the inventory it purported to prove.
+- **Completed deletion:** `staged_composition_validated`, its three production
+  writes, and 17 repetitive test assertions are gone. Mutation-only results
+  retain only Mutation patches, instrumentation-only results retain only
+  Instrumentation patches, and the staged composer prepends its independently
+  validated Mutation inventory to the Instrumentation inventory.
+- **Stronger validation and contract test:** A lifecycle-leave rewrite is
+  considered reinstrumented only when the covering Instrumentation patch also
+  identifies a relocated guest instruction that decodes as a barrier. Merely
+  fabricating an Instrumentation-phase accounting record cannot bypass the
+  fixed-zero lifecycle proof. The composite corruption test now removes the
+  Instrumentation phase from every patch and requires the resulting illegal
+  same-phase overlap to be rejected.
+- **Deletion result:** Production source is one net line smaller, source plus
+  tests is 17 net lines smaller, and every raw result loses the duplicate
+  boolean state.
+- **Completed checked-in gate:** The two focused final-validation tests pass.
+  The complete host gate passes 1,508 tests with the two expected
+  benchmark-object skips; all 194 HSA-hook tests pass; and all 2,878
+  simulator-device tests across the five supported targets pass in 68.32
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

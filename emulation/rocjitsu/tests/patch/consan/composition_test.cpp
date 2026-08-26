@@ -354,7 +354,6 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
 
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(valid.errors) << testing::PrintToString(valid.warnings);
-  EXPECT_TRUE(valid.staged_composition_validated);
   EXPECT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(valid.mutation.fault.applied, 1u);
   ASSERT_GE(valid.elf_bytes.size(), bytes.size());
@@ -539,7 +538,6 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithRetainedInlineShadowProbe) {
 
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(valid.errors) << testing::PrintToString(valid.warnings);
-  EXPECT_TRUE(valid.staged_composition_validated);
   EXPECT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(valid.mutation.fault.applied, 1u);
   const auto mutation = std::ranges::find(
@@ -976,7 +974,6 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
 
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.staged_composition_validated);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_EQ(result.mutation.fault.applied, 1u);
     const ConSanPatchKind barrier_patch = engine == ConSanMoiEngine::Sampled
@@ -1070,7 +1067,6 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
@@ -1145,7 +1141,6 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineBarrierNopRewrite,

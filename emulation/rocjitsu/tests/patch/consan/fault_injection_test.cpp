@@ -338,7 +338,6 @@ TEST(ConSanMoi, LdsAddressFaultComposesWithEveryMoiAccessEngine) {
     const ConSanResult result = try_patch_consan(bytes, options);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.staged_composition_validated);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_EQ(result.mutation.fault.applied, 1u);
     const auto mutation = std::ranges::find(

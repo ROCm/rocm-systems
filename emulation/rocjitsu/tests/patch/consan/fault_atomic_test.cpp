@@ -33,7 +33,6 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   const ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.planned, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_EQ(result.fault_plans.size(), 1u);
@@ -97,7 +96,6 @@ TEST(ConSan, AtomicOrderFaultComposesWithRemovedReleaseBoundary) {
   const ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.staged_composition_validated);
   const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineAtomicOrderRewrite;
   });
@@ -170,7 +168,6 @@ TEST(ConSan, AtomicAddressFaultComposesWithExactFlatUnknownCasReleaseEdge) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.mutation.perturbation.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {

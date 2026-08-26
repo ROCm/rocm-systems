@@ -8444,7 +8444,6 @@ TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   for (const ConSanPatchInfo &mutation : result.patches) {
     if (mutation.phase != ConSanPatchPhase::Mutation)

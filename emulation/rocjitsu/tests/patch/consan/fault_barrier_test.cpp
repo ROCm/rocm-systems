@@ -79,7 +79,6 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.planned, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.mutation.perturbation.applied, 1u);
@@ -138,7 +137,6 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.planned, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.mutation.perturbation.applied, 1u);
@@ -420,7 +418,6 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   ASSERT_TRUE(result.mutation.applied_fault_logical_identity);
@@ -503,7 +500,6 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(result.modified);
   EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_FALSE(result.staged_composition_validated);
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(result.errors.empty());

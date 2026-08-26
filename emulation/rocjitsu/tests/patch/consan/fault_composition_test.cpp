@@ -251,7 +251,6 @@ TEST(ConSan, AtomicOrderFaultComposesWithPerturbationAndAccessInstrumentation) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.mutation.perturbation.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
@@ -290,7 +289,6 @@ TEST(ConSan, AtomicScopeFaultComposesWithPerturbationAndAccessInstrumentation) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.mutation.perturbation.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
@@ -415,7 +413,6 @@ TEST(ConSan, BarrierCompositeRollsBackWhenDropDestroysSelectedEdge) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(result.modified);
   EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_FALSE(result.staged_composition_validated);
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_EQ(result.mutation.fault.applied, 0u);
@@ -485,9 +482,10 @@ TEST(ConSan, FinalValidationRejectsCorruptedBarrierCompositeIdentityOwnershipAnd
   wrong_source_anchor.patches.back().perturbation_source_anchor_offset += sizeof(uint32_t);
   expect_rejected(std::move(wrong_source_anchor), "rederived outer sequence member");
 
-  ConSanResult missing_stage_proof = valid;
-  missing_stage_proof.staged_composition_validated = false;
-  expect_rejected(std::move(missing_stage_proof), "out-of-range patch");
+  ConSanResult missing_instrumentation_phase = valid;
+  for (ConSanPatchInfo &patch : missing_instrumentation_phase.patches)
+    patch.phase = ConSanPatchPhase::Mutation;
+  expect_rejected(std::move(missing_instrumentation_phase), "partially overlapping patch ranges");
 
   ConSanResult corrupted_sleep = valid;
   const ConSanPatchInfo &patch = corrupted_sleep.patches.back();

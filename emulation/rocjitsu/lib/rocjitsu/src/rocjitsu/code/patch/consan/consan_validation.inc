@@ -1692,6 +1692,10 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
          is_barrier_instruction(*instruction);
 }
 
+[[nodiscard]] bool has_consan_patch_phase(const ConSanResult &result, ConSanPatchPhase phase) {
+  return std::ranges::find(result.patches, phase, &ConSanPatchInfo::phase) != result.patches.end();
+}
+
 [[nodiscard]] std::vector<std::string>
 validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeObject &replacement,
                             const ConSanResult &result) {
@@ -1701,11 +1705,10 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   // final validation calls this function once internally and callers may
   // independently validate the same result again. On large code objects that
   // otherwise turned one transform into three identical whole-image analyses.
-  if (std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
-        return patch.phase == ConSanPatchPhase::Mutation;
-      })) {
+  if (!has_consan_patch_phase(result, ConSanPatchPhase::Mutation)) {
     return errors;
   }
+  const bool staged_composition = has_consan_patch_phase(result, ConSanPatchPhase::Instrumentation);
   if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
     return errors;
   const auto original_text = std::span<const uint8_t>(
@@ -1740,7 +1743,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   bool barrier_id_scope_reinstrumented = false;
   const auto composed_atomic_bytes =
       [&](const ConSanPatchInfo &mutation) -> std::optional<std::span<const uint8_t>> {
-    if (!result.staged_composition_validated)
+    if (!staged_composition)
       return std::nullopt;
     const ConSanPatchInfo *match = nullptr;
     for (const ConSanPatchInfo &candidate : result.patches) {
@@ -1790,7 +1793,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   };
   const auto composed_lds_bytes =
       [&](const ConSanPatchInfo &mutation) -> std::optional<std::span<const uint8_t>> {
-    if (!result.staged_composition_validated)
+    if (!staged_composition)
       return std::nullopt;
     const ConSanPatchInfo *match = nullptr;
     for (const ConSanPatchInfo &candidate : result.patches) {
@@ -2000,7 +2003,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
       std::array<uint32_t, 2> after{};
       std::memcpy(before.data(), original_text.data() + patch.anchor_offset, patch.original_size);
       std::span<const uint8_t> after_bytes;
-      if (result.staged_composition_validated) {
+      if (staged_composition) {
         const auto staged = composed_lds_bytes(patch);
         if (!staged) {
           errors.emplace_back(
@@ -2097,7 +2100,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
         continue;
       }
       const bool reinstrumented =
-          result.staged_composition_validated &&
+          staged_composition &&
           std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &candidate) {
             return candidate.phase == ConSanPatchPhase::Instrumentation &&
                    candidate.anchor_offset <= patch.anchor_offset &&
@@ -2335,12 +2338,15 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
           std::memcpy(&replacement_leave, replacement_text.data() + leave_offset,
                       sizeof(replacement_leave));
           const bool leave_reinstrumented =
-              result.staged_composition_validated &&
+              staged_composition &&
               std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &candidate) {
                 return candidate.phase == ConSanPatchPhase::Instrumentation &&
                        candidate.anchor_offset <= leave_offset &&
                        leave_offset + sizeof(uint32_t) <=
-                           candidate.anchor_offset + candidate.original_size;
+                           candidate.anchor_offset + candidate.original_size &&
+                       candidate.relocated_guest_instruction_offset &&
+                       decodes_as_barrier(replacement_text,
+                                          *candidate.relocated_guest_instruction_offset, *decoder);
               });
           if (!leave_instruction || leave_instruction->mnemonic() != "s_barrier_leave" ||
               leave_instruction->size() != static_cast<int>(sizeof(uint32_t)) ||
@@ -2588,7 +2594,7 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
     // nesting is checked by byte accounting; retain the source-NOP and
     // entry-branch checks above and rely on both recorded stage proofs for the
     // nested rewrite.
-    if (body_reinstrumented && result.staged_composition_validated)
+    if (body_reinstrumented && staged_composition)
       return errors;
     const uint64_t barrier_body_offset =
         direction == ConSanBarrierMoveDirection::Earlier ? 0u : target.original_size;
@@ -2633,6 +2639,7 @@ validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
   std::vector<std::string> errors;
   const size_t perturbation_patch_count = static_cast<size_t>(std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind));
+  const bool composite = has_consan_patch_phase(result, ConSanPatchPhase::Mutation);
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineScPerturbation &&
         (patch.perturbation_edge || !patch.perturbation_sequence_identity.empty() ||
@@ -2692,7 +2699,6 @@ validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       errors.emplace_back("ConSan SC perturbation proof found incomplete semantic identity");
       continue;
     }
-    const bool composite = result.staged_composition_validated;
     if (composite && (patch.perturbation_source_candidate_identity.empty() ||
                       patch.perturbation_source_sequence_identity.empty() ||
                       patch.perturbation_source_container_name.empty() ||

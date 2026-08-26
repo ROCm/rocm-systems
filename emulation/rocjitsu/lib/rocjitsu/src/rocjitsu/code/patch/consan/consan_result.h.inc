@@ -193,10 +193,6 @@ struct ConSanMutationOutcome {
 
 struct ConSanResult {
   bool modified = false;
-  /// Both the pristine-to-mutation and mutation-to-instrumentation images were
-  /// independently structurally and semantically validated before their patch
-  /// inventories were composed.
-  bool staged_composition_validated = false;
   ConSanBranchOnlyRoutingTelemetry moi_branch_only_routing_telemetry;
   /// Reservoir footprint retained in a successfully emitted MOI patch. A
   /// rejected transform retains no output image, so this remains zero; any

@@ -267,7 +267,6 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
 [[nodiscard]] ConSanResult rollback_composite_mutation(ConSanResult result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.modified = false;
-  result.staged_composition_validated = false;
   result.elf_bytes.clear();
   result.patches.clear();
   result.mutation.fault.applied = 0;
@@ -306,7 +305,6 @@ void reset_inventory_for_fault_planning(const ConSanOptions &options, ConSanResu
   // outcome or any mutation-stage state from the sizing pass.
   result.warnings.resize(result.moi_stage_warning_begin);
   result.outcome = ConSanTransformOutcome::Unchanged;
-  result.staged_composition_validated = false;
   result.mutation.fault.requested = requested_fault_mutation_count(options);
   result.mutation.fault.planned = 0;
   result.mutation.fault.applied = 0;
@@ -571,7 +569,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         instrument_result.mutation.applied_fault_logical_identity.reset();
         return instrument_result;
       }
-      instrument_result.staged_composition_validated = true;
       // Retain the exact applied mutation plan. The instrumentation pass
       // inventories the mutated image, so without this provenance a live
       // staged result loses which dry-run plan authorized the mutation.
