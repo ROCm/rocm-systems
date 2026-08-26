@@ -3724,7 +3724,6 @@ json_tool_start()
 {
     client::start();
     return ROCPROFILER_STATUS_SUCCESS;
-
 }
 
 extern "C" {
