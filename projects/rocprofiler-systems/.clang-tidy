@@ -1,5 +1,7 @@
 HeaderFilterRegex: "/rocprofiler-systems/source/"
 
+# Deliberately not enabled:
+#   bugprone-exception-escape: nice to have, but too slow on current tree.
 Checks: >
   -*,
   bugprone-assignment-in-if-condition,
@@ -15,7 +17,6 @@ Checks: >
   bugprone-dynamic-static-initializers,
   bugprone-empty-catch,
   bugprone-exception-copy-constructor-throws,
-  bugprone-exception-escape,
   bugprone-float-loop-counter,
   bugprone-fold-init-type,
   bugprone-implicit-widening-of-multiplication-result,
