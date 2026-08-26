@@ -126,7 +126,10 @@ def test_mixed_runtime_load(paths):
     """RCCL must load both net and tuner from the single mixed shared object.
 
     The plugin loader is a per-process property, so this runs the collective in a
-    single multi-GPU process (all_reduce_perf -g 2); no MPI launcher is required.
+    single multi-GPU process (all_reduce_perf -g 2). rccl-tests may be built with
+    MPI (USE_MPI=ON), in which case the binary calls MPI_Init and must be launched
+    via mpirun; when an OpenMPI is available it is run through `mpirun -np 1`,
+    otherwise (a non-MPI binary) it is run bare.
     """
     so_path = _build_mixed_plugin()
 
@@ -152,19 +155,36 @@ def test_mixed_runtime_load(paths):
         }
     )
 
-    args = [perf_bin, "-b", "8", "-e", "1M", "-f", "4", "-g", "2", "-n", "5", "-w", "2"]
+    perf_args = [perf_bin, "-b", "8", "-e", "1M", "-f", "4", "-g", "2", "-n", "5", "-w", "2"]
+
+    # A USE_MPI=ON rccl-tests binary calls MPI_Init and hangs if launched bare
+    # under OpenMPI 5.x (PMIx/PRTE). When an OpenMPI is available, launch the one
+    # process via `mpirun -np 1` so MPI initializes cleanly; the loader is still
+    # per-process, so a single rank with -g 2 exercises the reuse path just as a
+    # bare run would. mpirun forwards this env (NCCL_NET_PLUGIN etc.) to the rank.
+    mpirun = os.path.join(paths.OMPI_INSTALL_DIR, "bin", "mpirun")
+    if os.path.exists(mpirun):
+        env["PATH"] = f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}"
+        env["LD_LIBRARY_PATH"] = f"{paths.OMPI_INSTALL_DIR}/lib:{env['LD_LIBRARY_PATH']}"
+        args = [mpirun, "-np", "1"] + perf_args
+    else:
+        args = perf_args
 
     log_dir = os.path.join(paths.LOGDIR, "mixed_plugin_test_logs")
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "test_mixed_runtime_load.log")
     with open(log_file, "w") as logfile:
-        run = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
+        try:
+            run = subprocess.run(
+                args,
+                env=env,
+                stdout=logfile,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"Mixed plugin collective run timed out after 300s, see {log_file}")
 
     with open(log_file) as logfile:
         log = logfile.read()

@@ -233,7 +233,11 @@ python3 -m pip install --quiet --disable-pip-version-check -r "${ext_dir}/requir
 
 # conftest.py resolves assets/logs from the current working directory.
 cd "${ext_dir}"
-python3 -m pytest -v -rs --color=no -m "ext_mixed or ext_tuner"
+# Safety net: cap any single test at 10 min (pytest-timeout, signal method so it
+# interrupts a blocked subprocess). A hung test then fails fast instead of eating
+# the whole SLURM allocation, and the remaining tests still run.
+python3 -m pytest -v -rs --color=no --timeout=600 --timeout-method=signal \
+  -m "ext_mixed or ext_tuner"
 _pt "test:end"
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"
