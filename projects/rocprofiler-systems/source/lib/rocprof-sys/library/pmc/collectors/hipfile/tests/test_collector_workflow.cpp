@@ -5,7 +5,9 @@
 
 #include "library/pmc/collectors/hipfile/collector.hpp"
 #include "library/pmc/collectors/hipfile/device.hpp"
+#include "library/pmc/collectors/hipfile/hipfile_traits.hpp"
 #include "library/pmc/collectors/hipfile/perfetto_policy.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 
 #include <gtest/gtest.h>
 
@@ -66,6 +68,7 @@ struct stub_cache
         metadata_gpus.push_back(gpu_id);
     }
 
+    // NOLINTNEXTLINE(readability-function-size)
     static void store_sample(std::size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_cfg,
                              const enabled_metrics& supported, const metrics& values,
@@ -93,10 +96,10 @@ struct stub_cache
     [[nodiscard]] static std::vector<recorded_sample> for_metric(const std::string& name)
     {
         std::vector<recorded_sample> out;
-        std::copy_if(samples.begin(), samples.end(), std::back_inserter(out),
-                     [&name](const recorded_sample& sample_rec) {
-                         return sample_rec.metric == name;
-                     });
+        std::ranges::copy_if(samples, std::back_inserter(out),
+                             [&name](const recorded_sample& sample_rec) {
+                                 return sample_rec.metric == name;
+                             });
         return out;
     }
 };

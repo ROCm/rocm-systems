@@ -21,9 +21,10 @@ samples hipFile's in-process stats and reports per-GPU counters
 workload runs on any filesystem; it is meant to exercise telemetry, not the
 GPU-direct fast path.
 
-Source: `hipfile-io.cpp`. Built only when hipFile is found, and skipped when
-hipFile support is not compiled into the profiler (`ROCPROFSYS_BUILD_HIPFILE=OFF`,
-or `AUTO` with no new enough package).
+Source: `hipfile-io.cpp`. Built whenever the hipFile runtime is found (same as
+`hipfile-trace`). Profiling its I/O counters still requires hipFile telemetry
+support in the profiler binaries (`ROCPROFSYS_BUILD_HIPFILE=ON`, or `AUTO` with a
+new enough package).
 
 Usage: `hipfile-io [FILE] [GPUID] [SECONDS]`
 

@@ -782,7 +782,9 @@ export_domain_gpu(nlohmann::json&                           config,
         gpu["hipfile"]["enabled"] = is_truthy(*hipfile_enabled);
     }
     if(auto metrics = lookup(env_map, env_vars::HIPFILE_METRICS))
+    {
         csv_to_json_enabled_flags(gpu["hipfile"]["metrics"], *metrics);
+    }
 
     auto use_amd_smi = lookup(env_map, env_vars::USE_AMD_SMI);
     if(!use_amd_smi) return;

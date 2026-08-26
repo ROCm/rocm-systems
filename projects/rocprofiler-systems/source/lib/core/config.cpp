@@ -3637,6 +3637,7 @@ get_causal_mode()
         {
             auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
             throw std::runtime_error(
+                // NOLINTNEXTLINE(misc-include-cleaner)
                 fmt::format("[get_causal_mode] invalid causal mode {}. Choices: {}",
                             _mode, fmt::join(_v->second->get_choices(), ", ")));
         }

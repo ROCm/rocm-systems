@@ -28,7 +28,6 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 namespace
@@ -104,6 +103,7 @@ private:
 };
 }  // namespace
 
+// NOLINTBEGIN(readability-function-size)
 int
 main(int argc, char** argv)
 {
@@ -161,14 +161,14 @@ main(int argc, char** argv)
 
     const scratch_file file{ path, raw_fd };
 
-    if(ftruncate(file.fd(), static_cast<off_t>(bytes)) != 0)
+    if(ftruncate(file.fd(), bytes) != 0)
     {
         fprintf(stderr, "ftruncate failed (%s)\n", strerror(errno));
         return EXIT_FAILURE;
     }
 
     hipFileHandle_t handle{};
-    hipFileDescr_t  descr{};
+    hipFileDescr_t  descr;
     descr.type      = hipFileHandleTypeOpaqueFD;
     descr.handle.fd = file.fd();
     err             = hipFileHandleRegister(&handle, &descr);
@@ -188,13 +188,13 @@ main(int argc, char** argv)
     std::uint64_t iters = 0;
     while(std::chrono::steady_clock::now() < deadline)
     {
-        const ssize_t bytes_written = hipFileWrite(handle, devbuf, bytes, 0, 0);
+        const auto bytes_written = hipFileWrite(handle, devbuf, bytes, 0, 0);
         if(bytes_written < 0)
         {
             fprintf(stderr, "hipFileWrite failed (%zd)\n", bytes_written);
             break;
         }
-        const ssize_t bytes_read = hipFileRead(handle, devbuf, bytes, 0, 0);
+        const auto bytes_read = hipFileRead(handle, devbuf, bytes, 0, 0);
         if(bytes_read < 0)
         {
             fprintf(stderr, "hipFileRead failed (%zd)\n", bytes_read);
@@ -215,3 +215,4 @@ main(int argc, char** argv)
     (void) hipFree(devbuf);
     return EXIT_SUCCESS;
 }
+// NOLINTEND(readability-function-size)

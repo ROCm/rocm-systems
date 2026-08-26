@@ -41,7 +41,7 @@ struct mock_per_gpu_stats_t
 struct mock_stats_l3_t
 {
     std::uint32_t num_gpus = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
     mock_per_gpu_stats_t per_gpu_stats[MAX_GPUS] = {};
 };
 

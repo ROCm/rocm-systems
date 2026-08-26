@@ -174,13 +174,17 @@ visibility_mask_is_ordered_subset(std::string_view value)
             return false;
         }
         const auto ordinal = std::stoull(token);
-        if(have_previous && ordinal <= previous) return false;
+        if(have_previous && ordinal <= previous)
+        {
+            return false;
+        }
         previous      = ordinal;
         have_previous = true;
     }
     return true;
 }
 
+// NOLINTBEGIN(readability-function-size)
 void
 warn_if_visibility_mask_permutes()
 {
@@ -188,7 +192,10 @@ warn_if_visibility_mask_permutes()
     std::call_once(once, []() {
         auto check = [](const char* name) {
             const auto value = rocprofsys::get_env<std::string>(name, "");
-            if(value.empty() || visibility_mask_is_ordered_subset(value)) return;
+            if(value.empty() || visibility_mask_is_ordered_subset(value))
+            {
+                return;
+            }
             LOG_WARNING(
                 "hipFile per-GPU stats are indexed by HIP device ordinal. {}={} "
                 "is a permutation (or UUID list), not an increasing subset, so "
@@ -217,6 +224,7 @@ warn_if_visibility_mask_permutes()
         }
     });
 }
+// NOLINTEND(readability-function-size)
 }  // namespace
 
 int

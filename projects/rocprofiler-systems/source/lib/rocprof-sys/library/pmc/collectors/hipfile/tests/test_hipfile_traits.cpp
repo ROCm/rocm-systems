@@ -25,6 +25,7 @@ namespace test_values
 {
 constexpr std::size_t   out_of_range_ordinal = 99;
 constexpr std::size_t   extra_visible_gpus   = 8;
+constexpr std::size_t   gpu_index_four       = 4;
 constexpr std::uint64_t read_bytes_gpu0      = 10;
 constexpr std::uint64_t read_bytes_gpu1      = 20;
 constexpr std::uint64_t read_bytes_slot0     = 111;
@@ -225,19 +226,20 @@ TEST_F(HipFileTraitsTest, identity_mapping_is_unchanged_without_a_visibility_mas
 TEST_F(HipFileTraitsTest, subset_mask_maps_hipfile_slots_onto_profiler_indices)
 {
     // HIP_VISIBLE_DEVICES=4,5: hipFile ordinal 0 is physical GPU 4, ordinal 1 is GPU 5.
-    stub_settings::visible_type_indices    = { 4, 5 };
+    stub_settings::visible_type_indices    = { test_values::gpu_index_four,
+                                               test_values::filter_index };
     m_provider->backend->gpu(0).read_bytes = test_values::read_bytes_slot0;
     m_provider->backend->gpu(1).read_bytes = test_values::read_bytes_slot1;
 
     const auto entries = enumerate();
 
     ASSERT_EQ(entries.size(), 2U);
-    EXPECT_EQ(entries[0].device->get_index(), 4U);
+    EXPECT_EQ(entries[0].device->get_index(), test_values::gpu_index_four);
     EXPECT_EQ(entries[0].device->get_hipfile_slot(), 0U);
     EXPECT_EQ(entries[0].device->get_name(), "GPU 4");
     EXPECT_EQ(track_name(entries[0].device->get_index(), "Read Bytes"),
               "GPU [4] Storage Read Bytes (S)");
-    EXPECT_EQ(entries[1].device->get_index(), 5U);
+    EXPECT_EQ(entries[1].device->get_index(), test_values::filter_index);
     EXPECT_EQ(entries[1].device->get_hipfile_slot(), 1U);
     EXPECT_EQ(entries[1].device->get_name(), "GPU 5");
     EXPECT_EQ(track_name(entries[1].device->get_index(), "Read Bytes"),
@@ -253,16 +255,17 @@ TEST_F(HipFileTraitsTest, subset_mask_maps_hipfile_slots_onto_profiler_indices)
 
 TEST_F(HipFileTraitsTest, sampling_gpus_filter_uses_profiler_index_not_hipfile_slot)
 {
-    stub_settings::visible_type_indices    = { 4, 5 };
+    stub_settings::visible_type_indices    = { test_values::gpu_index_four,
+                                               test_values::filter_index };
     stub_settings::gpu_filter.mode         = device_selection_mode::SPECIFIC;
-    stub_settings::gpu_filter.indices      = { 4 };
+    stub_settings::gpu_filter.indices      = { test_values::gpu_index_four };
     m_provider->backend->gpu(0).read_bytes = test_values::read_bytes_filtered;
     m_provider->backend->gpu(1).read_bytes = test_values::read_bytes_excluded;
 
     const auto entries = enumerate();
 
     ASSERT_EQ(entries.size(), 1U);
-    EXPECT_EQ(entries[0].device->get_index(), 4U);
+    EXPECT_EQ(entries[0].device->get_index(), test_values::gpu_index_four);
     EXPECT_EQ(entries[0].device->get_hipfile_slot(), 0U);
 
     enabled_metrics enabled;

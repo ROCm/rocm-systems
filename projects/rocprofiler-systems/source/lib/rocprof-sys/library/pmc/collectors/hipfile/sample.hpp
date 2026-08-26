@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/trace_cache/cache_type_traits.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"

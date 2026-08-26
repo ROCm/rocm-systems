@@ -5,7 +5,6 @@
 
 #include "core/categories.hpp"
 #include "core/trace_cache/cache_manager.hpp"
-#include "core/trace_cache/metadata_registry.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 
@@ -81,6 +80,7 @@ struct cache_policy
      * @param metric_values Collected values.
      * @param timestamp Sample timestamp in nanoseconds.
      */
+    // NOLINTNEXTLINE(readability-function-size)
     static void store_sample(std::size_t                         device_id,
                              [[maybe_unused]] const std::string& device_name,
                              const enabled_metrics&              enabled_metrics_cfg,
