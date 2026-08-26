@@ -507,8 +507,7 @@ preset_registry::describe(std::string_view preset_name)
     }
 
     // Output: rocPD
-    if(preset_json.contains("output") && preset_json["output"].contains("rocpd_output") &&
-       preset_json["output"]["rocpd_output"].value("enabled", false))
+    if(is_rocpd_output_enabled(preset_name))
     {
         lines.emplace_back("rocPD Output:    ON");
     }
