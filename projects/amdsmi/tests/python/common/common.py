@@ -1634,7 +1634,7 @@ def _nic_handles():
         ):
             try:
                 found = amdsmi.amdsmi_get_processor_handles_by_type(socket, nic_type)
-            except amdsmi.AmdSmiLibraryException:
+            except (amdsmi.AmdSmiLibraryException, AttributeError):
                 continue
             handles.extend(found["processor_handles"])
     return handles
@@ -1644,6 +1644,9 @@ def _cpu_handles():
     try:
         return amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
     except amdsmi.AmdSmiLibraryException:
+        return []
+    except AttributeError:
+        # A library built without ESMI never binds the CPU entry points.
         return []
 
 

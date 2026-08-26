@@ -22,6 +22,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amdsmi_get_temp_metric()` returning `AMDSMI_STATUS_INTERNAL_EXCEPTION` for a sensor the device does not expose**.  
+  - `Monitor::getTempSensorIndex()` resolved the sensor with `std::map::at`, which threw `std::out_of_range` before the caller could test the result for `RSMI_TEMP_TYPE_INVALID`. The intended `AMDSMI_STATUS_NOT_SUPPORTED` path was therefore unreachable, and the throw surfaced as `Exception caught: map::at` on stderr.
+  - `getVoltSensorIndex()` carried the same unguarded lookup and now returns its invalid sentinel instead of throwing.
+
 - **Fixed `amd-smi set -L/--clk-limit <clk> max <value>` not enforcing caps that fall between clock levels**.  
   - For `mclk` and `fclk` ONLY, which expose a discrete DPM table, the requested `max` is now rounded down to the nearest selectable clock level, so the enforced limit never exceeds the requested value.
   - `sclk` supports a continuous frequency range, so its requested `max` is honored exactly (e.g. `600` enforces a limit of 600MHz) and is not snapped.
