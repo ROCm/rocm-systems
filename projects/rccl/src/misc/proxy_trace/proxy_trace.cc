@@ -111,7 +111,7 @@ void facebook_rccl::ProxyTraceOp::computeStatus() {
 
 std::string facebook_rccl::ProxyTrace::dump(uint64_t commHash) {
   std::lock_guard<std::mutex> lock(mutex_);
-  std::string result = fmt::format("commDump for commHash:{}\n", commHash);
+  std::string result = rccl::format("commDump for commHash:{}\n", commHash);
   std::map<std::string, std::string> sortedDumpStrMap;
   for (auto& opCountMap : activeOps.at(commHash)) {
     for (auto& proxyOpMap : opCountMap.second) {
@@ -129,7 +129,7 @@ std::string facebook_rccl::ProxyTrace::dump(uint64_t commHash) {
 std::string facebook_rccl::ProxyTrace::dump() {
   std::lock_guard<std::mutex> lock(mutex_);
   std::string result = "commDump for all active ops ";
-  result += fmt::format("mapSizeMB:{:.2f}\n", getMapSizeMB());
+  result += rccl::format("mapSizeMB:{:.2f}\n", getMapSizeMB());
 
   // maps serialized key to serliazed proxyOp; sorted by key
   std::map<std::string, std::string> sortedDumpStrMap;
@@ -156,24 +156,24 @@ std::string facebook_rccl::ProxyTrace::dump() {
 std::string facebook_rccl::ProxyTraceOp::str() {
   computeStatus();
   std::string ret =
-    fmt::format("createT:{}, lastT:{}, postT:{}, sendT:{}, cntNm:{}, {}, {}, {}->{}({}), "
-                "chan:{}, status:{}, ns:{}, nb:{}, po:{}, ke:{}, tail/h:{}, recvT:{}, "
-                "connSz/h:{}, trans:{}, flushed:{}, recvd:{}, done:{}\n",
-                std::chrono::duration_cast<std::chrono::milliseconds>(startTs.time_since_epoch()).count(),
-                std::chrono::duration_cast<std::chrono::milliseconds>(lastUpdateTs.time_since_epoch()).count(),
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                  timestamps[facebook_rccl::ProxyCounterTypes::POSTED].time_since_epoch())
-                  .count(),
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                  timestamps[facebook_rccl::ProxyCounterTypes::KERNEL_COPY_READY].time_since_epoch())
-                  .count(),
-                static_cast<int>(lastUpdatingCounter), traceKey.str(), extraInfo.str(), myRank, peerRank,
-                opType == ProxyOpType::SEND ? "S" : "R", channelId, proxyStepStatusStrMap[status], nSteps, nbytes,
-                counters[ProxyCounterTypes::POSTED], counters[ProxyCounterTypes::KERNEL_COPY_READY],
-                counters[ProxyCounterTypes::TAIL_OR_HEAD], counters[ProxyCounterTypes::RECV_TAIL],
-                counters[ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE], counters[ProxyCounterTypes::TRANSMITTED],
-                counters[ProxyCounterTypes::FLUSHED], counters[ProxyCounterTypes::RECEIVED],
-                counters[ProxyCounterTypes::DONE]);
+    rccl::format("createT:{}, lastT:{}, postT:{}, sendT:{}, cntNm:{}, {}, {}, {}->{}({}), "
+                 "chan:{}, status:{}, ns:{}, nb:{}, po:{}, ke:{}, tail/h:{}, recvT:{}, "
+                 "connSz/h:{}, trans:{}, flushed:{}, recvd:{}, done:{}\n",
+                 std::chrono::duration_cast<std::chrono::milliseconds>(startTs.time_since_epoch()).count(),
+                 std::chrono::duration_cast<std::chrono::milliseconds>(lastUpdateTs.time_since_epoch()).count(),
+                 std::chrono::duration_cast<std::chrono::milliseconds>(
+                   timestamps[facebook_rccl::ProxyCounterTypes::POSTED].time_since_epoch())
+                   .count(),
+                 std::chrono::duration_cast<std::chrono::milliseconds>(
+                   timestamps[facebook_rccl::ProxyCounterTypes::KERNEL_COPY_READY].time_since_epoch())
+                   .count(),
+                 static_cast<int>(lastUpdatingCounter), traceKey.str(), extraInfo.str(), myRank, peerRank,
+                 opType == ProxyOpType::SEND ? "S" : "R", channelId, proxyStepStatusStrMap[status], nSteps, nbytes,
+                 counters[ProxyCounterTypes::POSTED], counters[ProxyCounterTypes::KERNEL_COPY_READY],
+                 counters[ProxyCounterTypes::TAIL_OR_HEAD], counters[ProxyCounterTypes::RECV_TAIL],
+                 counters[ProxyCounterTypes::FIFO_SZ_OR_HEAD_CACHE], counters[ProxyCounterTypes::TRANSMITTED],
+                 counters[ProxyCounterTypes::FLUSHED], counters[ProxyCounterTypes::RECEIVED],
+                 counters[ProxyCounterTypes::DONE]);
   return ret;
 }
 

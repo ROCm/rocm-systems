@@ -4,9 +4,8 @@
 #   1. Standalone:   cmake -S . -B build && cmake --build build
 #   2. As part of the main RCCL build via add_subdirectory(plugins/profiler/proxytrace)
 #
-# Either way, fmt is resolved through the imported fmt::fmt-header-only target,
-# which provides the include path (e.g. an installed/conda fmt) and the
-# FMT_HEADER_ONLY definition automatically.
+# Either way, formatting comes from rccl::format (src/include/rccl_format.h),
+# which resolves to std::format on C++20 toolchains and to fmt otherwise.
 
 # Detect standalone vs. in-tree configuration.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -20,10 +19,13 @@ endif()
 # RCCL source root (this file lives at plugins/profiler/proxytrace).
 get_filename_component(RCCL_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
-# fmt::fmt-header-only is already available when built in-tree (the main build
-# calls find_package / FetchContent for fmt). For standalone builds, resolve it.
-if(NOT TARGET fmt::fmt-header-only)
-    find_package(fmt REQUIRED)
+# In-tree builds inherit these from the main build; standalone builds resolve
+# them the same way it does.
+if(NOT DEFINED RCCL_CXX_STANDARD)
+    include(${RCCL_ROOT}/cmake/RcclCxxStandard.cmake)
+endif()
+if(NOT DEFINED RCCL_FORMAT_LINK_LIBS)
+    include(${RCCL_ROOT}/cmake/RcclFormat.cmake)
 endif()
 
 add_library(rccl-profiler-proxytrace SHARED
@@ -41,12 +43,15 @@ target_compile_definitions(rccl-profiler-proxytrace PRIVATE
     RCCL_PROXYTRACE_PLUGIN_BUILD
 )
 
-target_compile_features(rccl-profiler-proxytrace PRIVATE cxx_std_17)
+target_compile_features(rccl-profiler-proxytrace PRIVATE cxx_std_${RCCL_CXX_STANDARD})
 
 target_compile_options(rccl-profiler-proxytrace PRIVATE -Wall -Wextra)
 
-# fmt-header-only supplies the fmt include directory and FMT_HEADER_ONLY=1.
-target_link_libraries(rccl-profiler-proxytrace PRIVATE fmt::fmt-header-only)
+# Empty when std::format is in use; otherwise fmt-header-only supplies the fmt
+# include directory and FMT_HEADER_ONLY=1.
+if(RCCL_FORMAT_LINK_LIBS)
+    target_link_libraries(rccl-profiler-proxytrace PRIVATE ${RCCL_FORMAT_LINK_LIBS})
+endif()
 
 # Match the legacy Makefile output name: librccl-profiler-proxytrace.so
 set_target_properties(rccl-profiler-proxytrace PROPERTIES

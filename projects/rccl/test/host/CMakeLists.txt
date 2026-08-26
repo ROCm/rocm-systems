@@ -257,8 +257,8 @@ set(CMAKE_CXX_FLAGS_INIT "--gcc-install-dir=${_gcc_install_dir} --offload-host-o
 
 project(rccl-HostUnitTests LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Shared with the main build so the host tests compile at the same standard.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/RcclCxxStandard.cmake)
 
 add_compile_options(-Wno-tautological-constant-out-of-range-compare)
 
@@ -298,17 +298,8 @@ if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
   add_library(GTest::GTest ALIAS GTest::gtest)
 endif()
 
-# --- Resolve fmt: system -> FetchContent fallback ---
-find_package(fmt QUIET)
-if(NOT fmt_FOUND)
-  message(STATUS "Downloading fmt via FetchContent")
-  FetchContent_Declare(fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG        10.2.1
-    GIT_SHALLOW    TRUE
-  )
-  FetchContent_MakeAvailable(fmt)
-endif()
+# --- Resolve the formatting back end (std::format, or fmt as fallback) ---
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/RcclFormat.cmake)
 
 # --- Resolve RCCL build directory ---
 set(RCCL_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build" CACHE PATH
@@ -410,7 +401,7 @@ target_compile_definitions(rccl-source-wrappers PRIVATE
 )
 target_link_libraries(rccl-source-wrappers PRIVATE
   GTest::GTest
-  fmt::fmt-header-only
+  ${RCCL_FORMAT_LINK_LIBS}
 )
 
 # --- Main test executable ---
@@ -472,7 +463,7 @@ target_link_options(rccl-HostUnitTests PRIVATE -no-hip-rt -no-pie)
 target_link_libraries(rccl-HostUnitTests PRIVATE
   GTest::GTest
   Threads::Threads
-  fmt::fmt-header-only
+  ${RCCL_FORMAT_LINK_LIBS}
   # RCCL_TEST_CODE_COVERAGE compiles a dlsym() call in
   # ProcessIsolatedTestRunner.cpp; the in-tree test build links dl for the same
   # runner. Empty on platforms where libdl is folded into libc (glibc >= 2.34),
@@ -525,7 +516,7 @@ target_link_options(rccl-UnitTestsMicro PRIVATE -no-hip-rt -no-pie)
 target_link_libraries(rccl-UnitTestsMicro PRIVATE
   GTest::GTest
   Threads::Threads
-  fmt::fmt-header-only
+  ${RCCL_FORMAT_LINK_LIBS}
 )
 
 # llvm source-based coverage (host-only build: no -Xarch_device split needed
@@ -593,7 +584,7 @@ foreach(_variant "" "-uncached")
   target_link_libraries(${_init_tgt} PRIVATE
     GTest::GTest
     Threads::Threads
-    fmt::fmt-header-only
+    ${RCCL_FORMAT_LINK_LIBS}
   )
 
   if(MICRO_COVERAGE)

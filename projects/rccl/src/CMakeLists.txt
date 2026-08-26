@@ -624,6 +624,19 @@ add_custom_command(
 )
 list(APPEND HIP_SOURCES ${PROXY_TRACE_HDR_DST})
 
+# rccl_format.h has no CUDA constructs to hipify, but the headers that include
+# it are staged here, so it has to be staged alongside them.
+set(RCCL_FORMAT_HDR_SRC "${RCCL_SOURCE_DIR}/src/include/rccl_format.h")
+set(RCCL_FORMAT_HDR_DST "${HIPIFY_DIR}/src/include/rccl_format.h")
+add_custom_command(
+  OUTPUT ${RCCL_FORMAT_HDR_DST}
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPIFY_DIR}/src/include"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RCCL_FORMAT_HDR_SRC} ${RCCL_FORMAT_HDR_DST}
+  MAIN_DEPENDENCY ${RCCL_FORMAT_HDR_SRC}
+  COMMENT "Copying rccl_format.h (no hipification)"
+)
+list(APPEND HIP_SOURCES ${RCCL_FORMAT_HDR_DST})
+
 # copy_directory_if_different was added in CMake 3.26.  On older toolchains
 # fall back to the unconditional copy_directory (same behaviour, just causes
 # unnecessary recompilation on no-op rebuilds).
@@ -1256,11 +1269,13 @@ if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
     target_link_libraries(rccl PRIVATE ${ROCM_CORE_LIB})
   endif()
 endif()
-# Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
-# and is omitted from the exported rccl-targets export set. Without this,
-# a FetchContent-built fmt-header-only target leaks into rccl's link
-# interface and breaks install(EXPORT) for static builds.
-target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
+# Empty when std::format is in use. Wrap fmt in $<BUILD_INTERFACE:...> so it's
+# only used while building rccl and is omitted from the exported rccl-targets
+# export set. Without this, a FetchContent-built fmt-header-only target leaks
+# into rccl's link interface and breaks install(EXPORT) for static builds.
+if(RCCL_FORMAT_LINK_LIBS)
+  target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:${RCCL_FORMAT_LINK_LIBS}>)
+endif()
 if(ENABLE_ROCSHMEM)
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
   # --hip-link tells amdclang++ to perform the RDC device-link step as part

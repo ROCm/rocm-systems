@@ -1042,8 +1042,8 @@ static void showVersion() {
   std::string extendedInfo = VERSION_STRING_EXTENDED;
 #endif
 
-  std::string versionInfo = fmt::format("{}-{}\n{}\n{:<12} : {}\n{:>12} : {}", VERSION_STRING, rcclGitHash,
-                                        extendedInfo, "Hostname", hostInfo, "Librccl path", libPathInfo);
+  std::string versionInfo = rccl::format("{}-{}\n{}\n{:<12} : {}\n{:>12} : {}", VERSION_STRING, rcclGitHash,
+                                         extendedInfo, "Hostname", hostInfo, "Librccl path", libPathInfo);
 
   if (ncclDebugLevel == NCCL_LOG_VERSION || ncclDebugLevel == NCCL_LOG_WARN) {
     VERSION("%s", versionInfo.c_str());

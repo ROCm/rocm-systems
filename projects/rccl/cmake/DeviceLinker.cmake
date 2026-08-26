@@ -129,8 +129,10 @@ endif()
 # and are not visible via get_target_property. Add them explicitly.
 target_compile_definitions(rccl_device_defs INTERFACE
   __HIP_PLATFORM_AMD__=1
-  FMT_HEADER_ONLY=1
 )
+if(NOT RCCL_HAS_STD_FORMAT)
+  target_compile_definitions(rccl_device_defs INTERFACE FMT_HEADER_ONLY=1)
+endif()
 
 # Include directories from the rccl target (only the device-relevant subset)
 get_target_property(_rccl_includes rccl INCLUDE_DIRECTORIES)
@@ -154,8 +156,11 @@ elseif(ROCM_PATH)
   target_include_directories(rccl_device_defs SYSTEM INTERFACE "${ROCM_PATH}/include")
 endif()
 
-# fmt headers: FetchContent provides fmt_SOURCE_DIR; find_package provides the target.
-if(fmt_SOURCE_DIR)
+# fmt headers, only when fmt is the formatting back end:
+# FetchContent provides fmt_SOURCE_DIR; find_package provides the target.
+if(RCCL_HAS_STD_FORMAT)
+  # Nothing to add; <format> ships with the standard library.
+elseif(fmt_SOURCE_DIR)
   target_include_directories(rccl_device_defs SYSTEM INTERFACE "${fmt_SOURCE_DIR}/include")
 elseif(TARGET fmt::fmt-header-only)
   get_target_property(_fmt_inc fmt::fmt-header-only INTERFACE_INCLUDE_DIRECTORIES)
@@ -275,7 +280,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     --arch=${DL_GPU_TARGET}
     --clang=${DL_CLANG}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     ${DL_HIP_COMPILER_FLAGS}
     # -fPIC is required so amdclang++ emits GOT-relative relocations for
     # cross-function calls inside the device .o files. Without it, larger
@@ -371,7 +376,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
-      -std=c++17
+      -std=c++${RCCL_CXX_STANDARD}
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
     DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
@@ -415,7 +420,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
         -x hip --offload-device-only --offload-arch=${DL_GPU_TARGET}
         ${DL_HIP_COMPILER_FLAGS}
         -gline-tables-only
-        -std=c++17 ${DL_OPT_FLAGS}
+        -std=c++${RCCL_CXX_STANDARD} ${DL_OPT_FLAGS}
         -emit-llvm -S
         -o ${IR_OUT}
         ${SRC}
@@ -489,7 +494,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     ${DL_HOST_COMPRESS}
     -c -o ${COMMON_FAT_OBJ}
@@ -514,7 +519,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -c -o ${ONERANK_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/onerank.cu.cpp
@@ -548,7 +553,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
-      -std=c++17
+      -std=c++${RCCL_CXX_STANDARD}
       -fPIC
       -MD -MF ${COLLECTIVES_DEPFILE}
       -c -o ${COLLECTIVES_FAT_OBJ}
@@ -569,7 +574,7 @@ else()
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_INHERITED_FLAGS}
-      -std=c++17
+      -std=c++${RCCL_CXX_STANDARD}
       -fPIC
       -c -o ${COLLECTIVES_FAT_OBJ}
       ${HIPIFY_DIR}/src/collectives.cc
@@ -599,7 +604,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp
@@ -618,7 +623,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp
@@ -637,7 +642,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp
@@ -656,7 +661,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp
@@ -680,7 +685,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ}
@@ -702,7 +707,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
@@ -721,7 +726,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
@@ -751,7 +756,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
@@ -771,7 +776,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_FAT_OBJ}
@@ -790,7 +795,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
@@ -809,7 +814,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
@@ -829,7 +834,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
@@ -848,7 +853,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
@@ -867,7 +872,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
@@ -886,7 +891,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
@@ -905,7 +910,7 @@ add_custom_command(
     ${_link_def_flags}
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
-    -std=c++17
+    -std=c++${RCCL_CXX_STANDARD}
     -fPIC
     -w
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
@@ -943,7 +948,7 @@ foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
       ${_link_def_flags}
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
-      -std=c++17
+      -std=c++${RCCL_CXX_STANDARD}
       -fPIC
       -w
       -c -o ${_ce_reduce_obj}
@@ -999,7 +1004,7 @@ if(GENERATE_SYM_KERNELS)
       COMMAND ${DL_CLANG}
         -x hip --cuda-device-only --offload-arch=${_bc_arch}
         -emit-llvm -Xclang -disable-llvm-passes
-        -std=c++17 -fPIC
+        -std=c++${RCCL_CXX_STANDARD} -fPIC
         -I${ROCSHMEM_SOURCE_DIR}/src
         -I${ROCSHMEM_SOURCE_DIR}/include
         -c -o ${_cm_bc} ${_cm_src}
@@ -1052,7 +1057,7 @@ if(GENERATE_SYM_KERNELS)
         ${_host_inc_flags}
         ${DL_OPT_FLAGS}
         ${DL_INHERITED_FLAGS}
-        -std=c++17
+        -std=c++${RCCL_CXX_STANDARD}
         -fPIC
         ${_this_bc_flag}
         -c -o ${_sym_obj}
