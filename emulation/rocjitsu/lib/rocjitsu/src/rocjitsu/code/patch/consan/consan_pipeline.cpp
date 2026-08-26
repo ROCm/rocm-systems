@@ -6,6 +6,7 @@
 #include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
 
 #include <algorithm>
+#include <map>
 #include <utility>
 #include <variant>
 
@@ -118,6 +119,97 @@ void add_contract_issue(TransformResult &result, ConSanPipelineStage stage,
   return result;
 }
 
+[[nodiscard]] ConSanDispatchRequirements
+build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCoverageLedger &coverage,
+                            std::span<const ConSanPatchInfo> patches) {
+  std::map<std::string, ConSanKernelDispatchRequirement> requirements_by_name;
+  const auto note_kernel = [&](const ConSanKernelInfo &kernel, const auto &apply) {
+    if (kernel.name.empty())
+      return false;
+    ConSanKernelDispatchRequirement &requirement = requirements_by_name[kernel.name];
+    requirement.kernel_name = kernel.name;
+    apply(requirement);
+    return true;
+  };
+  const auto note_descriptor = [&](uint64_t descriptor_offset, const auto &apply) {
+    const auto kernel = std::ranges::find(inventory.kernels(), descriptor_offset,
+                                          &ConSanKernelInfo::descriptor_file_offset);
+    return kernel != inventory.kernels().end() && note_kernel(*kernel, apply);
+  };
+  const auto note_physical_site = [&](const PhysicalSiteId &physical, const auto &apply) {
+    bool attributed = false;
+    for (const ConSanAccessInventorySite &site : inventory.access_sites()) {
+      if (site.physical_id != physical)
+        continue;
+      for (uint64_t owner : site.execution_owner_descriptor_file_offsets)
+        attributed |= note_descriptor(owner, apply);
+    }
+    for (const ConSanSyncEvent &event : inventory.sync().sync_events) {
+      if (event.semantic_id.physical != physical)
+        continue;
+      for (const ConSanExecutionOwner &owner : event.execution_owners)
+        attributed |= note_descriptor(owner.descriptor_file_offset, apply);
+    }
+    if (attributed)
+      return;
+
+    // Kernel-local legacy sites may predate explicit execution-owner analysis.
+    // Keep this bounded fallback at the publication boundary; runtime code must
+    // not repeat symbol-range ownership inference.
+    const auto kernel =
+        std::ranges::find_if(inventory.kernels(), [&](const ConSanKernelInfo &item) {
+          return item.has_text_range && physical.original_text_offset >= item.entry_text_offset &&
+                 physical.original_text_offset - item.entry_text_offset < item.code_size;
+        });
+    if (kernel != inventory.kernels().end())
+      (void)note_kernel(*kernel, apply);
+  };
+
+  for (const ConSanIntentCoverageEntry &entry : coverage.intent_entries()) {
+    if (entry.lowering != ConSanLoweringOutcomeKind::Instrumented)
+      continue;
+    const auto mark_instrumented = [](ConSanKernelDispatchRequirement &requirement) {
+      requirement.has_instrumented_probe = true;
+    };
+    if (entry.intent.covered_semantic_sites.empty()) {
+      note_physical_site(entry.intent.physical_site, mark_instrumented);
+      continue;
+    }
+    for (const SemanticSiteId &semantic : entry.intent.covered_semantic_sites)
+      note_physical_site(semantic.physical, mark_instrumented);
+  }
+
+  for (const ConSanPatchInfo &patch : patches) {
+    const bool has_segment_requirement = patch.required_private_segment_size != 0u ||
+                                         patch.dynamic_private_segment_addend != 0u ||
+                                         patch.required_group_segment_size != 0u;
+    if (!has_segment_requirement)
+      continue;
+    const auto merge_segments = [&](ConSanKernelDispatchRequirement &requirement) {
+      requirement.required_private_bytes =
+          std::max(requirement.required_private_bytes, patch.required_private_segment_size);
+      requirement.dynamic_private_addend =
+          std::max(requirement.dynamic_private_addend, patch.dynamic_private_segment_addend);
+      requirement.required_group_bytes =
+          std::max(requirement.required_group_bytes, patch.required_group_segment_size);
+    };
+    if (!patch.owner_descriptor_file_offsets.empty()) {
+      for (uint64_t owner : patch.owner_descriptor_file_offsets)
+        (void)note_descriptor(owner, merge_segments);
+      continue;
+    }
+    note_physical_site(
+        {.code_object = inventory.code_object_id(), .original_text_offset = patch.anchor_offset},
+        merge_segments);
+  }
+
+  ConSanDispatchRequirements result;
+  result.kernels.reserve(requirements_by_name.size());
+  for (auto &entry : requirements_by_name)
+    result.kernels.push_back(std::move(entry.second));
+  return result;
+}
+
 } // namespace
 
 bool ConSanPipelineStageRecord::well_formed() const {
@@ -153,7 +245,7 @@ const ConSanPipelineStageRecord *TransformResult::stage(ConSanPipelineStage valu
 
 bool TransformResult::well_formed() const {
   if (!code_object.valid() || stages.size() != kConSanPipelineStages.size() ||
-      !valid_contract_issue(configuration_issue)) {
+      !valid_contract_issue(configuration_issue) || !dispatch_requirements.well_formed()) {
     return false;
   }
   for (size_t index = 0; index < stages.size(); ++index) {
@@ -187,7 +279,8 @@ bool TransformResult::well_formed() const {
   case ConSanTransformOutcome::Unchanged:
   case ConSanTransformOutcome::Unsupported:
   case ConSanTransformOutcome::Invalid:
-    if (final_validation_passed || !replacement_bytes.empty())
+    if (final_validation_passed || !replacement_bytes.empty() ||
+        !dispatch_requirements.kernels.empty())
       return false;
     break;
   default:
@@ -228,6 +321,7 @@ void TransformResult::discard_replacement(std::string warning) {
   outcome = ConSanTransformOutcome::Unsupported;
   final_validation_passed = false;
   replacement_bytes.clear();
+  dispatch_requirements = {};
   warnings.push_back(std::move(warning));
   legacy_compatibility_.outcome = outcome;
   legacy_compatibility_.modified = false;
@@ -379,6 +473,10 @@ TransformResult TransformResult::publish_optional(
   result.final_validation_passed = legacy.final_validation_passed;
   result.mutation = std::exchange(legacy.mutation, {});
   result.warnings = std::move(legacy.warnings);
+  if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
+    result.dispatch_requirements = build_dispatch_requirements(
+        result.program_inventory, result.coverage_ledger, legacy.patches);
+  }
   for (std::string &error : legacy.errors) {
     result.issues.push_back({
         .kind = ConSanTransformIssueKind::LegacyLowering,
@@ -495,6 +593,7 @@ TransformResult TransformResult::publish_optional(
       add_contract_issue(result, ConSanPipelineStage::RuntimeBinding, binding_issue);
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.replacement_bytes.clear();
+      result.dispatch_requirements = {};
       result.final_validation_passed = false;
       result.legacy_compatibility_.patches.clear();
     }

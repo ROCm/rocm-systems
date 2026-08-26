@@ -408,53 +408,6 @@ void mark_consan_static_coverage_uninstrumented(ConSanStaticCoverage &coverage) 
   coverage.complete = false;
 }
 
-[[nodiscard]] bool is_consan_access_instrumentation_patch(rocjitsu::ConSanPatchKind kind) {
-  switch (kind) {
-  case rocjitsu::ConSanPatchKind::InlineLdsLoadCheckTrap:
-  case rocjitsu::ConSanPatchKind::InlineLdsStoreCheckTrap:
-  case rocjitsu::ConSanPatchKind::LocalCaveLdsLoadCheckTrap:
-  case rocjitsu::ConSanPatchKind::LocalCaveLdsStoreCheckTrap:
-  case rocjitsu::ConSanPatchKind::InlineFlatLoadCheckTrap:
-  case rocjitsu::ConSanPatchKind::InlineFlatStoreCheckTrap:
-  case rocjitsu::ConSanPatchKind::LocalCaveFlatLoadCheckTrap:
-  case rocjitsu::ConSanPatchKind::LocalCaveFlatStoreCheckTrap:
-  case rocjitsu::ConSanPatchKind::InlineMoiAccessRecordStore:
-  case rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore:
-  case rocjitsu::ConSanPatchKind::InlineMoiExactShadowStore:
-  case rocjitsu::ConSanPatchKind::TrampolineMoiExactShadowStore:
-  case rocjitsu::ConSanPatchKind::InlineMoiSampledWatchpointStore:
-  case rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore:
-    return true;
-  default:
-    return false;
-  }
-}
-
-[[nodiscard]] std::optional<rocjitsu::ConSanResourceSiteKind>
-consan_patch_resource_site_kind(const rocjitsu::ConSanPatchInfo &patch,
-                                const rocjitsu::ConSanResult &result) {
-  if (is_consan_access_instrumentation_patch(patch.kind))
-    return rocjitsu::ConSanResourceSiteKind::Access;
-  if (patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiBarrierRecord ||
-      patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiInlineEpochBarrier ||
-      patch.kind == rocjitsu::ConSanPatchKind::InlineMalformedBarrierAbort)
-    return rocjitsu::ConSanResourceSiteKind::Barrier;
-  if (patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiInlineAtomicOrdering ||
-      patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiAtomicRecord)
-    return rocjitsu::ConSanResourceSiteKind::Atomic;
-  if (patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiFenceRecord)
-    return rocjitsu::ConSanResourceSiteKind::Fence;
-  if (patch.kind != rocjitsu::ConSanPatchKind::TrampolineMoiSampledSyncMetadata)
-    return std::nullopt;
-  for (const rocjitsu::ConSanCandidateResourcePlan &plan : result.resource_plans) {
-    if (plan.text_offset == patch.anchor_offset &&
-        (plan.site_kind == rocjitsu::ConSanResourceSiteKind::Barrier ||
-         plan.site_kind == rocjitsu::ConSanResourceSiteKind::Atomic))
-      return plan.site_kind;
-  }
-  return std::nullopt;
-}
-
 [[nodiscard]] ConSanStaticCoverageKind &
 consan_coverage_kind(ConSanStaticCoverage &coverage, rocjitsu::ConSanResourceSiteKind kind) {
   switch (kind) {
@@ -1892,57 +1845,27 @@ public:
     return *registry;
   }
 
-  void note_patch_requirements(hsa_executable_t executable, const rocjitsu::ConSanResult &result) {
+  void note_requirements(hsa_executable_t executable,
+                         const rocjitsu::ConSanDispatchRequirements &requirements) {
     std::lock_guard lock(mutex_);
-    for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
-      const bool has_segment_requirement = patch.required_private_segment_size != 0 ||
-                                           patch.dynamic_private_segment_addend != 0 ||
-                                           patch.required_group_segment_size != 0;
-      const bool records_moi_site = patch.phase == rocjitsu::ConSanPatchPhase::Instrumentation &&
-                                    consan_patch_resource_site_kind(patch, result).has_value();
-      if (!has_segment_requirement && !records_moi_site) {
+    for (const rocjitsu::ConSanKernelDispatchRequirement &requirement : requirements.kernels) {
+      const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
+        return candidate.executable == executable.handle &&
+               candidate.kernel_name == requirement.kernel_name;
+      });
+      if (pending == pending_.end()) {
+        pending_.push_back({executable.handle, requirement.kernel_name,
+                            requirement.required_private_bytes, requirement.dynamic_private_addend,
+                            requirement.required_group_bytes, requirement.has_instrumented_probe});
         continue;
       }
-      const auto note_kernel = [&](const auto &kernel) {
-        const auto pending = std::ranges::find_if(pending_, [&](const Pending &candidate) {
-          return candidate.executable == executable.handle && candidate.kernel_name == kernel.name;
-        });
-        if (pending == pending_.end()) {
-          pending_.push_back({executable.handle, kernel.name, patch.required_private_segment_size,
-                              patch.dynamic_private_segment_addend,
-                              patch.required_group_segment_size, records_moi_site});
-        } else {
-          pending->required_private_bytes =
-              std::max(pending->required_private_bytes, patch.required_private_segment_size);
-          pending->dynamic_private_addend =
-              std::max(pending->dynamic_private_addend, patch.dynamic_private_segment_addend);
-          pending->required_group_bytes =
-              std::max(pending->required_group_bytes, patch.required_group_segment_size);
-          pending->records_moi_site |= records_moi_site;
-        }
-      };
-
-      if (!patch.owner_descriptor_file_offsets.empty()) {
-        for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
-          const auto kernel =
-              std::ranges::find_if(result.program_inventory.kernels(), [&](const auto &candidate) {
-                return candidate.descriptor_file_offset == descriptor_offset;
-              });
-          if (kernel != result.program_inventory.kernels().end())
-            note_kernel(*kernel);
-        }
-        continue;
-      }
-
-      // Legacy single-owner patches predate explicit owner lists. Preserve the
-      // anchor-range fallback for those kernel-local sites.
-      const auto kernel =
-          std::ranges::find_if(result.program_inventory.kernels(), [&](const auto &candidate) {
-            return candidate.has_text_range && patch.anchor_offset >= candidate.entry_text_offset &&
-                   patch.anchor_offset - candidate.entry_text_offset < candidate.code_size;
-          });
-      if (kernel != result.program_inventory.kernels().end())
-        note_kernel(*kernel);
+      pending->required_private_bytes =
+          std::max(pending->required_private_bytes, requirement.required_private_bytes);
+      pending->dynamic_private_addend =
+          std::max(pending->dynamic_private_addend, requirement.dynamic_private_addend);
+      pending->required_group_bytes =
+          std::max(pending->required_group_bytes, requirement.required_group_bytes);
+      pending->has_instrumented_probe |= requirement.has_instrumented_probe;
     }
   }
 
@@ -1972,7 +1895,7 @@ public:
         .required_private_bytes = pending->required_private_bytes,
         .dynamic_private_addend = pending->dynamic_private_addend,
         .required_group_bytes = pending->required_group_bytes,
-        .records_moi_site = pending->records_moi_site,
+        .has_instrumented_probe = pending->has_instrumented_probe,
     };
     const auto bound = std::ranges::find_if(
         bound_, [&](const Bound &candidate) { return candidate.symbol == symbol.handle; });
@@ -1988,7 +1911,7 @@ public:
           std::max(bound->dynamic_private_addend, pending->dynamic_private_addend);
       bound->required_group_bytes =
           std::max(bound->required_group_bytes, pending->required_group_bytes);
-      bound->records_moi_site |= pending->records_moi_site;
+      bound->has_instrumented_probe |= pending->has_instrumented_probe;
     }
     if (pending->required_private_bytes != 0u || pending->dynamic_private_addend != 0u ||
         pending->required_group_bytes != 0u) {
@@ -2039,7 +1962,7 @@ public:
         bound_, [&](const Bound &candidate) { return candidate.kernel_object == kernel_object; });
     if (bound == bound_.end())
       return {};
-    if (bound->records_moi_site &&
+    if (bound->has_instrumented_probe &&
         instrumented_dispatch_count_ != std::numeric_limits<uint64_t>::max())
       ++instrumented_dispatch_count_;
     return {
@@ -2072,7 +1995,7 @@ private:
     uint32_t required_private_bytes = 0;
     uint32_t dynamic_private_addend = 0;
     uint32_t required_group_bytes = 0;
-    bool records_moi_site = false;
+    bool has_instrumented_probe = false;
   };
   struct Bound {
     uint64_t executable = 0;
@@ -2081,7 +2004,7 @@ private:
     uint32_t required_private_bytes = 0;
     uint32_t dynamic_private_addend = 0;
     uint32_t required_group_bytes = 0;
-    bool records_moi_site = false;
+    bool has_instrumented_probe = false;
   };
 
   [[nodiscard]] static std::string_view normalize_kernel_name(std::string_view name) {
@@ -4398,9 +4321,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     const bool requires_dynamic_private_dispatch_adjustment =
         replacement_instrumentation_selected &&
-        std::ranges::any_of(patch_result.patches, [](const rocjitsu::ConSanPatchInfo &patch) {
-          return patch.dynamic_private_segment_addend != 0u;
-        });
+        transform_result.dispatch_requirements.requires_packet_interception();
     if (requires_dynamic_private_dispatch_adjustment &&
         !layer().dispatch_packet_interception_enabled()) {
       std::fprintf(stderr, "[rocjitsu-dbi-hooks] ConSan replacement requires dispatch-packet "
@@ -5750,8 +5671,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       fault_installation_evidence.mark_installed();
       process_fault_application_reservation.commit_applied_mutation();
     }
-    KernelPrivateDispatchRegistry::instance().note_patch_requirements(
-        executable, patch_result_storage->legacy_mechanism());
+    KernelPrivateDispatchRegistry::instance().note_requirements(
+        executable, patch_result_storage->dispatch_requirements);
   }
   if (using_replacement_reader) {
     auto *original_destroy = layer().destroy();

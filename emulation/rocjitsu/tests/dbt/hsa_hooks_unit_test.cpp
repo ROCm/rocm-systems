@@ -894,6 +894,13 @@ hsa_status_t HSA_API fake_agent_iterate_regions(hsa_agent_t agent,
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t HSA_API fake_guest_agent_iterate_regions(
+    hsa_agent_t agent, hsa_status_t (*callback)(hsa_region_t, void *), void *data) {
+  if (agent.handle != kGuestAgent.handle || callback == nullptr)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  return callback(hsa_region_t{30}, data);
+}
+
 hsa_status_t HSA_API fake_region_get_info(hsa_region_t region, hsa_region_info_t attribute,
                                           void *value) {
   if ((region.handle != 30 && region.handle != 31) || value == nullptr)
@@ -8874,13 +8881,26 @@ TEST(HsaHooksUnitTest, ConSanDynamicPrivateReplacementRequiresDispatchPacketInte
     g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
     install_consan_test_program_identity(g_transform_override_result, ROCJITSU_CODE_ARCH_CDNA3,
                                          ROCJITSU_CODE_TARGET_GFX942);
+    install_consan_test_program_inventory(g_transform_override_result,
+                                          [](rocjitsu::ProgramInventoryBuilder &builder) {
+                                            builder.kernels().emplace_back();
+                                            auto &kernel = builder.kernels().back();
+                                            kernel.name = "oversized_kernel";
+                                            kernel.descriptor_file_offset = 64u;
+                                            kernel.entry_text_offset = 0u;
+                                            kernel.code_size = sizeof(uint32_t);
+                                            kernel.has_text_range = true;
+                                            kernel.uses_dynamic_stack = true;
+                                          });
     g_transform_override_result.modified = true;
     g_transform_override_result.final_validation_passed = true;
     g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 'd', 'y', 'n'};
     rocjitsu::ConSanPatchInfo patch;
     patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
     patch.kind = rocjitsu::ConSanPatchKind::LocalCaveFlatLoadCheckTrap;
+    patch.required_private_segment_size = 32u;
     patch.dynamic_private_segment_addend = 32u;
+    patch.owner_descriptor_file_offsets = {64u};
     g_transform_override_result.patches.push_back(patch);
 
     FakeApiTable api;
@@ -8926,6 +8946,9 @@ void configure_consan_symbol_binding_case() {
                                           auto &kernel = builder.kernels().back();
                                           kernel.name = "oversized_kernel";
                                           kernel.descriptor_file_offset = 64u;
+                                          kernel.entry_text_offset = 0u;
+                                          kernel.code_size = sizeof(uint32_t);
+                                          kernel.has_text_range = true;
                                         });
 
   rocjitsu::ConSanPatchInfo patch;
@@ -9039,6 +9062,9 @@ TEST(HsaHooksUnitTest, ConSanExecutableDestroyDropsReusedSymbolDispatchMetadata)
 void configure_consan_zero_record_case() {
   reset_code_object_observations();
   reset_queue_fakes();
+  unsetenv("RJ_CONSAN_MOI_REPORT_BUFFER");
+  unsetenv("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE");
+  setenv("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "1048576", 1);
   g_transform_override_result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
   install_consan_test_program_identity(g_transform_override_result, ROCJITSU_CODE_ARCH_CDNA3,
                                        ROCJITSU_CODE_TARGET_GFX942);
@@ -9051,7 +9077,14 @@ void configure_consan_zero_record_case() {
                                           auto &kernel = builder.kernels().back();
                                           kernel.name = "oversized_kernel";
                                           kernel.descriptor_file_offset = 64u;
+                                          kernel.entry_text_offset = 0u;
+                                          kernel.code_size = sizeof(uint32_t);
+                                          kernel.has_text_range = true;
                                         });
+
+  install_test_access_coverage(
+      g_transform_override_result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
+      rocjitsu::ConSanAccessPolicyReason::None, rocjitsu::ConSanLoweringOutcomeKind::Instrumented);
 
   rocjitsu::ConSanPatchInfo patch;
   patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
@@ -9062,6 +9095,8 @@ void configure_consan_zero_record_case() {
 
 void run_consan_zero_record_case(bool iterate_symbol, bool dispatch_kernel) {
   FakeApiTable api;
+  api.core.hsa_agent_iterate_regions_fn = fake_guest_agent_iterate_regions;
+  api.core.hsa_memory_assign_agent_fn = nullptr;
   api.amd.hsa_amd_queue_intercept_create_fn = fake_amd_queue_intercept_create;
   api.amd.hsa_amd_queue_intercept_register_fn = fake_amd_queue_intercept_register;
   InstalledDbiHook hook(api);

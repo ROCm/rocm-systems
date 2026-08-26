@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -234,6 +235,77 @@ struct ConSanTransformIssue {
   bool operator==(const ConSanTransformIssue &) const = default;
 };
 
+/// Runtime dispatch facts required by the validated replacement of one kernel.
+///
+/// A lowerer can increase the fixed private or group segment used by a kernel,
+/// and a spill in a dynamically sized private frame can require an additional
+/// per-dispatch addend that cannot be represented by the static descriptor
+/// alone. `has_instrumented_probe` is a semantic attribution fact: it says at
+/// least one target-neutral probe intent owned by this kernel reached the
+/// `Instrumented` lowering outcome. The runtime uses that fact only to
+/// distinguish dispatches of instrumented kernels from unrelated dispatches;
+/// it must not rediscover it from emitted patch kinds.
+struct ConSanKernelDispatchRequirement {
+  /// Original kernel symbol name used to bind this requirement after loading.
+  std::string kernel_name;
+  /// Absolute minimum private-segment bytes required by the replacement.
+  uint32_t required_private_bytes = 0;
+  /// Extra private bytes added to the runtime-selected dynamic frame size.
+  uint32_t dynamic_private_addend = 0;
+  /// Absolute minimum group-segment bytes required by the replacement.
+  uint32_t required_group_bytes = 0;
+  /// Whether a successfully lowered probe can execute through this kernel.
+  bool has_instrumented_probe = false;
+
+  /// Return whether this kernel requires any dispatch-packet segment update.
+  [[nodiscard]] bool has_segment_requirement() const {
+    return required_private_bytes != 0u || dynamic_private_addend != 0u ||
+           required_group_bytes != 0u;
+  }
+
+  /// Verify the symbol identity, useful payload, and dynamic-frame bound.
+  [[nodiscard]] bool well_formed() const {
+    return !kernel_name.empty() && (has_segment_requirement() || has_instrumented_probe) &&
+           dynamic_private_addend <= required_private_bytes;
+  }
+
+  bool operator==(const ConSanKernelDispatchRequirement &) const = default;
+};
+
+/// Complete per-kernel runtime-dispatch contract for one replacement image.
+///
+/// Entries are ordered by kernel name and names are unique, so repeated
+/// lowering records for a shared or aliased kernel have already been reduced
+/// to maximum segment requirements and one semantic instrumentation bit. An
+/// empty value is valid when a replacement needs neither packet adjustment nor
+/// dispatch attribution. This value owns no executable, symbol, or kernel
+/// object handles; the HSA adapter adds those runtime-lifetime identities only
+/// after the replacement has loaded successfully.
+struct ConSanDispatchRequirements {
+  /// Deterministic, name-unique requirements for affected kernels.
+  std::vector<ConSanKernelDispatchRequirement> kernels;
+
+  /// Return whether any dynamic frame requires dispatch-packet interception.
+  [[nodiscard]] bool requires_packet_interception() const {
+    return std::ranges::any_of(kernels, [](const ConSanKernelDispatchRequirement &requirement) {
+      return requirement.dynamic_private_addend != 0u;
+    });
+  }
+
+  /// Verify every entry and the deterministic unique-name ordering.
+  [[nodiscard]] bool well_formed() const {
+    for (size_t index = 0; index < kernels.size(); ++index) {
+      if (!kernels[index].well_formed() ||
+          (index != 0u && kernels[index - 1u].kernel_name >= kernels[index].kernel_name)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool operator==(const ConSanDispatchRequirements &) const = default;
+};
+
 /// Static output of one typed ConSan transformation attempt.
 ///
 /// This type separates caller-facing stage state, immutable semantic artifacts,
@@ -278,6 +350,9 @@ public:
   /// Validation-only mutation facts produced by this static transform. These
   /// counts do not imply that the runtime installed the replacement image.
   ConSanMutationOutcome mutation;
+  /// Runtime dispatch contract derived once from validated lowering and typed
+  /// semantic coverage, then bound to executable symbols by the HSA adapter.
+  ConSanDispatchRequirements dispatch_requirements;
 
   /// Return the record for one stage, or null for an invalid stage or malformed
   /// result that omitted it.

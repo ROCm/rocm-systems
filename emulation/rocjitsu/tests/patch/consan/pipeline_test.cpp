@@ -205,6 +205,211 @@ TEST(ConSanPipeline, MutationOutcomeKeepsFaultAndPerturbationDomainsSeparate) {
   EXPECT_NE(outcome, ConSanMutationOutcome{});
 }
 
+TEST(ConSanPipeline, DispatchRequirementsValidatePayloadOrderingAndPacketInterception) {
+  ConSanDispatchRequirements requirements;
+  EXPECT_TRUE(requirements.well_formed());
+  EXPECT_FALSE(requirements.requires_packet_interception());
+
+  requirements.kernels = {{
+      .kernel_name = "kernel_a",
+      .required_private_bytes = 64u,
+      .dynamic_private_addend = 16u,
+      .required_group_bytes = 128u,
+      .has_instrumented_probe = true,
+  }};
+  EXPECT_TRUE(requirements.kernels.front().has_segment_requirement());
+  EXPECT_TRUE(requirements.kernels.front().well_formed());
+  EXPECT_TRUE(requirements.well_formed());
+  EXPECT_TRUE(requirements.requires_packet_interception());
+
+  ConSanDispatchRequirements malformed = requirements;
+  malformed.kernels.front().kernel_name.clear();
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = requirements;
+  malformed.kernels.front().dynamic_private_addend = 65u;
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = requirements;
+  malformed.kernels = {{.kernel_name = "kernel_b", .has_instrumented_probe = true},
+                       {.kernel_name = "kernel_a", .has_instrumented_probe = true}};
+  EXPECT_FALSE(malformed.well_formed());
+  malformed.kernels[1].kernel_name = "kernel_b";
+  EXPECT_FALSE(malformed.well_formed());
+
+  const ConSanKernelDispatchRequirement attribution_only = {
+      .kernel_name = "kernel_c",
+      .has_instrumented_probe = true,
+  };
+  EXPECT_FALSE(attribution_only.has_segment_requirement());
+  EXPECT_TRUE(attribution_only.well_formed());
+  EXPECT_NE(attribution_only, ConSanKernelDispatchRequirement{});
+}
+
+TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel) {
+  constexpr std::array<uint8_t, 24> bytes{};
+  ProgramInventoryBuilder inventory_builder(bytes);
+  inventory_builder.set_code_object_facts(true, 0u, ROCJITSU_CODE_ARCH_CDNA4,
+                                          ROCJITSU_CODE_TARGET_GFX950);
+  ConSanKernelInfo kernel_a;
+  kernel_a.name = "kernel_a";
+  kernel_a.descriptor_file_offset = 64u;
+  kernel_a.entry_text_offset = 0u;
+  kernel_a.code_size = 8u;
+  kernel_a.has_text_range = true;
+  ConSanLdsSite shared_access;
+  shared_access.kind = ConSanLdsAccessKind::Read;
+  shared_access.supported_mvp = true;
+  shared_access.text_offset = 0u;
+  shared_access.file_offset = 0u;
+  shared_access.size = sizeof(uint32_t);
+  shared_access.width_bits = 32u;
+  shared_access.mnemonic = "ds_read_b32";
+  shared_access.addr_vgpr = 0u;
+  shared_access.owner_descriptor_file_offsets = {64u, 128u};
+  kernel_a.lds_sites.push_back(shared_access);
+  inventory_builder.kernels().push_back(kernel_a);
+  ConSanKernelInfo kernel_b;
+  kernel_b.name = "kernel_b";
+  kernel_b.descriptor_file_offset = 128u;
+  kernel_b.entry_text_offset = 8u;
+  kernel_b.code_size = 8u;
+  kernel_b.has_text_range = true;
+  inventory_builder.kernels().push_back(kernel_b);
+  ConSanKernelInfo kernel_c;
+  kernel_c.name = "kernel_c";
+  kernel_c.descriptor_file_offset = 192u;
+  kernel_c.entry_text_offset = 16u;
+  kernel_c.code_size = 8u;
+  kernel_c.has_text_range = true;
+  inventory_builder.kernels().push_back(kernel_c);
+  inventory_builder.rebuild_access_inventory(bytes);
+  ConSanSyncEvent barrier;
+  barrier.semantic_id = {
+      .physical = {.code_object = inventory_builder.view().code_object_id(),
+                   .original_text_offset = 16u},
+      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+  };
+  barrier.kind = ConSanSyncEventKind::Barrier;
+  barrier.operation = ConSanSyncOperation::BarrierFull;
+  barrier.container_name = "kernel_c";
+  barrier.in_kernel = true;
+  barrier.text_offset = 16u;
+  barrier.file_offset = 16u;
+  barrier.size = sizeof(uint32_t);
+  barrier.execution_owners.push_back({.descriptor_file_offset = 192u});
+  inventory_builder.synchronization().sync_events.push_back(barrier);
+  const ProgramInventory inventory = inventory_builder.view();
+  ASSERT_EQ(inventory.access_sites().size(), 1u);
+  ASSERT_EQ(inventory.access_sites().front().ranges.size(), 1u);
+
+  ConSanObservationPlan plan;
+  plan.engine = ConSanCapabilityEngine::RecordReplay;
+  const SemanticSiteId semantic = inventory.access_sites().front().ranges.front().id;
+  plan.probe_intents.push_back({
+      .id = {0u},
+      .engine = ConSanCapabilityEngine::RecordReplay,
+      .physical_site = semantic.physical,
+      .covered_semantic_sites = {semantic},
+      .kind = ConSanProbeIntentKind::AccessRecord,
+      .position = ConSanProbePosition::Before,
+      .lane_mask = ConSanLaneMaskPolicy::ActiveExecutionMask,
+      .requirement = ConSanProbeRequirement::Required,
+      .synchronization_association = std::nullopt,
+      .dynamic_result = ConSanDynamicResultRequirement::None,
+  });
+  plan.site_decisions.push_back({
+      .engine = ConSanCapabilityEngine::RecordReplay,
+      .semantic_site = semantic,
+      .kind = ConSanSiteDecisionKind::Admitted,
+      .reason = ConSanAccessPolicyReason::None,
+      .intent_ids = {{0u}},
+      .source_containers = {"shared_access"},
+  });
+  plan.probe_intents.push_back({
+      .id = {1u},
+      .engine = ConSanCapabilityEngine::RecordReplay,
+      .physical_site = barrier.semantic_id.physical,
+      .covered_semantic_sites = {barrier.semantic_id},
+      .kind = ConSanProbeIntentKind::BarrierRecord,
+      .position = ConSanProbePosition::Before,
+      .lane_mask = ConSanLaneMaskPolicy::ActiveExecutionMask,
+      .requirement = ConSanProbeRequirement::Required,
+      .synchronization_association = std::nullopt,
+      .dynamic_result = ConSanDynamicResultRequirement::None,
+  });
+  plan.barrier_site_decisions.push_back({
+      .engine = ConSanCapabilityEngine::RecordReplay,
+      .semantic_site = barrier.semantic_id,
+      .kind = ConSanSiteDecisionKind::Admitted,
+      .reason = ConSanBarrierPolicyReason::None,
+      .intent_ids = {{1u}},
+      .source_containers = {"kernel_c"},
+  });
+  ASSERT_TRUE(plan.valid());
+  ConSanCoverageLedger coverage(plan);
+  ASSERT_TRUE(coverage.set_lowering_outcome({0u}, ConSanLoweringOutcomeKind::Instrumented));
+  ASSERT_TRUE(coverage.set_lowering_outcome({1u}, ConSanLoweringOutcomeKind::Instrumented));
+
+  ConSanResult mechanism;
+  mechanism.visited_code_object = true;
+  mechanism.parsed_code_object = true;
+  mechanism.flavor = ConSanFlavor::Moi;
+  mechanism.moi_engine = ConSanMoiEngine::RecordReplay;
+  mechanism.program_inventory = inventory;
+  mechanism.observation_plan = plan;
+  mechanism.coverage_ledger = coverage;
+  mechanism.outcome = ConSanTransformOutcome::ModifiedValid;
+  mechanism.modified = true;
+  mechanism.final_validation_passed = true;
+  mechanism.elf_bytes = {0x7f, 'E', 'L', 'F'};
+  ConSanPatchInfo shared_segments;
+  shared_segments.kind = ConSanPatchKind::InlineNopRewrite;
+  shared_segments.required_private_segment_size = 40u;
+  shared_segments.dynamic_private_segment_addend = 8u;
+  shared_segments.required_group_segment_size = 100u;
+  shared_segments.owner_descriptor_file_offsets = {64u, 128u};
+  mechanism.patches.push_back(shared_segments);
+  ConSanPatchInfo kernel_a_segments = shared_segments;
+  kernel_a_segments.required_private_segment_size = 64u;
+  kernel_a_segments.dynamic_private_segment_addend = 16u;
+  kernel_a_segments.required_group_segment_size = 80u;
+  kernel_a_segments.owner_descriptor_file_offsets = {64u};
+  mechanism.patches.push_back(kernel_a_segments);
+  ConSanPatchInfo legacy_kernel_b_segments = shared_segments;
+  legacy_kernel_b_segments.anchor_offset = 12u;
+  legacy_kernel_b_segments.required_private_segment_size = 56u;
+  legacy_kernel_b_segments.dynamic_private_segment_addend = 0u;
+  legacy_kernel_b_segments.required_group_segment_size = 120u;
+  legacy_kernel_b_segments.owner_descriptor_file_offsets.clear();
+  mechanism.patches.push_back(legacy_kernel_b_segments);
+
+  const TransformResult published = publish_consan_mechanism_result(
+      bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
+      enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
+      complete_runtime_capabilities(), BoundRuntimeResources{}, std::move(mechanism));
+
+  ASSERT_TRUE(published.well_formed()) << testing::PrintToString(published.issues);
+  ASSERT_EQ(published.dispatch_requirements.kernels.size(), 3u);
+  EXPECT_EQ(published.dispatch_requirements.kernels[0], (ConSanKernelDispatchRequirement{
+                                                            .kernel_name = "kernel_a",
+                                                            .required_private_bytes = 64u,
+                                                            .dynamic_private_addend = 16u,
+                                                            .required_group_bytes = 100u,
+                                                            .has_instrumented_probe = true,
+                                                        }));
+  EXPECT_EQ(published.dispatch_requirements.kernels[1], (ConSanKernelDispatchRequirement{
+                                                            .kernel_name = "kernel_b",
+                                                            .required_private_bytes = 56u,
+                                                            .dynamic_private_addend = 8u,
+                                                            .required_group_bytes = 120u,
+                                                            .has_instrumented_probe = true,
+                                                        }));
+  EXPECT_EQ(published.dispatch_requirements.kernels[2], (ConSanKernelDispatchRequirement{
+                                                            .kernel_name = "kernel_c",
+                                                            .has_instrumented_probe = true,
+                                                        }));
+  EXPECT_TRUE(published.dispatch_requirements.requires_packet_interception());
+}
+
 TEST(ConSanPipeline, InvalidConfigurationStopsBeforeLegacyLoweringWithTypedIssue) {
   ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   request.moi_sample_stride = 0;
@@ -440,6 +645,9 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   malformed.issues.push_back({});
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
+  malformed.dispatch_requirements.kernels.push_back({});
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = good;
   malformed.outcome = ConSanTransformOutcome::ModifiedValid;
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
@@ -620,6 +828,7 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   EXPECT_EQ(first.issues, second.issues);
   EXPECT_EQ(first.warnings, second.warnings);
   EXPECT_EQ(first.mutation, second.mutation);
+  EXPECT_EQ(first.dispatch_requirements, second.dispatch_requirements);
   EXPECT_EQ(request, request_before);
   EXPECT_EQ(capabilities, capabilities_before);
 
@@ -656,6 +865,7 @@ TEST(ConSanPipeline, RuntimeDiscardKeepsTypedAndTemporaryMechanismStateCoherent)
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_FALSE(result.replacement_bytes.empty());
   ASSERT_FALSE(result.legacy_mechanism().patches.empty());
+  ASSERT_FALSE(result.dispatch_requirements.kernels.empty());
 
   result.discard_replacement("runtime report allocation failed");
 
@@ -663,6 +873,7 @@ TEST(ConSanPipeline, RuntimeDiscardKeepsTypedAndTemporaryMechanismStateCoherent)
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(result.final_validation_passed);
   EXPECT_TRUE(result.replacement_bytes.empty());
+  EXPECT_TRUE(result.dispatch_requirements.kernels.empty());
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadOriginal);
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
   EXPECT_TRUE(result.legacy_mechanism().patches.empty());

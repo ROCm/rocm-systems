@@ -2567,6 +2567,55 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   seconds of aggregate CTest test time. E2E validation remains outside this
   deletion work.
 
+### Slice 4M: publish one typed kernel-dispatch contract
+
+- **Completed ownership cutover:** `ConSanDispatchRequirements` is now the
+  sole transform-to-runtime contract for affected kernel symbols, fixed and
+  dynamic private-segment growth, group-segment growth, and semantic probe
+  attribution. Publication reduces all lowering records to one sorted,
+  name-unique entry per kernel. The value owns no HSA handles; the hook adds
+  executable and symbol lifetimes only after the replacement loads.
+- **Semantic attribution instead of patch taxonomy:** An instrumented kernel
+  is derived from `ConSanCoverageLedger` entries whose typed lowering outcome
+  is `Instrumented`, joined to execution owners in `ProgramInventory`. The HSA
+  hook's 46-case patch-kind classifier, resource-plan lookup, and kernel-range
+  rescan are deleted. Adding a new patch encoding can therefore no longer
+  silently make a valid semantic probe invisible at dispatch time.
+- **Segment binding instead of runtime reconstruction:** Low-level patch
+  records still supply segment-growth facts at the lowering/publication seam,
+  where explicit descriptor owners are preferred and the bounded legacy
+  text-range fallback occurs once. The hook consumes only the reduced typed
+  contract when binding loaded symbols. Its decision to intercept dispatch
+  packets now comes from the contract's dynamic-frame requirement rather than
+  a second scan over compatibility patches.
+- **Fail-safe lifetime rules:** Non-installable results cannot retain dispatch
+  requirements, runtime binding demotion clears them, and discarding a
+  replacement clears the typed value together with the temporary mechanism
+  state. Validation rejects empty names, empty per-kernel payloads,
+  unsorted/duplicate entries, and a dynamic addend larger than the published
+  private-segment bound.
+- **Focused contract gate:** Unit tests cover empty and attribution-only
+  values, ordering and uniqueness, segment bounds, value semantics, packet
+  interception, deterministic publication, maximum aggregation, explicit
+  multi-owner attribution, access and synchronization execution owners, the
+  bounded unowned-patch fallback, malformed result rejection, and runtime
+  discard. Hook tests exercise typed dynamic-private interception, symbol
+  binding and cleanup, and real evidence binding for zero-record diagnostics.
+- **Size result and next deletion:** Production grows by 95 net lines and
+  source plus tests by 341 net lines. This is the documented typed boundary
+  and its independently falsifiable contract, while 79 net hook lines and the
+  runtime's entire patch-taxonomy dependency disappear. The only remaining
+  production use of `legacy_mechanism()` is the broad transform-detail
+  logging/telemetry block; deleting that final observer is the next
+  compatibility-seam slice rather than adding another projection.
+- **Completed checked-in gate:** The complete RocJitsu host binary passed
+  5,604 of 5,608 tests with four intentional skips, and the complete HSA-hook
+  binary passed all 196 tests. All 2,878 simulator device rows across gfx942,
+  gfx950, gfx1100, gfx1201, and gfx1250 passed in 74.92 seconds. A focused
+  physical-gfx950 gate passed all 44 dynamic-private, mixed-owner, and
+  dispatch-identity rows across the engines in 13.78 seconds. E2E validation
+  remains outside this deletion work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner
