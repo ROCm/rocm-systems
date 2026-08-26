@@ -295,15 +295,15 @@ directly via `getenv()`.
 
 ### Shader wave trace as seen with auto instrumentation and user markers together
 
-![Global view trace](../docs/markers/trace.png)
+![Global view trace](trace.png)
 
 ### Coarse Flamegraph derived from the previous trace without instruction tracing
 
-![Coarse flamegraph](../docs/markers/globalflame.png)
+![Coarse flamegraph](globalflame.png)
 
 ### Fine Flamegraph derived from the previous trace with instruction tracing
 
-![Fine flamegraph](../docs/markers/fineflame.png)
+![Fine flamegraph](fineflame.png)
 
 ### User marker example
 

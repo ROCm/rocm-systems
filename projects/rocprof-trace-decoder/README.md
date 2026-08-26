@@ -101,7 +101,7 @@ For information on how to generate thread trace data, see [using rocprofv3 to co
 
 SQTT marker generation is provided by the LLVM project under
 `amd/sqtt-marker`. This project retains the marker decoder, analysis scripts,
-and [marker documentation](markers/README.md), including the detailed [format
+and [marker documentation](docs/markers/README.md), including the detailed [format
 specification](docs/markers/SPEC.md).
 
 ### C API
