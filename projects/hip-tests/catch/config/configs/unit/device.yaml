@@ -390,9 +390,11 @@ device:
   Unit_hipGetProcAddress_IPC_Event: *level_2
   Unit_hipGetProcAddress_IPC_Event_SetDevice:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [multigpu]
   Unit_hipGetProcAddress_IPC_Event_CrossDevice:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [multigpu]
   Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
     <<: *level_2

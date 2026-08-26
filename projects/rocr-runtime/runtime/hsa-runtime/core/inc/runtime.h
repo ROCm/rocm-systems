@@ -1171,6 +1171,11 @@ class Runtime {
   int IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, unsigned int numNodes,
                       HSAuint32* nodes, void** importAddress, HSAuint64* importSize,
                       bool isdmabufSysmem, uint32_t shared_handle);
+
+  /// @brief Release the buffer objects of an IPC import: the exporting device's handle and one
+  /// per peer device.
+  static void ReleaseImportHandles(HsaMemoryObjectHandle owner,
+                                   const std::vector<AllocationRegion::PeerImport>& peers);
 };
 
 }  // namespace core
