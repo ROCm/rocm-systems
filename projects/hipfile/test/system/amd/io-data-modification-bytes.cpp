@@ -3,25 +3,16 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include "context.h"
-#include "configuration.h"
 #include "hipfile-warnings.h"
 #include "hipfile.h"
 
 #include "io-scenario.h"
-#include "io-test.h"
 #include "io-verify.h"
-#include "test-common.h"
 #include "test-options.h"
 
 #include <array>
-#include <cstdint>
 #include <gtest/gtest.h>
-#include <hip/hip_runtime_api.h>
-#include <string>
-#include <tuple>
 #include <unistd.h>
-#include <vector>
 
 extern SystemTestOptions test_env;
 
