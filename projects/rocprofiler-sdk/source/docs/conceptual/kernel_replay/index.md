@@ -73,6 +73,9 @@ the stacked tool integration PR.
   and MI455X.
 - **[Test coverage](kernel_replay_testing.md)** — what replay is tested for at each level, which
   checks need a GPU and which deliberately do not, the known gaps, and where a new test belongs.
+- **[Downstream tools](kernel_replay_downstream_tools.md)** — what it would take for
+  rocprofiler-compute, rocprofiler-systems and the rocprofv3 lite-trace fast path to use replay,
+  and which of them it is worth doing for.
 - **[Callback tracing API design](kernel_replay_callback_api_design.md)** — the design rationale and
   history behind the callback API. Read the pages above for current behavior; this one records how
   the design got there and what remains open.

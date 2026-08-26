@@ -122,6 +122,8 @@ subtrees:
           title: Performance assessment
         - file: conceptual/kernel_replay/kernel_replay_testing
           title: Test coverage
+        - file: conceptual/kernel_replay/kernel_replay_downstream_tools
+          title: Downstream tools
         - file: conceptual/kernel_replay/kernel_replay_callback_api_design
           title: Design history
   - caption: License

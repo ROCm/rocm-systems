@@ -122,6 +122,13 @@ target_sources(kernel-replay-abi-test PRIVATE ${KERNEL_REPLAY_ABI_SOURCES})
 
 set_source_files_properties(replay_abi_c.c PROPERTIES LANGUAGE C)
 
+# Pin the C dialect rather than inheriting whatever the toolchain defaults to, so the
+# check means the same thing everywhere. aqlprofile-core-tests mixes a C translation unit
+# into a gtest executable the same way (source/lib/aqlprofile/core/tests,
+# aql_profile_v2_c_test.c).
+set_target_properties(kernel-replay-abi-test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED
+                                                                      ON)
+
 target_link_libraries(
     kernel-replay-abi-test PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers GTest::gtest
                                    GTest::gtest_main)
