@@ -2742,6 +2742,32 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   tranche remains the proportional physical gate. E2E validation remains
   outside this work.
 
+### Slice 4R: delete unsupported inventory telemetry
+
+- **Completed deletion:** The hook no longer emits raw parse-visit flags,
+  count-only fault/destination/synchronization inventory records, every
+  decoded synchronization-event record, or every barrier-lifecycle group.
+  Those lines had no documented or checked-in consumer and duplicated facts
+  already owned and unit-tested by immutable `ProgramInventory`. The patch-end
+  and configuration records retain outcome, warning, patch, and policy facts
+  without consulting `visited_code_object`.
+- **Retained semantic output:** Fault sites, barrier-move destinations, logical
+  synchronization sequences, fault plans and summaries, compact program
+  summary, typed coverage, resource qualification, patch proof, and runtime
+  analysis remain. The hook gate specifically protects the compact target and
+  architecture names, including a parsed-but-unsupported target; that record
+  was retained and now reads the typed inventory unconditionally instead of
+  depending on `parsed_code_object`.
+- **Deletion result:** Production source is 93 net lines smaller. This also
+  removes all hook reads of the two raw parse-progress flags. No replacement
+  log schema or compatibility value was added.
+- **Completed checked-in gate:** The complete HSA-hook binary passed all 194
+  tests, including the target-name and unsupported-target contracts. All
+  2,878 simulator device rows across gfx942, gfx950, gfx1100, gfx1201, and
+  gfx1250 passed in 68.27 seconds. The preceding full ConSan host gate remains
+  applicable because this slice changes only hook rendering. Physical and E2E
+  execution are unaffected and remain outside this proportional gate.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

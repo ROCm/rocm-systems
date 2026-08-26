@@ -4161,10 +4161,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         install_action == rocjitsu::ConSanInstallAction::LoadReplacement;
     log_message(
         kLogInfo,
-        "ConSan patch end reader=%llu visited=%s modified=%s outcome=%s errors=%zu "
+        "ConSan patch end reader=%llu modified=%s outcome=%s errors=%zu "
         "warnings=%zu patches=%zu patch_ms=%.3f",
         static_cast<unsigned long long>(code_object_reader.handle),
-        patch_result.visited_code_object ? "true" : "false",
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
                                                                                     : "false",
         rocjitsu::consan_transform_outcome_name(transform_result.outcome),
@@ -4216,7 +4215,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     ScopedDetailedLogBatch detailed_log_batch;
     log_message(
         kLogInfo,
-        "ConSan inventory reader=%llu flavor=%s moi_engine=%s bytes=%zu visited=%s modified=%s "
+        "ConSan inventory reader=%llu flavor=%s moi_engine=%s bytes=%zu modified=%s "
         "delay_nops=%u fail_closed=%s probe_nop=%s probe_trampoline_nop=%s "
         "probe_endpgm=%s probe_lds_endpgm=%s check_trap_mode=%s probe_lds_check_trap=%s "
         "probe_flat_check_trap=%s probe_flat_trap=%s fault_drop_barrier=%s "
@@ -4236,7 +4235,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         static_cast<unsigned long long>(code_object_reader.handle),
         flavor_name(request.flavor.value_or(rocjitsu::ConSanFlavor::None)),
         rocjitsu::consan_moi_engine_name(request.moi_engine),
-        transform_result.code_object.byte_size, patch_result.visited_code_object ? "true" : "false",
+        transform_result.code_object.byte_size,
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
                                                                                     : "false",
         config->delay_nops, config->fail_closed ? "true" : "false",
@@ -4279,21 +4278,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         static_cast<unsigned long long>(runtime_resources.moi_report_buffer_size),
         static_cast<unsigned long long>(config->moi_auto_report_buffer_size),
         config->require_patch ? "true" : "false");
-    if (patch_result.parsed_code_object) {
-      log_message(
-          kLogInfo,
-          "ConSan code-object reader=%llu target=%s arch=%s text_sections=%zu "
-          "kernels=%zu functions=%zu",
-          static_cast<unsigned long long>(code_object_reader.handle),
-          rj_code_target_name(transform_result.program_inventory.target()),
-          rj_code_arch_name(rj_code_arch_for_target(transform_result.program_inventory.target())),
-          transform_result.program_inventory.text_sections().size(),
-          transform_result.program_inventory.kernels().size(),
-          transform_result.program_inventory.functions().size());
-    }
-    log_message(kLogInfo, "ConSan fault inventory reader=%llu sites=%zu",
-                static_cast<unsigned long long>(code_object_reader.handle),
-                patch_result.fault_sites.size());
+    log_message(
+        kLogInfo,
+        "ConSan code-object reader=%llu target=%s arch=%s text_sections=%zu "
+        "kernels=%zu functions=%zu",
+        static_cast<unsigned long long>(code_object_reader.handle),
+        rj_code_target_name(transform_result.program_inventory.target()),
+        rj_code_arch_name(rj_code_arch_for_target(transform_result.program_inventory.target())),
+        transform_result.program_inventory.text_sections().size(),
+        transform_result.program_inventory.kernels().size(),
+        transform_result.program_inventory.functions().size());
     for (const rocjitsu::ConSanFaultSite &site : patch_result.fault_sites) {
       const OwnerLogFields owners =
           owner_log_fields(site.execution_owners, transform_result.program_inventory.kernels());
@@ -4316,9 +4310,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   ordinary_memory_support_reason_name(site.ordinary_memory_support_reason),
                   site.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
-    log_message(kLogInfo, "ConSan barrier destination inventory reader=%llu destinations=%zu",
-                static_cast<unsigned long long>(code_object_reader.handle),
-                patch_result.barrier_move_destinations.size());
     for (const rocjitsu::ConSanBarrierMoveDestination &destination :
          patch_result.barrier_move_destinations) {
       const OwnerLogFields owners = owner_log_fields(destination.execution_owners,
@@ -4420,62 +4411,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         mutation.perturbation.planned, mutation.perturbation.applied, config->sc_perturb_max,
         config->sc_perturb_required_count, config->sc_perturb_sleep);
     const rocjitsu::SynchronizationInventoryView sync = transform_result.program_inventory.sync();
-    log_message(kLogInfo, "ConSan sync inventory reader=%llu events=%zu",
-                static_cast<unsigned long long>(code_object_reader.handle),
-                sync.sync_events.size());
-    for (const rocjitsu::ConSanSyncEvent &event : sync.sync_events) {
-      const OwnerLogFields owners =
-          owner_log_fields(event.execution_owners, transform_result.program_inventory.kernels());
-      std::string reason = event.confidence_reason;
-      std::ranges::replace(reason, ' ', '-');
-      const std::string static_offset =
-          event.static_byte_offset ? std::to_string(*event.static_byte_offset) : "-";
-      const std::string raw_scope = event.raw_scope ? std::to_string(*event.raw_scope) : "-";
-      const std::string participant_count =
-          event.participant_count ? std::to_string(*event.participant_count) : "-";
-      const std::string participant_mask =
-          event.participant_mask ? std::to_string(*event.participant_mask) : "-";
-      const std::string barrier_id = event.barrier_id ? std::to_string(*event.barrier_id) : "-";
-      const std::string barrier_raw_selector =
-          event.barrier_raw_operand_selector ? std::to_string(*event.barrier_raw_operand_selector)
-                                             : "-";
-      const std::string barrier_literal_width =
-          event.barrier_literal_width_bits ? std::to_string(*event.barrier_literal_width_bits)
-                                           : "-";
-      const std::string barrier_literal_value =
-          event.barrier_literal_value ? std::to_string(*event.barrier_literal_value) : "-";
-      const std::string barrier_raw_simm16 =
-          event.barrier_raw_simm16 ? std::to_string(*event.barrier_raw_simm16) : "-";
-      log_message(
-          kLogVerbose,
-          "ConSan sync event reader=%llu identity=%s kind=%s operation=%s "
-          "address_source=%s memory_role=%s memory_role_confidence=%s rmw_outcome=%s "
-          "confidence=%s reason=%s "
-          "container=%s container_kind=%s occurrence=%u text_offset=0x%llx "
-          "file_offset=0x%llx size=%u width_bits=%u mnemonic=%s static_offset=%s "
-          "raw_scope=%s barrier_id=%s barrier_operand_source=%s barrier_raw_selector=%s "
-          "barrier_literal_width_bits=%s barrier_literal_value=%s barrier_raw_simm16=%s "
-          "barrier_scope=%s "
-          "participant_count=%s participant_mask=%s "
-          "owners=%zu owner_names=%s owner_proofs=%s",
-          static_cast<unsigned long long>(code_object_reader.handle), event.identity.c_str(),
-          sync_event_kind_name(event.kind), sync_operation_name(event.operation),
-          sync_address_source_name(event.address_source), sync_memory_role_name(event.memory_role),
-          sync_confidence_name(event.memory_role_confidence),
-          sync_rmw_outcome_name(event.rmw_outcome), sync_confidence_name(event.confidence),
-          reason.c_str(), event.container_name.c_str(), event.in_kernel ? "kernel" : "function",
-          event.occurrence, static_cast<unsigned long long>(event.text_offset),
-          static_cast<unsigned long long>(event.file_offset), event.size, event.width_bits,
-          event.mnemonic.c_str(), static_offset.c_str(), raw_scope.c_str(), barrier_id.c_str(),
-          barrier_operand_source_name(event.barrier_operand_source), barrier_raw_selector.c_str(),
-          barrier_literal_width.c_str(), barrier_literal_value.c_str(), barrier_raw_simm16.c_str(),
-          barrier_scope_name(event.barrier_scope), participant_count.c_str(),
-          participant_mask.c_str(), event.execution_owners.size(), owners.names.c_str(),
-          owners.proofs.c_str());
-    }
-    log_message(kLogInfo, "ConSan sync sequence inventory reader=%llu sequences=%zu",
-                static_cast<unsigned long long>(code_object_reader.handle),
-                sync.sync_sequences.size());
     for (const rocjitsu::ConSanSyncSequence &sequence : sync.sync_sequences) {
       const OwnerLogFields owners =
           owner_log_fields(sequence.execution_owners, transform_result.program_inventory.kernels());
@@ -4546,34 +4481,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   barrier_scope_name(sequence.barrier_scope), release_wait_offset.data(),
                   participant_count.c_str(), participant_mask.c_str(), members.c_str(),
                   sequence.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
-    }
-    log_message(kLogInfo, "ConSan barrier lifecycle inventory reader=%llu groups=%zu",
-                static_cast<unsigned long long>(code_object_reader.handle),
-                sync.barrier_lifecycle_groups.size());
-    for (const rocjitsu::ConSanBarrierLifecycleGroup &group : sync.barrier_lifecycle_groups) {
-      std::string members;
-      for (const std::string &identity : group.member_event_identities) {
-        if (!members.empty())
-          members += ',';
-        members += identity;
-      }
-      std::string reason = group.rejection_reason.empty() ? "-" : group.rejection_reason;
-      std::ranges::replace(reason, ' ', '-');
-      log_message(kLogVerbose,
-                  "ConSan barrier lifecycle reader=%llu identity=%s container=%s "
-                  "container_kind=%s block=%s begin_text_offset=0x%llx "
-                  "end_text_offset=0x%llx barrier_id=%s barrier_scope=%s admissible=%s "
-                  "confidence=%s reason=%s members=%s",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  group.identity.c_str(), group.container_name.c_str(),
-                  group.in_kernel ? "kernel" : "function",
-                  group.basic_block_index ? std::to_string(*group.basic_block_index).c_str() : "-",
-                  static_cast<unsigned long long>(group.begin_text_offset),
-                  static_cast<unsigned long long>(group.end_text_offset),
-                  group.barrier_id ? std::to_string(*group.barrier_id).c_str() : "-",
-                  barrier_scope_name(group.barrier_scope), group.admissible ? "true" : "false",
-                  sync_confidence_name(group.confidence), reason.c_str(),
-                  members.empty() ? "-" : members.c_str());
     }
     if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
       const rocjitsu::ConSanResourcePlanSummary &resource_summary =
