@@ -170,6 +170,16 @@ TEST(RaceLogExpectationTest, RejectsDuplicateField) {
   EXPECT_NE(parsed.error.find("duplicate header field 'dispatch'"), std::string::npos);
 }
 
+TEST(RaceLogExpectationTest, IgnoresUnknownHeaderField) {
+  std::string extended(kValidRaceLog);
+  extended.insert(extended.find(" conflict=unknown"), " future=value");
+  const RaceLogParseResult parsed = parse(extended);
+
+  ASSERT_TRUE(parsed.ok()) << parsed.error;
+  ASSERT_EQ(parsed.records.size(), 1u);
+  EXPECT_EQ(parsed.records.front().conflict, "unknown");
+}
+
 TEST(RaceLogExpectationTest, MissingEnvironmentFails) {
   EnvironmentGuard environment("RJ_SINK_DIR");
   environment.unset();

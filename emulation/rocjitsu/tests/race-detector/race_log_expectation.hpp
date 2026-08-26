@@ -4,12 +4,14 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <istream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -131,6 +133,80 @@ inline bool contains(const std::string &value, const std::string &substring) {
   return value.find(substring) != std::string::npos;
 }
 
+class RaceHeaderParser {
+public:
+  explicit RaceHeaderParser(std::size_t line_number) : line_number_(line_number) {}
+
+  [[nodiscard]] std::optional<std::string> parse(std::string_view header_text) {
+    std::istringstream header{std::string(header_text)};
+    std::string field;
+    while (header >> field) {
+      const std::size_t equals = field.find('=');
+      if (equals == std::string::npos || equals == 0 || equals + 1 == field.size()) {
+        return lineError(line_number_, "malformed header field '" + field + "'");
+      }
+
+      const std::string_view key(field.data(), equals);
+      const std::string_view value(field.data() + equals + 1, field.size() - equals - 1);
+      if (auto error = parseField(key, value))
+        return error;
+    }
+
+    if (!std::all_of(seen_.begin(), seen_.end(), [](bool seen) { return seen; }))
+      return lineError(line_number_, "RACE header is missing one or more required fields");
+    return std::nullopt;
+  }
+
+  [[nodiscard]] RaceRecord takeRecord() && { return std::move(record_); }
+
+private:
+  struct FieldDescriptor {
+    std::string_view key;
+    std::string RaceRecord::*string_member;
+    int RaceRecord::*integer_member;
+  };
+
+  inline static constexpr std::array<FieldDescriptor, 10> fields_{{
+      {"kernel", &RaceRecord::kernel, nullptr},
+      {"symbol", &RaceRecord::symbol, nullptr},
+      {"dispatch", nullptr, &RaceRecord::dispatch},
+      {"type", &RaceRecord::type, nullptr},
+      {"access", &RaceRecord::access, nullptr},
+      {"reg", nullptr, &RaceRecord::reg},
+      {"wave", nullptr, &RaceRecord::wave},
+      {"lane", nullptr, &RaceRecord::lane},
+      {"wg", &RaceRecord::workgroup, nullptr},
+      {"conflict", &RaceRecord::conflict, nullptr},
+  }};
+
+  [[nodiscard]] std::optional<std::string> parseField(std::string_view key,
+                                                      std::string_view value) {
+    for (std::size_t index = 0; index < fields_.size(); ++index) {
+      const FieldDescriptor &descriptor = fields_[index];
+      if (descriptor.key != key)
+        continue;
+      if (seen_[index])
+        return lineError(line_number_, "duplicate header field '" + std::string(key) + "'");
+      seen_[index] = true;
+
+      if (descriptor.string_member != nullptr) {
+        record_.*descriptor.string_member = value;
+      } else if (!parseInteger(value, record_.*descriptor.integer_member)) {
+        return lineError(line_number_,
+                         "invalid " + std::string(key) + " value '" + std::string(value) + "'");
+      }
+      return std::nullopt;
+    }
+
+    // Ignore well-formed unknown fields so the producer can extend the format.
+    return std::nullopt;
+  }
+
+  std::size_t line_number_;
+  RaceRecord record_;
+  std::array<bool, fields_.size()> seen_{};
+};
+
 } // namespace detail
 
 /// Parse structured RACE blocks from an already-open stream.
@@ -155,105 +231,10 @@ inline RaceLogParseResult parseRaceLog(std::istream &input) {
     }
     saw_plugin_output = true;
 
-    RaceRecord record;
-    bool saw_kernel = false;
-    bool saw_symbol = false;
-    bool saw_dispatch = false;
-    bool saw_type = false;
-    bool saw_access = false;
-    bool saw_reg = false;
-    bool saw_wave = false;
-    bool saw_lane = false;
-    bool saw_workgroup = false;
-    bool saw_conflict = false;
-
-    std::istringstream header(line.substr(5));
-    std::string field;
-    while (header >> field) {
-      const std::size_t equals = field.find('=');
-      if (equals == std::string::npos || equals == 0 || equals + 1 == field.size()) {
-        return detail::parseFailure(
-            detail::lineError(line_number, "malformed header field '" + field + "'"));
-      }
-
-      const std::string key = field.substr(0, equals);
-      const std::string value = field.substr(equals + 1);
-      auto reject_duplicate = [&](bool seen) -> RaceLogParseResult {
-        return seen ? detail::parseFailure(
-                          detail::lineError(line_number, "duplicate header field '" + key + "'"))
-                    : RaceLogParseResult{};
-      };
-
-      if (key == "kernel") {
-        if (auto duplicate = reject_duplicate(saw_kernel); !duplicate.ok())
-          return duplicate;
-        saw_kernel = true;
-        record.kernel = value;
-      } else if (key == "symbol") {
-        if (auto duplicate = reject_duplicate(saw_symbol); !duplicate.ok())
-          return duplicate;
-        saw_symbol = true;
-        record.symbol = value;
-      } else if (key == "dispatch") {
-        if (auto duplicate = reject_duplicate(saw_dispatch); !duplicate.ok())
-          return duplicate;
-        saw_dispatch = true;
-        if (!detail::parseInteger(value, record.dispatch)) {
-          return detail::parseFailure(
-              detail::lineError(line_number, "invalid dispatch value '" + value + "'"));
-        }
-      } else if (key == "type") {
-        if (auto duplicate = reject_duplicate(saw_type); !duplicate.ok())
-          return duplicate;
-        saw_type = true;
-        record.type = value;
-      } else if (key == "access") {
-        if (auto duplicate = reject_duplicate(saw_access); !duplicate.ok())
-          return duplicate;
-        saw_access = true;
-        record.access = value;
-      } else if (key == "reg") {
-        if (auto duplicate = reject_duplicate(saw_reg); !duplicate.ok())
-          return duplicate;
-        saw_reg = true;
-        if (!detail::parseInteger(value, record.reg)) {
-          return detail::parseFailure(
-              detail::lineError(line_number, "invalid reg value '" + value + "'"));
-        }
-      } else if (key == "wave") {
-        if (auto duplicate = reject_duplicate(saw_wave); !duplicate.ok())
-          return duplicate;
-        saw_wave = true;
-        if (!detail::parseInteger(value, record.wave)) {
-          return detail::parseFailure(
-              detail::lineError(line_number, "invalid wave value '" + value + "'"));
-        }
-      } else if (key == "lane") {
-        if (auto duplicate = reject_duplicate(saw_lane); !duplicate.ok())
-          return duplicate;
-        saw_lane = true;
-        if (!detail::parseInteger(value, record.lane)) {
-          return detail::parseFailure(
-              detail::lineError(line_number, "invalid lane value '" + value + "'"));
-        }
-      } else if (key == "wg") {
-        if (auto duplicate = reject_duplicate(saw_workgroup); !duplicate.ok())
-          return duplicate;
-        saw_workgroup = true;
-        record.workgroup = value;
-      } else if (key == "conflict") {
-        if (auto duplicate = reject_duplicate(saw_conflict); !duplicate.ok())
-          return duplicate;
-        saw_conflict = true;
-        record.conflict = value;
-      }
-    }
-
-    if (!(saw_kernel && saw_symbol && saw_dispatch && saw_type && saw_access && saw_reg &&
-          saw_wave && saw_lane && saw_workgroup && saw_conflict)) {
-      return detail::parseFailure(
-          detail::lineError(line_number, "RACE header is missing one or more required fields"));
-    }
+    detail::RaceHeaderParser header_parser(line_number);
+    if (auto error = header_parser.parse(std::string_view(line).substr(5)))
+      return detail::parseFailure(std::move(*error));
+    RaceRecord record = std::move(header_parser).takeRecord();
 
     bool terminated = false;
     while (std::getline(input, line)) {
