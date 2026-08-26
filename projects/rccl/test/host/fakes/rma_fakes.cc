@@ -15,9 +15,12 @@
 // ---------------------------------------------------------------------------
 
 static bool DefaultRmaCircularBufEmpty(struct ncclRmaProxyCtx* ctx, int peer) {
-  // Mirror production ncclRmaProxyCircularBufEmpty: empty when the consumer
-  // index has reached the producer index.
-  return ctx->cis[peer] >= ctx->pis[peer];
+  // Empty when the consumer index has caught up to the producer index. Use
+  // exact equality rather than production's `>=` so the fake does not bake in
+  // production's latent wraparound bug: once pi wraps past 2^32 while ci has
+  // not, `ci >= pi` would spuriously report empty with descriptors still live.
+  // (The production fix belongs in rma_proxy_launch.cc: `(pi - ci) == 0`.)
+  return ctx->cis[peer] == ctx->pis[peer];
 }
 
 static ncclResult_t DefaultRmaDestroyDesc(struct ncclComm* /*comm*/,
