@@ -12,6 +12,7 @@
 
 #include DEV_RUNTIME_CC_PATH
 
+#include <cstdlib>
 #include <memory>
 
 #include <gtest/gtest.h>
@@ -250,4 +251,15 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
           })
           .setVariable("RCCL_TEST_GCN_ARCH", "gfx900")
           .clearVariable("NCCL_CUMEM_SKIP_FREE"));
+}
+
+TEST(DevrRegistrationSupportTest, DisabledElasticRejectsHostSegment) {
+  ASSERT_EQ(setenv("NCCL_ELASTIC_BUFFER_REGISTER", "0", 1), 0);
+
+  ncclComm comm{};
+  EXPECT_EQ(ncclDevrCheckRegistrationSupport(reinterpret_cast<void*>(0x100000), 4096, &comm,
+                                             /*hasSysmemSegment=*/true),
+            ncclInvalidArgument);
+
+  unsetenv("NCCL_ELASTIC_BUFFER_REGISTER");
 }
