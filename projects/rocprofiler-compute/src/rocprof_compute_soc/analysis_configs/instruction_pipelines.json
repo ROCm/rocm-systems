@@ -29,6 +29,61 @@
     "SALU": "SCALAR",
     "VALU": "VALU"
   },
+  "name_rules": {
+    "BARRIER": {
+      "prefixes": [
+        "s_barrier"
+      ],
+      "names": [
+        "s_wakeup_barrier",
+        "s_get_barrier_state"
+      ]
+    },
+    "EXP": {
+      "prefixes": [
+        "s_sendmsg"
+      ],
+      "names": []
+    },
+    "INTERNAL": {
+      "prefixes": [
+        "s_wait",
+        "s_soft_wait",
+        "s_delay",
+        "s_set",
+        "s_sleep",
+        "s_monitor_sleep",
+        "s_ttrace",
+        "s_clause",
+        "s_inst_prefetch",
+        "s_incperflevel",
+        "s_decperflevel",
+        "s_icache_inv",
+        "s_denorm_mode",
+        "s_round_mode",
+        "s_singleuse_vdst",
+        "s_endpgm",
+        "s_code_end",
+        "s_nop",
+        "s_trap",
+        "s_wakeup"
+      ],
+      "names": []
+    },
+    "VMEM": {
+      "prefixes": [
+        "global_",
+        "scratch_"
+      ],
+      "names": []
+    },
+    "FLAT": {
+      "prefixes": [
+        "flat_"
+      ],
+      "names": []
+    }
+  },
   "pipelines": {
     "atomic_fence": "SCALAR",
     "buffer_atomic_add": "VMEM",
