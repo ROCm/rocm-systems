@@ -312,6 +312,48 @@ if (NOT BUILD_TESTS_ONLY)
     if(GPU_TARGETS_FULL)
       list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX ".*:xnack-$")
     endif()
+
+    # RDNA archs (gfx11xx/gfx12xx) have no xnack+ variant at all, so device
+    # ASAN can never be enabled for them - clang just ignores
+    # -fsanitize=address for that offload arch with a warning. Drop them
+    # instead of leaving a target in GPU_TARGETS that silently gets no
+    # instrumentation.
+    set(_ASAN_INCOMPATIBLE_ARCHS gfx1100 gfx1201 gfx1250)
+    foreach(_asan_incompatible_arch ${_ASAN_INCOMPATIBLE_ARCHS})
+      list(FILTER GPU_TARGETS EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
+      if(GPU_TARGETS_FULL)
+        list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
+      endif()
+    endforeach()
+
+    if(NOT GPU_TARGETS)
+      message(FATAL_ERROR "ASAN requires a GPU target that supports xnack+ (e.g. gfx90a, gfx942, gfx950). "
+        "None of the requested/default GPU_TARGETS support it.")
+    endif()
+
+    # CDNA archs (gfx90a/gfx942/gfx950) only get ASAN instrumentation with the
+    # xnack+ feature explicitly enabled; a bare arch name compiles without it.
+    # Force :xnack+ onto any entry that doesn't already request it.
+    set(_ASAN_GPU_TARGETS "")
+    foreach(_asan_target ${GPU_TARGETS})
+      if(NOT _asan_target MATCHES "xnack\\+")
+        message(STATUS "ASAN: appending :xnack+ to GPU target '${_asan_target}'")
+        set(_asan_target "${_asan_target}:xnack+")
+      endif()
+      list(APPEND _ASAN_GPU_TARGETS "${_asan_target}")
+    endforeach()
+    set(GPU_TARGETS "${_ASAN_GPU_TARGETS}")
+
+    if(GPU_TARGETS_FULL)
+      set(_ASAN_GPU_TARGETS_FULL "")
+      foreach(_asan_target ${GPU_TARGETS_FULL})
+        if(NOT _asan_target MATCHES "xnack\\+")
+          set(_asan_target "${_asan_target}:xnack+")
+        endif()
+        list(APPEND _ASAN_GPU_TARGETS_FULL "${_asan_target}")
+      endforeach()
+      set(GPU_TARGETS_FULL "${_ASAN_GPU_TARGETS_FULL}")
+    endif()
   endif()
 
   # hip-config-amd.cmake caches GPU_BUILD_TARGETS without FORCE, so on a
