@@ -18,7 +18,7 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-"""Guards the module-isolation contract of the mock tier.
+"""Guards the module-isolation contract.
 
 A suite that leaves a stub in ``sys.modules`` shadows the real module for every
 test that runs after it, and the resulting ImportError surfaces in an unrelated
@@ -29,8 +29,9 @@ import os
 import sys
 import unittest
 
+from common.common import ModuleIsolationMixin
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_MOCK_DIR = os.path.join(_THIS_DIR, "mock")
 _TOP_LEVEL_DIR = os.path.dirname(_THIS_DIR)
 
 # typing.io and friends are hand-built module objects too, so shape alone cannot
@@ -63,12 +64,22 @@ def _looks_like_stub(name):
     )
 
 
+def _isolating_suite():
+    """Suites that declare the contract, found by marker rather than by path."""
+    discovered = unittest.TestLoader().discover(
+        start_dir=_THIS_DIR, pattern="test_*.py", top_level_dir=_TOP_LEVEL_DIR
+    )
+    suite = unittest.TestSuite()
+    for test in _iter_tests(discovered):
+        if isinstance(test, ModuleIsolationMixin):
+            suite.addTest(test)
+    return suite
+
+
 class TestModuleIsolation(unittest.TestCase):
-    def test_mock_tier_restores_sys_modules_and_sys_path(self):
-        suite = unittest.TestLoader().discover(
-            start_dir=_MOCK_DIR, pattern="test_*.py", top_level_dir=_TOP_LEVEL_DIR
-        )
-        self.assertGreater(suite.countTestCases(), 0, "no mock tests discovered")
+    def test_isolating_suites_restore_sys_modules_and_sys_path(self):
+        suite = _isolating_suite()
+        self.assertGreater(suite.countTestCases(), 0, "no isolating tests discovered")
 
         declared = _declared_isolated_modules(suite)
         self.assertTrue(declared, "no suite declares ISOLATED_MODULES")
@@ -79,7 +90,7 @@ class TestModuleIsolation(unittest.TestCase):
         with open(os.devnull, "w") as devnull:
             result = unittest.TextTestRunner(stream=devnull, verbosity=0).run(suite)
         self.assertTrue(
-            result.wasSuccessful(), "mock tier must pass for this guard to mean anything"
+            result.wasSuccessful(), "isolating suites must pass for this guard to mean anything"
         )
 
         not_restored = sorted(n for n in declared if sys.modules.get(n) is not before[n])

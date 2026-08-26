@@ -635,11 +635,14 @@ def _filter_suite_exclude(suite, pattern):
     return filtered
 
 
-def run_test_dir(subdir, title, top_level_dir):
-    """Discover and run every test under *top_level_dir*/*subdir*, then exit.
+def run_test_dir(subdirs, title, top_level_dir):
+    """Discover and run every test under *top_level_dir*/*subdirs*, then exit.
 
-    Single implementation of the runner boilerplate shared by the three entry
-    scripts (integration_test.py / cli_unit_test.py / unit_tests.py): it handles
+    *subdirs* is a single tier name or a sequence of them, so one tier can be
+    run alone or several together in one report.
+
+    Single implementation of the runner boilerplate shared by the entry
+    scripts (run_tests.py and the per-tier wrappers): it handles
     ``-h``/``--help``, ``-k``/``--keyword`` filtering, ``-l``/``--list``, the
     root-privilege check, the legend/title preamble, output buffering
     (``-b``/``--buffer``) and the GTest-style summary runner.  Never returns —
@@ -659,13 +662,21 @@ def run_test_dir(subdir, title, top_level_dir):
     if k_pattern:
         loader.testNamePatterns = [f"*{k_pattern}*"]
 
-    start_dir = os.path.join(top_level_dir, subdir)
-    suite = loader.discover(start_dir=start_dir, pattern="test_*.py", top_level_dir=top_level_dir)
+    tiers = [subdirs] if isinstance(subdirs, str) else list(subdirs)
+    suite = unittest.TestSuite()
+    for tier in tiers:
+        start_dir = os.path.join(top_level_dir, tier)
+        if not os.path.isdir(start_dir):
+            print(f"ERROR: no such test tier: {start_dir}", file=sys.stderr)
+            sys.exit(2)
+        suite.addTests(
+            loader.discover(start_dir=start_dir, pattern="test_*.py", top_level_dir=top_level_dir)
+        )
 
     # An empty suite is "successful", so without this a mislaid or unpackaged
     # test tree exits 0 and silently reports nothing. A -k miss is not an error.
     if suite.countTestCases() == 0 and not k_pattern:
-        print(f"ERROR: no tests discovered under {start_dir}", file=sys.stderr)
+        print(f"ERROR: no tests discovered under {', '.join(tiers)}", file=sys.stderr)
         sys.exit(2)
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of

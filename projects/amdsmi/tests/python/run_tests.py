@@ -19,23 +19,31 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-"""
-Integration test runner — discovers and runs all tests under integration/.
-These tests require live hardware and may require elevated privileges (sudo/root).
+
+"""Unified test runner — run one tier, several, or all of them.
+
+Tiers:
+    unit           hardware-free logic and mocked-CLI suites
+    integration    per-API suites that drive live devices
+    functional     end-to-end behaviour suites
+    cli            amd-smi command-line suites
 
 Usage (installed):
-    /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
-    /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v
-    /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "power" -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/run_tests.py --unit -v
 
 Usage (source):
-    tests/python/integration_test.py -v
+    tests/python/run_tests.py                        # every tier
+    tests/python/run_tests.py --unit                 # one tier
+    tests/python/run_tests.py --unit --integration   # several
+    tests/python/run_tests.py --all -v
 
 Options:
+    --all             Run every tier (the default when no tier is named)
     -v / --verbose    Verbose output (show per-test names)
     -q / --quiet      Quiet output
     -b / --buffer     Buffer stdout/stderr during tests
     -k "pattern"      Only run tests matching the substring
+    -x "pattern"      Skip tests matching the substring
     --list / -l       List all available tests without running them
 """
 
@@ -49,4 +57,13 @@ sys.path.insert(0, _here)
 
 import common.common as common  # noqa: E402  (sys.path bootstrapped above)
 
-common.run_test_dir("integration", "AMD SMI Integration Tests", _here)
+TIERS = ("unit", "integration", "functional", "cli")
+
+if "-h" in sys.argv or "--help" in sys.argv:
+    print(__doc__)
+
+selected = [tier for tier in TIERS if f"--{tier}" in sys.argv]
+if not selected or "--all" in sys.argv:
+    selected = list(TIERS)
+
+common.run_test_dir(selected, f"AMD SMI Tests ({', '.join(selected)})", _here)

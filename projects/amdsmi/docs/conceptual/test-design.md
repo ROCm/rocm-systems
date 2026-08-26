@@ -22,8 +22,8 @@ The test suite redesign has four goals:
 3. **Selective execution** — CI and developers can run only the tests relevant to a component or
    feature without maintaining manual filter lists.
 4. **Test-type clarity** — Test types are structurally separated so they can run in different
-   environments. C++ unit tests never touch hardware; the Python `unit/` tree mixes logic-only
-   suites with live-device API suites (see the Test type taxonomy below).
+   environments. Neither C++ nor Python unit tests touch hardware; the Python suites that
+   drive a live device live in `integration/` (see the Test type taxonomy below).
 
 ## Component taxonomy
 
@@ -41,7 +41,8 @@ The test suite redesign has four goals:
 
 | Type | Directory | Hardware required | Framework |
 | :--- | :--- | :--- | :--- |
-| **Unit** | `unit/` | No for C++; yes for the Python API suites — see below | C++: `TEST()` macro · Python: `unittest` |
+| **Unit** | `unit/` | No | C++: `TEST()` macro · Python: `unittest` |
+| **Integration** | `integration/` | Yes — one suite per API area | Python: `unittest` |
 | **Functional** | `functional/` | Yes — runs against a live device | C++: `TestBase` lifecycle · Python: `unittest` |
 
 Performance benchmarks belong in `functional/` because they require a real device to produce
@@ -49,9 +50,9 @@ meaningful timing data.
 
 ### The Python API tier
 
-`unit/<component>/` owns per-API coverage for the Python bindings and drives a live device to get
-it. Each API gets one test that does two things, both built on
-[`common/common.py`](../../tests/python/common/common.py):
+`integration/<component>/` owns per-API coverage for the Python bindings and drives a live device
+to get it. Each API gets one test that does two things, both built on
+[`common/api_test.py`](../../tests/python/common/api_test.py):
 
 | Driver | Contract |
 | :--- | :--- |
@@ -224,11 +225,12 @@ of touching hardware is still a **unit test**. In C++ mocked and non-mocked unit
 live side by side under `unit/<component>/`, organized by *what* they test rather than *how* they
 are isolated, and the technique shows up in the filename (`mock_<feature>_test.cc`).
 
-Python cannot do the same. Its mock suites replace entries in `sys.modules`, which is process-wide
-state that outlives the test unless it is restored, so they are grouped under `unit/mock/` where a
-single guard ([`unit/test_module_isolation.py`](../../tests/python/unit/test_module_isolation.py))
-can assert the whole tier cleans up after itself. The split is a containment boundary, not a
-separate test level — see [Python test structure](#python-test-structure).
+Python cannot do the same. Its mocked suites replace entries in `sys.modules`, which is
+process-wide state that outlives the test unless it is restored, so each one declares the
+`ModuleIsolationMixin` contract and a single guard
+([`unit/test_module_isolation.py`](../../tests/python/unit/test_module_isolation.py)) collects them
+by that marker and asserts they clean up after themselves. The marker is the containment boundary,
+not a separate test level — see [Python test structure](#python-test-structure).
 
 The cper suite shows both styles:
 
@@ -380,11 +382,23 @@ tests/python/
 │   ├── common.py                      # Common base class, device enumeration, error mapping, runner machinery
 │   └── runcmd.py                      # CLI subprocess wrapper
 │
-├── unit/                              # Logic tests plus the live-device API suites
+├── unit/                              # No hardware: logic and mocked-import suites
 │   ├── __init__.py
-│   ├── test_module_isolation.py       # Guards that mock/ restores sys.modules and sys.path
+│   ├── test_module_isolation.py       # Guards that isolating suites restore sys.modules/sys.path
 │   ├── gpu/
-│   │   ├── test_apu_metrics.py        # APU metrics interface helpers (no hardware)
+│   │   ├── test_apu_metrics.py        # APU metrics interface helpers
+│   │   ├── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly
+│   │   └── ...                        # kfd_process_gpus, vcn_busy_navi, cli_* suites
+│   └── system/
+│       ├── test_bdf.py                # BDF string parsing and formatting
+│       ├── test_check_res.py          # amdsmi_check_res return-code validation
+│       └── test_output_file_stdin.py  # CLI --file/stdin handling
+│
+├── integration/                       # Live device: one suite per API area
+│   ├── __init__.py
+│   ├── test_api_coverage.py           # Every public API must be driven by a suite here
+│   ├── test_memory_partition_lifecycle.py  # Standalone sudo script, not a runner suite
+│   ├── gpu/
 │   │   ├── test_power.py              # Every GPU power API: rejection + validated reads
 │   │   └── ...                        # clock, memory, thermal, ras, partition, pci, xgmi, ...
 │   ├── cpu/
@@ -393,15 +407,9 @@ tests/python/
 │   ├── nic/
 │   │   ├── test_identity.py           # Every NIC discovery API: rejection + validated reads
 │   │   └── test_switch.py
-│   ├── system/
-│   │   ├── test_bdf.py                # BDF string parsing and formatting (no hardware)
-│   │   ├── test_check_res.py          # amdsmi_check_res return-code validation
-│   │   ├── test_lifecycle.py          # init, discovery and version APIs
-│   │   └── test_topology.py           # topology, link and affinity APIs
-│   └── mock/                          # Suites that replace amdsmi or the CLI's imports
-│       ├── gpu/
-│       │   ├── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly
-│       │   └── ...
+│   └── system/
+│       ├── test_lifecycle.py          # init, discovery and version APIs
+│       └── test_topology.py           # topology, link and affinity APIs
 │       └── system/
 │           ├── test_output_file_stdin.py  # --file overwrite prompt and its non-TTY guard
 │           └── ...
@@ -466,7 +474,9 @@ tests/python/
 │   ├── test_fabric.py
 │   └── test_ras.py                    # ras (+ afid folder)
 │
-├── integration_test.py               # Runner: discovers and runs functional/ tests
+├── run_tests.py                      # Runner: any tier, several, or all of them
+├── integration_test.py               # Runner: discovers and runs integration/ tests
+├── functional_test.py                # Runner: discovers and runs functional/ tests
 ├── cli_unit_test.py                  # Runner: discovers and runs cli/ tests
 ├── unit_tests.py                     # Runner: discovers and runs unit/ tests
 ├── CMakeLists.txt                    # Installs this tree into the python_unittest/ path
@@ -495,7 +505,10 @@ declares `needs_peer=True` so that a single-device host reports why it skipped.
 
 ### Running Python tests
 
-Three top-level runner scripts install under `python_unittest/`, keeping the same path as before.
+Top-level runner scripts install under `python_unittest/`, keeping the same path as before.
+`run_tests.py` takes `--unit`, `--integration`, `--functional` and `--cli` and runs any combination
+of them in one report; naming no tier runs them all. The per-tier scripts remain for running one
+tier on its own.
 All support `-v`, `-b`, `-q`, `-k "pattern"` (include), and `-x "pattern"` (exclude — the inverse
 of `-k`, skips tests whose id contains the pattern). Run from source by substituting
 `tests/python/` for the install path.
@@ -503,12 +516,14 @@ of `-k`, skips tests whose id contains the pattern). Run from source by substitu
 **List all available tests** (no hardware, no execution):
 
 ```shell
+/opt/rocm/share/amd_smi/tests/python_unittest/run_tests.py --list
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py --list
 /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py --list
+/opt/rocm/share/amd_smi/tests/python_unittest/functional_test.py --list
 /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py --list
 ```
 
-**All unit tests** (the per-component API suites need a live device; the logic tests do not):
+**All unit tests** (no hardware required):
 
 ```shell
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
@@ -517,7 +532,7 @@ of `-k`, skips tests whose id contains the pattern). Run from source by substitu
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "metric" -v
 ```
 
-**All functional (integration) tests** (live hardware, root may be required):
+**All functional tests** (live hardware, root may be required):
 
 ```shell
 /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
@@ -648,9 +663,9 @@ shown in parentheses.
 
 | Old file (`tests/python_unittest/`) | New location (`tests/python/`) |
 | :--- | :--- |
-| `unit_tests.py` | `unit/<component>/test_<feature>.py` (e.g. `unit/system/test_bdf.py`, `unit/gpu/test_power.py`); suites that stub `sys.modules` live under `unit/mock/<component>/` |
+| `unit_tests.py` | `unit/<component>/test_<feature>.py` for logic (e.g. `unit/system/test_bdf.py`) and `integration/<component>/test_<feature>.py` for the per-API suites (e.g. `integration/gpu/test_power.py`); a suite that stubs `sys.modules` declares `ModuleIsolationMixin` |
 | `integration_test.py` | `functional/<component>/test_<feature>.py` (e.g. `functional/system/test_init.py`, `functional/gpu/test_power.py`, `functional/nic/test_discovery.py`) |
-| `partition_metric_unit_test.py` | `unit/mock/gpu/test_cli_metric_partition.py` |
+| `partition_metric_unit_test.py` | `unit/gpu/test_cli_metric_partition.py` |
 | `cli_unit_test.py` | `cli/test_<command>.py`, one per command (shared scaffolding in `cli/base.py`) |
 | `perf_tests.py` | `functional/gpu/test_benchmark.py` |
 | `perf_cputests.py` | `functional/cpu/test_benchmark.py` |

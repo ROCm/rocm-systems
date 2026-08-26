@@ -26,7 +26,7 @@ import unittest
 
 import common.common as common
 
-_UNIT_DIR = pathlib.Path(__file__).resolve().parent
+_TIER_DIR = pathlib.Path(__file__).resolve().parent
 
 # Naming an API in a comment or a message must not count as covering it, so
 # match only the drivers that actually call one.
@@ -46,14 +46,14 @@ class TestApiCoverage(unittest.TestCase):
             if name.startswith("amdsmi_") and callable(getattr(common.amdsmi, name))
         }
         driven = set()
-        for path in _UNIT_DIR.rglob("test_*.py"):
+        for path in _TIER_DIR.rglob("test_*.py"):
             driven |= set(_DRIVEN.findall(path.read_text()))
 
         missing = sorted(public - driven)
         self.assertEqual(
             missing,
             [],
-            "public APIs with no test under tests/python/unit; add one per API "
+            "public APIs with no test under tests/python/integration; add one per API "
             f"or the coverage silently rots: {missing}",
         )
 
