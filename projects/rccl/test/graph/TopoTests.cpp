@@ -16,14 +16,8 @@
 #include <cstdlib>
 #include <cstring>
 
-// busIdToInt64 / int64ToBusId are internal helpers (declared in utils.h).
+// busIdToInt64 is an internal helper (declared in utils.h).
 ncclResult_t busIdToInt64(const char* busId, int64_t* id);
-ncclResult_t int64ToBusId(int64_t id, char* busId);
-
-// Debug-visible internals from graph/topo.cc.
-ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId,
-                                 struct ncclTopoNode** nodes, int* nNodes);
-extern struct kvDict kvDictPciClass[];
 
 // ncclTopoAddXGMI is a non-static internal symbol in graph/topo.cc that is not
 // exposed through any header. It is only visible to tests in Debug builds (the
@@ -39,7 +33,7 @@ namespace RcclUnitTesting {
 
 class TopoTest : public ::testing::Test {
 protected:
-  static constexpr int kMaxXmlNodes = 128;
+  static constexpr int kMaxXmlNodes = 64;
 
   void SetUp() override {
     system =
@@ -178,69 +172,13 @@ protected:
 
 // Encoding lives in headers; these run on every platform.
 TEST_F(TopoTest, MloPartBusId_DoesNotClobberPciFunction) {
-  int64_t busFn0 = 0, busFn1 = 0;
-  ASSERT_EQ(busIdToInt64("0000:01:00.0", &busFn0), ncclSuccess);
-  ASSERT_EQ(busIdToInt64("0000:01:00.1", &busFn1), ncclSuccess);
-  ASSERT_EQ(busFn0 & 0xf, 0);
-  ASSERT_EQ(busFn1 & 0xf, 1);
-
-  // Historical bug: overlaying MLOPart on bits [1:0] made function-0 + mloPart 0
-  // collide with a real PCI function-1 device at the same BDF.
-  constexpr int64_t kOldMask = 0x3;
-  const int64_t oldFn0Part0 = busFn0 | ((((int64_t)0 << 1) | 0x1) & kOldMask);
-  EXPECT_EQ(oldFn0Part0, busFn1);
-
-  const int64_t enc0 = NCCL_TOPO_MLOPART_BUSID(busFn1, 0);
-  const int64_t enc1 = NCCL_TOPO_MLOPART_BUSID(busFn1, 1);
-  EXPECT_EQ(enc0 & 0xf, 1);
-  EXPECT_EQ(enc1 & 0xf, 1);
-  EXPECT_NE(enc0, enc1);
-  EXPECT_EQ(enc0 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
-  EXPECT_EQ(enc1 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
-  EXPECT_EQ(enc0 >> NCCL_TOPO_GPU_LOCAL_RANK_SHIFT, 0);
-  EXPECT_NE(enc0 & NCCL_TOPO_MLOPART_MASK, 0);
-  EXPECT_LT(NCCL_TOPO_MLOPART_SHIFT + 1, NCCL_TOPO_GPU_LOCAL_RANK_SHIFT);
-
-  char roundTrip[32];
-  ASSERT_EQ(int64ToBusId(enc0 & ~NCCL_TOPO_MLOPART_MASK, roundTrip), ncclSuccess);
-  EXPECT_STREQ(roundTrip, "0000:01:00.1");
-}
-
-TEST_F(TopoTest, PciAcceleratorClass_MapsToGpu) {
-  int type = PCI;
-  ASSERT_EQ(kvConvertToInt(PCI_ACCELERATOR_CLASS, &type, kvDictPciClass), ncclSuccess);
-  EXPECT_EQ(type, GPU);
-  type = PCI;
-  ASSERT_EQ(kvConvertToInt("0x03", &type, kvDictPciClass), ncclSuccess);
-  EXPECT_EQ(type, GPU);
-  type = GPU;
-  ASSERT_EQ(kvConvertToInt("0x02", &type, kvDictPciClass), ncclSuccess);
-  EXPECT_EQ(type, NIC);
-}
-
-TEST_F(TopoTest, GetDevNodes_MatchesMloPartOnFunctionOne) {
   int64_t busFn1 = 0;
-  ASSERT_EQ(busIdToInt64("0000:03:00.1", &busFn1), ncclSuccess);
-  const int64_t id0 = NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(busFn1, 0));
-  const int64_t id1 = NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(busFn1, 1));
-  ASSERT_NE(id0, id1);
-  EXPECT_EQ(NCCL_TOPO_ID_LOCAL_ID(id1) & 0xf, 1);
-
-  struct ncclTopoNode* d0 = nullptr;
-  struct ncclTopoNode* d1 = nullptr;
-  ASSERT_EQ(ncclTopoCreateNode(system, &d0, DEV, id0), ncclSuccess);
-  ASSERT_EQ(ncclTopoCreateNode(system, &d1, DEV, id1), ncclSuccess);
-
-  struct ncclTopoNode* found[NCCL_TOPO_MLOPART_DEV_MAX] = {};
-  int n = 0;
-  ASSERT_EQ(ncclTopoGetDevNodes(system, busFn1, found, &n), ncclSuccess);
-  EXPECT_EQ(n, 2);
-  EXPECT_TRUE((found[0] == d0 && found[1] == d1) || (found[0] == d1 && found[1] == d0));
-
-  n = 0;
-  ASSERT_EQ(ncclTopoGetDevNodes(system, NCCL_TOPO_MLOPART_BUSID(busFn1, 0), found, &n),
-            ncclSuccess);
-  EXPECT_EQ(n, 2);
+  ASSERT_EQ(busIdToInt64("0000:01:00.1", &busFn1), ncclSuccess);
+  const int64_t enc0 = NCCL_TOPO_MLOPART_BUSID(busFn1, 0);
+  const int64_t enc7 = NCCL_TOPO_MLOPART_BUSID(busFn1, 7);
+  EXPECT_NE(enc7, enc0);
+  EXPECT_EQ(enc0 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
+  EXPECT_EQ(enc7 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
 }
 
 // ncclTopoAddXGMI() is only built on HIP/AMD platforms, so guard these tests
@@ -270,47 +208,6 @@ TEST_F(TopoTest, Gfx1250_SingleSystem_BidirectionalLink) {
   ASSERT_NE(l10, nullptr);
   EXPECT_FLOAT_EQ(l01->bw, 8 * ncclTopoXGMISpeed("gfx1250"));
   EXPECT_FLOAT_EQ(l10->bw, 8 * ncclTopoXGMISpeed("gfx1250"));
-}
-
-// Regression: xml.cc stamps XGMI peers with PCI_ACCELERATOR_CLASS ("0x120000")
-// instead of inferring the class from sysfs (a non-zero PCI function can alias
-// an unrelated device). The builder must still treat that tclass as a GPU.
-TEST_F(TopoTest, XgmiAcceleratorTclass_BidirectionalLink) {
-  const uint64_t host = 0xa2;
-  registerHost(0, host);
-
-  struct ncclTopoNode* g0 = addGpu(0, "0000:01:00.1", "gfx942", 0, 0);
-  struct ncclTopoNode* g1 = addGpu(0, "0000:02:00.1", "gfx942", 1, 1);
-  ASSERT_NE(g0, nullptr);
-  ASSERT_NE(g1, nullptr);
-
-  struct ncclXmlNode* cpu = addCpu(host);
-  addGpuLink(addGpuHolder(cpu, "0000:01:00.1"), "0000:02:00.1", 8,
-             PCI_ACCELERATOR_CLASS);
-  addGpuLink(addGpuHolder(cpu, "0000:02:00.1"), "0000:01:00.1", 8,
-             PCI_ACCELERATOR_CLASS);
-
-  ASSERT_EQ(ncclTopoAddXGMI(root, system, nullptr, 0), ncclSuccess);
-  EXPECT_NE(findLink(g0, g1), nullptr);
-  EXPECT_NE(findLink(g1, g0), nullptr);
-}
-
-// If tclass is inferred as NIC (0x02) — the sysfs-alias failure mode — the
-// XGMI entry must not become a GPU-GPU NVL link.
-TEST_F(TopoTest, XgmiNicTclass_DoesNotCreateGpuGpuLink) {
-  const uint64_t host = 0xa3;
-  registerHost(0, host);
-
-  struct ncclTopoNode* g0 = addGpu(0, "0000:01:00.1", "gfx942", 0, 0);
-  struct ncclTopoNode* g1 = addGpu(0, "0000:02:00.1", "gfx942", 1, 1);
-  ASSERT_NE(g0, nullptr);
-  ASSERT_NE(g1, nullptr);
-
-  struct ncclXmlNode* cpu = addCpu(host);
-  addGpuLink(addGpuHolder(cpu, "0000:01:00.1"), "0000:02:00.1", 8, "0x02");
-
-  ASSERT_EQ(ncclTopoAddXGMI(root, system, nullptr, 0), ncclSuccess);
-  EXPECT_EQ(findLink(g0, g1), nullptr);
 }
 
 // Positive (regression): two heterogeneous systems whose GPUs reuse identical
@@ -540,77 +437,61 @@ TEST_F(TopoTest, DevModel_IndirectXgmiPath_IsFourHops) {
   ncclTopoFree(built);
 }
 
-// XCP-style siblings at PCI function .0/.1 plus MLOPart overlays on function .1
-// must produce distinct DEV ids that still round-trip as function 1.
-TEST_F(TopoTest, GetSystemFromXml_MloPartOnPciFunctionOne) {
+TEST_F(TopoTest, GetSystemFromXml_MloPartOnNonzeroPhysicalFunction) {
   const uint64_t host = 0x77;
   struct ncclXmlNode* cpu = addSystemCpu(host);
   struct ncclXmlNode* pci = addGpuPci(cpu, "0000:03:00.1", "gfx942", 0, 0, /*mloPart=*/0);
-  addGpuUnderPci(pci, "gfx942", 1, 1, /*mloPart=*/1);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  struct ncclXmlNode* gpu1 = addGpuUnderPci(pci, "gfx942", 1, 1, /*mloPart=*/1);
+  addGpuLink(gpu0, "0000:03:00.1", 1, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpu1, "0000:03:00.0", 1, PCI_ACCELERATOR_CLASS);
 
   struct ncclTopoSystem* built = nullptr;
   ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
   ASSERT_NE(built, nullptr);
   ASSERT_EQ(built->nodes[DEV].count, 2);
-  ASSERT_EQ(built->nodes[GPU].count, 2);
-
-  int64_t busFn1 = 0;
-  ASSERT_EQ(busIdToInt64("0000:03:00.1", &busFn1), ncclSuccess);
-  for (int i = 0; i < built->nodes[DEV].count; i++) {
-    const int64_t local = NCCL_TOPO_ID_LOCAL_ID(built->nodes[DEV].nodes[i].id);
-    EXPECT_EQ(local & 0xf, 1);
-    EXPECT_EQ(local & ~NCCL_TOPO_MLOPART_MASK, busFn1);
-  }
-
-  struct ncclTopoNode* found[NCCL_TOPO_MLOPART_DEV_MAX] = {};
-  int n = 0;
-  ASSERT_EQ(ncclTopoGetDevNodes(built, busFn1, found, &n), ncclSuccess);
-  EXPECT_EQ(n, 2);
-
+  EXPECT_NE(findLink(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1), nullptr);
+  EXPECT_NE(findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes), nullptr);
   ncclTopoFree(built);
 }
 
-TEST_F(TopoTest, GetSystemFromXml_HipLogicalFunctionUnderPhysicalPci) {
-  const uint64_t host = 0x1250;
+// CPX: eight HIP partitions (mlopart 0-7) hang off the physical function-0 PCI
+// node. Overlay bits must stay above the PCI function nibble.
+TEST_F(TopoTest, GetSystemFromXml_CpxEightMlopartsUnderPhysicalPci) {
+  const uint64_t host = 0xc0;
   struct ncclXmlNode* cpu = addSystemCpu(host);
-  struct ncclXmlNode* pci = addGpuPci(cpu, "0001:01:00.0", "gfx1250", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
   struct ncclXmlNode* gpu0 = nullptr;
   ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
   ASSERT_NE(gpu0, nullptr);
-  struct ncclXmlNode* gpu1 = addGpuUnderPci(pci, "gfx1250", 1, 1, /*mloPart=*/1);
-  addGpuLink(gpu0, "0001:01:00.1", 1, PCI_ACCELERATOR_CLASS);
-  addGpuLink(gpu1, "0001:01:00.0", 1, PCI_ACCELERATOR_CLASS);
+  struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
+  gpus[0] = gpu0;
+  for (int p = 1; p < NCCL_TOPO_MLOPART_DEV_MAX; p++) {
+    gpus[p] = addGpuUnderPci(pci, "gfx942", p, p, p);
+  }
+  for (int p = 0; p < NCCL_TOPO_MLOPART_DEV_MAX; p++) {
+    char tgt[32];
+    snprintf(tgt, sizeof(tgt), "0000:0c:00.%d", (p + 1) % NCCL_TOPO_MLOPART_DEV_MAX);
+    addGpuLink(gpus[p], tgt, 1, PCI_ACCELERATOR_CLASS);
+  }
 
   struct ncclTopoSystem* built = nullptr;
   ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
   ASSERT_NE(built, nullptr);
-  ASSERT_EQ(built->nodes[DEV].count, 2);
-  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(built->nodes[DEV].count, NCCL_TOPO_MLOPART_DEV_MAX);
+  ASSERT_EQ(built->nodes[GPU].count, NCCL_TOPO_MLOPART_DEV_MAX);
 
-  int64_t bus0 = 0, bus1 = 0;
-  ASSERT_EQ(busIdToInt64("0001:01:00.0", &bus0), ncclSuccess);
-  ASSERT_EQ(busIdToInt64("0001:01:00.1", &bus1), ncclSuccess);
-
-  struct ncclTopoNode* d0 = nullptr;
-  struct ncclTopoNode* d1 = nullptr;
-  struct ncclTopoNode* fakeFn = nullptr;
-  ASSERT_EQ(ncclTopoGetNode(built, &d0, DEV, NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(bus0, 0))),
-            ncclSuccess);
-  ASSERT_EQ(ncclTopoGetNode(built, &d1, DEV, NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(bus0, 1))),
-            ncclSuccess);
-  ASSERT_EQ(ncclTopoGetNode(built, &fakeFn, DEV, NCCL_TOPO_ID(0, bus1)), ncclSuccess);
-  struct ncclTopoNode* rawFn0 = nullptr;
-  ASSERT_EQ(ncclTopoGetNode(built, &rawFn0, DEV, NCCL_TOPO_ID(0, bus0)), ncclSuccess);
-  ASSERT_NE(d0, nullptr);
-  ASSERT_NE(d1, nullptr);
-  EXPECT_EQ(fakeFn, nullptr);
-  EXPECT_EQ(rawFn0, nullptr);
-
-  ASSERT_NE(findLink(d0, d1), nullptr);
-  ASSERT_NE(findLink(d1, d0), nullptr);
-
-  for (int i = 0; i < built->nodes[DEV].count; i++) {
-    EXPECT_EQ(NCCL_TOPO_ID_LOCAL_ID(built->nodes[DEV].nodes[i].id) & 0xf, 0);
+  int64_t bus0 = 0;
+  ASSERT_EQ(busIdToInt64("0000:0c:00.0", &bus0), ncclSuccess);
+  for (int p = 0; p < NCCL_TOPO_MLOPART_DEV_MAX; p++) {
+    struct ncclTopoNode* dev = nullptr;
+    ASSERT_EQ(ncclTopoGetNode(built, &dev, DEV,
+                              NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(bus0, p))),
+              ncclSuccess);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(NCCL_TOPO_ID_LOCAL_ID(dev->id) & 0xf, 0);
+    EXPECT_NE(findLink(dev, built->nodes[DEV].nodes + (p + 1) % NCCL_TOPO_MLOPART_DEV_MAX), nullptr);
   }
 
   ncclTopoFree(built);

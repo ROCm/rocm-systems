@@ -612,7 +612,6 @@ ncclResult_t ncclTopoGetDevNodes(struct ncclTopoSystem* system, int64_t baseId, 
 
 static ncclResult_t ncclTopoCheckMloPartBusId(int64_t busId) {
   // check that the bits used for mlopart information are free and always 0 to avoid collision.
-  // A PCI busId only occupies bits [35:0], so this can only fire on a malformed busId.
   if (busId & NCCL_TOPO_MLOPART_MASK) {
     WARN(
       "BusId 0x%lx has non-zero bits in MLOPart mask 0x%llx, cannot encode MLOPart partition index without collision",
@@ -834,12 +833,11 @@ ncclResult_t ncclTopoAddCpu(struct ncclXmlNode* xmlCpu, struct ncclTopoSystem* s
 
 static ncclResult_t ncclTopoGetGpuDevNode(struct ncclXmlNode* xmlGpu, const char* busId, int systemId,
                                           struct ncclTopoSystem* system, struct ncclTopoNode** devNode) {
-  int mloPart, sm;
+  int mloPart;
   int64_t rawBusId;
   NCCLCHECK(busIdToInt64(busId, &rawBusId));
   NCCLCHECK(ncclTopoCheckMloPartBusId(rawBusId));
   NCCLCHECK(xmlGetAttrIntDefault(xmlGpu, "mlopart", &mloPart, NCCL_TOPO_UNDEF));
-  NCCLCHECK(xmlGetAttrInt(xmlGpu, "sm", &sm));
   int64_t devBusId =
     (mloPart != NCCL_TOPO_UNDEF && ncclParamTopoSplitMlopart()) ? NCCL_TOPO_MLOPART_BUSID(rawBusId, mloPart) : rawBusId;
   NCCLCHECK(ncclTopoGetNode(system, devNode, DEV, NCCL_TOPO_ID(systemId, devBusId)));
@@ -865,24 +863,30 @@ static ncclResult_t ncclTopoXmlIsPrimaryGpuForDev(struct ncclXmlNode* xmlGpu, bo
   return ncclSuccess;
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 static ncclResult_t ncclTopoGetDevForPciBusId(struct ncclTopoSystem* system, int systemId, int64_t busId,
                                               struct ncclTopoNode** devNode) {
   *devNode = NULL;
   NCCLCHECK(ncclTopoGetNode(system, devNode, DEV, NCCL_TOPO_ID(systemId, busId)));
   if (*devNode) return ncclSuccess;
-  // HIP logical GPU BDFs keep the fake function nibble; DEV ids for those
-  // partitions use the physical function-0 busId plus the MLOPart overlay.
-  // Function 0 with mlopart=0 is also overlaid (enable bit set), so a raw .0
-  // XGMI target must fall back to that overlay id.
+  // HIP uses the function nibble as the partition index. Match an overlaid DEV
+  // on the same PCI domain:bus:device, regardless of its physical function.
   int fn = (int)(busId & 0xf);
-  if (fn < 0 || fn >= NCCL_TOPO_MLOPART_DEV_MAX) return ncclSuccess;
+  if (fn >= NCCL_TOPO_MLOPART_DEV_MAX) return ncclSuccess;
   int64_t phys = busId & ~0xfLL;
-  NCCLCHECK(ncclTopoCheckMloPartBusId(phys));
-  NCCLCHECK(ncclTopoGetNode(system, devNode, DEV, NCCL_TOPO_ID(systemId, NCCL_TOPO_MLOPART_BUSID(phys, fn))));
+  for (int d = 0; d < system->nodes[DEV].count; d++) {
+    struct ncclTopoNode* candidate = system->nodes[DEV].nodes + d;
+    int64_t local = NCCL_TOPO_ID_LOCAL_ID(candidate->id);
+    if (NCCL_TOPO_ID_SYSTEM_ID(candidate->id) == systemId &&
+        (local & ~(NCCL_TOPO_MLOPART_MASK | 0xfLL)) == phys &&
+        (local & NCCL_TOPO_MLOPART_MASK) == NCCL_TOPO_MLOPART(fn)) {
+      *devNode = candidate;
+      break;
+    }
+  }
   return ncclSuccess;
 }
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // RCCL: XGMI is the AMD analogue of NVLink. Upstream v2.30 introduced the generic DEV
 // (physical device) topology node, with GPU (rank) nodes hanging off their parent DEV node
 // via LINK_LOC. ncclTopoComputePaths()/search now assemble inter-GPU links as DEV->DEV hops

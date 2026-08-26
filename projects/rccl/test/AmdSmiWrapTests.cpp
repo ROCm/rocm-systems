@@ -327,17 +327,12 @@ TEST(AmdSmiWrapFabricPaths, LibraryPathMatchesSysfs)
 
             EXPECT_EQ(libInfo.fabricSupported, sysfsInfo.supported == 1)
                 << "amd_smi and sysfs disagree on whether device 0 has fabric";
-            // Unconfigured ualink is a node setup issue. Both backends must agree it
-            // is not usable; they need not agree on sentinels (lib zeros vs sysfs
-            // UNKNOWN / 0xffffffff) until the fabric is actually ready/active.
-            if (libInfo.fabricSupported && sysfsInfo.supported == 1) {
-              EXPECT_EQ(static_cast<int>(libInfo.fabricType), static_cast<int>(sysfsInfo.fabric_type));
-              EXPECT_EQ(static_cast<int>(libInfo.state), static_cast<int>(sysfsInfo.accel_state));
-              EXPECT_EQ(libInfo.acceleratorId, sysfsInfo.accel_id);
-              EXPECT_EQ(libInfo.ppodSize, sysfsInfo.ppod_size);
-              EXPECT_EQ(libInfo.cliqueId, sysfsInfo.vpod_id);
-              EXPECT_EQ(libInfo.vpodSize, sysfsInfo.vpod_size);
-            }
+            EXPECT_EQ(static_cast<int>(libInfo.fabricType), static_cast<int>(sysfsInfo.fabric_type));
+            EXPECT_EQ(static_cast<int>(libInfo.state), static_cast<int>(sysfsInfo.accel_state));
+            EXPECT_EQ(libInfo.acceleratorId, sysfsInfo.accel_id);
+            EXPECT_EQ(libInfo.ppodSize, sysfsInfo.ppod_size);
+            EXPECT_EQ(libInfo.cliqueId, sysfsInfo.vpod_id);
+            EXPECT_EQ(libInfo.vpodSize, sysfsInfo.vpod_size);
 
             EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
         },

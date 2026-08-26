@@ -29,13 +29,32 @@
 // Arbitrarily large number for constructing virtual topology string
 #define NCCL_MAX_XML_DEPTH 1024
 
-static int ncclTopoPciClassIsGpuOrAccel(const char* deviceClass) {
+static int ncclTopoPciClassIsGpu(const char* deviceClass) {
   if (deviceClass == NULL || deviceClass[0] == '\0') return 0;
   if (strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0) return 1;
-  if (strncmp(deviceClass, PCI_NVSWITCH_CLASS, strlen(PCI_NVSWITCH_CLASS)) == 0) return 1;
   if (strncmp(deviceClass, "0x03", 4) == 0) return 1;
   return 0;
 }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// XGMI peers come from accelerator enumeration, so do not infer their class
+// from a HIP alias BDF that may be missing or identify another PCI function.
+static ncclResult_t ncclTopoXmlAddXgmiPeerGpu(struct ncclXml* xml, struct ncclXmlNode* gpuNode, const char* target,
+                                              int count, struct ncclXmlNode** nodeOut, int* createdOut = NULL) {
+  struct ncclXmlNode* node = NULL;
+  NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &node, "target", target));
+  int created = node == NULL;
+  if (created) {
+    NCCLCHECK(xmlAddNode(xml, gpuNode, "xgmi", &node));
+    NCCLCHECK(xmlSetAttr(node, "target", target));
+    NCCLCHECK(xmlSetAttrInt(node, "count", count));
+    NCCLCHECK(xmlSetAttr(node, "tclass", PCI_ACCELERATOR_CLASS));
+  }
+  if (nodeOut) *nodeOut = node;
+  if (createdOut) *createdOut = created;
+  return ncclSuccess;
+}
+#endif
 
 /*******************/
 /* XML File Parser */
@@ -915,9 +934,9 @@ exit:
 }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-// HIP may expose a second logical GPU at function .1 of the same device while
-// sysfs at that BDF is a different function (often a NIC). Link those HIP
-// siblings with 1-hop XGMI even when SMI only enumerates the physical GPU.
+// HIP may expose logical GPUs at function .1-.7 of the same device while sysfs
+// at that BDF is missing or a different function. Link those HIP siblings with
+// 1-hop XGMI even when SMI only enumerates the physical GPU.
 static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct ncclXmlNode* gpuNode,
                                                    struct ncclXmlNode* pciNode, uint32_t xmlDev) {
   const char* pciBusId = NULL;
@@ -1050,12 +1069,10 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
           // fabricSupported is false and discovery falls through to 1-hop XGMI.
           // Either path stamps accelerator tclass: HIP bus IDs need not exist on
           // the physical PCI bus, so sysfs class at that BDF is not the peer GPU.
-          int created = 0;
-          NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-          if (nvlNode == NULL) created = 1;
+          int created;
           // count=1: amd-smi does not yet report UALoE link count.
           // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE.
-          NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvlNode));
+          NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvlNode, &created));
           if (created) {
             uint64_t uuidHigh = 0;
             uint64_t uuidLow = 0;
@@ -1082,10 +1099,8 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
                 lowerId[c] = tolower(busIdStr[c]);
                 if (busIdStr[c] == 0) break;
               }
-              int created = 0;
-              NCCLCHECK(xmlGetSubKv(gpuNode, "xgmi", &nvlNode, "target", lowerId));
-              if (nvlNode == NULL) created = 1;
-              NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, count, &nvlNode));
+              int created;
+              NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, count, &nvlNode, &created));
               if (created) {
                 NCCLCHECK(xmlSetAttrInt(nvlNode, "fabric_supported", 0));
               }
@@ -1221,17 +1236,10 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
     }
   }
 #endif
-  NCCLCHECK(ncclTopoXmlFillLinkTclass(gpuNode));
-  *gpuNodeRet = gpuNode;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoXmlFillLinkTclass(struct ncclXmlNode* gpuNode) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // Sysfs class is only meaningful for a physical PCI function. HIP can name a
   // logical GPU at a BDF that is not on the bus (e.g. function .1); ualink
-  // configured or not does not change that. Trust GPU/accelerator/switch class,
-  // otherwise keep the peer as an accelerator.
+  // configured or not does not change that. Trust only GPU/accelerator classes.
 #endif
   for (int s = 0; s < gpuNode->nSubs; s++) {
     struct ncclXmlNode* sub = gpuNode->subs[s];
@@ -1255,10 +1263,10 @@ ncclResult_t ncclTopoXmlFillLinkTclass(struct ncclXmlNode* gpuNode) {
         if (ncclOsGetPciDeviceClassByBusId(busId, deviceClass, sizeof(deviceClass)) == ncclSuccess &&
             deviceClass[0] != '\0') {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-          int gpuOrSwitch = ncclTopoPciClassIsGpuOrAccel(deviceClass);
-          if (!gpuOrSwitch) {
+          int isGpu = ncclTopoPciClassIsGpu(deviceClass);
+          if (!isGpu) {
             INFO(NCCL_GRAPH,
-                 "XGMI target %s sysfs class %s is not a GPU/switch (HIP logical BDF?); using accelerator tclass",
+                 "XGMI target %s sysfs class %s is not a GPU (HIP logical BDF?); using accelerator tclass",
                  busId, deviceClass);
             NCCLCHECK(xmlSetAttr(sub, "tclass", PCI_ACCELERATOR_CLASS));
           } else {
@@ -1281,6 +1289,7 @@ ncclResult_t ncclTopoXmlFillLinkTclass(struct ncclXmlNode* gpuNode) {
       }
     }
   }
+  *gpuNodeRet = gpuNode;
   return ncclSuccess;
 }
 
@@ -1290,8 +1299,9 @@ ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct nccl
   char physBusId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // HIP logical GPUs can sit at a BDF that is not the GPU's PCI function (DPX
-  // function .1 is often a NIC in sysfs). Attach the <gpu> under the physical
-  // function-0 PCI node; mlopart is filled from the fake function in fillInfo.
+  // function .1 is often a NIC in sysfs; CPX .1-.7 are missing from sysfs).
+  // Attach the <gpu> under the physical function-0 PCI node; mlopart is filled
+  // from the fake function in fillInfo.
   int64_t hipId = 0;
   NCCLCHECK(busIdToInt64(busId, &hipId));
   int fn = (int)(hipId & 0xf);
@@ -1299,7 +1309,7 @@ ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct nccl
     char deviceClass[MAX_STR_LEN];
     deviceClass[0] = '\0';
     (void)ncclOsGetPciDeviceClassByBusId(busId, deviceClass, sizeof(deviceClass));
-    if (!ncclTopoPciClassIsGpuOrAccel(deviceClass)) {
+    if (!ncclTopoPciClassIsGpu(deviceClass)) {
       NCCLCHECK(int64ToBusId(hipId & ~0xfLL, physBusId));
       pciBusId = physBusId;
       INFO(NCCL_GRAPH,
