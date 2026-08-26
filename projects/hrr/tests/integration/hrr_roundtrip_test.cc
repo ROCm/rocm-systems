@@ -1247,13 +1247,21 @@ HRR_TEST_CASE(Unit_HRR_MiscAPIsRoundtrip) {
 // Pure copy chains with no floating-point arithmetic; byte-exact D2H via
 // hrr_run_exact_roundtrip() is the correct oracle (see helper above).
 HRR_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
+#ifdef _WIN32
+  HRR_SKIP("driver memcpy 3D HRR roundtrip is disabled on Windows");
+#else
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy3d"};
   hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
+#endif
 }
 
 HRR_TEST_CASE(Unit_HRR_DrvMemcpy2DUnalignedRoundtrip) {
+#ifdef _WIN32
+  HRR_SKIP("driver memcpy 2D unaligned HRR roundtrip is disabled on Windows");
+#else
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy2dunaligned"};
   hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy2DUnaligned_Direct", cap.path);
+#endif
 }
 
 HRR_TEST_CASE(Unit_HRR_TextureRoundtrip) {

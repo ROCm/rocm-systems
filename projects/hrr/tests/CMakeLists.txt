@@ -34,5 +34,8 @@ find_package(hip CONFIG REQUIRED)
 add_subdirectory(unit)
 
 if(HRR_BUILD_INTEGRATION_TESTS)
+  if(NOT HRR_BUILD_PLAYBACK)
+    message(FATAL_ERROR "HRR_BUILD_INTEGRATION_TESTS requires HRR_BUILD_PLAYBACK because integration tests spawn hrr-playback")
+  endif()
   add_subdirectory(integration)
 endif()
