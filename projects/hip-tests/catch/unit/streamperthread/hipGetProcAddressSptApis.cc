@@ -2501,12 +2501,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_spt_LaunchKernel) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_spt_LaunchCooperativeKernel) {
-  hipDeviceProp_t device_properties;
-  HIP_CHECK(hipGetDeviceProperties(&device_properties, 0));
-
-  if (!device_properties.cooperativeLaunch) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-  }
+  CHECK_COOPERATIVE_LAUNCH_SUPPORT
 
   void* hipLaunchCooperativeKernel_spt_ptr = nullptr;
 

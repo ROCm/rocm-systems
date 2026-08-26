@@ -1,67 +1,38 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/decoder.h"
 
-#include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/instruction.h"
-#include <memory>
+#include "rocjitsu/isa/target_registry.h"
 
 namespace rocjitsu {
 
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
+                                         std::string_view target_id) {
+  const IsaTargetDescriptor *target = registry.find(target_id);
+  return target == nullptr ? nullptr : target->decoder_factory();
+}
+
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_code_arch_t arch) {
+  const IsaTargetDescriptor *target = registry.find(arch);
+  return target == nullptr ? nullptr : target->decoder_factory();
+}
+
 Decoder::~Decoder() {
-  // If this decoder's pool is still the active one, deactivate it so
-  // surviving instructions (held by callers in unique_ptr/vectors) fall
-  // back to ::operator delete instead of following a dangling pool pointer.
-  if (Instruction::alloc_pool_ == &pool_)
-    deactivate_pool();
+  // Clear direct and temporarily suppressed references to this pool so no
+  // later allocation scope can restore a pointer into a destroyed decoder.
+  Instruction::invalidate_allocator_pool(&pool_);
 }
 
-Instruction *Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc) {
-  Instruction *decoded = decode(inst);
-  if (decoded != nullptr)
-    decoded->src_loc_ = src_loc;
+void Decoder::disable_pool() { Instruction::invalidate_allocator_pool(&pool_); }
+
+DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
+                             const DecodeErrorEmitter &emit_error) {
+  DecodeResult decoded = decode(inst, emit_error);
+  if (decoded.succeeded())
+    decoded.value()->src_loc_ = src_loc;
   return decoded;
-}
-
-std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
-  /*
-   * \NPI new ISA family: #include its arch/amdgpu/<isa>/isa.h above and add a \
-   * case returning std::make_unique<IsaDecoder<<isa>::Isa>>() here.
-   */
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-    return std::make_unique<IsaDecoder<cdna1::Isa>>();
-  case ROCJITSU_CODE_ARCH_CDNA2:
-    return std::make_unique<IsaDecoder<cdna2::Isa>>();
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    return std::make_unique<IsaDecoder<cdna3::Isa>>();
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return std::make_unique<IsaDecoder<cdna4::Isa>>();
-  case ROCJITSU_CODE_ARCH_RDNA1:
-    return std::make_unique<IsaDecoder<rdna1::Isa>>();
-  case ROCJITSU_CODE_ARCH_RDNA2:
-    return std::make_unique<IsaDecoder<rdna2::Isa>>();
-  case ROCJITSU_CODE_ARCH_RDNA3:
-    return std::make_unique<IsaDecoder<rdna3::Isa>>();
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return std::make_unique<IsaDecoder<rdna3_5::Isa>>();
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return std::make_unique<IsaDecoder<rdna4::Isa>>();
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return std::make_unique<IsaDecoder<gfx1250::Isa>>();
-  default:
-    return nullptr;
-  }
 }
 
 void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
@@ -70,10 +41,19 @@ void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
   Instruction::alloc_pool_ = pool;
 }
 
-void Decoder::deactivate_pool() {
-  Instruction::alloc_fn_ = nullptr;
-  Instruction::dealloc_fn_ = nullptr;
-  Instruction::alloc_pool_ = nullptr;
+Result Decoder::validate_instruction_operands(const Instruction &inst,
+                                              const DecodeErrorEmitter &emit_error) {
+  for (int index = 0; index < inst.num_src_operands(); ++index) {
+    if (const Operand *operand = inst.src_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  for (int index = 0; index < inst.num_dst_operands(); ++index) {
+    if (const Operand *operand = inst.dst_operand(index))
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+        return Result::failure();
+  }
+  return Result::success();
 }
 
 } // namespace rocjitsu

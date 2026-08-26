@@ -9,6 +9,7 @@
 #include <random>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace simdojo {
 
@@ -83,6 +84,18 @@ Port *resolve_port_impl(CompositeComponent *root, const std::string &path) {
   return find_or_create_port(comp, pn);
 }
 
+void validate_link_ports([[maybe_unused]] Port *src, [[maybe_unused]] Port *dst) {
+  // Validate port protocol compatibility (UNTYPED matches anything).
+  assert((src->protocol() == PortProtocol::UNTYPED || dst->protocol() == PortProtocol::UNTYPED ||
+          src->protocol() == dst->protocol()) &&
+         "link endpoints must have compatible protocols");
+  // Validate port direction: link goes from OUT to IN (or UNTYPED).
+  assert((src->direction() == PortDirection::OUT || src->protocol() == PortProtocol::UNTYPED) &&
+         "link source must be an OUT port");
+  assert((dst->direction() == PortDirection::IN || dst->protocol() == PortProtocol::UNTYPED) &&
+         "link destination must be an IN port");
+}
+
 } // namespace
 
 ClockDomain *Topology::add_clock_domain(std::string name, uint64_t frequency_hz,
@@ -94,21 +107,26 @@ ClockDomain *Topology::add_clock_domain(std::string name, uint64_t frequency_hz,
 }
 
 Link *Topology::add_link(Port *src, Port *dst, Tick latency, uint32_t weight) {
-  // Validate port protocol compatibility (UNTYPED matches anything).
-  assert((src->protocol() == PortProtocol::UNTYPED || dst->protocol() == PortProtocol::UNTYPED ||
-          src->protocol() == dst->protocol()) &&
-         "link endpoints must have compatible protocols");
-  // Validate port direction: link goes from OUT to IN (or UNTYPED).
-  assert((src->direction() == PortDirection::OUT || src->protocol() == PortProtocol::UNTYPED) &&
-         "link source must be an OUT port");
-  assert((dst->direction() == PortDirection::IN || dst->protocol() == PortProtocol::UNTYPED) &&
-         "link destination must be an IN port");
+  validate_link_ports(src, dst);
 
   auto link = std::make_unique<Link>(next_link_id_++, src, dst, latency);
   link->set_weight(weight);
   src->set_link(link.get());
   dst->set_link(link.get());
   Link *raw = link.get();
+  links_.push_back(std::move(link));
+  return raw;
+}
+
+QueuedLink *Topology::add_queued_link(Port *src, Port *dst, Tick latency, size_t capacity,
+                                      uint32_t weight) {
+  validate_link_ports(src, dst);
+
+  auto link = std::make_unique<QueuedLink>(next_link_id_++, src, dst, latency, capacity);
+  link->set_weight(weight);
+  src->set_link(link.get());
+  dst->set_link(link.get());
+  QueuedLink *raw = link.get();
   links_.push_back(std::move(link));
   return raw;
 }
@@ -126,6 +144,16 @@ std::vector<Component *> Topology::collect_all_components() const {
   if (root_ != nullptr)
     root_->collect_components(result);
   return result;
+}
+
+void Topology::append_link_endpoint_owners(std::vector<Component *> &components) const {
+  std::unordered_set<Component *> collected(components.begin(), components.end());
+  for (const auto &link : links_) {
+    for (Component *owner : {link->src()->owner(), link->dst()->owner()}) {
+      if (owner && collected.insert(owner).second)
+        components.push_back(owner);
+    }
+  }
 }
 
 uint32_t Topology::num_components() const {
@@ -184,10 +212,14 @@ void Topology::dfs_visit(std::function<void(Component *, uint32_t)> visitor) con
   }
 }
 
-void Topology::partition(uint32_t num_partitions) {
-  auto components = collect_all_components();
+void Topology::partition_balanced(uint32_t num_partitions) {
+  if (num_partitions == 0)
+    throw std::invalid_argument("partition_balanced: num_partitions must be nonzero");
 
-  if (num_partitions <= 1) {
+  auto components = collect_all_components();
+  append_link_endpoint_owners(components);
+
+  if (num_partitions == 1) {
     Partition part;
     part.id = 0;
     part.components = std::move(components);
@@ -213,21 +245,36 @@ void Topology::partition(uint32_t num_partitions) {
 
 void Topology::partition_manual(uint32_t num_partitions,
                                 std::function<PartitionID(Component *)> assigner) {
+  if (num_partitions == 0)
+    throw std::invalid_argument("partition_manual: num_partitions must be nonzero");
+
   auto components = collect_all_components();
+  append_link_endpoint_owners(components);
 
-  partitions_.clear();
-  partitions_.resize(num_partitions);
-  for (uint32_t i = 0; i < num_partitions; ++i)
-    partitions_[i].id = i;
-
+  std::vector<PartitionID> assignments;
+  assignments.reserve(components.size());
   for (auto *comp : components) {
     PartitionID pid = assigner(comp);
-    assert(pid < num_partitions && "partition_manual: assigner returned out-of-range ID");
-    comp->set_partition_id(pid);
-    partitions_[pid].components.push_back(comp);
-    partitions_[pid].total_weight += comp->weight();
+    if (pid >= num_partitions)
+      throw std::invalid_argument("partition_manual: assigner returned out-of-range ID");
+    assignments.push_back(pid);
   }
 
+  std::vector<Partition> partitions(num_partitions);
+  for (uint32_t i = 0; i < num_partitions; ++i)
+    partitions[i].id = i;
+
+  for (size_t i = 0; i < components.size(); ++i) {
+    auto *comp = components[i];
+    PartitionID pid = assignments[i];
+    partitions[pid].components.push_back(comp);
+    partitions[pid].total_weight += comp->weight();
+  }
+
+  for (size_t i = 0; i < components.size(); ++i)
+    components[i]->set_partition_id(assignments[i]);
+
+  partitions_ = std::move(partitions);
   classify_links();
 }
 

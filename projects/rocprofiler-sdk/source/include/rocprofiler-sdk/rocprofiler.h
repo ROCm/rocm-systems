@@ -120,6 +120,7 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler-sdk/dispatch_counting_service.h"
 #include "rocprofiler-sdk/external_correlation.h"
 #include "rocprofiler-sdk/hip.h"
+#include "rocprofiler-sdk/hipfile.h"
 #include "rocprofiler-sdk/hsa.h"
 #include "rocprofiler-sdk/intercept_table.h"
 #include "rocprofiler-sdk/internal_threading.h"
@@ -129,6 +130,7 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler-sdk/rccl.h"
 #include "rocprofiler-sdk/rocdecode.h"
 #include "rocprofiler-sdk/rocjpeg.h"
+#include "rocprofiler-sdk/rocshmem.h"
 // #include "rocprofiler-sdk/spm.h"
 
 // subject to removal

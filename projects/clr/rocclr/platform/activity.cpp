@@ -141,10 +141,15 @@ void ReportActivity(const amd::Command& command) {
     // kernel_names and timestamps are both populated only when profiling is active
     // at dispatch time. Walk the shorter of the two as a safety bound.
     for (uint32_t i = 0; i < kernel_names.size() && i < timestamps.size(); i++) {
-      auto it = timestamps[i];
-      record.begin_ns = it.first;
-      record.end_ns = it.second;
+      auto& ts = timestamps[i];
+      record.begin_ns = ts.start;
+      record.end_ns = ts.end;
       record.kernel_name = kernel_names[i];
+      // Use per-packet queue_index when available so each kernel is assigned
+      // to the internal parallel stream it ran on, not the launch stream.
+      if (ts.queue_index != UINT32_MAX) {
+        record.queue_id = static_cast<uint64_t>(ts.queue_index);
+      }
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {

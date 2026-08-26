@@ -1,0 +1,10 @@
+# Build artifacts for the standalone rocshmem4py project
+build/
+build_nanobind*/
+dist/
+*.egg-info/
+*.so
+
+# Python caches
+__pycache__/
+*.py[cod]

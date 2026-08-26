@@ -234,20 +234,8 @@ void _convert_entry_to_device(CuidFileEntry &entry, DevicePtr &device) {
     cpu_info.header.fields.cpu.device_id = entry.device_id;
     cpu_info.header.fields.cpu.revision_id = entry.revision_id;
     cpu_info.header.fields.cpu.unit_id = entry.unit_id;
-
-    // Split package_core_id by colon into package and core
-    uint16_t package = 0;
-    uint16_t core = 0;
-    size_t colon_pos = entry.package_core_id.find(':');
-    if (colon_pos != std::string::npos) {
-      package = static_cast<uint16_t>(
-          std::stoul(entry.package_core_id.substr(0, colon_pos)));
-      core = static_cast<uint16_t>(
-          std::stoul(entry.package_core_id.substr(colon_pos + 1)));
-    }
-
-    cpu_info.header.fields.cpu.physical_id = package;
-    cpu_info.header.fields.cpu.core = core;
+    cpu_info.header.fields.cpu.physical_id = entry.package_id;
+    cpu_info.header.fields.cpu.core = entry.core_id;
     // Restore device_node for unique CPU identification (needed for SMT)
     cpu_info.device_node = entry.device_node;
     device = std::make_shared<CuidCpu>(cpu_info);

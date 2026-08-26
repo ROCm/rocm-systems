@@ -23,6 +23,7 @@
 #include "ptrace_session.hpp"
 
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 
@@ -30,7 +31,6 @@
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 #include <rocprofiler-sdk-rocattach/types.h>
 
-#include <filesystem>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -45,6 +45,8 @@ namespace rocattach
 {
 namespace
 {
+namespace fs = common::filesystem;
+
 using session_t = rocprofiler::rocattach::PTraceSession;
 
 struct pid_entry_t
@@ -174,6 +176,14 @@ build_environment_buffer()
             // only take envvars starting with ROCP
             continue;
         }
+        constexpr auto register_library_env = "ROCPROFILER_REGISTER_LIBRARY=";
+        if(std::string_view{var}.find(register_library_env) == 0)
+        {
+            // ROCPROFILER_REGISTER_LIBRARY is set by the attaching process's SDK and may
+            // contain a host-only, fully versioned path. Do not propagate it to the target;
+            // let rocprofiler-register resolve the SDK in the target environment.
+            continue;
+        }
 
         var_count++;
         ROCP_TRACE << "[rocprofiler-sdk-rocattach] Adding to environment buffer: " << var;
@@ -207,7 +217,7 @@ resolve_attach_tid(pid_t pid)
 {
     auto            task_dir = "/proc/" + std::to_string(pid) + "/task";
     std::error_code ec;
-    for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
+    for(const auto& entry : fs::directory_iterator(task_dir, ec))
     {
         if(!entry.is_directory()) continue;
 
@@ -238,12 +248,105 @@ resolve_attach_tid(pid_t pid)
 }
 
 rocattach_status_t
+validate_target_absolute_tool_path(pid_t pid, const fs::path& tool_path)
+{
+    auto target_path = fs::path{fmt::format("/proc/{}/root", pid)} / tool_path.relative_path();
+    std::error_code ec;
+    if(!fs::exists(target_path, ec))
+    {
+        if(ec)
+        {
+            // If host-side validation is blocked by procfs permissions or namespace
+            // restrictions, keep attachment best-effort and let target-side dlopen
+            // report the final load failure.
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
+                         << tool_path.string() << "' at " << target_path.string()
+                         << " from the target process mount namespace: " << ec.message();
+            return ROCATTACH_STATUS_SUCCESS;
+        }
+
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_path.string()
+                   << "' is absolute but is not visible at " << target_path.string()
+                   << " from the target process mount namespace. Attachment requires "
+                      "ROCPROF_ATTACH_TOOL_LIBRARY to name a library path that target-side "
+                      "dlopen can resolve.";
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    if(!fs::is_regular_file(target_path, ec))
+    {
+        if(ec)
+        {
+            // If host-side validation is blocked by procfs permissions or namespace
+            // restrictions, keep attachment best-effort and let target-side dlopen
+            // report the final load failure.
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Could not validate tool library path '"
+                         << tool_path.string() << "' at " << target_path.string()
+                         << " from the target process mount namespace: " << ec.message();
+            return ROCATTACH_STATUS_SUCCESS;
+        }
+
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path '" << tool_path.string()
+                   << "' is absolute but does not refer to a regular file at "
+                   << target_path.string() << " from the target process mount namespace.";
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    return ROCATTACH_STATUS_SUCCESS;
+}
+
+rocattach_status_t
 setup(int pid)
 {
     // Setup attachment for rocprofiler
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attachment library rocattach_attach function called "
                   "for pid "
                << pid;
+
+    auto status = ROCATTACH_STATUS_SUCCESS;
+
+    // Build the tool library path before ptrace setup so invalid absolute paths
+    // fail before modifying target process state. Do not honor the user-controllable
+    // ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution context (setuid/setgid,
+    // file capabilities, etc.), so an unprivileged user cannot cause a privileged attach
+    // helper to inject an arbitrary library.
+    constexpr auto default_tool_lib_path = std::string_view{"librocprofiler-sdk-tool.so"};
+    auto           tool_lib_path_env     = std::string{default_tool_lib_path};
+    auto           tool_lib_path_override =
+        rocprofiler::common::get_env_optional("ROCPROF_ATTACH_TOOL_LIBRARY");
+    if(rocprofiler::common::is_at_secure())
+    {
+        if(tool_lib_path_override)
+        {
+            ROCP_WARNING << "[rocprofiler-sdk-rocattach] Ignoring ROCPROF_ATTACH_TOOL_LIBRARY "
+                            "override in secure-execution context; using generic tool library "
+                         << default_tool_lib_path;
+        }
+    }
+    else if(tool_lib_path_override)
+    {
+        tool_lib_path_env = *tool_lib_path_override;
+    }
+    const char* tool_lib_path = tool_lib_path_env.c_str();
+    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
+
+    auto tool_path = fs::path{tool_lib_path_env};
+    if(tool_path.empty())
+    {
+        ROCP_ERROR << "[rocprofiler-sdk-rocattach] Tool library path must not be empty.";
+        return ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    // Bare or relative library names must be resolved by dlopen in the target
+    // process using the target's loader search path and working directory.
+    if(tool_path.is_absolute())
+    {
+        status = validate_target_absolute_tool_path(pid, tool_path);
+        if(status != ROCATTACH_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
 
     auto*      sessions = CHECK_NOTNULL(get_sessions());
     session_t* session;
@@ -274,7 +377,6 @@ setup(int pid)
         sessions->emplace(pid, target_tid);
         session = &(sessions->at(pid).session);
     }
-    auto status = ROCATTACH_STATUS_SUCCESS;
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Attempting attachment to pid " << pid;
     status = session->attach();
@@ -296,17 +398,7 @@ setup(int pid)
         return status;
     }
 
-    // Build and write tool library path to target process. Do not honor the
-    // user-controllable ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution
-    // context (setuid/setgid, file capabilities, etc.), so an unprivileged user
-    // cannot cause a privileged attach helper to inject an arbitrary library.
-    auto        tool_lib_path_env = rocprofiler::common::is_at_secure()
-                                        ? std::string{"librocprofiler-sdk-tool.so"}
-                                        : rocprofiler::common::get_env("ROCPROF_ATTACH_TOOL_LIBRARY",
-                                                                "librocprofiler-sdk-tool.so");
-    const char* tool_lib_path     = tool_lib_path_env.c_str();
-    ROCP_TRACE << "[rocprofiler-sdk-rocattach] Tool library path: " << tool_lib_path;
-
+    // Build and write tool library path to target process.
     size_t               tool_lib_path_len = strlen(tool_lib_path) + 1;
     std::vector<uint8_t> tool_lib_buffer(tool_lib_path, tool_lib_path + tool_lib_path_len);
 
@@ -387,7 +479,7 @@ collect_process_tree(pid_t root_pid)
 
         auto            task_dir = "/proc/" + std::to_string(pid) + "/task";
         std::error_code ec;
-        for(const auto& entry : std::filesystem::directory_iterator(task_dir, ec))
+        for(const auto& entry : fs::directory_iterator(task_dir, ec))
         {
             if(!entry.is_directory()) continue;
             auto          children_path = entry.path() / "children";

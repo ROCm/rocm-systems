@@ -75,10 +75,7 @@ public:
   }
 
   /// Register an LDS write and validate against outstanding reads.
-  void ldsWrite(int wave, int lane, int addr, int bytes, uint64_t exec = 0) {
-    if (!exec) {
-      exec = defaultExec_;
-    }
+  void ldsWrite(int wave, int lane, int addr, int bytes) {
     detector_->validateWrite(addr, WaveId{wave}, lane, bytes);
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
@@ -90,11 +87,7 @@ public:
   /// Register an LDS read and validate against outstanding writes.
   /// byteMask: which bytes of the destination VGPR are written by this load
   /// (0xF=full, 0x3=lo D16, 0xC=hi D16). Used for byte-level race tracking.
-  void ldsRead(int wave, int lane, int addr, int bytes, int vgprDst, uint8_t byteMask = 0xF,
-               uint64_t exec = 0) {
-    if (!exec) {
-      exec = defaultExec_;
-    }
+  void ldsRead(int wave, int lane, int addr, int bytes, int vgprDst, uint8_t byteMask = 0xF) {
     detector_->validateRead(addr, WaveId{wave}, lane, bytes);
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
@@ -132,6 +125,14 @@ public:
 
   void checkVgprReadLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
     waves_[wave]->checkVgprReadLanes(reg, laneMask, byteMask);
+  }
+
+  void checkVgprWrite(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
+    waves_[wave]->checkVgprWrite(reg, lane, byteMask);
+  }
+
+  void checkVgprWriteLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
+    waves_[wave]->checkVgprWriteLanes(reg, laneMask, byteMask);
   }
 
   void checkSgprRead(int wave, int reg) { waves_[wave]->checkSgprRead(reg); }

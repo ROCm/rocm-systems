@@ -93,6 +93,7 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     fork
     videodecode
     jpegdecode
+    hipfile
     roctx
     thread-limit
     transferBench
@@ -100,6 +101,7 @@ set(ROCPROFSYS_EXAMPLE_DIRS
     shmem
     scratch-memory
     sdma-test
+    rocshmem
     unified-memory
     minimal
 )

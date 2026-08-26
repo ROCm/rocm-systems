@@ -43,7 +43,9 @@
 #include <cstring>
 #include <cinttypes>
 #include <cstddef>
+#include <atomic>
 
+#include "util/atomic_helpers.h"
 #include "impl/wddm/queue.h"
 #include "impl/registers.h"
 
@@ -63,6 +65,11 @@ extern wsl::thunk::GpuMemory* GetGpuMemoryFromAddress(void* memory_address);
 
 namespace wsl {
 namespace thunk {
+
+// Format value in a VENDOR_SPECIFIC AQL packet's ven_hdr identifying a PM4
+// indirect-buffer packet (amd_aql_pm4_ib). A VENDOR_SPECIFIC slot is only fully
+// published once ven_hdr holds this; until then the body is still being written.
+static constexpr uint16_t AMD_AQL_FORMAT_PM4_IB = 0x1;
 
 hsa_status_t WDDMQueue::SwsInit(void) {
   if (!device->CreateSyncobj(&syncobj, &sync_addr)) return HSA_STATUS_ERROR;
@@ -663,7 +670,7 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   int major = device->Major();
-  int i = ib_size;
+  uint32_t i = ib_size;
 
   const amd_kernel_code_t* kernel_object =
       (const amd_kernel_code_t*)GetKernelObjAddr(packet->kernel_object);
@@ -816,7 +823,7 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
   }
 
   int major = device->Major();
-  int i = ib_size;
+  uint32_t i = ib_size;
 
   if (packet->completion_signal.handle != 0) {
     amd_signal_t* signal = (amd_signal_t*)packet->completion_signal.handle;
@@ -868,7 +875,6 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
 }
 
 hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* packet) {
-  constexpr uint32_t AMD_AQL_FORMAT_PM4_IB = 0x1;
   assert(packet->ven_hdr == AMD_AQL_FORMAT_PM4_IB);
 
   uint8_t op = (packet->ib_jump_cmd[0] >> PM4_OPCODE_SHIFT) & 0xff;
@@ -877,16 +883,42 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
       reinterpret_cast<uint32_t*>((static_cast<uint64_t>(packet->ib_jump_cmd[2]) << 32) |
                                   (static_cast<uint64_t>(packet->ib_jump_cmd[1]) & ~3ull));
   uint32_t pm4_size = packet->ib_jump_cmd[3] & 0xfffff;
+  size_t required_size = platform_atomic_support_ ? sizeof(AtomicTemplate)
+                                                  : sizeof(WriteDataTemplate);
+  bool process_packet = dxg_runtime->vendor_packet_process;
+
+  if (process_packet) {
+    required_size += static_cast<size_t>(pm4_size) * sizeof(uint32_t);
+
+    if (packet->completion_signal.handle != 0) {
+      required_size += sizeof(BarrierTemplate);
+      required_size += device->Major() == 9 ? sizeof(gfx9::AcquireMemTemplate)
+                                            : sizeof(gfx10::AcquireMemTemplate);
+
+      if (EnableProfiling()) required_size += 2 * sizeof(PM4MEC_COPY_DATA);
+      if (platform_atomic_support_) required_size += sizeof(AtomicTemplate);
+    }
+  }
+
+  if (required_size > cmdbuf_aql_frame_size) {
+    pr_err("PM4 command buffer overflow in VendorSpecific: required %zu bytes, limit %u bytes\n",
+           required_size, cmdbuf_aql_frame_size);
+    // Oversized vendor IB: drop the PM4 payload but still retire the AQL
+    // packet and signal completion, matching the existing
+    // vendor_packet_process=off skip contract below (no queue hang).
+    process_packet = false;
+  }
+
   pr_debug("queue %p %s VENDOR_SPECIFIC pkt pm4_addr %p pm4_size %#x cs=%" PRIx64 "\n", ring,
-           dxg_runtime->vendor_packet_process ? "process" : "skip", pm4_addr, pm4_size,
+           process_packet ? "process" : "skip", pm4_addr, pm4_size,
            packet->completion_signal.handle);
   for (int i = 0; i < pm4_size; i++) {
     pr_debug("pm4_addr[%d]=%#x\n", i, pm4_addr[i]);
   }
 
-  int i = ib_size;
+  uint32_t i = ib_size;
 
-  if (dxg_runtime->vendor_packet_process) {
+  if (process_packet) {
     int major = device->Major();
     memcpy(cpu + i, pm4_addr, pm4_size * sizeof(uint32_t));
     i += pm4_size * sizeof(uint32_t);
@@ -932,22 +964,28 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
     i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t*)ring_rptr,
                                           cmdbuf_aql_frame_write_index + 1);
 
-  // Check if we exceeded the frame size
-  if ((i - ib_size) > cmdbuf_aql_frame_size) {
-    pr_err("PM4 command buffer overflow in VendorSpecific: used %" PRIu64 " bytes, limit %u bytes\n",
-           i - ib_size, cmdbuf_aql_frame_size);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
+  // Safety net: required_size above must stay in lockstep with the Build*
+  // calls emitted in this function. Catch drift in debug builds if a new
+  // Build* call is added without a matching required_size term.
+  assert((i - ib_size) <= cmdbuf_aql_frame_size);
 
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
+  // Clear ven_hdr on consume so a recycled slot can't transiently read a stale
+  // PM4-IB format before the next producer republishes its body.
+  packet->ven_hdr = 0;
   packet->header = HSA_PACKET_TYPE_INVALID;
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
   uint16_t* packet = (uint16_t*)((char*)ring + (cmdbuf_aql_frame_write_index % ring_size) * 64);
-  uint16_t header = (*packet >> HSA_PACKET_HEADER_TYPE);
+  // Acquire-load the header to pair with the producer's release publication so
+  // the packet body is fully visible before we read it; a plain read races the
+  // producer's burst commit (it bumps the write index before the slot body is
+  // visible) and yields a half-published packet.
+  uint16_t header =
+      (rocr::atomic::Load(packet, std::memory_order_acquire) >> HSA_PACKET_HEADER_TYPE);
   header &= (1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
   hsa_kernel_dispatch_packet_t* aql_packet = (hsa_kernel_dispatch_packet_t*)packet;
   hsa_status_t ret;
@@ -975,6 +1013,13 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
       BarrierGenericAqlToPm4((char*)ib_start_addr, (hsa_barrier_and_packet_t*)aql_packet, true);
       break;
     case HSA_PACKET_TYPE_VENDOR_SPECIFIC:
+      // A burst commit makes the producer bump the write index before the new
+      // slot's body is fully visible: the header can already read VENDOR_SPECIFIC
+      // (type 0, which passes the INVALID gate) while ven_hdr still holds the slot's
+      // stale value. Treat that as not-yet-published and retry next iteration,
+      // exactly like an INVALID packet.
+      if (((amd_aql_pm4_ib*)aql_packet)->ven_hdr != AMD_AQL_FORMAT_PM4_IB)
+        return HSA_STATUS_SUCCESS;
       VendorSpecificAqlToPm4((char*)ib_start_addr, (amd_aql_pm4_ib*)aql_packet);
       break;
     case HSA_PACKET_TYPE_INVALID:

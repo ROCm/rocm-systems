@@ -84,12 +84,15 @@ option(BUILD_BFD                               "Enable custom backtrace (if bfd.
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
-option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} example plugins" OFF)
+option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
+option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
+option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
 # relocations (PC32/PLT32/GOTPCRELX/32S) between .text and the read-only /
 # writable data clusters stay in range even when the bundled device fat
@@ -106,8 +109,19 @@ option(QP_TRACKING                             "Enable per-device QP tracking"  
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
-option(ENABLE_ROCSHMEM                         "Link librocshmem.a into librccl.so (full rocSHMEM device+host integration)" OFF)
-option(ENABLE_ROCSHMEM_GIN                     "Compile GIN rocshmem plugins; symbols resolved at runtime by the executable" OFF)
+# rocSHMEM integration (mutually exclusive — enabling both causes duplicate
+# rocshmem state between librccl.so and the executable at runtime):
+#   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
+#     via -fgpu-rdc --hip-link.  Does not enable GIN plugins.
+#   ENABLE_ROCSHMEM_GIN: GIN plugins (GDA, SDMA).  Device symbols (QueuePair)
+#     resolved via per-arch bitcode injection; host symbols resolved at runtime
+#     from the executable.  Does not enable alltoall_wg offload.
+option(ENABLE_ROCSHMEM                         "Full rocSHMEM: link librocshmem.a into librccl.so (alltoall_wg offload)" OFF)
+option(ENABLE_ROCSHMEM_GIN                     "GIN plugins: device bitcode injected at build, host resolved at runtime" OFF)
+if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
+  message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
+endif()
+set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device unit tests with ENABLE_ROCSHMEM on test targets only (no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
@@ -164,10 +178,23 @@ set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGE
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
-    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  set(_suffix "asan")
+  set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
+  foreach(_clang_rt_name ${_clang_rt_names})
+    execute_process(
+      COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=${_clang_rt_name}
+      OUTPUT_VARIABLE _clang_rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+    # If _clang_rt_path is libclang_rt.asan-x86_64.so
+    # rather than /path/to/libclang_rt.asan-x86_64.so then
+    # we failed to locate it.
+    if(IS_ABSOLUTE "${_clang_rt_path}" AND EXISTS "${_clang_rt_path}")
+      get_filename_component(ASAN_RUNTIME_DIR "${_clang_rt_path}" DIRECTORY)
+      break()
+    endif()
+  endforeach()
+  if(NOT ASAN_RUNTIME_DIR)
+    message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so or libclang_rt.asan.so")
+  endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
   SET(amdgpu_targets "")
@@ -540,8 +567,10 @@ endif()
 
 # Check for --amdgpu-kernarg-preload-count
 check_cxx_compiler_flag("-mllvm --amdgpu-kernarg-preload-count=16" HAVE_KERNARG_PRELOAD)
-if (HAVE_KERNARG_PRELOAD)
+if (HAVE_KERNARG_PRELOAD AND NOT DISABLE_KERNARG_PRELOAD)
   message(STATUS "Kernarg preloading to SGPR enabled")
+elseif (HAVE_KERNARG_PRELOAD AND DISABLE_KERNARG_PRELOAD)
+  message(STATUS "Kernarg preloading to SGPR disabled by DISABLE_KERNARG_PRELOAD=ON")
 endif()
 
 check_cxx_compiler_flag("-parallel-jobs=12" HAVE_PARALLEL_JOBS)
@@ -648,6 +677,12 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 # Source directory contains library creation
 add_subdirectory(src)
 
+# NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
+# NCCL_PROFILER_PLUGIN; the MPI tests pick up the in-tree build automatically.
+if(BUILD_PROFILER_INSPECTOR)
+  add_subdirectory(plugins/profiler/inspector)
+endif()
+
 # LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
 #==================================================================================================
 # When EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
@@ -658,9 +693,26 @@ if(EMIT_LLVM_IR)
   add_subdirectory(bindings/ir)
   # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
   # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
-  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # nccl_device_header_symlinks provides the un-suffixed core.h/comm.h/gin.h
+  # aliases (hipify renames them to *_tmp.h) that the verbatim IR wrapper needs.
+  add_dependencies(llvm_ir copy_nccl_device_headers nccl_device_header_symlinks)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
+endif()
+
+# nccl4py Python bindings (opt-in)
+#==================================================================================================
+# When BUILD_NCCL4PY=ON, expose the `uv`-driven wheel/dev targets defined in
+# bindings/nccl4py/CMakeLists.txt. This is opt-in (OFF by default) so a normal
+# RCCL build never requires `uv` or a managed Python toolchain. The wheel build
+# itself is CUDA/HIP-header free (see bindings/nccl4py/setup.py); librccl.so is
+# resolved at runtime via dlopen, so we only add a build-order dependency on the
+# rccl target for convenience when running the bindings against a fresh build.
+if(BUILD_NCCL4PY)
+  add_subdirectory(bindings/nccl4py)
+  if(TARGET nccl4py AND TARGET rccl)
+    add_dependencies(nccl4py rccl)
+  endif()
 endif()
 
 # Install settings
@@ -750,28 +802,13 @@ if(BUILD_TESTS)
   enable_testing()
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
-  if(BUILD_EXT_EXAMPLES)
+  if(BUILD_PLUGIN_EXAMPLES)
     add_subdirectory(plugins/net/example)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
   endif()
   add_subdirectory(test)
-
-  if(BUILD_SHARED_LIBS)
-    # rccl is defined in src/, so avoid TARGET-signature command here.
-    # Use an output-stamp command plus a local custom target dependency.
-    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
-    add_custom_command(
-      OUTPUT "${extract_metadata_stamp}"
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
-      COMMAND ${CMAKE_COMMAND} -E touch "${extract_metadata_stamp}"
-      DEPENDS rccl
-      VERBATIM
-    )
-    add_custom_target(extract_rccl_metadata ALL DEPENDS "${extract_metadata_stamp}")
-  endif()
 
 endif()
 

@@ -551,4 +551,37 @@ hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
 
   HIP_RETURN(hipSuccess);
 }
+
+// ================================================================================================
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type) {
+  HIP_INIT_API(hipMemGetDefaultMemPool, memPool, location, type);
+  if (memPool == nullptr || location == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->type != hipMemLocationTypeDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->id < 0 || location->id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  switch (type) {
+    case hipMemAllocationTypePinned:
+      // The default device mempool is pinned
+      *memPool = reinterpret_cast<hipMemPool_t>(
+          g_devices[static_cast<std::size_t>(location->id)]->GetDefaultMemoryPool());
+      break;
+    case hipMemAllocationTypeManaged:
+      *memPool = reinterpret_cast<hipMemPool_t>(
+          g_devices[static_cast<std::size_t>(location->id)]->GetDefaultManagedMemoryPool());
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
 }  // namespace hip

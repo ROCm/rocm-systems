@@ -61,8 +61,7 @@ static bool isMarkerSentinel(Instruction* I)
 
 static Instruction* nextRealInstruction(Instruction* I)
 {
-    while (I && (I->isDebugOrPseudoInst() || I->isLifetimeStartOrEnd() || isMarkerSentinel(I)))
-        I = I->getNextNode();
+    while (I && (I->isDebugOrPseudoInst() || I->isLifetimeStartOrEnd() || isMarkerSentinel(I))) I = I->getNextNode();
     return I;
 }
 
@@ -75,9 +74,7 @@ static bool isPayloadSequence(CallInst* header, CallInst* payload, MDNode* group
     return true;
 }
 
-static void branchToScopedTrace(
-    BasicBlock* source, BasicBlock* trace, BasicBlock* skip, Value* ok, bool pinSkipHead
-)
+static void branchToScopedTrace(BasicBlock* source, BasicBlock* trace, BasicBlock* skip, Value* ok, bool pinSkipHead)
 {
     source->getTerminator()->eraseFromParent();
     IRBuilder<>(source).CreateCondBr(ok, trace, skip);
@@ -126,9 +123,7 @@ void SQTTInstrumentPass::emitTraceBoundary(IRBuilder<>& B, bool after, bool sche
     if (after && SchedBarrier) B.CreateCall(SchedBarrier, {ConstantInt::get(I32, 0)});
 }
 
-void SQTTInstrumentPass::emitTraceBoundaries(
-    IRBuilder<>& B, Instruction* first, Instruction* last, bool schedBarrier
-)
+void SQTTInstrumentPass::emitTraceBoundaries(IRBuilder<>& B, Instruction* first, Instruction* last, bool schedBarrier)
 {
     Instruction* next = last->getNextNode();
     IRBuilder<> Before(first);
@@ -168,9 +163,7 @@ void SQTTInstrumentPass::emitScopedTrace(
     B.SetInsertPoint(&*TailBB->begin());
 }
 
-void SQTTInstrumentPass::insertTraceMarker(
-    IRBuilder<>& B, uint32_t markerID, Function& F, GfxGen gen, Value* payload
-)
+void SQTTInstrumentPass::insertTraceMarker(IRBuilder<>& B, uint32_t markerID, Function& F, GfxGen gen, Value* payload)
 {
     Module* M = F.getParent();
     bool needsBarriers = !Config.needsScopeCheck();
@@ -249,8 +242,7 @@ bool SQTTInstrumentPass::finalizeExistingMarkers(Function& F, GfxGen gen)
             if (!isTraceDataCall(CI)) continue;
             MDNode* group = CI->getMetadata(SQTT_PAYLOAD_GROUP_METADATA);
             if (CI->getMetadata(SQTT_RAW_PAYLOAD_METADATA) && group && !InBB.empty() &&
-                InBB.back().First == InBB.back().Last &&
-                InBB.back().First->getMetadata(SQTT_MARKER_HEADER_METADATA) &&
+                InBB.back().First == InBB.back().Last && InBB.back().First->getMetadata(SQTT_MARKER_HEADER_METADATA) &&
                 InBB.back().First->getMetadata(SQTT_PAYLOAD_GROUP_METADATA) == group &&
                 isPayloadSequence(InBB.back().First, CI, group))
                 InBB.back().Last = CI;
@@ -277,10 +269,8 @@ bool SQTTInstrumentPass::finalizeExistingMarkers(Function& F, GfxGen gen)
         }
         for (const TraceRange& range : Ranges)
         {
-            while (isCanonicalSchedBarrier(range.First->getPrevNode()))
-                range.First->getPrevNode()->eraseFromParent();
-            while (isCanonicalSchedBarrier(range.Last->getNextNode()))
-                range.Last->getNextNode()->eraseFromParent();
+            while (isCanonicalSchedBarrier(range.First->getPrevNode())) range.First->getPrevNode()->eraseFromParent();
+            while (isCanonicalSchedBarrier(range.Last->getNextNode())) range.Last->getNextNode()->eraseFromParent();
         }
 
         // Coalesce adjacent marker runs: OptimizerLastEP has no later
@@ -332,7 +322,8 @@ CallInst* SQTTInstrumentPass::emitBareTrace(IRBuilder<>& B, uint32_t encoded, Mo
     Function* TTD = Intrinsic::getOrInsertDeclaration(
         M, useImm ? Intrinsic::amdgcn_s_ttracedata_imm : Intrinsic::amdgcn_s_ttracedata
     );
-    CallInst* CI = B.CreateCall(TTD, {ConstantInt::get(useImm ? Type::getInt16Ty(Ctx) : Type::getInt32Ty(Ctx), encoded)});
+    CallInst* CI =
+        B.CreateCall(TTD, {ConstantInt::get(useImm ? Type::getInt16Ty(Ctx) : Type::getInt32Ty(Ctx), encoded)});
     CI->setMetadata(SQTT_MARKER_HEADER_METADATA, MDNode::get(Ctx, {}));
     return CI;
 }
@@ -369,8 +360,7 @@ CallInst* SQTTInstrumentPass::emitRawTracePayload(IRBuilder<>& B, Value* val, Mo
     }
     if (!isa<ConstantInt>(val))
     {
-        Function* ReadFirstLane =
-            Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_readfirstlane, {I32});
+        Function* ReadFirstLane = Intrinsic::getOrInsertDeclaration(M, Intrinsic::amdgcn_readfirstlane, {I32});
         CallInst* prep = B.CreateCall(ReadFirstLane, {val});
         prep->setMetadata(SQTT_PAYLOAD_GROUP_METADATA, group);
         val = prep;
@@ -384,8 +374,7 @@ bool SQTTInstrumentPass::finalizeFullTraces(Function& F, GfxGen gen)
 {
     unsigned clockBits = Config.ShaderClockBits;
     const bool packClock = gen == GfxGen::GFX12 && clockBits != 0;
-    if (packClock && clockBits > 29)
-        report_fatal_error("SQTT_SHADER_CLOCK_BITS must leave at least one marker ID bit");
+    if (packClock && clockBits > 29) report_fatal_error("SQTT_SHADER_CLOCK_BITS must leave at least one marker ID bit");
     if (packClock && (Config.ShaderClockShift >= 32 || Config.ShaderClockShift + clockBits > 32))
         report_fatal_error("SQTT shader clock window must fit in shader_cycles_lo bits [31:0]");
 
@@ -405,12 +394,10 @@ bool SQTTInstrumentPass::finalizeFullTraces(Function& F, GfxGen gen)
     // Model M0 as a fixed output instead of a clobber. M0 is reserved on
     // AMDGPU and LLVM diagnoses `~{m0}` as undefined behavior.
     FunctionType* TraceTy = FunctionType::get(I32, {I32}, false);
-    static constexpr const char TraceAsmText[] =
-        "s_mov_b32 m0, $1\n"
-        "s_nop 0\n"
-        "s_ttracedata";
-    InlineAsm* ImmediateTrace =
-        InlineAsm::get(TraceTy, TraceAsmText, "={m0},i", /*hasSideEffects=*/true);
+    static constexpr const char TraceAsmText[] = "s_mov_b32 m0, $1\n"
+                                                 "s_nop 0\n"
+                                                 "s_ttracedata";
+    InlineAsm* ImmediateTrace = InlineAsm::get(TraceTy, TraceAsmText, "={m0},i", /*hasSideEffects=*/true);
     InlineAsm* ScalarTrace = InlineAsm::get(TraceTy, TraceAsmText, "={m0},s", /*hasSideEffects=*/true);
 
     bool changed = false;
@@ -445,8 +432,7 @@ bool SQTTInstrumentPass::finalizeFullTraces(Function& F, GfxGen gen)
                     packThisTrace = CI->getMetadata(SQTT_MARKER_HEADER_METADATA);
             }
 
-            if (!packThisTrace && CI->getCalledFunction()->getIntrinsicID() != Intrinsic::amdgcn_s_ttracedata)
-                continue;
+            if (!packThisTrace && CI->getCalledFunction()->getIntrinsicID() != Intrinsic::amdgcn_s_ttracedata) continue;
 
             IRBuilder<> B(CI);
             Value* value = CI->getArgOperand(0);

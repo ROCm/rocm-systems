@@ -118,6 +118,7 @@ class LoweringContext:
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
     vcc_dst: str | None = None
+    mask_result_writer: str | None = None
     true16_dst_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
@@ -126,6 +127,7 @@ class LoweringContext:
     arch_name: str = ''
     vector_sgpr_once: bool = False
     clear_false_lane_mask_writes: bool = True
+    mode_sensitive_f16_dst: bool = True
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -263,27 +265,22 @@ def _vcc_init_expr(ctx: LoweringContext) -> str:
 
 
 def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
-    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
-    # vector_cmp.py.
-    return (
-        f'if (wf.wf_size() <= 32)\n'
-        f'    amdgpu::RegisterAccess(wf).write_scalar({dst}, static_cast<uint32_t>(vcc));\n'
-        f'  else\n'
-        f'    amdgpu::RegisterAccess(wf).write_scalar64({dst}, vcc);'
-    )
+    return f'amdgpu::write_wave_mask_scalar({dst}, wf, vcc);'
 
 
 def _vcc_write_stmt(ctx: LoweringContext) -> str:
     """Return the C++ statement to write back the vcc local variable."""
+    if ctx.mask_result_writer:
+        return f'{ctx.mask_result_writer}(vcc);'
     if ctx.vcc_dst and ctx.vcc_dst != '__vcc__':
         return _write_vcc_mask_to_explicit_dst(ctx.vcc_dst)
     if ctx.vcc_dst == '__vcc__':
-        return 'wf.set_vcc(vcc);'
+        return 'wf.set_vcc_mask(vcc);'
     if ctx.operand_map:
         dst = ctx.operand_map.dst(0)
         if dst:
             return _write_vcc_mask_to_explicit_dst(dst.name)
-    return 'wf.set_vcc(vcc);'
+    return 'wf.set_vcc_mask(vcc);'
 
 
 def _indent(ctx: LoweringContext) -> str:
@@ -356,6 +353,12 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
     # Expression used as statement (e.g., standalone .call)
     expr = _lower_expr(node, ctx)
     return [f'{_indent(ctx)}{expr};']
+
+
+def _contains_call(node: SemaNode, call_name: str) -> bool:
+    return (node.kind == SemaNodeKind.CALL and node.call_name == call_name) or any(
+        _contains_call(child, call_name) for child in node.children
+    )
 
 
 def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
@@ -992,10 +995,29 @@ def _lower_dst_write(
 
     needs_bitcast = _rhs_is_float_expr(rhs_node)
     lhs_ty = _get_operand_dtype(lhs_node)
+    binding = ctx.operand_map.dst(idx) if ctx.operand_map else None
     if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16:
-        rhs = f'util::f32_to_f16({rhs})'
+        if ctx.mode_sensitive_f16_dst:
+            rhs = f'util::f32_to_f16_mode({rhs}, wf.fp16_ovfl())'
+        else:
+            rhs = f'util::f32_to_f16({rhs})'
+        if _contains_call(rhs_node, 'apply_omod'):
+            rhs = (
+                f'amdgpu::fp_mode::finalize_omod_f16({rhs}, '
+                'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
+                'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod))'
+            )
     elif lhs_ty and lhs_ty.base == 'BF' and lhs_ty.size == 16:
+        # Explicit data-conversion generators use the mode-aware BF16 helpers.
+        # Generic BF16 semantic writes cover arithmetic forms where current ISA
+        # prose does not define FP16_OVFL clamping.
         rhs = f'util::f32_to_bf16({rhs})'
+        if _contains_call(rhs_node, 'apply_omod'):
+            rhs = (
+                f'amdgpu::fp_mode::finalize_omod_bf16({rhs}, '
+                'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+                'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod))'
+            )
     elif lhs_ty and lhs_ty.size == 16 and lhs_ty.base in ('I', 'U'):
         cpp = lhs_ty.cpp_type
         rhs = (
@@ -1007,10 +1029,6 @@ def _lower_dst_write(
         rhs = f'std::bit_cast<uint32_t>({rhs})'
     elif needs_bitcast == 64:
         rhs = f'std::bit_cast<uint64_t>({rhs})'
-
-    binding = None
-    if ctx.operand_map:
-        binding = ctx.operand_map.dst(idx)
 
     if binding:
         name = binding.name
@@ -1233,13 +1251,15 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (std::isnan(s) || s < 0.0f) return 0u;'
     ' if (s >= 4294967296.0f) return UINT32_MAX;'
     ' return static_cast<uint32_t>(s); }}()',
-    'cvt_f16_f32': 'util::f32_to_f16(std::bit_cast<float>(static_cast<uint32_t>({0})))',
+    # Explicit F32->F16 conversion consumes MODE.FP16_OVFL even on scalar paths;
+    # generic generated scalar F16 arithmetic is gated out in CodeGenerator.
+    'cvt_f16_f32': 'util::f32_to_f16_mode(std::bit_cast<float>(static_cast<uint32_t>({0})), wf.fp16_ovfl())',
     'cvt_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
-    'cvt_f16_fp8': 'static_cast<uint32_t>(util::f32_to_f16(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0}))))',
-    'cvt_f16_bf8': 'static_cast<uint32_t>(util::f32_to_f16(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0}))))',
+    'cvt_f16_fp8': 'static_cast<uint32_t>(util::f32_to_f16_mode(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})), wf.fp16_ovfl()))',
+    'cvt_f16_bf8': 'static_cast<uint32_t>(util::f32_to_f16_mode(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})), wf.fp16_ovfl()))',
     'cvt_f64_i32': 'std::bit_cast<uint64_t>(static_cast<double>(static_cast<int32_t>({0})))',
     'cvt_f64_u32': 'std::bit_cast<uint64_t>(static_cast<double>({0}))',
     'cvt_i32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
@@ -1253,8 +1273,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return static_cast<uint32_t>(s); }}()',
     'cvt_f64_f32': 'std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>({0}))))',
     'cvt_f32_f64': 'std::bit_cast<uint32_t>(static_cast<float>(std::bit_cast<double>(static_cast<uint64_t>({0}))))',
-    'cvt_f16_u16': 'util::f32_to_f16(static_cast<float>(static_cast<uint16_t>({0})))',
-    'cvt_f16_i16': 'util::f32_to_f16(static_cast<float>(static_cast<int16_t>({0} & 0xFFFF)))',
+    'cvt_f16_u16': 'util::f32_to_f16_mode(static_cast<float>(static_cast<uint16_t>({0})), wf.fp16_ovfl())',
+    'cvt_f16_i16': 'util::f32_to_f16_mode(static_cast<float>(static_cast<int16_t>({0} & 0xFFFF)), wf.fp16_ovfl())',
     'cvt_u16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
     ' if (std::isnan(s) || s < 0.0f) return 0u;'
     ' if (s >= 65536.0f) return static_cast<uint32_t>(UINT16_MAX);'
@@ -1507,8 +1527,8 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' for (int i = 0; i < 4; ++i) {{'
     ' uint8_t ab = (a >> (i*8)) & 0xFF;'
     ' uint8_t bb = (b >> (i*8)) & 0xFF;'
-    ' uint8_t cb = (c >> (i*8)) & 0xFF;'
-    ' r |= static_cast<uint32_t>(ab + ((bb - ab) * cb + 128) / 256) << (i*8);'
+    ' uint8_t round_up = (c >> (i*8)) & 1;'
+    ' r |= static_cast<uint32_t>((ab + bb + round_up) >> 1) << (i*8);'
     ' }} return r; }}()',
     'add3': '({0} + {1} + {2})',
     'or3': '({0} | {1} | {2})',
@@ -1567,17 +1587,21 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'msad_u8': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = c;'
     ' for (int i = 0; i < 4; ++i) {{'
-    ' uint8_t rb = (a >> (i*8)) & 0xFF;'
-    ' if (rb != 0) {{'
-    ' uint8_t sb = (b >> (i*8)) & 0xFF;'
-    ' r += (rb > sb) ? (rb - sb) : (sb - rb);'
+    ' uint8_t value = (a >> (i*8)) & 0xFF;'
+    ' uint8_t reference = (b >> (i*8)) & 0xFF;'
+    ' if (reference != 0) {{'
+    ' r += (value > reference) ? (value - reference) : (reference - value);'
     ' }}}} return r; }}()',
     'perm': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' uint32_t r = 0; uint64_t src = (static_cast<uint64_t>(a) << 32) | b;'
     ' for (int i = 0; i < 4; ++i) {{'
     ' uint8_t sel = (c >> (i*8)) & 0xFF;'
-    ' uint8_t byte = (sel < 8) ? static_cast<uint8_t>((src >> (sel*8)) & 0xFF)'
-    ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
+    ' uint8_t byte = 0;'
+    ' if (sel < 8) byte = static_cast<uint8_t>((src >> (sel*8)) & 0xFF);'
+    ' else if (sel < 12) {{'
+    ' uint8_t sign_byte = static_cast<uint8_t>((src >> (((sel - 8) * 2 + 1) * 8)) & 0xFF);'
+    ' byte = (sign_byte & 0x80) ? 0xFFu : 0u;'
+    ' }} else if (sel >= 13) byte = 0xFFu;'
     ' r |= static_cast<uint32_t>(byte) << (i*8);'
     ' }} return r; }}()',
     'minimum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
@@ -1704,6 +1728,27 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
 
+    pseudo_scalar_operations = {
+        'exp2': 'EXP2',
+        'log2': 'LOG2',
+        'rcp': 'RCP',
+        'rsq': 'RSQ',
+        'sqrt': 'SQRT',
+    }
+    if len(args) == 1 and callee.startswith('pseudo_scalar_'):
+        precision = callee.rsplit('_', 1)[-1]
+        operation = callee.removeprefix('pseudo_scalar_').removesuffix(f'_{precision}')
+        operation_name = pseudo_scalar_operations[operation]
+        mode_suffix = 'f32' if precision == 'f32' else 'f16_f64'
+        fp16_ovfl = ', wf.fp16_ovfl()' if precision == 'f16' else ''
+        return (
+            f'amdgpu::pseudo_scalar::execute_{precision}('
+            f'amdgpu::pseudo_scalar::Operation::{operation_name}, {args[0]}, '
+            f'(inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, '
+            f'wf.fp_round_mode_{mode_suffix}(), wf.fp_denorm_mode_{mode_suffix}(), '
+            f'inst_.omod, inst_.clamp{fp16_ovfl})'
+        )
+
     if len(args) == 1 and callee in (
         'cvt_f32_fp8',
         'cvt_f32_bf8',
@@ -1723,9 +1768,9 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
             )
         if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f16_fp8':
             return (
-                f'static_cast<uint32_t>(util::f32_to_f16(({ctx.fp8_decode_e5m3_select}) ? '
+                f'static_cast<uint32_t>(util::f32_to_f16_mode(({ctx.fp8_decode_e5m3_select}) ? '
                 f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
-                f'{fp8_decode_fn}(static_cast<uint8_t>({arg}))))'
+                f'{fp8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
             )
         if callee == 'cvt_f32_fp8':
             return (
@@ -1736,8 +1781,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
                 f'std::bit_cast<uint32_t>({bf8_decode_fn}(static_cast<uint8_t>({arg})))'
             )
         if callee == 'cvt_f16_fp8':
-            return f'static_cast<uint32_t>(util::f32_to_f16({fp8_decode_fn}(static_cast<uint8_t>({arg}))))'
-        return f'static_cast<uint32_t>(util::f32_to_f16({bf8_decode_fn}(static_cast<uint8_t>({arg}))))'
+            return f'static_cast<uint32_t>(util::f32_to_f16_mode({fp8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
+        return f'static_cast<uint32_t>(util::f32_to_f16_mode({bf8_decode_fn}(static_cast<uint8_t>({arg})), wf.fp16_ovfl()))'
 
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])
@@ -1831,11 +1876,33 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
     is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
     suffix = '' if is_f64 else 'f'
+    if is_f64:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
+        )
+    elif node.ty == SemaType.F16:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod)'
+        )
+    elif node.ty == SemaType.BF16:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
+        )
+    else:
+        omod_expr = (
+            'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
+            'wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod)'
+        )
     return (
         f'[&]() {{ {fp_type} v = {rhs};'
-        f' if (inst_.omod == 1) v *= 2.0{suffix};'
-        f' else if (inst_.omod == 2) v *= 4.0{suffix};'
-        f' else if (inst_.omod == 3) v *= 0.5{suffix};'
+        f' const uint32_t effective_omod = {omod_expr};'
+        f' if (effective_omod == 1) v *= 2.0{suffix};'
+        f' else if (effective_omod == 2) v *= 4.0{suffix};'
+        f' else if (effective_omod == 3) v *= 0.5{suffix};'
+        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if is_f64 else "f32"}(v, effective_omod);'
         f' return v; }}()'
     )
 
@@ -1854,9 +1921,8 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
     fp_type = 'double' if is_f64 else 'float'
-    suffix = '' if is_f64 else 'f'
     return (
         f'[&]() {{ {fp_type} v = {rhs};'
-        f' if (inst_.clamp) v = std::clamp(v, 0.0{suffix}, 1.0{suffix});'
+        ' if (inst_.clamp) v = amdgpu::clamp_floating_result(v, wf);'
         f' return v; }}()'
     )

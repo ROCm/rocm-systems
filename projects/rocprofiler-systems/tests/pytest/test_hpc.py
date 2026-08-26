@@ -94,7 +94,6 @@ class TestJacobi(RocprofsysTest):
     def test_usm(self, mode, hpc_openmp_environment, gpu_info, kfd_rules):
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy"
-        env["ROCPROFSYS_TRACE_LEGACY"] = "ON"
         env["HSA_XNACK"] = "1"
         env["ROCPROFSYS_USE_AMD_SMI"] = "OFF"
         if "apu" not in gpu_info.categories:

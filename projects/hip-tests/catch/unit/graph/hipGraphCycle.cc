@@ -231,3 +231,27 @@ HIP_TEST_CASE(Unit_hipGraph_BasicCyclic5) {
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
+HIP_TEST_CASE(Unit_hipGraph_CyclicChildInstantiation) {
+  hipGraph_t parent_graph = nullptr;
+  hipGraph_t child_graph = nullptr;
+  hipGraphExec_t graph_exec = nullptr;
+  hipGraphNode_t child_node = nullptr;
+  hipGraphNode_t first_node = nullptr;
+  hipGraphNode_t second_node = nullptr;
+  hipGraphNode_t third_node = nullptr;
+
+  HIP_CHECK(hipGraphCreate(&parent_graph, 0));
+  HIP_CHECK(hipGraphCreate(&child_graph, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&first_node, child_graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddEmptyNode(&second_node, child_graph, &first_node, 1));
+  HIP_CHECK(hipGraphAddEmptyNode(&third_node, child_graph, &second_node, 1));
+  HIP_CHECK(hipGraphAddDependencies(child_graph, &third_node, &second_node, 1));
+  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, parent_graph, nullptr, 0, child_graph));
+
+  REQUIRE(hipGraphInstantiate(&graph_exec, parent_graph, nullptr, nullptr, 0) ==
+          hipErrorInvalidValue);
+
+  HIP_CHECK(hipGraphDestroy(parent_graph));
+  HIP_CHECK(hipGraphDestroy(child_graph));
+}

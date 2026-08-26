@@ -42,7 +42,6 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
-#include <fmt/core.h>
 #include <fmt/format.h>
 
 #include <dlfcn.h>

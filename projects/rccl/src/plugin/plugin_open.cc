@@ -15,16 +15,18 @@
 
 #define MAX_STR_LEN 255
 
-#define NUM_LIBS 5
+#define NUM_LIBS 6
 static char* libNames[NUM_LIBS];
 char* ncclPluginLibPaths[NUM_LIBS];
 static void* libHandles[NUM_LIBS];
-static const char* pluginNames[NUM_LIBS] = {"NET", "GIN", "TUNER", "PROFILER", "ENV"};
-static const char* pluginPrefix[NUM_LIBS] = {"librccl-net", "libnccl-gin", "libnccl-tuner", "libnccl-profiler",
-                                             "libnccl-env"};
-static const char* pluginFallback[NUM_LIBS] = {"", "", "", "", ""};
-static unsigned long subsys[NUM_LIBS] = {NCCL_INIT | NCCL_NET, NCCL_INIT | NCCL_NET, NCCL_INIT | NCCL_TUNING, NCCL_INIT,
-                                         NCCL_INIT | NCCL_ENV};
+static const char* pluginNames[NUM_LIBS] = {"NET", "GIN", "RMA", "TUNER", "PROFILER", "ENV"};
+static const char* pluginPrefix[NUM_LIBS] = {"librccl-net",   "libnccl-gin",      "libnccl-rma",
+                                             "libnccl-tuner", "libnccl-profiler", "libnccl-env"};
+static const char* pluginFallback[NUM_LIBS] = {"", "", "", "", "", ""};
+static unsigned long subsys[NUM_LIBS] = {
+  NCCL_INIT | NCCL_NET, NCCL_INIT | NCCL_NET, NCCL_INIT | NCCL_NET, NCCL_INIT | NCCL_TUNING, NCCL_INIT,
+  NCCL_INIT | NCCL_ENV
+};
 
 static void* tryOpenLib(char* name, int* err, char* errStr) {
   *err = 0;
@@ -98,7 +100,8 @@ static void* openPluginLib(enum ncclPluginType type, const char* libName) {
     INFO(subsys[type], "%s/Plugin: %s: %s", pluginNames[type], libName_, openErrStr);
   }
 
-  // libName can't be a relative or absolute path (start with '.' or contain any '/'). It can't be a library name either (start with 'lib' or end with '.so')
+  // libName can't be a relative or absolute path (start with '.' or contain any '/'). It can't be a
+  // library name either (start with 'lib' or end with '.so')
   if (libName && strlen(libName) && strchr(libName, '/') == nullptr &&
       (strncmp(libName, "lib", strlen("lib")) || strlen(libName) < strlen(".so") ||
        strncmp(libName + strlen(libName) - strlen(".so"), ".so", strlen(".so")))) {
@@ -134,6 +137,10 @@ void* ncclOpenGinPluginLib(const char* name) {
   return openPluginLib(ncclPluginTypeGin, name);
 }
 
+void* ncclOpenRmaPluginLib(const char* name) {
+  return openPluginLib(ncclPluginTypeRma, name);
+}
+
 void* ncclOpenTunerPluginLib(const char* name) {
   return openPluginLib(ncclPluginTypeTuner, name);
 }
@@ -144,6 +151,16 @@ void* ncclOpenProfilerPluginLib(const char* name) {
 
 void* ncclOpenEnvPluginLib(const char* name) {
   return openPluginLib(ncclPluginTypeEnv, name);
+}
+
+void* ncclGetGinPluginLib(enum ncclPluginType type) {
+  if (libNames[ncclPluginTypeGin]) {
+    // increment the reference counter of the gin library
+    libNames[type] = strdup(libNames[ncclPluginTypeGin]);
+    ncclPluginLibPaths[type] = strdup(ncclPluginLibPaths[ncclPluginTypeGin]);
+    libHandles[type] = ncclOsDlopen(libNames[ncclPluginTypeGin]);
+  }
+  return libHandles[type];
 }
 
 void* ncclGetNetPluginLib(enum ncclPluginType type) {
@@ -166,4 +183,8 @@ ncclResult_t ncclClosePluginLib(void* handle, enum ncclPluginType type) {
     libNames[type] = nullptr;
   }
   return ncclSuccess;
+}
+
+const char* ncclGetPluginLibName(enum ncclPluginType type) {
+  return libNames[type];
 }

@@ -275,10 +275,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SPDLOG
     "Enable building spdlog library internally" ON
 )
 
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_SQLITE3
-    "Enable building sqlite3 library internally" ON
-)
-
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_GTEST
     "Enable building googletest library internally" ON
 )
@@ -517,6 +513,18 @@ configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/modulefile.in
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${ROCPROFSYS_VERSION}
     @ONLY
+)
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/CTestConfig.cmake
+    ${PROJECT_BINARY_DIR}/CTestConfig.cmake
+    COPYONLY
+)
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/CTestCustom.cmake
+    ${PROJECT_BINARY_DIR}/CTestCustom.cmake
+    COPYONLY
 )
 
 configure_file(
