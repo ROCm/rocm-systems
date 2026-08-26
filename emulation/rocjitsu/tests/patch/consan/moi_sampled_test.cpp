@@ -5638,10 +5638,10 @@ TEST(ConSanMoi, SampledRuntimeGateUsesExpandedBranchIslands) {
       patched_words.end());
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland) {
-      // Offset zero needs the 26-word fixed vector-tuple gate plus the
-      // displaced two-word instruction, rather than an unconditional large
-      // reservation.
-      EXPECT_EQ(patch.trampoline_size, 28u * sizeof(uint32_t));
+      // Offset zero needs the 27-word fixed vector-tuple gate (including the
+      // selected-path SCC restore) plus the displaced two-word instruction,
+      // rather than an unconditional large reservation.
+      EXPECT_EQ(patch.trampoline_size, 29u * sizeof(uint32_t));
     }
   }
   const auto prologue = std::ranges::find(
