@@ -556,6 +556,15 @@ typedef enum hipDeviceAttribute_t {
                                                        ///< management)
   hipDeviceAttributeHandleTypeFabricSupported,   ///< Device supports exporting memory to a fabric handle
   hipDeviceAttributeHostAllocDmaBufSupported,  ///< Device supports host-allocated DMABuf buffer sharing
+  hipDeviceAttributeGPUDirectRDMASupported,  ///< Device supports GPUDirect RDMA APIs
+  hipDeviceAttributeGPUDirectRDMAFlushWritesOptions,  ///< Bitmask of
+                                                      ///< hipFlushGPUDirectRDMAWritesOptions
+                                                      ///< describing the flush paths the device
+                                                      ///< supports
+  hipDeviceAttributeGPUDirectRDMAWritesOrdering,  ///< A hipGPUDirectRDMAWritesOrdering value
+                                                  ///< giving the scope at which GPUDirect RDMA
+                                                  ///< writes are naturally ordered, i.e. visible
+                                                  ///< without an explicit flush
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -646,6 +655,25 @@ enum hipGPUDirectRDMAWritesOrdering {
   hipGPUDirectRDMAWritesOrderingNone = 0,
   hipGPUDirectRDMAWritesOrderingOwner = 100,
   hipGPUDirectRDMAWritesOrderingAllDevices = 200
+};
+
+/**
+ * The target of a hipDeviceFlushGPUDirectRDMAWrites operation.
+ */
+enum hipFlushGPUDirectRDMAWritesTarget {
+  hipFlushGPUDirectRDMAWritesTargetCurrentDevice = 0  ///< Memory of the current HIP device
+};
+
+/**
+ * The scope at which hipDeviceFlushGPUDirectRDMAWrites makes pending remote writes visible.
+ *
+ * The enumerator values match hipGPUDirectRDMAWritesOrdering, so a device whose
+ * hipDeviceAttributeGPUDirectRDMAWritesOrdering is greater than or equal to the requested
+ * scope already orders those writes and needs no explicit flush.
+ */
+enum hipFlushGPUDirectRDMAWritesScope {
+  hipFlushGPUDirectRDMAWritesToOwner = 100,      ///< Visible to the device owning the memory
+  hipFlushGPUDirectRDMAWritesToAllDevices = 200  ///< Visible to all HIP devices
 };
 
 #if defined(__HIP_PLATFORM_AMD__) && !defined(__HIP_PLATFORM_NVIDIA__)
@@ -2470,6 +2498,29 @@ hipError_t hipGetDeviceCount(int* count);
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  */
 hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceId);
+/**
+ * @brief Blocks until remote writes are visible to the specified scope
+ *
+ * Blocks until GPUDirect RDMA writes to the target device, issued by a third-party device
+ * such as an RDMA-capable NIC, are visible to the specified scope. This is a host-ordered
+ * visibility barrier on inbound remote writes; it does not synchronize with any stream or
+ * kernel.
+ *
+ * If @p scope is at or within the scope reported by
+ * #hipDeviceAttributeGPUDirectRDMAWritesOrdering, the writes are already ordered by the
+ * hardware and the call is a no-op.
+ *
+ * Support is reported by #hipDeviceAttributeGPUDirectRDMAFlushWritesOptions. The call
+ * returns #hipErrorNotSupported when that bitmask does not contain
+ * #hipFlushGPUDirectRDMAWritesOptionHost.
+ *
+ * @param [in] target The target of the operation, see #hipFlushGPUDirectRDMAWritesTarget
+ * @param [in] scope  The scope of the operation, see #hipFlushGPUDirectRDMAWritesScope
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ */
+hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target,
+                                             enum hipFlushGPUDirectRDMAWritesScope scope);
 /**
  * @brief Returns the default memory pool of the specified device
  *

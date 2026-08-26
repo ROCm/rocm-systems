@@ -482,6 +482,8 @@ def generate_prof_header(f, api_map, callback_ids, opts_map):
         arg_name = arg_tuple[1]
         # Checking for enum type
         if arg_type == "hipLimit_t": arg_type = 'enum ' + arg_type
+        if arg_type == "hipFlushGPUDirectRDMAWritesTarget": arg_type = 'enum ' + arg_type
+        if arg_type == "hipFlushGPUDirectRDMAWritesScope": arg_type = 'enum ' + arg_type
         # Structuer field code
         f.write('      ' + arg_type + ' ' + arg_name + ';\n')
         if ptr_type != '':
