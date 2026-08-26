@@ -1962,19 +1962,19 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
     if (it != allocation_map_.end()) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (it->second.thunk_bo) {
-        // A failed thunk call must not skip the remaining releases: the caller
-        // has no way to retry a detach. Each buffer object sits in its own device's
-        // address space, so unmapping them all before releasing any is equivalent to
-        // pairing each unmap with its release.
-        auto unmap = [&](HsaMemoryObjectHandle bo, HSAuint32 node) {
-          if (HSAKMT_CALL(hsaKmtMemoryVaUnmap(bo, 0, static_cast<HSAuint64>(it->second.size),
-                                              reinterpret_cast<HSAuint64>(ptr), node)) !=
+        HSAuint32 gpu_node_id = it->second.thunk_node_id;
+        for (const auto& peer : it->second.thunk_peer_imports) {
+          if (HSAKMT_CALL(hsaKmtMemoryVaUnmap(peer.thunk_bo, 0,
+                                              static_cast<HSAuint64>(it->second.size),
+                                              reinterpret_cast<HSAuint64>(ptr), peer.node_id)) !=
               HSAKMT_STATUS_SUCCESS)
-            debug_warning(false && "dma-buf unmap failed");
-        };
-        for (const auto& peer : it->second.thunk_peer_imports) unmap(peer.thunk_bo, peer.node_id);
-        if (it->second.thunk_node_id != AllocationRegion::kNodeUnmapped)
-          unmap(it->second.thunk_bo, it->second.thunk_node_id);
+            debug_warning(false && "Peer dma-buf unmap failed");
+        }
+        if (gpu_node_id != AllocationRegion::kNodeUnmapped &&
+            HSAKMT_CALL(hsaKmtMemoryVaUnmap(
+                it->second.thunk_bo, 0, static_cast<HSAuint64>(it->second.size),
+                reinterpret_cast<HSAuint64>(ptr), gpu_node_id)) != HSAKMT_STATUS_SUCCESS)
+          debug_warning(false && "Owner dma-buf unmap failed");
 
         ReleaseImportHandles(it->second.thunk_bo, it->second.thunk_peer_imports);
         ldrmImportCleaned = true;
