@@ -1086,6 +1086,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   if (!deviceOnly) Allreduce(args, &deltaSec, average);
 
+  bool skipMetricRow = false;
+
   if (deviceOnly) {
     // The reported metric is the in-kernel wall_clock64 device latency
     // (per iteration, max across ranks), measured by the collective's hook.
@@ -1101,7 +1103,8 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     // getBw (0.00 us / inf GB/s), and the DEVTIME_CHECK below would validate a stale
     // buffer -- the warmup/production result (false pass), or raw init scratch under
     // -w 0 (false fail) -- for a kernel that never executed. So WARN once and skip
-    // this row rather than emit a bogus metric or a misleading check verdict.
+    // the metric for this row rather than emit a bogus metric or a misleading check
+    // verdict; datacheck still runs below.
     double deviceDeltaSec = -1.0;
     TESTCHECK(args->collTest->deviceTime(args, type, op, root, in_place, &deviceDeltaSec));
     if (deviceDeltaSec <= 0.0) {
@@ -1111,31 +1114,32 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
                         "unsupported op/type, count==0, or loop<1); skipping row "
                         "(size %ld bytes)\n", args->expectedBytes);
       }
-      return testSuccess;
-    }
-    deltaSec = deviceDeltaSec;
-    cputimeSec = deviceDeltaSec;
+      skipMetricRow = true;
+    } else {
+      deltaSec = deviceDeltaSec;
+      cputimeSec = deviceDeltaSec;
 
-    // Opt-in validation of the TIMED path itself (--devtime_check=1).
-    // Reached only when the timed kernel actually ran (deviceDeltaSec > 0 above), so
-    // recvbuff holds the timed kernel's output -- not a stale warmup/production
-    // buffer. The hook just ran skip+loop back-to-back collectives into recvbuff;
-    // each iteration is a full deterministic collective over the unchanged sendbuff,
-    // so the final recvbuff equals `expected` from initData. Validate it HERE -- the
-    // only point the timed kernel's output is live, before the datacheck loop below
-    // re-inits buffers and overwrites it with the production path. Needs datacheck on
-    // (that is what populates `expected`). Combines wrong-element counts across
-    // threads/ranks so any rank's mismatch fails the run.
-    if (devtimeCheck && datacheck) {
-      int64_t timedWrong = 0;
-      TESTCHECK(CheckData(args, type, op, root, in_place, &timedWrong));
-      long long timedWrong1 = timedWrong;
-      Allreduce(args, &timedWrong1, /*sum*/4);
-      if (timedWrong1) {
-        fprintf(stderr, "\nERROR: --devtime_check: timed-kernel output datacheck "
-                        "failed with %lld wrong elements (size %ld bytes)\n",
-                        timedWrong1, args->expectedBytes);
-        return testInternalError;
+      // Opt-in validation of the TIMED path itself (--devtime_check=1).
+      // Reached only when the timed kernel actually ran (deviceDeltaSec > 0 above), so
+      // recvbuff holds the timed kernel's output -- not a stale warmup/production
+      // buffer. The hook just ran skip+loop back-to-back collectives into recvbuff;
+      // each iteration is a full deterministic collective over the unchanged sendbuff,
+      // so the final recvbuff equals `expected` from initData. Validate it HERE -- the
+      // only point the timed kernel's output is live, before the datacheck loop below
+      // re-inits buffers and overwrites it with the production path. Needs datacheck on
+      // (that is what populates `expected`). Combines wrong-element counts across
+      // threads/ranks so any rank's mismatch fails the run.
+      if (devtimeCheck && datacheck) {
+        int64_t timedWrong = 0;
+        TESTCHECK(CheckData(args, type, op, root, in_place, &timedWrong));
+        long long timedWrong1 = timedWrong;
+        Allreduce(args, &timedWrong1, /*sum*/4);
+        if (timedWrong1) {
+          fprintf(stderr, "\nERROR: --devtime_check: timed-kernel output datacheck "
+                          "failed with %lld wrong elements (size %ld bytes)\n",
+                          timedWrong1, args->expectedBytes);
+          return testInternalError;
+        }
       }
     }
   }
@@ -1154,18 +1158,23 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 #endif
 
   // Host-timed path can also yield zero elapsed (timer resolution, fast
-  // collectives, or platform quirks). getBw divides by sec; skip rather than
-  // SIGFPE or emit inf GB/s -- same rationale as the --device_timing=2 guard.
-  if (rccl_tests_devtime::shouldSkipBenchTimeRow(deltaSec)) {
+  // collectives, or platform quirks). getBw divides by sec; skip the metric for
+  // this row rather than SIGFPE or emit inf GB/s -- same rationale as the
+  // --device_timing=2 guard. Datacheck still runs below.
+  if (!skipMetricRow && rccl_tests_devtime::shouldSkipBenchTimeRow(deltaSec)) {
     if (args->proc == 0 && args->thread == 0) {
       fprintf(stderr, "# WARN: zero or negative elapsed time (deltaSec=%g); "
                       "skipping row (size %ld bytes)\n", deltaSec, args->expectedBytes);
     }
-    return testSuccess;
+    skipMetricRow = true;
   }
 
-  double algBw, busBw;
-  args->collTest->getBw(count, wordSize(type), deltaSec, &algBw, &busBw, args->nProcs*args->nThreads*args->nGpus);
+  double algBw = 0.0, busBw = 0.0;
+  if (!skipMetricRow) {
+    args->collTest->getBw(count, wordSize(type), deltaSec, &algBw, &busBw, args->nProcs*args->nThreads*args->nGpus);
+  } else if (in_place == 0) {
+    writeBenchMarkLineNullBody();
+  }
 
   Barrier(args);
 
@@ -1239,19 +1248,22 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       if (wrongElts) break;
   }
 
-  double timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
-  writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
+  double timeUsec = 0.0;
+  if (!skipMetricRow) {
+    timeUsec = (report_cputime ? cputimeSec : deltaSec)*1.0E6;
+    writeBenchmarkLineBody(timeUsec, algBw, busBw, args->reportErrors, wrongElts, report_cputime, report_timestamps, in_place==0);
 
-  auto largestMessageSize = std::max(args->sendBytes, args->expectedBytes);
-  if (args->reporter) {
-    if (args->reportErrors) {
-      args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw, wrongElts);
-    } else {
-      args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw);
+    auto largestMessageSize = std::max(args->sendBytes, args->expectedBytes);
+    if (args->reporter) {
+      if (args->reportErrors) {
+        args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw, wrongElts);
+      } else {
+        args->reporter->addResult((args->nThreads * args->nGpus), args->nProcs, args->totalProcs, largestMessageSize, in_place, timeUsec, algBw, busBw);
+      }
     }
   }
 
-  if (record && args->ms) {
+  if (!skipMetricRow && record && args->ms) {
     // Extract max-across-GPUs per iteration (convert ms to seconds)
     double* iterTimes = (double*)calloc(iters, sizeof(double));
     for (int iter = 0; iter < iters; iter++) {
@@ -1287,8 +1299,10 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     free(args->ms);
   }
 
-  args->bw[0] += busBw;
-  args->bw_count[0]++;
+  if (!skipMetricRow) {
+    args->bw[0] += busBw;
+    args->bw_count[0]++;
+  }
 
   // Mode 1 (augment): print an extra device-only line alongside the normal
   // graph/hipEvent numbers above. Mode 2 already reported device time as THE
@@ -2721,7 +2735,8 @@ testResult_t run() {
   }
   envstr = getenv("NCCL_TESTS_MIN_BW");
   const double check_avg_bw = envstr ? atof(envstr) : -1;
-  bw[0] /= bw_count[0];
+  if (bw_count[0] > 0)
+    bw[0] /= bw_count[0];
 
   writeResultFooter(errors.data(), bw.data(), check_avg_bw, programName);
   if (memory_report) {
