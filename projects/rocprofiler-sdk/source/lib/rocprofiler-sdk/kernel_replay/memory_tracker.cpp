@@ -31,6 +31,7 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <optional>
 
 namespace rocprofiler
 {
@@ -101,6 +102,53 @@ record_unsupported_executable(void* ptr, size_t size)
     });
 }
 
+// Inventory entries pulled out ahead of an HSA free. snap() copies from every address the
+// inventory lists, so the entry has to be retired *before* the device memory is released --
+// leaving it in place across the free lets a concurrent replay on another thread read a retired
+// allocation. The removed values are kept so the entry can be put back when the free itself fails
+// and the allocation is therefore still live.
+struct retired_alloc_t
+{
+    std::optional<alloc_info_t> tracked{};
+    std::optional<alloc_info_t> unsupported{};
+
+    bool any() const { return tracked.has_value() || unsupported.has_value(); }
+};
+
+retired_alloc_t
+retire_recorded_alloc(void* ptr)
+{
+    auto out = retired_alloc_t{};
+    if(registration::get_fini_status() > 0) return out;
+
+    inventory().wlock([&](auto& _map) {
+        if(auto itr = _map.find(ptr); itr != _map.end())
+        {
+            out.tracked = itr->second;
+            _map.erase(itr);
+        }
+    });
+    unsupported_executable_inventory().wlock([&](auto& _map) {
+        if(auto itr = _map.find(ptr); itr != _map.end())
+        {
+            out.unsupported = itr->second;
+            _map.erase(itr);
+        }
+    });
+    return out;
+}
+
+void
+reinstate_recorded_alloc(void* ptr, const retired_alloc_t& prev)
+{
+    if(registration::get_fini_status() > 0) return;
+
+    if(prev.tracked) inventory().wlock([&](auto& _map) { _map[ptr] = *prev.tracked; });
+    if(prev.unsupported)
+        unsupported_executable_inventory().wlock(
+            [&](auto& _map) { _map[ptr] = *prev.unsupported; });
+}
+
 hsa_status_t
 pool_allocate_wrapper(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, void** ptr)
 {
@@ -131,9 +179,13 @@ pool_allocate_wrapper(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags, v
 hsa_status_t
 pool_free_wrapper(void* ptr)
 {
+    const bool tracking = tracking_flag().load(std::memory_order_relaxed) && ptr != nullptr;
+    const auto retired  = tracking ? retire_recorded_alloc(ptr) : retired_alloc_t{};
+
     auto st = next_pool_free(ptr);
-    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr)
-        record_free(ptr);
+
+    if(tracking && st != HSA_STATUS_SUCCESS && retired.any())
+        reinstate_recorded_alloc(ptr, retired);
     return st;
 }
 
@@ -149,9 +201,13 @@ memory_allocate_wrapper(hsa_region_t region, size_t size, void** ptr)
 hsa_status_t
 memory_free_wrapper(void* ptr)
 {
+    const bool tracking = tracking_flag().load(std::memory_order_relaxed) && ptr != nullptr;
+    const auto retired  = tracking ? retire_recorded_alloc(ptr) : retired_alloc_t{};
+
     auto st = next_memory_free(ptr);
-    if(tracking_flag().load(std::memory_order_relaxed) && st == HSA_STATUS_SUCCESS && ptr)
-        record_free(ptr);
+
+    if(tracking && st != HSA_STATUS_SUCCESS && retired.any())
+        reinstate_recorded_alloc(ptr, retired);
     return st;
 }
 }  // namespace
