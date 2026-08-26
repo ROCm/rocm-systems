@@ -6277,7 +6277,6 @@ TEST(ConSanMoi, SampledQualifiedBarrierPublishesSelectedEpochTransition) {
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->anchor_offset, kWait * sizeof(uint32_t));
   EXPECT_EQ(patch->covered_sync_event_count, 2u);
-  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 2u);
   ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.observation_plan.barrier_site_decisions,
                                   [&](const ConSanBarrierSiteDecision &decision) {
@@ -6377,7 +6376,6 @@ TEST(ConSanMoi, SampledStraightLineSeparatedBarriersPublishTwoMemberSequences) {
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->anchor_offset, kWait * sizeof(uint32_t));
   EXPECT_EQ(patch->covered_sync_event_count, 2u);
-  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 2u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             1u);
@@ -7956,7 +7954,6 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_EQ(result.moi_candidates.size(), kSiteCount);
-  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 2u * kSiteCount);
   const auto is_access_patch = [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
@@ -8092,7 +8089,6 @@ TEST(ConSanMoi, SampledOwnerAbiFailureRemainsApplicableAndFailsLowering) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 1u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             0u);
@@ -8415,7 +8411,6 @@ TEST(ConSanMoi, Gfx1250SampledClusterBarrierPublishesClusterScope) {
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->covered_sync_event_count, 2u);
-  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 2u);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> trampoline =
@@ -8567,10 +8562,10 @@ TEST(ConSanMoi, SampledConditionallyExecutedBarrierPublishesOnlyWhenExecuted) {
       try_patch_consan(make_rdna4_lds_code_object(words, "bypassable_barrier"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
-                               &ConSanPatchInfo::kind),
-            1u);
-  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 2u);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->covered_sync_event_count, 2u);
 }
 
 TEST(ConSanMoi, SampledBarrierInConditionallyExitingLoopPublishesEveryIteration) {
@@ -8598,10 +8593,10 @@ TEST(ConSanMoi, SampledBarrierInConditionallyExitingLoopPublishesEveryIteration)
       try_patch_consan(make_rdna4_lds_code_object(words, "barrier_loop"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
-                               &ConSanPatchInfo::kind),
-            1u);
-  EXPECT_EQ(result.sampled_barrier_applicable_event_count, 2u);
+  const auto patch = std::ranges::find(
+      result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata, &ConSanPatchInfo::kind);
+  ASSERT_NE(patch, result.patches.end());
+  EXPECT_EQ(patch->covered_sync_event_count, 2u);
 }
 
 TEST(ConSanMoi, SampledWatchpointRoundTripsRangeFields) {

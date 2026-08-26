@@ -494,7 +494,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
       result.errors.empty() ? ConSanTransformOutcome::Unchanged : ConSanTransformOutcome::Invalid;
   result.flavor = ConSanFlavor::Moi;
   result.moi_engine = effective_options.moi_engine;
-  result.sampled_barrier_applicable_event_count = 0;
   result.resolved_moi_owner_vgpr.reset();
   result.resolved_moi_epoch_vgpr.reset();
   result.resolved_moi_workgroup_key_vgpr.reset();

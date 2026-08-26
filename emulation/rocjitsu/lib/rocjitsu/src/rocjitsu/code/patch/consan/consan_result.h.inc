@@ -324,10 +324,6 @@ struct ConSanResult {
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   ConSanFlavor flavor = ConSanFlavor::None;
   ConSanMoiEngine moi_engine = ConSanMoiEngine::RecordReplay;
-  /// Original barrier instructions in Sampled sequences that can order at
-  /// least one selected LDS causal window. Raw inventory may contain earlier
-  /// barriers that are not applicable to the sampled LDS analysis.
-  uint32_t sampled_barrier_applicable_event_count = 0;
   std::optional<uint16_t> resolved_moi_owner_vgpr;
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   std::optional<uint16_t> resolved_moi_workgroup_key_vgpr;

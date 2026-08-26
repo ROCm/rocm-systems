@@ -786,13 +786,6 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
     if (!plan_admits_barrier_insertion(result.observation_plan,
                                        completing_sites.front().text_offset))
       continue;
-    if (sequence.member_event_identities.size() >
-        std::numeric_limits<uint32_t>::max() - result.sampled_barrier_applicable_event_count) {
-      result.errors.emplace_back("ConSan MOI sampled barrier applicable event count overflow");
-      return;
-    }
-    result.sampled_barrier_applicable_event_count +=
-        static_cast<uint32_t>(sequence.member_event_identities.size());
     std::vector<SampledBarrierWindow> windows;
     bool every_owner_has_window = true;
     std::string owner_lowering_failure;
@@ -879,10 +872,6 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled barrier sync has no preceding selected causal window for every "
           "owner in " +
           sequence.container_name);
-      if (!sequence.in_kernel)
-        continue;
-      result.sampled_barrier_applicable_event_count -=
-          static_cast<uint32_t>(sequence.member_event_identities.size());
       continue;
     }
     const uint64_t representative_descriptor =

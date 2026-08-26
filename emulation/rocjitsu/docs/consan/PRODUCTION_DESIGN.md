@@ -2899,6 +2899,35 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   the periodic physical gate remains applicable. E2E validation remains
   outside this work.
 
+### Slice 4W: delete cached Sampled barrier applicability counts
+
+- **Single authoritative representation:** Sampled barrier admission and
+  lowering are represented by typed barrier-site decisions in the observation
+  plan and coverage ledger. A successfully emitted sync-metadata patch carries
+  its exact `covered_sync_event_count`. Together these facts distinguish
+  admitted, instrumented, resource-rejected, and uncovered events without a
+  parallel aggregate.
+- **Completed deletion:** `ConSanResult` no longer carries
+  `sampled_barrier_applicable_event_count`. The Sampled lowerer no longer
+  increments the cache before owner/window analysis, subtracts from it on one
+  rejection path, or maintains an otherwise unreachable 32-bit overflow
+  diagnostic. No production consumer read the value.
+- **Contract-test correction:** Tests with typed observation-plan or coverage-
+  ledger assertions retain those stronger checks. Tests focused on control-
+  flow placement now inspect `covered_sync_event_count` on the emitted sync
+  patch rather than the cached result-wide count. Access, barrier, multi-owner,
+  resource-rejection, cluster-scope, conditional, and loop cases all remain
+  covered.
+- **Deletion result:** Production source is 16 lines smaller and source plus
+  tests is 21 net lines smaller. No replacement state or adapter was added.
+- **Completed checked-in gate:** The ConSan host gate passed 1,508 of 1,510
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 68.13
+  seconds. This cached-state deletion does not change emitted device code; the
+  periodic physical gate remains applicable. E2E validation remains outside
+  this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner
