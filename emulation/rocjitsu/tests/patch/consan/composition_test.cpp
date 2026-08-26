@@ -245,7 +245,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_FALSE(inventory.modified);
   const ConSanMoiAutoReportInventory capacity =
-      inventory_consan_moi_auto_report(inventory, inventory_options, bytes);
+      plan_test_moi_evidence_inventory(inventory, inventory_options);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(capacity);
   ASSERT_TRUE(plan.complete());
   const auto layout = consan_moi_auto_report_layout_override(plan);
@@ -266,8 +266,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
   EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
   EXPECT_EQ(retried.applied_fault_mutations, 1u);
-  const ConSanMoiAutoReportInventory required =
-      inventory_consan_moi_auto_report(retried, live, bytes);
+  const ConSanMoiAutoReportInventory required = plan_test_moi_evidence_inventory(retried, live);
   EXPECT_TRUE(consan_moi_auto_report_inventory_covers(capacity, required));
 
   std::cout << "live_fault_retry_benchmark bytes=" << bytes.size() << " probe_ms=" << probe_ms
@@ -312,7 +311,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_FALSE(inventory.modified);
   const ConSanMoiAutoReportInventory capacity =
-      inventory_consan_moi_auto_report(inventory, inventory_options, bytes);
+      plan_test_moi_evidence_inventory(inventory, inventory_options);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(capacity);
   ASSERT_TRUE(plan.complete());
   const auto layout = consan_moi_auto_report_layout_override(plan);
@@ -334,8 +333,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
   EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
-  const ConSanMoiAutoReportInventory required =
-      inventory_consan_moi_auto_report(retried, live, bytes);
+  const ConSanMoiAutoReportInventory required = plan_test_moi_evidence_inventory(retried, live);
   EXPECT_TRUE(consan_moi_auto_report_inventory_covers(capacity, required));
 
   std::set<std::pair<bool, std::string_view>> candidate_owners;
@@ -623,7 +621,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   pristine_options.moi_report_buffer_size = 0;
   const ConSanResult pristine = try_patch_consan(bytes, pristine_options);
   const ConSanMoiAutoReportInventory pristine_inventory =
-      inventory_consan_moi_auto_report(pristine, pristine_options, bytes);
+      plan_test_moi_evidence_inventory(pristine, pristine_options);
 
   const ConSanResult live = try_patch_consan(bytes, live_options);
   ASSERT_EQ(live.outcome, ConSanTransformOutcome::ModifiedValid)
@@ -647,7 +645,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   EXPECT_EQ(retried.elf_bytes, live.elf_bytes);
   EXPECT_EQ(retried.final_validation_passed, live.final_validation_passed);
   const ConSanMoiAutoReportInventory live_inventory =
-      inventory_consan_moi_auto_report(retried, live_options, bytes);
+      plan_test_moi_evidence_inventory(retried, live_options);
 
   EXPECT_TRUE(consan_moi_auto_report_inventory_covers(pristine_inventory, live_inventory));
   EXPECT_EQ(pristine_inventory.access_range_count, live_inventory.access_range_count);

@@ -2360,10 +2360,10 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   state.
 - **Deletion result and immediate payoff:** production grows by nine formatted
   lines because consumers now name the real inventory and a few large
-  functions retain a local immutable view. The paired follow-up is Slice 4H:
-  delete the roughly 185-line pre-plan auto-report inventory reconstruction
-  that still rescans these same synchronization facts. No additional adapter
-  is needed for that deletion. More importantly, the code already has one
+  functions retain a local immutable view. The paired follow-up is completed
+  in Slice 4H, which deletes the roughly 185-line pre-plan auto-report
+  inventory reconstruction that rescanned these same synchronization facts.
+  No additional production adapter was needed. More importantly, the code has one
   synchronization owner, one mutation capability, and one immutable policy
   projection; result copying can no longer carry stale spans that require
   rebinding.
@@ -2371,6 +2371,43 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   focused HSA-hook tests, all 2,908 simulator device rows, and all 593
   physical-gfx950 device rows passed. The final simulator and physical matrices
   took 75.32 and 441.91 seconds of wall time, respectively.
+
+### Slice 4H: delete pre-plan auto-report inventory reconstruction
+
+- **Completed deletion:** `inventory_consan_moi_auto_report` and its roughly
+  185-line reconstruction of access, barrier, atomic, fence, owner-bank,
+  Sampled, and InlineShadow capacities from prototype candidates, resource
+  plans, patches, synchronization facts, and original object bytes have been
+  deleted. The HSA runtime coordinator now binds the engine-specific
+  `ConSanEvidenceRequirements` already published by `TransformResult`.
+- **One authoritative path:** the hook neither reruns an evidence planner nor
+  guesses requirements when an observation plan is absent. Record/Replay,
+  Sampled, and InlineShadow expose their already-validated sizing inventory,
+  ABI plan, and runtime requirements through the closed evidence variant. A
+  malformed or missing MOI evidence contract is rejected under fail-closed;
+  fail-open installs the pristine object without allocating a report.
+- **Test cutover and guard:** mechanism tests call the production typed
+  planners through a narrow test-only dispatcher that reads only immutable
+  inventory and observation policy. Synthetic allocation/retry hook fixtures
+  now carry valid engine-matching observation plans. Tests whose sole purpose
+  was to preserve the deleted compatibility adapter are gone. A focused hook
+  regression test supplies contradictory legacy candidates and patches with no
+  observation plan and proves that they cannot resurrect automatic allocation
+  or instrumentation.
+- **Live mutation invariant:** pristine and live fault transforms compare the
+  sizing inventories from their respective typed evidence contracts. The
+  growth test now changes the live semantic plan rather than mutating
+  post-lowering telemetry, so it guards the actual capacity contract.
+- **Deletion result:** the formatted production source is 192 net lines
+  smaller. Source plus tests is 146 net lines smaller; the test-only growth is
+  the explicit hook contract guard and typed fixture setup. Including this
+  expanded design record, the complete tranche remains 113 net lines smaller.
+- **Completed checked-in gate:** 1,503 of 1,505 selected ConSan host tests
+  passed, with two external-object benchmarks intentionally skipped, plus all
+  100 focused HSA-hook tests. All 2,908 simulator device rows passed in 72.88
+  seconds of wall time, and all 593 physical-gfx950 device rows passed in
+  439.14 seconds. E2E validation is intentionally outside this deletion
+  tranche.
 
 ### Slice 5A: Record/Replay evidence requirements
 
@@ -2388,11 +2425,11 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   allocation, then passes the existing layout/address through the late-bound
   compatibility adapter. Production sizing no longer rescans resource plans,
   site dispositions, or emitted patches.
-- **Retained compatibility seam:** Hook unit tests can inject historical
-  synthetic `ConSanResult` values that predate `ObservationPlan`. Only those
-  structurally invalid pre-plan fixtures use the old inventory projection;
-  every valid production plan takes the new path. The seam remains explicit
-  until those external test overrides migrate or Slice 7 deletes them.
+- **Historical compatibility seam, now deleted:** This slice temporarily let
+  hook unit tests inject synthetic `ConSanResult` values that predated
+  `ObservationPlan`. Slice 4H migrated those fixtures to typed plans and
+  deleted the fallback projection, so production and tests now share one
+  evidence-sizing path.
 - **Completed test gate:** Focused type tests exhaustively cover schema,
   boundedness, loss, construction-reason, layout-outcome, and layout-reason
   enums; capacity-policy adaptation; empty and mixed intent plans; multi-range
@@ -2436,9 +2473,9 @@ could complete.
 - **Completed production cutover:** Every valid production observation plan
   reaches the engine-specific typed planner before hook allocation. The hook
   consumes the resulting runtime requirements and late-binds the existing
-  report or marker registry. The old result/patch rescan remains only for
-  structurally invalid synthetic pre-plan hook fixtures. ABI decoders and
-  allocation mechanics remain implementation details for later slices.
+  report or marker registry. Slice 4H subsequently deleted the old
+  result/patch rescan and migrated the synthetic hook fixtures. ABI decoders
+  and allocation mechanics remain implementation details for later slices.
 - **Completed type and unit gate:** Focused tests cover neutral and legacy-
   adapted capacity policies; every schema/boundedness/loss/reason enum and
   invalid sentinel; every intent-to-capacity mapping; expert limits; missing

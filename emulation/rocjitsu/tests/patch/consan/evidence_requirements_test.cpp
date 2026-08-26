@@ -434,60 +434,6 @@ TEST(ConSanEvidenceRequirements, WellFormedRejectsEveryCrossTypeContractMismatch
       [](auto &value) { ++*value.runtime_requirements.minimum_report_allocation_bytes; });
 }
 
-TEST(ConSanEvidenceRequirements,
-     LegacyInventoryAdapterConsumesOnlyTheObservationPlanForRecordReplay) {
-  ConSanResult result;
-  result.observation_plan = RecordReplayObservationPlanBuilder()
-                                .add_access(2)
-                                .add_barrier()
-                                .add_atomic()
-                                .add_fence()
-                                .build();
-  // Contradictory mutable telemetry proves that the compatibility entry point
-  // no longer rescans resource plans, patches, or object bytes.
-  result.resource_plans.resize(23);
-  result.patches.resize(29);
-  ConSanOptions options;
-  options.moi_engine = ConSanMoiEngine::RecordReplay;
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, {});
-  EXPECT_EQ(inventory,
-            plan_consan_record_replay_evidence(result.observation_plan).sizing_inventory);
-  EXPECT_EQ(inventory.access_range_count, 2u);
-  EXPECT_EQ(inventory.barrier_event_count, kConSanMoiRecordReplayDynamicEventHeadroom);
-  EXPECT_EQ(inventory.atomic_event_count, kConSanMoiRecordReplayDynamicLaneEventHeadroom);
-  EXPECT_EQ(inventory.fence_event_count, kConSanMoiRecordReplayDynamicLaneEventHeadroom);
-}
-
-TEST(ConSanEvidenceRequirements,
-     LegacyInventoryAdapterConsumesTypedPlansForSampledAndInlineShadow) {
-  ConSanResult sampled_result;
-  sampled_result.observation_plan =
-      EvidenceObservationPlanBuilder(ConSanCapabilityEngine::Sampled)
-          .add(ConSanProbeIntentKind::SampledAccess, ConSanSemanticSiteDomain::Access, 2)
-          .add(ConSanProbeIntentKind::SampledAtomicOrdering,
-               ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
-          .build();
-  sampled_result.resource_plans.resize(17);
-  sampled_result.patches.resize(19);
-  ConSanOptions sampled_options;
-  sampled_options.moi_engine = ConSanMoiEngine::Sampled;
-  EXPECT_EQ(inventory_consan_moi_auto_report(sampled_result, sampled_options, {}),
-            plan_consan_sampled_evidence(sampled_result.observation_plan).sizing_inventory);
-
-  const InlineEvidenceFixture fixture =
-      make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);
-  ConSanResult inline_result;
-  inline_result.program_inventory = fixture.inventory;
-  inline_result.observation_plan = fixture.plan;
-  inline_result.resource_plans.resize(29);
-  inline_result.patches.resize(31);
-  ConSanOptions inline_options;
-  inline_options.moi_engine = ConSanMoiEngine::InlineShadow;
-  EXPECT_EQ(inventory_consan_moi_auto_report(inline_result, inline_options, {}),
-            plan_consan_inline_shadow_evidence(fixture.inventory, fixture.plan).sizing_inventory);
-}
-
 TEST(ConSanEvidenceRequirements, CapacityPolicyAdaptersCarryOnlyExplicitLegacyBounds) {
   ConSanOptions options;
   options.max_patches = 11;

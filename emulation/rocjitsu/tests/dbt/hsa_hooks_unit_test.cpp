@@ -5465,6 +5465,37 @@ rocjitsu::ConSanResult auto_report_atomic_transform_result() {
     builder.kernels().back().name = "auto_report_atomic";
     builder.kernels().back().atomic_sites.emplace_back();
   });
+  const rocjitsu::PhysicalSiteId physical{
+      .code_object = result.program_inventory.code_object_id(),
+      .original_text_offset = 0u,
+  };
+  const rocjitsu::SemanticSiteId semantic{
+      .physical = physical,
+      .domain = rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent,
+  };
+  result.observation_plan = {
+      .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+      .site_decisions = {},
+      .barrier_site_decisions = {},
+      .atomic_site_decisions = {},
+      .fence_site_decisions = {},
+      .probe_intents = {{
+          .id = {0u},
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .physical_site = physical,
+          .covered_semantic_sites = {semantic},
+          .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
+          .position = rocjitsu::ConSanProbePosition::After,
+          .lane_mask = rocjitsu::ConSanLaneMaskPolicy::ActiveExecutionMask,
+          .requirement = rocjitsu::ConSanProbeRequirement::Required,
+          .synchronization_association =
+              rocjitsu::ConSanSynchronizationAssociationId{"auto-report-atomic"},
+      }},
+  };
+  EXPECT_TRUE(result.observation_plan.valid());
+  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
+  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
+      {0u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
   return result;
 }
 
@@ -5490,15 +5521,24 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
   candidate.container_name = "auto_report_access";
   candidate.mnemonic = "ds_store_b32";
   result.moi_candidates.push_back(std::move(candidate));
-  if (owner_scope != AutoReplayOwnerScope::NoProvenance) {
-    const auto append_patch = [&](uint32_t instruction_offset, uint64_t owner) {
-      rocjitsu::ConSanPatchInfo patch;
-      patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore;
-      patch.anchor_offset = instruction_offset;
-      if (owner_scope != AutoReplayOwnerScope::UnknownOwnerPair)
-        patch.owner_descriptor_file_offsets = {owner};
-      result.patches.push_back(std::move(patch));
-    };
+  install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
+                               rocjitsu::ConSanAccessPolicyReason::None,
+                               rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
+                               rocjitsu::ConSanCapabilityEngine::RecordReplay,
+                               rocjitsu::ConSanProbeIntentKind::AccessRecord);
+  const auto append_patch = [&](uint32_t instruction_offset, uint64_t owner) {
+    rocjitsu::ConSanPatchInfo patch;
+    patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore;
+    patch.anchor_offset = instruction_offset;
+    if (owner_scope != AutoReplayOwnerScope::NoProvenance &&
+        owner_scope != AutoReplayOwnerScope::UnknownOwnerPair) {
+      patch.owner_descriptor_file_offsets = {owner};
+    }
+    result.patches.push_back(std::move(patch));
+  };
+  if (owner_scope == AutoReplayOwnerScope::NoProvenance) {
+    append_patch(0xfe96cu, 0u);
+  } else {
     append_patch(0xfe96cu, 0x100u);
     append_patch(0xfe974u,
                  owner_scope == AutoReplayOwnerScope::DisjointOwnerPair ? 0x200u : 0x100u);
@@ -5536,7 +5576,47 @@ rocjitsu::ConSanResult auto_report_sampled_transform_result(
     if (owner_scope == AutoSampledOwnerScope::UnknownOwnerPair)
       result.patches.back().owner_descriptor_file_offsets.clear();
   }
+  install_test_access_coverage(
+      result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
+      rocjitsu::ConSanAccessPolicyReason::None, rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
+      rocjitsu::ConSanCapabilityEngine::Sampled, rocjitsu::ConSanProbeIntentKind::SampledAccess);
   return result;
+}
+
+TEST(HsaHooksUnitTest, ConSanAutoReportNeverReconstructsMissingEvidenceFromMechanismTelemetry) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  g_transform_override_result.observation_plan = {};
+  g_transform_override_result.coverage_ledger = {};
+
+  testing::internal::CaptureStderr();
+  {
+    FakeApiTable api;
+    InstalledDbiHook hook(api);
+    ASSERT_TRUE(hook.installed()) << hook.error();
+    constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+    hsa_code_object_reader_t reader{};
+    ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                    original.size(), &reader),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                reader, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
+    EXPECT_TRUE(g_core_memory_allocations.empty());
+    EXPECT_EQ(g_core_memory_allocate_calls, 0);
+  }
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_NE(log.find("missing or invalid typed evidence requirements"), std::string::npos) << log;
 }
 
 TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLiveOptions) {
@@ -5628,6 +5708,11 @@ TEST(HsaHooksUnitTest, ConSanAutoReportRejectsLiveFaultInventoryGrowth) {
   g_transform_override_live_fault_result->moi_candidates.push_back(std::move(second_candidate));
   g_transform_override_live_fault_result->resource_plans.push_back(
       g_transform_override_live_fault_result->resource_plans.front());
+  install_test_access_coverage(
+      *g_transform_override_live_fault_result, 2u, rocjitsu::ConSanSiteDecisionKind::Admitted,
+      rocjitsu::ConSanAccessPolicyReason::None, rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
+      rocjitsu::ConSanCapabilityEngine::RecordReplay,
+      rocjitsu::ConSanProbeIntentKind::AccessRecord);
   g_transform_override_models_fault_application = true;
 
   testing::internal::CaptureStderr();
@@ -6118,7 +6203,7 @@ TEST(HsaHooksUnitTest, ConSanMoiAutoReportReclaimsEveryExecutableAcrossProcessBu
 
     reset_code_object_observations();
     reset_core_memory_observations();
-    g_transform_override_result = auto_report_sampled_transform_result();
+    g_transform_override_result = auto_report_replay_transform_result();
     {
       FakeApiTable api;
       InstalledDbiHook hook(api);

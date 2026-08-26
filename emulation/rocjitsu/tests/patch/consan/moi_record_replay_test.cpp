@@ -3065,7 +3065,7 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
     EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
     const ConSanMoiAutoReportInventory inventory =
-        inventory_consan_moi_auto_report(result, options, bytes);
+        plan_test_moi_evidence_inventory(result, options);
     EXPECT_EQ(inventory.access_range_count, expected_byte_offsets.size());
     ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
     const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -3138,7 +3138,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
     EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
     const ConSanMoiAutoReportInventory inventory =
-        inventory_consan_moi_auto_report(result, options, bytes);
+        plan_test_moi_evidence_inventory(result, options);
     EXPECT_EQ(inventory.access_range_count, 1u);
     ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
     const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -4706,8 +4706,7 @@ TEST(ConSanMoi, AutoReportInventoryReservesRecordReplaySyncHeadroom) {
 
   const ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(result));
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
 
   EXPECT_EQ(inventory.barrier_event_count, kConSanMoiRecordReplayDynamicEventHeadroom);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
@@ -4740,8 +4739,7 @@ TEST(ConSanMoi, AutoReportInventoryReservesLaneScaledRecordReplayFenceHeadroom) 
 
   const ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
 
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
   EXPECT_EQ(inventory.fence_event_count, 2u * kConSanMoiRecordReplayDynamicLaneEventHeadroom);
@@ -11524,8 +11522,7 @@ TEST(ConSanMoi, RecordReplayAllSupportedPolicyIgnoresNominalPatchLimit) {
                                &ConSanPatchInfo::kind),
             kAccessCount);
 
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.access_range_count, kAccessCount);
 }
 

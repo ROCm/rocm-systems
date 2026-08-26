@@ -68,6 +68,33 @@ inline constexpr uint32_t kRdna4Wave64AllVgprsGranulated = 63;
               sizeof(ConSanMoiSampledPendingAcquireSlot));
 }
 
+/// Derive the MOI report inventory used by mechanism-focused tests from the
+/// same immutable observation plan and engine-specific evidence planner as
+/// production. This test helper deliberately cannot reconstruct requirements
+/// from emitted patches, resource assignments, or original object bytes.
+[[nodiscard]] ConSanMoiAutoReportInventory
+plan_test_moi_evidence_inventory(const ConSanResult &result, const ConSanOptions &options,
+                                 uint64_t caller_ceiling_bytes = 0) {
+  switch (options.moi_engine) {
+  case ConSanMoiEngine::RecordReplay:
+    return plan_consan_record_replay_evidence(
+               result.observation_plan,
+               make_consan_record_replay_capacity_policy(options, caller_ceiling_bytes))
+        .sizing_inventory;
+  case ConSanMoiEngine::Sampled:
+    return plan_consan_sampled_evidence(
+               result.observation_plan,
+               make_consan_sampled_capacity_policy(options, caller_ceiling_bytes))
+        .sizing_inventory;
+  case ConSanMoiEngine::InlineShadow:
+    return plan_consan_inline_shadow_evidence(
+               result.program_inventory, result.observation_plan,
+               make_consan_inline_shadow_capacity_policy(options, caller_ceiling_bytes))
+        .sizing_inventory;
+  }
+  return {};
+}
+
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 

@@ -987,8 +987,7 @@ TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.access_range_count, 1u);
   EXPECT_EQ(inventory.atomic_event_count, 1u);
   EXPECT_EQ(inventory.sampled_range_bank_count, 8u);
@@ -4638,8 +4637,7 @@ TEST(ConSanMoi, Gfx1250DynamicStackSampledStoreSpillsAcrossGuestOperands) {
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
   EXPECT_TRUE(result.final_validation_passed);
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.access_range_count, 1u);
   EXPECT_EQ(inventory.sampled_range_bank_count, 8u);
   EXPECT_EQ(inventory.sampled_watchpoint_count, 8u);

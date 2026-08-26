@@ -3278,8 +3278,7 @@ TEST(ConSanMoi, SampledAtomicTrackingRequiresSelectedReadyCausalWindow) {
 
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.patches.empty());
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.atomic_event_count, 0u);
   EXPECT_EQ(inventory.access_range_count, 0u);
   EXPECT_EQ(inventory.sampled_range_bank_count, 0u);

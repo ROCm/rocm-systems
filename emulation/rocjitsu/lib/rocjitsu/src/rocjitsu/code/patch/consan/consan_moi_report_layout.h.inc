@@ -846,11 +846,3 @@ fit_consan_moi_sampled_auto_report_inventory(ConSanMoiAutoReportInventory invent
 [[nodiscard]] ConSanMoiAutoReportInventory
 fit_consan_moi_inline_auto_report_inventory(ConSanMoiAutoReportInventory inventory,
                                             uint64_t caller_ceiling_bytes = 0);
-
-/// Extracts the bounded ordinary report requirements from one completed
-/// inventory transform. This does not allocate and deliberately does not try
-/// to predict expert dynamic per-lane replay volume.
-[[nodiscard]] ConSanMoiAutoReportInventory
-inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions &options,
-                                 std::span<const uint8_t> code_object_bytes,
-                                 uint64_t caller_ceiling_bytes = 0);

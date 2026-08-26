@@ -2301,7 +2301,7 @@ TEST(ConSanMoi, InventoryUsesSemanticArchNotDisplayTarget) {
       result.program_inventory.malformed_kernel_metadata_note_count(),
       result.program_inventory.arch(), ROCJITSU_CODE_TARGET_GFX942);
   result.program_inventory = display_target_revision.view();
-  EXPECT_EQ(inventory_consan_moi_auto_report(result, options, bytes).access_range_count, 1u);
+  EXPECT_EQ(plan_test_moi_evidence_inventory(result, options).access_range_count, 1u);
 }
 
 TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
@@ -2414,7 +2414,7 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     const ConSanMoiAutoReportInventory inventory =
-        inventory_consan_moi_auto_report(result, options, bytes);
+        plan_test_moi_evidence_inventory(result, options);
     EXPECT_EQ(inventory.engine, engine);
     EXPECT_EQ(inventory.access_range_count, 2u);
     EXPECT_GE(inventory.diagnostic_count, 2u);
@@ -2448,8 +2448,7 @@ TEST(ConSanMoi, InlineAutoReportBudgetsDiagnosticsAcrossDispatchBanks) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   const uint64_t dispatch_banks =
       consan_moi_inline_exact_dispatch_bank_count_for_lds(inventory.inline_lds_bytes);
   ASSERT_GT(dispatch_banks, 1u);
@@ -2476,8 +2475,7 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.inline_lds_bytes, kRuntimeLdsBytes);
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
   ASSERT_TRUE(plan.complete());
@@ -2505,8 +2503,7 @@ TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_TRUE(result.program_inventory.kernels().front().has_dynamic_lds);
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.inline_lds_bytes,
             consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5));
   const ConSanMoiAutoReportPlan plan = plan_consan_moi_auto_report(inventory);
@@ -2538,8 +2535,7 @@ TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   ASSERT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
-  const ConSanMoiAutoReportInventory inventory =
-      inventory_consan_moi_auto_report(result, options, bytes);
+  const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.access_range_count, 1u);
   EXPECT_EQ(inventory.inline_lds_bytes, kConSanMoiInlineShadowConservativeExactShadowEntries *
                                             consan_moi_exact_shadow::granule_bytes);
