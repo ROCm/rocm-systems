@@ -196,6 +196,356 @@ protected:
   void SetUp() override { SetUpWithConfig(RDNA3_CONFIG_PATH); }
 };
 
+// A compute queue created through KFD is replicated onto every XCD so its
+// dispatches can be spread across the whole device; the XCD that owns the queue
+// still reads the ring alone. An SDMA queue is per-engine and is not replicated.
+TEST_F(KfdIoctlTest, CreateQueueReplicatesComputeQueueAcrossXcds) {
+  const uint32_t num_xcds = soc_->num_xcds();
+  ASSERT_GT(num_xcds, 1u);
+
+  auto total_registered = [&]() {
+    size_t total = 0;
+    for (uint32_t xi = 0; xi < num_xcds; ++xi)
+      total += soc_->xcd(xi)->command_processor()->registered_queue_count_for_test();
+    return total;
+  };
+  ASSERT_EQ(total_registered(), 0u);
+
+  alignas(4096) std::array<std::byte, 8192> ring{};
+  alignas(64) std::array<uint64_t, 8> ptrs{};
+
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kGpuId;
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  args.ring_size = static_cast<uint32_t>(ring.size());
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+  args.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+
+  EXPECT_EQ(total_registered(), num_xcds)
+      << "compute queue should be registered on every XCD's command processor";
+  for (uint32_t xi = 0; xi < num_xcds; ++xi)
+    EXPECT_EQ(soc_->xcd(xi)->command_processor()->registered_queue_count_for_test(), 1u)
+        << "xcd" << xi;
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = args.queue_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(total_registered(), 0u) << "destroying the queue should drop every replica";
+}
+
+TEST_F(KfdIoctlTest, CreateQueueDoesNotReplicateSdmaQueue) {
+  const uint32_t num_xcds = soc_->num_xcds();
+  ASSERT_GT(num_xcds, 1u);
+
+  alignas(4096) std::array<std::byte, 8192> ring{};
+  alignas(64) std::array<uint64_t, 8> ptrs{};
+
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kGpuId;
+  args.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  args.ring_size = static_cast<uint32_t>(ring.size());
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+  args.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+  ASSERT_NE(args.queue_id, 0u) << "queue ids are process-local and start at one";
+
+  auto registered_on_all_xcds = [&] {
+    size_t total = 0;
+    for (uint32_t xi = 0; xi < num_xcds; ++xi)
+      total += soc_->xcd(xi)->command_processor()->registered_queue_count_for_test();
+    return total;
+  };
+  EXPECT_EQ(registered_on_all_xcds(), 1u)
+      << "an SDMA queue belongs to one engine, not to every XCD";
+
+  kfd_ioctl_destroy_queue_args destroy_args{};
+  destroy_args.queue_id = args.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy_args), 0);
+  EXPECT_EQ(registered_on_all_xcds(), 0u) << "destroying the queue should leave nothing behind";
+}
+
+// Fan-out is an allowlist of the compute types, not "anything that is not SDMA",
+// so both halves need covering: the second compute type must fan out, and a type
+// this driver does not recognize must not acquire device-wide replication by
+// falling through. Testing only COMPUTE_AQL and one SDMA type would let either
+// half regress -- a negation would still pass both.
+TEST_F(KfdIoctlTest, CreateQueueFansOutNamedComputeTypesOnly) {
+  const uint32_t num_xcds = soc_->num_xcds();
+  ASSERT_GT(num_xcds, 1u);
+
+  alignas(4096) std::array<std::byte, 8192> ring{};
+  alignas(64) std::array<uint64_t, 8> ptrs{};
+
+  auto registered_on_all_xcds = [&]() {
+    size_t total = 0;
+    for (uint32_t xi = 0; xi < num_xcds; ++xi)
+      total += soc_->xcd(xi)->command_processor()->registered_queue_count_for_test();
+    return total;
+  };
+
+  auto create = [&](uint32_t queue_type) {
+    kfd_ioctl_create_queue_args args{};
+    args.gpu_id = kGpuId;
+    args.queue_type = queue_type;
+    args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    args.ring_size = static_cast<uint32_t>(ring.size());
+    args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+    args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+    args.queue_percentage = 100;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0) << "queue_type " << queue_type;
+    return args.queue_id;
+  };
+  auto destroy = [&](uint32_t queue_id) {
+    kfd_ioctl_destroy_queue_args args{};
+    args.queue_id = queue_id;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &args), 0);
+  };
+
+  ASSERT_EQ(registered_on_all_xcds(), 0u);
+  const uint32_t compute = create(KFD_IOC_QUEUE_TYPE_COMPUTE);
+  ASSERT_NE(compute, 0u) << "CREATE_QUEUE did not return a queue id to destroy";
+  EXPECT_EQ(registered_on_all_xcds(), num_xcds)
+      << "the PM4 compute type is named in the allowlist and must fan out";
+  destroy(compute);
+  ASSERT_EQ(registered_on_all_xcds(), 0u);
+
+  // One past the last type the UAPI defines, so it tracks the header rather than
+  // being a literal that quietly becomes a real type when the UAPI grows. It is
+  // accepted as an ordinary queue, but it is not thereby a compute queue, so it
+  // stays on the XCD that owns it.
+  const uint32_t unknown = create(KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID + 1);
+  ASSERT_NE(unknown, 0u) << "CREATE_QUEUE did not return a queue id to destroy";
+  EXPECT_EQ(registered_on_all_xcds(), 1u)
+      << "an unrecognized queue type must not acquire device-wide replication";
+  destroy(unknown);
+}
+
+// Replication makes every CP hold a host-accessible queue, so "does this CP have
+// a KFD queue" stops answering "does this CP have a queue of its own". Two
+// queues land on different XCDs, and destroying the first leaves the second's
+// replica behind on the XCD that owned it. That CP must then be back to owning
+// nothing: a predicate that counted the leftover replica would keep its doorbell
+// monitor alive for a ring it never reads, and would let the queue be reported
+// idle from more than one CP.
+TEST_F(KfdIoctlTest, DestroyingOneOwnerLeavesTheOtherQueueUnaffected) {
+  const uint32_t num_xcds = soc_->num_xcds();
+  ASSERT_GT(num_xcds, 1u);
+
+  alignas(4096) std::array<std::byte, 8192> ring_a{};
+  alignas(4096) std::array<std::byte, 8192> ring_b{};
+  alignas(64) std::array<uint64_t, 8> ptrs_a{};
+  alignas(64) std::array<uint64_t, 8> ptrs_b{};
+
+  auto create = [&](std::array<std::byte, 8192> &ring, std::array<uint64_t, 8> &ptrs) {
+    kfd_ioctl_create_queue_args args{};
+    args.gpu_id = kGpuId;
+    args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    args.ring_size = static_cast<uint32_t>(ring.size());
+    args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[0]);
+    args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[1]);
+    args.queue_percentage = 100;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+    return args.queue_id;
+  };
+
+  // Find the CP that owns a queue: exactly one polls, the rest hold replicas.
+  auto owning_cp = [&]() -> rocjitsu::amdgpu::CommandProcessor * {
+    rocjitsu::amdgpu::CommandProcessor *found = nullptr;
+    for (uint32_t xi = 0; xi < num_xcds; ++xi) {
+      auto *cp = soc_->xcd(xi)->command_processor();
+      if (cp->polled_kfd_queue_count_for_test() > 0) {
+        EXPECT_EQ(found, nullptr) << "more than one CP claims to own a queue";
+        found = cp;
+      }
+    }
+    return found;
+  };
+
+  const uint32_t queue_a = create(ring_a, ptrs_a);
+  auto *cp_a = owning_cp();
+  ASSERT_NE(cp_a, nullptr);
+
+  create(ring_b, ptrs_b);
+  // Both queues are replicated everywhere, so every CP now holds two entries --
+  // but only two CPs own one, and the rest own none. That gap between holding a
+  // queue and owning one is the whole point.
+  size_t total_owned = 0;
+  for (uint32_t xi = 0; xi < num_xcds; ++xi) {
+    auto *cp = soc_->xcd(xi)->command_processor();
+    EXPECT_EQ(cp->registered_queue_count_for_test(), 2u) << "xcd" << xi;
+    EXPECT_LE(cp->polled_kfd_queue_count_for_test(), 1u) << "xcd" << xi;
+    total_owned += cp->polled_kfd_queue_count_for_test();
+  }
+  EXPECT_EQ(total_owned, 2u) << "each queue is owned by exactly one XCD";
+  EXPECT_EQ(cp_a->polled_kfd_queue_count_for_test(), 1u) << "the first queue's owner still owns it";
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue_a;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+
+  // The first queue's owner still holds the second queue's replica, so it still
+  // has a KFD queue -- but it no longer owns one, which is what its doorbell
+  // monitor and the idle walk must key off.
+  EXPECT_EQ(cp_a->registered_queue_count_for_test(), 1u) << "the peer's replica is still here";
+  EXPECT_EQ(cp_a->polled_kfd_queue_count_for_test(), 0u)
+      << "a leftover replica is not a queue of its own";
+
+  // ...and the surviving queue is still owned by exactly one CP, a different one.
+  auto *cp_b = owning_cp();
+  ASSERT_NE(cp_b, nullptr);
+  EXPECT_NE(cp_b, cp_a);
+
+  // The census above is necessary but not sufficient: it would still pass if the
+  // monitor kept keying off "has a KFD queue". Observe the behavior the owner-only
+  // predicate exists for. cp_a polls a ring it no longer owns unless its monitor
+  // retires, while cp_b must keep polling for the queue it does own.
+  auto wait_for_monitor = [](rocjitsu::amdgpu::CommandProcessor *cp, bool expected) {
+    // The monitor retires on its own cadence; allow generous slack for CI load.
+    for (int i = 0; i < 2000 && cp->doorbell_monitor_running_for_test() != expected; ++i)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return cp->doorbell_monitor_running_for_test();
+  };
+  EXPECT_FALSE(wait_for_monitor(cp_a, false))
+      << "a CP left holding only a replica must not keep a monitor for a ring it never reads";
+  EXPECT_TRUE(cp_b->doorbell_monitor_running_for_test())
+      << "the surviving queue's owner must still poll its own ring";
+}
+
+// The idle walk skips replicas, so a fanned-out queue raises HQD_IDLE from the
+// XCD that owns it and from nowhere else. Each peer's shards drain before the
+// owner's, so a report from a peer is not merely duplicated, it is early.
+//
+// Reaching the skip needs a CP that is *both* running a monitor and holding a
+// replica -- a CP with only replicas never starts a monitor at all, so its sweep
+// never runs and a test built on one passes no matter what the walk does. Two
+// processes give that shape and make it observable: the callback carries the
+// process id, so an owner reporting its own queue is distinguishable from a
+// replica reporting someone else's. Queue placement is by process-local ordinal,
+// so process B's second queue is what lands on a different XCD than process A's
+// first.
+TEST_F(KfdIoctlTest, IdleNotificationComesOnlyFromTheOwningXcd) {
+  const uint32_t num_xcds = soc_->num_xcds();
+  ASSERT_GT(num_xcds, 1u);
+
+  // Extra processes on the fixture's own driver, which already has a topology;
+  // a freshly constructed SimulatedKfd would not know this GPU.
+  const uint32_t pid_a = driver_->open_process();
+  const uint32_t pid_b = driver_->open_process();
+  ASSERT_NE(pid_a, 0u);
+  ASSERT_NE(pid_b, pid_a);
+
+  alignas(4096) std::array<std::byte, 32768> rings{};
+  alignas(64) std::array<uint64_t, 32> ptrs{};
+
+  auto create = [&](uint32_t pid, size_t slot) {
+    kfd_ioctl_create_queue_args args{};
+    args.gpu_id = kGpuId;
+    args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    args.ring_base_address = reinterpret_cast<uint64_t>(rings.data() + slot * 8192);
+    args.ring_size = 8192;
+    args.read_pointer_address = reinterpret_cast<uint64_t>(&ptrs[slot * 4]);
+    args.write_pointer_address = reinterpret_cast<uint64_t>(&ptrs[slot * 4 + 1]);
+    args.queue_percentage = 100;
+    EXPECT_EQ(driver_->ioctl(pid, AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+    return args.queue_id;
+  };
+
+  auto *owner_of_a = soc_->xcd(0)->command_processor();
+  auto *owner_of_b2 = soc_->xcd(1)->command_processor();
+  ASSERT_NE(owner_of_a, owner_of_b2);
+
+  // Record which process ids each of the two CPs reports idle. Replaces the
+  // driver's own callback; nothing here waits on a KFD event.
+  std::mutex seen_mutex;
+  std::set<uint32_t> seen_by_b2_owner;
+  std::set<uint32_t> seen_by_a_owner;
+
+  // Installed before the first CREATE_QUEUE, which is what starts the doorbell
+  // monitors. interrupt_cb_ is a plain std::function that the poll loop reads
+  // without a lock, so assigning it once a monitor is live is a data race on the
+  // function object itself -- one TSan reports.
+  owner_of_b2->set_interrupt_callback([&](uint32_t pid, uint32_t) {
+    std::lock_guard<std::mutex> lock(seen_mutex);
+    seen_by_b2_owner.insert(pid);
+  });
+  owner_of_a->set_interrupt_callback([&](uint32_t pid, uint32_t) {
+    std::lock_guard<std::mutex> lock(seen_mutex);
+    seen_by_a_owner.insert(pid);
+  });
+
+  // Detaches the observers before the state they capture goes out of scope.
+  // Declared after that state so it is destroyed first, and it runs on every exit
+  // path including a failed ASSERT: closing both processes destroys their queues,
+  // which stops and joins every monitor, so no poll thread can still be inside a
+  // callback by the time these locals die.
+  struct ObserverGuard {
+    rocjitsu::SimulatedKfd *driver;
+    rocjitsu::SoC *soc;
+    uint32_t pid_a;
+    uint32_t pid_b;
+    ~ObserverGuard() {
+      driver->close(pid_a);
+      driver->close(pid_b);
+      for (uint32_t xi = 0; xi < soc->num_xcds(); ++xi)
+        soc->xcd(xi)->command_processor()->set_interrupt_callback(nullptr);
+    }
+  } observer_guard{driver_, soc_, pid_a, pid_b};
+
+  // A's only queue takes ordinal 0; B's queues take ordinals 0 and 1, so B's
+  // second one is owned by a different XCD than A's.
+  create(pid_a, 0);
+  create(pid_b, 1);
+  create(pid_b, 2);
+
+  // owner_of_b2 must be running a monitor of its own -- otherwise its idle sweep
+  // never executes and this test cannot see the walk at all.
+  ASSERT_GT(owner_of_b2->polled_kfd_queue_count_for_test(), 0u);
+  ASSERT_GT(owner_of_b2->registered_queue_count_for_test(),
+            owner_of_b2->polled_kfd_queue_count_for_test())
+      << "the XCD under test must also hold a replica it does not own";
+
+  // The observers below are installed only on the two owners, so a replica-only
+  // XCD that started a monitor of its own would run the same idle sweep and report
+  // queues it does not own without this test ever seeing it. Pin that directly:
+  // holding replicas must not make a CP polled, and must not start a monitor.
+  for (uint32_t xi = 0; xi < soc_->num_xcds(); ++xi) {
+    auto *cp = soc_->xcd(xi)->command_processor();
+    if (cp == owner_of_a || cp == owner_of_b2)
+      continue;
+    EXPECT_GT(cp->registered_queue_count_for_test(), 0u)
+        << "xcd" << xi << " should hold replicas of the fanned-out queues";
+    EXPECT_EQ(cp->polled_kfd_queue_count_for_test(), 0u)
+        << "xcd" << xi << " owns no queue of its own and must poll nothing";
+    EXPECT_FALSE(cp->doorbell_monitor_running_for_test())
+        << "xcd" << xi << " started a doorbell monitor for replicas alone";
+  }
+
+  // Every queue is empty from creation, so each owner re-broadcasts idle on its
+  // periodic sweep. Wait for the sweep to have happened rather than for a fixed
+  // duration, so a loaded machine does not turn "not yet" into "never".
+  auto b2_owner_reported = [&] {
+    std::lock_guard<std::mutex> lock(seen_mutex);
+    return !seen_by_b2_owner.empty();
+  };
+  for (int i = 0; i < 4000 && !b2_owner_reported(); ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ASSERT_TRUE(b2_owner_reported()) << "the owning XCD never reported its idle queue";
+  // Give a wrong reporter the same chance to appear that the right one had.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  std::lock_guard<std::mutex> lock(seen_mutex);
+  EXPECT_TRUE(seen_by_b2_owner.count(pid_b) == 1) << "the owning XCD must report the queue it owns";
+  EXPECT_EQ(seen_by_b2_owner.count(pid_a), 0u)
+      << "this XCD holds only a replica of process A's queue and must not report it idle";
+  EXPECT_EQ(seen_by_a_owner.count(pid_a), 1u) << "process A's queue is idle on its own owner";
+}
+
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
   kfd_ioctl_set_memory_policy_args args{};
   args.gpu_id = kGpuId;
@@ -3606,7 +3956,12 @@ TEST_F(KfdIoctlTest, DbgTrapQueueSnapshotEnumeratesQueues) {
     suspended_queues +=
         cp->queue_runtime_suspended_for_test(q1.queue_id, driver_->local_process_id());
   });
-  EXPECT_EQ(suspended_queues, 1u);
+  // A compute queue is replicated onto every XCD for dispatch fan-out, and the
+  // suspension must reach every copy: a replica holds shards of its own, which
+  // the CP would otherwise keep draining while the runtime believes the queue is
+  // stopped. UPDATE_QUEUE already broadcasts to every command processor, so the
+  // count is one per XCD holding the queue rather than one for the owner.
+  EXPECT_EQ(suspended_queues, soc_->num_xcds());
 
   update.queue_percentage = 100;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UPDATE_QUEUE, &update), 0);

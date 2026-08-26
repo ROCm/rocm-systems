@@ -54,6 +54,22 @@ class MemoryCoherencyModel(Enum):
     GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
+class SwmmacLayout(Enum):
+    """Executor calling convention used by sparse WMMA instructions."""
+
+    NONE = auto()
+    FIXED_WAVE = auto()
+    RUNTIME_WAVE = auto()
+
+
+class MatrixLayout(Enum):
+    """Register/lane layout used by matrix instruction executors."""
+
+    MFMA_ACCUMULATOR = auto()
+    WMMA_REPLICATED_HALFWAVE = auto()
+    WMMA_SPLIT_K = auto()
+
+
 class DppOpcodeRule(Enum):
     """Opcode-level availability of a DPP source extension."""
 
@@ -558,8 +574,8 @@ class IsaProfile(ABC):
         """Cross-lane routing used by 8-bit B64 DS transpose loads.
 
         CDNA4 and older targets use the MFMA-oriented B64_TR_B8 routing.
-        Architectures with the 16x16 WMMA routing override this property so
-        opcode aliases cannot acquire different behavior from their spelling.
+        Architectures with target-specific DS B8 routing override this property
+        so opcode aliases cannot acquire different behavior from their spelling.
         """
         return 3
 
@@ -1247,6 +1263,16 @@ class _AmdgpuProfileBase(IsaProfile):
     def has_wmma(self) -> bool:
         """True if this ISA has WMMA matrix instructions (RDNA3+)."""
         return False
+
+    @property
+    def swmmac_layout(self) -> SwmmacLayout:
+        """Sparse WMMA executor layout supported by this ISA."""
+        return SwmmacLayout.NONE
+
+    @property
+    def matrix_layout(self) -> MatrixLayout:
+        """Register/lane mapping used by matrix instructions."""
+        return MatrixLayout.MFMA_ACCUMULATOR
 
     @property
     def flat_scratch_mechanism(self) -> str:
@@ -1957,6 +1983,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def matrix_layout(self) -> MatrixLayout:
+        return MatrixLayout.WMMA_REPLICATED_HALFWAVE
+
+    @property
     def has_vopd(self) -> bool:
         return True
 
@@ -2169,6 +2199,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def matrix_layout(self) -> MatrixLayout:
+        return MatrixLayout.WMMA_SPLIT_K
+
+    @property
+    def swmmac_layout(self) -> SwmmacLayout:
+        return SwmmacLayout.RUNTIME_WAVE
+
+    @property
     def has_vopd(self) -> bool:
         return True
 
@@ -2277,9 +2315,9 @@ class Cdna5Profile(Rdna4Profile):
 
     @property
     def ds_b8_transpose_kind(self) -> int:
-        # gfx1250 opcode 0xfd retains the B64_TR_B8 routing. All of its
-        # mnemonic aliases must resolve through this one profile value.
-        return 3
+        # gfx1250 groups source lanes by four rows and two eight-column halves.
+        # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
+        return 7
 
     @property
     def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
@@ -2444,6 +2482,10 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def wave_size_max(self) -> int:
         return 32
+
+    @property
+    def swmmac_layout(self) -> SwmmacLayout:
+        return SwmmacLayout.FIXED_WAVE
 
     @property
     def vop3_cmp_sdst_size_bits(self) -> int | None:
