@@ -252,6 +252,28 @@ the ORM metadata for the schema diagram, and materializes the views in a
 throwaway database to read back their real columns for the views diagram, so
 neither diagram can drift from the code. Do not edit the PNGs by hand.
 
+## Instruction Execution Pipeline Table
+
+[`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.json`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.json)
+maps every instruction mnemonic to the pipeline that runs it (VALU, MATRIX,
+SCALAR, and so on). Analyze reads it to fill the instruction type of each
+disassembled line. It is generated from the AMDGPU TableGen files of the LLVM
+commit TheRock pins, not written by hand:
+
+```bash
+./tools/instruction_pipeline_generator.py
+```
+
+Rerun it when a new GPU family needs support, or when an instruction shows up
+with an empty type in analyze, and commit the regenerated file as is. The script
+needs `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if they are
+not under `/opt/rocm`), network access, and a few minutes. It fetches the LLVM
+sources into a temporary directory it removes on exit.
+
+Before writing the file it checks that every mnemonic in the code objects of the
+local ROCm install has an entry. Pass `--corpus-root` when those code objects
+live outside `ROCM_PATH`, as they do in a ROCm Python wheel install.
+
 ## Vendoring External Dependencies
 
 rocprofiler-compute vendors certain Python dependencies (via git submodules) to eliminate external dependencies in profile mode. This improves portability and reliability on HPC systems.
