@@ -3,20 +3,15 @@
 
 """ROCTX instrumentation backend for PyTorch.
 
-ATen operators use the C++ RecordFunction tier when
-``torch_trace_collector`` is available; otherwise a Python
-``TorchDispatchMode`` is used. If no collector matches the workload
-PyTorch version, the process exits. Structural wraps (``nn.Module``,
-Optimizer, distributed, CUDA graph, ``torch.compile``) apply on both
-tiers. Triton kernel launches are handled by the triton backend.
-
-Import has no effect on PyTorch state. Torch is imported by
-``TorchBackend.install``.
+ATen operators are traced with ``torch_trace_collector`` when it is
+installed, and with ``TorchDispatchMode`` otherwise. The process
+exits if no collector matches this PyTorch version or the collector
+fails to load. Inductor static-launcher kernels are recorded here.
+This module is imported as ``utils.inject_roctx._backends.torch``
+and does not modify the ``torch`` package.
 """
 
-import importlib
 import importlib.util
-import inspect
 import os
 import sys
 import threading
@@ -51,11 +46,7 @@ class _RecordFnHook:
 
 
 class _TorchState:
-    """Mutable backend state populated by TorchBackend.install().
-
-    Holds the resolved torch module handles, the torch_trace_collector loader and
-    native C++ RecordFunction tier, and the active Python-tier dispatch mode.
-    """
+    """Resolved torch modules, collector, and active tracing tier."""
 
     def __init__(self) -> None:
         self.torch: Any = None
@@ -363,7 +354,7 @@ def patch_distributed_collectives() -> None:
             fn = getattr(fc, fn_name, None)
             if not callable(fn):
                 continue
-            if inspect.isclass(fn):
+            if isinstance(fn, type):
                 continue
             # Skip symbols re-exported from other modules (e.g. ReduceOp).
             if getattr(fn, "__module__", "") != fc.__name__:

@@ -5,8 +5,7 @@
 ROCTX injection.
 
 Invoked by absolute path as ``python <path>/launch.py --frameworks <name>
-[<name> ...] -- <target.py> [args...]``. When ``--frameworks`` is omitted the
-workload runs uninstrumented.
+[<name> ...] -- <target.py> [args...]``.
 """
 
 import runpy
