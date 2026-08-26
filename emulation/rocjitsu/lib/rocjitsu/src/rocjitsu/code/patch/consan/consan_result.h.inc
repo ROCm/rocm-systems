@@ -447,29 +447,11 @@ struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
   bool moi_dispatch_id_vgprs_automatic = false;
   size_t input_size = 0;
   std::string input_fingerprint;
-  /// Machine-readable input-metadata trust state retained with the diagnostic.
-  bool kernel_metadata_trustworthy = false;
-  size_t malformed_kernel_metadata_note_count = 0;
   /// Immutable semantic options captured before the first MOI planning pass.
   /// A report-buffer retry derives its options from this snapshot and can
   /// change only ConSanMoiReportRetryConfig fields plus the narrow live-fault
   /// selection carried by ConSanFaultMutationRetryConfig.
   std::optional<ConSanOptions> moi_inventory_options;
-  /// Resolved target architecture.  Production transforms set this before
-  /// candidate classification.  The hook rejects candidate-bearing results
-  /// that retain the invalid default before coverage or require-patch
-  /// classification.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
-  /// Exact code-object target identity. Its display name is derived from this
-  /// value, which must not participate in semantic decisions.
-  rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID;
-  /// Set immediately before architecture-dependent decoding and semantic
-  /// classification begin. Parse-only results, including unsupported targets,
-  /// leave this false even though they retain section and symbol inventory.
-  /// Every later result stage is copied from that classified result, so new
-  /// semantic fields added after the transition inherit this invariant without
-  /// extending a hand-maintained list of members.
-  bool semantic_arch_required = false;
   /// Immutable ownership of original code-object/container/access facts. The
   /// inherited `LegacyInventoryView` is rebound whenever this value is
   /// installed and remains only as a read-only compatibility projection for
@@ -533,7 +515,8 @@ struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
 /// Whether every architecture-dependent result stage has a typed architecture.
 /// Parse-only results are safe to pass through without one.
 [[nodiscard]] inline bool consan_result_has_resolved_semantic_arch(const ConSanResult &result) {
-  return !result.semantic_arch_required || result.arch != ROCJITSU_CODE_ARCH_INVALID;
+  return !result.program_inventory.semantic_arch_required() ||
+         result.program_inventory.arch() != ROCJITSU_CODE_ARCH_INVALID;
 }
 
 /// Whether a semantic claim is at least as strong as the weakest confidence a

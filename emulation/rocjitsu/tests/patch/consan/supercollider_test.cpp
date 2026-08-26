@@ -2978,8 +2978,8 @@ TEST(ConSan, Gfx1100LdsCheckTrapUsesRdna3CompletionWait) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1100);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1100);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   const std::vector<uint32_t> rewritten =

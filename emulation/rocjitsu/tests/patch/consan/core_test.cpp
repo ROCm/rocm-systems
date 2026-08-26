@@ -245,7 +245,7 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.errors.empty());
   EXPECT_TRUE(result.warnings.empty());
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_INVALID);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
   EXPECT_TRUE(result.kernels.empty());
 }
 
@@ -417,7 +417,7 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   EXPECT_EQ(result.input_size, bytes.size());
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_FALSE(result.errors.empty());
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_INVALID);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
   EXPECT_TRUE(result.kernels.empty());
 }
 
@@ -452,9 +452,9 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
     EXPECT_TRUE(result.parsed_code_object);
     EXPECT_FALSE(result.modified);
     EXPECT_TRUE(result.errors.empty());
-    EXPECT_FALSE(result.semantic_arch_required);
+    EXPECT_FALSE(result.program_inventory.semantic_arch_required());
     EXPECT_TRUE(consan_result_has_resolved_semantic_arch(result));
-    EXPECT_EQ(result.target, unsupported.target);
+    EXPECT_EQ(result.program_inventory.target(), unsupported.target);
     EXPECT_TRUE(std::ranges::any_of(result.warnings, [&](const std::string &warning) {
       return warning == "ConSan does not support target '" +
                             std::string(rj_code_target_name(unsupported.target)) + "'";
@@ -473,10 +473,15 @@ TEST(ConSan, SemanticArchitectureGateTracksAnalysisStageRatherThanResultMembers)
   parse_only.input_fingerprint = "parsed";
   EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
 
-  parse_only.semantic_arch_required = true;
+  ProgramInventoryBuilder required_inventory(parse_only.program_inventory);
+  required_inventory.set_semantic_arch_required(true);
+  parse_only.install_program_inventory(required_inventory.view());
   EXPECT_FALSE(consan_result_has_resolved_semantic_arch(parse_only));
 
-  parse_only.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  ProgramInventoryBuilder resolved_inventory(parse_only.program_inventory);
+  resolved_inventory.set_code_object_facts(false, 0u, ROCJITSU_CODE_ARCH_RDNA4,
+                                           ROCJITSU_CODE_TARGET_GFX1201);
+  parse_only.install_program_inventory(resolved_inventory.view());
   EXPECT_TRUE(consan_result_has_resolved_semantic_arch(parse_only));
 }
 
@@ -692,9 +697,10 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
       EXPECT_FALSE(result.final_validation_passed);
       EXPECT_TRUE(result.elf_bytes.empty());
       EXPECT_TRUE(result.patches.empty());
-      EXPECT_FALSE(result.kernel_metadata_trustworthy);
-      EXPECT_EQ(result.malformed_kernel_metadata_note_count, damage.malformed_note_count);
-      EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1201);
+      EXPECT_FALSE(result.program_inventory.kernel_metadata_trustworthy());
+      EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(),
+                damage.malformed_note_count);
+      EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
       ASSERT_EQ(result.errors.size(), 1u);
       EXPECT_EQ(result.errors.front(), damage.expected_error);
       EXPECT_EQ(consan_install_action(result, false), ConSanInstallAction::LoadOriginal);
@@ -735,8 +741,8 @@ TEST(ConSan, ReportsMultipleMalformedKernelMetadataNotes) {
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult result = try_patch_consan(bytes, options);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_FALSE(result.kernel_metadata_trustworthy);
-  EXPECT_EQ(result.malformed_kernel_metadata_note_count, 2u);
+  EXPECT_FALSE(result.program_inventory.kernel_metadata_trustworthy());
+  EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(), 2u);
   ASSERT_EQ(result.errors.size(), 1u);
   EXPECT_NE(result.errors.front().find("2 malformed AMDGPU kernel metadata notes"),
             std::string::npos);

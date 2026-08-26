@@ -6053,7 +6053,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
     result.resolved_moi_record_replay_workgroup_sgprs = options.moi_record_replay_workgroup_sgprs;
   };
   const bool crosses_cdna_accvgpr_boundary =
-      (consan_uses_gfx9_cdna_encoding(result.arch)) &&
+      (consan_uses_gfx9_cdna_encoding(result.program_inventory.arch())) &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
         return plan.source != ConSanRegisterAllocationSource::Unsupported &&
                !plan.owner_descriptor_file_offsets.empty() &&
@@ -6067,7 +6067,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   // state by itself fits below every AccVGPR boundary.  The other components
   // retain the smaller scalar-dispatch representation.
   const bool needs_cdna_component_dispatch_placement =
-      (consan_uses_gfx9_cdna_encoding(result.arch)) &&
+      (consan_uses_gfx9_cdna_encoding(result.program_inventory.arch())) &&
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
       options.automatic_moi_private_dispatch_id && !needs_persistent_dispatch_vgprs;
   if (crosses_cdna_accvgpr_boundary || needs_cdna_component_dispatch_placement) {

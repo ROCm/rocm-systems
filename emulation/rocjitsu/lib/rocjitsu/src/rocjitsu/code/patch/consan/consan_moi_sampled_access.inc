@@ -58,14 +58,15 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
             site = &*found;
         }
       }
-      const bool supported_scope = sequence.raw_scope
-                                       ? *sequence.raw_scope >= 1u && *sequence.raw_scope <= 3u
-                                       : result.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-                                             site != nullptr && site->mnemonic.starts_with("ds_");
+      const bool supported_scope =
+          sequence.raw_scope ? *sequence.raw_scope >= 1u && *sequence.raw_scope <= 3u
+                             : result.program_inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
+                                   site != nullptr && site->mnemonic.starts_with("ds_");
       if (site != nullptr && supported_scope &&
           (site->mnemonic.starts_with("flat_atomic") ||
            site->mnemonic.starts_with("global_atomic") ||
-           (result.arch == ROCJITSU_CODE_ARCH_CDNA5 && site->mnemonic.starts_with("ds_"))) &&
+           (result.program_inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
+            site->mnemonic.starts_with("ds_"))) &&
           (sequence.rmw_outcome != ConSanSyncRmwOutcome::CompareExchange ||
            site->returns_old_value.value_or(false))) {
         eligible = true;

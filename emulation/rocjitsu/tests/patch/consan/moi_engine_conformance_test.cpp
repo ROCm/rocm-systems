@@ -90,8 +90,8 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100NativeLdsAccess) {
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
-    EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1100);
-    EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA3);
+    EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1100);
+    EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA3);
     EXPECT_EQ(
         std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
         1u);
@@ -125,8 +125,8 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100SingletonWorkgroupBarrier) {
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
-    EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1100);
-    EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA3);
+    EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1100);
+    EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA3);
     EXPECT_EQ(std::ranges::count(result.patches, expected_kind, &ConSanPatchInfo::kind), 1u)
         << testing::PrintToString(result.warnings) << testing::PrintToString(result.patches);
   }

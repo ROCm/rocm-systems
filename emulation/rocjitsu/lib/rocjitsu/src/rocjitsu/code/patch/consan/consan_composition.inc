@@ -402,7 +402,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     if (pristine_inventory) {
       pristine_mutation_plan = std::move(pristine_inventory->result);
       reset_inventory_for_fault_planning(planning_options, pristine_mutation_plan);
-      build_fault_mutation_plan(planning_options, pristine_mutation_plan.arch,
+      build_fault_mutation_plan(planning_options, pristine_mutation_plan.program_inventory.arch(),
                                 pristine_mutation_plan);
     } else {
       pristine_mutation_plan = try_patch_consan_impl(code_object_bytes, planning_options);
@@ -670,13 +670,13 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     return result;
   }
   result.parsed_code_object = true;
-  result.kernel_metadata_trustworthy = code_object->kernel_metadata_is_trustworthy();
-  result.malformed_kernel_metadata_note_count = code_object->malformed_kernel_metadata_note_count();
-  result.target = code_object->target_id();
-  result.arch = consan_arch_for_target(code_object->target_id());
-  inventory_builder.set_code_object_facts(result.kernel_metadata_trustworthy,
-                                          result.malformed_kernel_metadata_note_count, result.arch,
-                                          result.target);
+  const bool kernel_metadata_trustworthy = code_object->kernel_metadata_is_trustworthy();
+  const size_t malformed_kernel_metadata_note_count =
+      code_object->malformed_kernel_metadata_note_count();
+  const rj_code_target_id_t target = code_object->target_id();
+  const rj_code_arch_t arch = consan_arch_for_target(target);
+  inventory_builder.set_code_object_facts(kernel_metadata_trustworthy,
+                                          malformed_kernel_metadata_note_count, arch, target);
   result.errors = validate_consan_input_layout(*code_object);
   if (!result.errors.empty())
     return result;
@@ -709,7 +709,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     info.has_text_range = kernel.has_text_range;
     info.has_dynamic_lds = kernel.has_dynamic_lds;
     info.uses_dynamic_stack = kernel.uses_dynamic_stack;
-    if (result.kernel_metadata_trustworthy) {
+    if (kernel_metadata_trustworthy) {
       info.vgpr_count = kernel.vgpr_count;
       info.agpr_count = kernel.agpr_count;
     }
@@ -746,22 +746,20 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   if (result.kernels.empty())
     result.warnings.emplace_back("ConSan found no kernel descriptor symbols");
 
-  const rj_code_arch_t arch = result.arch;
   if (arch == ROCJITSU_CODE_ARCH_INVALID) {
     publish_access_inventory();
     result.warnings.emplace_back("ConSan does not support target '" +
-                                 std::string(rj_code_target_name(result.target)) + "'");
+                                 std::string(rj_code_target_name(target)) + "'");
     result.outcome = ConSanTransformOutcome::Unsupported;
     return result;
   }
-  result.semantic_arch_required = true;
   inventory_builder.set_semantic_arch_required(true);
 
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (!decoder) {
     publish_access_inventory();
     result.warnings.emplace_back("ConSan could not create decoder for arch '" +
-                                 std::string(rj_code_arch_name(result.arch)) + "'");
+                                 std::string(rj_code_arch_name(arch)) + "'");
     result.outcome = ConSanTransformOutcome::Unsupported;
     return result;
   }

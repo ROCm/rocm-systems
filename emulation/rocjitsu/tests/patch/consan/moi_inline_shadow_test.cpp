@@ -500,7 +500,7 @@ TEST(ConSanMoi, CdnaInlineShadowUsesTrustedMetadataToMoveRoundedEmptyAccumulator
 
       const ConSanResult result = try_patch_consan(bytes, options);
 
-      ASSERT_TRUE(result.kernel_metadata_trustworthy);
+      ASSERT_TRUE(result.program_inventory.kernel_metadata_trustworthy());
       ASSERT_EQ(result.kernels.size(), 1u);
       EXPECT_EQ(result.kernels.front().vgpr_count, std::optional<uint16_t>(9u));
       EXPECT_EQ(result.kernels.front().agpr_count,

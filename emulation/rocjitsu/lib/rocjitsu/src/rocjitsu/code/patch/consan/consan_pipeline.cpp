@@ -408,7 +408,7 @@ TransformResult LegacyConSanLowering::publish_optional(
   if (flavor == ConSanFlavor::None) {
     capability_stage.status = ConSanPipelineStageStatus::NotApplicable;
   } else if (result.legacy_compatibility_.parsed_code_object) {
-    capability_stage.status = consan_target_profile(result.legacy_compatibility_.target)
+    capability_stage.status = consan_target_profile(result.program_inventory.target())
                                   ? ConSanPipelineStageStatus::Completed
                                   : ConSanPipelineStageStatus::Unsupported;
   } else {

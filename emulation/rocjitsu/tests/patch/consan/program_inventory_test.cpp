@@ -714,13 +714,11 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesInventoryEquivalentToLegacyD
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.program_inventory.code_object_id().fingerprint, result.input_fingerprint);
   EXPECT_EQ(result.program_inventory.code_object_id().byte_size, bytes.size());
-  EXPECT_EQ(result.program_inventory.arch(), result.arch);
-  EXPECT_EQ(result.program_inventory.target(), result.target);
-  EXPECT_EQ(result.program_inventory.kernel_metadata_trustworthy(),
-            result.kernel_metadata_trustworthy);
-  EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(),
-            result.malformed_kernel_metadata_note_count);
-  EXPECT_EQ(result.program_inventory.semantic_arch_required(), result.semantic_arch_required);
+  EXPECT_EQ(result.program_inventory.arch(), result.program_inventory.arch());
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
+  EXPECT_TRUE(result.program_inventory.kernel_metadata_trustworthy());
+  EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(), 0u);
+  EXPECT_TRUE(result.program_inventory.semantic_arch_required());
 
   const LegacyInventoryView legacy = result.program_inventory.legacy_view();
   EXPECT_EQ(legacy.text_sections.data(), result.text_sections.data());

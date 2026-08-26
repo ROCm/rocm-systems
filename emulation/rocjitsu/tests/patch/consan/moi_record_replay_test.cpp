@@ -600,11 +600,21 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   expect_invalid(std::move(wrong_engine), bytes, "requested engine");
 
   ConSanResult wrong_target = pristine;
-  wrong_target.target = ROCJITSU_CODE_TARGET_GFX1250;
+  ProgramInventoryBuilder wrong_target_inventory(wrong_target.program_inventory);
+  wrong_target_inventory.set_code_object_facts(
+      wrong_target.program_inventory.kernel_metadata_trustworthy(),
+      wrong_target.program_inventory.malformed_kernel_metadata_note_count(),
+      wrong_target.program_inventory.arch(), ROCJITSU_CODE_TARGET_GFX1250);
+  wrong_target.install_program_inventory(wrong_target_inventory.view());
   expect_invalid(std::move(wrong_target), bytes, "code-object target");
 
   ConSanResult wrong_arch = pristine;
-  wrong_arch.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  ProgramInventoryBuilder wrong_arch_inventory(wrong_arch.program_inventory);
+  wrong_arch_inventory.set_code_object_facts(
+      wrong_arch.program_inventory.kernel_metadata_trustworthy(),
+      wrong_arch.program_inventory.malformed_kernel_metadata_note_count(), ROCJITSU_CODE_ARCH_CDNA5,
+      wrong_arch.program_inventory.target());
+  wrong_arch.install_program_inventory(wrong_arch_inventory.view());
   expect_invalid(std::move(wrong_arch), bytes, "code-object architecture");
 
   ConSanResult modified = pristine;
@@ -2993,8 +3003,8 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
@@ -7409,8 +7419,8 @@ TEST(ConSanMoi, Cdna4BarrierRecordForcedSpillUsesNativePrivateWindows) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
@@ -10756,8 +10766,8 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -11337,8 +11347,8 @@ TEST(ConSanMoi, Cdna4FarRecordReplayBarriersUseRelocatedRouterBelowCompactCountL
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kSiteCount);
@@ -12694,8 +12704,8 @@ TEST(ConSanMoi, Cdna3RecordReplayAtomicEmitsValidatedNativeTransaction) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX942);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA3);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX942);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA3);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             1u);
@@ -12734,8 +12744,8 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {

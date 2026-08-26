@@ -193,6 +193,12 @@ current compatibility lowerer still performs much of the underlying decode and
 analysis; the contract prevents later policy and lowering from rewriting the
 facts it produces.
 
+The inventory is also the sole owner of the parsed target, semantic
+architecture, kernel-metadata trust state, malformed-note count, and the fact
+that architecture-dependent classification began. `ConSanResult` no longer
+duplicates those facts, so retry, policy, lowering, and the runtime coordinator
+cannot observe inconsistent identities.
+
 ### Engine policy and observation plan
 
 Policy is split by semantic domain:

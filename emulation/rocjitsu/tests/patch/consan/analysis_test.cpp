@@ -1248,8 +1248,8 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty());
   ASSERT_EQ(result.kernels.size(), 1u);
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1201);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA4);
 
   const ConSanKernelInfo &kernel = result.kernels.front();
   EXPECT_EQ(kernel.name, "lds_probe");
@@ -1441,8 +1441,8 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
     const ConSanResult result = try_patch_consan(target_case.bytes, options);
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     EXPECT_TRUE(result.parsed_code_object);
-    EXPECT_EQ(result.target, target_case.target);
-    EXPECT_EQ(result.arch, target_case.arch);
+    EXPECT_EQ(result.program_inventory.target(), target_case.target);
+    EXPECT_EQ(result.program_inventory.arch(), target_case.arch);
   }
   EXPECT_EQ(consan_capability_engine(ConSanFlavor::SuperCollider, ConSanMoiEngine::RecordReplay),
             ConSanCapabilityEngine::SuperCollider);
@@ -1469,8 +1469,8 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
-  ASSERT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
+  ASSERT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_EQ(result.kernels.size(), 1u);
   const ConSanKernelInfo &kernel = result.kernels.front();
   EXPECT_TRUE(kernel.decoded);

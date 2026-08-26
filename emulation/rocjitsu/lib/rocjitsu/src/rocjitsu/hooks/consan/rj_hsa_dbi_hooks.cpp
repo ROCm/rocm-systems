@@ -412,7 +412,7 @@ is_supported_require_patch_moi_candidate(const rocjitsu::ConSanMoiCandidate &can
   if (!result.resource_plans.empty())
     return true;
   return std::ranges::any_of(result.moi_candidates, [&](const auto &candidate) {
-    return is_supported_require_patch_moi_candidate(candidate, result.arch);
+    return is_supported_require_patch_moi_candidate(candidate, result.program_inventory.arch());
   });
 }
 
@@ -564,7 +564,8 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
       coverage.access.discovered = result.moi_candidates.size();
       coverage.access.supported = static_cast<uint64_t>(std::count_if(
           result.moi_candidates.begin(), result.moi_candidates.end(), [&](const auto &candidate) {
-            return is_supported_require_patch_moi_candidate(candidate, result.arch);
+            return is_supported_require_patch_moi_candidate(candidate,
+                                                            result.program_inventory.arch());
           }));
     }
     const auto has_disposition_kind = [&](rocjitsu::ConSanResourceSiteKind wanted) {
@@ -593,7 +594,8 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
       coverage.access.discovered = result.moi_candidates.size();
       coverage.access.supported = static_cast<uint64_t>(std::count_if(
           result.moi_candidates.begin(), result.moi_candidates.end(), [&](const auto &candidate) {
-            return is_supported_require_patch_moi_candidate(candidate, result.arch);
+            return is_supported_require_patch_moi_candidate(candidate,
+                                                            result.program_inventory.arch());
           }));
     }
     const bool has_inline_exact_patch =
@@ -4615,14 +4617,15 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         static_cast<unsigned long long>(config->moi_auto_report_buffer_size),
         config->require_patch ? "true" : "false");
     if (patch_result.parsed_code_object) {
-      log_message(kLogInfo,
-                  "ConSan code-object reader=%llu target=%s arch=%s text_sections=%zu "
-                  "kernels=%zu functions=%zu",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  rj_code_target_name(patch_result.target),
-                  rj_code_arch_name(rj_code_arch_for_target(patch_result.target)),
-                  patch_result.text_sections.size(), patch_result.kernels.size(),
-                  patch_result.functions.size());
+      log_message(
+          kLogInfo,
+          "ConSan code-object reader=%llu target=%s arch=%s text_sections=%zu "
+          "kernels=%zu functions=%zu",
+          static_cast<unsigned long long>(code_object_reader.handle),
+          rj_code_target_name(transform_result.program_inventory.target()),
+          rj_code_arch_name(rj_code_arch_for_target(transform_result.program_inventory.target())),
+          patch_result.text_sections.size(), patch_result.kernels.size(),
+          patch_result.functions.size());
     }
     log_message(kLogInfo, "ConSan fault inventory reader=%llu sites=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),

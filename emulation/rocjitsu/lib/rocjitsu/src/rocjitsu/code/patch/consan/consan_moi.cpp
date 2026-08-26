@@ -1056,7 +1056,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = options.moi_engine;
-  const rj_code_arch_t arch = result.arch;
+  const rj_code_arch_t arch = result.program_inventory.arch();
 
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;
@@ -1221,7 +1221,7 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
                                        inventory.inline_lds_bytes < selected_native_lds_extent;
     if (selected_flat_candidate || selected_dynamic_lds_owner || descriptor_opaque_lds) {
       const uint64_t external_lds_bytes = options.moi_max_workgroup_lds_bytes.value_or(
-          result.arch == ROCJITSU_CODE_ARCH_CDNA5
+          result.program_inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5
               ? consan_moi_max_workgroup_lds_bytes(ROCJITSU_CODE_ARCH_CDNA5)
               : static_cast<uint32_t>(kConSanMoiInlineShadowConservativeExactShadowEntries *
                                       consan_moi_exact_shadow::granule_bytes));

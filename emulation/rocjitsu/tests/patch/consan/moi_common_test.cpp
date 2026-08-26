@@ -2263,10 +2263,15 @@ TEST(ConSanMoi, InventoryUsesSemanticArchNotDisplayTarget) {
   options.moi_report_buffer_size = 64u * 1024u * 1024u;
   ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX1201);
-  ASSERT_EQ(result.arch, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
+  ASSERT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA4);
 
-  result.target = ROCJITSU_CODE_TARGET_GFX942;
+  ProgramInventoryBuilder display_target_revision(result.program_inventory);
+  display_target_revision.set_code_object_facts(
+      result.program_inventory.kernel_metadata_trustworthy(),
+      result.program_inventory.malformed_kernel_metadata_note_count(),
+      result.program_inventory.arch(), ROCJITSU_CODE_TARGET_GFX942);
+  result.install_program_inventory(display_target_revision.view());
   EXPECT_EQ(inventory_consan_moi_auto_report(result, options, bytes).access_range_count, 1u);
 }
 
@@ -2617,8 +2622,8 @@ TEST(ConSanMoi, Cdna4OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.target, ROCJITSU_CODE_TARGET_GFX950);
-  EXPECT_EQ(result.arch, ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
+  EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);

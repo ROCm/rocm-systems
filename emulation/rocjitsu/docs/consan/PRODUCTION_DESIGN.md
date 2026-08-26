@@ -2460,6 +2460,14 @@ The remaining lowerer responsibilities are explicit:
   placement/emission and transactional finalization. At each boundary, delete
   the corresponding `ConSanOptions`/`ConSanResult` fields and extend the focused
   type tests before proceeding.
+
+The first deletion in that order is complete: `ProgramInventory` is now the
+only owner of target identity, semantic architecture, metadata trust,
+malformed-note count, and the semantic-classification-required state. The five
+formerly duplicated `ConSanResult` members and their independent mutation
+paths have been deleted. Parser construction and decoded-container population
+remain inside the legacy boundary and are the next inventory responsibility to
+extract.
 - **Completed final gate:** All 1,502 selected ConSan host tests ran: 1,500
   passed and the two external-object benchmarks skipped as intended. All 98
   hook/transform-memory tests and all 16 focused pipeline tests passed. The
