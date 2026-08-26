@@ -116,6 +116,7 @@ Checks: >
   readability-function-cognitive-complexity,
   readability-function-size,
   readability-identifier-length,
+  readability-identifier-naming,
   readability-magic-numbers,
   readability-misleading-indentation,
   readability-redundant-declaration,
