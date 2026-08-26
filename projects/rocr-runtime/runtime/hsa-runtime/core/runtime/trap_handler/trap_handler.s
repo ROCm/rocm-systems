@@ -176,9 +176,9 @@
 
  .macro  S_STORE_DWORD_PCS_TTMP_REG1 base, offset
   .if (.amdgcn.gfx_generation_minor >= 4)
-    s_store_dword    ttmp6, \base, \offset
+    s_store_dword    ttmp6, \base, \offset glc
   .else
-    s_store_dword    ttmp13, \base, \offset
+    s_store_dword    ttmp13, \base, \offset glc
   .endif
  .endm
 
@@ -532,28 +532,28 @@ trap_entry:
   s_addc_u32                            ttmp3, ttmp3, ttmp5             // ttmp[2:3]=&bufferX[local_entry]
   s_memrealtime                         ttmp[4:5]
   s_and_b32                             ttmp1, ttmp1, 0xffff            // clear out extra data from PC_HI
-  s_store_dwordx2                       ttmp[0:1], ttmp[2:3]            // store PC
+  s_store_dwordx2                       ttmp[0:1], ttmp[2:3] glc        // store PC
   s_waitcnt                             lgkmcnt(0)                      // wait for timestamp
   S_MOV_B32_SRC_PCS_TTMP_REG1           exec_lo
   S_STORE_DWORD_PCS_TTMP_REG1           ttmp[2:3], 0x8                  // store EXEC_LO
   S_MOV_B32_SRC_PCS_TTMP_REG1           exec_hi
   S_STORE_DWORD_PCS_TTMP_REG1           ttmp[2:3], 0xc                  // store EXEC_HI
-  s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10      // store wg_id_x and wg_id_y
-  s_store_dword                         ttmp10, ttmp[2:3], 0x18         // store wg_id_z
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x30      // store timestamp
+  s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10 glc  // store wg_id_x and wg_id_y
+  s_store_dword                         ttmp10, ttmp[2:3], 0x18 glc     // store wg_id_z
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x30 glc  // store timestamp
 
 .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
   s_getreg_b32                          ttmp4, hwreg(HW_REG_XCC_ID)     //store XCC_ID
   s_lshl_b32                            ttmp4, ttmp4, 8
   s_and_b32                             ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
   s_or_b32                              ttmp4, ttmp4, ttmp5
-  s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store wave_in_wg
+  s_store_dword                         ttmp4, ttmp[2:3], 0x1c glc      // store wave_in_wg
 .else
   s_and_b32                             ttmp4, ttmp11, 0x3f
-  s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store wave_in_wg
+  s_store_dword                         ttmp4, ttmp[2:3], 0x1c glc      // store wave_in_wg
 .endif
   s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
-  s_store_dword                         ttmp4, ttmp[2:3], 0x20          // store HW_ID
+  s_store_dword                         ttmp4, ttmp[2:3], 0x20 glc      // store HW_ID
 
   s_branch                              .get_correlation_id
 
@@ -565,29 +565,29 @@ trap_entry:
   s_addc_u32                            ttmp3, ttmp3, ttmp5             // ttmp[2:3]=&buffer[local_entry]
   s_memrealtime                         ttmp[4:5]
   s_waitcnt                             lgkmcnt(0)                      // Wait for timestamp
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x30       // Store timestamp
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x30 glc   // Store timestamp
 
   s_getreg_b32                          ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_LO)
   s_getreg_b32                          ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_PC_HI)
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x00       // store snapshot data
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3] 0x00 glc   // store snapshot data
   s_getreg_b32                          ttmp5, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA1)
   s_getreg_b32                          ttmp4, hwreg(HW_REG_SQ_PERF_SNAPSHOT_DATA)
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x24            // store snapshot PC
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x24 glc        // store snapshot PC
 
   s_mov_b32                             ttmp6, exec_lo
-  s_store_dword                         ttmp6, ttmp[2:3], 0x8           // store EXEC_LO
+  s_store_dword                         ttmp6, ttmp[2:3], 0x8 glc       // store EXEC_LO
   s_mov_b32                             ttmp6, exec_hi
-  s_store_dword                         ttmp6, ttmp[2:3], 0xc           // store EXEC_HI
+  s_store_dword                         ttmp6, ttmp[2:3], 0xc glc       // store EXEC_HI
 
-  s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10      // store wg_id_x and wg_id_y
-  s_store_dword                         ttmp10, ttmp[2:3], 0x18         // store wg_id_z
+  s_store_dwordx2                       ttmp[8:9], ttmp[2:3], 0x10 glc  // store wg_id_x and wg_id_y
+  s_store_dword                         ttmp10, ttmp[2:3], 0x18 glc     // store wg_id_z
   s_getreg_b32                          ttmp4, hwreg(HW_REG_XCC_ID)
   s_lshl_b32                            ttmp4, ttmp4, 8
   s_and_b32                             ttmp5, ttmp11, TTMP11_WAVE_IN_WG_MASK
   s_or_b32                              ttmp4, ttmp4, ttmp5
-  s_store_dword                         ttmp4, ttmp[2:3], 0x1c          // store chiplet_and_wave_id
+  s_store_dword                         ttmp4, ttmp[2:3], 0x1c glc      // store chiplet_and_wave_id
   s_getreg_b32                          ttmp4, hwreg(HW_REG_HW_ID)
-  s_store_dword                         ttmp4, ttmp[2:3], 0x20          // store HW_ID
+  s_store_dword                         ttmp4, ttmp[2:3], 0x20 glc      // store HW_ID
   // ttmp[2:3]=&buffer[local_entry]; ttmp[4:5], ttmp[6:7] are free
   // ttmp[14:15]=ptr to ‘tma’ and is live out; ttmp11.b31 is buf_to_use, 0 or 1
   s_branch                              .get_correlation_id
@@ -635,7 +635,7 @@ trap_entry:
 .else
   s_and_b32                             ttmp4, ttmp6, 0x1ffffff         // extract low 25 bits from ttmp6 (DispatchPktIndx[24:0])
 .endif
-  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x38      // ttmp[4:5] is correlation ID. Store correlation_id to sample
+  s_store_dwordx2                       ttmp[4:5], ttmp[2:3], 0x38 glc  // ttmp[4:5] is correlation ID. Store correlation_id to sample
   // get_correlation_id() -- end //
 
   // complete stores before returning
