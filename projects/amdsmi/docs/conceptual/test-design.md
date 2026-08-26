@@ -475,9 +475,9 @@ tests/python/
 │   └── test_ras.py                    # ras (+ afid folder)
 │
 ├── run_tests.py                      # Runner: any tier, several, or all of them
-├── integration_test.py               # Runner: discovers and runs integration/ tests
-├── functional_test.py                # Runner: discovers and runs functional/ tests
-├── cli_unit_test.py                  # Runner: discovers and runs cli/ tests
+├── integration_tests.py               # Runner: discovers and runs integration/ tests
+├── functional_tests.py                # Runner: discovers and runs functional/ tests
+├── cli_tests.py                  # Runner: discovers and runs cli/ tests
 ├── unit_tests.py                     # Runner: discovers and runs unit/ tests
 ├── CMakeLists.txt                    # Installs this tree into the python_unittest/ path
 └── README.md                         # Prerequisites + pointer to this design doc
@@ -518,9 +518,9 @@ of `-k`, skips tests whose id contains the pattern). Run from source by substitu
 ```shell
 /opt/rocm/share/amd_smi/tests/python_unittest/run_tests.py --list
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py --list
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py --list
-/opt/rocm/share/amd_smi/tests/python_unittest/functional_test.py --list
-/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py --list
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py --list
+/opt/rocm/share/amd_smi/tests/python_unittest/functional_tests.py --list
+/opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py --list
 ```
 
 **All unit tests** (no hardware required):
@@ -535,16 +535,16 @@ of `-k`, skips tests whose id contains the pattern). Run from source by substitu
 **All functional tests** (live hardware, root may be required):
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "power" -v
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -v
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -b -v
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -k "power" -v
 ```
 
 **All CLI tests**:
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
-/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "gpu" -v
+/opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -v
+/opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -k "gpu" -v
 ```
 
 **Narrow to a single feature file** with `-k` on the matching runner. The individual
@@ -555,29 +555,29 @@ invoking one with `python test_power.py` simply raises `ModuleNotFoundError: com
 as running a pytest test file directly. Always go through a runner with a `-k` filter:
 
 ```shell
-# functional/gpu/test_power.py -> integration_test.py with a -k filter
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "functional.gpu.test_power" -v
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_power" -v
+# functional/gpu/test_power.py -> integration_tests.py with a -k filter
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -k "functional.gpu.test_power" -v
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -k "test_power" -v
 
 # unit/system/test_bdf.py -> unit_tests.py
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "unit.system.test_bdf" -v
 ```
 
 **Equivalent matrix between Python and C++.**  
-The two suites are structurally asymmetric: Python has **three independent runners** (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`),
+The two suites are structurally asymmetric: Python has **three independent runners** (`unit_tests.py`, `integration_tests.py`, `cli_tests.py`),
 while C++ is a **single `amdsmitst` binary** filtered with `--gtest_filter`. Some concepts map only
 one way — **CLI tests are Python-only**, and the **read-only/read-write split is C++-only**.
 
 | Intent | Python | C++ (`amdsmitst`) |
 | :--- | :--- | :--- |
-| List all tests | `--list` / `-l` on each runner (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`) | `--gtest_list_tests` |
+| List all tests | `--list` / `-l` on each runner (`unit_tests.py`, `integration_tests.py`, `cli_tests.py`) | `--gtest_list_tests` |
 | Unit only | `unit_tests.py -v` — API suites need a live device, logic-only suites do not | `--gtest_filter="*Unit*"` |
-| All functional | `integration_test.py -v` | `--gtest_filter="*Functional*"` |
+| All functional | `integration_tests.py -v` | `--gtest_filter="*Functional*"` |
 | Functional read-only / read-write | Not distinguished — Python groups functional tests by component/feature, not by RO/RW | `--gtest_filter="*FunctionalReadOnly*"` / `"*FunctionalReadWrite*"` |
-| CLI tests | `cli_unit_test.py -v` | _Python-only — no C++ equivalent_ |
-| Feature filter (e.g. power) | `integration_test.py -k power -v` (use the runner that owns that test type) | `--gtest_filter="*.*Power*"` |
-| Exclude / negate | `integration_test.py -x partition -v` (skip tests whose id contains `partition`) | `--gtest_filter="-*.*Partition*"` |
-| Everything | `unit_tests.py -v && integration_test.py -v && cli_unit_test.py -v` | `./amdsmitst` |
+| CLI tests | `cli_tests.py -v` | _Python-only — no C++ equivalent_ |
+| Feature filter (e.g. power) | `integration_tests.py -k power -v` (use the runner that owns that test type) | `--gtest_filter="*.*Power*"` |
+| Exclude / negate | `integration_tests.py -x partition -v` (skip tests whose id contains `partition`) | `--gtest_filter="-*.*Partition*"` |
+| Everything | `unit_tests.py -v && integration_tests.py -v && cli_tests.py -v` | `./amdsmitst` |
 
 ### CMake integration
 
@@ -664,9 +664,9 @@ shown in parentheses.
 | Old file (`tests/python_unittest/`) | New location (`tests/python/`) |
 | :--- | :--- |
 | `unit_tests.py` | `unit/<component>/test_<feature>.py` for logic (e.g. `unit/system/test_bdf.py`) and `integration/<component>/test_<feature>.py` for the per-API suites (e.g. `integration/gpu/test_power.py`); a suite that stubs `sys.modules` declares `ModuleIsolationMixin` |
-| `integration_test.py` | `functional/<component>/test_<feature>.py` (e.g. `functional/system/test_init.py`, `functional/gpu/test_power.py`, `functional/nic/test_discovery.py`) |
+| `integration_tests.py` | `functional/<component>/test_<feature>.py` (e.g. `functional/system/test_init.py`, `functional/gpu/test_power.py`, `functional/nic/test_discovery.py`) |
 | `partition_metric_unit_test.py` | `unit/gpu/test_cli_metric_partition.py` |
-| `cli_unit_test.py` | `cli/test_<command>.py`, one per command (shared scaffolding in `cli/base.py`) |
+| `cli_tests.py` | `cli/test_<command>.py`, one per command (shared scaffolding in `cli/base.py`) |
 | `perf_tests.py` | `functional/gpu/test_benchmark.py` |
 | `perf_cputests.py` | `functional/cpu/test_benchmark.py` |
 | `common.py` | `common/common.py` |

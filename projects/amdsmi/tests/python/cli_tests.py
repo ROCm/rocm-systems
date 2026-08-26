@@ -19,15 +19,16 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-
-"""Functional test runner — discovers and runs all tests under functional/.
-These tests require live hardware and may require elevated privileges (sudo/root).
+"""
+CLI unit test runner — discovers and runs all tests under cli/.
 
 Usage (installed):
-    /opt/rocm/share/amd_smi/tests/python_unittest/functional_test.py -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -b -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -k "gpu" -v
 
 Usage (source):
-    tests/python/functional_test.py -v
+    tests/python/cli_tests.py -v
 
 Options:
     -v / --verbose    Verbose output (show per-test names)
@@ -47,4 +48,4 @@ sys.path.insert(0, _here)
 
 import common.common as common  # noqa: E402  (sys.path bootstrapped above)
 
-common.run_test_dir("functional", "AMD SMI Functional Tests", _here)
+common.run_test_dir("cli", "AMD SMI CLI Tests", _here)

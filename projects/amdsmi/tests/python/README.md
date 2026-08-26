@@ -30,9 +30,9 @@ For the broader design rationale (C++ + Python), see the test design guide:
 tests/python/
 ├── run_tests.py            # runner: one tier, several, or all
 ├── unit_tests.py           # runner: discovers unit/         (no hardware)
-├── integration_test.py     # runner: discovers integration/  (live device)
-├── functional_test.py      # runner: discovers functional/   (live device + root)
-├── cli_unit_test.py        # runner: discovers cli/          (drives amd-smi CLI)
+├── integration_tests.py     # runner: discovers integration/  (live device)
+├── functional_tests.py      # runner: discovers functional/   (live device + root)
+├── cli_tests.py        # runner: discovers cli/          (drives amd-smi CLI)
 ├── common/                 # shared runner + helpers (common.py, api_test.py, runcmd.py)
 ├── unit/                   # no hardware: logic and mocked-import suites
 │   ├── gpu/                #   apu_metrics, kfd_process_gpus, the cli_* mocked suites
@@ -52,9 +52,9 @@ subtree.
 graph TD
     A[tests/python] --> R["run_tests.py<br/>--unit --integration --functional --cli"]
     A --> U[unit_tests.py]
-    A --> I[integration_test.py]
-    A --> F[functional_test.py]
-    A --> C[cli_unit_test.py]
+    A --> I[integration_tests.py]
+    A --> F[functional_tests.py]
+    A --> C[cli_tests.py]
     R -->|discovers any combination| ALL[unit/ integration/<br/>functional/ cli/]
     U -->|discovers| UU[unit/**/test_*.py<br/>no hardware]
     I -->|discovers| II[integration/**/test_*.py<br/>live device]
@@ -108,9 +108,9 @@ inherit `common.common.ModuleIsolationMixin` and declare `ISOLATED_MODULES` (and
 [unit/test_module_isolation.py](unit/test_module_isolation.py) finds those suites by
 that marker and enforces the contract.
 
-| `integration_test.py` | `integration/` | Yes | Per-API argument rejection and payload validation |
-| `functional_test.py` | `functional/` | Yes | Setters, stateful lifecycles and benchmarks |
-| `cli_unit_test.py` | `cli/` | Yes | Runs the installed `amd-smi` binary and checks its output |
+| `integration_tests.py` | `integration/` | Yes | Per-API argument rejection and payload validation |
+| `functional_tests.py` | `functional/` | Yes | Setters, stateful lifecycles and benchmarks |
+| `cli_tests.py` | `cli/` | Yes | Runs the installed `amd-smi` binary and checks its output |
 
 They all share the same option set and the same GTest-style summary, because
 they all delegate to `common.run_test_dir()`.
@@ -135,9 +135,9 @@ From this source tree:
 sudo ./run_tests.py -v                          # every tier
 sudo ./run_tests.py --unit --integration -v     # two tiers together
 sudo ./unit_tests.py -v                         # one tier on its own
-sudo ./integration_test.py -v
-sudo ./functional_test.py -v
-sudo ./cli_unit_test.py -v
+sudo ./integration_tests.py -v
+sudo ./functional_tests.py -v
+sudo ./cli_tests.py -v
 ```
 
 > The install target maps `tests/python/` to `.../tests/python_unittest/` so the
@@ -213,13 +213,13 @@ sudo ./unit_tests.py -v
 sudo ./unit_tests.py -k "bdf" -v
 
 # Run all functional tests except the performance suites
-sudo ./functional_test.py -x performance -v
+sudo ./functional_tests.py -x performance -v
 
 # Run only the CLI version-command test, buffering per-test output
-sudo ./cli_unit_test.py -k "version" -b -v
+sudo ./cli_tests.py -k "version" -b -v
 
 # Point at a non-default build
-sudo AMDSMI_PATH=/path/to/build/share/amd_smi ./functional_test.py -v
+sudo AMDSMI_PATH=/path/to/build/share/amd_smi ./functional_tests.py -v
 ```
 
 ### `-l` (list) output

@@ -24,12 +24,12 @@ Integration test runner — discovers and runs all tests under integration/.
 These tests require live hardware and may require elevated privileges (sudo/root).
 
 Usage (installed):
-    /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
-    /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v
-    /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "power" -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -b -v
+    /opt/rocm/share/amd_smi/tests/python_unittest/integration_tests.py -k "power" -v
 
 Usage (source):
-    tests/python/integration_test.py -v
+    tests/python/integration_tests.py -v
 
 Options:
     -v / --verbose    Verbose output (show per-test names)

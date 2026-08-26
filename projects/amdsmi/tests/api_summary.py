@@ -423,7 +423,7 @@ def Parse_Command_Line(cmds=None):
             setattr(namespace, self.dest, values)
             setattr(namespace, f"{self.dest}_called", True)
 
-    msg_description = "Create API coverage report for unit_test.py and integration_test.py tests"
+    msg_description = "Create API coverage report for unit_tests.py and integration_tests.py tests"
     msg_epilog = "Example:\n\t%(prog)s --c_unit_test <c_unit_test.log> --py_integration_test <py_integration_test.log>"
     parser = argparse.ArgumentParser(
         description=msg_description,

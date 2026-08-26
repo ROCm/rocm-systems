@@ -17,7 +17,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Reorganized the Python test tree into unit, integration and functional tiers**.
   - `tests/python/unit/` is now hardware-free: the per-API suites that drive a live device moved to `tests/python/integration/`, and the `unit/mock/` suites moved up into `unit/<component>/`.
   - Added `tests/python/run_tests.py`, which takes `--unit`, `--integration`, `--functional` and `--cli` and runs any combination in one report; naming no tier runs them all.
-  - `integration_test.py` now discovers `integration/` rather than `functional/`, and the new `functional_test.py` discovers `functional/`.
+  - `integration_tests.py` now discovers `integration/` rather than `functional/`, and the new `functional_tests.py` discovers `functional/`.
 
 - **The per-API suites require a live device**.
   - Suites for a processor kind the platform lacks skip their read path but still verify argument rejection.

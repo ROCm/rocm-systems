@@ -33,7 +33,7 @@ Owns three responsibilities:
     printers used by the three top-level runners.
 
 Imported by every functional/unit leaf test and by all three runners
-(integration_test.py, cli_unit_test.py, unit_tests.py).
+(integration_tests.py, cli_tests.py, unit_tests.py).
 """
 
 import contextlib
@@ -158,7 +158,7 @@ except ImportError as e:
 # sys.modules.
 #
 # Example of how to trigger this error output (for test purposes):
-# sudo AMDSMI_PATH=/tmp /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
+# sudo AMDSMI_PATH=/tmp /opt/rocm/share/amd_smi/tests/python_unittest/cli_tests.py -v
 if _staged_amdsmi:
     _amdsmi_file = getattr(amdsmi, "__file__", None) or ""
     if not os.path.realpath(_amdsmi_file).startswith(os.path.realpath(amdsmi_path) + os.sep):
@@ -167,7 +167,13 @@ if _staged_amdsmi:
         # For direct test-script invocations use sys.exit so no Python traceback
         # clutters the remediation output.  For anything else (pytest, IDE runners,
         # ad-hoc imports) raise so the caller gets a clear error with location.
-        _known_scripts = ("unit_tests.py", "integration_test.py", "cli_unit_test.py")
+        _known_scripts = (
+            "run_tests.py",
+            "unit_tests.py",
+            "integration_tests.py",
+            "functional_tests.py",
+            "cli_tests.py",
+        )
         _main_file = getattr(sys.modules.get("__main__"), "__file__", "") or ""
         if os.path.basename(_main_file) in _known_scripts:
             sys.exit(1)
@@ -526,8 +532,8 @@ def _print_test_ids(suite):
 def print_test_ids(suite):
     """Print every test ID in an already-loaded *suite* to stdout.
 
-    Public entry point for the discover()-based runners (cli_unit_test.py,
-    integration_test.py, unit_tests.py), which build their suite from a
+    Public entry point for the discover()-based runners (cli_tests.py,
+    integration_tests.py, unit_tests.py), which build their suite from a
     directory rather than from a single module.  Emits an "Available tests:"
     header followed by one dotted test id per line.  Output goes to stdout so
     the listing can be captured/piped independently of the normal test-run
