@@ -366,6 +366,15 @@ phase: do not wait for, rerun, or update the E2E status matrices merely to
 qualify these internal cutovers. E2E qualification will resume after the
 internal implementation has converged.
 
+### Execution gate
+
+This section is a plan, not authorization to begin its implementation. Do not
+start a migration or deletion slice until the explicit green light is given.
+Once execution is authorized, preserve this gate at every smaller boundary as
+well: no component cutover is complete, and no dependent slice may begin,
+until its checked-in host and device test gate passes. End-to-end revalidation
+is not part of this gate for the present phase.
+
 ### Quantitative starting point
 
 Measured against `origin/shared/rocjitsu/sanitizers` at `97c1640b2f65`, and
