@@ -28,7 +28,7 @@ template <typename BackendFactory>
 class provider
 {
 public:
-    using backend_t = typename BackendFactory::backend_t;
+    using backend_t = BackendFactory::backend_t;
 
     provider()
     : m_backend(BackendFactory::create_backend())
@@ -68,7 +68,10 @@ public:
 
     void shutdown()
     {
-        if(m_backend) m_backend->shutdown();
+        if(m_backend)
+        {
+            m_backend->shutdown();
+        }
     }
 
 private:

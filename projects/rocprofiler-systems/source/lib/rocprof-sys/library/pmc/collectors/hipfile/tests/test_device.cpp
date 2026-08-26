@@ -4,9 +4,11 @@
 #include "mock_backend.hpp"
 
 #include "library/pmc/collectors/hipfile/device.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -68,6 +70,7 @@ constexpr std::uint64_t write_ops_compat = 20;
 }  // namespace attribution
 
 constexpr std::uint32_t k_remapped_profiler_index = 4;
+constexpr std::size_t   k_inactive_profiler_index = 5;
 constexpr double        k_one_second_bandwidth    = 1000.0;
 constexpr double        k_half_second_bandwidth   = 500.0;
 constexpr double        k_two_megabyte_bandwidth  = 2'000'000.0;
@@ -99,7 +102,7 @@ protected:
 
 TEST_F(HipFileDeviceTest, index_and_name_track_the_profiler_device_index)
 {
-    device_t remapped{ m_backend, 0, 4 };
+    const device_t remapped{ m_backend, 0, 4 };
 
     EXPECT_EQ(remapped.get_hipfile_slot(), 0U);
     EXPECT_EQ(remapped.get_index(), 4U);
@@ -108,10 +111,10 @@ TEST_F(HipFileDeviceTest, index_and_name_track_the_profiler_device_index)
 
 TEST_F(HipFileDeviceTest, is_supported_bounds_the_hipfile_slot_not_the_profiler_index)
 {
-    device_t high_profiler_index{ m_backend, 0, MAX_GPUS + 4 };
+    const device_t high_profiler_index{ m_backend, 0, MAX_GPUS + 4 };
     EXPECT_TRUE(high_profiler_index.is_supported());
 
-    device_t slot_past_capacity{ m_backend, MAX_GPUS, 0 };
+    const device_t slot_past_capacity{ m_backend, MAX_GPUS, 0 };
     EXPECT_FALSE(slot_past_capacity.is_supported());
 }
 
@@ -404,7 +407,7 @@ TEST_F(HipFileDeviceTest, inactive_gpu_reports_zeros)
 {
     m_backend->gpu(0).read_bytes = slot_bytes::kb4;
 
-    device_t   idle{ m_backend, 5 };
+    device_t   idle{ m_backend, k_inactive_profiler_index };
     const auto out = idle.get_metrics(m_enabled, TS_1);
 
     EXPECT_FALSE(out.query_failed);

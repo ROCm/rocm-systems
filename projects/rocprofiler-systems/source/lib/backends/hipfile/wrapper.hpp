@@ -34,11 +34,8 @@
 namespace rocprofsys::backends::hipfile
 {
 
-namespace
-{
-constexpr unsigned long k_version_major_factor = 1000000UL;
-constexpr unsigned long k_version_minor_factor = 1000UL;
-}  // namespace
+inline constexpr unsigned long k_version_major_factor = 1000000UL;
+inline constexpr unsigned long k_version_minor_factor = 1000UL;
 
 /// @brief Collapse a version triple into one comparable number.
 [[nodiscard]] constexpr unsigned long
@@ -85,9 +82,11 @@ struct wrapper
     static bool runtime_version_supported() noexcept
     {
         static const bool _supported = []() {
+            // NOLINTBEGIN(misc-const-correctness) -- out-parameters for hipFileGetVersion
             unsigned major = 0;
             unsigned minor = 0;
             unsigned patch = 0;
+            // NOLINTEND(misc-const-correctness)
 
             if(hipFileGetVersion(&major, &minor, &patch).err != hipFileSuccess)
             {
