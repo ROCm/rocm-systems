@@ -19,8 +19,9 @@ inline double normalizeElapsedPerIter(double elapsedSec, int iters, int aggIters
 }
 
 inline double applyCudaGraphLaunchesScale(double deltaSec, int cudaGraphLaunches) {
-  if (cudaGraphLaunches >= 1)
-    return (cudaGraphLaunches > 0) ? deltaSec / (double)cudaGraphLaunches : 0.0;
+  if (cudaGraphLaunches >= 1) {
+    return deltaSec / (double)cudaGraphLaunches;
+  }
   return deltaSec;
 }
 
