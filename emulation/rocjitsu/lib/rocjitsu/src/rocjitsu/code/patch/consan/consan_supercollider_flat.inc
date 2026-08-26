@@ -271,7 +271,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   if (std::ranges::none_of(canonical_sites, [&](const CanonicalFlatSite &canonical) {
         return is_supported_flat_check_trap_site(canonical.site, options.flat_provenance_mode);
       })) {
-    publish_sc_access_coverage_support(result, ConSanScAccessCoverageKind::FlatGroup,
+    publish_sc_access_coverage_support(result, ConSanAccessOrigin::Flat,
                                        [](uint64_t) { return false; });
     result.warnings.emplace_back(
         "ConSan flat check/trap proof found no supported likely group-FLAT load/store site");
@@ -870,9 +870,9 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                common_allocated_sgpr_count, max_owner_private_segment_size, owner_stack_kind,
                owner_liveness, std::move(owners));
   }
-  publish_sc_access_coverage_support(
-      result, ConSanScAccessCoverageKind::FlatGroup,
-      [&](uint64_t file_offset) { return supported_physical_sites.contains(file_offset); });
+  publish_sc_access_coverage_support(result, ConSanAccessOrigin::Flat, [&](uint64_t file_offset) {
+    return supported_physical_sites.contains(file_offset);
+  });
   if (!result.errors.empty())
     return;
   if (options.max_patches_is_expert_limit && options.max_patches == 0u) {

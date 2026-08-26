@@ -36,8 +36,6 @@ struct ByteRange {
 
 [[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,
                                                  ConSanResult &result) {
-  result.sc_access_coverage_resolved = false;
-  result.sc_access_coverage_sites.clear();
   const ConSanAccessPolicyRequest request{
       .engine = ConSanCapabilityEngine::SuperCollider,
       .native_lds_enabled = options.probe_lds_check_trap,
@@ -100,63 +98,26 @@ struct ByteRange {
     return false;
   }
 
-  std::unordered_set<uint64_t> projected_physical_sites;
-  for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
-    if (decision.kind == ConSanSiteDecisionKind::NotApplicable ||
-        !projected_physical_sites.insert(decision.semantic_site.physical.original_text_offset)
-             .second) {
-      continue;
-    }
-    const auto access = std::ranges::find_if(
-        result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &candidate) {
-          return candidate.physical_id == decision.semantic_site.physical;
-        });
-    if (access == result.program_inventory.access_sites().end()) {
-      result.errors.emplace_back("ConSan SuperCollider access policy lost its inventory site");
-      return false;
-    }
-    result.sc_access_coverage_sites.push_back({
-        .kind = access->origin == ConSanAccessOrigin::Flat ? ConSanScAccessCoverageKind::FlatGroup
-                                                           : ConSanScAccessCoverageKind::NativeLds,
-        .file_offset = access->file_offset,
-        .evaluated = decision.kind == ConSanSiteDecisionKind::Unsupported,
-        .supported = false,
-    });
-  }
-  std::ranges::sort(result.sc_access_coverage_sites, [](const auto &lhs, const auto &rhs) {
-    if (lhs.file_offset != rhs.file_offset)
-      return lhs.file_offset < rhs.file_offset;
-    return lhs.kind < rhs.kind;
-  });
-  for (size_t i = 1; i < result.sc_access_coverage_sites.size(); ++i) {
-    if (result.sc_access_coverage_sites[i - 1].file_offset ==
-            result.sc_access_coverage_sites[i].file_offset &&
-        result.sc_access_coverage_sites[i - 1].kind != result.sc_access_coverage_sites[i].kind) {
-      result.errors.emplace_back(
-          "ConSan SuperCollider physical access was classified as both native LDS and group-FLAT");
-      result.sc_access_coverage_sites.clear();
-      return false;
-    }
-  }
-  result.sc_access_coverage_resolved = true;
   return true;
 }
 
 template <typename Supported>
-void publish_sc_access_coverage_support(ConSanResult &result, ConSanScAccessCoverageKind kind,
+void publish_sc_access_coverage_support(ConSanResult &result, ConSanAccessOrigin origin,
                                         Supported &&supported) {
-  if (!result.sc_access_coverage_resolved)
-    return;
-  for (ConSanScAccessCoverageSite &site : result.sc_access_coverage_sites) {
-    if (site.kind != kind)
+  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    const auto site = std::ranges::find_if(result.program_inventory.access_sites(),
+                                           [&](const ConSanAccessInventorySite &candidate) {
+                                             return candidate.physical_id == intent.physical_site;
+                                           });
+    if (site == result.program_inventory.access_sites().end() || site->origin != origin)
       continue;
-    const bool is_supported = supported(site.file_offset);
-    if (site.evaluated)
-      site.supported = site.supported && is_supported;
-    else {
-      site.evaluated = true;
-      site.supported = is_supported;
-    }
+    const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
+    if (entry == nullptr || entry->lowering == ConSanLoweringOutcomeKind::ResourceRejected ||
+        supported(site->file_offset))
+      continue;
+    (void)result.coverage_ledger.set_lowering_outcome(
+        intent.id, ConSanLoweringOutcomeKind::ResourceRejected,
+        "SuperCollider lowerer found no complete planning context");
   }
 }
 
@@ -190,23 +151,12 @@ void finalize_sc_access_coverage_ledger(ConSanResult &result) {
                                                         ConSanLoweringOutcomeKind::Instrumented);
       continue;
     }
-    const auto access = std::ranges::find_if(result.program_inventory.access_sites(),
-                                             [&](const ConSanAccessInventorySite &candidate) {
-                                               return candidate.physical_id == intent.physical_site;
-                                             });
-    const auto legacy =
-        access == result.program_inventory.access_sites().end()
-            ? result.sc_access_coverage_sites.end()
-            : std::ranges::find(result.sc_access_coverage_sites, access->file_offset,
-                                &ConSanScAccessCoverageSite::file_offset);
-    const bool resource_supported =
-        legacy != result.sc_access_coverage_sites.end() && legacy->evaluated && legacy->supported;
+    const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(intent.id);
+    if (entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::ResourceRejected)
+      continue;
     (void)result.coverage_ledger.set_lowering_outcome(
-        intent.id,
-        resource_supported ? ConSanLoweringOutcomeKind::PlacementRejected
-                           : ConSanLoweringOutcomeKind::ResourceRejected,
-        resource_supported ? "legacy lowerer emitted no access patch"
-                           : "legacy lowerer found no complete planning context");
+        intent.id, ConSanLoweringOutcomeKind::PlacementRejected,
+        "SuperCollider lowerer emitted no access patch");
   }
 }
 

@@ -90,6 +90,13 @@ testing::AssertionResult consan_patch_succeeded(const ConSanResult &result) {
                             &ConSanSiteDecision::kind);
 }
 
+[[nodiscard]] size_t consan_applicable_access_decision_count(const ConSanResult &result) {
+  return std::ranges::count_if(result.observation_plan.site_decisions,
+                               [](const ConSanSiteDecision &decision) {
+                                 return decision.kind != ConSanSiteDecisionKind::NotApplicable;
+                               });
+}
+
 [[nodiscard]] const ConSanSiteDecision *consan_access_decision_at(const ConSanResult &result,
                                                                   uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
@@ -97,6 +104,15 @@ testing::AssertionResult consan_patch_succeeded(const ConSanResult &result) {
         return candidate.semantic_site.physical.original_text_offset == text_offset;
       });
   return decision == result.observation_plan.site_decisions.end() ? nullptr : &*decision;
+}
+
+[[nodiscard]] const ConSanSiteDecision *
+consan_access_decision_at_file_offset(const ConSanResult &result, uint64_t file_offset) {
+  const auto access = std::ranges::find(result.program_inventory.access_sites(), file_offset,
+                                        &ConSanAccessInventorySite::file_offset);
+  if (access == result.program_inventory.access_sites().end())
+    return nullptr;
+  return consan_access_decision_at(result, access->physical_id.original_text_offset);
 }
 
 [[nodiscard]] const ConSanIntentCoverageEntry *consan_access_coverage_at(const ConSanResult &result,

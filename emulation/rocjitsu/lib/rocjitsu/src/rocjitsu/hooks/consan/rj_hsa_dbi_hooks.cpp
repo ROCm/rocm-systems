@@ -347,17 +347,25 @@ void print_waitcheck_exception(uint64_t reader, const std::exception *error) {
   return WaitcheckPreflightOutcome::AnalysisFailed;
 }
 
-[[nodiscard]] bool require_patch_applies_to(const rocjitsu::ConSanResult &result,
+[[nodiscard]] bool require_patch_applies_to(const rocjitsu::TransformResult &result,
                                             const HookConfig &config) {
   const bool has_selected_access = config.probe_lds_check_trap || config.probe_flat_check_trap;
   if (!has_selected_access)
     return false;
-  if (!result.sc_access_coverage_resolved)
-    return result.flavor == rocjitsu::ConSanFlavor::SuperCollider;
-  return std::ranges::any_of(result.sc_access_coverage_sites, [&](const auto &site) {
-    return sc_access_coverage_kind_enabled(site.kind, config) &&
-           (!site.evaluated || site.supported);
-  });
+  if (result.coverage_ledger.site_decisions().empty())
+    return !result.observation_plan.valid();
+  return std::ranges::any_of(
+      result.coverage_ledger.site_decisions(), [&](const rocjitsu::ConSanSiteDecision &decision) {
+        if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted ||
+            decision.intent_ids.empty())
+          return false;
+        return std::ranges::any_of(decision.intent_ids, [&](rocjitsu::ConSanProbeIntentId id) {
+          const rocjitsu::ConSanIntentCoverageEntry *entry =
+              result.coverage_ledger.intent_entry(id);
+          return entry == nullptr ||
+                 entry->lowering != rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected;
+        });
+      });
 }
 
 [[nodiscard]] bool
@@ -512,78 +520,79 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
                                const rocjitsu::ConSanCoverageLedger *pipeline_ledger = nullptr) {
   ConSanStaticCoverage coverage;
   coverage.expert_limit = config.max_patches_explicit;
-  bool has_durable_moi_lowering_outcomes = false;
-  if (result.flavor == rocjitsu::ConSanFlavor::Moi) {
-    const rocjitsu::ConSanCoverageLedger &ledger =
-        pipeline_ledger == nullptr ? result.coverage_ledger : *pipeline_ledger;
-    const bool has_typed_moi_coverage =
-        !ledger.site_decisions().empty() || !ledger.barrier_site_decisions().empty() ||
-        !ledger.atomic_site_decisions().empty() || !ledger.fence_site_decisions().empty();
-    if (has_typed_moi_coverage) {
-      struct TypedSiteCoverage {
-        rocjitsu::ConSanResourceSiteKind kind = rocjitsu::ConSanResourceSiteKind::Access;
-        uint64_t text_offset = 0;
-        bool supported = false;
-        std::vector<rocjitsu::ConSanProbeIntentId> intents;
-      };
-      std::vector<TypedSiteCoverage> sites;
-      const auto append_decisions = [&](const auto &decisions,
-                                        rocjitsu::ConSanResourceSiteKind kind) {
-        for (const auto &decision : decisions) {
-          if (decision.kind == rocjitsu::ConSanSiteDecisionKind::NotApplicable)
-            continue;
-          const uint64_t text_offset = decision.semantic_site.physical.original_text_offset;
-          auto site = std::ranges::find_if(sites, [&](const TypedSiteCoverage &candidate) {
-            return candidate.kind == kind && candidate.text_offset == text_offset;
-          });
-          if (site == sites.end()) {
-            sites.push_back({
-                .kind = kind,
-                .text_offset = text_offset,
-                .supported = false,
-                .intents = {},
-            });
-            site = std::prev(sites.end());
-          }
-          if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted)
-            continue;
-          site->supported = true;
-          for (rocjitsu::ConSanProbeIntentId id : decision.intent_ids) {
-            if (std::ranges::find(site->intents, id) == site->intents.end())
-              site->intents.push_back(id);
-          }
-        }
-      };
-      append_decisions(ledger.site_decisions(), rocjitsu::ConSanResourceSiteKind::Access);
-      append_decisions(ledger.barrier_site_decisions(), rocjitsu::ConSanResourceSiteKind::Barrier);
-      append_decisions(ledger.atomic_site_decisions(), rocjitsu::ConSanResourceSiteKind::Atomic);
-      append_decisions(ledger.fence_site_decisions(), rocjitsu::ConSanResourceSiteKind::Fence);
-      has_durable_moi_lowering_outcomes = true;
-      for (const TypedSiteCoverage &site : sites) {
-        ConSanStaticCoverageKind &kind = consan_coverage_kind(coverage, site.kind);
-        ++kind.discovered;
-        if (!site.supported)
+  bool has_durable_lowering_outcomes = false;
+  const rocjitsu::ConSanCoverageLedger &ledger =
+      pipeline_ledger == nullptr ? result.coverage_ledger : *pipeline_ledger;
+  const bool has_typed_coverage =
+      !ledger.site_decisions().empty() || !ledger.barrier_site_decisions().empty() ||
+      !ledger.atomic_site_decisions().empty() || !ledger.fence_site_decisions().empty();
+  if (has_typed_coverage) {
+    struct TypedSiteCoverage {
+      rocjitsu::ConSanResourceSiteKind kind = rocjitsu::ConSanResourceSiteKind::Access;
+      uint64_t text_offset = 0;
+      bool supported = false;
+      std::vector<rocjitsu::ConSanProbeIntentId> intents;
+    };
+    std::vector<TypedSiteCoverage> sites;
+    const auto append_decisions = [&](const auto &decisions,
+                                      rocjitsu::ConSanResourceSiteKind kind) {
+      for (const auto &decision : decisions) {
+        if (decision.kind == rocjitsu::ConSanSiteDecisionKind::NotApplicable)
           continue;
-        ++kind.supported;
-        bool all_instrumented = !site.intents.empty();
-        bool resource_rejected = false;
-        for (rocjitsu::ConSanProbeIntentId id : site.intents) {
-          const rocjitsu::ConSanIntentCoverageEntry *entry = ledger.intent_entry(id);
-          if (entry == nullptr ||
-              entry->lowering != rocjitsu::ConSanLoweringOutcomeKind::Instrumented)
-            all_instrumented = false;
-          if (entry != nullptr &&
-              entry->lowering == rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected)
-            resource_rejected = true;
+        const uint64_t text_offset = decision.semantic_site.physical.original_text_offset;
+        auto site = std::ranges::find_if(sites, [&](const TypedSiteCoverage &candidate) {
+          return candidate.kind == kind && candidate.text_offset == text_offset;
+        });
+        if (site == sites.end()) {
+          sites.push_back({
+              .kind = kind,
+              .text_offset = text_offset,
+              .supported = false,
+              .intents = {},
+          });
+          site = std::prev(sites.end());
         }
-        if (all_instrumented)
-          ++kind.patched;
-        else if (resource_rejected)
-          ++kind.resource_failed;
-        else
-          ++kind.placement_or_lowering_failed;
+        if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted)
+          continue;
+        site->supported = true;
+        for (rocjitsu::ConSanProbeIntentId id : decision.intent_ids) {
+          if (std::ranges::find(site->intents, id) == site->intents.end())
+            site->intents.push_back(id);
+        }
       }
-    } else {
+    };
+    append_decisions(ledger.site_decisions(), rocjitsu::ConSanResourceSiteKind::Access);
+    append_decisions(ledger.barrier_site_decisions(), rocjitsu::ConSanResourceSiteKind::Barrier);
+    append_decisions(ledger.atomic_site_decisions(), rocjitsu::ConSanResourceSiteKind::Atomic);
+    append_decisions(ledger.fence_site_decisions(), rocjitsu::ConSanResourceSiteKind::Fence);
+    has_durable_lowering_outcomes = true;
+    for (const TypedSiteCoverage &site : sites) {
+      ConSanStaticCoverageKind &kind = consan_coverage_kind(coverage, site.kind);
+      ++kind.discovered;
+      if (!site.supported)
+        continue;
+      ++kind.supported;
+      bool all_instrumented = !site.intents.empty();
+      bool resource_rejected = false;
+      for (rocjitsu::ConSanProbeIntentId id : site.intents) {
+        const rocjitsu::ConSanIntentCoverageEntry *entry = ledger.intent_entry(id);
+        if (entry == nullptr ||
+            entry->lowering != rocjitsu::ConSanLoweringOutcomeKind::Instrumented)
+          all_instrumented = false;
+        if (entry != nullptr &&
+            entry->lowering == rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected)
+          resource_rejected = true;
+      }
+      if (all_instrumented)
+        ++kind.patched;
+      else if (resource_rejected)
+        ++kind.resource_failed;
+      else
+        ++kind.placement_or_lowering_failed;
+    }
+  }
+  if (result.flavor == rocjitsu::ConSanFlavor::Moi) {
+    if (!has_typed_coverage) {
       coverage.access.discovered = result.moi_candidates.size();
       coverage.access.supported = static_cast<uint64_t>(std::count_if(
           result.moi_candidates.begin(), result.moi_candidates.end(), [&](const auto &candidate) {
@@ -591,12 +600,12 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
                                                             result.program_inventory.arch());
           }));
     }
-    if (!has_typed_moi_coverage) {
+    if (!has_typed_coverage) {
       for (const rocjitsu::ConSanCandidateResourcePlan &plan : result.resource_plans) {
         ConSanStaticCoverageKind &kind = consan_coverage_kind(coverage, plan.site_kind);
         ++kind.discovered;
         ++kind.supported;
-        if (!has_durable_moi_lowering_outcomes &&
+        if (!has_durable_lowering_outcomes &&
             plan.source == rocjitsu::ConSanRegisterAllocationSource::Unsupported)
           ++kind.resource_failed;
       }
@@ -621,9 +630,8 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
                  (patch.kind == rocjitsu::ConSanPatchKind::InlineMoiSampledWatchpointStore ||
                   patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiSampledWatchpointStore);
         });
-    if (!has_durable_moi_lowering_outcomes &&
-        config.moi_engine == rocjitsu::ConSanMoiEngine::Sampled && config.moi_track_barriers &&
-        has_sampled_access_patch) {
+    if (!has_durable_lowering_outcomes && config.moi_engine == rocjitsu::ConSanMoiEngine::Sampled &&
+        config.moi_track_barriers && has_sampled_access_patch) {
       // Sampled barrier metadata advances only causal windows selected before
       // the sequence. Earlier raw barriers cannot order a supported sampled
       // LDS access and are outside this engine's applicable synchronization
@@ -633,7 +641,7 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
       coverage.barrier.discovered = result.sampled_barrier_applicable_event_count;
       coverage.barrier.supported = result.sampled_barrier_applicable_event_count;
     }
-    if (!has_durable_moi_lowering_outcomes &&
+    if (!has_durable_lowering_outcomes &&
         config.moi_engine == rocjitsu::ConSanMoiEngine::InlineShadow && config.moi_track_barriers &&
         has_inline_exact_patch) {
       // Inline epoch probes consume the semantic barrier inventory directly;
@@ -654,13 +662,8 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
           count_barriers(function);
       }
     }
-  } else if (result.flavor == rocjitsu::ConSanFlavor::SuperCollider) {
-    const ConSanSuperColliderAccessCoverage access =
-        compute_consan_supercollider_access_coverage(result, config);
-    coverage.access.discovered = access.discovered;
-    coverage.access.supported = access.supported;
   }
-  if (!has_durable_moi_lowering_outcomes) {
+  if (!has_durable_lowering_outcomes) {
     for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
       if (patch.phase != rocjitsu::ConSanPatchPhase::Instrumentation)
         continue;
@@ -5688,7 +5691,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     if (config->require_patch && !config->fault_dry_run &&
         !has_consan_site_instrumentation_patch(patch_result)) {
       const bool required = (request.flavor == rocjitsu::ConSanFlavor::SuperCollider &&
-                             require_patch_applies_to(patch_result, *config)) ||
+                             require_patch_applies_to(transform_result, *config)) ||
                             (request.flavor == rocjitsu::ConSanFlavor::Moi &&
                              require_moi_patch_applies_to(patch_result));
       if (required) {

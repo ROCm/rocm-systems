@@ -98,7 +98,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     return false;
   }();
   if (!has_plannable_supported_site) {
-    publish_sc_access_coverage_support(result, ConSanScAccessCoverageKind::NativeLds,
+    publish_sc_access_coverage_support(result, ConSanAccessOrigin::NativeLds,
                                        [](uint64_t) { return false; });
     result.warnings.emplace_back("ConSan LDS check/trap proof found no supported "
                                  "native-LDS load or store site with complete owners");
@@ -881,7 +881,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     }
   }
   publish_sc_access_coverage_support(
-      result, ConSanScAccessCoverageKind::NativeLds,
+      result, ConSanAccessOrigin::NativeLds,
       [&](uint64_t file_offset) { return supported_physical_sites.contains(file_offset); });
   if (options.max_patches_is_expert_limit && options.max_patches == 0u) {
     result.warnings.emplace_back(

@@ -2284,6 +2284,34 @@ hook/runtime tests and all 371 CPU-only validation-protocol tests. All 2,908
 emulator device rows passed in 71.74 seconds of wall time. The complete 593-row
 physical-gfx950 device matrix passed in 426.82 seconds of wall time.
 
+### Slice 4E: delete the SuperCollider access-coverage projection
+
+- **Completed deletion:** `ConSanScAccessCoverageKind`,
+  `ConSanScAccessCoverageSite`, `sc_access_coverage_resolved`, and the duplicate
+  physical-site vector have been deleted. SuperCollider lowerers now publish
+  resource rejection directly to the shared coverage ledger, and final patch
+  publication changes remaining admitted intents to instrumented or placement
+  rejected without reconstructing support from a second representation.
+- **Shared hook contract:** Static coverage for all four engines is aggregated
+  from the same typed policy decisions and lowering entries. SuperCollider
+  require-patch policy treats pending and placement-rejected admitted intents
+  as required, excludes resource-rejected intents, fails closed on an invalid
+  or missing plan, and accepts a valid plan with no applicable access sites.
+- **Regression discovered by the device gate:** The first implementation
+  conflated an invalid plan with a valid empty plan, causing runtime-only code
+  objects to be rejected. The hook unit test now distinguishes admitted,
+  placement-rejected, resource-rejected, invalid, and valid-empty states. The
+  complete simulator matrix caught the omission before the slice was committed.
+- **Deletion result:** Production loses 102 net lines. Tests stop constructing
+  the private projection and instead assert target-neutral admission and typed
+  lowering outcomes, leaving the complete tranche 155 lines smaller including
+  its focused test changes and this documentation.
+- **Completed gate:** 1,505 of 1,507 ConSan host tests passed, with the two
+  external-object benchmarks intentionally skipped; all 194 current HSA-hook
+  tests and all 371 CPU-only validation-protocol tests passed; all 2,908
+  simulator device rows passed in 68.64 seconds of wall time; and the complete
+  593-row physical-gfx950 device matrix passed in 444.01 seconds of wall time.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

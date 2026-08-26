@@ -1005,18 +1005,14 @@ TEST(ConSan, CombinedCheckTrapCanPatchNativeLdsAndFlatInSameCodeObject) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 2u);
-  EXPECT_EQ(std::ranges::count(result.sc_access_coverage_sites,
-                               ConSanScAccessCoverageKind::NativeLds,
-                               &ConSanScAccessCoverageSite::kind),
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
+  EXPECT_EQ(std::ranges::count(result.program_inventory.access_sites(),
+                               ConSanAccessOrigin::NativeLds, &ConSanAccessInventorySite::origin),
             1u);
-  EXPECT_EQ(std::ranges::count(result.sc_access_coverage_sites,
-                               ConSanScAccessCoverageKind::FlatGroup,
-                               &ConSanScAccessCoverageSite::kind),
+  EXPECT_EQ(std::ranges::count(result.program_inventory.access_sites(), ConSanAccessOrigin::Flat,
+                               &ConSanAccessInventorySite::origin),
             1u);
-  EXPECT_TRUE(
-      std::ranges::all_of(result.sc_access_coverage_sites, &ConSanScAccessCoverageSite::supported));
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineLdsStoreCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 0u);
@@ -1037,10 +1033,8 @@ TEST(ConSan, CombinedCheckTrapCanPatchNativeLdsAndFlatInSameCodeObject) {
   options.max_patches_is_expert_limit = true;
   const ConSanResult limited = try_patch_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(limited)) << testing::PrintToString(limited.errors);
-  ASSERT_TRUE(limited.sc_access_coverage_resolved);
-  ASSERT_EQ(limited.sc_access_coverage_sites.size(), 2u);
-  EXPECT_TRUE(std::ranges::all_of(limited.sc_access_coverage_sites,
-                                  &ConSanScAccessCoverageSite::supported));
+  ASSERT_EQ(consan_access_decision_count(limited, ConSanSiteDecisionKind::Admitted), 2u);
+  EXPECT_EQ(consan_access_lowering_count(limited, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
   EXPECT_EQ(
       std::ranges::count_if(limited.patches,
                             [](const ConSanPatchInfo &patch) {
@@ -1183,10 +1177,8 @@ TEST(ConSan, FlatCheckTrapCoverageKeepsUnownedFunctionSiteUnsupported) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.patches.empty());
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 1u);
-  EXPECT_EQ(result.sc_access_coverage_sites.front().kind, ConSanScAccessCoverageKind::FlatGroup);
-  EXPECT_FALSE(result.sc_access_coverage_sites.front().supported);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
 }
 
 TEST(ConSan, FlatCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
@@ -1223,10 +1215,8 @@ TEST(ConSan, FlatCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 2u);
-  EXPECT_TRUE(
-      std::ranges::all_of(result.sc_access_coverage_sites, &ConSanScAccessCoverageSite::supported));
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineFlatLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             1u);
@@ -1254,9 +1244,8 @@ TEST(ConSan, FlatCheckTrapKernelFilterMatchesSharedFunctionOwner) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 1u);
-  EXPECT_TRUE(result.sc_access_coverage_sites.front().evaluated);
-  EXPECT_TRUE(result.sc_access_coverage_sites.front().supported);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &info) {
     return info.kind == ConSanPatchKind::InlineFlatLoadCheckTrap ||
            info.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap;
@@ -1331,8 +1320,7 @@ TEST(ConSan, FlatCoverageLedgerIgnoresInconsistentNonGroupAliasesInStrictMode) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.patches.empty());
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  EXPECT_TRUE(result.sc_access_coverage_sites.empty());
+  EXPECT_EQ(consan_applicable_access_decision_count(result), 0u);
 }
 
 TEST(ConSan, FlatCoverageRequiresSiteMembershipInEveryOwnerCfg) {
@@ -1366,10 +1354,8 @@ TEST(ConSan, FlatCoverageRequiresSiteMembershipInEveryOwnerCfg) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.patches.empty());
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 1u);
-  EXPECT_TRUE(result.sc_access_coverage_sites.front().evaluated);
-  EXPECT_FALSE(result.sc_access_coverage_sites.front().supported);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
 }
 
 TEST(ConSan, FlatCheckTrapPatchesAliasedKernelSiteOnceForEveryOwner) {
@@ -1426,11 +1412,12 @@ TEST(ConSan, FlatCheckTrapPatchesAliasedKernelSiteOnceForEveryOwner) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
   const uint64_t access_file_offset = body_file_offset + 5u * sizeof(uint32_t);
-  ASSERT_EQ(std::ranges::count(result.sc_access_coverage_sites, access_file_offset,
-                               &ConSanScAccessCoverageSite::file_offset),
-            1u);
+  const ConSanSiteDecision *access_decision =
+      consan_access_decision_at_file_offset(result, access_file_offset);
+  ASSERT_NE(access_decision, nullptr);
+  EXPECT_TRUE(consan_decision_has_lowering(result, *access_decision,
+                                           ConSanLoweringOutcomeKind::Instrumented));
   const auto is_flat_body = [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineFlatLoadCheckTrap ||
            patch.kind == ConSanPatchKind::LocalCaveFlatLoadCheckTrap;
@@ -4538,8 +4525,8 @@ TEST(ConSan, ProbeLdsCheckTrapModeSupportsByteD16LoadsAcrossTargets) {
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
       ASSERT_TRUE(result.final_validation_passed);
-      ASSERT_EQ(result.sc_access_coverage_sites.size(), 1u);
-      EXPECT_TRUE(result.sc_access_coverage_sites.front().supported);
+      ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+      EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
       EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::InlineLdsLoadCheckTrap,
                                    &ConSanPatchInfo::kind) +
                     std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
@@ -5271,10 +5258,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeLeavesAdjacentAtomicAndBarrierUntouched) {
   EXPECT_TRUE(result.fault_sites.empty());
   EXPECT_TRUE(result.sync_events.empty());
   EXPECT_TRUE(result.sync_sequences.empty());
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 1u);
-  EXPECT_EQ(result.sc_access_coverage_sites.front().file_offset, 0x100u);
-  EXPECT_TRUE(result.sc_access_coverage_sites.front().supported);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+  const ConSanSiteDecision *access_decision = consan_access_decision_at_file_offset(result, 0x100u);
+  ASSERT_NE(access_decision, nullptr);
+  EXPECT_TRUE(consan_decision_has_lowering(result, *access_decision,
+                                           ConSanLoweringOutcomeKind::Instrumented));
   constexpr uint64_t adjacent_file_offset = 0x108u;
   constexpr uint64_t adjacent_size = 5u * sizeof(uint32_t);
   EXPECT_EQ(0, std::memcmp(result.elf_bytes.data() + adjacent_file_offset,
@@ -5585,19 +5573,15 @@ TEST(ConSan, ProbeLdsCheckTrapPatchesAliasedKernelSiteOnceForEveryOwner) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
   // Retargeting the second symbol leaves its old function body in the image.
   // The coverage ledger retains that now-unowned physical site as unsupported,
   // while the aliased entry itself still appears exactly once.
-  ASSERT_EQ(std::ranges::count(result.sc_access_coverage_sites, body_file_offset,
-                               &ConSanScAccessCoverageSite::file_offset),
-            1u);
-  const auto aliased_coverage = std::ranges::find(result.sc_access_coverage_sites, body_file_offset,
-                                                  &ConSanScAccessCoverageSite::file_offset);
-  ASSERT_NE(aliased_coverage, result.sc_access_coverage_sites.end());
-  EXPECT_TRUE(aliased_coverage->supported);
-  EXPECT_TRUE(std::ranges::any_of(result.sc_access_coverage_sites,
-                                  [](const auto &site) { return !site.supported; }));
+  const ConSanSiteDecision *aliased_decision =
+      consan_access_decision_at_file_offset(result, body_file_offset);
+  ASSERT_NE(aliased_decision, nullptr);
+  EXPECT_TRUE(consan_decision_has_lowering(result, *aliased_decision,
+                                           ConSanLoweringOutcomeKind::Instrumented));
+  EXPECT_GT(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
   const auto is_lds_body = [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineLdsLoadCheckTrap ||
            patch.kind == ConSanPatchKind::LocalCaveLdsLoadCheckTrap;
@@ -5661,10 +5645,8 @@ TEST(ConSan, ProbeLdsCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 2u);
-  EXPECT_TRUE(
-      std::ranges::all_of(result.sc_access_coverage_sites, &ConSanScAccessCoverageSite::supported));
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
   EXPECT_EQ(
       std::ranges::count_if(result.patches,
                             [](const ConSanPatchInfo &patch) {
@@ -5697,9 +5679,8 @@ TEST(ConSan, ProbeLdsCheckTrapCoverageKeepsUnownedFunctionSiteUnsupported) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.patches.empty());
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 1u);
-  EXPECT_FALSE(result.sc_access_coverage_sites.front().supported);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
 }
 
 TEST(ConSan, ProbeLdsCoverageRequiresSiteMembershipInEveryOwnerCfg) {
@@ -5727,10 +5708,8 @@ TEST(ConSan, ProbeLdsCoverageRequiresSiteMembershipInEveryOwnerCfg) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.patches.empty());
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), 1u);
-  EXPECT_TRUE(result.sc_access_coverage_sites.front().evaluated);
-  EXPECT_FALSE(result.sc_access_coverage_sites.front().supported);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::ResourceRejected), 1u);
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
@@ -6095,10 +6074,9 @@ TEST(ConSan, Rdna4DenseCheckTrapUsesCalledLocalFunctionHost) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), kSiteCount);
-  EXPECT_TRUE(
-      std::ranges::all_of(result.sc_access_coverage_sites, &ConSanScAccessCoverageSite::supported));
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), kSiteCount);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kSiteCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsLoadCheckTrap,
                                &ConSanPatchInfo::kind),
             kSiteCount);
@@ -6149,10 +6127,9 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  ASSERT_TRUE(result.sc_access_coverage_resolved);
-  ASSERT_EQ(result.sc_access_coverage_sites.size(), kSiteCount);
-  EXPECT_TRUE(
-      std::ranges::all_of(result.sc_access_coverage_sites, &ConSanScAccessCoverageSite::supported));
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), kSiteCount);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kSiteCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::LocalCaveLdsStoreCheckTrap,
                                &ConSanPatchInfo::kind),
             kSiteCount);

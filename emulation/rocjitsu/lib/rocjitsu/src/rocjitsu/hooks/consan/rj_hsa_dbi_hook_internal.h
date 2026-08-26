@@ -91,37 +91,6 @@ struct HookConfig : rocjitsu::ConSanRequest,
   }
 };
 
-struct ConSanSuperColliderAccessCoverage {
-  uint64_t discovered = 0;
-  uint64_t supported = 0;
-};
-
-[[nodiscard]] inline bool sc_access_coverage_kind_enabled(ConSanScAccessCoverageKind kind,
-                                                          const HookConfig &config) {
-  switch (kind) {
-  case ConSanScAccessCoverageKind::NativeLds:
-    return config.probe_lds_check_trap;
-  case ConSanScAccessCoverageKind::FlatGroup:
-    return config.probe_flat_check_trap;
-  }
-  return false;
-}
-
-[[nodiscard]] inline ConSanSuperColliderAccessCoverage
-compute_consan_supercollider_access_coverage(const ConSanResult &result, const HookConfig &config) {
-  if (!result.sc_access_coverage_resolved)
-    return {};
-  ConSanSuperColliderAccessCoverage coverage;
-  for (const ConSanScAccessCoverageSite &site : result.sc_access_coverage_sites) {
-    if (!sc_access_coverage_kind_enabled(site.kind, config))
-      continue;
-    ++coverage.discovered;
-    if (site.evaluated && site.supported)
-      ++coverage.supported;
-  }
-  return coverage;
-}
-
 constexpr std::string_view kMoiStandardProfile = "standard-v1";
 // Automatic Record/Replay retains exact events for a bounded set of
 // dispatch/workgroup identities. Gate ordinary workloads at the same effective
