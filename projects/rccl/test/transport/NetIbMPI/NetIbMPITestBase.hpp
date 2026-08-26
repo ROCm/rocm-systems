@@ -97,14 +97,14 @@ using namespace RCCLTestHelpers;
 // scheduler) is enabled alongside it. Must be called from the test body (not
 // a helper), because GTEST_SKIP() only interrupts execution when expanded
 // inline in the test scope. RCCL_IB_COMM_NGROUPS is set per preset by the
-// qpshare_* configs in net_ib_transport.json (and the matching qpshare_*
-// categories in test_categories_mpi.yaml); there is no shared qpshare_base.
+// a_qpshare_* configs in ainic.json (and the matching qpshare_* categories in
+// test_categories_mpi.yaml).
 #define QPSHARE_ENV_CHECK_OR_SKIP()                                                       \
     do {                                                                                   \
         const char* _ng = getenv("RCCL_IB_COMM_NGROUPS");                                  \
         if (!_ng || _ng[0] == '\0' || std::atoll(_ng) <= 0) {                              \
             GTEST_SKIP() << "Requires RCCL_IB_COMM_NGROUPS > 0. "                          \
-                            "Use qpshare_* configs in net_ib_transport.json.";              \
+                            "Use the a_qpshare_* configs in ainic.json.";                   \
         }                                                                                   \
         auto _qpshareIsSetTo1 = [](const char* name) {                                     \
             const char* v = getenv(name);                                                  \
@@ -254,13 +254,6 @@ protected:
     int numDevices_;
     std::vector<int> deviceIds_;
     void* initCtx_;
-
-    // ExpectQpShareLayout re-checks every live comm after every create and
-    // destroy, so a layout that is wrong from connection 0 fails O(n^2) times.
-    // Cap the reporting; see ExpectQpShareLayout. Per-fixture, so it resets for
-    // each TEST_F.
-    static constexpr int kMaxLayoutFailures = 40;
-    int qpShareLayoutFailures_ = 0;
 
     void SetUp() override {
         MPITestBase::SetUp();
@@ -821,6 +814,71 @@ protected:
         if (sendComm)   EXPECT_EQ(CloseSendComm(sendComm), ncclSuccess);
     }
 
+    // One cast connection, from one rank's point of view. Both ranks build the
+    // same sequence; each holds only its own side (rank 0: listen+recv, rank 1:
+    // send), so the unused pointers stay null.
+    struct QpShareConn {
+        void* listen = nullptr;
+        void* send   = nullptr;
+        void* recv   = nullptr;
+        QpShareRefModel::Placement place;
+
+        // This rank's comm: the one the introspection hook can be called on.
+        void* Mine(int rank) const { return rank == 0 ? recv : send; }
+    };
+
+    // Open `n` connections, appending to `cs` and advancing `model` in step.
+    // Stops at the first failure and reports which connection it was and where
+    // the model expected it to land -- diagnosing *why* a connect failed is the
+    // log's job, not the assertion's. Returns the number established.
+    int OpenConns(int n, QpShareRefModel& model,
+                  std::vector<QpShareConn>& cs, const char* what) {
+        int opened = 0;
+        for (int c = 0; c < n; c++) {
+            QpShareConn conn;
+            conn.place = model.AssignOnCreate();
+            if (!TryCastConnection(/*dev=*/0, &conn.listen, &conn.send, &conn.recv)) {
+                model.Release(conn.place);
+                ADD_FAILURE()
+                    << what << ": connection " << c << " of " << n << " failed to establish"
+                    << " (RCCL_IB_COMM_NGROUPS=" << QpShareEnvNGroups()
+                    << " RCCL_IB_QP_DEPTH_MULTIPLIER=" << QpShareEnvDepthMultiplier()
+                    << "); it would have been comm #" << (model.Load(conn.place.group) + 1)
+                    << " in group " << conn.place.group;
+                break;
+            }
+            cs.push_back(conn);
+            opened++;
+        }
+        return opened;
+    }
+
+    // This rank's comms, in order -- the vector ExpectQpShareLayout takes.
+    std::vector<void*> MineOf(const std::vector<QpShareConn>& cs) {
+        const int rank = MPIEnvironment::world_rank;
+        std::vector<void*> mine;
+        mine.reserve(cs.size());
+        for (const QpShareConn& c : cs) mine.push_back(c.Mine(rank));
+        return mine;
+    }
+
+    std::vector<QpShareRefModel::Placement> PlacesOf(const std::vector<QpShareConn>& cs) {
+        std::vector<QpShareRefModel::Placement> p;
+        p.reserve(cs.size());
+        for (const QpShareConn& c : cs) p.push_back(c.place);
+        return p;
+    }
+
+    // Close every connection and empty `cs`. Barriers between closes so the two
+    // ranks tear the same connection down together.
+    void CloseAll(std::vector<QpShareConn>& cs) {
+        for (const QpShareConn& c : cs) {
+            CloseCastConnection(c.listen, c.send, c.recv);
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+        cs.clear();
+    }
+
     // Same MPI_LAND agreement TryCastConnection uses, for any other loop of
     // per-connection setup calls (RegisterMemory, PostRecv, ...) that can fail
     // on one rank but not the other.
@@ -865,95 +923,150 @@ protected:
         fflush(stdout);
     }
 
-    // Compare every live comm's actual sharing state against the reference
-    // model, including cross-comm QP identity: comms in the same group must sit
-    // on one physical QP, comms in different groups must not.
+    // Check that the sharing layout the transport reports is self-consistent.
+    //
+    // Derived entirely from the observed states -- no reference model -- so it
+    // holds whatever assignment policy the transport implements, and keeps
+    // holding after that policy changes. What it pins down is the bookkeeping:
+    //
+    //   * every comm is on the sharing path (commId set, group assigned);
+    //   * a group's refcount equals the number of live comms reporting it, so a
+    //     slot freed on close but still counted, or counted but not freed,
+    //     shows up here;
+    //   * refcount and cqRefcount agree. connect.cc maintains them in lockstep
+    //     over the same set of comms, but cqRefcount alone gates
+    //     IbCastCleanupGroupCqs, i.e. it decides when the group's CQ and PD are
+    //     released. The stress tests see that release only through RDMA object
+    //     counts; a drift caught here says which of the two counters is wrong,
+    //     which an object-count delta cannot;
+    //   * at most one PRIMARY per group -- at most rather than exactly, because
+    //     roles are fixed at connect() time and releasing a group's PRIMARY does
+    //     not promote a SECONDARY, so a live group legitimately has none;
+    //   * comms in one group sit on one physical QP, and no two groups share one.
     //
     // `comms[i]` is this rank's comm for connection i (recvComm on rank 0,
-    // sendComm on rank 1); `places[i]` is what QpShareRefModel predicted for it.
-    // Non-fatal throughout, so a layout divergence is reported for every comm
-    // rather than only the first, and both ranks always reach the next barrier.
-    void ExpectQpShareLayout(const std::vector<void*>& comms,
-                             const std::vector<QpShareRefModel::Placement>& places,
-                             const QpShareRefModel& model,
-                             const char* stage) {
+    // sendComm on rank 1). Non-fatal, so both ranks always reach the next
+    // barrier. Returns false once anything diverges: callers that re-check after
+    // every create and destroy should stop, since a layout that is already wrong
+    // repeats the same failure O(n) more times without adding information.
+    bool ExpectQpShareLayout(const std::vector<void*>& comms, const char* stage) {
+        struct GroupTally {
+            int      live      = 0;
+            int      primaries = 0;
+            uint32_t qpn       = 0;
+        };
+        std::map<int, GroupTally> groups;
+        std::vector<struct ncclIbQpSharingState> states(comms.size());
+        std::vector<bool> live(comms.size(), false);
+        bool ok = true;
+
+        for (size_t i = 0; i < comms.size(); i++) {
+            if (comms[i] == nullptr) continue;
+            states[i] = GetActualQpSharingState(comms[i]);
+            live[i]   = true;
+
+            if (states[i].commId == 0) {
+                ADD_FAILURE() << stage << ": conn " << i << " has no commId -- it"
+                              << " silently fell back off the sharing path";
+                ok = false;
+            }
+            if (states[i].sharedGroupIdx < 0) {
+                ADD_FAILURE() << stage << ": conn " << i << " has no shared group"
+                              << " while sharing is enabled";
+                ok = false;
+                live[i] = false;   // nothing below is meaningful for it
+                continue;
+            }
+            GroupTally& t = groups[states[i].sharedGroupIdx];
+            t.live++;
+            if (states[i].isSharedQpPrimary) t.primaries++;
+        }
+
+        for (size_t i = 0; i < comms.size(); i++) {
+            if (!live[i]) continue;
+            const struct ncclIbQpSharingState& st = states[i];
+            const int g = st.sharedGroupIdx;
+
+            if (st.refcount != groups[g].live) {
+                ADD_FAILURE() << stage << ": conn " << i << " in group " << g
+                              << " reports refcount=" << st.refcount << " but "
+                              << groups[g].live << " live comms report that group";
+                ok = false;
+            }
+            if (st.cqRefcount != st.refcount) {
+                ADD_FAILURE() << stage << ": conn " << i << " in group " << g
+                              << " has cqRefcount=" << st.cqRefcount << " but refcount="
+                              << st.refcount << ". cqRefcount alone decides when the"
+                              << " group's CQ and PD are released, so a drift here"
+                              << " either frees a CQ that is still in use or never"
+                              << " frees it";
+                ok = false;
+            }
+            if (groups[g].qpn == 0) {
+                groups[g].qpn = st.qpn[0];
+            } else if (st.qpn[0] != groups[g].qpn) {
+                ADD_FAILURE() << stage << ": conn " << i << " is in group " << g
+                              << " but not on that group's physical QP";
+                ok = false;
+            }
+        }
+
+        for (const auto& g : groups) {
+            if (g.second.primaries > 1) {
+                ADD_FAILURE() << stage << ": group " << g.first << " has "
+                              << g.second.primaries << " PRIMARYs; a group has one"
+                              << " physical QP and so at most one owner";
+                ok = false;
+            }
+        }
+        for (auto a = groups.begin(); a != groups.end(); ++a) {
+            auto b = a;
+            for (++b; b != groups.end(); ++b) {
+                if (a->second.qpn != 0 && a->second.qpn == b->second.qpn) {
+                    ADD_FAILURE() << stage << ": groups " << a->first << " and "
+                                  << b->first << " unexpectedly share one physical QP";
+                    ok = false;
+                }
+            }
+        }
+        return ok;
+    }
+
+    // Additionally require the observed placement to match what QpShareRefModel
+    // predicted. This asserts the assignment *policy* -- occupancy-modulo, which
+    // the model transcribes from connect.cc -- rather than the bookkeeping, so a
+    // deliberate policy change fails it and the model has to be updated to match.
+    // Only QpShareAlgoLayoutSweep and QpShareAlgoChurnLayout exist to pin the
+    // policy down; everything else should use ExpectQpShareLayout alone.
+    //
+    // Note that the model counts only the comms the calling test opened, while
+    // the transport counts every live comm to that peer in the process
+    // (IbCastCountPeerTotalRefcount scans the global pool). A comm leaked by an
+    // earlier test in the same binary therefore shifts every prediction here.
+    bool ExpectQpSharePlacement(const std::vector<void*>& comms,
+                                const std::vector<QpShareRefModel::Placement>& places,
+                                const char* stage) {
         EXPECT_EQ(comms.size(), places.size()) << stage;
-        if (comms.size() != places.size()) return;
-        if (qpShareLayoutFailures_ > kMaxLayoutFailures) return;
-        const int partsOnEntry = CurrentTestFailureParts();
-        std::map<int, uint32_t> groupQpn;  // group -> qpn of its physical QP
+        if (comms.size() != places.size()) return false;
+        bool ok = true;
         for (size_t i = 0; i < comms.size(); i++) {
             if (comms[i] == nullptr) continue;
             struct ncclIbQpSharingState st = GetActualQpSharingState(comms[i]);
-            const int g = places[i].group;
-
-            EXPECT_EQ(st.sharedGroupIdx, g)
-                << stage << ": conn " << i << " group mismatch";
-            EXPECT_EQ(st.isSharedQpPrimary, places[i].primary)
-                << stage << ": conn " << i << " PRIMARY/SECONDARY role mismatch"
-                << " (group " << g << ")";
-            EXPECT_EQ(st.refcount, model.Load(g))
-                << stage << ": conn " << i << " refcount does not match the "
-                << "number of live comms in group " << g;
-            // cqRefcount is a second, independent counter over the same set of
-            // comms: connect.cc increments refcount and cqRefcount together on
-            // the q==0 slot (:1058/:1066, :1866/:1874) and decrements them
-            // together on close (:2082/:2092, :2160/:2174), both starting at 1.
-            // They must therefore always agree. It is worth asserting
-            // separately because cqRefcount alone gates IbCastCleanupGroupCqs,
-            // i.e. it is the counter that decides when the group's CQ and PD
-            // are released. QpShareStressConnectionChurn and
-            // QpShareStressBatchCreateDestroy observe that release only through
-            // its effect on RDMA object counts; a drift caught here says which
-            // of the two counters is wrong, which an object-count delta cannot.
-            EXPECT_EQ(st.cqRefcount, st.refcount)
-                << stage << ": conn " << i << " in group " << g
-                << " has cqRefcount=" << st.cqRefcount << " but refcount="
-                << st.refcount << ". These count the same comms and are"
-                << " maintained in lockstep; cqRefcount alone decides when the"
-                << " group's CQ and PD are released, so a drift here either"
-                << " frees a CQ that is still in use or never frees it.";
-            EXPECT_NE(st.commId, 0)
-                << stage << ": conn " << i << " has no commId -- it silently fell "
-                << "back off the sharing path";
-
-            if (st.sharedGroupIdx != g) continue;  // QP identity is meaningless if the group is wrong
-            auto it = groupQpn.find(g);
-            if (it == groupQpn.end()) groupQpn[g] = st.qpn[0];
-            else EXPECT_EQ(st.qpn[0], it->second)
-                << stage << ": conn " << i << " is in group " << g
-                << " but not on that group's physical QP";
-        }
-        for (auto a = groupQpn.begin(); a != groupQpn.end(); ++a) {
-            auto b = a;
-            for (++b; b != groupQpn.end(); ++b) {
-                EXPECT_NE(a->second, b->second)
-                    << stage << ": groups " << a->first << " and " << b->first
-                    << " unexpectedly share one physical QP";
+            if (st.sharedGroupIdx != places[i].group) {
+                ADD_FAILURE() << stage << ": conn " << i << " landed in group "
+                              << st.sharedGroupIdx << ", model predicted "
+                              << places[i].group;
+                ok = false;
+            }
+            if (st.isSharedQpPrimary != places[i].primary) {
+                ADD_FAILURE() << stage << ": conn " << i << " is "
+                              << (st.isSharedQpPrimary ? "PRIMARY" : "SECONDARY")
+                              << ", model predicted "
+                              << (places[i].primary ? "PRIMARY" : "SECONDARY");
+                ok = false;
             }
         }
-        qpShareLayoutFailures_ += CurrentTestFailureParts() - partsOnEntry;
-        if (qpShareLayoutFailures_ > kMaxLayoutFailures) {
-            printf("[QPSHARE-COV] layout divergences exceeded %d at \"%s\";"
-                   " further per-comm layout checks suppressed for this test."
-                   " The test still fails -- read the FIRST divergence above,"
-                   " not the last: every later one is downstream of it.\n",
-                   kMaxLayoutFailures, stage);
-            fflush(stdout);
-        }
-    }
-
-    // Failure records logged so far by the currently running test. Used as a
-    // cheap delta counter; gtest exposes no "did that block just fail" query.
-    static int CurrentTestFailureParts() {
-        const ::testing::TestInfo* info =
-            ::testing::UnitTest::GetInstance()->current_test_info();
-        if (info == nullptr || info->result() == nullptr) return 0;
-        const ::testing::TestResult* res = info->result();
-        int n = 0;
-        for (int i = 0; i < res->total_part_count(); i++)
-            if (res->GetTestPartResult(i).failed()) n++;
-        return n;
+        return ok;
     }
 
     // Composite block: Warmup send + read real nqps from sendComm on rank 1.
