@@ -71,9 +71,46 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
   EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
-  EXPECT_EQ(soc->assign_queue_cp(0), soc->xcd(0)->command_processor());
-  EXPECT_EQ(soc->assign_queue_cp(1), soc->xcd(1)->command_processor());
-  EXPECT_EQ(soc->assign_queue_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(0), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(1), soc->xcd(1)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
+}
+
+TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
+  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
+                                    rocjitsu::kEmbeddedSchema);
+  auto standalone =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.num_gpus, 4u);
+  ASSERT_EQ(loaded.devices.size(), 4u);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
+
+  EXPECT_EQ(loaded.device.revision_id, standalone.device.revision_id);
+  EXPECT_EQ(loaded.device.simd_count, standalone.device.simd_count);
+  EXPECT_EQ(loaded.device.num_shader_engines, standalone.device.num_shader_engines);
+  EXPECT_EQ(loaded.device.num_shader_arrays_per_engine,
+            standalone.device.num_shader_arrays_per_engine);
+  EXPECT_EQ(loaded.device.num_cu_per_sh, standalone.device.num_cu_per_sh);
+  EXPECT_EQ(loaded.device.simd_per_cu, standalone.device.simd_per_cu);
+  EXPECT_EQ(loaded.device.l1_size_kb, standalone.device.l1_size_kb);
+  EXPECT_EQ(loaded.device.l1_line_size, standalone.device.l1_line_size);
+  EXPECT_EQ(loaded.device.l1_assoc, standalone.device.l1_assoc);
+  EXPECT_EQ(loaded.device.l2_size_kb, standalone.device.l2_size_kb);
+  EXPECT_EQ(loaded.device.l2_line_size, standalone.device.l2_line_size);
+  EXPECT_EQ(loaded.device.l2_assoc, standalone.device.l2_assoc);
+
+  for (uint32_t i = 0; i < loaded.num_gpus; ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(loaded.devices[i].gpu_id, 1250u + i);
+    EXPECT_EQ(loaded.devices[i].location_id, 0x0300u + (i << 8));
+    EXPECT_EQ(loaded.devices[i].drm_render_minor, 128u + i);
+    EXPECT_EQ(loaded.devices[i].unique_id, 1250u + i);
+    EXPECT_EQ(loaded.devices[i].revision_id, 1u);
+  }
+
+  for (const auto &build : loaded.extra_gpu_builds)
+    EXPECT_NE(dynamic_cast<SoC *>(build.root.get()), nullptr);
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {

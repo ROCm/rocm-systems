@@ -24,12 +24,14 @@ from amdisa.isa_profile import (
     CdnaProfile,
     Cdna5Profile,
     DppOpcodeRule,
+    MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
     Rdna2Profile,
     Rdna3Profile,
     Rdna3_5Profile,
     Rdna4Profile,
+    SwmmacLayout,
 )
 
 
@@ -121,6 +123,24 @@ def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64
 )
 def test_amdgpu_profiles_split_execution_sources(profile):
     assert profile.split_execution_sources
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), False),
+        (CdnaProfile(), False),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Cdna5Profile(), True),
+    ],
+)
+def test_uses_vgpr_msb_indexing(profile, expected):
+    assert profile.uses_vgpr_msb_indexing is expected
 
 
 @pytest.mark.parametrize(
@@ -670,6 +690,9 @@ class TestCdnaProfile:
     def test_has_wmma_false(self):
         assert self.p.has_wmma is False
 
+    def test_swmmac_layout_none(self):
+        assert self.p.swmmac_layout is SwmmacLayout.NONE
+
     def test_has_vopd_false(self):
         assert self.p.has_vopd is False
 
@@ -814,6 +837,9 @@ class TestRdna3Profile:
     def test_has_wmma(self):
         assert self.p.has_wmma is True
 
+    def test_swmmac_layout_none(self):
+        assert self.p.swmmac_layout is SwmmacLayout.NONE
+
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
@@ -873,6 +899,9 @@ class TestRdna4Profile:
     def test_has_wmma(self):
         assert self.p.has_wmma is True
 
+    def test_swmmac_layout(self):
+        assert self.p.swmmac_layout is SwmmacLayout.RUNTIME_WAVE
+
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
@@ -894,6 +923,12 @@ class TestCdna5Profile:
 
     def test_wave_size_max(self):
         assert self.p.wave_size_max == 32
+
+    def test_swmmac_layout(self):
+        assert self.p.swmmac_layout is SwmmacLayout.FIXED_WAVE
+
+    def test_matrix_layout(self):
+        assert self.p.matrix_layout is MatrixLayout.WMMA_SPLIT_K
 
     def test_has_vopd3(self):
         assert self.p.has_vopd3 is True
@@ -1092,9 +1127,12 @@ class TestCdna5Profile:
                 chunk_overhead=0,
             )
 
-    def test_detect_profile_uses_filename_override(self, tmp_path):
-        xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
-        xml.write_text('<Spec />')
+    def test_detect_profile_uses_public_cdna5_architecture(self, tmp_path):
+        xml = tmp_path / 'amdgpu_isa_cdna5.xml'
+        xml.write_text(
+            '<Spec><ISA><Architecture><ArchitectureName>AMD CDNA 5</ArchitectureName>'
+            '</Architecture></ISA></Spec>'
+        )
         assert _detect_profile(str(xml)) == 'cdna5'
 
     def test_test_encoding_uses_primary_decode_key(self):
