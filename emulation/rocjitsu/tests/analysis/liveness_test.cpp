@@ -21,6 +21,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -2540,7 +2542,7 @@ TEST(CfgAnalysis, Gfx1250RelativeVgprDestinationDisablesExactCalleeSummary) {
   }
 }
 
-TEST(CfgAnalysis, Gfx1250GprIndexedVgprDestinationDisablesExactCalleeSummary) {
+TEST(CfgAnalysis, Gfx1250ModeBit27DoesNotInvalidateExactCalleeSummary) {
   constexpr uint16_t kReturnSreg = 30;
   constexpr uint16_t kModeGprIdxEnable = 1u | (27u << 6);
   constexpr auto enable_with_literal =
@@ -2578,11 +2580,15 @@ TEST(CfgAnalysis, Gfx1250GprIndexedVgprDestinationDisablesExactCalleeSummary) {
     ASSERT_NE(decoder, nullptr);
     auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_CDNA5);
 
+    const IndirectCallFixup *continuation_fixup = nullptr;
     for (const auto &block : blocks) {
-      EXPECT_TRUE(std::ranges::none_of(
-          block->static_indirect_call_fixups(),
-          [](const IndirectCallFixup &fixup) { return fixup.source_call_offset == 52; }));
+      for (const auto &fixup : block->static_indirect_call_fixups()) {
+        if (fixup.source_call_offset == 52)
+          continuation_fixup = &fixup;
+      }
     }
+    ASSERT_NE(continuation_fixup, nullptr);
+    EXPECT_EQ(continuation_fixup->source_target_offset, 60u);
   }
 }
 
@@ -4250,9 +4256,7 @@ TEST(LivenessAnalysis, Gfx1250SwaprelDisablesGlobalUnusedQuery) {
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
-TEST(LivenessAnalysis, Gfx1250GprIndexModeWriteDisablesGlobalUnusedQuery) {
-  // A runtime MODE[27] write can enable GPR indexing, after which ordinary
-  // encoded operands may access M0-offset VGPRs.
+TEST(LivenessAnalysis, Gfx1250DynamicModeBit27WriteDoesNotEnableGprIndexing) {
   constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregB32Sopk, {.simm16 = kModeGprIdxEnableHwreg, .sdst = 0});
@@ -4276,11 +4280,39 @@ TEST(LivenessAnalysis, Gfx1250GprIndexModeWriteDisablesGlobalUnusedQuery) {
   auto instruction = blocks.front()->instructions().begin();
   ++instruction;
   ASSERT_NE(instruction, blocks.front()->instructions().end());
-  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), std::nullopt);
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1);
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
 }
 
-TEST(LivenessAnalysis, Gfx1250ImmediateGprIndexModeWriteUsesLiteralValue) {
+TEST(LivenessAnalysis, Rdna4DynamicModeBit27WriteDoesNotEnableGprIndexing) {
+  constexpr uint16_t kModeDisablePerfHwreg = 1u | (27u << 6);
+  constexpr auto setreg =
+      rdna4::build_sopk(rdna4::kSSetregB32Sopk, {.simm16 = kModeDisablePerfHwreg, .sdst = 0});
+  constexpr auto move = rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 0});
+  constexpr auto end = rdna4::build_sopp(rdna4::kSEndpgmSopp);
+  TestCodeObject co({setreg[0], move[0], end[0]});
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_EQ(blocks.size(), 1u);
+  auto scope = block_scope(blocks);
+
+  LivenessAnalysisOptions options;
+  options.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  options.entry_block = scope.front();
+  options.text = text_span(co);
+  const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/32);
+  LivenessAnalysis liveness(KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
+                            options);
+
+  auto instruction = blocks.front()->instructions().begin();
+  ++instruction;
+  ASSERT_NE(instruction, blocks.front()->instructions().end());
+  EXPECT_EQ(liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2), 1);
+  EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
+}
+
+TEST(LivenessAnalysis, Gfx1250ImmediateModeBit27WriteDoesNotEnableGprIndexing) {
   constexpr uint16_t kModeGprIdxEnableHwreg = 1u | (27u << 6);
   constexpr auto setreg =
       cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeGprIdxEnableHwreg});
@@ -4308,10 +4340,7 @@ TEST(LivenessAnalysis, Gfx1250ImmediateGprIndexModeWriteUsesLiteralValue) {
     ++instruction;
     ASSERT_NE(instruction, blocks.front()->instructions().end());
     const auto unused = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
-    if (literal == 0)
-      EXPECT_EQ(unused, 1);
-    else
-      EXPECT_EQ(unused, std::nullopt);
+    EXPECT_EQ(unused, 1);
     EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
   }
 }
@@ -5598,15 +5627,16 @@ TEST(GeneratedInstDefUse, DppBoundCtrlZeroRotateDoesNotReadDestination) {
 }
 
 TEST(GeneratedInstDefUse, Vop1DppPartialMaskReadsFullWidthDestination) {
-  // v_cvt_f64_i32_e32 writes a VGPR pair (v[6:7]). A partial DPP row mask
-  // preserves the whole 64-bit destination, so the implicit use must match the
-  // width-2 def -- not just the low dword.
-  // CDNA4 VOP1 word0: encoding[31:25]=0x3F, vdst[24:17]=6, op[16:9]=4
-  // (v_cvt_f64_i32), src0[8:0]=250 (SRC_DPP).
-  constexpr uint32_t kVop1CvtF64I32Word0Dpp = (0x3Fu << 25) | (6u << 17) | (4u << 9) | 250u;
-  auto inst = decode_cdna4({kVop1CvtF64I32Word0Dpp, (0x7u << 28) | (0xFu << 24) | 2u});
+  // v_mov_b64_e32 writes a VGPR pair (v[6:7]). A partial DPP row mask preserves
+  // the whole 64-bit destination, so the implicit use must match the width-2
+  // def -- not just the low dword.
+  // CDNA4 VOP1 word0: encoding[31:25]=0x3F, vdst[24:17]=6, op[16:9]=56
+  // (v_mov_b64), src0[8:0]=250 (SRC_DPP).
+  constexpr uint32_t kVop1MovB64Word0Dpp = (0x3Fu << 25) | (6u << 17) | (56u << 9) | 250u;
+  constexpr uint32_t kDppCtrlRowShare0 = 0x150u << 8;
+  auto inst = decode_cdna4({kVop1MovB64Word0Dpp, (0x7u << 28) | (0xFu << 24) | kDppCtrlRowShare0});
   ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 13), "v_cvt_f64_i32");
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 9), "v_mov_b64");
 
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 6, 2}));
@@ -5698,8 +5728,8 @@ TEST(GeneratedInstDefUse, Vop2DppBoundCtrlOneEdgeCrossingDoesNotReadDestination)
 // SGPR: a VOP3-re-encoded compare (v_cmp_*_e64) writes its lane mask to an SGPR
 // through vdst. So Vop3::implicit_uses derives the preserved ref from the
 // decoded destination operand rather than assuming VGPR -- these cases exercise
-// both a VGPR-dest op and an SGPR-dest compare. VOP3 is not in CDNA, so these
-// decode for RDNA4.
+// both a VGPR-dest op and an SGPR-dest compare. CDNA VOP3 encodings do not
+// support this DPP form, so these decode for RDNA4.
 //
 // RDNA4 VOP3 word0: encoding[31:26]=53, op[25:16], clamp[15], opsel[14:11],
 // abs[10:8], vdst[7:0]. word1: src0[8:0]=marker (250=SRC_DPP), src1[17:9]. The
@@ -5709,6 +5739,7 @@ constexpr uint32_t kVop3AddF32Op = 259u << 16;  // v_add_f32_e64 (VGPR vdst)
 constexpr uint32_t kVop3CmpLtF32Op = 17u << 16; // v_cmp_lt_f32_e64 (SGPR vdst)
 // word1: src0=SRC_DPP, src1=VGPR3.
 constexpr uint32_t kVop3DppWord1 = (3u << 9) | 250u;
+constexpr uint32_t kVop3DppFi = 1u << 18;
 
 // VOP3 DPP16 is 3 dwords and a FLAT (D16) load can decode as a 3-dword
 // instruction, so the buffer is zero-padded to avoid out-of-bounds reads during
@@ -5733,14 +5764,25 @@ TEST(GeneratedInstDefUse, Vop3DppPartialRowMaskReadsVgprDestination) {
 }
 
 TEST(GeneratedInstDefUse, Vop3DppFullRowMaskDoesNotReadDestination) {
-  // Full masks, dpp_ctrl=0 (quad_perm, never OOB) -> every lane written.
-  auto inst = decode_rdna4(
-      {kVop3Enc | kVop3AddF32Op | 5u, kVop3DppWord1, (0xFu << 28) | (0xFu << 24) | 2u});
+  // Full masks, FI=1, dpp_ctrl=0 (quad_perm, never OOB) -> every lane written.
+  auto inst = decode_rdna4({kVop3Enc | kVop3AddF32Op | 5u, kVop3DppWord1,
+                            (0xFu << 28) | (0xFu << 24) | kVop3DppFi | 2u});
   ASSERT_NE(inst, nullptr);
 
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop3DppInactiveSourceReadsVgprDestinationWithFullMasks) {
+  // Full destination masks and an in-range quad permutation isolate FI=0:
+  // BOUND_CTRL=0 can suppress writes selected from inactive source lanes.
+  auto inst = decode_rdna4({kVop3Enc | kVop3AddF32Op | 5u, kVop3DppWord1, kDppFullMasks | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
 TEST(GeneratedInstDefUse, Vop3DppBoundCtrlZeroEdgeCrossingReadsDestination) {
@@ -5757,12 +5799,10 @@ TEST(GeneratedInstDefUse, Vop3DppBoundCtrlZeroEdgeCrossingReadsDestination) {
 
 TEST(GeneratedInstDefUse, Vop3CmpDppPartialRowMaskDoesNotReadDestination) {
   // v_cmp_lt_f32_e64 writes its lane mask to an SGPR pair via the vdst field
-  // (s[8:9]). The executor's non-VOPC DPP restore only touches the VGPR file at
-  // inst_.vdst -- a no-op that writes back the saved value -- and does NOT
-  // preserve the SGPR mask, which is fully written. So a partial mask reads
-  // neither the SGPR nor a VGPR, matching implicit_uses filtering to VGPR.
-  auto inst = decode_rdna4(
-      {kVop3Enc | kVop3CmpLtF32Op | 8u, kVop3DppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+  // (s[8:9]). Row/bank-masked compare bits are cleared, so a partial destination
+  // mask alone does not read the old SGPR result.
+  auto inst = decode_rdna4({kVop3Enc | kVop3CmpLtF32Op | 8u, kVop3DppWord1,
+                            (0x7u << 28) | (0xFu << 24) | kVop3DppFi | 2u});
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 9), "v_cmp_lt_");
 
@@ -5772,16 +5812,45 @@ TEST(GeneratedInstDefUse, Vop3CmpDppPartialRowMaskDoesNotReadDestination) {
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 8, 1}));
 }
 
-TEST(GeneratedInstDefUse, Vop3pDppPartialRowMaskReadsDestination) {
-  // v_dot2_f32_f16 (VOP3P, VGPR vdst=6) has an explicit DPP encoding. A
-  // partial row mask preserves the packed VGPR destination.
-  // RDNA4 VOP3P word0: encoding[31:24]=204, op[22:16]=19 (v_dot2_f32_f16),
-  // vdst[7:0]=6. word1: src0[8:0]=250 (SRC_DPP), src1[17:9]=3 (VGPR3).
-  constexpr uint32_t kVop3pDot2Word0 = (204u << 24) | (19u << 16) | 6u;
-  constexpr uint32_t kVop3pDppWord1 = (3u << 9) | 250u;
-  auto inst = decode_rdna4({kVop3pDot2Word0, kVop3pDppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+TEST(GeneratedInstDefUse, Vop3CmpDppInvalidSourceDoesNotReadScalarDestination) {
+  // With FI=1 and BOUND_CTRL=0, row_shr:1 has OOB row-edge sources. Active
+  // compare destinations at those edges receive zero rather than preserving
+  // their old SGPR result bits.
+  auto inst = decode_rdna4({kVop3Enc | kVop3CmpLtF32Op | 8u, kVop3DppWord1,
+                            kDppFullMasks | kVop3DppFi | kDppCtrlRowShr1 | 2u});
   ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 14), "v_dot2_f32_f16");
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 8, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop3CmpDppInactiveSourceDoesNotReadScalarDestination) {
+  // As above, full masks and an in-range permutation isolate FI=0 as the
+  // reason an invalid-source result bit is forced to zero.
+  auto inst = decode_rdna4({kVop3Enc | kVop3CmpLtF32Op | 8u, kVop3DppWord1, kDppFullMasks | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 8, 1}));
+}
+
+TEST(GeneratedInstDefUse, Vop3pDppPartialRowMaskReadsDestination) {
+  // v_fma_mix_f32 (VOP3P, VGPR vdst=6) is a legal DPP VOP3P operation. A
+  // partial row mask preserves the VGPR dst.
+  // RDNA4 VOP3P word0: encoding[31:24]=204, op[22:16]=32 (v_fma_mix_f32),
+  // vdst[7:0]=6. word1: src0[8:0]=250 (SRC_DPP), src1[17:9]=3 (VGPR3).
+  // Modern DPP requires low-half selection for all low results and high-half
+  // selection for all high results. The third high selector occupies word0 bit
+  // 14; the first two occupy word1 bits 27:28.
+  constexpr uint32_t kVop3pFmaMixWord0 = (204u << 24) | (32u << 16) | (1u << 14) | 6u;
+  constexpr uint32_t kVop3pDppWord1 = (3u << 27) | (3u << 9) | 250u;
+  auto inst = decode_rdna4({kVop3pFmaMixWord0, kVop3pDppWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 13), "v_fma_mix_f32");
 
   InstDefUse idu(*inst);
   EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 6, 1}));
@@ -5790,14 +5859,15 @@ TEST(GeneratedInstDefUse, Vop3pDppPartialRowMaskReadsDestination) {
 
 TEST(GeneratedInstDefUse, Vop3SdstEncDppPartialRowMaskReadsOnlyVgprResult) {
   // v_add_co_ci_u32_e64 (VOP3_SDST_ENC) writes TWO destinations: a VGPR result
-  // (v6) and an SGPR carry-out (s[8:9]). The executor's DPP restore preserves
-  // only the VGPR result (write_vgpr); the SGPR carry is fully written, so only
-  // the VGPR surfaces as a use -- implicit_uses filters to RegClass::VGPR.
+  // (v6) and an SGPR carry-out (s[8:9]). Row/bank masking preserves only the
+  // VGPR result. BC=1 eliminates invalid-source write suppression, so the SGPR
+  // carry remains a pure def.
   // RDNA4 VOP3_SDST_ENC word0: encoding[31:26]=53, op[25:16]=288, sdst[14:8]=8,
   // vdst[7:0]=6. word1: src0=250 (SRC_DPP), src1[17:9]=3, src2[26:18]=10 (carry).
   constexpr uint32_t kVop3SdstWord0 = (53u << 26) | (288u << 16) | (8u << 8) | 6u;
   constexpr uint32_t kVop3SdstWord1 = (10u << 18) | (3u << 9) | 250u;
-  auto inst = decode_rdna4({kVop3SdstWord0, kVop3SdstWord1, (0x7u << 28) | (0xFu << 24) | 2u});
+  auto inst =
+      decode_rdna4({kVop3SdstWord0, kVop3SdstWord1, (0x7u << 28) | (0xFu << 24) | (1u << 19) | 2u});
   ASSERT_NE(inst, nullptr);
   ASSERT_EQ(std::string_view(inst->mnemonic()).substr(0, 14), "v_add_co_ci_u3");
 
@@ -6024,6 +6094,17 @@ TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
   InstDefUse lds_idu(*lds);
   EXPECT_FALSE(lds_idu.uses.contains({RegClass::VGPR, 5, 1}))
       << "LDS set: data goes to LDS, so vdata is not a preserved read";
+}
+
+TEST(GeneratedInstDefUse, Vop3SdstEncDppInvalidSourceCanReadScalarResult) {
+  constexpr uint32_t kVop3SdstWord0 = (53u << 26) | (288u << 16) | (8u << 8) | 6u;
+  constexpr uint32_t kVop3SdstWord1 = (10u << 18) | (3u << 9) | 250u;
+  auto inst = decode_rdna4({kVop3SdstWord0, kVop3SdstWord1, (0xFu << 28) | (0xFu << 24) | 2u});
+  ASSERT_NE(inst, nullptr);
+
+  InstDefUse idu(*inst);
+  EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
 }
 
 } // namespace

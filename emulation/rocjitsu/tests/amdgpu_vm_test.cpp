@@ -6,10 +6,16 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3p.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -174,13 +180,20 @@ struct VmFixture {
   uint64_t write_kernel(uint64_t addr, const void *code, size_t code_size, uint32_t sgprs = 104,
                         uint32_t vgprs = 256, uint32_t user_sgprs = 2,
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
-                        uint32_t enable_vgpr_workitem_id = 0,
-                        uint32_t extra_compute_pgm_rsrc1 = 0) {
+                        uint32_t enable_vgpr_workitem_id = 0, uint32_t extra_compute_pgm_rsrc1 = 0,
+                        bool wave32 = true) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+    AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    static_cast<uint32_t>(wave32));
+    kd.compute_pgm_rsrc1 |= extra_compute_pgm_rsrc1;
+    const uint32_t wave_size = kernel_wavefront_size(cu()->arch(), kd);
+    const uint32_t vgpr_granule =
+        descriptor_vgpr_granularity_for_wavefront(cu()->arch(), wave_size);
+    assert(vgpr_granule != 0 && vgprs % vgpr_granule == 0);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((vgprs / 8) - 1));
+                    ((vgprs / vgpr_granule) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                     ((sgprs / 8) - 1));
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
@@ -188,8 +201,6 @@ struct VmFixture {
     kd.group_segment_fixed_size = group_segment_fixed_size;
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
                     enable_vgpr_workitem_id);
-    kd.compute_pgm_rsrc1 |= extra_compute_pgm_rsrc1;
-
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
                       addr + sizeof(kernel_descriptor_t));
@@ -225,6 +236,99 @@ void step_until_halted(simdojo::SimulationEngine &engine,
       saw_work = true;
     else if (saw_work)
       break;
+  }
+}
+
+TEST(LdsAllocationTest, ZeroLdsDispatchKeepsCuBackingUnmaterialized) {
+  VmFixture f("cdna5", 1, 8, /*lds_size_kb=*/64);
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  const uint64_t kernel_object = f.write_kernel(0x1000, &kCdna5Endpgm, sizeof(kCdna5Endpgm));
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
+  queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
+  ASSERT_NO_THROW(f.engine->run());
+  EXPECT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
+}
+
+TEST(LdsAllocationTest, DescriptorFixedSizeMaterializesWorkgroupBacking) {
+  VmFixture f("cdna5", 1, 8, /*lds_size_kb=*/64);
+  constexpr uint32_t kStaticLdsBytes = 1537;
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  const uint32_t code[] = {kCdna5Endpgm};
+  const uint64_t kernel_object =
+      f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                     /*user_sgprs=*/2, kStaticLdsBytes);
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
+  queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
+  ASSERT_NO_THROW(f.engine->run());
+
+  constexpr uint32_t kAlignedStaticLdsBytes = 1792;
+  EXPECT_GE(f.cu()->lds().materialized_size_bytes(), kAlignedStaticLdsBytes);
+  EXPECT_LT(f.cu()->lds().materialized_size_bytes(), f.cu()->lds().size_bytes());
+}
+
+TEST(LdsAllocationTest, PacketGroupSizeMaterializesDynamicWorkgroupBacking) {
+  VmFixture f("cdna5", 1, 8, /*lds_size_kb=*/64);
+  constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
+  const uint32_t code[] = {kCdna5Endpgm};
+  const uint64_t kernel_object = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint32_t kDynamicLdsBytes = 6145;
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+  packet.setup = 1;
+  packet.workgroup_size_x = 32;
+  packet.workgroup_size_y = 1;
+  packet.workgroup_size_z = 1;
+  packet.grid_size_x = 32;
+  packet.grid_size_y = 1;
+  packet.grid_size_z = 1;
+  packet.group_segment_size = kDynamicLdsBytes;
+  packet.kernel_object = kernel_object;
+  test::AqlQueue queue(f.mem(), f.cp());
+
+  ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
+  queue.submit(packet);
+  ASSERT_NO_THROW(f.engine->run());
+
+  constexpr uint32_t kAlignedDynamicLdsBytes = 6400;
+  EXPECT_GE(f.cu()->lds().materialized_size_bytes(), kAlignedDynamicLdsBytes);
+  EXPECT_LT(f.cu()->lds().materialized_size_bytes(), f.cu()->lds().size_bytes());
+}
+
+TEST(RdnaDispatchTest, DescriptorSelectsCoherentWaveWidthAndVgprGranule) {
+  constexpr uint32_t kRdnaEndpgm = 0xBFB00000u;
+
+  for (bool wave32 : {false, true}) {
+    SCOPED_TRACE(wave32 ? "Wave32" : "Wave64");
+    VmFixture fixture("rdna4", 1, 4, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128,
+                      /*vgprs_per_wf=*/64);
+    auto *snapshots = fixture.capture_halts();
+    const uint32_t expected_wave_size = wave32 ? 32u : 64u;
+    const uint32_t expected_vgprs = wave32 ? 8u : 4u;
+    const uint64_t kernel_object = fixture.write_kernel(
+        0x1000, &kRdnaEndpgm, sizeof(kRdnaEndpgm), /*sgprs=*/104, expected_vgprs,
+        /*user_sgprs=*/2, /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
+        /*enable_vgpr_workitem_id=*/0, /*extra_compute_pgm_rsrc1=*/0, wave32);
+    rocr::llvm::amdhsa::kernel_descriptor_t stored_descriptor{};
+    fixture.mem()->read_block(kernel_object, {reinterpret_cast<uint8_t *>(&stored_descriptor),
+                                              sizeof(stored_descriptor)});
+    ASSERT_EQ(kernel_wavefront_size(fixture.cu()->arch(), stored_descriptor), expected_wave_size);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.dispatch(kernel_object, /*workgroup_size=*/64, /*grid_size=*/64);
+
+    ASSERT_NO_THROW(fixture.engine->run());
+    ASSERT_FALSE(snapshots->snapshots().empty());
+    EXPECT_EQ(snapshots->snapshots().size(), wave32 ? 2u : 1u);
+    for (const auto &snapshot : snapshots->snapshots()) {
+      EXPECT_EQ(snapshot.wf_size, expected_wave_size);
+      EXPECT_EQ(snapshot.num_vgprs, expected_vgprs);
+    }
+    if (!wave32) {
+      EXPECT_EQ(snapshots->snapshots().front().vgpr(0, 43), 43u);
+    }
   }
 }
 
@@ -391,6 +495,21 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
     for (const auto &wf : snap->snapshots())
       EXPECT_EQ(wf.lds_size_bytes, kWgpLdsBytes);
   }
+}
+
+TEST(RdnaDispatchTest, ZeroLdsReservationKeepsWgpBackingUnmaterialized) {
+  VmFixture f("rdna4", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+  amdgpu::DispatchEntry entry{};
+  entry.dispatch_id = 1;
+  entry.wgp_mode = true;
+  entry.group_segment_fixed_size = 0;
+
+  auto placement = f.se()->spi().allocate_workgroup(entry, /*global_wg_id=*/0);
+  ASSERT_TRUE(placement.has_value());
+  ASSERT_NE(placement->lds, nullptr);
+  EXPECT_NE(placement->lds, &placement->cu->lds());
+  EXPECT_EQ(placement->lds->materialized_size_bytes(), 0u);
+  EXPECT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
 }
 
 TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
@@ -3667,6 +3786,123 @@ constexpr uint32_t tr_b16_halfword_value(uint32_t lane, uint32_t halfword) {
 
 constexpr uint32_t pack_u16_pair(uint32_t lo, uint32_t hi) {
   return (lo & 0xffffu) | ((hi & 0xffffu) << 16);
+}
+
+constexpr uint32_t tr_b8_byte_value(uint32_t lane, uint32_t byte) {
+  return (0x40u + lane * 7u + byte) & 0xffu;
+}
+
+constexpr uint32_t cdna5_tr_b8_matrix_value(uint32_t row, uint32_t col) {
+  return (0x20u + row * 17u + col * 3u) & 0xffu;
+}
+
+constexpr uint32_t pack_tr_b8_word(uint32_t source_base, uint32_t source_byte,
+                                   uint32_t dest_byte_base) {
+  uint32_t word = 0;
+  for (uint32_t byte = 0; byte < 4; ++byte)
+    word |= tr_b8_byte_value(source_base + 2 * (dest_byte_base + byte), source_byte) << (byte * 8);
+  return word;
+}
+
+void verify_ds_b8_transpose_lane_layout(std::string_view arch, uint32_t wave_size) {
+  VmFixture f(arch, 1, 10);
+  auto *snap = f.capture_halts();
+
+  constexpr uint32_t VDST = 4;
+  constexpr uint32_t TID_REG = 0;
+  constexpr uint32_t ADDR_REG = 1;
+  constexpr uint32_t BYTES_PER_LANE = 8;
+
+  std::array<uint32_t, 7> code{};
+  if (arch == "cdna5") {
+    const auto add_tid = cdna5::build_vop2(
+        cdna5::kVAddNcU32Vop2,
+        {.src0 = cdna5::OPR_SRC_VGPR_MIN + TID_REG, .vsrc1 = TID_REG, .vdst = ADDR_REG});
+    const auto double_addr = cdna5::build_vop2(
+        cdna5::kVAddNcU32Vop2,
+        {.src0 = cdna5::OPR_SRC_VGPR_MIN + ADDR_REG, .vsrc1 = ADDR_REG, .vdst = ADDR_REG});
+    const auto transpose =
+        cdna5::build_vds(cdna5::kDsLoadTr8B64Vds, {.addr = ADDR_REG, .vdst = VDST});
+    const auto wait = cdna5::build_sopp(cdna5::kSWaitDscntSopp);
+    const auto end = cdna5::build_sopp(cdna5::kSEndpgmSopp);
+    code = {add_tid[0],   double_addr[0], double_addr[0], transpose[0],
+            transpose[1], wait[0],        end[0]};
+  } else {
+    ASSERT_EQ(arch, "cdna4");
+    const auto add_tid = cdna4::build_vop2(
+        cdna4::kVAddU32Vop2,
+        {.src0 = cdna4::OPR_SRC_VGPR_MIN + TID_REG, .vsrc1 = TID_REG, .vdst = ADDR_REG});
+    const auto double_addr = cdna4::build_vop2(
+        cdna4::kVAddU32Vop2,
+        {.src0 = cdna4::OPR_SRC_VGPR_MIN + ADDR_REG, .vsrc1 = ADDR_REG, .vdst = ADDR_REG});
+    const auto transpose =
+        cdna4::build_ds(cdna4::kDsReadB64TrB8Ds, {.addr = ADDR_REG, .vdst = VDST});
+    const auto wait = cdna4::build_sopp(cdna4::kSWaitcntSopp);
+    const auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
+    code = {add_tid[0],   double_addr[0], double_addr[0], transpose[0],
+            transpose[1], wait[0],        end[0]};
+  }
+  uint64_t ko = f.write_kernel(0x1000, code.data(), sizeof(code), /*sgprs=*/104, /*vgprs=*/256,
+                               /*user_sgprs=*/2, /*group_segment_fixed_size=*/0,
+                               /*wgp_mode=*/false, /*enable_vgpr_workitem_id=*/1);
+
+  auto *cu = f.cu();
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    uint32_t lo = 0;
+    uint32_t hi = 0;
+    if (arch == "cdna5") {
+      const uint32_t row = 8u * (lane >> 4) + (lane & 3u) + 4u * ((lane >> 3) & 1u);
+      const uint32_t col_base = 8u * ((lane >> 2) & 1u);
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        lo |= cdna5_tr_b8_matrix_value(row, col_base + byte) << (byte * 8);
+        hi |= cdna5_tr_b8_matrix_value(row, col_base + byte + 4) << (byte * 8);
+      }
+    } else {
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        lo |= tr_b8_byte_value(lane, byte) << (byte * 8);
+        hi |= tr_b8_byte_value(lane, byte + 4) << (byte * 8);
+      }
+    }
+    cu->lds().write32(lane * BYTES_PER_LANE, lo);
+    cu->lds().write32(lane * BYTES_PER_LANE + 4, hi);
+  }
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko, /*grid_size_x=*/wave_size, /*workgroup_size_x=*/wave_size);
+  f.engine->run();
+
+  ASSERT_EQ(snap->snapshots().size(), 1u);
+  const auto &wf = snap->snapshots().front();
+
+  for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    if (arch == "cdna5") {
+      const uint32_t row_base = 8u * (lane >> 4);
+      const uint32_t col = lane & 15u;
+      uint32_t expected_lo = 0;
+      uint32_t expected_hi = 0;
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        expected_lo |= cdna5_tr_b8_matrix_value(row_base + byte, col) << (byte * 8);
+        expected_hi |= cdna5_tr_b8_matrix_value(row_base + byte + 4, col) << (byte * 8);
+      }
+      EXPECT_EQ(wf.vgpr(VDST, lane), expected_lo) << "lane " << lane << " v" << VDST;
+      EXPECT_EQ(wf.vgpr(VDST + 1, lane), expected_hi) << "lane " << lane << " v" << (VDST + 1);
+      continue;
+    }
+    const uint32_t source_byte = lane & 7u;
+    const uint32_t source_base = (lane & ~0xfu) | ((lane >> 3) & 1u);
+    EXPECT_EQ(wf.vgpr(VDST, lane), pack_tr_b8_word(source_base, source_byte, 0))
+        << "lane " << lane << " v" << VDST;
+    EXPECT_EQ(wf.vgpr(VDST + 1, lane), pack_tr_b8_word(source_base, source_byte, 4))
+        << "lane " << lane << " v" << (VDST + 1);
+  }
+}
+
+TEST(DsTransposeTest, ReadB64TrB8_LaneLayout) {
+  verify_ds_b8_transpose_lane_layout("cdna4", /*wave_size=*/64);
+}
+
+TEST(DsTransposeTest, Gfx1250LoadTr8B64_LaneLayout) {
+  verify_ds_b8_transpose_lane_layout("cdna5", /*wave_size=*/32);
 }
 
 // Verify the ds_read_b64_tr_b16 cross-lane layout: within each 16-lane group,

@@ -6,6 +6,7 @@
 #include "long_path_handoff.h"
 #include "scoped_temp.h"
 
+#include "checkpoint_generated.h"
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
@@ -38,6 +39,7 @@ RJ_DIAGNOSTIC_POP
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 namespace {
 
 const std::string CONFIG_DIR_PATH = CONFIG_DIR;
@@ -49,6 +51,11 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
   test::ScopedTempFile file("rocjitsu-config-");
   file.write(json);
   return file;
+}
+
+std::vector<uint8_t> read_binary_file(const std::string &path) {
+  std::ifstream stream(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
@@ -64,9 +71,46 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
   EXPECT_EQ(xcd->num_shader_engines(), 4u);
   EXPECT_EQ(xcd->shader_engine(0)->num_compute_units(), 9u);
   EXPECT_EQ(kmd::drm_cu_active_number(loaded.device.simd_count, loaded.device.simd_per_cu), 256u);
-  EXPECT_EQ(soc->assign_queue_cp(0), soc->xcd(0)->command_processor());
-  EXPECT_EQ(soc->assign_queue_cp(1), soc->xcd(1)->command_processor());
-  EXPECT_EQ(soc->assign_queue_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(0), soc->xcd(0)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(1), soc->xcd(1)->command_processor());
+  EXPECT_EQ(soc->assign_queue_owner_cp(soc->num_xcds()), soc->xcd(0)->command_processor());
+}
+
+TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
+  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
+                                    rocjitsu::kEmbeddedSchema);
+  auto standalone =
+      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+
+  EXPECT_EQ(loaded.num_gpus, 4u);
+  ASSERT_EQ(loaded.devices.size(), 4u);
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
+
+  EXPECT_EQ(loaded.device.revision_id, standalone.device.revision_id);
+  EXPECT_EQ(loaded.device.simd_count, standalone.device.simd_count);
+  EXPECT_EQ(loaded.device.num_shader_engines, standalone.device.num_shader_engines);
+  EXPECT_EQ(loaded.device.num_shader_arrays_per_engine,
+            standalone.device.num_shader_arrays_per_engine);
+  EXPECT_EQ(loaded.device.num_cu_per_sh, standalone.device.num_cu_per_sh);
+  EXPECT_EQ(loaded.device.simd_per_cu, standalone.device.simd_per_cu);
+  EXPECT_EQ(loaded.device.l1_size_kb, standalone.device.l1_size_kb);
+  EXPECT_EQ(loaded.device.l1_line_size, standalone.device.l1_line_size);
+  EXPECT_EQ(loaded.device.l1_assoc, standalone.device.l1_assoc);
+  EXPECT_EQ(loaded.device.l2_size_kb, standalone.device.l2_size_kb);
+  EXPECT_EQ(loaded.device.l2_line_size, standalone.device.l2_line_size);
+  EXPECT_EQ(loaded.device.l2_assoc, standalone.device.l2_assoc);
+
+  for (uint32_t i = 0; i < loaded.num_gpus; ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(loaded.devices[i].gpu_id, 1250u + i);
+    EXPECT_EQ(loaded.devices[i].location_id, 0x0300u + (i << 8));
+    EXPECT_EQ(loaded.devices[i].drm_render_minor, 128u + i);
+    EXPECT_EQ(loaded.devices[i].unique_id, 1250u + i);
+    EXPECT_EQ(loaded.devices[i].revision_id, 1u);
+  }
+
+  for (const auto &build : loaded.extra_gpu_builds)
+    EXPECT_NE(dynamic_cast<SoC *>(build.root.get()), nullptr);
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
@@ -879,6 +923,7 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
+  ASSERT_EQ(cu->vgpr_storage_lane_count(), 32u);
   EXPECT_EQ(cu->config().sgprs_per_wf, 128u);
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
 }
@@ -1060,6 +1105,22 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 64u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 64u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
+
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
@@ -1092,7 +1153,7 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
             0xFEEDFACEu);
 }
 
-TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
+TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"rdna4"},
     "topology":{
@@ -1125,19 +1186,36 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
-  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf, 64);
   ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 32u);
+  ASSERT_EQ(wf->wf_size(), 64u);
   wf->set_exec_raw(0xDEADBEEF0000000FULL);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
   const uint32_t vgpr_last = vgpr_base + cu->vgpr_allocation_block_size() - 1;
   cu->write_vgpr(vgpr_base + 1, 31, 0x1234001Fu);
+  cu->write_vgpr(vgpr_base + 1, 43, 0x1234002Bu);
   cu->write_vgpr(vgpr_base + cu->vgpr_allocation_block_size() / 2, 31, 0x5678001Fu);
   cu->write_vgpr(vgpr_last, 31, 0x9ABC001Fu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 64u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 64u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();
@@ -1149,9 +1227,11 @@ TEST(CheckpointTest, SaveAndRestoreWave32ExecScratch) {
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
   ASSERT_NE(restored_wf, nullptr);
-  EXPECT_EQ(restored_wf->exec(), 0xFULL);
+  EXPECT_EQ(restored_wf->exec(), 0xDEADBEEF0000000FULL);
   EXPECT_EQ(restored_wf->exec_raw(), 0xDEADBEEF0000000FULL);
+  EXPECT_EQ(restored_wf->kernel_wave_size(), 64u);
   EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 31), 0x1234001Fu);
+  EXPECT_EQ(restored_cu->read_vgpr(restored_wf->vgpr_alloc().base + 1, 43), 0x1234002Bu);
   EXPECT_EQ(restored_cu->read_vgpr(
                 restored_wf->vgpr_alloc().base + restored_cu->vgpr_allocation_block_size() / 2, 31),
             0x5678001Fu);
@@ -1205,6 +1285,22 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config);
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
+
+  const auto checkpoint_bytes = read_binary_file(checkpoint.path());
+  flatbuffers::Verifier verifier(checkpoint_bytes.data(), checkpoint_bytes.size());
+  ASSERT_TRUE(fb::VerifySimulationCheckpointBuffer(verifier));
+  const auto *saved_checkpoint = fb::GetSimulationCheckpoint(checkpoint_bytes.data());
+  ASSERT_NE(saved_checkpoint->compute_units(), nullptr);
+  ASSERT_EQ(saved_checkpoint->compute_units()->size(), 1u);
+  const auto *saved_wavefronts = saved_checkpoint->compute_units()->Get(0)->wavefronts();
+  ASSERT_NE(saved_wavefronts, nullptr);
+  ASSERT_EQ(saved_wavefronts->size(), 1u);
+  const auto *saved_wavefront = saved_wavefronts->Get(0);
+  ASSERT_NE(saved_wavefront->vgprs(), nullptr);
+  EXPECT_EQ(saved_wavefront->kernel_wave_size(), 32u);
+  EXPECT_EQ(saved_wavefront->vgpr_lane_count(), 32u);
+  EXPECT_EQ(saved_wavefront->vgprs()->size(),
+            cu->vgpr_allocation_block_size() * 32u * sizeof(uint32_t));
 
   auto restored = config::restore_checkpoint(checkpoint.path());
   auto *restored_soc = restored.soc();

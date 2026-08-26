@@ -54,6 +54,8 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -118,6 +120,8 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -155,6 +159,8 @@ VCmpClassF64Vopc::VCmpClassF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -165,7 +171,8 @@ DecodeResult decodeVCmpClassF64Vopc(const MachineInst *opcode,
       "v_cmp_class_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_CLASS_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_CLASS_F64 does not support SDWA";
@@ -193,6 +200,8 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -204,7 +213,8 @@ DecodeResult decodeVCmpxClassF64Vopc(const MachineInst *opcode,
       "v_cmpx_class_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_CLASS_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_CLASS_F64 does not support SDWA";
@@ -255,6 +265,8 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -320,6 +332,8 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -382,6 +396,8 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -443,6 +459,8 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -504,6 +522,8 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -565,6 +585,8 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -626,6 +648,8 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -687,6 +711,8 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -748,6 +774,8 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -808,6 +836,8 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -868,6 +898,8 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -929,6 +961,8 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -990,6 +1024,8 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -1051,6 +1087,8 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -1112,6 +1150,8 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -1173,6 +1213,8 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -1234,6 +1276,8 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -1295,6 +1339,8 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -1359,6 +1405,8 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1424,6 +1472,8 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1489,6 +1539,8 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1554,6 +1606,8 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1619,6 +1673,8 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1684,6 +1740,8 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1749,6 +1807,8 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1814,6 +1874,8 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1879,6 +1941,8 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -1944,6 +2008,8 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -2010,6 +2076,8 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -2076,6 +2144,8 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -2142,6 +2212,8 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -2208,6 +2280,8 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -2274,6 +2348,8 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -2340,6 +2416,8 @@ VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -2401,6 +2479,8 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2461,6 +2541,8 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2521,6 +2603,8 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2581,6 +2665,8 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2641,6 +2727,8 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2701,6 +2789,8 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2761,6 +2851,8 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2820,6 +2912,8 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2879,6 +2973,8 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2939,6 +3035,8 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -2999,6 +3097,8 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -3059,6 +3159,8 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -3119,6 +3221,8 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -3179,6 +3283,8 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -3239,6 +3345,8 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -3299,6 +3407,8 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -3362,6 +3472,8 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3426,6 +3538,8 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3490,6 +3604,8 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3554,6 +3670,8 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3618,6 +3736,8 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3682,6 +3802,8 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3746,6 +3868,8 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3810,6 +3934,8 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3874,6 +4000,8 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -3938,6 +4066,8 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4003,6 +4133,8 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4068,6 +4200,8 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4133,6 +4267,8 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4198,6 +4334,8 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4263,6 +4401,8 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4328,6 +4468,8 @@ VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4365,6 +4507,8 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4374,7 +4518,8 @@ DecodeResult decodeVCmpFF64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_f_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_F64 does not support SDWA";
@@ -4399,6 +4544,8 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4408,7 +4555,8 @@ DecodeResult decodeVCmpLtF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_lt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_F64 does not support SDWA";
@@ -4433,6 +4581,8 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4442,7 +4592,8 @@ DecodeResult decodeVCmpEqF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_eq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_F64 does not support SDWA";
@@ -4467,6 +4618,8 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4476,7 +4629,8 @@ DecodeResult decodeVCmpLeF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_le_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_F64 does not support SDWA";
@@ -4501,6 +4655,8 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4510,7 +4666,8 @@ DecodeResult decodeVCmpGtF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_gt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_F64 does not support SDWA";
@@ -4535,6 +4692,8 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4544,7 +4703,8 @@ DecodeResult decodeVCmpLgF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_lg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LG_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LG_F64 does not support SDWA";
@@ -4569,6 +4729,8 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4578,7 +4740,8 @@ DecodeResult decodeVCmpGeF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_F64 does not support SDWA";
@@ -4603,6 +4766,8 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4612,7 +4777,8 @@ DecodeResult decodeVCmpOF64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_o_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_O_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_O_F64 does not support SDWA";
@@ -4637,6 +4803,8 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4646,7 +4814,8 @@ DecodeResult decodeVCmpUF64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_u_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_U_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_U_F64 does not support SDWA";
@@ -4671,6 +4840,8 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4680,7 +4851,8 @@ DecodeResult decodeVCmpNgeF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_nge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NGE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NGE_F64 does not support SDWA";
@@ -4705,6 +4877,8 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4714,7 +4888,8 @@ DecodeResult decodeVCmpNlgF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_nlg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLG_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLG_F64 does not support SDWA";
@@ -4739,6 +4914,8 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4748,7 +4925,8 @@ DecodeResult decodeVCmpNgtF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_ngt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NGT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NGT_F64 does not support SDWA";
@@ -4773,6 +4951,8 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4782,7 +4962,8 @@ DecodeResult decodeVCmpNleF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_nle_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLE_F64 does not support SDWA";
@@ -4807,6 +4988,8 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4816,7 +4999,8 @@ DecodeResult decodeVCmpNeqF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_neq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NEQ_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NEQ_F64 does not support SDWA";
@@ -4841,6 +5025,8 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4850,7 +5036,8 @@ DecodeResult decodeVCmpNltF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_nlt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NLT_F64 does not support SDWA";
@@ -4875,6 +5062,8 @@ VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -4884,7 +5073,8 @@ DecodeResult decodeVCmpTruF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmp_tru_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_TRU_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_TRU_F64 does not support SDWA";
@@ -4912,6 +5102,8 @@ VCmpxFF64Vopc::VCmpxFF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4922,7 +5114,8 @@ DecodeResult decodeVCmpxFF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_f_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_F64 does not support SDWA";
@@ -4950,6 +5143,8 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4960,7 +5155,8 @@ DecodeResult decodeVCmpxLtF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_lt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_F64 does not support SDWA";
@@ -4988,6 +5184,8 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4998,7 +5196,8 @@ DecodeResult decodeVCmpxEqF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_eq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_F64 does not support SDWA";
@@ -5026,6 +5225,8 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5036,7 +5237,8 @@ DecodeResult decodeVCmpxLeF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_le_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_F64 does not support SDWA";
@@ -5064,6 +5266,8 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5074,7 +5278,8 @@ DecodeResult decodeVCmpxGtF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_gt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_F64 does not support SDWA";
@@ -5102,6 +5307,8 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5112,7 +5319,8 @@ DecodeResult decodeVCmpxLgF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_lg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LG_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LG_F64 does not support SDWA";
@@ -5140,6 +5348,8 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5150,7 +5360,8 @@ DecodeResult decodeVCmpxGeF64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_F64 does not support SDWA";
@@ -5178,6 +5389,8 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5188,7 +5401,8 @@ DecodeResult decodeVCmpxOF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_o_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_O_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_O_F64 does not support SDWA";
@@ -5216,6 +5430,8 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5226,7 +5442,8 @@ DecodeResult decodeVCmpxUF64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_u_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_U_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_U_F64 does not support SDWA";
@@ -5254,6 +5471,8 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5265,7 +5484,8 @@ DecodeResult decodeVCmpxNgeF64Vopc(const MachineInst *opcode,
       "v_cmpx_nge_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NGE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NGE_F64 does not support SDWA";
@@ -5293,6 +5513,8 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5304,7 +5526,8 @@ DecodeResult decodeVCmpxNlgF64Vopc(const MachineInst *opcode,
       "v_cmpx_nlg_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLG_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLG_F64 does not support SDWA";
@@ -5332,6 +5555,8 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5343,7 +5568,8 @@ DecodeResult decodeVCmpxNgtF64Vopc(const MachineInst *opcode,
       "v_cmpx_ngt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NGT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NGT_F64 does not support SDWA";
@@ -5371,6 +5597,8 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5382,7 +5610,8 @@ DecodeResult decodeVCmpxNleF64Vopc(const MachineInst *opcode,
       "v_cmpx_nle_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLE_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLE_F64 does not support SDWA";
@@ -5410,6 +5639,8 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5421,7 +5652,8 @@ DecodeResult decodeVCmpxNeqF64Vopc(const MachineInst *opcode,
       "v_cmpx_neq_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NEQ_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NEQ_F64 does not support SDWA";
@@ -5449,6 +5681,8 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5460,7 +5694,8 @@ DecodeResult decodeVCmpxNltF64Vopc(const MachineInst *opcode,
       "v_cmpx_nlt_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLT_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NLT_F64 does not support SDWA";
@@ -5488,6 +5723,8 @@ VCmpxTruF64Vopc::VCmpxTruF64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5499,7 +5736,8 @@ DecodeResult decodeVCmpxTruF64Vopc(const MachineInst *opcode,
       "v_cmpx_tru_f64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_TRU_F64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_TRU_F64 does not support SDWA";
@@ -5549,6 +5787,8 @@ VCmpFI16Vopc::VCmpFI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -5610,6 +5850,8 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -5671,6 +5913,8 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -5732,6 +5976,8 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -5793,6 +6039,8 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -5854,6 +6102,8 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -5915,6 +6165,8 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -5975,6 +6227,8 @@ VCmpTI16Vopc::VCmpTI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6035,6 +6289,8 @@ VCmpFU16Vopc::VCmpFU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6096,6 +6352,8 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6157,6 +6415,8 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6218,6 +6478,8 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6279,6 +6541,8 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6340,6 +6604,8 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6401,6 +6667,8 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6461,6 +6729,8 @@ VCmpTU16Vopc::VCmpTU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -6525,6 +6795,8 @@ VCmpxFI16Vopc::VCmpxFI16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6590,6 +6862,8 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6655,6 +6929,8 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6720,6 +6996,8 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6785,6 +7063,8 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6850,6 +7130,8 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6915,6 +7197,8 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6980,6 +7264,8 @@ VCmpxTI16Vopc::VCmpxTI16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7045,6 +7331,8 @@ VCmpxFU16Vopc::VCmpxFU16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7110,6 +7398,8 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7175,6 +7465,8 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7240,6 +7532,8 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7305,6 +7599,8 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7370,6 +7666,8 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7435,6 +7733,8 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7500,6 +7800,8 @@ VCmpxTU16Vopc::VCmpxTU16Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7560,6 +7862,8 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -7620,6 +7924,8 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -7680,6 +7986,8 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -7740,6 +8048,8 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -7800,6 +8110,8 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -7860,6 +8172,8 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -7920,6 +8234,8 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -7979,6 +8295,8 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8038,6 +8356,8 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8098,6 +8418,8 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8158,6 +8480,8 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8218,6 +8542,8 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8278,6 +8604,8 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8338,6 +8666,8 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8398,6 +8728,8 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8457,6 +8789,8 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -8520,6 +8854,8 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8584,6 +8920,8 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8648,6 +8986,8 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8712,6 +9052,8 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8776,6 +9118,8 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8840,6 +9184,8 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8904,6 +9250,8 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -8968,6 +9316,8 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9032,6 +9382,8 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9096,6 +9448,8 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9160,6 +9514,8 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9224,6 +9580,8 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9288,6 +9646,8 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9352,6 +9712,8 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9416,6 +9778,8 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9480,6 +9844,8 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -9516,6 +9882,8 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9525,7 +9893,8 @@ DecodeResult decodeVCmpFI64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_f_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_I64 does not support SDWA";
@@ -9550,6 +9919,8 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9559,7 +9930,8 @@ DecodeResult decodeVCmpLtI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_lt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_I64 does not support SDWA";
@@ -9584,6 +9956,8 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9593,7 +9967,8 @@ DecodeResult decodeVCmpEqI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_eq_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_I64 does not support SDWA";
@@ -9618,6 +9993,8 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9627,7 +10004,8 @@ DecodeResult decodeVCmpLeI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_le_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_I64 does not support SDWA";
@@ -9652,6 +10030,8 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9661,7 +10041,8 @@ DecodeResult decodeVCmpGtI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_gt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_I64 does not support SDWA";
@@ -9686,6 +10067,8 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9695,7 +10078,8 @@ DecodeResult decodeVCmpNeI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ne_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NE_I64 does not support SDWA";
@@ -9720,6 +10104,8 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9729,7 +10115,8 @@ DecodeResult decodeVCmpGeI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ge_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_I64 does not support SDWA";
@@ -9754,6 +10141,8 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9763,7 +10152,8 @@ DecodeResult decodeVCmpTI64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_t_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_T_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_T_I64 does not support SDWA";
@@ -9788,6 +10178,8 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9797,7 +10189,8 @@ DecodeResult decodeVCmpFU64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_f_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_F_U64 does not support SDWA";
@@ -9822,6 +10215,8 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9831,7 +10226,8 @@ DecodeResult decodeVCmpLtU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_lt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LT_U64 does not support SDWA";
@@ -9856,6 +10252,8 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9865,7 +10263,8 @@ DecodeResult decodeVCmpEqU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_eq_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_EQ_U64 does not support SDWA";
@@ -9890,6 +10289,8 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9899,7 +10300,8 @@ DecodeResult decodeVCmpLeU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_le_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_LE_U64 does not support SDWA";
@@ -9924,6 +10326,8 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9933,7 +10337,8 @@ DecodeResult decodeVCmpGtU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_gt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GT_U64 does not support SDWA";
@@ -9958,6 +10363,8 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -9967,7 +10374,8 @@ DecodeResult decodeVCmpNeU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ne_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_NE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_NE_U64 does not support SDWA";
@@ -9992,6 +10400,8 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -10001,7 +10411,8 @@ DecodeResult decodeVCmpGeU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmp_ge_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_GE_U64 does not support SDWA";
@@ -10026,6 +10437,8 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
 }
 
 namespace detail {
@@ -10035,7 +10448,8 @@ DecodeResult decodeVCmpTU64Vopc(const MachineInst *opcode, const DecodeErrorEmit
       "v_cmp_t_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMP_T_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMP_T_U64 does not support SDWA";
@@ -10063,6 +10477,8 @@ VCmpxFI64Vopc::VCmpxFI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10073,7 +10489,8 @@ DecodeResult decodeVCmpxFI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_f_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_I64 does not support SDWA";
@@ -10101,6 +10518,8 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10111,7 +10530,8 @@ DecodeResult decodeVCmpxLtI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_lt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_I64 does not support SDWA";
@@ -10139,6 +10559,8 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10149,7 +10571,8 @@ DecodeResult decodeVCmpxEqI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_eq_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_I64 does not support SDWA";
@@ -10177,6 +10600,8 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10187,7 +10612,8 @@ DecodeResult decodeVCmpxLeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_le_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_I64 does not support SDWA";
@@ -10215,6 +10641,8 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10225,7 +10653,8 @@ DecodeResult decodeVCmpxGtI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_gt_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_I64 does not support SDWA";
@@ -10253,6 +10682,8 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10263,7 +10694,8 @@ DecodeResult decodeVCmpxNeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ne_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NE_I64 does not support SDWA";
@@ -10291,6 +10723,8 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10301,7 +10735,8 @@ DecodeResult decodeVCmpxGeI64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ge_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_I64 does not support SDWA";
@@ -10329,6 +10764,8 @@ VCmpxTI64Vopc::VCmpxTI64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10339,7 +10776,8 @@ DecodeResult decodeVCmpxTI64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_t_i64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_I64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_I64 does not support SDWA";
@@ -10367,6 +10805,8 @@ VCmpxFU64Vopc::VCmpxFU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10377,7 +10817,8 @@ DecodeResult decodeVCmpxFU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_f_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_F_U64 does not support SDWA";
@@ -10405,6 +10846,8 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10415,7 +10858,8 @@ DecodeResult decodeVCmpxLtU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_lt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LT_U64 does not support SDWA";
@@ -10443,6 +10887,8 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10453,7 +10899,8 @@ DecodeResult decodeVCmpxEqU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_eq_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_EQ_U64 does not support SDWA";
@@ -10481,6 +10928,8 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10491,7 +10940,8 @@ DecodeResult decodeVCmpxLeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_le_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_LE_U64 does not support SDWA";
@@ -10519,6 +10969,8 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10529,7 +10981,8 @@ DecodeResult decodeVCmpxGtU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_gt_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GT_U64 does not support SDWA";
@@ -10557,6 +11010,8 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10567,7 +11022,8 @@ DecodeResult decodeVCmpxNeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ne_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_NE_U64 does not support SDWA";
@@ -10595,6 +11051,8 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10605,7 +11063,8 @@ DecodeResult decodeVCmpxGeU64Vopc(const MachineInst *opcode, const DecodeErrorEm
       "v_cmpx_ge_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_GE_U64 does not support SDWA";
@@ -10633,6 +11092,8 @@ VCmpxTU64Vopc::VCmpxTU64Vopc(const MachineInst *inst)
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  vsrc1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= WRITES_EXEC;
 }
 
@@ -10643,7 +11104,8 @@ DecodeResult decodeVCmpxTU64Vopc(const MachineInst *opcode, const DecodeErrorEmi
       "v_cmpx_t_u64_e32", reinterpret_cast<const Vopc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) [[unlikely]]
+  if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
+      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_U64 does not support DPP";
   if (reinterpret_cast<const Vopc::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_U64 does not support SDWA";
