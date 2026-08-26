@@ -57,9 +57,13 @@ OMPI_INSTALL_DIR="${ext_cache}/ompi/install/${OMPI_VERSION}-ucx${UCX_VERSION}"
 
 ucx_cached()  { [[ -f "${UCX_INSTALL_DIR}/lib/libucp.so" ]]; }
 ompi_cached() {
+  # OpenMPI 5.x links the UCX pml component into libmpi rather than shipping a
+  # standalone lib/openmpi/mca_pml_ucx.so, so a file check for that component
+  # never succeeds and would rebuild OpenMPI on every job. Gate on the .stamp
+  # written only after a successful `--with-ucx` build + install instead.
   [[ -x "${OMPI_INSTALL_DIR}/bin/mpirun" ]] \
     && [[ -f "${OMPI_INSTALL_DIR}/lib/libmpi.so" ]] \
-    && [[ -f "${OMPI_INSTALL_DIR}/lib/openmpi/mca_pml_ucx.so" ]]
+    && [[ -f "${OMPI_INSTALL_DIR}/.stamp" ]]
 }
 
 do_build_ucx() {
