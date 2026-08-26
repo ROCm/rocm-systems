@@ -168,8 +168,9 @@ private:
     ~VaContext();
 
 #ifdef ROCDECODE_USE_DLOPEN_VA
-    // Owns the private-namespace dlmopen handle and all VA function pointers.
-    // Initialized once on first use; outlives all VADisplay handles.
+    // Exclusively owns the dlopen handle and VA function pointer table.
+    // VaContext is a singleton so there is exactly one instance; unique_ptr
+    // is correct here. Outlives all VADisplay handles.
     std::unique_ptr<VaapiLoader> va_loader_;
 #endif
 

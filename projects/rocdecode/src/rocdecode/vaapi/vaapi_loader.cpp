@@ -113,11 +113,19 @@ VaapiLoader::VaapiLoader() {
     //
     // The inner dlopen(radeonsi_drv_video.so, RTLD_GLOBAL) from vaInitialize works
     // normally.  radeonsi_drv_video.so has DT_NEEDED: librocm_sysdeps_va.so.2, so
-    // the linker resolves its va* symbols directly through that dependency rather
-    // than through the global scope — it gets our libva regardless of RTLD_LOCAL.
+    // with RTLD_DEEPBIND it resolves its va* symbols through its own local scope
+    // (ROCm libva) rather than picking up system libva from the global scope.
+    // This is required even when libavcodec is loaded in the same process (e.g.
+    // FFmpeg-based extended tests), because libavcodec pulls system libva into
+    // the global scope and radeonsi would otherwise bind to it.
     //
     // Rocdecode's own va* calls are isolated via the function-pointer macros in
     // vaapi_videodecoder.cpp and never go through the global symbol scope.
+    //
+    // Note: RTLD_DEEPBIND causes libva-internal allocations to bypass ASan's
+    // interposed malloc/free, so they are not tracked by ASan. This is
+    // acceptable because libva manages its own memory and rocdecode only holds
+    // opaque VA handles — there are no cross-boundary frees for ASan to catch.
     va_drm_handle_ = dlopen(va_drm_path.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
     if (!va_drm_handle_) {
         throw std::runtime_error(std::string("VaapiLoader: dlopen('") + va_drm_path +

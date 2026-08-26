@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "rocjpeg_vaapi_decoder.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <stdlib.h>
 
@@ -30,39 +31,40 @@ THE SOFTWARE.
 // ---------------------------------------------------------------------------
 // VA-API call redirection through the process-wide shared dlopen vtable.
 // All va*() calls in this translation unit are macro-redirected through
-// g_va_loader->fn.*, resolving to the isolated librocm_sysdeps_va.so.2
+// g_va_loader.load()->fn.*, resolving to the isolated librocm_sysdeps_va.so.2
 // loaded with RTLD_LOCAL | RTLD_DEEPBIND.  This prevents system libva.so.2
 // (e.g. loaded by libavcodec) from intercepting rocjpeg's VA calls.
-// g_va_loader is a raw pointer to the process-wide shared loader owned by
-// all live RocJpegVappiDecoder instances via shared_ptr. It is valid
-// whenever any decoder exists; nulled only when the last decoder is destroyed.
+//
+// g_va_loader is std::atomic to make concurrent decoder construction/destruction
+// safe: all writes use release ordering and the destructor uses compare_exchange
+// to avoid clobbering a pointer already updated by a concurrent constructor.
 // ---------------------------------------------------------------------------
-static RocJpegVaapiLoader *g_va_loader = nullptr;
+static std::atomic<RocJpegVaapiLoader *> g_va_loader{nullptr};
 
 // clang-format off
-#define vaGetDisplayDRM(...)          (g_va_loader->fn.vaGetDisplayDRM(__VA_ARGS__))
-#define vaInitialize(...)             (g_va_loader->fn.vaInitialize(__VA_ARGS__))
-#define vaTerminate(...)              (g_va_loader->fn.vaTerminate(__VA_ARGS__))
-#define vaSetInfoCallback(...)        (g_va_loader->fn.vaSetInfoCallback(__VA_ARGS__))
-#define vaQueryVendorString(...)      (g_va_loader->fn.vaQueryVendorString(__VA_ARGS__))
-#define vaErrorStr(...)               (g_va_loader->fn.vaErrorStr(__VA_ARGS__))
-#define vaMaxNumEntrypoints(...)      (g_va_loader->fn.vaMaxNumEntrypoints(__VA_ARGS__))
-#define vaQueryConfigEntrypoints(...) (g_va_loader->fn.vaQueryConfigEntrypoints(__VA_ARGS__))
-#define vaGetConfigAttributes(...)    (g_va_loader->fn.vaGetConfigAttributes(__VA_ARGS__))
-#define vaCreateConfig(...)           (g_va_loader->fn.vaCreateConfig(__VA_ARGS__))
-#define vaDestroyConfig(...)          (g_va_loader->fn.vaDestroyConfig(__VA_ARGS__))
-#define vaQuerySurfaceAttributes(...) (g_va_loader->fn.vaQuerySurfaceAttributes(__VA_ARGS__))
-#define vaCreateSurfaces(...)         (g_va_loader->fn.vaCreateSurfaces(__VA_ARGS__))
-#define vaDestroySurfaces(...)        (g_va_loader->fn.vaDestroySurfaces(__VA_ARGS__))
-#define vaCreateContext(...)          (g_va_loader->fn.vaCreateContext(__VA_ARGS__))
-#define vaDestroyContext(...)         (g_va_loader->fn.vaDestroyContext(__VA_ARGS__))
-#define vaCreateBuffer(...)           (g_va_loader->fn.vaCreateBuffer(__VA_ARGS__))
-#define vaDestroyBuffer(...)          (g_va_loader->fn.vaDestroyBuffer(__VA_ARGS__))
-#define vaBeginPicture(...)           (g_va_loader->fn.vaBeginPicture(__VA_ARGS__))
-#define vaRenderPicture(...)          (g_va_loader->fn.vaRenderPicture(__VA_ARGS__))
-#define vaEndPicture(...)             (g_va_loader->fn.vaEndPicture(__VA_ARGS__))
-#define vaSyncSurface(...)            (g_va_loader->fn.vaSyncSurface(__VA_ARGS__))
-#define vaExportSurfaceHandle(...)    (g_va_loader->fn.vaExportSurfaceHandle(__VA_ARGS__))
+#define vaGetDisplayDRM(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaGetDisplayDRM(__VA_ARGS__))
+#define vaInitialize(...)             (g_va_loader.load(std::memory_order_acquire)->fn.vaInitialize(__VA_ARGS__))
+#define vaTerminate(...)              (g_va_loader.load(std::memory_order_acquire)->fn.vaTerminate(__VA_ARGS__))
+#define vaSetInfoCallback(...)        (g_va_loader.load(std::memory_order_acquire)->fn.vaSetInfoCallback(__VA_ARGS__))
+#define vaQueryVendorString(...)      (g_va_loader.load(std::memory_order_acquire)->fn.vaQueryVendorString(__VA_ARGS__))
+#define vaErrorStr(...)               (g_va_loader.load(std::memory_order_acquire)->fn.vaErrorStr(__VA_ARGS__))
+#define vaMaxNumEntrypoints(...)      (g_va_loader.load(std::memory_order_acquire)->fn.vaMaxNumEntrypoints(__VA_ARGS__))
+#define vaQueryConfigEntrypoints(...) (g_va_loader.load(std::memory_order_acquire)->fn.vaQueryConfigEntrypoints(__VA_ARGS__))
+#define vaGetConfigAttributes(...)    (g_va_loader.load(std::memory_order_acquire)->fn.vaGetConfigAttributes(__VA_ARGS__))
+#define vaCreateConfig(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateConfig(__VA_ARGS__))
+#define vaDestroyConfig(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyConfig(__VA_ARGS__))
+#define vaQuerySurfaceAttributes(...) (g_va_loader.load(std::memory_order_acquire)->fn.vaQuerySurfaceAttributes(__VA_ARGS__))
+#define vaCreateSurfaces(...)         (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateSurfaces(__VA_ARGS__))
+#define vaDestroySurfaces(...)        (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroySurfaces(__VA_ARGS__))
+#define vaCreateContext(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateContext(__VA_ARGS__))
+#define vaDestroyContext(...)         (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyContext(__VA_ARGS__))
+#define vaCreateBuffer(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaCreateBuffer(__VA_ARGS__))
+#define vaDestroyBuffer(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaDestroyBuffer(__VA_ARGS__))
+#define vaBeginPicture(...)           (g_va_loader.load(std::memory_order_acquire)->fn.vaBeginPicture(__VA_ARGS__))
+#define vaRenderPicture(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaRenderPicture(__VA_ARGS__))
+#define vaEndPicture(...)             (g_va_loader.load(std::memory_order_acquire)->fn.vaEndPicture(__VA_ARGS__))
+#define vaSyncSurface(...)            (g_va_loader.load(std::memory_order_acquire)->fn.vaSyncSurface(__VA_ARGS__))
+#define vaExportSurfaceHandle(...)    (g_va_loader.load(std::memory_order_acquire)->fn.vaExportSurfaceHandle(__VA_ARGS__))
 // clang-format on
 #endif // ROCJPEG_USE_DLOPEN_VA
 
@@ -389,7 +391,7 @@ RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id},
     va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {
 #ifdef ROCJPEG_USE_DLOPEN_VA
     va_loader_ = RocJpegVaapiLoader::GetShared();
-    g_va_loader = va_loader_.get();
+    g_va_loader.store(va_loader_.get(), std::memory_order_release);
 #endif
 };
 
@@ -432,14 +434,17 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
 
     }
 #ifdef ROCJPEG_USE_DLOPEN_VA
-    // Null the global before releasing our shared_ptr reference. If this is
-    // the last decoder instance (use_count == 1), the loader will be destroyed
-    // and any post-destruction macro call would fault — nulling first makes
-    // that fault visible rather than silent. If other decoders still exist,
-    // they will reset g_va_loader to their own (identical) pointer in their
-    // own constructor, so it remains valid for them.
+    // Only null the global when this is the last live decoder (use_count == 1).
+    // This prevents nulling g_va_loader while another decoder is still alive
+    // and making VA calls through it.
+    // The CAS adds a guard for the narrow race where a concurrent constructor
+    // has called GetShared() (incrementing use_count to 2 after our check, so
+    // our check was stale) and already stored its pointer to g_va_loader: in
+    // that case the CAS fails because g_va_loader no longer matches our
+    // expected value, and we leave the valid pointer untouched.
     if (va_loader_.use_count() == 1) {
-        g_va_loader = nullptr;
+        RocJpegVaapiLoader *expected = va_loader_.get();
+        g_va_loader.compare_exchange_strong(expected, nullptr, std::memory_order_release);
     }
     va_loader_.reset();
 #endif

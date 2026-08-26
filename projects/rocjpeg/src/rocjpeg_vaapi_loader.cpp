@@ -116,7 +116,14 @@ RocJpegVaapiLoader::RocJpegVaapiLoader() {
     // RTLD_LOCAL keeps librocm_sysdeps_va symbols out of the process-wide
     // global symbol scope, preventing collision with system libva.so.2.
     // RTLD_DEEPBIND makes libva and its backend driver prefer their own
-    // symbol closure over the global scope.
+    // symbol closure over the global scope. This is required even when
+    // libavcodec (and hence system libva) is loaded — e.g. in extended tests
+    // that use FFmpeg for demuxing — to ensure radeonsi_drv_video.so resolves
+    // its va* symbols to ROCm libva rather than system libva.
+    // Note: RTLD_DEEPBIND causes libva-internal allocations to bypass ASan's
+    // interposed malloc/free, so they are not tracked by ASan. This is
+    // acceptable because libva manages its own memory and rocjpeg only holds
+    // opaque VA handles — there are no cross-boundary frees for ASan to catch.
     // librocm_sysdeps_va.so.2 is pulled in automatically as a DT_NEEDED
     // dependency of librocm_sysdeps_va-drm.so.2, so all va-core symbols
     // are reachable from va_drm_handle_ via transitive dlsym search.

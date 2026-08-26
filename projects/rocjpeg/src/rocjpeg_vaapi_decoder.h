@@ -340,7 +340,6 @@ public:
     RocJpegStatus SetSurfaceAsIdle(VASurfaceID surface_id);
 private:
 #ifdef ROCJPEG_USE_DLOPEN_VA
-    // Owns the dlopen handle and all VA function pointers for this decoder instance.
     // Shared reference to the process-wide VA loader. The dlopen handle stays
     // open as long as at least one decoder instance exists; dlclose runs when
     // the last shared_ptr is destroyed.
