@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from instruction_pipeline_generator import (  # noqa: E402
     InstructionRecord,
+    build_document,
     build_pipeline_table,
     classify,
     find_rule_conflicts,
@@ -170,3 +171,14 @@ def test_record_flags_ignore_fields_that_are_not_pipeline_flags():
             flags=frozenset({"VALU"}),
         )
     ]
+
+
+def test_document_records_every_rule_the_classifier_applies():
+    """A pipeline the file names must be one its recorded rules can produce."""
+    document = build_document("0" * 40, {"v_add_f32_e32": "VALU"})
+
+    produced_by_flags = set(document["flag_to_pipeline"].values())
+    produced_by_names = set(document["name_rules"])
+    assert set(document["precedence"]) == produced_by_flags | produced_by_names
+    assert document["name_rules"]["INTERNAL"]["prefixes"]
+    assert document["name_rules"]["BARRIER"]["names"]
