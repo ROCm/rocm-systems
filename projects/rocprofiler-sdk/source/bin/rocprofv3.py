@@ -1436,6 +1436,38 @@ def conflicting_input_settings(inp_args, ignore=()):
     return sorted(conflicts)
 
 
+def services_conflicting_with_kernel_replay(args, environ=None):
+    """Services that kernel replay cannot collect correctly in the same run.
+
+    Kernel replay re-runs each dispatch once per counter group. Counter collection is the only
+    pass-aware service: the tool hands the SDK a pass count derived from the counter groups and
+    picks a different group on each pass. Every other service is simply left enabled for the whole
+    replay loop, so it instruments all of the passes and reports them under the one dispatch id the
+    replay reuses -- N thread traces, or N sets of PC samples, where the run asked for one.
+
+    Returns the display names of the conflicting services, in the order they are reported.
+    """
+    environ = os.environ if environ is None else environ
+    conflicts = []
+
+    if getattr(args, "advanced_thread_trace", None):
+        conflicts.append("--att")
+
+    if (
+        getattr(args, "pc_sampling_beta_enabled", None)
+        or environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is not None
+    ):
+        conflicts.append("PC sampling")
+
+    # SPM is rejected alongside counter collection further down, but that check only looks at
+    # --pmc. Counter groups can also arrive from an input file, which is the form kernel replay
+    # takes, so name SPM here too rather than letting it through to fail inside the SDK.
+    if getattr(args, "spm", None):
+        conflicts.append("--spm")
+
+    return conflicts
+
+
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
 
@@ -2201,6 +2233,16 @@ def run(app_args, args, **kwargs):
         )
 
     if getattr(args, "kernel_replay_beta_enabled", None):
+        replay_conflicts = services_conflicting_with_kernel_replay(args)
+        if replay_conflicts:
+            fatal_error(
+                "--kernel-replay-beta-enabled cannot be combined with "
+                + " or ".join(replay_conflicts)
+                + ". Kernel replay only varies counter groups from one pass to the next; "
+                "every other service stays on for all of the passes and would report each "
+                "kernel once per pass. Collect them in a separate run."
+            )
+
         # Route counter collection through the in-process kernel-replay service (config.hpp:
         # ROCPROF_KERNEL_REPLAY). The SDK derives the pass count from the number of counter groups
         # via the tool's pass-count callback, so no pass-count env is needed.

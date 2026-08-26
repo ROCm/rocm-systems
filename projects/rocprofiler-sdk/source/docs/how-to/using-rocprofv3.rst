@@ -1168,6 +1168,8 @@ The preceding command collects both counter groups in a single run of ``<applica
 
    - ``--kernel-replay-beta-enabled`` requires ``--pmc``.
 
+   - ``--kernel-replay-beta-enabled`` collects counters only. It cannot be combined with ``--att``, PC sampling, or ``--spm``, and rocprofv3 rejects those combinations. Counter groups are the only thing that changes from one pass to the next, so any other service would stay enabled across all of the passes and report every kernel once per pass. Collect them in a separate run. Tool authors who need per-pass control over other services can get it through the SDK; see :ref:`using-kernel-replay`.
+
    - This feature is in beta. The flag, the SDK API, and the output schema may change.
 
    - There is no ``--kernel-replay-passes`` flag. The number of passes is the number of ``--pmc`` groups collectable on the dispatch's GPU agent.

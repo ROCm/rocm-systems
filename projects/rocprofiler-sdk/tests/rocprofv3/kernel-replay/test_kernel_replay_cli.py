@@ -153,6 +153,59 @@ def test_empty_later_job_is_skipped():
     assert conflicts({"pmc": ["A"], "output_directory": "/a"}, {}) == []
 
 
+def service_conflicts(environ=None, **attrs):
+    return rocprofv3().services_conflicting_with_kernel_replay(
+        rocprofv3().dotdict(attrs), environ={} if environ is None else environ
+    )
+
+
+def test_counters_only_replay_has_no_service_conflict():
+    # The supported combination. Nothing here may start reporting a conflict.
+    assert service_conflicts(pmc=["SQ_WAVES"]) == []
+
+
+def test_att_conflicts_with_replay():
+    # ATT instruments every pass and reports them all under the dispatch id replay reuses.
+    assert service_conflicts(advanced_thread_trace=True) == ["--att"]
+
+
+def test_pc_sampling_flag_conflicts_with_replay():
+    assert service_conflicts(pc_sampling_beta_enabled=True) == ["PC sampling"]
+
+
+def test_pc_sampling_env_conflicts_with_replay():
+    # The beta gate can be opened by environment instead of by flag; both reach the same service.
+    assert service_conflicts(environ={"ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1"}) == [
+        "PC sampling"
+    ]
+
+
+def test_spm_conflicts_with_replay():
+    # The existing SPM check only looks at --pmc, so counter groups from an input file (the shape
+    # kernel replay uses) would otherwise slip past it.
+    assert service_conflicts(spm=["SQ_WAVES"]) == ["--spm"]
+
+
+def test_every_conflicting_service_is_reported_together():
+    # A user who asked for all of them should be told about all of them, not one per run.
+    assert service_conflicts(
+        advanced_thread_trace=True, pc_sampling_beta_enabled=True, spm=["SQ_WAVES"]
+    ) == ["--att", "PC sampling", "--spm"]
+
+
+def test_unset_service_options_do_not_conflict():
+    # argparse leaves these as None/False rather than absent; none of them may look enabled.
+    assert (
+        service_conflicts(
+            advanced_thread_trace=False,
+            pc_sampling_beta_enabled=False,
+            spm=None,
+            pmc=["SQ_WAVES"],
+        )
+        == []
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
