@@ -56,8 +56,6 @@ RJ_DIAGNOSTIC_POP
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
 extern "C" void OnUnload();
-using ConSanTransformOverride = rocjitsu::ConSanResult (*)(std::span<const uint8_t>,
-                                                           const rocjitsu::ConSanOptions &);
 extern "C" void rj_hsa_dbt_set_topology_nodes_root_for_test(const char *root);
 
 namespace {
@@ -521,7 +519,6 @@ std::vector<bool> g_transform_override_fault_mutations;
 std::vector<bool> g_transform_override_fault_dry_runs;
 std::vector<rocjitsu::ConSanPatchedImageGrowthLimit>
     g_transform_override_patched_image_growth_limits;
-bool g_transform_override_uses_production = false;
 bool g_transform_override_models_fault_application = false;
 size_t g_transform_override_actual_fault_applications = 1;
 std::optional<rocjitsu::ConSanResult> g_transform_override_live_fault_result;
@@ -899,8 +896,7 @@ hsa_status_t HSA_API fake_code_object_reader_create_from_memory(
   const auto *begin = static_cast<const uint8_t *>(bytes);
   g_code_object_reader_inputs.emplace_back(begin, begin == nullptr ? begin : begin + size);
   code_object_reader->handle = 100u + static_cast<uint64_t>(g_code_object_reader_create_calls);
-  const bool replacement = !g_transform_override_uses_production &&
-                           !g_transform_override_result.elf_bytes.empty() &&
+  const bool replacement = !g_transform_override_result.elf_bytes.empty() &&
                            g_transform_override_result.elf_bytes.size() == size &&
                            std::equal(g_transform_override_result.elf_bytes.begin(),
                                       g_transform_override_result.elf_bytes.end(), begin);
@@ -1055,38 +1051,35 @@ hsa_status_t HSA_API fake_memory_assign_agent(void *, hsa_agent_t agent, hsa_acc
   return agent.handle == kHostAgent.handle ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
-rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
-                                          const rocjitsu::ConSanOptions &options) {
-  const bool fault_mutation_enabled =
-      options.fault_drop_barrier || options.fault_move_barrier ||
-      options.fault_mutate_barrier_id_scope || options.fault_mutate_barrier_participants ||
-      options.fault_atomic_wrong_address || options.fault_atomic_weaken_order ||
-      options.fault_atomic_weaken_scope || options.fault_lds_wrong_address ||
-      options.fault_ordinary_wrong_address || options.fault_ordinary_weaken_order ||
-      options.fault_ordinary_weaken_scope;
+rocjitsu::ConSanResult
+transform_override(std::span<const uint8_t>, const rocjitsu::ConSanRequest &request,
+                   const rocjitsu::TransformPolicy &transform_policy,
+                   const rocjitsu::RuntimePolicy &, const rocjitsu::ConSanDebugOverrides &debug,
+                   const rocjitsu::MutationRequest &mutation, const rocjitsu::RuntimeCapabilities &,
+                   const rocjitsu::BoundRuntimeResources &resources) {
+  const bool fault_mutation_enabled = mutation.has_fault_mutation();
   std::optional<rocjitsu::ConSanResult> queued_result;
   {
     std::lock_guard lock(g_transform_observation_mutex);
-    g_transform_override_flavors.push_back(options.flavor);
-    g_transform_override_engines.push_back(options.moi_engine);
-    g_transform_override_abort_unmatched_waits.push_back(options.abort_unmatched_barrier_wait);
-    g_transform_override_track_barriers.push_back(options.moi_track_barriers);
-    g_transform_override_track_atomics.push_back(options.moi_track_atomics);
-    g_transform_override_fault_drop_barriers.push_back(options.fault_drop_barrier);
+    g_transform_override_flavors.push_back(*request.flavor);
+    g_transform_override_engines.push_back(request.moi_engine);
+    g_transform_override_abort_unmatched_waits.push_back(debug.abort_unmatched_barrier_wait);
+    g_transform_override_track_barriers.push_back(request.moi_track_barriers);
+    g_transform_override_track_atomics.push_back(request.moi_track_atomics);
+    g_transform_override_fault_drop_barriers.push_back(mutation.fault_drop_barrier);
     g_transform_override_fault_mutations.push_back(fault_mutation_enabled);
-    g_transform_override_fault_dry_runs.push_back(options.fault_dry_run);
-    g_transform_override_patched_image_growth_limits.push_back(options.patched_image_growth_limit);
-    g_transform_override_runtime_sample_strides.push_back(options.moi_runtime_sample_stride);
-    g_transform_override_sc_report_addresses.push_back(options.report_buffer_address);
-    g_transform_override_report_sizes.push_back(options.moi_report_buffer_size);
-    g_transform_override_report_layouts.push_back(options.moi_report_layout);
+    g_transform_override_fault_dry_runs.push_back(mutation.fault_dry_run);
+    g_transform_override_patched_image_growth_limits.push_back(
+        transform_policy.patched_image_growth_limit);
+    g_transform_override_runtime_sample_strides.push_back(request.moi_runtime_sample_stride);
+    g_transform_override_sc_report_addresses.push_back(resources.report_buffer_address);
+    g_transform_override_report_sizes.push_back(resources.moi_report_buffer_size);
+    g_transform_override_report_layouts.push_back(resources.moi_report_layout);
     if (!g_transform_override_results.empty()) {
       queued_result = std::move(g_transform_override_results.front());
       g_transform_override_results.pop_front();
     }
   }
-  if (g_transform_override_uses_production)
-    return rocjitsu::try_patch_consan(bytes, options);
   {
     std::unique_lock lock(g_transform_block_mutex);
     if (g_block_first_transform && !g_first_transform_entered) {
@@ -1098,7 +1091,7 @@ rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
   rocjitsu::ConSanResult result =
       queued_result ? std::move(*queued_result) : g_transform_override_result;
   if (g_transform_override_models_fault_application && fault_mutation_enabled &&
-      !options.fault_dry_run) {
+      !mutation.fault_dry_run) {
     if (g_transform_override_live_fault_result)
       result = *g_transform_override_live_fault_result;
     if (g_reentrant_fault_load) {
@@ -1116,11 +1109,11 @@ rocjitsu::ConSanResult transform_override(std::span<const uint8_t> bytes,
     }
   }
   result.visited_code_object = true;
-  result.flavor = options.flavor;
-  result.moi_engine = options.moi_engine;
+  result.flavor = *request.flavor;
+  result.moi_engine = request.moi_engine;
   if (g_transform_override_models_fault_application) {
     result.planned_fault_mutations = fault_mutation_enabled ? 1u : 0u;
-    result.applied_fault_mutations = fault_mutation_enabled && !options.fault_dry_run
+    result.applied_fault_mutations = fault_mutation_enabled && !mutation.fault_dry_run
                                          ? g_transform_override_actual_fault_applications
                                          : 0u;
   }
@@ -1737,6 +1730,7 @@ public:
   [[nodiscard]] bool installed() const { return installed_; }
   [[nodiscard]] const std::string &error() const { return error_; }
   [[nodiscard]] size_t moi_retry_count() const { return moi_retry_count_(); }
+  void use_production_transform() { set_override_(nullptr); }
   void set_log_sink_override(rocjitsu::consan_hook::LogSinkOverride sink) {
     set_log_sink_override_(sink);
   }
@@ -1770,7 +1764,7 @@ public:
 private:
   using OnLoadFn = bool (*)(HsaApiTable *, uint64_t, uint64_t, const char *const *);
   using OnUnloadFn = void (*)();
-  using SetOverrideFn = void (*)(ConSanTransformOverride);
+  using SetOverrideFn = void (*)(rocjitsu::consan_hook::ConSanTransformOverride);
   using SetLogSinkOverrideFn = void (*)(rocjitsu::consan_hook::LogSinkOverride);
   using MoiRetryCountFn = size_t (*)();
   rocjitsu::test::ScopedTempDirectory runtime_dir_;
@@ -1822,7 +1816,6 @@ void reset_code_object_observations() {
   g_transform_override_fault_mutations.clear();
   g_transform_override_fault_dry_runs.clear();
   g_transform_override_patched_image_growth_limits.clear();
-  g_transform_override_uses_production = false;
   g_transform_override_models_fault_application = false;
   g_transform_override_actual_fault_applications = 1;
   g_transform_override_live_fault_result.reset();
@@ -4183,11 +4176,11 @@ TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpe
     SCOPED_TRACE(profile.name);
     reset_code_object_observations();
     configure_consan_profile(profile, /*fail_closed=*/false);
-    g_transform_override_uses_production = true;
     FakeApiTable api;
     testing::internal::CaptureStderr();
     InstalledDbiHook hook(api);
     ASSERT_TRUE(hook.installed()) << profile.name << ": " << hook.error();
+    hook.use_production_transform();
 
     hsa_code_object_reader_t reader{};
     ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(unsupported.data(),
@@ -4196,7 +4189,6 @@ TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpe
     EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
                                                                 reader, nullptr, nullptr),
               HSA_STATUS_SUCCESS);
-    expect_transform_profile(profile);
     EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{101u});
     const std::string log = testing::internal::GetCapturedStderr();
     EXPECT_NE(log.find("target=gfx1200 arch=rdna4"), std::string::npos) << log;
@@ -4238,11 +4230,10 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
     ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", "trap");
     ScopedEnvVar growth("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "0");
     ScopedEnvVar process_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", limit.c_str());
-    g_transform_override_uses_production = true;
-
     FakeApiTable api;
     InstalledDbiHook hook(api);
     ASSERT_TRUE(hook.installed()) << hook.error();
+    hook.use_production_transform();
     hsa_code_object_reader_t reader{};
     ASSERT_EQ(
         api.core.hsa_code_object_reader_create_from_memory_fn(bytes.data(), bytes.size(), &reader),
@@ -4250,7 +4241,6 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
     EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
                                                                 reader, nullptr, nullptr),
               HSA_STATUS_SUCCESS);
-    EXPECT_TRUE(g_transform_override_flavors.empty());
     EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{reader.handle});
   }
 
@@ -4264,11 +4254,10 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
     ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", "trap");
     ScopedEnvVar growth("RJ_CONSAN_MAX_PATCHED_IMAGE_GROWTH_BYTES", "0");
     ScopedEnvVar process_limit("RJ_CONSAN_MAX_PROCESS_CONCURRENT_TRANSFORM_BYTES", limit.c_str());
-    g_transform_override_uses_production = true;
-
     FakeApiTable api;
     InstalledDbiHook hook(api);
     ASSERT_TRUE(hook.installed()) << hook.error();
+    hook.use_production_transform();
     hsa_code_object_reader_t reader{};
     ASSERT_EQ(
         api.core.hsa_code_object_reader_create_from_memory_fn(bytes.data(), bytes.size(), &reader),
@@ -4276,8 +4265,6 @@ TEST(HsaHooksUnitTest, ConSanProductionTransformUsesDerivedMajorImageAdmission) 
     EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
                                                                 reader, nullptr, nullptr),
               HSA_STATUS_SUCCESS);
-    EXPECT_EQ(g_transform_override_flavors,
-              std::vector<rocjitsu::ConSanFlavor>{rocjitsu::ConSanFlavor::SuperCollider});
     EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{102u});
     EXPECT_EQ(api.core.hsa_executable_destroy_fn(hsa_executable_t{7}), HSA_STATUS_SUCCESS);
   }
@@ -5388,6 +5375,7 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
   candidate.kind = rocjitsu::ConSanLdsAccessKind::Write;
   candidate.size = sizeof(uint32_t);
   candidate.width_bits = 32u;
+  candidate.access_ranges.push_back({.static_byte_offset = 0u, .byte_count = sizeof(uint32_t)});
   candidate.file_offset = 0u;
   candidate.text_offset = 0u;
   candidate.container_name = "auto_report_access";

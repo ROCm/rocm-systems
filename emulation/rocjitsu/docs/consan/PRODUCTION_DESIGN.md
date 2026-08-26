@@ -1957,7 +1957,11 @@ prototype lowering, retry, and inventory seams; the direct `ConSanOptions`
 overload is marked internal for focused legacy tests. The former production
 hook block that manually copied approximately ninety policy, mutation,
 register, and report fields has been deleted, and the adapter exposes a
-reviewed projection inventory.
+reviewed projection inventory. The hook-test transform override now receives
+the same separated typed inputs as production, so inventory and retry tests no
+longer force the hook to reconstruct a `ConSanOptions` value. Its raw return is
+only a synthetic lowerer fixture and is immediately published into the typed
+result before loader policy can observe it.
 
 The focused `request_contract_test.cpp` host suite covers defaults, value
 semantics, all validation and sentinel branches, mode conflicts, sampling and

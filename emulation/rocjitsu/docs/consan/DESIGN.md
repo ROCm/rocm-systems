@@ -100,7 +100,10 @@ emission and placement still run inside an explicitly isolated compatibility
 lowering path. The former `LegacyConSanLowering` wrapper type has been deleted;
 the remaining free operations name the ordinary transform, pristine MOI
 inventory, runtime-bound retry, and temporary hook-test publication directly.
-This path is still a migration boundary, not the intended final mechanism
+The hook's transform test double receives those same typed inputs; only its
+synthetic mechanism result remains temporary and is published by the hook
+before any loader decision observes it. This path is still a migration
+boundary, not the intended final mechanism
 layer, and must shrink component by component.
 
 ## The four engines

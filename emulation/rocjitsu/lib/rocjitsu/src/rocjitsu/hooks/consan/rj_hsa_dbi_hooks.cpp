@@ -84,14 +84,11 @@ std::atomic<LogSinkOverride> g_test_log_sink_override{nullptr};
 
 std::mutex &log_mutex();
 
-using ConSanTransformOverride = rocjitsu::ConSanResult (*)(std::span<const uint8_t>,
-                                                           const rocjitsu::ConSanOptions &);
 std::atomic<ConSanTransformOverride> g_test_consan_transform_override{nullptr};
 std::atomic<size_t> g_test_consan_moi_retry_count{0};
 
-/// Invoke the current lowering implementation through the sole Slice-2
-/// compatibility seam. Every call receives immutable typed inputs and creates
-/// a fresh legacy value immediately before entering the prototype patcher.
+/// Invoke the production transformer or a test double through the same typed
+/// contract. The hook never reconstructs prototype option or result values.
 rocjitsu::TransformResult run_consan_transform(std::span<const uint8_t> bytes,
                                                const rocjitsu::ConSanRequest &request,
                                                const rocjitsu::TransformPolicy &transform_policy,
@@ -102,11 +99,10 @@ rocjitsu::TransformResult run_consan_transform(std::span<const uint8_t> bytes,
                                                const rocjitsu::BoundRuntimeResources &resources) {
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
-    const rocjitsu::ConSanOptions legacy_options = rocjitsu::LegacyOptionsAdapter::adapt(
-        request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
-    return rocjitsu::publish_consan_mechanism_result(bytes, request, transform_policy,
-                                                     runtime_policy, debug, mutation, capabilities,
-                                                     resources, override(bytes, legacy_options));
+    return rocjitsu::publish_consan_mechanism_result(
+        bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
+        override(bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
+                 resources));
   }
   return mutation.has_mutation()
              ? rocjitsu::transform_consan_with_mutation(bytes, request, transform_policy,
@@ -116,9 +112,8 @@ rocjitsu::TransformResult run_consan_transform(std::span<const uint8_t> bytes,
                                           capabilities, resources);
 }
 
-/// Preserve the hook tests' historical transform-override ABI around the
-/// typed pristine-inventory entry. Production never enters the mutable-options
-/// branch; it calls the named legacy lowerer with typed values.
+/// Run the address-free MOI inventory through the production transformer or
+/// the same typed test double used by ordinary transforms.
 rocjitsu::TransformResult run_consan_pristine_moi_inventory(
     std::span<const uint8_t> bytes, const rocjitsu::ConSanRequest &request,
     const rocjitsu::TransformPolicy &transform_policy,
@@ -129,18 +124,11 @@ rocjitsu::TransformResult run_consan_pristine_moi_inventory(
     bool preserve_extended_barrier_pairs) {
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
-    rocjitsu::ConSanOptions options =
-        rocjitsu::LegacyOptionsAdapter::adapt(request, transform_policy, runtime_policy, debug,
-                                              disabled_mutation, capabilities, unbound_resources);
-    options.moi_report_buffer_address.reset();
-    options.moi_report_buffer_size = 0;
-    options.moi_report_layout.reset();
-    options.moi_report_generation = 0;
-    options.moi_report_dispatch_id = 0;
-    options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
     return rocjitsu::publish_consan_mechanism_result(
         bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
-        unbound_resources, override(bytes, options));
+        unbound_resources,
+        override(bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
+                 capabilities, unbound_resources));
   }
   return rocjitsu::transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities,
@@ -153,17 +141,15 @@ rocjitsu::TransformResult retry_consan_moi_transform(
     const rocjitsu::RuntimePolicy &runtime_policy, const rocjitsu::ConSanDebugOverrides &debug,
     const rocjitsu::MutationRequest &mutation, const rocjitsu::RuntimeCapabilities &capabilities,
     const rocjitsu::BoundRuntimeResources &resources, rocjitsu::TransformResult inventory) {
-  const rocjitsu::ConSanOptions legacy_options = rocjitsu::LegacyOptionsAdapter::adapt(
-      request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
-  // Unit tests replace the whole transform boundary and expect both phases to
-  // flow through that seam. Production keeps the raw retry inside the typed
-  // compatibility operation.
+  // Unit tests replace the whole typed transform boundary and expect both
+  // phases to flow through that seam.
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
     g_test_consan_moi_retry_count.fetch_add(1, std::memory_order_relaxed);
-    return rocjitsu::publish_consan_mechanism_result(bytes, request, transform_policy,
-                                                     runtime_policy, debug, mutation, capabilities,
-                                                     resources, override(bytes, legacy_options));
+    return rocjitsu::publish_consan_mechanism_result(
+        bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
+        override(bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities,
+                 resources));
   }
   return rocjitsu::retry_transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources,
