@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Integration tests for dispatch-ID filtering during profiling."""
+"""Integration tests for kernel iteration filtering during profiling."""
 
 import inspect
 
@@ -18,7 +18,7 @@ from tests.integration.common import (
 
 
 def test_dispatch_0(binary_handler_profile_rocprof_compute):
-    options = ["--dispatch", "1"]
+    options = ["--kernel-iteration-range", "1"]
     workload_dir = common.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
@@ -39,7 +39,7 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
 
 
 def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
-    options = ["--dispatch", "1:2"]
+    options = ["--kernel-iteration-range", "1:2"]
     workload_dir = common.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
@@ -57,7 +57,7 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
 
 
 def test_dispatch_2(binary_handler_profile_rocprof_compute):
-    options = ["--dispatch", "1"]
+    options = ["--kernel-iteration-range", "1"]
     workload_dir = common.get_output_dir()
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
@@ -88,11 +88,11 @@ def test_dispatch_invalid_rejected(binary_handler_profile_rocprof_compute, bad_v
     returncode, stdout, stderr = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
-        ["--dispatch", bad_value],
+        ["--kernel-iteration-range", bad_value],
         check_success=False,
         capture_output=True,
     )
     assert returncode == 1
     output = stdout + stderr
-    assert f"Invalid --dispatch value '{bad_value}'" in output
+    assert f"Invalid --kernel-iteration-range value '{bad_value}'" in output
     common.clean_output_dir(config["cleanup"], workload_dir)

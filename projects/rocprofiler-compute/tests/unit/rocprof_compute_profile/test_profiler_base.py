@@ -44,7 +44,7 @@ def _make_sanitize_args(remaining, torch_trace=False, **overrides):
         attach_duration_msec=None,
         remaining=["--"] + remaining,
         torch_trace=torch_trace,
-        dispatch=None,
+        kernel_iteration_range=None,
         kernel=None,
     )
     defaults.update(overrides)
@@ -348,7 +348,7 @@ def test_attach_library_resolution_with_fallback():
         attach_duration_msec=None,
         kokkos_trace=False,
         kernel=None,
-        dispatch=None,
+        kernel_iteration_range=None,
         torch_trace=False,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -400,7 +400,7 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
         attach_duration_msec=None,
         kokkos_trace=False,
         kernel=None,
-        dispatch=None,
+        kernel_iteration_range=None,
         torch_trace=False,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)

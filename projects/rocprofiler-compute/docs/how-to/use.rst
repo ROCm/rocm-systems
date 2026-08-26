@@ -57,8 +57,11 @@ Common filters to customize data collection include:
 ``-k``, ``--kernel``
    Enables filtering kernels by name.
 
+``--kernel-iteration-range``
+   In profile mode, selects which iterations of each kernel to profile.
+
 ``-d``, ``--dispatch``
-   Enables filtering based on dispatch iteration.
+   In analyze mode, selects which already-profiled dispatches to report on.
 
 ``-b``, ``--block``
    Enables collection metrics for only the specified analysis report blocks.
