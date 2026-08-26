@@ -117,6 +117,7 @@ cleanup:
 }
 
 // Collective: every rank must call it. Skips on ROCM-29812. Imported handles are not re-exported.
+// Hybrid elastic windows require NCCL_SYM_REUSE_SYSMEM_HANDLES=1 at registration time.
 inline bool CheckHybridVmmRuntimeSupport(int dev, std::string* reason = nullptr)
 {
     HybridVmmRuntimeSupport local = ProbeHybridVmmRuntimeSupport(dev);
