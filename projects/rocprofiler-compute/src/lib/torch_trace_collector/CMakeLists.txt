@@ -29,10 +29,7 @@ macro(_ttc_skip reason)
             "torch_trace_collector: ${reason}; the extension is not built."
         )
     else()
-        message(
-            STATUS
-            "torch_trace_collector: ${reason}; the extension is not built."
-        )
+        message(STATUS "torch_trace_collector: ${reason}; the extension is not built.")
     endif()
     return()
 endmacro()
@@ -188,7 +185,7 @@ target_compile_options(
     ${_so_name}
     PRIVATE -fvisibility=hidden -Wno-deprecated-declarations
 )
-set_target_properties(${_so_name} PROPERTIES PREFIX "")  # torch_trace_collector-<version>.so
+set_target_properties(${_so_name} PROPERTIES PREFIX "") # torch_trace_collector-<version>.so
 
 # Publish the module target name for the root install rule.
 set(TORCH_TRACE_COLLECTOR_TARGET "${_so_name}" CACHE INTERNAL "")
