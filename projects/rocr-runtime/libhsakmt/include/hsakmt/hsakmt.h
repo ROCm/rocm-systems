@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /* Forward declarations for the KFD ioctl arguments the entry points below take
- * by pointer. linux/kfd_ioctl.h defines them and neither package installs it,
+ * by pointer. linux/kfd_ioctl.h defines them and the dev package excludes it,
  * so without these a consumer's C compiler invents a type scoped to the
  * prototype and the pointer it passes is a different one.
  */
