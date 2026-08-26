@@ -5,10 +5,10 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from pc_sampling import instruction_type
 
@@ -27,12 +27,12 @@ def pipeline_table(tmp_path):
     analysis_configs = tmp_path / "rocprof_compute_soc" / "analysis_configs"
     analysis_configs.mkdir(parents=True)
     (analysis_configs / instruction_type.INSTRUCTION_PIPELINES_FILE).write_text(
-        json.dumps({
+        yaml.safe_dump({
             "commit": "0" * 40,
             "pipelines": {
-                "v_mov_b32_e32": "VALU",
-                "s_waitcnt": "INTERNAL",
-                "v_mfma_f32_16x16x16f16": "MATRIX",
+                "VALU": ["v_mov_b32_e32"],
+                "INTERNAL": ["s_waitcnt"],
+                "MATRIX": ["v_mfma_f32_16x16x16f16"],
             },
         }),
         encoding="utf-8",

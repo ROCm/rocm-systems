@@ -254,21 +254,18 @@ neither diagram can drift from the code. Do not edit the PNGs by hand.
 
 ## Instruction Execution Pipeline Table
 
-[`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.json`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.json)
-is generated from the AMDGPU TableGen files of the LLVM commit TheRock pins, not
-written by hand. Rerun the generator when a new GPU family needs support, or when
-an instruction shows up with an empty type in analyze, and commit the regenerated
-file as is:
+[`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml)
+is generated, not written by hand. Rerun the generator when a new GPU family
+needs support, or when an instruction shows up with an empty type in analyze,
+and commit the regenerated file as is:
 
 ```bash
 ./tools/instruction_pipeline_generator.py
 ```
 
-This requires `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if they
-are not under `/opt/rocm`), network access, and a few minutes. The generator
-fetches the LLVM sources into a temporary directory it removes on exit, and
-validates the result before writing, so a run that fails leaves the committed
-file untouched. Do not edit the JSON by hand.
+This requires `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if
+they are not under `/opt/rocm`) and network access. Do not edit the YAML by
+hand.
 
 ## Vendoring External Dependencies
 
