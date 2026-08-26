@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -1072,6 +1073,248 @@ TEST_F(DispatchTest, MultiDispatchWrapAroundAsync) {
   EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+}
+
+TEST(Dispatch, AgentInfo) {
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  std::vector<hsa_agent_t> aie_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(aie_agents.empty());
+
+  char name[64] = {};
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_NAME, name), HSA_STATUS_SUCCESS);
+  EXPECT_GT(std::strlen(name), 0u);
+
+  char product_name[64] = {};
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(),
+                               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME),
+                               product_name),
+            HSA_STATUS_SUCCESS);
+
+  char vendor_name[64] = {};
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_VENDOR_NAME, vendor_name),
+            HSA_STATUS_SUCCESS);
+  EXPECT_STREQ(vendor_name, "AMD");
+
+  // HSA_AMD_AGENT_INFO_UUID is documented (hsa_ext_amd.h) as an Ascii string with a
+  // maximum of 21 chars including NUL. Query into an exactly 21-byte buffer flanked by
+  // guard bytes to catch any write past it.
+  struct {
+    char guard_before[8];
+    char uuid[21];
+    char guard_after[8];
+  } uuid_buf;
+  std::memset(uuid_buf.guard_before, 0xAB, sizeof(uuid_buf.guard_before));
+  std::memset(uuid_buf.uuid, 0xCD, sizeof(uuid_buf.uuid));
+  std::memset(uuid_buf.guard_after, 0xAB, sizeof(uuid_buf.guard_after));
+
+  char guard_expected[8];
+  std::memset(guard_expected, 0xAB, sizeof(guard_expected));
+
+  ASSERT_EQ(
+      hsa_agent_get_info(aie_agents.front(), static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID),
+                         uuid_buf.uuid),
+      HSA_STATUS_SUCCESS);
+  EXPECT_EQ(std::memcmp(uuid_buf.guard_before, guard_expected, sizeof(guard_expected)), 0);
+  EXPECT_EQ(std::memcmp(uuid_buf.guard_after, guard_expected, sizeof(guard_expected)), 0);
+  EXPECT_STREQ(uuid_buf.uuid, "AIE-XX");
+
+  hsa_agent_feature_t feature{};
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_FEATURE, &feature),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(feature, HSA_AGENT_FEATURE_AGENT_DISPATCH);
+
+  hsa_queue_type32_t queue_type{};
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUE_TYPE, &queue_type),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(queue_type, HSA_QUEUE_TYPE_SINGLE);
+
+  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+}
+
+TEST(Dispatch, CreateDestroyMultipleQueues) {
+  ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+
+  std::vector<hsa_agent_t> aie_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_AIE>, &aie_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(aie_agents.empty());
+
+  std::uint32_t min_queue_size = 0;
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUE_MIN_SIZE, &min_queue_size),
+            HSA_STATUS_SUCCESS);
+  ASSERT_GT(min_queue_size, 0u);
+
+  std::uint32_t max_queues = 0;
+  ASSERT_EQ(hsa_agent_get_info(aie_agents.front(), HSA_AGENT_INFO_QUEUES_MAX, &max_queues),
+            HSA_STATUS_SUCCESS);
+  ASSERT_GT(max_queues, 0u);
+
+  const std::uint32_t num_queues = std::min(max_queues, 4u);
+  std::vector<hsa_queue_t*> queues(num_queues, nullptr);
+
+  for (std::uint32_t i = 0; i < num_queues; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                               nullptr, 0, 0, &queues[i]),
+              HSA_STATUS_SUCCESS);
+    ASSERT_NE(queues[i], nullptr);
+  }
+
+  for (std::uint32_t i = 0; i < num_queues; ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(hsa_queue_destroy(queues[i]), HSA_STATUS_SUCCESS);
+  }
+
+  EXPECT_EQ(hsa_shut_down(), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, DestroyQueueWithPendingPacket) {
+  // --- Create queue ---
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  // --- Load PDI and instructions ---
+  void* pdi_buf = nullptr;
+  std::size_t pdi_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
+
+  void* insts_buf = nullptr;
+  std::size_t insts_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+
+  // --- Allocate I/O buffers ---
+  std::uint32_t* input = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, aie_vector_scalar_kernel::element_bytes, 0,
+                                         reinterpret_cast<void**>(&input)),
+            HSA_STATUS_SUCCESS);
+
+  std::uint32_t* output = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, aie_vector_scalar_kernel::element_bytes, 0,
+                                         reinterpret_cast<void**>(&output)),
+            HSA_STATUS_SUCCESS);
+
+  std::iota(input, input + aie_vector_scalar_kernel::element_count, 0);
+  std::fill_n(output, aie_vector_scalar_kernel::element_count, 0);
+
+  uint64_t* kernargs = nullptr;
+  ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, aie_vector_scalar_kernel::kernarg_bytes, 0,
+                                         reinterpret_cast<void**>(&kernargs)),
+            HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+
+  // --- Dispatch and ring the doorbell, then tear the queue down without waiting ---
+  const auto wr_idx = aie_vector_scalar_kernel::dispatch_packet(
+      pdi_buf, insts_buf, insts_size, input, output, kernargs, signal, queue);
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+
+  // AieAqlQueue::Inactivate destroys the kernel-mode queue; it does not drain the ring,
+  // so this races tear-down against the in-flight packet. The destroy must still return
+  // cleanly and leave the hardware detached from the buffers freed below.
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+
+  // --- Cleanup ---
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(kernargs), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(output), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(input), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
+}
+
+TEST_F(DispatchTest, ConcurrentQueuesIndependentExecution) {
+  constexpr std::uint32_t num_queues = 2;
+  constexpr std::uint32_t num_rounds = 20;
+
+  // --- Create queues ---
+  hsa_queue_t* queues[num_queues] = {};
+  for (std::uint32_t q = 0; q < num_queues; ++q) {
+    SCOPED_TRACE(q);
+    ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                               nullptr, 0, 0, &queues[q]),
+              HSA_STATUS_SUCCESS);
+  }
+
+  // --- Load PDI and instructions (shared by both queues) ---
+  void* pdi_buf = nullptr;
+  std::size_t pdi_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::pdiPath, &pdi_buf, pdi_size));
+
+  void* insts_buf = nullptr;
+  std::size_t insts_size = 0;
+  ASSERT_TRUE(load_binary(dev_pool, aie_vector_scalar_kernel::instsPath, &insts_buf, insts_size));
+
+  // --- Per-queue I/O buffers, so a cross-queue bleed shows up as a wrong value ---
+  const auto total_element_count = aie_vector_scalar_kernel::element_count * num_rounds;
+  const auto total_element_size = aie_vector_scalar_kernel::element_bytes * num_rounds;
+  const auto total_kernarg_bytes = aie_vector_scalar_kernel::kernarg_bytes * num_rounds;
+
+  std::uint32_t* input[num_queues] = {};
+  std::uint32_t* output[num_queues] = {};
+  uint64_t* kernargs[num_queues] = {};
+  hsa_signal_t signals[num_queues] = {};
+
+  for (std::uint32_t q = 0; q < num_queues; ++q) {
+    SCOPED_TRACE(q);
+    ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, total_element_size, 0,
+                                           reinterpret_cast<void**>(&input[q])),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hsa_amd_memory_pool_allocate(data_pool, total_element_size, 0,
+                                           reinterpret_cast<void**>(&output[q])),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hsa_amd_memory_pool_allocate(kernarg_pool, total_kernarg_bytes, 0,
+                                           reinterpret_cast<void**>(&kernargs[q])),
+              HSA_STATUS_SUCCESS);
+
+    // Distinct value ranges per queue.
+    std::iota(input[q], input[q] + total_element_count, q * total_element_count);
+    std::fill_n(output[q], total_element_count, 0);
+
+    ASSERT_EQ(hsa_signal_create(num_rounds, 0, nullptr, &signals[q]), HSA_STATUS_SUCCESS);
+  }
+
+  // --- Interleave submissions so both queues are in flight at the same time ---
+  for (std::uint32_t iter = 0; iter < num_rounds; ++iter) {
+    for (std::uint32_t q = 0; q < num_queues; ++q) {
+      SCOPED_TRACE(testing::Message() << "queue " << q << " iter " << iter);
+
+      auto* input_ptr = input[q] + iter * aie_vector_scalar_kernel::element_count;
+      auto* output_ptr = output[q] + iter * aie_vector_scalar_kernel::element_count;
+      auto* kernarg_ptr = kernargs[q] + iter * aie_vector_scalar_kernel::num_kernargs_sizes;
+
+      const auto wr_idx =
+          aie_vector_scalar_kernel::dispatch_packet(pdi_buf, insts_buf, insts_size, input_ptr,
+                                                    output_ptr, kernarg_ptr, signals[q], queues[q]);
+      hsa_signal_store_screlease(queues[q]->doorbell_signal, wr_idx);
+    }
+  }
+
+  // --- Wait and verify each queue saw only its own dispatches ---
+  for (std::uint32_t q = 0; q < num_queues; ++q) {
+    SCOPED_TRACE(q);
+    hsa_signal_wait_scacquire(signals[q], HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                              HSA_WAIT_STATE_BLOCKED);
+    for (std::size_t i = 0; i < total_element_count; ++i) {
+      EXPECT_EQ(output[q][i], input[q][i] + 1) << "mismatch at index " << i;
+    }
+  }
+
+  // --- Cleanup ---
+  for (std::uint32_t q = 0; q < num_queues; ++q) {
+    EXPECT_EQ(hsa_signal_destroy(signals[q]), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(hsa_queue_destroy(queues[q]), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(hsa_amd_memory_pool_free(kernargs[q]), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(hsa_amd_memory_pool_free(output[q]), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(hsa_amd_memory_pool_free(input[q]), HSA_STATUS_SUCCESS);
+  }
   EXPECT_EQ(hsa_amd_memory_pool_free(insts_buf), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_memory_pool_free(pdi_buf), HSA_STATUS_SUCCESS);
 }
