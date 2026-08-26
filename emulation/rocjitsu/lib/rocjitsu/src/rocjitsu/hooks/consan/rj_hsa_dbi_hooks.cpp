@@ -4412,35 +4412,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                                      code_object_reader.handle, "multiple-fault-mutations-applied",
                                      fault_installation_evidence);
     }
-    log_message(kLogInfo, "ConSan SC perturb inventory reader=%llu candidates=%zu",
-                static_cast<unsigned long long>(code_object_reader.handle),
-                patch_result.perturbation_candidates.size());
-    for (const rocjitsu::ConSanPerturbationCandidate &candidate :
-         patch_result.perturbation_candidates) {
-      log_message(kLogVerbose,
-                  "ConSan SC perturb candidate reader=%llu identity=%s sequence=%s kind=%s "
-                  "edge=%s container=%s container_kind=%s block=%u anchor=%s "
-                  "anchor_text_offset=0x%llx anchor_size=%u eligible=%s reason=%s",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  candidate.identity.c_str(), candidate.sequence_identity.c_str(),
-                  perturbation_kind_name(candidate.kind), perturbation_edge_name(candidate.edge),
-                  candidate.container_name.c_str(), candidate.in_kernel ? "kernel" : "function",
-                  candidate.basic_block_index, candidate.anchor_event_identity.c_str(),
-                  static_cast<unsigned long long>(candidate.anchor_text_offset),
-                  candidate.anchor_size, candidate.eligible ? "true" : "false",
-                  candidate.rejection_reason.empty() ? "-" : candidate.rejection_reason.c_str());
-    }
-    for (const rocjitsu::ConSanPerturbationPlan &plan : patch_result.perturbation_plans) {
-      log_message(kLogInfo,
-                  "ConSan SC perturb plan reader=%llu dry_run=%s identity=%s sequence=%s "
-                  "kind=%s edge=%s anchor=%s anchor_text_offset=0x%llx anchor_size=%u sleep=%u",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  config->fault_dry_run ? "true" : "false", plan.candidate_identity.c_str(),
-                  plan.sequence_identity.c_str(), perturbation_kind_name(plan.kind),
-                  perturbation_edge_name(plan.edge), plan.anchor_event_identity.c_str(),
-                  static_cast<unsigned long long>(plan.anchor_text_offset), plan.anchor_size,
-                  plan.sleep_imm);
-    }
     log_message(
         kLogInfo,
         "ConSan SC perturb summary reader=%llu requested=%zu planned=%zu applied=%zu max=%u "
@@ -4448,44 +4419,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         static_cast<unsigned long long>(code_object_reader.handle), mutation.perturbation.requested,
         mutation.perturbation.planned, mutation.perturbation.applied, config->sc_perturb_max,
         config->sc_perturb_required_count, config->sc_perturb_sleep);
-    for (const rocjitsu::ConSanAccessPlan &plan : patch_result.access_plans) {
-      log_message(kLogVerbose,
-                  "ConSan access plan reader=%llu dry_run=true identity=%s container=%s "
-                  "container_kind=%s kind=%s planned=1 text_offset=0x%llx",
-                  static_cast<unsigned long long>(code_object_reader.handle), plan.identity.c_str(),
-                  plan.container_name.c_str(), plan.in_kernel ? "kernel" : "function",
-                  plan.kind.c_str(), static_cast<unsigned long long>(plan.text_offset));
-    }
-    if (patch_result.composite_proof) {
-      const rocjitsu::ConSanCompositeProof &proof = *patch_result.composite_proof;
-      log_message(
-          kLogInfo,
-          "ConSan composite proof reader=%llu staged_composition_validated=true "
-          "pristine_identity=%s pristine_sequence=%s pristine_container=%s "
-          "pristine_container_kind=%s pristine_owner_descriptor=0x%llx "
-          "pristine_edge=%s pristine_anchor=%s pristine_anchor_text_offset=0x%llx "
-          "pristine_anchor_size=%u translated_identity=%s translated_edge=%s "
-          "translated_anchor_text_offset=0x%llx translated_anchor_size=%u "
-          "anchor_relation=%s cache_companion_identity=%s atomic_overlap=%s "
-          "removed_cache_boundary=%s removed_cache_non_resurrection_validated=%s "
-          "atomic_mutation_anchor_text_offset=0x%llx",
-          static_cast<unsigned long long>(code_object_reader.handle),
-          proof.pristine_identity.c_str(), proof.pristine_sequence.c_str(),
-          proof.pristine_container.c_str(), proof.pristine_in_kernel ? "kernel" : "function",
-          static_cast<unsigned long long>(proof.pristine_owner_descriptor),
-          perturbation_edge_name(proof.pristine_edge), proof.pristine_anchor.c_str(),
-          static_cast<unsigned long long>(proof.pristine_anchor_text_offset),
-          proof.pristine_anchor_size, proof.translated_identity.c_str(),
-          perturbation_edge_name(proof.translated_edge),
-          static_cast<unsigned long long>(proof.translated_anchor_text_offset),
-          proof.translated_anchor_size, proof.anchor_relation.c_str(),
-          proof.cache_companion_identity.c_str(), proof.atomic_overlap ? "true" : "false",
-          proof.removed_cache_boundary ? "true" : "false",
-          proof.removed_cache_non_resurrection_applicable
-              ? (proof.removed_cache_non_resurrection_validated ? "true" : "false")
-              : "not-applicable",
-          static_cast<unsigned long long>(proof.atomic_mutation_anchor_text_offset.value_or(0)));
-    }
     const rocjitsu::SynchronizationInventoryView sync = patch_result.program_inventory.sync();
     log_message(kLogInfo, "ConSan sync inventory reader=%llu events=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),
@@ -4643,35 +4576,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   members.empty() ? "-" : members.c_str());
     }
     if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
-      log_message(kLogInfo, "ConSan MOI inventory reader=%llu candidates=%zu",
-                  static_cast<unsigned long long>(code_object_reader.handle),
-                  patch_result.moi_candidates.size());
-      for (const rocjitsu::ConSanMoiCandidate &candidate : patch_result.moi_candidates) {
-        log_message(kLogDebug,
-                    "ConSan MOI candidate reader=%llu source=%s container=%s container_kind=%s "
-                    "kind=%s mnemonic=%s text_offset=0x%llx file_offset=0x%llx size=%u "
-                    "width_bits=%u dst_vgpr=%s addr_vgpr=%s data_vgpr=%s flat_hint=%s "
-                    "raw_saddr=%s raw_vaddr=%s raw_vsrc=%s raw_vdst=%s raw_ioffset=%s "
-                    "raw_scope=%s raw_th=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle),
-                    moi_candidate_source_name(candidate.source), candidate.container_name.c_str(),
-                    candidate.in_kernel ? "kernel" : "function",
-                    lds_access_kind_name(candidate.kind), candidate.mnemonic.c_str(),
-                    static_cast<unsigned long long>(candidate.text_offset),
-                    static_cast<unsigned long long>(candidate.file_offset), candidate.size,
-                    candidate.width_bits,
-                    candidate.dst_vgpr ? std::to_string(*candidate.dst_vgpr).c_str() : "-",
-                    candidate.addr_vgpr ? std::to_string(*candidate.addr_vgpr).c_str() : "-",
-                    candidate.data_vgpr ? std::to_string(*candidate.data_vgpr).c_str() : "-",
-                    flat_address_space_hint_name(candidate.flat_address_space_hint),
-                    candidate.raw_saddr ? std::to_string(*candidate.raw_saddr).c_str() : "-",
-                    candidate.raw_vaddr ? std::to_string(*candidate.raw_vaddr).c_str() : "-",
-                    candidate.raw_vsrc ? std::to_string(*candidate.raw_vsrc).c_str() : "-",
-                    candidate.raw_vdst ? std::to_string(*candidate.raw_vdst).c_str() : "-",
-                    candidate.raw_ioffset ? std::to_string(*candidate.raw_ioffset).c_str() : "-",
-                    candidate.raw_scope ? std::to_string(*candidate.raw_scope).c_str() : "-",
-                    candidate.raw_th ? std::to_string(*candidate.raw_th).c_str() : "-");
-      }
       const rocjitsu::ConSanResourcePlanSummary &resource_summary =
           patch_result.resource_plan_summary;
       log_message(kLogInfo,
@@ -4763,52 +4667,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         }
       }
       for (const rocjitsu::ConSanCandidateResourcePlan &plan : patch_result.resource_plans) {
-        constexpr size_t kMaxLoggedResourceOwners = 8;
-        std::string owner_names;
-        size_t logged_owners = 0;
-        for (uint64_t descriptor_offset : plan.owner_descriptor_file_offsets) {
-          if (logged_owners == kMaxLoggedResourceOwners)
-            break;
-          const auto kernel =
-              std::ranges::find_if(patch_result.program_inventory.kernels(),
-                                   [descriptor_offset](const rocjitsu::ConSanKernelInfo &item) {
-                                     return item.descriptor_file_offset == descriptor_offset;
-                                   });
-          if (kernel == patch_result.program_inventory.kernels().end())
-            continue;
-          if (!owner_names.empty())
-            owner_names += ',';
-          owner_names += kernel->name;
-          ++logged_owners;
-        }
-        if (plan.owner_descriptor_file_offsets.size() > logged_owners) {
-          if (!owner_names.empty())
-            owner_names += ',';
-          owner_names +=
-              "+" + std::to_string(plan.owner_descriptor_file_offsets.size() - logged_owners);
-        }
-        if (owner_names.empty())
-          owner_names = "-";
-        log_message(
-            kLogDebug,
-            "ConSan MOI resource reader=%llu site=%s candidate=%zu text_offset=0x%llx "
-            "source=%s reason=%s owners=%zu owner_names=%s scratch_vgpr=%s scratch_count=%u "
-            "current_vgprs=%u max_referenced_vgprs=%u required_vgprs=%u "
-            "current_sgprs=%u max_referenced_sgprs=%u scalar_tail_floor=%u "
-            "indirect_sgprs=%s sgpr_reference_coverage=%s "
-            "private_bytes=%u",
-            static_cast<unsigned long long>(code_object_reader.handle),
-            moi_resource_site_kind_name(plan.site_kind), plan.candidate_index,
-            static_cast<unsigned long long>(plan.text_offset),
-            moi_resource_source_name(plan.source),
-            rocjitsu::consan_register_plan_reason_name(plan.reason),
-            plan.owner_descriptor_file_offsets.size(), owner_names.c_str(),
-            plan.scratch_vgpr ? std::to_string(*plan.scratch_vgpr).c_str() : "-",
-            plan.scratch_vgpr_count, plan.current_vgpr_count, plan.max_referenced_vgpr_count,
-            plan.required_vgpr_count, plan.current_sgpr_count, plan.max_referenced_sgpr_count,
-            plan.scalar_tail_floor, plan.has_indirect_sgpr_access ? "true" : "false",
-            plan.sgpr_reference_coverage_complete ? "complete" : "open",
-            plan.original_private_segment_size);
         for (size_t alternative_index = 0; alternative_index < plan.alternatives.size();
              ++alternative_index) {
           const rocjitsu::ConSanResourcePlanAlternative &alternative =
@@ -4826,72 +4684,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                       rocjitsu::consan_resource_plan_alternative_outcome_name(
                           rocjitsu::consan_resource_plan_alternative_outcome(plan, alternative)));
         }
-      }
-      if (patch_result.resolved_moi_owner_vgpr || patch_result.resolved_moi_epoch_vgpr ||
-          patch_result.resolved_moi_workgroup_key_vgpr ||
-          !patch_result.resolved_moi_record_replay_workgroup_vgprs.empty() ||
-          patch_result.resolved_moi_exec_save_sgpr || patch_result.resolved_moi_owner_sgpr ||
-          patch_result.resolved_moi_persistent_owner_sgpr ||
-          patch_result.resolved_moi_persistent_epoch_sgpr ||
-          patch_result.resolved_moi_persistent_workgroup_key_sgpr ||
-          !patch_result.resolved_moi_record_replay_workgroup_sgprs.empty() ||
-          patch_result.moi_private_epoch_automatic) {
-        log_message(
-            kLogInfo,
-            "ConSan MOI persistent reader=%llu owner_vgpr=%s epoch_vgpr=%s "
-            "workgroup_key_vgpr=%s rr_workgroup_vgprs=%s/%s/%s "
-            "exec_save_sgpr=%s owner_sgpr=%s scalar_owner_sgpr=%s "
-            "scalar_epoch_sgpr=%s scalar_workgroup_key_sgpr=%s "
-            "rr_workgroup_sgprs=%s/%s/%s automatic_vgprs=%s "
-            "automatic_private_epoch=%s automatic_exec_save=%s "
-            "automatic_owner_sgpr=%s",
-            static_cast<unsigned long long>(code_object_reader.handle),
-            patch_result.resolved_moi_owner_vgpr
-                ? std::to_string(*patch_result.resolved_moi_owner_vgpr).c_str()
-                : "-",
-            patch_result.resolved_moi_epoch_vgpr
-                ? std::to_string(*patch_result.resolved_moi_epoch_vgpr).c_str()
-                : "-",
-            patch_result.resolved_moi_workgroup_key_vgpr
-                ? std::to_string(*patch_result.resolved_moi_workgroup_key_vgpr).c_str()
-                : "-",
-            patch_result.resolved_moi_record_replay_workgroup_vgprs.x
-                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_vgprs.x).c_str()
-                : "-",
-            patch_result.resolved_moi_record_replay_workgroup_vgprs.y
-                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_vgprs.y).c_str()
-                : "-",
-            patch_result.resolved_moi_record_replay_workgroup_vgprs.z
-                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_vgprs.z).c_str()
-                : "-",
-            patch_result.resolved_moi_exec_save_sgpr
-                ? std::to_string(*patch_result.resolved_moi_exec_save_sgpr).c_str()
-                : "-",
-            patch_result.resolved_moi_owner_sgpr
-                ? std::to_string(*patch_result.resolved_moi_owner_sgpr).c_str()
-                : "-",
-            patch_result.resolved_moi_persistent_owner_sgpr
-                ? std::to_string(*patch_result.resolved_moi_persistent_owner_sgpr).c_str()
-                : "-",
-            patch_result.resolved_moi_persistent_epoch_sgpr
-                ? std::to_string(*patch_result.resolved_moi_persistent_epoch_sgpr).c_str()
-                : "-",
-            patch_result.resolved_moi_persistent_workgroup_key_sgpr
-                ? std::to_string(*patch_result.resolved_moi_persistent_workgroup_key_sgpr).c_str()
-                : "-",
-            patch_result.resolved_moi_record_replay_workgroup_sgprs.x
-                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_sgprs.x).c_str()
-                : "-",
-            patch_result.resolved_moi_record_replay_workgroup_sgprs.y
-                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_sgprs.y).c_str()
-                : "-",
-            patch_result.resolved_moi_record_replay_workgroup_sgprs.z
-                ? std::to_string(*patch_result.resolved_moi_record_replay_workgroup_sgprs.z).c_str()
-                : "-",
-            patch_result.moi_persistent_vgprs_automatic ? "true" : "false",
-            patch_result.moi_private_epoch_automatic ? "true" : "false",
-            patch_result.moi_exec_save_sgprs_automatic ? "true" : "false",
-            patch_result.moi_owner_sgpr_automatic ? "true" : "false");
       }
     }
     size_t candidate_kernel_count = 0;

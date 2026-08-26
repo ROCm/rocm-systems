@@ -2645,6 +2645,39 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   the affected runtime seam on 44 physical-gfx950 rows; this log-only deletion
   does not alter device execution. E2E validation remains outside this work.
 
+### Slice 4O: delete per-candidate and chosen-register debug records
+
+- **Completed deletion:** The hook no longer walks the compatibility result to
+  print every perturbation candidate/plan, mutation-composition access plan,
+  composite patch proof, raw MOI candidate, accepted resource plan, or chosen
+  persistent register. These records exposed candidate container layout,
+  decoded operands, exact scratch registers, and the temporary composition
+  algorithm rather than a sanitizer behavior or stable diagnostic.
+- **Preserved supported output:** The typed fault and perturbation mutation
+  summaries remain. So do the fault-site and synchronization identities,
+  coverage/trust records, report/evidence records, patch timing, aggregate MOI
+  resource summary, resource-alternative chronology, and aggregated resource
+  failures consumed by validation or qualification tooling. The complete hook
+  gate caught the latter's qualification-level contract; its renderer was
+  restored rather than weakening that test.
+- **Device-contract audit:** The CDNA kernarg-preload/private-state device pair
+  additionally required the exact text `automatic_private_epoch=true`. Both
+  behavioral members already exercised that private-state path successfully,
+  use stride one to remove the incidental dispatch-identity consumer, and run
+  with strict `require_patch`. The mechanism-string oracle was therefore
+  deleted while the cross-architecture correct/incorrect workload and its
+  semantic output/diagnostic assertions remain intact.
+- **Deletion result:** Production source is 208 net lines smaller. Source plus
+  checked-in tests is 218 net lines smaller; the three added test lines explain
+  why the remaining device oracle is behavioral rather than register-shaped.
+  No replacement debug schema or projection was introduced.
+- **Completed checked-in gate:** The selected ConSan host suite passed 1,508
+  of 1,510 tests with two external-object benchmarks intentionally skipped,
+  and the complete HSA-hook suite passed all 194 tests. All 2,878 simulator
+  device rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in
+  67.92 seconds. This output-only slice does not alter physical device
+  execution. E2E validation remains outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

@@ -854,7 +854,9 @@ function(rj_add_consan_device_conformance_cases)
                 # Qwen's IREE kernels use AMDHSA's +256 kernarg-preload entry.
                 # Pin stride one so this contract has no incidental dispatch-ID
                 # consumer: the private-state prologue must mirror both entries
-                # on its own.
+                # on its own. The paired result and diagnostic oracles, together
+                # with require-patch, validate that behavior without constraining
+                # which register-allocation mechanism implements the state.
                 list(
                     APPEND _correct_environment
                     "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
@@ -862,18 +864,6 @@ function(rj_add_consan_device_conformance_cases)
                 list(
                     APPEND _incorrect_environment
                     "RJ_CONSAN_MOI_RUNTIME_SAMPLE_STRIDE=1"
-                )
-                set(
-                    _private_preload_regex
-                    "automatic_private_epoch=true"
-                )
-                list(
-                    APPEND _correct_pass_regex_args
-                    PASS_REGEX "${_private_preload_regex}"
-                )
-                list(
-                    APPEND _incorrect_pass_regex_args
-                    PASS_REGEX "${_private_preload_regex}"
                 )
             endif()
 
