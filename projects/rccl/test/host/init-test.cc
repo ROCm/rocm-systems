@@ -810,7 +810,7 @@ TEST_F(InitMicrotest, DevCommSetup_DevCommAllocFails_ReturnsError) {
   InstallDevCommSetupSuccess();
   std::unique_ptr<ncclComm> comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
-  g_hipExtMallocWithFlags = [](void**, std::size_t, unsigned) { return hipErrorMemoryAllocation; };
+  g_hipHostMalloc = [](void**, std::size_t, unsigned) { return hipErrorMemoryAllocation; };
   EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
 }
 
