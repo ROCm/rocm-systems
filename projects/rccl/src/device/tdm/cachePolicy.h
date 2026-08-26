@@ -27,6 +27,14 @@ THE SOFTWARE.
 /// implementation (asyncCopy.h) accept the same compile-time cache policy so their
 /// public APIs stay identical.  A CachePolicy packs a temporal hint together with a
 /// memory scope into the integer immediate the memory instructions expect.
+///
+/// A round-trip copy (global -> LDS -> global) touches two different global buffers,
+/// which in a collective are typically not equally distant: the source is usually
+/// local HBM while the destination is a peer's memory reached over the interconnect.
+/// The copy entry points therefore take TWO policies -- localCp for the read leg and
+/// remoteCp for the write leg -- so the near side can use a cheaper scope than the
+/// far side.  The one-way global<->LDS primitives touch a single global buffer and
+/// keep a single policy for it.
 
 #ifndef __TDM_CACHE_POLICY_H
 #define __TDM_CACHE_POLICY_H
@@ -50,14 +58,17 @@ enum struct MemScope : uint32_t {
   SYS, // System scope
 };
 
+// Near cache is L1 data cache, far cache is L2.  The first four values apply the same temporality to both caches.  
+// The last four values have different policies for the near cache and far cache.
 enum struct TemporalHint : uint32_t {
   RT = 0, // Regular temporal (nothing special)
   NT, // Not temporal
   HT, // High temporal
   LU, // Last use
-  NT_RT,
-  RT_NT,
-  NT_HT,
+  NT_RT, // Not temporal near cache, regular temporal far cache
+  RT_NT, // Regular temporal near cache, not temporal far cache
+  NT_HT, // Not temporal near cache, high temporal far cache
+  NT_WB, // Non temporal near cache, writeback far cache, only valid for stores, not loads
 };
 
 __host__ __device__ constexpr CachePolicy createCachePolicy(TemporalHint temporal, MemScope scope) noexcept {
