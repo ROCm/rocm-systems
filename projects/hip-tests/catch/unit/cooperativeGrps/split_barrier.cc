@@ -383,29 +383,11 @@ HIP_TEST_CASE(Unit_coop_grids_split_barrier_Multiple) {
   }
 }
 
-// Returns 1 when the hardware s_barrier_signal path is compiled in for this
-// arch, 0 for the s_barrier fallback or when the toolchain has no
-// s_barrier_signal builtin, -1 on a non-AMD compile.
-static __device__ int split_barrier_hw_path() {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__)
-#if __has_builtin(__builtin_amdgcn_s_barrier_signal)
-  return __builtin_amdgcn_is_invocable(__builtin_amdgcn_s_barrier_signal) ? 1 : 0;
-#else
-  return 0;
-#endif
-#else
-  return -1;
-#endif
-}
-
-static __global__ void wg_split_barrier_probe(int* out, const int* in,
-                                              int* hw_path) {
+static __global__ void wg_split_barrier_probe(int* out, const int* in) {
   namespace cg = cooperative_groups;
   extern __shared__ int sb_probe[];
   auto tb = cg::this_thread_block();
   size_t i = threadIdx.x;
-
-  if (i == 0) *hw_path = split_barrier_hw_path();
 
   sb_probe[i] = in[i];  // publish before arrive
   auto tok = tb.barrier_arrive();
@@ -420,44 +402,29 @@ static __global__ void wg_split_barrier_probe(int* out, const int* in,
 HIP_TEST_CASE(Unit_coop_thread_block_split_barrier_Sanity) {
   hipDeviceProp_t prop;
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-  std::cout << "[split_barrier] device gcnArchName: " << prop.gcnArchName
-            << std::endl;
 
   // Multi-wave blocks, so arrive/wait is not a single-wave no-op.
   for (const unsigned size : {256u, 512u, 1024u}) {
     if (size > static_cast<unsigned>(prop.maxThreadsPerBlock)) continue;
 
-    int *d_out, *d_in, *d_hw;
+    int *d_out, *d_in;
     HIP_CHECK(hipMalloc(&d_out, sizeof(int) * size));
     HIP_CHECK(hipMalloc(&d_in, sizeof(int) * size));
-    HIP_CHECK(hipMalloc(&d_hw, sizeof(int)));
-    HIP_CHECK(hipMemset(d_hw, 0, sizeof(int)));
 
     std::vector<int> in(size), out(size, 0), expected(size);
     for (unsigned i = 0; i < size; i++) in[i] = static_cast<int>(i + 1);
     HIP_CHECK(hipMemcpy(d_in, in.data(), sizeof(int) * size,
                         hipMemcpyHostToDevice));
 
-    wg_split_barrier_probe<<<1, size, sizeof(int) * size>>>(d_out, d_in, d_hw);
+    wg_split_barrier_probe<<<1, size, sizeof(int) * size>>>(d_out, d_in);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(int) * size,
                         hipMemcpyDeviceToHost));
-    int hw = -2;
-    HIP_CHECK(hipMemcpy(&hw, d_hw, sizeof(int), hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipFree(d_out));
     HIP_CHECK(hipFree(d_in));
-    HIP_CHECK(hipFree(d_hw));
-
-    if (size == 256u) {
-      const char* path = (hw == 1)   ? "hardware s_barrier_signal/s_barrier_wait"
-                         : (hw == 0)  ? "s_barrier fallback"
-                                      : "non-AMD / unknown";
-      std::cout << "[split_barrier] thread_block barrier_arrive path: " << path
-                << std::endl;
-    }
 
     for (unsigned i = 0; i < size; i++) {
       expected[i] = in[i] * 2 + in[(i + 1) % size];
