@@ -2322,12 +2322,17 @@ void exec_wmma_f32_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
   }
 }
 
+constexpr bool wmma_f32_f32_native_width_supported(uint32_t n, uint32_t width) {
+  return width > 1 && n % width == 0;
+}
+
 /// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
 /// F16C convert — the hoist reads each operand word straight through observed
 /// register-access regions. Compile-time M/N/K fully unroll the matmul, looped
-/// over N in native-width chunks. Falls back to generic exec_wmma_f32 without
-/// host SIMD, when N is not divisible by the native width, or under
-/// force-scalar.
+/// over N in native-width chunks. The specialization requires a usable native
+/// SIMD width that evenly divides N. Otherwise it delegates to exec_wmma_f32,
+/// whose generic implementation may still use native-width SIMD with a scalar
+/// tail.
 template <uint32_t M, uint32_t N, uint32_t K>
 void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                             uint32_t const_acc = ACC_FROM_VGPR, uint32_t c_modifier = 0) {
@@ -2338,7 +2343,7 @@ void exec_wmma_f32_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    if (util::force_scalar() || W <= 1 || N % W != 0) {
+    if (util::force_scalar() || !wmma_f32_f32_native_width_supported(N, W)) {
       exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
                     const_acc, c_modifier);
       return;

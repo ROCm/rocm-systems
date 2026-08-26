@@ -3020,13 +3020,19 @@ TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
                        0xFFFF'FFFFu);
 }
 
+static_assert(!amdgpu::wmma_f32_f32_native_width_supported(16, 1));
+static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 4));
+static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 8));
+static_assert(amdgpu::wmma_f32_f32_native_width_supported(16, 16));
+static_assert(!amdgpu::wmma_f32_f32_native_width_supported(16, 32));
+
 TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "stdx SIMD is unavailable";
   } else {
     constexpr uint32_t M = 16, N = 16, K = 4;
     constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-    if (width <= 1 || N % width != 0)
+    if (!amdgpu::wmma_f32_f32_native_width_supported(N, width))
       GTEST_SKIP() << "f32 WMMA shape is not divisible by the native SIMD width";
 
     ForceScalarOverride force_simd(false);
