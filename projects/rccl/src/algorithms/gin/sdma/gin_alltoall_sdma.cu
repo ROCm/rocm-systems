@@ -91,30 +91,35 @@ void ginA2ALsaLaunchConfig(int nRanks, size_t bytesPerPeer, int* chunksPerPeer, 
 template <bool UseSdma>
 __global__ void ncclGinA2AKernel(ncclWindow_t sendWin, size_t sendOff, ncclWindow_t recvWin, size_t recvOff,
                                  size_t bytesPerPeer, size_t chunkBytes, struct ncclDevComm devComm) {
-  constexpr int ginContext = 0;
-  // LSA runs a 2D (peer, chunk) grid, so flatten it for the per-CTA slots.
-  unsigned int ctaIndex = blockIdx.y * gridDim.x + blockIdx.x;
-  ncclGin gin{devComm, ginContext};
-  uint64_t signalValue = UseSdma ? gin.readSignal(ctaIndex) : 0;
+  if constexpr (UseSdma) {
+    if (blockIdx.x != 0) return;
 
-  ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), devComm, ncclTeamTagLsa(), ctaIndex};
-  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+    constexpr int ginContext = 0;
+    constexpr unsigned int slot = 0;
+    ncclGin gin{devComm, ginContext};
+    uint64_t signalValue = gin.readSignal(slot);
 
-  if (UseSdma) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int nthreads = blockDim.x * gridDim.x;
+    // The puts span the world team, so the barrier has to as well.
+    ncclBarrierSession<ncclCoopCta> bar{ncclCoopCta(), ncclTeamTagWorld(), gin, slot};
+    bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
-    for (int r = tid; r < devComm.nRanks; r += nthreads) {
-      gin.put(ncclTeamWorld(devComm), r, recvWin, recvOff + devComm.rank * bytesPerPeer, sendWin,
-              sendOff + r * bytesPerPeer, bytesPerPeer, ncclGin_SignalInc{ctaIndex});
+    int peer = threadIdx.x;
+    if (peer < devComm.nRanks) {
+      gin.put(ncclTeamWorld(devComm), peer, recvWin, recvOff + devComm.rank * bytesPerPeer, sendWin,
+              sendOff + peer * bytesPerPeer, bytesPerPeer, ncclGin_SignalInc{slot});
     }
 
-    int receivingCta = (devComm.rank % nthreads) / blockDim.x;
-    if (blockIdx.x == receivingCta) {
-      gin.waitSignal(ncclCoopCta(), ctaIndex, signalValue + devComm.nRanks);
-    }
+    gin.waitSignal(ncclCoopCta(), slot, signalValue + devComm.nRanks);
     gin.flush(ncclCoopCta());
+
+    bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::None);
   } else {
+    // LSA runs a 2D (peer, chunk) grid, so flatten it for the per-CTA slots.
+    unsigned int ctaIndex = blockIdx.y * gridDim.x + blockIdx.x;
+
+    ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), devComm, ncclTeamTagLsa(), ctaIndex};
+    bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+
     // blockIdx.x picks the peer, blockIdx.y the chunk of that peer's slice.
     int r = blockIdx.x;
     size_t off = chunkBytes * blockIdx.y;
@@ -127,9 +132,9 @@ __global__ void ncclGinA2AKernel(ncclWindow_t sendWin, size_t sendOff, ncclWindo
       const char* src = (const char*)ncclGetLocalPointer(sendWin, sendOff + r * bytesPerPeer + off);
       ginA2ACopyCta(dst, src, bytes);
     }
-  }
 
-  bar.sync(ncclCoopCta(), cuda::memory_order_release);
+    bar.sync(ncclCoopCta(), cuda::memory_order_release);
+  }
 }
 
 ncclResult_t ncclGinA2AInitOnce(ncclComm* comm) {
@@ -139,6 +144,7 @@ ncclResult_t ncclGinA2AInitOnce(ncclComm* comm) {
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     reqs.lsaBarrierCount = kGinA2AMaxCtas;
     reqs.ginSignalCount = kGinA2AMaxCtas;
+    reqs.barrierCount = kGinA2ASdmaCtas;
     reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
     NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true));
     state->initialized = true;
@@ -155,13 +161,15 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm == nullptr || comm->bootstrap == nullptr) return false;
   if (count == 0) return false;
 
-  // Scaleup only: every rank must be reachable over LSA.
+  // Scaleup only.
   if (comm->nNodes != 1) return false;
-  if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
   if (comm->nRanks > kGinA2AMaxRanks) return false;
 
   if (!comm->symmetricSupport) return false;
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
+
+  // Every rank must be reachable over LSA.
+  if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
 
   // This path runs on the comm's shared GIN backend, so it has to be SDMA.
   if (comm->sharedRes->ginState.ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
