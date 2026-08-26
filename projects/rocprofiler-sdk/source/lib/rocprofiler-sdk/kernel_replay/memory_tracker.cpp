@@ -262,8 +262,8 @@ memory_tracker_init(hsa::hsa_core_table_t* table, uint64_t lib_instance)
     if(lib_instance > 0) return;
 
     // Idempotent on this table: restore_table may call memory_tracker_init again after putting the
-    // original pointers back; std::call_once would skip that re-hook. Guard against a second install
-    // on an already-wrapped table (which would capture our wrapper as next_* and recurse).
+    // original pointers back; std::call_once would skip that re-hook. Guard against a second
+    // install on an already-wrapped table (which would capture our wrapper as next_* and recurse).
     if(table->hsa_memory_allocate_fn == memory_tracker::memory_allocate_wrapper) return;
 
     memory_tracker::next_memory_allocate = table->hsa_memory_allocate_fn;
