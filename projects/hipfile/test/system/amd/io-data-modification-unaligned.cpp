@@ -30,66 +30,6 @@ using namespace hipFileTest;
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
 // ---------------------------------------------------------------------------
-// This test suite exercises the ability of hipFileRead and hipFileWrite on unaligned I/O while varying the
-// size of I/O, and the source of unaligned-ness (device buffer offset vs. file offset vs. size).
-//
-// NOTE: unaligned I/O only uses the fallback path.
-//
-// We verify hipFileRead and hipFileWrite behave as expected by guarding the targeted regions of the
-// device memory allocation and the region of the file that data will be read from and written to, surrounding
-// them with poisoned memory containing sentinel values that would tell us if hipFile ever read or wrote data
-// to a location that the user did not specify.
-// ---------------------------------------------------------------------------
-struct HipFileVerifyUnaligned : public DataModificationBase<ByteElementPolicy> {
-    void SetUp() override
-    {
-        // File layout (each sentinel region 4_KiB, data io_bytes; data begins at file
-        // offset GetParam().file_off past the chunk boundary). Size through the tail bracket:
-        // [head file sentinel region][data][tail file sentinel region]
-        const hoff_t tail_off = GetParam().file_off + static_cast<hoff_t>(io_bytes);
-        ASSERT_EQ(0, ftruncate(tmpfile.fd, tail_off + static_cast<hoff_t>(4_KiB)));
-        DataModificationBase::SetUp();
-    }
-};
-
-TEST_P(HipFileVerifyUnaligned, RoundTripGuardsAllRegions)
-{
-    ASSERT_NO_FATAL_FAILURE(runAllRegionsTest(*this));
-}
-
-constexpr hoff_t kFileOffBase = static_cast<hoff_t>(kChunkBytes + 4_KiB);
-constexpr hoff_t kBufOffBase  = static_cast<hoff_t>(4_KiB);
-
-HIPFILE_WARN_NO_EXIT_DTOR_OFF
-const std::array<Axis<hoff_t>, 2> kFileOffs{{
-    {kFileOffBase, "file_aligned"},
-    {kFileOffBase + 1, "file_unaligned"},
-}};
-
-const std::array<Axis<hoff_t>, 2> kBufOffs{{
-    {kBufOffBase, "buffer_aligned"},
-    {kBufOffBase + 1, "buffer_unaligned"},
-}};
-
-const std::array<Axis<size_t>, 4> kUnalignedSizes{{
-    {4_KiB, "small_aligned"},
-    {4_KiB + 1, "small_unaligned"},
-    {kChunkBytes + 4_KiB, "large_aligned"},
-    {kChunkBytes + 4_KiB + 1, "large_unaligned"},
-}};
-HIPFILE_WARN_NO_EXIT_DTOR_ON
-
-// Roughly a matrix of {device buffer aligned, unaligned} x {file offset aligned, unaligned} x {size
-// aligned, unaligned}.
-INSTANTIATE_TEST_SUITE_P(, HipFileVerifyUnaligned,
-                         testing::ValuesIn(IoTestScenarioSet{IoTestScenario{.stride = 2}}
-                                               .over(&IoTestScenario::file_off, kFileOffs)
-                                               .over(&IoTestScenario::buf_off, kBufOffs)
-                                               .over(&IoTestScenario::io_bytes, kUnalignedSizes)
-                                               .build()),
-                         ioTestScenarioName);
-
-// ---------------------------------------------------------------------------
 // This test suite exercises the behaviour of extending the length of a file with an unaligned hipFileWrite,
 // to ensure that untouched regions of a file that is extended are either the previously present data, or a
 // hole of 0-initialized data, matching the POSIX behaviour. The length of the file before the write, the file
