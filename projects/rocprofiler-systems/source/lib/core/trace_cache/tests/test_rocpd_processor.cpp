@@ -1216,16 +1216,25 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
 
 // ---------------------------------------------------------------------------
 // handle(ainic_pmc_sample): NIC RDMA metric PMC inserts
-// NIC agents are not supported by profiler-hub register_agent_info, so the
-// handle() pathway registers PMC events using make_agent_uid(NIC) directly.
 // ---------------------------------------------------------------------------
 
 TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
 {
     register_base_metadata();
-    register_gpu_agent();
 
-    auto gpu_uid = make_agent_uid(gpu_agent());
+    auto nic = nic_agent();
+
+    profiler_hub::writer_types::agent_info_t nic_info{};
+    nic_info.unique_id    = make_agent_uid(nic);
+    nic_info.name         = nic.name;
+    nic_info.model_name   = nic.model_name;
+    nic_info.vendor_name  = nic.vendor_name;
+    nic_info.product_name = nic.product_name;
+    nic_info.node_id      = NODE_ID;
+    nic_info.process_id   = PID;
+    m_writer->register_agent_info(nic_info);
+
+    auto nic_uid = make_agent_uid(nic);
 
     auto ev = make_event(0, 0, 0, "amd_smi_nic");
 
@@ -1233,9 +1242,10 @@ TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
                                            double value, size_t timestamp) {
         profiler_hub::writer_types::pmc_info_t pi{};
         pi.unique_id.name     = pmc_name;
-        pi.unique_id.agent_id = gpu_uid;
+        pi.unique_id.agent_id = nic_uid;
         pi.symbol             = pmc_name;
         pi.description        = pmc_name;
+        pi.target_arch        = "NIC";
         pi.node_id            = NODE_ID;
         pi.process_id         = PID;
         m_writer->register_pmc_info(pi);
@@ -1257,7 +1267,7 @@ TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
 
         profiler_hub::writer_types::pmc_info_unique_id_t uid{};
         uid.name     = pmc_name;
-        uid.agent_id = gpu_uid;
+        uid.agent_id = nic_uid;
 
         m_writer->insert_pmc_event_data(pmc_data, uid);
     };

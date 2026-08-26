@@ -1276,6 +1276,8 @@ rocpd_processor_t::post_process_metadata()
             std::find(cpu_gpu_types.begin(), cpu_gpu_types.end(), pmc_info.type) !=
             cpu_gpu_types.end();
 
+        const bool has_target_arch = is_cpu_gpu_agent || pmc_info.type == agent_type::NIC;
+
         const agent* pmc_agent_ptr = nullptr;
         try
         {
@@ -1304,8 +1306,8 @@ rocpd_processor_t::post_process_metadata()
         uid.agent_id            = pmc_agent_uid;
         pmc_info_data.unique_id = uid;
         pmc_info_data.target_arch =
-            is_cpu_gpu_agent ? std::optional<std::string_view>{ pmc_info.target_arch }
-                             : std::nullopt;
+            has_target_arch ? std::optional<std::string_view>{ pmc_info.target_arch }
+                            : std::nullopt;
         pmc_info_data.event_code       = pmc_info.event_code;
         pmc_info_data.instance_id      = pmc_info.instance_id;
         pmc_info_data.symbol           = pmc_info.symbol;
