@@ -267,7 +267,7 @@ def calc_unroll_and_pipeline_for_local_arch():
     elif "gfx1250" == gfx_name:
       # gfx1250 (MI450) benefits from larger unrolls; Unroll 8 required for FP8 launch;
       # 32 is the default (commSetUnrollFactor).
-      return (["8", "16", "32"], all_pipelines)
+      return (["1", "2", "4", "8", "16", "32"], all_pipelines)
     else:
       return (["4"], all_pipelines)
   else:
@@ -290,7 +290,7 @@ def func_validate(coll, algo, proto, redop, ty, acc,  pipeline, unroll, reg):
   # use the gfx1250-only unroll factors (8/16/32). Don't emit those nonsensical variants: the
   # device linker would skip compiling them for gfx942 while the dispatch table still expected
   # them (undefined-symbol link error).
-  if coll == "SendRecv" and reg == "1" and unroll in ("8", "16", "32"):
+  if coll == "SendRecv" and reg == "1" and unroll in ("1", "2", "4", "8", "16", "32"):
     return False
   if not is_rocshmem and coll in gda_colls:
     return False
@@ -420,7 +420,7 @@ def get_arch_guard(fn):
       # LL128 SendRecv latency kernel: only build (and only activate) on gfx942/gfx950.
       # Every other arch keeps the legacy LL kernel (reg "0"), which has no guard.
       cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
-  elif fn.unroll in ("8", "16", "32"):
+  elif fn.unroll in ("1", "2", "4", "8", "16", "32"):
       cond = "defined(__gfx1250__)"
   elif fn.proto == "LL128" and fn.acc == "1":
       cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
@@ -758,7 +758,7 @@ specialized_filelist.sort(key=_compile_cost_key)
 # Write the list of specialized files for CMake consumption
 with open(os.path.join(gensrc, "specialized_files.txt"), "w") as f:
   for filename, func_name, guard, fn in specialized_filelist:
-    if fn.unroll in ("8", "16", "32"):
+    if fn.unroll in ("1", "2", "4", "8", "16", "32"):
       cmake_guard = "defined(__gfx1250__)"
       if fn.proto == "LL128":
         cmake_guard += " && defined(ENABLE_LL128)"
