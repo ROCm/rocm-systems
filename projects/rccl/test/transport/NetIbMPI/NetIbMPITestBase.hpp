@@ -534,8 +534,15 @@ protected:
         return linkLayerRead && strcmp(linkLayer, "Ethernet") == 0;
     }
 
+    // familiesOut, when given, accumulates kGidFamily* over every routable GID on
+    // the port rather than the first one found. Which single GID the plugin will
+    // pick is not knowable from here -- it depends on NCCL_IB_GID_INDEX,
+    // NCCL_IB_ADDR_FAMILY, the RoCE version files and prefix matching
+    // (connect.cc) -- so sampling one and calling it "the" family would be an
+    // arbitrary choice that can disagree with the plugin's on a dual-stack port.
+    // The whole set carries no such assumption.
     static bool PortHasRoutableGid(const char* portsPath, const char* port,
-                                   uint8_t* gidOut = nullptr) {
+                                   unsigned* familiesOut = nullptr) {
         char path[PATH_MAX];
         if (snprintf(path, sizeof(path), "%s/%s/gids", portsPath, port) >= (int)sizeof(path))
             return false;
@@ -545,7 +552,9 @@ protected:
 
         struct dirent* ent;
         bool found = false;
-        while (!found && (ent = readdir(gidDir)) != nullptr) {
+        // Scanning stops at the first routable GID unless the caller wants the
+        // family set, which needs all of them.
+        while ((!found || familiesOut) && (ent = readdir(gidDir)) != nullptr) {
             if (ent->d_name[0] == '.') continue;
             char gidPath[PATH_MAX];
             if (snprintf(gidPath, sizeof(gidPath), "%s/%s", path, ent->d_name) >= (int)sizeof(gidPath))
@@ -559,11 +568,14 @@ protected:
             // Skip all-zero GIDs and link-local (fe80::) GIDs
             bool allZero = (strcmp(gid, "0000:0000:0000:0000:0000:0000:0000:0000") == 0);
             bool linkLocal = (strncmp(gid, "fe80:", 5) == 0);
-            found = !allZero && !linkLocal;
+            if (allZero || linkLocal) continue;
+            found = true;
             // A GID that cannot be parsed still counts as routable -- that is the
-            // decision this function has always made -- but it is not handed out
-            // for comparison, so the caller falls back to index symmetry alone.
-            if (found && gidOut && !ParseGidText(gid, gidOut)) memset(gidOut, 0, 16);
+            // decision this function has always made -- it just adds no family, so
+            // a port whose GIDs are all unreadable stays uncomparable and the
+            // caller falls back to index symmetry alone.
+            uint8_t raw[16] = {};
+            if (familiesOut && ParseGidText(gid, raw)) *familiesOut |= GidAddrFamilyBit(raw);
         }
         closedir(gidDir);
         return found;
@@ -577,12 +589,13 @@ protected:
     // The ports come from the device directory rather than ncclNetProperties_t::port, which the
     // plugin sets to portNum + realPort. realPort counts VF siblings on one PCI path, so for
     // every VF past the first it names a port that does not exist in sysfs.
-    // gidOut, when given, receives the routable GID this decision was made on, so
-    // the ranks can compare subnets rather than only agreeing that each end has
-    // something routable. It is left untouched when the answer is "routable" for
-    // any other reason -- no ports directory, or no Ethernet port at all, i.e. a
-    // real IB link -- and the caller treats an absent GID as "cannot tell".
-    static bool CanRouteCrossNode(const char* devName, uint8_t* gidOut = nullptr) {
+    // familiesOut, when given, collects the address families of every routable GID
+    // on the device, so the ranks can check they have one in common rather than
+    // only agreeing that each end has something routable. It is left empty when
+    // the answer is "routable" for any other reason -- no ports directory, or no
+    // Ethernet port at all, i.e. a real IB link -- and the caller reads an empty
+    // set as "cannot tell".
+    static bool CanRouteCrossNode(const char* devName, unsigned* familiesOut = nullptr) {
         char portsPath[PATH_MAX];
         if (snprintf(portsPath, sizeof(portsPath), "/sys/class/infiniband/%s/ports", devName)
             >= (int)sizeof(portsPath))
@@ -594,11 +607,13 @@ protected:
         int ethernetPorts = 0;
         bool routable = false;
         struct dirent* ent;
-        while (!routable && (ent = readdir(portsDir)) != nullptr) {
+        // As in PortHasRoutableGid: the family set needs every port looked at, the
+        // routable verdict alone does not.
+        while ((!routable || familiesOut) && (ent = readdir(portsDir)) != nullptr) {
             if (ent->d_name[0] == '.') continue;
             if (!PortIsEthernet(portsPath, ent->d_name)) continue;
             ethernetPorts++;
-            routable = PortHasRoutableGid(portsPath, ent->d_name, gidOut);
+            if (PortHasRoutableGid(portsPath, ent->d_name, familiesOut)) routable = true;
         }
         closedir(portsDir);
 
@@ -1346,10 +1361,23 @@ protected:
     // The cross-rank device agreement travels as one 64-bit mask, so it covers
     // plugin device indices 0..63.
     static constexpr int kAgreedDevMaskBits = 64;
-    // ::ffff:a.b.c.d, i.e. what the plugin's getGidAddrFamily() calls AF_INET.
-    static bool GidIsV4Mapped(const uint8_t gid[16]) {
-        static const uint8_t kV4Prefix[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
-        return memcmp(gid, kV4Prefix, sizeof(kV4Prefix)) == 0;
+    static constexpr unsigned kGidFamilyV4 = 1u << 0;
+    static constexpr unsigned kGidFamilyV6 = 1u << 1;
+
+    // The plugin's getGidAddrFamily(), byte for byte: AF_INET covers both
+    // ::ffff:a.b.c.d and the IPv4-mapped multicast form ff0e::ffff:a.b.c.d, and
+    // everything else is AF_INET6. Reading only the first of those would classify
+    // a multicast-form GID as IPv6 here while the plugin calls it IPv4, which
+    // would invent a cross-rank mismatch and drop a usable NIC.
+    static unsigned GidAddrFamilyBit(const uint8_t gid[16]) {
+        static const uint8_t kV4Suffix[4]         = {0x00, 0x00, 0xff, 0xff};
+        static const uint8_t kZeros[8]            = {0, 0, 0, 0, 0, 0, 0, 0};
+        static const uint8_t kMulticastPrefix[4]  = {0xff, 0x0e, 0x00, 0x00};
+        const bool v4Suffix = memcmp(gid + 8, kV4Suffix, 4) == 0;
+        const bool v4Mapped = v4Suffix && memcmp(gid, kZeros, 8) == 0;
+        const bool v4MappedMulticast =
+            v4Suffix && memcmp(gid, kMulticastPrefix, 4) == 0 && memcmp(gid + 4, kZeros, 4) == 0;
+        return (v4Mapped || v4MappedMulticast) ? kGidFamilyV4 : kGidFamilyV6;
     }
 
     // Device indices both ranks agree on. PhysicalDeviceIndices() reads local
@@ -1358,8 +1386,8 @@ protected:
     // the traffic is then dropped, which surfaces as an unexplained completion
     // timeout -- the very failure the routability filter exists to prevent.
     // Intersecting the two lists keeps every slot symmetric. Index symmetry is not
-    // subnet symmetry, though, so the surviving slots are then compared by GID:
-    // see the second half of this function.
+    // reachability, though, so the surviving slots are then checked for a shared
+    // GID address family: see the second half of this function.
     bool AgreedPhysicalDeviceIndices(std::vector<int>* out, std::string* reason) {
         out->clear();
         unsigned long long localMask = 0;
@@ -1392,9 +1420,19 @@ protected:
 
         // CanRouteCrossNode() reads local sysfs, so an agreed index only means each
         // rank has something routable in slot k -- not that the two ends can reach
-        // each other. So the ranks exchange the GID each decision was made on and
-        // compare address families, keeping only slots where both ends are the same
-        // kind of address.
+        // each other. So the ranks exchange, per slot, the set of address families
+        // its routable GIDs offer, and keep the slots that have one in common.
+        //
+        // A set and not one sampled GID. Which GID the plugin will actually use is
+        // not knowable from here: it depends on NCCL_IB_GID_INDEX,
+        // NCCL_IB_ADDR_FAMILY, the RoCE version files and prefix matching, all
+        // resolved in connect.cc at connect time. Picking whichever GID sysfs
+        // happens to list first would therefore be an arbitrary choice that a
+        // dual-stack port can make disagree with the plugin's, dropping a usable
+        // NIC or keeping an unusable one. Asking only whether the two ends share a
+        // family assumes nothing about the selection, and is still enough to catch
+        // the case worth catching, since the plugin cannot pair AF_INET with
+        // AF_INET6 whatever else it decides.
         //
         // Family and not subnet, which is what one would reach for first. On this
         // fabric a working link's two ends are deliberately on different subnets:
@@ -1404,73 +1442,65 @@ protected:
         // NCCL_IB_SUBNET_PREFIX_LEN default -- would therefore reject every
         // cross-node pair that in fact works. That rule belongs to plane matching
         // in connect.cc, not to reachability. Family still holds: gidSameSubnet()
-        // rejects AF_INET against AF_INET6 before it looks at any prefix, so a slot
-        // that is IPv4-mapped on one node and native IPv6 on the other cannot carry
-        // traffic whatever the subnets are.
-        std::vector<uint8_t> localGids(kAgreedDevMaskBits * 16, 0);
-        std::vector<uint8_t> localHave(kAgreedDevMaskBits, 0);
+        // rejects AF_INET against AF_INET6 before it looks at any prefix.
+        std::vector<uint8_t> localFamilies(kAgreedDevMaskBits, 0);
         for (int dev : *out) {
             ncclNetProperties_t props;
             memset(&props, 0, sizeof(props));
             if (GetDeviceProperties(dev, &props) != ncclSuccess || !props.name) continue;
-            uint8_t gid[16] = {};
-            if (!CanRouteCrossNode(props.name, gid)) continue;
-            bool haveGid = false;
-            for (int b = 0; b < 16; b++) haveGid = haveGid || gid[b] != 0;
-            if (!haveGid) continue;
-            memcpy(&localGids[dev * 16], gid, 16);
-            localHave[dev] = 1;
+            unsigned families = 0;
+            if (!CanRouteCrossNode(props.name, &families)) continue;
+            localFamilies[dev] = static_cast<uint8_t>(families);
         }
 
         const int worldSize = MPIEnvironment::world_size;
-        std::vector<uint8_t> allGids(localGids.size() * worldSize, 0);
-        std::vector<uint8_t> allHave(localHave.size() * worldSize, 0);
-        if (MPI_Allgather(localGids.data(), (int)localGids.size(), MPI_BYTE, allGids.data(),
-                          (int)localGids.size(), MPI_BYTE, MPI_COMM_WORLD) != MPI_SUCCESS
-            || MPI_Allgather(localHave.data(), (int)localHave.size(), MPI_BYTE, allHave.data(),
-                             (int)localHave.size(), MPI_BYTE, MPI_COMM_WORLD) != MPI_SUCCESS) {
-            *reason = "MPI_Allgather of the per-device GIDs failed";
+        std::vector<uint8_t> allFamilies(localFamilies.size() * worldSize, 0);
+        if (MPI_Allgather(localFamilies.data(), (int)localFamilies.size(), MPI_BYTE,
+                          allFamilies.data(), (int)localFamilies.size(), MPI_BYTE,
+                          MPI_COMM_WORLD) != MPI_SUCCESS) {
+            *reason = "MPI_Allgather of the per-device GID address families failed";
             return false;
         }
 
-        std::vector<int> sameFamily;
+        std::vector<int> sharedFamily;
         int unknown = 0;
         for (int dev : *out) {
             bool anyComparable = false;
-            bool anyMismatch   = false;
+            bool anyDisjoint   = false;
             for (int r = 0; r < worldSize; ++r) {
                 if (r == MPIEnvironment::world_rank) continue;
-                // Either end without a usable GID -- an IB link, or a GID sysfs
-                // wrote in a form this parser does not know -- leaves that pair
-                // uncomparable. A slot no peer could be compared against is kept,
-                // which is the behaviour before this check existed.
-                if (!localHave[dev] || !allHave[r * kAgreedDevMaskBits + dev]) continue;
+                const uint8_t peer = allFamilies[r * kAgreedDevMaskBits + dev];
+                // An empty set at either end -- an IB link, whose GIDs say nothing
+                // about routability, or a port whose GIDs sysfs wrote in a form this
+                // parser does not know -- leaves that pair uncomparable. A slot no
+                // peer could be compared against is kept, which is the behaviour
+                // before this check existed.
+                if (localFamilies[dev] == 0 || peer == 0) continue;
                 anyComparable = true;
-                if (GidIsV4Mapped(&localGids[dev * 16])
-                    != GidIsV4Mapped(&allGids[r * localGids.size() + dev * 16]))
-                    anyMismatch = true;
+                if ((localFamilies[dev] & peer) == 0) anyDisjoint = true;
             }
             if (!anyComparable) unknown++;
-            if (!anyMismatch) sameFamily.push_back(dev);
+            if (!anyDisjoint) sharedFamily.push_back(dev);
         }
 
-        if (sameFamily.empty()) {
-            // Every slot was comparable and every one disagreed. That is a genuinely
-            // mixed pair of nodes -- and also what a wrong GID would look like, so
-            // the index-symmetric list is kept and the disagreement is reported
-            // rather than turned into a skip on the strength of this parser.
-            TEST_INFO("Rank %d: no agreed device index has the same GID address family on "
-                      "every rank; keeping the %zu index-symmetric device(s) and continuing",
+        if (sharedFamily.empty()) {
+            // Every slot was comparable and no slot shared a family. That is a
+            // genuinely mixed pair of nodes -- and also what a misread GID table
+            // would look like, so the index-symmetric list is kept and the
+            // disagreement is reported rather than turned into a skip on the
+            // strength of this parser.
+            TEST_INFO("Rank %d: no agreed device index shares a GID address family with every "
+                      "rank; keeping the %zu index-symmetric device(s) and continuing",
                       MPIEnvironment::world_rank, out->size());
             return true;
         }
-        if (sameFamily.size() != out->size()) {
-            TEST_INFO("Rank %d: %zu of %zu agreed device index(es) dropped for a GID address "
-                      "family that differs across ranks (%d uncomparable and kept)",
-                      MPIEnvironment::world_rank, out->size() - sameFamily.size(), out->size(),
+        if (sharedFamily.size() != out->size()) {
+            TEST_INFO("Rank %d: %zu of %zu agreed device index(es) dropped for having no GID "
+                      "address family in common across ranks (%d uncomparable and kept)",
+                      MPIEnvironment::world_rank, out->size() - sharedFamily.size(), out->size(),
                       unknown);
         }
-        *out = sameFamily;
+        *out = sharedFamily;
         return true;
     }
 
