@@ -25,8 +25,10 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <fmt/core.h>
 
@@ -172,6 +174,7 @@ signal_less_counter_name(signal_less_counter which)
         case signal_less_counter::finalizer_emitted: return "emitted";
         case signal_less_counter::finalizer_no_timing: return "no-timing";
         case signal_less_counter::register_refused: return "register-refused";
+        case signal_less_counter::cap_evicted: return "cap-evicted";
         case signal_less_counter::kCount: break;
     }
     return "?";
@@ -306,6 +309,22 @@ close_drain_budget_ns()
     return _v;
 }
 
+// N1: reader-quiesce budget per attempt. 0 == "one non-blocking check then treat
+// as timed out". Read once (F3 pattern); reject-and-default via the shared parse
+// contract, never clamp. The [0, 60000] upper bound keeps *1e6 far from overflow.
+uint64_t
+quiesce_budget_ns()
+{
+    static const uint64_t _v = []() {
+        constexpr long _dflt_ms = 100;
+        const long     _ms = env_long_in_range("ROCPROFILER_KFD_DISPATCH_LOG_QUIESCE_MS", 0, 60'000)
+                             .value_or(_dflt_ms);
+        ROCP_INFO << "KFD dispatch-log: reader-quiesce budget = " << _ms << " ms";
+        return static_cast<uint64_t>(_ms) * 1'000'000ull;
+    }();
+    return _v;
+}
+
 void
 signal_less_disable_permanently()
 {
@@ -372,6 +391,11 @@ signal_less_teardown()
     //   6. join tasks-> safe only now: no producer can submit another task
     signal_less_hub().set_mode(session_mode::stopping);
     drain_signal_less_interceptor();
+    // F1: HW-drain every live queue against one shared budget BEFORE the reader
+    // quiesce, so a kernel in flight when main() returned finishes and its EOP is
+    // still copyable when the quiesce below waits for it. Residual: a kernel longer
+    // than the budget still strands, loudly, via the existing drain_for_teardown.
+    drain_signal_less_queues_hw(kfd::steady_now_ns() + close_drain_budget_ns());
     // Safe only here: steps 1-2 closed the set of records the reader still has to
     // drain, so this two-stage wait (drain_epoch then pipe.empty) covers a finite
     // amount of work rather than a moving target. Bounded, and a no-op when the
@@ -418,12 +442,26 @@ signal_less_fence_completions()
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
     if(!signal_less_feature_enabled()) return;
+    // Finalization already ran: our atexit finalize()+destroy_static_objects() has
+    // nulled the queue-registry static_object, so a second F24 call (from another
+    // DSO's __cxa_finalize teardown) must not rlock it -> NULL deref. finalize() sets
+    // fini_status at its very end, so this no-ops that re-entry (and the provably
+    // redundant F23 call from invoke_client_finalizers, fini_status==-1) while the
+    // genuinely-live detach paths (fini_status==0) still fence.
+    if(registration::get_fini_status() != 0) return;
     // (a) no registration/publication is mid-flight.
     drain_signal_less_interceptor();
     // (b) the two-stage wait: every record present in the ring at this call has
     // been copied+published (Stage 1) and popped+processed (Stage 2), so every
     // completion whose firmware record had reached the ring is emitted or deferred.
-    const bool _quiesced = wait_for_reader_quiesce();
+    // N1: at most TWO attempts with the same budget, the second issued immediately
+    // to absorb one scheduling miss under multi-tool contention -- not to extend
+    // the deadline. reader_unavailable short-circuits to abandon without spending
+    // attempt 2: a reader that is gone will not come back within the budget. The
+    // counter is call-local, so a later fence starts fresh.
+    bool _quiesced = wait_for_reader_quiesce(quiesce_budget_ns());
+    if(!_quiesced && !reader_unavailable())
+        _quiesced = wait_for_reader_quiesce(quiesce_budget_ns());
     if(!_quiesced)
     {
         // abandon-on-timeout: latch g_abandoned under the EXCLUSIVE gate, which

@@ -122,6 +122,11 @@ finalize_complete_signal_less_dispatch(signal_less_hub_t::proven&& p);
 void
 drain_signal_less_interceptor();
 
+// F1: HW-drain every live queue against one absolute deadline, race-free vs a
+// concurrent hsa_queue_destroy. Caller holds no other lock.
+void
+drain_signal_less_queues_hw(uint64_t deadline_ns);
+
 // Wait for every already-submitted completion to finish executing.
 void
 join_signal_less_tasks();

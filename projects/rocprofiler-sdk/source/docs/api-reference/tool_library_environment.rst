@@ -140,8 +140,9 @@ Kernel dispatch timestamp source
         ``4194303``. Defaults to 10 MiB. A non-integer, empty, zero, or
         out-of-range value is ignored with a warning and the default is used. If
         the firmware laps the reader the SDK logs an overrun warning and the
-        affected dispatches fall back to the HSA timestamps; raising this value
-        gives the reader more headroom.
+        affected signal-less dispatches emit no record (their firmware records were
+        overwritten before the reader copied them); raising this value gives the
+        reader more headroom.
 
         The driver only accepts ring sizes of ``80 * 2^k`` bytes (80 KiB, 160 KiB,
         320 KiB, ... up to the 640 MiB maximum), so the requested size is rounded
