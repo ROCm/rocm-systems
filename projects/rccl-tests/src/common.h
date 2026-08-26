@@ -238,6 +238,11 @@ struct threadArgs {
   void** recvRegHandles;
   void** biasRegHandles;
 #endif
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+  // Mode-1 device-timing augment line (#[a2a-devtime]); buffered here and
+  // flushed after writeBenchmarkLineTerminator so it does not split the row.
+  char devtimeAugmentLine[512];
+#endif
 };
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);
