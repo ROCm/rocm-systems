@@ -127,31 +127,6 @@ static inline testResult_t measure(struct threadArgs* args, int gridCtas, int lo
   return testSuccess;
 }
 
-// Per-GPU grid barrier for heterogeneous timed kernels (e.g. Hybrid -D 4) where
-// CTAs use different NCCL sync domains (world GIN vs node-local LSA). __syncthreads()
-// is per-CTA only; gridIterJoin aligns all CTAs before wall-clock stamps.
-struct GridBarrierState {
-  unsigned int count;
-  unsigned int generation;
-};
-
-__device__ inline void gridIterJoin(GridBarrierState* state, int numBlocks) {
-  __syncthreads();
-  if (threadIdx.x == 0) {
-    const unsigned int gen = state->generation;
-    const unsigned int prev = atomicAdd(&state->count, 1u);
-    if (prev + 1u == (unsigned)numBlocks) {
-      state->count = 0;
-      state->generation = gen + 1;
-    } else {
-      while (state->generation == gen) {
-        __threadfence();
-      }
-    }
-  }
-  __syncthreads();
-}
-
 }  // namespace gin_devtime
 
 #endif  // GIN_SDMA_DEVTIME_H_
