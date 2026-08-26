@@ -300,6 +300,55 @@ TEST_F(RmaMultiSegmentMPITest, Reproducer_MultiSegmentRegistrationAndTransfer)
             << "data corrupted across segment boundaries";
 }
 
+// Register two complete physical mappings plus half of a third. The final MR
+// must be clipped to the requested range, while a transfer ending at the last
+// registered byte succeeds without touching the mapped-but-unregistered tail.
+TEST_F(RmaMultiSegmentMPITest, PartialFinalSegmentRegistrationAndTransfer)
+{
+    if (!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
+
+    MultiSegmentVmmBuffer *sb = nullptr, *rb = nullptr;
+    if (!AllocSymPair(&sb, &rb, /*nSegments=*/3))
+        GTEST_SKIP() << "Multi-segment VMM allocation unavailable on this host";
+
+    const size_t registeredBytes = 2 * sb->segSize + sb->segSize / 2;
+    const size_t transferOffset  = 2 * sb->segSize - 4096;
+    const size_t transferBytes   = registeredBytes - transferOffset;
+    constexpr uint8_t kSentinel  = 0xB7;
+
+    if (worldRank_ == 0)
+        FillBuf(static_cast<uint8_t*>(sb->ptr) + transferOffset,
+                transferBytes, /*seed=*/0x71);
+    if (worldRank_ == 1)
+        FillSentinel(rb->ptr, rb->totalSize, kSentinel);
+
+    void *sendMh = nullptr, *sendGh = nullptr;
+    void *recvMh = nullptr, *recvGh = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              RegMr(sb->ptr, registeredBytes, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess,
+              RegMr(rb->ptr, registeredBytes, &recvMh, &recvGh));
+
+    if (SyncSkip(!AllTookMultiSegPath()))
+        GTEST_SKIP() << "multi-segment path not exercised on this host";
+
+    Barrier();
+    if (worldRank_ == 0)
+    {
+        void* req = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iput(rmaCtx_, 0, transferOffset, sendMh, transferBytes,
+                             transferOffset, recvMh, 1, &req));
+        ASSERT_TRUE(PollUntilDone(req));
+    }
+    Barrier();
+
+    if (worldRank_ == 1)
+        ExpectPayloadIsolated(rb->ptr, rb->totalSize, transferOffset,
+                              transferBytes, /*seed=*/0x71, kSentinel,
+                              "partial final physical segment");
+}
+
 // IPut starting/ending mid-segment so the WR builder splits on a non-zero
 // per-segment offset on both sides (most prone to addr/lkey/rkey errors).
 TEST_F(RmaMultiSegmentMPITest, IPutCrossSegmentBoundaryAtOffset)
