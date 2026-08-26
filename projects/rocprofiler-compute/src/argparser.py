@@ -232,7 +232,7 @@ Examples:
 \trocprof-compute profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_blocks -b sol -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
-\trocprof-compute profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
+\trocprof-compute profile -n vcopy_iter --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
 \trocprof-compute profile -n my_bench --bench-only
 ---------------------------------------------------------------------------------
@@ -295,6 +295,7 @@ Examples:
         ),
     )
     profile_group.add_argument(
+        "-d",
         "--output-directory",
         metavar="",
         type=str,
