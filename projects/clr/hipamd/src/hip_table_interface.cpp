@@ -3366,3 +3366,10 @@ hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int nu
   return hip::GetHipDispatchTable()->hipModuleEnumerateFunctions_fn(functions, numFunctions, mod);
   CATCH;
 }
+
+hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
+                                             hipFlushGPUDirectRDMAWritesScope scope) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceFlushGPUDirectRDMAWrites_fn(target, scope);
+  CATCH;
+}
