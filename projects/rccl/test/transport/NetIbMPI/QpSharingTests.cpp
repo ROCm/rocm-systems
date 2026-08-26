@@ -9,10 +9,15 @@
 //
 // Three categories:
 //
-//   QpShareAlgo*    group-assignment and PRIMARY/SECONDARY bookkeeping,
-//                   validated against QpShareRefModel. No data phase.
+//   QpShareAlgo*    group-assignment and PRIMARY/SECONDARY bookkeeping. These
+//                   are the only tests that pin the assignment policy itself,
+//                   via QpShareRefModel. No data phase.
 //   QpShareData*    the data path must be correct at every parameter point.
 //   QpShareStress*  scale and churn, with the scale under env control.
+//
+// Everything checks the layout the transport reports for self-consistency
+// (ExpectQpShareLayout); only the Algo tests additionally require it to match
+// the model's prediction (ExpectQpSharePlacement).
 //
 // Every test derives its expectations from RCCL_IB_COMM_NGROUPS rather than
 // pinning one hand-picked value, so all three categories are valid at any
@@ -53,34 +58,6 @@ std::string Stage(const char* what, int i) {
     return std::string(what) + " " + std::to_string(i);
 }
 
-// One rank's view of a set of cast connections, paired with the reference
-// model's prediction for each.
-struct QpShareConns {
-    std::vector<void*> listen;
-    std::vector<void*> send;
-    std::vector<void*> recv;
-    std::vector<void*> mine;   // recvComm on rank 0, sendComm on rank 1
-    std::vector<QpShareRefModel::Placement> place;
-
-    size_t size() const { return mine.size(); }
-
-    void Add(int rank, void* l, void* s, void* r, QpShareRefModel::Placement p) {
-        listen.push_back(l);
-        send.push_back(s);
-        recv.push_back(r);
-        mine.push_back(rank == 0 ? r : s);
-        place.push_back(p);
-    }
-
-    void Erase(size_t i) {
-        listen.erase(listen.begin() + i);
-        send.erase(send.begin() + i);
-        recv.erase(recv.begin() + i);
-        mine.erase(mine.begin() + i);
-        place.erase(place.begin() + i);
-    }
-};
-
 }  // namespace
 
 // =============================================================================
@@ -88,12 +65,15 @@ struct QpShareConns {
 //
 // The group-assignment contract, validated at whatever RCCL_IB_COMM_NGROUPS is
 // configured. Opens connections one at a time up to min(2*ngroups+1, 64), and
-// after every single create re-checks *every* live comm against
-// QpShareRefModel: group index, PRIMARY/SECONDARY role, refcount, commId, and
-// the physical-QP identity relation (same group => same QP, different groups
-// => different QPs). Then tears down in creation order -- which releases each
-// group's PRIMARY while its SECONDARYs are still live -- re-checking after
-// every destroy.
+// after every single create re-checks *every* live comm: the reported layout
+// must be self-consistent (ExpectQpShareLayout) and must match what
+// QpShareRefModel predicted (ExpectQpSharePlacement). Then tears down in
+// creation order -- which releases each group's PRIMARY while its SECONDARYs
+// are still live -- re-checking after every destroy.
+//
+// This and QpShareAlgoChurnLayout are the two tests that pin the assignment
+// policy itself, so they are the two that have to be updated deliberately if
+// the policy ever changes.
 //
 // Subsumes the old QpShareNGroupsOne (ngroups=1), QpSharePrimarySecondaryMix
 // (ngroups=2) and QpShareNGroupsExceedsConns (ngroups > nconns) as three
@@ -117,28 +97,17 @@ TEST_F(NetIbMPITest, QpShareAlgoLayoutSweep) {
     AssertInitAndGetDevices(nullptr);
 
     QpShareRefModel model(ngroups);
-    QpShareConns    cs;
+    std::vector<QpShareConn> cs;
 
+    // One at a time, re-checking every live comm after each create. Stops at the
+    // first divergence: the same wrong layout re-reported for every remaining
+    // connection adds nothing.
     for (int c = 0; c < target; c++) {
-        QpShareRefModel::Placement p = model.AssignOnCreate();
-        void* l = nullptr; void* s = nullptr; void* r = nullptr;
-        if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-            model.Release(p);
-            ADD_FAILURE()
-                << "connection " << c << " of " << target << " failed to establish at "
-                << "RCCL_IB_COMM_NGROUPS=" << ngroups << " RCCL_IB_QP_DEPTH_MULTIPLIER="
-                << QpShareEnvDepthMultiplier() << ". It would have been comm #"
-                << (model.Load(p.group) + 1) << " in group " << p.group
-                << ". This test never approaches the shared-QP pool's capacity (target <= "
-                << kAlgoMaxConns << " connections), so a connect() failure here means either "
-                   "a pool slot leaked by an earlier test in this process (slots are reclaimed "
-                   "on close, so this should not occur under normal operation) or a genuine "
-                   "hard-fail on pool exhaustion -- check NCCL_DEBUG=WARN for \"shared-QP pool "
-                   "exhausted\".";
-            break;
-        }
-        cs.Add(rank, l, s, r, p);
-        ExpectQpShareLayout(cs.mine, cs.place, model, Stage("after create", c).c_str());
+        if (OpenConns(1, model, cs, "algo sweep") != 1) break;
+        const std::vector<void*> mine = MineOf(cs);
+        const std::string stage = Stage("after create", c);
+        if (!ExpectQpShareLayout(mine, stage.c_str()) ||
+            !ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str())) break;
     }
 
     ReportQpShareCoverage("algo_layout_sweep", static_cast<int>(cs.size()),
@@ -146,14 +115,19 @@ TEST_F(NetIbMPITest, QpShareAlgoLayoutSweep) {
 
     // Teardown from the front: releases group PRIMARYs ahead of their
     // SECONDARYs, which is where refcount and pool bookkeeping are most likely
-    // to diverge from the model.
-    for (int c = 0; cs.size() > 0; c++) {
-        model.Release(cs.place[0]);
-        CloseCastConnection(cs.listen[0], cs.send[0], cs.recv[0]);
-        cs.Erase(0);
+    // to diverge.
+    for (int c = 0; !cs.empty(); c++) {
+        model.Release(cs.front().place);
+        CloseCastConnection(cs.front().listen, cs.front().send, cs.front().recv);
+        cs.erase(cs.begin());
         MPI_Barrier(MPI_COMM_WORLD);
-        ExpectQpShareLayout(cs.mine, cs.place, model, Stage("after destroy", c).c_str());
+        const std::vector<void*> mine = MineOf(cs);
+        const std::string stage = Stage("after destroy", c);
+        if (!ExpectQpShareLayout(mine, stage.c_str()) ||
+            !ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str())) break;
     }
+
+    CloseAll(cs);
 }
 
 // =============================================================================
@@ -178,7 +152,6 @@ TEST_F(NetIbMPITest, QpShareAlgoChurnLayout) {
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
     QPSHARE_ENV_CHECK_OR_SKIP();
-    const int rank    = MPIEnvironment::world_rank;
     const int ngroups = QpShareEnvNGroups();
     const int maxLive = Clamp(2 * ngroups, 2, kChurnMaxLive);
     const int steps   = 3 * maxLive + 6;
@@ -187,52 +160,36 @@ TEST_F(NetIbMPITest, QpShareAlgoChurnLayout) {
     AssertInitAndGetDevices(nullptr);
 
     QpShareRefModel model(ngroups);
-    QpShareConns    cs;
-    int  observedSpread = 0;
-    bool broke          = false;
+    std::vector<QpShareConn> cs;
+    int observedSpread = 0;
 
     // Deterministic and rank-identical: the decision depends only on `step` and
     // the live count, both of which evolve the same way on both ranks.
-    for (int step = 0; step < steps && !broke; step++) {
-        const bool create = cs.size() == 0 ||
+    for (int step = 0; step < steps; step++) {
+        const bool create = cs.empty() ||
                             (static_cast<int>(cs.size()) < maxLive && (step % 3) != 2);
         if (create) {
-            QpShareRefModel::Placement p = model.AssignOnCreate();
-            void* l = nullptr; void* s = nullptr; void* r = nullptr;
-            if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-                model.Release(p);
-                ADD_FAILURE()
-                    << "step " << step << ": connect failed with " << cs.size()
-                    << " live comms at RCCL_IB_COMM_NGROUPS=" << ngroups
-                    << " RCCL_IB_QP_DEPTH_MULTIPLIER=" << QpShareEnvDepthMultiplier()
-                    << " (would have been comm #" << (model.Load(p.group) + 1)
-                    << " in group " << p.group << ")";
-                broke = true;
-                break;
-            }
-            cs.Add(rank, l, s, r, p);
+            if (OpenConns(1, model, cs, Stage("churn step", step).c_str()) != 1) break;
         } else {
             // Rotating, non-tail victim: exercises releasing a comm that still
             // has live neighbours in its group.
             const size_t victim = static_cast<size_t>(step / 2) % cs.size();
-            model.Release(cs.place[victim]);
-            CloseCastConnection(cs.listen[victim], cs.send[victim], cs.recv[victim]);
-            cs.Erase(victim);
+            model.Release(cs[victim].place);
+            CloseCastConnection(cs[victim].listen, cs[victim].send, cs[victim].recv);
+            cs.erase(cs.begin() + victim);
             MPI_Barrier(MPI_COMM_WORLD);
         }
         observedSpread = std::max(observedSpread, model.Spread());
-        ExpectQpShareLayout(cs.mine, cs.place, model, Stage("churn step", step).c_str());
+        const std::vector<void*> mine = MineOf(cs);
+        const std::string stage = Stage("churn step", step);
+        if (!ExpectQpShareLayout(mine, stage.c_str()) ||
+            !ExpectQpSharePlacement(mine, PlacesOf(cs), stage.c_str())) break;
     }
 
     ReportQpShareCoverage("algo_churn_layout", static_cast<int>(cs.size()),
                           model.PeakLoad(), observedSpread);
 
-    while (cs.size() > 0) {
-        model.Release(cs.place[0]);
-        CloseCastConnection(cs.listen[0], cs.send[0], cs.recv[0]);
-        cs.Erase(0);
-        MPI_Barrier(MPI_COMM_WORLD);
-    }
+    CloseAll(cs);
 }
 
 // =============================================================================
@@ -258,36 +215,13 @@ TEST_F(NetIbMPITest, QpShareDataAllConnsTransfer) {
     AssertInitAndGetDevices(nullptr);
 
     QpShareRefModel model(ngroups);
-    QpShareConns    cs;
+    std::vector<QpShareConn> cs;
 
-    for (int c = 0; c < nconns; c++) {
-        QpShareRefModel::Placement p = model.AssignOnCreate();
-        void* l = nullptr; void* s = nullptr; void* r = nullptr;
-        if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-            model.Release(p);
-            ADD_FAILURE()
-                << "connection " << c << " of " << nconns << " failed to establish at "
-                << "RCCL_IB_COMM_NGROUPS=" << ngroups << " RCCL_IB_QP_DEPTH_MULTIPLIER="
-                << QpShareEnvDepthMultiplier() << " -- it would have been comm #"
-                << (model.Load(p.group) + 1) << " in group " << p.group
-                << ", and the shared QP is sized for " << QpShareEnvDepthMultiplier() << "."
-                << (c == 0
-                        ? " This is the FIRST connection, so nothing is shared yet:"
-                          " the depth multiplier itself exceeds what the device can"
-                          " allocate (a known depth-sizing limit, not pool exhaustion)."
-                        : " Pool exhaustion is now a hard connect() failure by design"
-                          " (net_ib_cast no longer falls back to unshared silently), so"
-                          " this is expected only if the shared-QP pool is genuinely"
-                          " full at this scale -- otherwise it indicates a leaked slot.");
-            break;
-        }
-        cs.Add(rank, l, s, r, p);
-    }
-
-    const int established = static_cast<int>(cs.size());
-    ExpectQpShareLayout(cs.mine, cs.place, model, "all conns established");
+    const int established = OpenConns(nconns, model, cs, "data all conns");
+    const std::vector<void*> mine = MineOf(cs);
+    ExpectQpShareLayout(mine, "all conns established");
     ReportQpShareCoverage("data_all_conns_transfer", established,
-                          established > 0 ? MaxObservedSharingDepth(cs.mine) : 0,
+                          established > 0 ? MaxObservedSharingDepth(mine) : 0,
                           model.Spread());
 
     if (established > 0) {
@@ -300,7 +234,7 @@ TEST_F(NetIbMPITest, QpShareDataAllConnsTransfer) {
         bool regOk = true;
         for (int c = 0; c < established && regOk; c++) {
             char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
-            if (RegisterMemory(cs.mine[c], regBuf, kMaxSz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
+            if (RegisterMemory(mine[c], regBuf, kMaxSz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
                 ADD_FAILURE() << "RegisterMemory failed for conn " << c;
                 regOk = false;
             }
@@ -311,7 +245,7 @@ TEST_F(NetIbMPITest, QpShareDataAllConnsTransfer) {
         for (size_t i = 0; i < kSizes.size(); i++) {
             for (int c = 0; c < established; c++) {
                 if (rank == 0) memset(recvBufs[c].data(), 0, kSizes[i]);
-                DoSendRecv(cs.send[c], cs.recv[c],
+                DoSendRecv(cs[c].send, cs[c].recv,
                            sendBufs[c].data(), recvBufs[c].data(),
                            kSizes[i], kTagBase + static_cast<int>(i) * established + c,
                            mhandles[c], mhandles[c],
@@ -320,14 +254,11 @@ TEST_F(NetIbMPITest, QpShareDataAllConnsTransfer) {
         }
 
         for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(cs.mine[c], mhandles[c]), ncclSuccess);
+            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    while (cs.size() > 0) {
-        CloseCastConnection(cs.listen[0], cs.send[0], cs.recv[0]);
-        cs.Erase(0);
-    }
+    CloseAll(cs);
 }
 
 // =============================================================================
@@ -353,30 +284,27 @@ TEST_F(NetIbMPITest, QpShareDataUnsharedGroups) {
     AssertInitAndGetDevices(nullptr);
 
     QpShareRefModel model(ngroups);
-    QpShareConns    cs;
+    std::vector<QpShareConn> cs;
 
-    for (int c = 0; c < nconns; c++) {
-        QpShareRefModel::Placement p = model.AssignOnCreate();
-        void* l = nullptr; void* s = nullptr; void* r = nullptr;
-        if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-            model.Release(p);
-            ADD_FAILURE() << "connection " << c << " of " << nconns
-                          << " failed to establish at RCCL_IB_COMM_NGROUPS=" << ngroups
-                          << " -- nothing is even shared at this connection count";
-            break;
-        }
-        cs.Add(rank, l, s, r, p);
-    }
+    const int established = OpenConns(nconns, model, cs, "data unshared groups");
+    const std::vector<void*> mine = MineOf(cs);
+    ExpectQpShareLayout(mine, "unshared groups established");
 
-    const int established = static_cast<int>(cs.size());
-    ExpectQpShareLayout(cs.mine, cs.place, model, "unshared groups established");
+    // The point of this test: at nconns <= ngroups every comm must be alone in
+    // its group and own its QP. Asserted against the observed state, not the
+    // model -- the model predicting solo groups is what makes this the unshared
+    // regime, but it is the transport that has to agree.
     for (int c = 0; c < established; c++) {
-        EXPECT_EQ(model.Load(cs.place[c].group), 1)
-            << "test bug: conn " << c << " was expected to be alone in its group";
-        EXPECT_TRUE(cs.place[c].primary);
+        struct ncclIbQpSharingState st = GetActualQpSharingState(mine[c]);
+        EXPECT_EQ(st.refcount, 1)
+            << "conn " << c << " shares group " << st.sharedGroupIdx
+            << " with " << (st.refcount - 1) << " other comm(s) at nconns="
+            << nconns << " <= ngroups=" << ngroups;
+        EXPECT_TRUE(st.isSharedQpPrimary)
+            << "conn " << c << " is a SECONDARY although it is alone in its group";
     }
     ReportQpShareCoverage("data_unshared_groups", established,
-                          established > 0 ? MaxObservedSharingDepth(cs.mine) : 0);
+                          established > 0 ? MaxObservedSharingDepth(mine) : 0);
 
     if (established > 0) {
         constexpr size_t kMsgSz = 64 * 1024;
@@ -386,7 +314,7 @@ TEST_F(NetIbMPITest, QpShareDataUnsharedGroups) {
         bool regOk = true;
         for (int c = 0; c < established && regOk; c++) {
             char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
-            if (RegisterMemory(cs.mine[c], regBuf, kMsgSz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
+            if (RegisterMemory(mine[c], regBuf, kMsgSz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
                 ADD_FAILURE() << "RegisterMemory failed for conn " << c;
                 regOk = false;
             }
@@ -394,19 +322,16 @@ TEST_F(NetIbMPITest, QpShareDataUnsharedGroups) {
         ASSERT_TRUE(RankAgree(regOk)) << "RegisterMemory failed on one rank only";
         constexpr int kTagBase = 5100;
         for (int c = 0; c < established; c++) {
-            DoSendRecv(cs.send[c], cs.recv[c], sendBufs[c].data(), recvBufs[c].data(),
+            DoSendRecv(cs[c].send, cs[c].recv, sendBufs[c].data(), recvBufs[c].data(),
                        kMsgSz, kTagBase + c, mhandles[c], mhandles[c],
                        /*patternSeed=*/c + 11);
         }
         for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(cs.mine[c], mhandles[c]), ncclSuccess);
+            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    while (cs.size() > 0) {
-        CloseCastConnection(cs.listen[0], cs.send[0], cs.recv[0]);
-        cs.Erase(0);
-    }
+    CloseAll(cs);
 }
 
 // =============================================================================
@@ -439,37 +364,32 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
     const size_t kSz = (nconns <= 8) ? (1024 * 1024) : (64 * 1024);
 
     QpShareRefModel model(ngroups);
-    QpShareConns    cs;
-    for (int c = 0; c < nconns; c++) {
-        QpShareRefModel::Placement p = model.AssignOnCreate();
-        void* l = nullptr; void* s = nullptr; void* r = nullptr;
-        if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-            model.Release(p);
-            ADD_FAILURE() << "connection " << c << " of " << nconns
-                          << " failed to establish at RCCL_IB_COMM_NGROUPS=" << ngroups
-                          << " RCCL_IB_QP_DEPTH_MULTIPLIER=" << QpShareEnvDepthMultiplier();
-            break;
-        }
-        cs.Add(rank, l, s, r, p);
-    }
-    const int established = static_cast<int>(cs.size());
-    ExpectQpShareLayout(cs.mine, cs.place, model, "flush conns established");
+    std::vector<QpShareConn> cs;
+    const int established = OpenConns(nconns, model, cs, "data flush routing");
+    const std::vector<void*> mine = MineOf(cs);
+    ExpectQpShareLayout(mine, "flush conns established");
 
-    // Locate a PRIMARY/SECONDARY pair and an unshared baseline from the model.
+    // Locate a PRIMARY/SECONDARY pair and an unshared baseline from what the
+    // transport actually reports, so the flush runs on a genuinely shared CQ
+    // rather than on one the model merely predicted would be shared.
+    std::vector<struct ncclIbQpSharingState> st(established);
+    for (int c = 0; c < established; c++) st[c] = GetActualQpSharingState(mine[c]);
+
     int primaryIdx = -1, secondaryIdx = -1, baselineIdx = -1;
     for (int c = 0; c < established && secondaryIdx < 0; c++) {
-        if (cs.place[c].primary) continue;
+        if (st[c].isSharedQpPrimary) continue;
         secondaryIdx = c;
         for (int q = 0; q < c; q++)
-            if (cs.place[q].group == cs.place[c].group && cs.place[q].primary) primaryIdx = q;
+            if (st[q].sharedGroupIdx == st[c].sharedGroupIdx && st[q].isSharedQpPrimary)
+                primaryIdx = q;
     }
     if (primaryIdx >= 0)
         for (int c = 0; c < established; c++)
-            if (cs.place[c].group != cs.place[primaryIdx].group) { baselineIdx = c; break; }
+            if (st[c].sharedGroupIdx != st[primaryIdx].sharedGroupIdx) { baselineIdx = c; break; }
 
     const bool havePair = (primaryIdx >= 0 && secondaryIdx >= 0);
     ReportQpShareCoverage("data_flush_routing", established,
-                          established > 0 ? MaxObservedSharingDepth(cs.mine) : 0);
+                          established > 0 ? MaxObservedSharingDepth(mine) : 0);
     if (!havePair && rank == 0) {
         printf("[QPSHARE-COV] data_flush_routing: no PRIMARY/SECONDARY pair formed at "
                "ngroups=%d with %d conns (cap %d) -- shared-CQ flush routing was NOT "
@@ -491,7 +411,7 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
                 break;
             }
             bufGuards.push_back(makeDeviceBufferAutoGuard(devBufs[c]));
-            if (RegisterMemory(cs.mine[c], devBufs[c], kSz, NCCL_PTR_CUDA, &mhandles[c]) != ncclSuccess) {
+            if (RegisterMemory(mine[c], devBufs[c], kSz, NCCL_PTR_CUDA, &mhandles[c]) != ncclSuccess) {
                 ADD_FAILURE() << "RegisterMemory failed for conn " << c;
                 setupOk = false;
                 break;
@@ -510,8 +430,8 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
         // Transfer every connection concurrently (post-all, wait-all).
         std::vector<void*> reqs(established, nullptr);
         for (int c = 0; c < established; c++) {
-            if (rank == 0) PostSingleRecv(cs.recv[c], devBufs[c], kSz, 730 + c, mhandles[c], &reqs[c]);
-            else           PostSendWithRetry(cs.send[c], devBufs[c], kSz, 730 + c, mhandles[c], &reqs[c]);
+            if (rank == 0) PostSingleRecv(cs[c].recv, devBufs[c], kSz, 730 + c, mhandles[c], &reqs[c]);
+            else           PostSendWithRetry(cs[c].send, devBufs[c], kSz, 730 + c, mhandles[c], &reqs[c]);
         }
         MPI_Barrier(MPI_COMM_WORLD);
         for (int c = 0; c < established; c++) {
@@ -524,9 +444,9 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
         if (rank == 0 && havePair) {
             void* fReqP = nullptr; void* fReqS = nullptr;
             int fszP = static_cast<int>(kSz), fszS = static_cast<int>(kSz);
-            EXPECT_EQ(FlushRecv(cs.recv[primaryIdx], 1, &devBufs[primaryIdx], &fszP,
+            EXPECT_EQ(FlushRecv(cs[primaryIdx].recv, 1, &devBufs[primaryIdx], &fszP,
                                 &mhandles[primaryIdx], &fReqP), ncclSuccess);
-            EXPECT_EQ(FlushRecv(cs.recv[secondaryIdx], 1, &devBufs[secondaryIdx], &fszS,
+            EXPECT_EQ(FlushRecv(cs[secondaryIdx].recv, 1, &devBufs[secondaryIdx], &fszS,
                                 &mhandles[secondaryIdx], &fReqS), ncclSuccess);
             EXPECT_NE(fReqP, nullptr);
             EXPECT_NE(fReqS, nullptr);
@@ -553,7 +473,7 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
         if (rank == 0 && soloIdx >= 0) {
             void* fReq = nullptr;
             int fsz = static_cast<int>(kSz);
-            EXPECT_EQ(FlushRecv(cs.recv[soloIdx], 1, &devBufs[soloIdx], &fsz,
+            EXPECT_EQ(FlushRecv(cs[soloIdx].recv, 1, &devBufs[soloIdx], &fsz,
                                 &mhandles[soloIdx], &fReq), ncclSuccess);
             int w = 0;
             EXPECT_EQ(WaitForCompletion(fReq, &w, kLargeTransferTimeoutMs), ncclSuccess)
@@ -564,14 +484,11 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
 
         MPI_Barrier(MPI_COMM_WORLD);
         for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(cs.mine[c], mhandles[c]), ncclSuccess);
+            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    while (cs.size() > 0) {
-        CloseCastConnection(cs.listen[0], cs.send[0], cs.recv[0]);
-        cs.Erase(0);
-    }
+    CloseAll(cs);
 }
 
 // =============================================================================
@@ -597,25 +514,12 @@ TEST_F(NetIbMPITest, QpShareStressManyConns) {
     AssertInitAndGetDevices(nullptr);
 
     QpShareRefModel model(ngroups);
-    QpShareConns    cs;
-    for (int c = 0; c < nconns; c++) {
-        QpShareRefModel::Placement p = model.AssignOnCreate();
-        void* l = nullptr; void* s = nullptr; void* r = nullptr;
-        if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-            model.Release(p);
-            ADD_FAILURE() << "connection " << c << " of " << nconns
-                          << " failed to establish at RCCL_IB_COMM_NGROUPS=" << ngroups
-                          << " RCCL_IB_QP_DEPTH_MULTIPLIER=" << QpShareEnvDepthMultiplier()
-                          << " (comm #" << (model.Load(p.group) + 1) << " in group "
-                          << p.group << ")";
-            break;
-        }
-        cs.Add(rank, l, s, r, p);
-    }
-    const int established = static_cast<int>(cs.size());
-    ExpectQpShareLayout(cs.mine, cs.place, model, "stress conns established");
+    std::vector<QpShareConn> cs;
+    const int established = OpenConns(nconns, model, cs, "stress many conns");
+    const std::vector<void*> mine = MineOf(cs);
+    ExpectQpShareLayout(mine, "stress conns established");
     ReportQpShareCoverage("stress_many_conns", established,
-                          established > 0 ? MaxObservedSharingDepth(cs.mine) : 0,
+                          established > 0 ? MaxObservedSharingDepth(mine) : 0,
                           model.Spread());
 
     if (established > 0) {
@@ -635,7 +539,7 @@ TEST_F(NetIbMPITest, QpShareStressManyConns) {
         bool regOk = true;
         for (int c = 0; c < established && regOk; c++) {
             char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
-            if (RegisterMemory(cs.mine[c], regBuf, kBufSz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
+            if (RegisterMemory(mine[c], regBuf, kBufSz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
                 ADD_FAILURE() << "RegisterMemory failed for conn " << c;
                 regOk = false;
             }
@@ -644,7 +548,7 @@ TEST_F(NetIbMPITest, QpShareStressManyConns) {
 
         constexpr int kTagBase = 6000;
         for (int c = 0; c < established; c++) {
-            CastDoBatchSendRecv(rank, cs.send[c], cs.recv[c],
+            CastDoBatchSendRecv(rank, cs[c].send, cs[c].recv,
                                 sendBufs[c].data(), recvBufs[c].data(),
                                 kMsgSz, kNMsgs, kTagBase + c * kNMsgs, mhandles[c]);
         }
@@ -657,14 +561,11 @@ TEST_F(NetIbMPITest, QpShareStressManyConns) {
 
         MPI_Barrier(MPI_COMM_WORLD);
         for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(cs.mine[c], mhandles[c]), ncclSuccess);
+            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    while (cs.size() > 0) {
-        CloseCastConnection(cs.listen[0], cs.send[0], cs.recv[0]);
-        cs.Erase(0);
-    }
+    CloseAll(cs);
 }
 
 // =============================================================================
@@ -691,22 +592,11 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
     AssertInitAndGetDevices(nullptr);
 
     QpShareRefModel model(ngroups);
-    QpShareConns    cs;
-    for (int c = 0; c < nconns; c++) {
-        QpShareRefModel::Placement p = model.AssignOnCreate();
-        void* l = nullptr; void* s = nullptr; void* r = nullptr;
-        if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-            model.Release(p);
-            ADD_FAILURE() << "connection " << c << " of " << nconns
-                          << " failed to establish at RCCL_IB_COMM_NGROUPS=" << ngroups
-                          << " RCCL_IB_QP_DEPTH_MULTIPLIER=" << QpShareEnvDepthMultiplier();
-            break;
-        }
-        cs.Add(rank, l, s, r, p);
-    }
-    const int established = static_cast<int>(cs.size());
+    std::vector<QpShareConn> cs;
+    const int established = OpenConns(nconns, model, cs, "stress rq saturation");
+    const std::vector<void*> mine = MineOf(cs);
     ReportQpShareCoverage("stress_rq_saturation", established,
-                          established > 0 ? MaxObservedSharingDepth(cs.mine) : 0,
+                          established > 0 ? MaxObservedSharingDepth(mine) : 0,
                           model.Spread());
 
     if (established > 0) {
@@ -717,7 +607,7 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
         bool regOk = true;
         for (int c = 0; c < established && regOk; c++) {
             char* regBuf = (rank == 0) ? recvBufs[c].data() : sendBufs[c].data();
-            if (RegisterMemory(cs.mine[c], regBuf, kMsgSz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
+            if (RegisterMemory(mine[c], regBuf, kMsgSz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
                 ADD_FAILURE() << "RegisterMemory failed for conn " << c;
                 regOk = false;
             }
@@ -735,7 +625,7 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
                     size_t sizes[1]   = {kMsgSz};
                     int    tags[1]    = {tagRoundBase + c};
                     void*  handles[1] = {mhandles[c]};
-                    if (PostRecv(cs.recv[c], 1, bufs, sizes, tags, handles, &reqs[c]) != ncclSuccess
+                    if (PostRecv(cs[c].recv, 1, bufs, sizes, tags, handles, &reqs[c]) != ncclSuccess
                         || reqs[c] == nullptr) {
                         ADD_FAILURE() << "PostRecv failed for round " << round << " conn " << c;
                         postOk = false;
@@ -746,7 +636,7 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
                 for (int c = 0; c < established; c++) {
                     fillHostBufferWithPattern<uint8_t>(sendBufs[c].data(), kMsgSz,
                                                        makeBytePattern(round * established + c));
-                    PostSendWithRetry(cs.send[c], sendBufs[c].data(), kMsgSz,
+                    PostSendWithRetry(cs[c].send, sendBufs[c].data(), kMsgSz,
                                       tagRoundBase + c, mhandles[c], &reqs[c]);
                 }
             }
@@ -771,14 +661,11 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
 
         MPI_Barrier(MPI_COMM_WORLD);
         for (int c = 0; c < established; c++)
-            EXPECT_EQ(DeregisterMemory(cs.mine[c], mhandles[c]), ncclSuccess);
+            EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    while (cs.size() > 0) {
-        CloseCastConnection(cs.listen[0], cs.send[0], cs.recv[0]);
-        cs.Erase(0);
-    }
+    CloseAll(cs);
 }
 
 // =============================================================================
@@ -811,13 +698,7 @@ TEST_F(NetIbMPITest, QpShareStressConnectionChurn) {
     {
         void* l = nullptr; void* s = nullptr; void* r = nullptr;
         if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-            // The shared-QP pool reclaims slots on close (free-stack), so this
-            // should not happen from cross-test accumulation anymore. A failure
-            // here now points at a slot leaked by an earlier test's teardown.
-            ADD_FAILURE() << "warmup connection failed before churn even started "
-                             "(shared-QP pool slot leak from an earlier test in this "
-                             "process? slots are reclaimed on close, so this should "
-                             "not occur under normal operation)";
+            ADD_FAILURE() << "warmup connection failed before churn even started";
             return;
         }
         void* mh = nullptr;
@@ -842,14 +723,8 @@ TEST_F(NetIbMPITest, QpShareStressConnectionChurn) {
         if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
             ADD_FAILURE()
                 << "connect failed at churn iteration " << iter << " of " << iters
-                << ". Only one connection is live at a time, so every earlier"
-                   " cycle was fully closed: a resource acquired per cycle was"
-                   " not returned. Check the RDMA-resource checkpoints above and"
-                   " run with NCCL_DEBUG=WARN -- pass -x"
-                   " NCCL_DEBUG_FILE=<dir>/nccl_%h_%p.log and read the per-rank"
-                   " files, since a merged mpirun log usually carries rank 0"
-                   " only and the absence of a WARN there is not evidence that"
-                   " none was emitted";
+                << ". Only one connection is live at a time, so every earlier cycle"
+                   " was fully closed; see the RDMA-resource checkpoints above.";
             break;
         }
         void* comm = (rank == 0) ? r : s;
@@ -888,8 +763,7 @@ TEST_F(NetIbMPITest, QpShareStressConnectionChurn) {
     // invites the reading that churn says something about sharing depth. It
     // does not. It exercises the create/destroy lifecycle of a shared group
     // whose membership never exceeds one, which is the occupancy that reaches
-    // the group-release path on every single cycle (the same path
-    // QpShareStressBatchCreateDestroy shows leaking a PD).
+    // the group-release path on every single cycle.
     ReportQpShareCoverage("stress_connection_churn", iters, /*maxCommsPerGroup=*/1);
 }
 
@@ -928,13 +802,7 @@ TEST_F(NetIbMPITest, QpShareStressBatchCreateDestroy) {
     {
         void* l = nullptr; void* s = nullptr; void* r = nullptr;
         if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-            // The shared-QP pool reclaims slots on close (free-stack), so this
-            // should not happen from cross-test accumulation anymore. A failure
-            // here now points at a slot leaked by an earlier test's teardown.
-            ADD_FAILURE() << "warmup connection failed before batching even started "
-                             "(shared-QP pool slot leak from an earlier test in this "
-                             "process? slots are reclaimed on close, so this should "
-                             "not occur under normal operation)";
+            ADD_FAILURE() << "warmup connection failed before batching even started";
             return;
         }
         void* mh = nullptr;
@@ -955,45 +823,27 @@ TEST_F(NetIbMPITest, QpShareStressBatchCreateDestroy) {
     int  peakSpread = 0;
     for (int batch = 0; batch < batches && !broke; batch++) {
         QpShareRefModel model(ngroups);
-        QpShareConns    cs;
-        std::vector<void*> mhandles;
+        std::vector<QpShareConn> cs;
 
-        for (int c = 0; c < perBatch; c++) {
-            QpShareRefModel::Placement p = model.AssignOnCreate();
-            void* l = nullptr; void* s = nullptr; void* r = nullptr;
-            if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
-                model.Release(p);
-                ADD_FAILURE()
-                    << "connect failed at batch " << batch << " of " << batches
-                    << ", connection " << c << " of " << perBatch
-                    << " (cumulative connection #" << (batch * perBatch + c)
-                    << "). ngroups=" << ngroups << " depth="
-                    << QpShareEnvDepthMultiplier()
-                    << ". Every previous batch was fully torn down, so a failure "
-                       "here means a per-batch resource was not returned -- check "
-                       "the RDMA-count checkpoints above for which one.";
-                broke = true;
-                break;
-            }
-            cs.Add(rank, l, s, r, p);
-            void* mh = nullptr;
-            bool regOk = (RegisterMemory(cs.mine.back(), buf.data(), sz, NCCL_PTR_HOST, &mh) == ncclSuccess);
-            if (!regOk) {
+        const int live = OpenConns(perBatch, model, cs, Stage("batch", batch).c_str());
+        if (live < perBatch) broke = true;
+        const std::vector<void*> mine = MineOf(cs);
+
+        std::vector<void*> mhandles(live, nullptr);
+        bool regOk = true;
+        for (int c = 0; c < live && regOk; c++) {
+            if (RegisterMemory(mine[c], buf.data(), sz, NCCL_PTR_HOST, &mhandles[c]) != ncclSuccess) {
                 ADD_FAILURE() << "RegisterMemory failed at batch " << batch
                               << ", connection " << c;
+                regOk = false;
             }
-            if (!RankAgree(regOk)) {
-                broke = true;
-                break;
-            }
-            mhandles.push_back(mh);
         }
+        if (!RankAgree(regOk)) broke = true;
 
-        const int live = static_cast<int>(cs.size());
         peakDepth  = std::max(peakDepth, model.PeakLoad());
         peakSpread = std::max(peakSpread, model.Spread());
-        for (int c = 0; c < live; c++) {
-            DoSendRecv(cs.send[c], cs.recv[c], buf.data(), buf.data(), sz,
+        for (int c = 0; c < live && regOk; c++) {
+            DoSendRecv(cs[c].send, cs[c].recv, buf.data(), buf.data(), sz,
                        /*tag=*/c, mhandles[c], mhandles[c], batch * perBatch + c);
         }
 
@@ -1002,9 +852,8 @@ TEST_F(NetIbMPITest, QpShareStressBatchCreateDestroy) {
             // Every batch starts from an empty live set, so the layout must be
             // identical to batch 0's. Drift here means teardown left refcounts
             // behind that IbCastCountPeerTotalRefcount still sees.
-            ExpectQpShareLayout(cs.mine, cs.place, model,
-                                Stage("batch checkpoint", batch).c_str());
-            struct ncclIbQpSharingState st = GetActualQpSharingState(cs.mine[0]);
+            ExpectQpShareLayout(mine, Stage("batch checkpoint", batch).c_str());
+            struct ncclIbQpSharingState st = GetActualQpSharingState(mine[0]);
             EXPECT_GT(st.refcount, 0)
                 << "refcount dropped to 0 at batch " << batch
                 << " -- comms are live but no longer tracked in the shared-QP pool";
@@ -1012,10 +861,9 @@ TEST_F(NetIbMPITest, QpShareStressBatchCreateDestroy) {
         }
 
         for (int c = 0; c < live; c++) {
-            EXPECT_EQ(DeregisterMemory(cs.mine[c], mhandles[c]), ncclSuccess);
-            CloseCastConnection(cs.listen[c], cs.send[c], cs.recv[c]);
+            if (mhandles[c]) EXPECT_EQ(DeregisterMemory(mine[c], mhandles[c]), ncclSuccess);
         }
-        MPI_Barrier(MPI_COMM_WORLD);
+        CloseAll(cs);
 
         if (checkpoint && !broke) {
             RdmaResourceCounts now = CaptureRdmaResources();
