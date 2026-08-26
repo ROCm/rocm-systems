@@ -11,26 +11,18 @@
 #   2. P-pass wall time does not blow up relative to a 1-pass baseline (linear scaling).
 
 import argparse
-import re
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "perf-common"))
 
 from perf_cost_model import model_max_ms
-
-_MARKER = re.compile(
-    r"\[kr-perf\]\s+ballast_mb=(?P<ballast_mb>\d+)\s+launches=(?P<launches>\d+)\s+"
-    r"wall_ms=(?P<wall_ms>[\d.]+)\s+counter=(?P<counter>\d+)"
-)
+from perf_stats import check_ceiling
+from perf_stats import parse_marker as _parse_marker
 
 
 def parse_marker(text: str) -> dict:
-    for line in text.splitlines():
-        m = _MARKER.search(line)
-        if m:
-            return {
-                k: float(v) if k == "wall_ms" else int(v)
-                for k, v in m.groupdict().items()
-            }
-    raise AssertionError("missing [kr-perf] wall_ms marker in test output")
+    return _parse_marker(text, "kr-perf")
 
 
 def main() -> int:
@@ -50,13 +42,11 @@ def main() -> int:
     ), f"counter {m['counter']} != launches {m['launches']} (restore failure)"
 
     max_ms = model_max_ms(int(m["ballast_mb"]), int(m["launches"]), args.passes)
-    assert m["wall_ms"] <= max_ms, (
-        f"P={args.passes} wall_ms={m['wall_ms']:.1f} exceeds cost-model ceiling "
-        f"{max_ms:.1f} ms (ballast_mb={m['ballast_mb']} launches={m['launches']})"
-    )
-    print(
-        f"[kr-perf-validate] PASS wall_ms={m['wall_ms']:.1f} <= ceiling={max_ms:.1f} ms "
-        f"(P={args.passes})"
+    check_ceiling(
+        m["wall_ms"],
+        max_ms,
+        f"[kr-perf-validate] P={args.passes} "
+        f"(ballast_mb={m['ballast_mb']} launches={m['launches']})",
     )
 
     if args.baseline_log:

@@ -33,12 +33,18 @@ touch(float* buf, int n, int* counter)
 int
 main(int argc, char** argv)
 {
+    // warmup: dispatches run before timing starts. The first dispatch pays for ballast page
+    // faults, code-object load and profiler attach, none of which repeat, so timing them makes
+    // the sample depend on how the run started rather than on per-dispatch cost.
     int ballast_mb = 8;
     int launches   = 32;
+    int warmup     = 1;
     if(argc > 1) ballast_mb = std::atoi(argv[1]);
     if(argc > 2) launches = std::atoi(argv[2]);
+    if(argc > 3) warmup = std::atoi(argv[3]);
     if(ballast_mb < 1) ballast_mb = 1;
     if(launches < 1) launches = 1;
+    if(warmup < 0) warmup = 0;
 
     const size_t ballast_bytes = static_cast<size_t>(ballast_mb) * 1024U * 1024U;
     const int    ballast_elems = static_cast<int>(ballast_bytes / sizeof(float));
@@ -48,6 +54,15 @@ main(int argc, char** argv)
     HIP_CHECK(hipMalloc(&ballast, ballast_bytes));
     HIP_CHECK(hipMalloc(&counter, sizeof(int)));
     HIP_CHECK(hipMemset(ballast, 0, ballast_bytes));
+    HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+
+    for(int i = 0; i < warmup; ++i)
+    {
+        touch<<<256, 64>>>(ballast, ballast_elems, counter);
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+    }
+    // The counter is the dispatch-accounting check below, so warmup must not be in it.
     HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
 
     using clock      = std::chrono::steady_clock;
@@ -66,9 +81,10 @@ main(int argc, char** argv)
     HIP_CHECK(hipFree(ballast));
     HIP_CHECK(hipFree(counter));
 
-    std::printf("[qh-perf] ballast_mb=%d launches=%d wall_ms=%.3f counter=%d\n",
+    std::printf("[qh-perf] ballast_mb=%d launches=%d warmup=%d wall_ms=%.3f counter=%d\n",
                 ballast_mb,
                 launches,
+                warmup,
                 wall_ms,
                 counter_h);
 
