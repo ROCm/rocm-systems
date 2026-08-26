@@ -1706,7 +1706,7 @@ def test_pc_sampling_multiprocess_dispatch_statistics_include_every_row(
 ) -> None:
     """Include every process-local dispatch in workload statistics."""
     workload = schema.Workload()
-    args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
+    args = argparse.Namespace(time_unit="ns")
     instance = make_db_analysis(str(tmp_path))
 
     instance.build_pc_sampling_only_workload(
@@ -1731,7 +1731,7 @@ def test_pc_sampling_dispatch_filter_selects_one_process(
 ) -> None:
     """Resolve a filtered dispatch ID to exactly one process's dispatch."""
     workload = schema.Workload(filter_dispatch_ids=["2"])
-    args = argparse.Namespace(time_unit="ns", kernel_verbose=5)
+    args = argparse.Namespace(time_unit="ns")
     instance = make_db_analysis(str(tmp_path))
 
     instance.build_pc_sampling_only_workload(

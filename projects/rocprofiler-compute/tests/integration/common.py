@@ -207,8 +207,8 @@ def check_csv_files(output_dir, num_devices, num_kernels):
     """
     files_in_workload = os.listdir(output_dir)
 
-    # Profile counter artifacts are gzip; pmc_perf.csv and the other analyze
-    # inputs stay plain.
+    # Profile counter artifacts are gzip; sysinfo.csv and the other plain
+    # profile CSVs are not.
     def is_csv(name):
         if name.startswith("results_"):
             return name.endswith(".csv.gz")

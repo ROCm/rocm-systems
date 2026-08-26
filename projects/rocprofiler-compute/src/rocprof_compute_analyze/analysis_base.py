@@ -116,7 +116,6 @@ class OmniAnalyze_Base:
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
             time_unit=args.time_unit,
-            kernel_verbose=args.kernel_verbose,
         )
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
@@ -384,7 +383,7 @@ class OmniAnalyze_Base:
 
         Args:
             result_files: The results_*.csv.gz files to concatenate
-            output_file: Destination CSV, written plain
+            output_file: Destination gzip CSV
         """
         console_warning(
             "Reading intermediate results_*.csv.gz files is deprecated and "
@@ -392,10 +391,10 @@ class OmniAnalyze_Base:
         )
 
         rows_written = 0
-        with open(output_file, "w", newline="", encoding="utf-8") as outfile:
+        with csv_compression.open_gzip_csv_write(output_file) as outfile:
             writer = None
             for file in result_files:
-                # Only the read can fail on compression; output_file is plain.
+                # Corruption comes from the source read, not the gzip write.
                 try:
                     with csv_compression.open_gzip_csv_read(file) as infile:
                         reader = csv.reader(infile)
@@ -417,7 +416,7 @@ class OmniAnalyze_Base:
                             writer.writerow(row)
                             rows_written += 1
                 except csv_compression.CORRUPT_CSV_ERRORS as e:
-                    # Drop the partial pmc_perf.csv built from earlier files.
+                    # Drop the partial output built from earlier files.
                     output_file.unlink(missing_ok=True)
                     console_error(
                         f"{file} is truncated or corrupt: {e}\n"
@@ -426,7 +425,7 @@ class OmniAnalyze_Base:
                         "workload."
                     )
 
-        # A header-only pmc_perf.csv would be reused by later analyze runs.
+        # A header-only output would be reused by later analyze runs.
         if rows_written == 0:
             output_file.unlink(missing_ok=True)
             console_error(
@@ -437,12 +436,14 @@ class OmniAnalyze_Base:
         console_debug(f"Created file: {output_file} ({rows_written} counter rows)")
 
     def join_workload_csvs(self, workload_dir: Path) -> None:
-        """Concatenate results_*.csv.gz source files into pmc_perf.csv if needed.
+        """Concatenate results_*.csv.gz source files into pmc_perf.csv.gz if needed.
 
         Args:
             workload_dir: Path to the workload directory
         """
-        pmc_perf = workload_dir / "pmc_perf.csv"
+        pmc_perf = csv_compression.compressed_name(
+            workload_dir / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+        )
         results_glob = f"results_*.csv{csv_compression.GZIP_SUFFIX}"
         result_files = sorted(workload_dir.glob(results_glob))
 
@@ -455,7 +456,7 @@ class OmniAnalyze_Base:
         else:
             console_error(
                 f"No profiling data found in {workload_dir}.\n"
-                f"Expected: pmc_perf.csv or {results_glob}\n"
+                f"Expected: {pmc_perf.name} or {results_glob}\n"
                 f"Please run 'rocprof-compute profile' first."
             )
 
@@ -501,7 +502,7 @@ class OmniAnalyze_Base:
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
         if not self.pc_sampling_only():
-            # Join results_*.csv source files into pmc_perf.csv if needed
+            # Join results_*.csv.gz source files into pmc_perf.csv.gz if needed
             for path_info in args.path:
                 workload_dir = Path(path_info[0])
                 self.join_workload_csvs(workload_dir)

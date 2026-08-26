@@ -19,21 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This application uses the following dependencies and their usage is governed by their respective licenses
-Python 3 standard library: PSFL
-astunparse python library: PSFL
-dash python library: MIT
-dash-bootstrap-components python library: MIT
-dash-svg python library: MIT
-Nuitka specific runtime code: Apache 2.0 license
-numpy python library: BSD
-pandas python library: BSD
-plotext python library: MIT
-pyyaml python library: MIT
-setuptools python library: MIT
-tabulate python library: MIT
-textual python library: MIT
-textual_plotext python library: MIT
