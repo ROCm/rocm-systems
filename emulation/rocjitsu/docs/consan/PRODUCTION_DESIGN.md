@@ -3406,6 +3406,17 @@ analysis completed.
   raw truth table accounts for the one-test decrease. E2E validation remains
   outside this work.
 
+### Slice 5G: delete dead telemetry predicates
+
+- **Completed deletion:** The unused planning-work emptiness predicate and the
+  reservoir-telemetry emptiness predicate are gone. The latter had one test
+  caller, which now asserts the telemetry value contract directly.
+- **Deletion result:** Production headers are 10 lines smaller without changing
+  telemetry storage or behavior. All ConSan, hook, and device targets rebuild,
+  and the affected degraded-partial-route test passes. The immediately
+  preceding complete checked-in gate remains applicable because no executable
+  behavior changed.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

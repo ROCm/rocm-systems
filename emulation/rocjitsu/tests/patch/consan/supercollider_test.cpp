@@ -7351,7 +7351,7 @@ TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
   EXPECT_EQ(result.lds_branch_only_routing_telemetry.work_budget_exhaustion_count, 0u);
   EXPECT_EQ(result.lds_branch_only_routing_telemetry.exact_pair_fallback_attempt_count, 6u);
   EXPECT_EQ(result.lds_branch_only_routing_telemetry.greedy_pair_fallback_attempt_count, 0u);
-  EXPECT_TRUE(branch_only_reservoir_telemetry_is_empty(result.lds_relay_reservoir_telemetry));
+  EXPECT_EQ(result.lds_relay_reservoir_telemetry, ConSanBranchOnlyReservoirTelemetry{});
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("branch-only continuation could not route all spill-backed sites") !=
                std::string::npos &&

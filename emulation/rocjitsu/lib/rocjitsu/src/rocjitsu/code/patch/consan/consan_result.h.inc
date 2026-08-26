@@ -135,11 +135,6 @@ accumulate_branch_only_reservoir_telemetry(ConSanBranchOnlyReservoirTelemetry &t
   }
 }
 
-[[nodiscard]] inline bool
-branch_only_reservoir_telemetry_is_empty(const ConSanBranchOnlyReservoirTelemetry &telemetry) {
-  return telemetry == ConSanBranchOnlyReservoirTelemetry{};
-}
-
 /// Work consumed outside the fixed-pair branch router. Counts are measured
 /// units charged by the shared bounded-planning meter; exhaustion counts are
 /// call- or convergence-scope events, not elapsed-time samples.
@@ -158,11 +153,6 @@ struct ConSanPlanningWorkTelemetry {
 
 static_assert(sizeof(ConSanPlanningWorkTelemetry) == 8u * sizeof(size_t),
               "update the planning-work telemetry schema tests");
-
-[[nodiscard]] inline bool
-consan_planning_work_telemetry_is_empty(const ConSanPlanningWorkTelemetry &telemetry) {
-  return telemetry == ConSanPlanningWorkTelemetry{};
-}
 
 /// Counts one validation-only mutation domain as it moves from a user request
 /// through semantic selection to emitted replacement bytes.
