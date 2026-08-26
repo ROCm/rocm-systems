@@ -403,16 +403,14 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
 
     register_agent(gpu_agent());
     register_agent(cpu_agent());
-
-    // profiler-hub only supports CPU and GPU agent types; NIC is rejected
-    EXPECT_THROW(register_agent(nic_agent()), std::invalid_argument);
+    register_agent(nic_agent());
 
     flush_and_open_reader();
     auto agents = m_reader->get_all_agents();
 
-    ASSERT_EQ(agents.size(), 2U);
+    ASSERT_EQ(agents.size(), 3U);
 
-    bool found_gpu = false, found_cpu = false;
+    bool found_gpu = false, found_cpu = false, found_nic = false;
     for(const auto& agent_ptr : agents)
     {
         if(agent_ptr->agent_type == "GPU")
@@ -427,9 +425,16 @@ TEST_F(rocpd_write_read_test, agents_round_trip_all_types)
             EXPECT_EQ(agent_ptr->name, "CPU0");
             EXPECT_EQ(agent_ptr->model_name, "EPYC");
         }
+        else if(agent_ptr->agent_type == "NIC")
+        {
+            found_nic = true;
+            EXPECT_EQ(agent_ptr->name, "NIC0");
+            EXPECT_EQ(agent_ptr->model_name, "CX7");
+        }
     }
     EXPECT_TRUE(found_gpu) << "GPU agent not found in read-back";
     EXPECT_TRUE(found_cpu) << "CPU agent not found in read-back";
+    EXPECT_TRUE(found_nic) << "NIC agent not found in read-back";
 }
 
 // ---------------------------------------------------------------------------
@@ -1211,16 +1216,25 @@ TEST_F(rocpd_write_read_test, handle_gpu_pmc_sample_pathway)
 
 // ---------------------------------------------------------------------------
 // handle(ainic_pmc_sample): NIC RDMA metric PMC inserts
-// NIC agents are not supported by profiler-hub register_agent_info, so the
-// handle() pathway registers PMC events using make_agent_uid(NIC) directly.
 // ---------------------------------------------------------------------------
 
 TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
 {
     register_base_metadata();
-    register_gpu_agent();
 
-    auto gpu_uid = make_agent_uid(gpu_agent());
+    auto nic = nic_agent();
+
+    profiler_hub::writer_types::agent_info_t nic_info{};
+    nic_info.unique_id    = make_agent_uid(nic);
+    nic_info.name         = nic.name;
+    nic_info.model_name   = nic.model_name;
+    nic_info.vendor_name  = nic.vendor_name;
+    nic_info.product_name = nic.product_name;
+    nic_info.node_id      = NODE_ID;
+    nic_info.process_id   = PID;
+    m_writer->register_agent_info(nic_info);
+
+    auto nic_uid = make_agent_uid(nic);
 
     auto ev = make_event(0, 0, 0, "amd_smi_nic");
 
@@ -1228,9 +1242,10 @@ TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
                                            double value, size_t timestamp) {
         profiler_hub::writer_types::pmc_info_t pi{};
         pi.unique_id.name     = pmc_name;
-        pi.unique_id.agent_id = gpu_uid;
+        pi.unique_id.agent_id = nic_uid;
         pi.symbol             = pmc_name;
         pi.description        = pmc_name;
+        pi.target_arch        = "NIC";
         pi.node_id            = NODE_ID;
         pi.process_id         = PID;
         m_writer->register_pmc_info(pi);
@@ -1252,7 +1267,7 @@ TEST_F(rocpd_write_read_test, handle_ainic_pmc_sample_pathway)
 
         profiler_hub::writer_types::pmc_info_unique_id_t uid{};
         uid.name     = pmc_name;
-        uid.agent_id = gpu_uid;
+        uid.agent_id = nic_uid;
 
         m_writer->insert_pmc_event_data(pmc_data, uid);
     };
