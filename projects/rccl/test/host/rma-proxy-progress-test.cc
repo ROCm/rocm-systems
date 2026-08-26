@@ -686,4 +686,94 @@ TEST_F(RmaProxyProgressTest, Completion_HeadOfLineGate_DrainsInFifoOrder) {
     EXPECT_EQ(doneSeqStore_[1], tailSeq);
 }
 
+// Network-side backpressure: credit permits the op but the network's request
+// pool is exhausted (#2119's regime). The poll propagates the error leaving no
+// residue -- no CI advance, no enqueue, no credit -- and resumes once a slot frees.
+TEST_F(RmaProxyProgressTest, SinglePut_NetworkPoolExhausted_PropagatesErrorAndResumes) {
+    const int peer = 1;
+    const uint32_t target = 1;
+
+    ctx_->maxInflightRequests = 8;   // credit is not the limiter; the network is
+    net_.poolSize = 1;
+
+    // Occupy the pool's only slot, with no proxy-side bookkeeping.
+    void* hog = nullptr;
+    ASSERT_EQ(net_.issue(target, &hog), ncclSuccess);
+    const int baseIssue = net_.issueCalls;
+
+    ncclRmaProxyDesc* desc = PushPendingPutSignal(peer, target);
+
+    EXPECT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer),
+              ncclInternalError);
+
+    EXPECT_EQ(net_.issueCalls, baseIssue + 1);
+    EXPECT_EQ(cis_[peer], 0u);                     // CI NOT advanced
+    EXPECT_EQ(InProgressHead(peer), nullptr);      // NOT enqueued
+    EXPECT_EQ(inflight_[target], 0u);              // failed op holds no credit
+    EXPECT_EQ(desc->putSignal.request, nullptr);
+
+    // The NIC retires the request, freeing the slot.
+    net_.completeRequest(hog);
+    int done = 0;
+    ASSERT_EQ(net_.testReq(hog, &done), ncclSuccess);
+    ASSERT_EQ(done, 1);
+
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, baseIssue + 2);     // retried exactly once
+    EXPECT_EQ(cis_[peer], 1u);
+    EXPECT_EQ(InProgressHead(peer), desc);
+    EXPECT_EQ(inflight_[target], 1u);
+}
+
+// Mid-group network refusal: 2 of 3 ops fit. The failed op must be neither
+// counted as issued nor charged a credit -- otherwise the retry skips past it and
+// the op is silently dropped, which is #2119's symptom.
+TEST_F(RmaProxyProgressTest, GroupPut_NetworkPoolExhaustedMidGroup_HoldsPartialProgressAndResumes) {
+    const int peer = 1;
+    const uint32_t target = 1;
+
+    ctx_->maxInflightRequests = 8;   // credit is not the limiter
+    net_.poolSize = 2;               // the network is: only 2 of 3 ops fit
+
+    ncclRmaProxyDesc* desc = PushPendingPutGroup(peer, {target, target, target});
+
+    EXPECT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer),
+              ncclInternalError);
+
+    EXPECT_EQ(net_.issueCalls, 3);                       // 2 issued, 3rd attempted
+    EXPECT_EQ(desc->putSignalGroup.nIssued, 2);          // failed op NOT counted
+    EXPECT_EQ(inflight_[target], 2u);                    // only live ops hold credit
+    EXPECT_EQ(desc->putSignalGroup.ops[2].request, nullptr);
+    EXPECT_EQ(cis_[peer], 0u);
+    EXPECT_EQ(InProgressHead(peer), nullptr);            // group stays pending
+
+    // A completion frees a slot; only the remaining op may issue.
+    net_.completeRequest(desc->putSignalGroup.ops[0].request);
+
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, 4);                       // exactly one more issue
+    EXPECT_EQ(desc->putSignalGroup.nIssued, 3);
+    EXPECT_EQ(desc->putSignalGroup.nCompleted, 1);
+    EXPECT_EQ(InProgressHead(peer), desc);
+    EXPECT_EQ(cis_[peer], 1u);
+}
+
+// Success with a NULL request, from inside the poll: the guard must reject it
+// before a credit is counted, and the poll must propagate rather than advance.
+TEST_F(RmaProxyProgressTest, PollDesc_NullRequestOnSuccess_PropagatesWithoutCredit) {
+    const int peer = 1;
+    const uint32_t target = 1;
+
+    net_.forceNullOnSuccess = true;
+    PushPendingPutSignal(peer, target);
+
+    EXPECT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer),
+              ncclInternalError);
+
+    EXPECT_EQ(net_.issueCalls, 1);
+    EXPECT_EQ(inflight_[target], 0u);          // no credit for a phantom request
+    EXPECT_EQ(cis_[peer], 0u);
+    EXPECT_EQ(InProgressHead(peer), nullptr);
+}
+
 }  // namespace
