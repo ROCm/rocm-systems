@@ -4092,6 +4092,11 @@ TEST(HsaHooksUnitTest, ConSanLoaderHonorsAllTypedOutcomesAcrossAllProfiles) {
     modified.modified = true;
     modified.final_validation_passed = true;
     modified.elf_bytes.assign(replacement.begin(), replacement.end());
+    if (profile.expected_flavor == rocjitsu::ConSanFlavor::SuperCollider) {
+      modified.observation_plan.engine = rocjitsu::ConSanCapabilityEngine::SuperCollider;
+      ASSERT_TRUE(modified.observation_plan.valid());
+      modified.coverage_ledger = rocjitsu::ConSanCoverageLedger(modified.observation_plan);
+    }
     run_hook_load_case(profile, false, modified, HSA_STATUS_SUCCESS, 102u, replacement);
     run_hook_load_case(profile, true, modified, HSA_STATUS_SUCCESS, 102u, replacement);
     run_hook_load_case(profile, false, modified, HSA_STATUS_SUCCESS, 101u, {}, true);
@@ -5239,6 +5244,10 @@ TEST(HsaHooksUnitTest, ConSanHighCardinalityTypedDiagnosticsUseBoundedBatchedWri
 
   install_test_access_coverage(result, kRecordCount, rocjitsu::ConSanSiteDecisionKind::Unsupported,
                                rocjitsu::ConSanAccessPolicyReason::UnsupportedMnemonic);
+  result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  result.modified = false;
+  result.final_validation_passed = false;
+  result.elf_bytes.clear();
   const auto count_records = [](std::string_view log, std::string_view marker) {
     size_t count = 0;
     for (size_t offset = 0; (offset = log.find(marker, offset)) != std::string_view::npos;
@@ -5435,6 +5444,10 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
   atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
   atomic_plan.text_offset = 0x30;
   result.resource_plans.push_back(std::move(atomic_plan));
+  result.outcome = rocjitsu::ConSanTransformOutcome::Unchanged;
+  result.modified = false;
+  result.final_validation_passed = false;
+  result.elf_bytes.clear();
 
   testing::internal::CaptureStderr();
   run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 101u);
@@ -5619,6 +5632,40 @@ TEST(HsaHooksUnitTest, ConSanAutoReportNeverReconstructsMissingEvidenceFromMecha
   EXPECT_NE(log.find("missing or invalid typed evidence requirements"), std::string::npos) << log;
 }
 
+TEST(HsaHooksUnitTest, ConSanAutoReportDoesNotAllocateForValidEmptyTypedEvidence) {
+  ScopedEnvVar mode("RJ_CONSAN_MODE", "record-replay");
+  ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
+  ScopedEnvVar report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", nullptr);
+  ScopedEnvVar report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", nullptr);
+  ScopedEnvVar auto_report_size("RJ_CONSAN_MOI_AUTO_REPORT_BUFFER_SIZE", "16777216");
+  ScopedEnvVar dynamic_records("RJ_CONSAN_MOI_DYNAMIC_ACCESS_RECORDS", "0");
+
+  reset_code_object_observations();
+  reset_core_memory_observations();
+  g_transform_override_result = auto_report_replay_transform_result();
+  g_transform_override_result.observation_plan = {};
+  g_transform_override_result.observation_plan.engine =
+      rocjitsu::ConSanCapabilityEngine::RecordReplay;
+  ASSERT_TRUE(g_transform_override_result.observation_plan.valid());
+  g_transform_override_result.coverage_ledger =
+      rocjitsu::ConSanCoverageLedger(g_transform_override_result.observation_plan);
+
+  FakeApiTable api;
+  InstalledDbiHook hook(api);
+  ASSERT_TRUE(hook.installed()) << hook.error();
+  constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(), original.size(),
+                                                                  &reader),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                              reader, nullptr, nullptr),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(g_core_memory_allocate_calls, 0);
+  EXPECT_TRUE(g_core_memory_allocations.empty());
+  EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{102u});
+}
+
 TEST(HsaHooksUnitTest, ConSanAutoReportLiveFaultUsesPristineSizingAndLateBoundLiveOptions) {
   constexpr std::array fault_environments = {
       "RJ_CONSAN_FAULT_DROP_BARRIER",
@@ -5781,6 +5828,11 @@ TEST(HsaHooksUnitTest, ConSanAutoReportFallbacksStillExecuteLiveFaultTransform) 
       g_transform_override_result.modified = true;
       g_transform_override_result.final_validation_passed = true;
       g_transform_override_result.elf_bytes = {0x7f, 'E', 'L', 'F', 'n', 'o'};
+      g_transform_override_result.observation_plan.engine =
+          rocjitsu::ConSanCapabilityEngine::RecordReplay;
+      ASSERT_TRUE(g_transform_override_result.observation_plan.valid());
+      g_transform_override_result.coverage_ledger =
+          rocjitsu::ConSanCoverageLedger(g_transform_override_result.observation_plan);
     }
     g_transform_override_models_fault_application = true;
     {
@@ -5818,7 +5870,53 @@ rocjitsu::ConSanResult auto_sc_transform_result() {
   patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
   patch.kind = rocjitsu::ConSanPatchKind::LocalCaveLdsStoreCheckTrap;
   result.patches.push_back(patch);
+  install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,
+                               rocjitsu::ConSanAccessPolicyReason::None,
+                               rocjitsu::ConSanLoweringOutcomeKind::Instrumented,
+                               rocjitsu::ConSanCapabilityEngine::SuperCollider,
+                               rocjitsu::ConSanProbeIntentKind::RedundantAccessObservation);
   return result;
+}
+
+TEST(HsaHooksUnitTest, ConSanScAutoReportNeverReconstructsMissingEvidenceFromMechanismTelemetry) {
+  for (const bool fail_closed : {false, true}) {
+    SCOPED_TRACE(fail_closed);
+    ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
+    ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
+    ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+    ScopedEnvVar fail_closed_value("RJ_CONSAN_FAIL_CLOSED", fail_closed ? "1" : "0");
+    ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
+    ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+
+    reset_code_object_observations();
+    reset_core_memory_observations();
+    g_transform_override_result = auto_sc_transform_result();
+    g_transform_override_result.observation_plan = {};
+    g_transform_override_result.coverage_ledger = {};
+
+    testing::internal::CaptureStderr();
+    {
+      FakeApiTable api;
+      InstalledDbiHook hook(api);
+      ASSERT_TRUE(hook.installed()) << hook.error();
+      constexpr std::array<uint8_t, 8> original = {0x7f, 'E', 'L', 'F', 1, 2, 3, 4};
+      hsa_code_object_reader_t reader{};
+      ASSERT_EQ(api.core.hsa_code_object_reader_create_from_memory_fn(original.data(),
+                                                                      original.size(), &reader),
+                HSA_STATUS_SUCCESS);
+      EXPECT_EQ(api.core.hsa_executable_load_agent_code_object_fn(hsa_executable_t{7}, kHostAgent,
+                                                                  reader, nullptr, nullptr),
+                fail_closed ? HSA_STATUS_ERROR_OUT_OF_RESOURCES : HSA_STATUS_SUCCESS);
+      EXPECT_EQ(g_core_memory_allocate_calls, 0);
+      EXPECT_TRUE(g_core_memory_allocations.empty());
+      if (fail_closed)
+        EXPECT_TRUE(g_loaded_code_object_readers.empty());
+      else
+        EXPECT_EQ(g_loaded_code_object_readers, std::vector<uint64_t>{reader.handle});
+    }
+    const std::string log = testing::internal::GetCapturedStderr();
+    EXPECT_NE(log.find("missing or invalid typed evidence requirements"), std::string::npos) << log;
+  }
 }
 
 TEST(HsaHooksUnitTest, ConSanOnUnloadDefersLiveReportFreeToRuntime) {
@@ -5875,6 +5973,8 @@ TEST(HsaHooksUnitTest, ConSanScAutoReportUsesMarkerAndCleansUpWithoutTrapFallbac
   ScopedEnvVar mode("RJ_CONSAN_MODE", "supercollider");
   ScopedEnvVar report_mode("RJ_CONSAN_SC_REPORT_MODE", nullptr);
   ScopedEnvVar report_buffer("RJ_CONSAN_REPORT_BUFFER", nullptr);
+  ScopedEnvVar foreign_moi_report_buffer("RJ_CONSAN_MOI_REPORT_BUFFER", "4096");
+  ScopedEnvVar foreign_moi_report_size("RJ_CONSAN_MOI_REPORT_BUFFER_SIZE", "65536");
   ScopedEnvVar fail_closed("RJ_CONSAN_FAIL_CLOSED", "0");
   ScopedEnvVar max_patches("RJ_CONSAN_MAX_PATCHES", nullptr);
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");

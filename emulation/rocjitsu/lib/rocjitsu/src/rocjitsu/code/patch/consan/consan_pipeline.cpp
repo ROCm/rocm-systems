@@ -53,14 +53,7 @@ delivery_scope(const ConSanEvidenceRequirements &requirements) {
 }
 
 [[nodiscard]] bool evidence_requires_binding(const ConSanEvidenceRequirements &requirements) {
-  return std::visit(
-      [](const auto &typed) {
-        using T = std::decay_t<decltype(typed)>;
-        if constexpr (std::is_same_v<T, ConSanSuperColliderEvidenceRequirements>)
-          return typed.requires_binding();
-        return typed.complete();
-      },
-      requirements);
+  return std::visit([](const auto &typed) { return typed.requires_binding(); }, requirements);
 }
 
 [[nodiscard]] bool evidence_is_complete(const ConSanEvidenceRequirements &requirements) {

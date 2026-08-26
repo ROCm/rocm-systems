@@ -261,6 +261,82 @@ TEST(ConSanEvidenceRequirements, EmptyRecordReplayPlanProducesOneAddressFreeHead
   EXPECT_FALSE(requirements.runtime_requirements.dispatch_segment_binding);
 }
 
+TEST(ConSanEvidenceRequirements, MoiBindingRequiresSemanticObservationsAndACompleteAbiPlan) {
+  ConSanMoiAutoReportInventory inventory;
+  EXPECT_FALSE(inventory.has_semantic_observations());
+  for (const ConSanMoiAutoReportCapacityMember member : {
+           &ConSanMoiAutoReportInventory::access_range_count,
+           &ConSanMoiAutoReportInventory::barrier_event_count,
+           &ConSanMoiAutoReportInventory::atomic_event_count,
+           &ConSanMoiAutoReportInventory::fence_event_count,
+       }) {
+    ConSanMoiAutoReportInventory observed;
+    observed.*member = 1u;
+    EXPECT_TRUE(observed.has_semantic_observations());
+  }
+
+  ConSanObservationPlan empty_record_replay;
+  empty_record_replay.engine = ConSanCapabilityEngine::RecordReplay;
+  const auto record_replay_empty = plan_consan_record_replay_evidence(empty_record_replay);
+  ASSERT_TRUE(record_replay_empty.complete());
+  EXPECT_FALSE(record_replay_empty.sizing_inventory.has_semantic_observations());
+  EXPECT_FALSE(record_replay_empty.requires_binding());
+
+  const auto record_replay_observed =
+      plan_consan_record_replay_evidence(RecordReplayObservationPlanBuilder().add_fence().build());
+  ASSERT_TRUE(record_replay_observed.complete());
+  EXPECT_TRUE(record_replay_observed.sizing_inventory.has_semantic_observations());
+  EXPECT_TRUE(record_replay_observed.requires_binding());
+
+  const auto record_replay_capacity_limited =
+      plan_consan_record_replay_evidence(RecordReplayObservationPlanBuilder().add_access(1).build(),
+                                         {.caller_ceiling_bytes = sizeof(ConSanMoiReportHeader),
+                                          .maximum_access_probe_count = std::nullopt});
+  ASSERT_TRUE(record_replay_capacity_limited.well_formed());
+  ASSERT_FALSE(record_replay_capacity_limited.complete());
+  EXPECT_TRUE(record_replay_capacity_limited.sizing_inventory.has_semantic_observations());
+  EXPECT_FALSE(record_replay_capacity_limited.requires_binding());
+
+  ConSanObservationPlan empty_sampled;
+  empty_sampled.engine = ConSanCapabilityEngine::Sampled;
+  const auto sampled_empty = plan_consan_sampled_evidence(empty_sampled);
+  ASSERT_TRUE(sampled_empty.complete());
+  EXPECT_FALSE(sampled_empty.sizing_inventory.has_semantic_observations());
+  EXPECT_FALSE(sampled_empty.requires_binding());
+  const auto sampled_observed =
+      plan_consan_sampled_evidence(EvidenceObservationPlanBuilder(ConSanCapabilityEngine::Sampled)
+                                       .add(ConSanProbeIntentKind::SampledBarrierEpoch,
+                                            ConSanSemanticSiteDomain::SynchronizationEvent)
+                                       .build());
+  ASSERT_TRUE(sampled_observed.complete());
+  EXPECT_TRUE(sampled_observed.sizing_inventory.has_semantic_observations());
+  EXPECT_TRUE(sampled_observed.requires_binding());
+
+  const InlineEvidenceFixture inline_fixture =
+      make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);
+  ConSanObservationPlan empty_inline;
+  empty_inline.engine = ConSanCapabilityEngine::InlineShadow;
+  const auto inline_empty =
+      plan_consan_inline_shadow_evidence(inline_fixture.inventory, empty_inline);
+  ASSERT_TRUE(inline_empty.complete());
+  EXPECT_FALSE(inline_empty.sizing_inventory.has_semantic_observations());
+  EXPECT_FALSE(inline_empty.requires_binding());
+  const auto inline_observed =
+      plan_consan_inline_shadow_evidence(inline_fixture.inventory, inline_fixture.plan);
+  ASSERT_TRUE(inline_observed.complete());
+  EXPECT_TRUE(inline_observed.sizing_inventory.has_semantic_observations());
+  EXPECT_TRUE(inline_observed.requires_binding());
+
+  EXPECT_FALSE(
+      ConSanRecordReplayEvidenceRequirements{}.sizing_inventory.has_semantic_observations());
+  EXPECT_FALSE(ConSanRecordReplayEvidenceRequirements{}.requires_binding());
+  EXPECT_FALSE(ConSanSampledEvidenceRequirements{}.sizing_inventory.has_semantic_observations());
+  EXPECT_FALSE(ConSanSampledEvidenceRequirements{}.requires_binding());
+  EXPECT_FALSE(
+      ConSanInlineShadowEvidenceRequirements{}.sizing_inventory.has_semantic_observations());
+  EXPECT_FALSE(ConSanInlineShadowEvidenceRequirements{}.requires_binding());
+}
+
 TEST(ConSanEvidenceRequirements, IntentKindsMapToIndependentRecordReplaySizingDimensions) {
   const ConSanObservationPlan plan = RecordReplayObservationPlanBuilder()
                                          .add_access(2)

@@ -2409,6 +2409,52 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   439.14 seconds. E2E validation is intentionally outside this deletion
   tranche.
 
+### Slice 4I: delete legacy report-need reconstruction
+
+- **Completed deletion:** `moi_inventory_needs_report_buffer` and
+  `sc_inventory_needs_report_buffer` are gone. The hook no longer infers a
+  report or marker requirement from prototype candidates, synchronization
+  sites, or emitted patch kinds, and it no longer reruns the SuperCollider
+  evidence planner. All four engines consume the evidence requirement already
+  published by `TransformResult`.
+- **Semantic binding contract:** the shared MOI sizing inventory now states
+  whether any admitted access, barrier, atomic, or fence observation exists.
+  Record/Replay, Sampled, and InlineShadow require a concrete binding only
+  when that semantic inventory is nonempty and its ABI plan is complete. Thus
+  a valid empty observation plan may retain a header-only ABI description
+  without allocating a useless report; an incomplete plan with real
+  observations remains a visible capacity failure rather than looking empty.
+- **Fail-safe cutover:** a modified result with missing, malformed, or
+  wrong-engine typed evidence cannot allocate from legacy telemetry or install
+  unbound instrumentation. Fail-open loads the pristine object and fail-closed
+  rejects it. Non-installable SuperCollider outcomes bypass marker allocation
+  and retain their normal typed loader policy.
+- **Engine isolation:** ignored report settings remain available to the
+  configuration diagnostics but are projected out before runtime binding. An
+  MOI buffer can therefore no longer make a SuperCollider transform appear
+  bound to the wrong resource kind, and conversely an SC marker cannot bind an
+  MOI requirement.
+- **Focused contract gate:** unit tests cover every MOI semantic count,
+  complete and capacity-limited requirements, valid empty plans for all four
+  engines, malformed requirements, and pipeline binding-stage outcomes. Hook
+  tests leave contradictory legacy patches/candidates in place and prove that
+  missing evidence cannot allocate or install, valid empty evidence allocates
+  nothing, foreign-engine resource settings are ignored, and both fail-open
+  and fail-closed behavior remain explicit.
+- **Deletion result:** the hook and pipeline shrink by 26 net production lines;
+  the shared typed evidence API grows by 23 lines, leaving production three
+  net lines smaller. Source plus the new focused regression contracts grows by
+  181 net lines. The test growth is deliberate: it replaces implicit behavior
+  of the deleted scans with independently falsifiable typed and lifecycle
+  contracts.
+- **Completed checked-in gate:** 1,504 of 1,506 selected ConSan host tests
+  passed, with two external-object benchmarks intentionally skipped, plus all
+  102 focused HSA-hook tests. All 2,908 simulator device rows passed in 69.80
+  seconds of wall time. The immediately preceding Slice 4H physical gate
+  passed all 593 gfx950 rows; the next periodic physical gate remains due
+  after the following deletion tranche. E2E validation remains outside this
+  work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

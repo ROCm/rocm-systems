@@ -763,19 +763,7 @@ private:
   Summary summary_;
 };
 
-[[nodiscard]] bool moi_inventory_needs_report_buffer(const rocjitsu::ConSanResult &result,
-                                                     const HookConfig &config) {
-  if (!result.moi_candidates.empty())
-    return true;
-  const auto container_needs_buffer = [&](const auto &container) {
-    return (config.moi_track_barriers && !container.barrier_sites.empty()) ||
-           (config.moi_track_atomics && !container.atomic_sites.empty());
-  };
-  return std::ranges::any_of(result.program_inventory.kernels(), container_needs_buffer) ||
-         std::ranges::any_of(result.program_inventory.functions(), container_needs_buffer);
-}
-
-/// Visit a complete MOI evidence contract without admitting SuperCollider or
+/// Visit a well-formed MOI evidence contract without admitting SuperCollider or
 /// malformed requirements through the MOI report-allocation path. The hook
 /// uses this narrow adapter only to bind an already-planned contract; it never
 /// reconstructs evidence requirements from mechanism telemetry.
@@ -796,24 +784,6 @@ template <typename Callback>
              &*result.evidence_requirements)) ||
          visit_if_present(std::get_if<rocjitsu::ConSanInlineShadowEvidenceRequirements>(
              &*result.evidence_requirements));
-}
-
-[[nodiscard]] bool sc_inventory_needs_report_buffer(const rocjitsu::ConSanResult &result) {
-  return std::ranges::any_of(result.patches, [](const rocjitsu::ConSanPatchInfo &patch) {
-    switch (patch.kind) {
-    case rocjitsu::ConSanPatchKind::InlineLdsLoadCheckTrap:
-    case rocjitsu::ConSanPatchKind::InlineLdsStoreCheckTrap:
-    case rocjitsu::ConSanPatchKind::LocalCaveLdsLoadCheckTrap:
-    case rocjitsu::ConSanPatchKind::LocalCaveLdsStoreCheckTrap:
-    case rocjitsu::ConSanPatchKind::InlineFlatLoadCheckTrap:
-    case rocjitsu::ConSanPatchKind::InlineFlatStoreCheckTrap:
-    case rocjitsu::ConSanPatchKind::LocalCaveFlatLoadCheckTrap:
-    case rocjitsu::ConSanPatchKind::LocalCaveFlatStoreCheckTrap:
-      return patch.phase == rocjitsu::ConSanPatchPhase::Instrumentation;
-    default:
-      return false;
-    }
-  });
 }
 
 std::mutex &log_mutex() {
@@ -3867,8 +3837,22 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     const auto &transform_policy = static_cast<const rocjitsu::TransformPolicy &>(*config);
     const auto &runtime_policy = static_cast<const rocjitsu::RuntimePolicy &>(*config);
     const auto &debug_overrides = static_cast<const rocjitsu::ConSanDebugOverrides &>(*config);
-    rocjitsu::BoundRuntimeResources runtime_resources =
+    const auto &configured_runtime_resources =
         static_cast<const rocjitsu::BoundRuntimeResources &>(*config);
+    rocjitsu::BoundRuntimeResources runtime_resources;
+    // Parsing retains ignored, foreign-engine settings so it can diagnose
+    // them. Do not let those settings masquerade as a binding of the selected
+    // engine's typed evidence contract.
+    if (request.flavor == rocjitsu::ConSanFlavor::SuperCollider) {
+      runtime_resources.report_buffer_address = configured_runtime_resources.report_buffer_address;
+      if (runtime_resources.report_buffer_address)
+        runtime_resources.scope = configured_runtime_resources.scope;
+    } else if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
+      runtime_resources = configured_runtime_resources;
+      runtime_resources.report_buffer_address.reset();
+      if (!runtime_resources.moi_report_buffer_address)
+        runtime_resources.scope = rocjitsu::ConSanRuntimeResourceScope::Unbound;
+    }
     rocjitsu::MutationRequest mutation_request =
         static_cast<const rocjitsu::MutationRequest &>(*config);
     // Exact fault selection is process-scoped in the HSA hook: workloads can
@@ -4066,17 +4050,28 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       rocjitsu::TransformResult inventory = run_consan_transform(
           std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
           debug_overrides, inventory_mutation, runtime_capabilities, runtime_resources);
-      std::optional<rocjitsu::ConSanSuperColliderEvidenceRequirements>
-          supercollider_evidence_requirements;
-      if (inventory.observation_plan.valid()) {
-        supercollider_evidence_requirements =
-            rocjitsu::plan_consan_supercollider_evidence(inventory.observation_plan);
-      }
-      const bool supercollider_requires_report =
-          supercollider_evidence_requirements
-              ? supercollider_evidence_requirements->requires_binding()
-              : sc_inventory_needs_report_buffer(inventory.legacy_mechanism());
-      if (!supercollider_requires_report) {
+      if (inventory.install_action(/*fail_closed=*/false) !=
+          rocjitsu::ConSanInstallAction::LoadReplacement) {
+        patch_result_storage = std::move(inventory);
+      } else if (const auto *supercollider_evidence_requirements =
+                     inventory.evidence_requirements
+                         ? std::get_if<rocjitsu::ConSanSuperColliderEvidenceRequirements>(
+                               &*inventory.evidence_requirements)
+                         : nullptr;
+                 !supercollider_evidence_requirements ||
+                 !supercollider_evidence_requirements->well_formed()) {
+        log_message(kLogInfo,
+                    "ConSan SC automatic report rejected reader=%llu: missing or invalid typed "
+                    "evidence requirements",
+                    static_cast<unsigned long long>(code_object_reader.handle));
+        inventory.discard_replacement(
+            "SuperCollider automatic report requires typed evidence requirements");
+        patch_result_storage = std::move(inventory);
+        if (config->fail_closed)
+          return reject_code_object_load(
+              *config, HSA_STATUS_ERROR_OUT_OF_RESOURCES, code_object_reader.handle,
+              "supercollider-report-missing-evidence-requirements", fault_installation_evidence);
+      } else if (!supercollider_evidence_requirements->requires_binding()) {
         log_message(kLogInfo,
                     "ConSan SC auto report buffer skipped reader=%llu: no selected check sites",
                     static_cast<unsigned long long>(code_object_reader.handle));
@@ -4085,18 +4080,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       } else {
         uint64_t auto_report_address = 0;
         uint64_t auto_report_generation = 0;
-        rocjitsu::RuntimeCapabilityRequirements report_requirements;
-        if (supercollider_evidence_requirements) {
-          report_requirements = supercollider_evidence_requirements->runtime_requirements;
-        } else {
-          // Compatibility for hook tests that inject a synthetic pre-plan
-          // transform result. Production plans always take the typed path.
-          report_requirements.host_device_visible_memory = true;
-          report_requirements.minimum_report_allocation_bytes = sizeof(uint32_t);
-          report_requirements.executable_binding = true;
-        }
         const rocjitsu::ConSanContractIssue capability_issue =
-            rocjitsu::validate_runtime_capabilities(runtime_capabilities, report_requirements);
+            rocjitsu::validate_runtime_capabilities(
+                runtime_capabilities, supercollider_evidence_requirements->runtime_requirements);
         const bool allocated = capability_issue == rocjitsu::ConSanContractIssue::None &&
                                AutoScReportBufferRegistry::instance().allocate(
                                    layer().core_table(), agent, code_object_reader.handle,
@@ -4168,17 +4154,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       if (!rocjitsu::consan_result_has_resolved_semantic_arch(inventory.legacy_mechanism()))
         return reject_unresolved_semantic_arch(*config, code_object_reader.handle,
                                                fault_installation_evidence);
-      const bool inventory_requires_report_buffer =
-          moi_inventory_needs_report_buffer(inventory.legacy_mechanism(), *config);
-      bool auto_report_plan_available = inventory_requires_report_buffer;
-      if (!inventory_requires_report_buffer) {
-        log_message(kLogInfo,
-                    "ConSan MOI auto report buffer skipped reader=%llu: no MOI report sites",
-                    static_cast<unsigned long long>(code_object_reader.handle));
-        if (!live_fault_transform)
-          patch_result_storage = std::move(inventory);
-      }
-
       uint64_t auto_report_address = 0;
       uint64_t auto_report_size = 0;
       uint64_t auto_report_generation = 0;
@@ -4188,7 +4163,42 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       std::optional<rocjitsu::ConSanMoiReportLayoutOverride> report_layout_override;
       std::optional<rocjitsu::ConSanMoiAutoReportInventory> planned_report_inventory;
       std::optional<rocjitsu::RuntimeCapabilityRequirements> evidence_runtime_requirements;
-      if (inventory_requires_report_buffer && !patch_result_storage &&
+      rocjitsu::ConSanMoiAutoReportInventory report_inventory;
+      rocjitsu::ConSanMoiAutoReportPlan report_plan;
+      bool inventory_has_semantic_observations = false;
+      const bool evidence_available =
+          visit_moi_evidence_requirements(inventory, [&](const auto &requirements) {
+            report_inventory = requirements.sizing_inventory;
+            report_plan = requirements.abi_plan;
+            evidence_runtime_requirements = requirements.runtime_requirements;
+            inventory_has_semantic_observations =
+                requirements.sizing_inventory.has_semantic_observations();
+          });
+      bool auto_report_plan_available = evidence_available && inventory_has_semantic_observations;
+      if (!evidence_available) {
+        log_message(kLogInfo,
+                    "ConSan MOI auto report rejected reader=%llu: missing or invalid typed "
+                    "evidence requirements",
+                    static_cast<unsigned long long>(code_object_reader.handle));
+        reject_auto_moi_report_plan(code_object_reader.handle, /*required_size=*/0,
+                                    config->moi_auto_report_buffer_size,
+                                    "missing_evidence_requirements");
+        if (config->fail_closed)
+          return reject_code_object_load(
+              *config, HSA_STATUS_ERROR_OUT_OF_RESOURCES, code_object_reader.handle,
+              "moi-report-missing-evidence-requirements", fault_installation_evidence);
+        inventory.discard_replacement(
+            "ConSan MOI automatic report requires typed evidence requirements");
+        patch_result_storage = std::move(inventory);
+      } else if (!inventory_has_semantic_observations) {
+        log_message(kLogInfo,
+                    "ConSan MOI auto report buffer skipped reader=%llu: no MOI report sites",
+                    static_cast<unsigned long long>(code_object_reader.handle));
+        if (!live_fault_transform)
+          patch_result_storage = std::move(inventory);
+      }
+
+      if (auto_report_plan_available && !patch_result_storage &&
           request.moi_dynamic_access_records) {
         if (!config->moi_auto_report_buffer_size_explicit) {
           log_message(kLogInfo,
@@ -4216,71 +4226,42 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                       static_cast<unsigned long long>(required_report_size),
                       static_cast<unsigned long long>(config->moi_auto_report_buffer_size));
         }
-      } else if (inventory_requires_report_buffer && !patch_result_storage) {
-        rocjitsu::ConSanMoiAutoReportInventory report_inventory;
-        rocjitsu::ConSanMoiAutoReportPlan report_plan;
-        const bool evidence_available =
-            visit_moi_evidence_requirements(inventory, [&](const auto &requirements) {
-              report_inventory = requirements.sizing_inventory;
-              report_plan = requirements.abi_plan;
-              evidence_runtime_requirements = requirements.runtime_requirements;
-            });
-        if (!evidence_available) {
-          log_message(kLogInfo,
-                      "ConSan MOI auto report rejected reader=%llu: missing or invalid typed "
-                      "evidence requirements",
-                      static_cast<unsigned long long>(code_object_reader.handle));
-          reject_auto_moi_report_plan(code_object_reader.handle, /*required_size=*/0,
-                                      config->moi_auto_report_buffer_size,
-                                      "missing_evidence_requirements");
-          if (config->fail_closed)
-            return reject_code_object_load(
-                *config, HSA_STATUS_ERROR_OUT_OF_RESOURCES, code_object_reader.handle,
-                "moi-report-missing-evidence-requirements", fault_installation_evidence);
-          inventory.discard_replacement(
-              "ConSan MOI automatic report requires typed evidence requirements");
-          auto_report_plan_available = false;
-          patch_result_storage = std::move(inventory);
-        }
-        if (evidence_available) {
-          planned_report_inventory = report_inventory;
-          required_report_size = report_plan.required_bytes;
-          requested_report_size = report_plan.required_bytes;
-          report_layout = report_plan.layout;
-          report_layout_override = rocjitsu::consan_moi_auto_report_layout_override(report_plan);
-          log_message(
-              kLogInfo,
-              "ConSan MOI auto report plan reader=%llu outcome=%s reason=%s "
-              "required_bytes=%llu cap_bytes=%llu per_buffer_ceiling=%llu "
-              "process_ceiling=%llu access_ranges=%llu barriers=%llu atomics=%llu fences=%llu "
-              "dispatch_banks=%llu owner_banks=%llu address_group_headroom=%llu "
-              "diagnostics=%llu sampled_banks=%llu sampled_watchpoints=%llu inline_lds_bytes=%llu "
-              "inline_releases=%llu inline_snapshots=%llu inline_tokens=%llu",
-              static_cast<unsigned long long>(code_object_reader.handle),
-              rocjitsu::consan_moi_auto_report_plan_outcome_name(report_plan.outcome).data(),
-              rocjitsu::consan_moi_auto_report_plan_reason_name(report_plan.reason).data(),
-              static_cast<unsigned long long>(report_plan.required_bytes),
-              static_cast<unsigned long long>(config->moi_auto_report_buffer_size),
-              static_cast<unsigned long long>(report_plan.ceiling_bytes),
-              static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
-              static_cast<unsigned long long>(report_inventory.access_range_count),
-              static_cast<unsigned long long>(report_inventory.barrier_event_count),
-              static_cast<unsigned long long>(report_inventory.atomic_event_count),
-              static_cast<unsigned long long>(report_inventory.fence_event_count),
-              static_cast<unsigned long long>(
-                  report_inventory.record_replay_access_dispatch_bank_count),
-              static_cast<unsigned long long>(
-                  report_inventory.record_replay_access_owner_bank_count),
-              static_cast<unsigned long long>(
-                  report_inventory.record_replay_address_group_headroom),
-              static_cast<unsigned long long>(report_inventory.diagnostic_count),
-              static_cast<unsigned long long>(report_inventory.sampled_range_bank_count),
-              static_cast<unsigned long long>(report_inventory.sampled_watchpoint_count),
-              static_cast<unsigned long long>(report_inventory.inline_lds_bytes),
-              static_cast<unsigned long long>(report_inventory.inline_atomic_release_count),
-              static_cast<unsigned long long>(report_inventory.inline_causal_snapshot_count),
-              static_cast<unsigned long long>(report_inventory.inline_acquired_epoch_token_count));
-        }
+      } else if (auto_report_plan_available && !patch_result_storage) {
+        planned_report_inventory = report_inventory;
+        required_report_size = report_plan.required_bytes;
+        requested_report_size = report_plan.required_bytes;
+        report_layout = report_plan.layout;
+        report_layout_override = rocjitsu::consan_moi_auto_report_layout_override(report_plan);
+        log_message(
+            kLogInfo,
+            "ConSan MOI auto report plan reader=%llu outcome=%s reason=%s "
+            "required_bytes=%llu cap_bytes=%llu per_buffer_ceiling=%llu "
+            "process_ceiling=%llu access_ranges=%llu barriers=%llu atomics=%llu fences=%llu "
+            "dispatch_banks=%llu owner_banks=%llu address_group_headroom=%llu "
+            "diagnostics=%llu sampled_banks=%llu sampled_watchpoints=%llu inline_lds_bytes=%llu "
+            "inline_releases=%llu inline_snapshots=%llu inline_tokens=%llu",
+            static_cast<unsigned long long>(code_object_reader.handle),
+            rocjitsu::consan_moi_auto_report_plan_outcome_name(report_plan.outcome).data(),
+            rocjitsu::consan_moi_auto_report_plan_reason_name(report_plan.reason).data(),
+            static_cast<unsigned long long>(report_plan.required_bytes),
+            static_cast<unsigned long long>(config->moi_auto_report_buffer_size),
+            static_cast<unsigned long long>(report_plan.ceiling_bytes),
+            static_cast<unsigned long long>(rocjitsu::kConSanMoiAutoReportProcessCeilingBytes),
+            static_cast<unsigned long long>(report_inventory.access_range_count),
+            static_cast<unsigned long long>(report_inventory.barrier_event_count),
+            static_cast<unsigned long long>(report_inventory.atomic_event_count),
+            static_cast<unsigned long long>(report_inventory.fence_event_count),
+            static_cast<unsigned long long>(
+                report_inventory.record_replay_access_dispatch_bank_count),
+            static_cast<unsigned long long>(report_inventory.record_replay_access_owner_bank_count),
+            static_cast<unsigned long long>(report_inventory.record_replay_address_group_headroom),
+            static_cast<unsigned long long>(report_inventory.diagnostic_count),
+            static_cast<unsigned long long>(report_inventory.sampled_range_bank_count),
+            static_cast<unsigned long long>(report_inventory.sampled_watchpoint_count),
+            static_cast<unsigned long long>(report_inventory.inline_lds_bytes),
+            static_cast<unsigned long long>(report_inventory.inline_atomic_release_count),
+            static_cast<unsigned long long>(report_inventory.inline_causal_snapshot_count),
+            static_cast<unsigned long long>(report_inventory.inline_acquired_epoch_token_count));
       }
       bool report_runtime_capabilities_available = true;
       if (auto_report_plan_available && !patch_result_storage) {

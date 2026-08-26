@@ -232,6 +232,14 @@ struct ConSanMoiAutoReportInventory {
   /// report ceiling. Runtime saturation remains visible and fail-closed.
   bool inline_diagnostic_count_adaptive = false;
 
+  /// Return whether the inventory describes any admitted access or ordering
+  /// observation. ABI-only header storage and Record/Replay hash-table
+  /// headroom do not by themselves require a runtime report binding.
+  [[nodiscard]] constexpr bool has_semantic_observations() const {
+    return access_range_count != 0u || barrier_event_count != 0u || atomic_event_count != 0u ||
+           fence_event_count != 0u;
+  }
+
   bool operator==(const ConSanMoiAutoReportInventory &) const = default;
 };
 
@@ -567,6 +575,11 @@ struct ConSanRecordReplayEvidenceRequirements {
 
   /// Return whether a well-formed requirement has an allocatable ABI layout.
   [[nodiscard]] bool complete() const { return well_formed() && abi_plan.complete(); }
+  /// Return whether a complete report must be bound before lowering can use
+  /// this contract. An empty plan's header-only ABI is not a binding request.
+  [[nodiscard]] bool requires_binding() const {
+    return complete() && sizing_inventory.has_semantic_observations();
+  }
 
   bool operator==(const ConSanRecordReplayEvidenceRequirements &) const = default;
 };
@@ -622,6 +635,11 @@ struct ConSanSampledEvidenceRequirements {
   [[nodiscard]] bool well_formed() const;
   /// Return whether a well-formed requirement has an allocatable ABI layout.
   [[nodiscard]] bool complete() const { return well_formed() && abi_plan.complete(); }
+  /// Return whether a complete report must be bound before lowering can use
+  /// this contract. An empty plan's header-only ABI is not a binding request.
+  [[nodiscard]] bool requires_binding() const {
+    return complete() && sizing_inventory.has_semantic_observations();
+  }
 
   bool operator==(const ConSanSampledEvidenceRequirements &) const = default;
 };
@@ -674,6 +692,11 @@ struct ConSanInlineShadowEvidenceRequirements {
   [[nodiscard]] bool well_formed() const;
   /// Return whether a well-formed requirement has an allocatable ABI layout.
   [[nodiscard]] bool complete() const { return well_formed() && abi_plan.complete(); }
+  /// Return whether a complete report must be bound before lowering can use
+  /// this contract. An empty plan's header-only ABI is not a binding request.
+  [[nodiscard]] bool requires_binding() const {
+    return complete() && sizing_inventory.has_semantic_observations();
+  }
 
   bool operator==(const ConSanInlineShadowEvidenceRequirements &) const = default;
 };

@@ -266,20 +266,28 @@ TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) 
   }
 }
 
-TEST(ConSanPipeline, EmptySuperColliderPlanNeedsNoRuntimeBinding) {
-  TransformResult result = transform_consan(
-      make_rdna4_supported_lds_code_object(), supercollider_request(/*observe_lds=*/false),
-      TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
-      complete_runtime_capabilities(), BoundRuntimeResources{});
-  ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
-  ASSERT_TRUE(result.evidence_requirements);
-  const auto *requirements =
-      std::get_if<ConSanSuperColliderEvidenceRequirements>(&*result.evidence_requirements);
-  ASSERT_NE(requirements, nullptr);
-  EXPECT_EQ(requirements->marker_bytes, 0u);
-  EXPECT_FALSE(requirements->requires_binding());
-  EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
-            ConSanPipelineStageStatus::NotApplicable);
+TEST(ConSanPipeline, EmptyPlansNeedNoRuntimeBindingForAnyEngine) {
+  constexpr std::array<uint32_t, 1> kTextWords = {0xBFB00000u};
+  const std::vector<uint8_t> bytes =
+      make_rdna4_lds_code_object(kTextWords, "typed_empty_observation_plan");
+  const std::array requests = {
+      moi_request(ConSanMoiEngine::RecordReplay),
+      moi_request(ConSanMoiEngine::Sampled),
+      moi_request(ConSanMoiEngine::InlineShadow),
+      supercollider_request(),
+  };
+  for (const ConSanRequest &request : requests) {
+    TransformResult result = transform_consan(
+        bytes, request, TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
+        complete_runtime_capabilities(), BoundRuntimeResources{});
+    ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
+    ASSERT_TRUE(result.evidence_requirements);
+    EXPECT_FALSE(
+        std::visit([](const auto &requirements) { return requirements.requires_binding(); },
+                   *result.evidence_requirements));
+    EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
+              ConSanPipelineStageStatus::NotApplicable);
+  }
 }
 
 TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
