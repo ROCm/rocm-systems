@@ -15,7 +15,7 @@ import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
-    instruction_pipeline,
+    InstructionPipelines,
     load_code_object_disassemblies,
 )
 from pc_sampling.pc_sampling_analysis import (
@@ -714,7 +714,7 @@ class db_analysis(OmniAnalyze_Base):
         None when the mnemonic is unknown, which leaves the column NULL and
         makes the missing table entry visible.
         """
-        pipeline = instruction_pipeline(instruction)
+        pipeline = InstructionPipelines.lookup(instruction)
         if pipeline is None:
             return None
         return Database.get_or_create_type(orm.InstructionTypeLookup, pipeline)
