@@ -3446,6 +3446,33 @@ analysis completed.
   gfx1250 pass in 69.26 seconds of wall time. E2E validation remains outside
   this work.
 
+### Slice 5I: delete duplicate patched-image rejection telemetry
+
+- **Authoritative owners:** `ConSanPatchedImageGrowthBudget` owns the resolved
+  total and remaining limits before replacement, and `TextReplacementResult`
+  owns the exact transaction growth and failure outcome after replacement.
+  The ConSan replacement helper combines those values once into the retained
+  diagnostic.
+- **Completed deletion:** `ConSanResult` no longer stores a second vector that
+  copied the operation, input size, policy, existing growth, transaction
+  growth, required total, and limit for policy rejections. The duplicate
+  `ConSanPatchedImageGrowthRejection` type and both construction paths are
+  gone. No production code read this telemetry.
+- **Preserved contract coverage:** Focused budget tests still cover absolute
+  and relative limits, saturation, invalid policy, and an already-exceeded
+  image. Replacement tests retain exact diagnostics at relative and absolute
+  boundaries and for malformed/allocation failures. The staged-growth test now
+  asserts the complete diagnostic, including original input, accumulated
+  first-stage growth, second-stage transaction growth, required total, and
+  resolved limit, instead of inspecting the deleted copy.
+- **Deletion result:** Production source is 30 lines smaller and source plus
+  tests is 48 lines smaller. No replacement telemetry or adapter was added.
+- **Completed checked-in gate:** All 13 focused growth tests pass. The complete
+  host gate passes 1,508 tests with the two expected benchmark-object skips;
+  all 194 HSA-hook tests pass; and all 2,878 simulator-device tests across the
+  five supported targets pass in 64.71 seconds. E2E validation remains outside
+  this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

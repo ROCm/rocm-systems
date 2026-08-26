@@ -35,19 +35,6 @@ struct ConSanPerturbationPlan {
   bool removed_cache_boundary = false;
 };
 
-/// Machine-readable resource-policy rejection retained alongside the human
-/// diagnostic. Required bytes are total growth from the original input;
-/// transaction bytes are the exact alignment-inclusive cost of this stage.
-struct ConSanPatchedImageGrowthRejection {
-  std::string operation;
-  ConSanPatchedImageGrowthLimit policy;
-  size_t input_image_bytes = 0;
-  size_t existing_growth_bytes = 0;
-  size_t transaction_growth_bytes = 0;
-  size_t required_total_growth_bytes = 0;
-  size_t limit_bytes = 0;
-};
-
 /// Retained branch-only routing activity used to verify integration behavior.
 /// Pair attempts count submitted requests and plan calls count router
 /// invocations, including LDS convergence iterations; together they detect an
@@ -268,7 +255,6 @@ struct ConSanResult {
   /// an emitted patch kind.
   ConSanCoverageLedger coverage_ledger;
   std::vector<ConSanFaultSite> fault_sites;
-  std::vector<ConSanPatchedImageGrowthRejection> patched_image_growth_rejections;
   std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
   std::vector<ConSanFaultMutationPlan> fault_plans;
   std::vector<ConSanPerturbationCandidate> perturbation_candidates;

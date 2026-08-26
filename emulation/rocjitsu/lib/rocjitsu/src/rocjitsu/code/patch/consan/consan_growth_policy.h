@@ -49,14 +49,6 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
     return false;
   }
   if (budget->already_exceeded) {
-    result.patched_image_growth_rejections.push_back(
-        {.operation = std::string(operation),
-         .policy = options.patched_image_growth_limit,
-         .input_image_bytes = input_image_bytes,
-         .existing_growth_bytes = budget->existing_growth_bytes,
-         .transaction_growth_bytes = 0,
-         .required_total_growth_bytes = budget->existing_growth_bytes,
-         .limit_bytes = budget->total_limit_bytes});
     result.errors.emplace_back("ConSan " + std::string(operation) +
                                " rejected patched-image file growth: required total " +
                                std::to_string(budget->existing_growth_bytes) + " bytes, limit " +
@@ -74,14 +66,6 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
     const size_t transaction_growth = *replacement.required_file_growth();
     const size_t required_total =
         util::saturating_add(budget->existing_growth_bytes, transaction_growth);
-    result.patched_image_growth_rejections.push_back(
-        {.operation = std::string(operation),
-         .policy = options.patched_image_growth_limit,
-         .input_image_bytes = input_image_bytes,
-         .existing_growth_bytes = budget->existing_growth_bytes,
-         .transaction_growth_bytes = transaction_growth,
-         .required_total_growth_bytes = required_total,
-         .limit_bytes = budget->total_limit_bytes});
     result.errors.emplace_back("ConSan " + std::string(operation) +
                                " rejected patched-image file growth: required total " +
                                std::to_string(required_total) + " bytes, limit " +

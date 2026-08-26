@@ -432,25 +432,15 @@ TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
   EXPECT_FALSE(rejected.modified);
   EXPECT_NE(std::ranges::find(rejected.errors, expected), rejected.errors.end())
       << testing::PrintToString(rejected.errors);
-  ASSERT_EQ(rejected.patched_image_growth_rejections.size(), 1u);
-  const auto &resource = rejected.patched_image_growth_rejections.front();
-  EXPECT_EQ(resource.operation, "flat check/trap proof");
-  EXPECT_EQ(resource.policy, fixture.options.patched_image_growth_limit);
-  EXPECT_EQ(resource.input_image_bytes, fixture.bytes.size());
-  EXPECT_EQ(resource.existing_growth_bytes, 0u);
-  EXPECT_EQ(resource.transaction_growth_bytes, required_growth);
-  EXPECT_EQ(resource.required_total_growth_bytes, required_growth);
-  EXPECT_EQ(resource.limit_bytes, rejecting_limit);
 
   fixture.options.patched_image_growth_limit.input_percent =
       static_cast<uint32_t>(admitting_percent);
   const ConSanResult admitted = try_patch_consan(fixture.bytes, fixture.options);
   ASSERT_TRUE(consan_patch_succeeded(admitted)) << testing::PrintToString(admitted.errors);
   EXPECT_EQ(admitted.elf_bytes, fixture.baseline.elf_bytes);
-  EXPECT_TRUE(admitted.patched_image_growth_rejections.empty());
 }
 
-TEST(ConSan, AbsoluteGrowthLimitReportsStructuredExactRejection) {
+TEST(ConSan, AbsoluteGrowthLimitReportsExactRejection) {
   GrowthPolicyFixture fixture = make_growth_policy_fixture();
   ASSERT_TRUE(consan_patch_succeeded(fixture.baseline))
       << testing::PrintToString(fixture.baseline.errors);
@@ -466,10 +456,6 @@ TEST(ConSan, AbsoluteGrowthLimitReportsStructuredExactRejection) {
       " bytes (policy absolute-bytes=" + std::to_string(required_growth - 1u) + ")";
   EXPECT_NE(std::ranges::find(rejected.errors, expected), rejected.errors.end())
       << testing::PrintToString(rejected.errors);
-  ASSERT_EQ(rejected.patched_image_growth_rejections.size(), 1u);
-  EXPECT_EQ(rejected.patched_image_growth_rejections.front().required_total_growth_bytes,
-            required_growth);
-  EXPECT_EQ(rejected.patched_image_growth_rejections.front().limit_bytes, required_growth - 1u);
 }
 
 TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
@@ -510,13 +496,13 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
       options.patched_image_growth_limit, fixture.bytes.size());
   ConSanResult result;
   EXPECT_FALSE(replace_consan_text(patcher, second_stage_text, options, "second stage", result));
-  ASSERT_EQ(result.patched_image_growth_rejections.size(), 1u);
-  const auto &rejection = result.patched_image_growth_rejections.front();
-  EXPECT_EQ(rejection.input_image_bytes, fixture.bytes.size());
-  EXPECT_EQ(rejection.existing_growth_bytes, first_stage_growth);
-  EXPECT_EQ(rejection.transaction_growth_bytes, second_stage_growth);
-  EXPECT_EQ(rejection.required_total_growth_bytes, required_total_growth);
-  EXPECT_EQ(rejection.limit_bytes, rejecting_limit);
+  const std::string expected =
+      "ConSan second stage rejected patched-image file growth: required total " +
+      std::to_string(required_total_growth) + " bytes, limit " + std::to_string(rejecting_limit) +
+      " bytes (policy input-percent=" + std::to_string(admitting_percent - 1u) +
+      ", original-input-image-bytes=" + std::to_string(fixture.bytes.size()) + ")";
+  EXPECT_NE(std::ranges::find(result.errors, expected), result.errors.end())
+      << testing::PrintToString(result.errors);
 }
 
 TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
@@ -528,7 +514,6 @@ TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
                               "ConSan flat check/trap proof has an invalid patched-image growth "
                               "policy (invalid-kind=255)"),
             invalid.errors.end());
-  EXPECT_TRUE(invalid.patched_image_growth_rejections.empty());
 
   AmdGpuCodeObject code_object(fixture.bytes.data(), fixture.bytes.size());
   ASSERT_TRUE(code_object.is_valid());
@@ -549,7 +534,6 @@ TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
       "))";
   EXPECT_NE(std::ranges::find(malformed.errors, expected_malformed), malformed.errors.end())
       << testing::PrintToString(malformed.errors);
-  EXPECT_TRUE(malformed.patched_image_growth_rejections.empty());
 }
 
 TEST(ConSan, ReplacementDiagnosticsReportAllocationAndExactResolvedGrowth) {
@@ -579,7 +563,6 @@ TEST(ConSan, ReplacementDiagnosticsReportAllocationAndExactResolvedGrowth) {
       "), required file growth " + std::to_string(uint64_t{1} << 63u) + " bytes)";
   EXPECT_NE(std::ranges::find(result.errors, expected), result.errors.end())
       << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.patched_image_growth_rejections.empty());
   EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), fixture.bytes));
 }
 
@@ -609,7 +592,6 @@ TEST(ConSan, ReplacementDiagnosticsReportLateMalformedInputAndExactResolvedGrowt
       "), required file growth 64 bytes)";
   EXPECT_NE(std::ranges::find(result.errors, expected), result.errors.end())
       << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.patched_image_growth_rejections.empty());
   EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), fixture.bytes));
 }
 
