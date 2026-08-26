@@ -249,7 +249,7 @@ TEST(CdnaVop3pPackedF32Test, SgprSourcesReadBothRegisters) {
                                                             .src1 = cdna5::OPR_SRC_SGPR_MIN + 8,
                                                             .src2 = cdna5::OPR_SRC_POS_INT_MIN,
                                                             .opsel_hi = 3});
-        words[0] |= uint32_t{1} << 14; // pad_14 is the src2 high-half selector.
+        words[0] |= uint32_t{1} << 14; // op_sel_hi_2 is the src2 high-half selector.
         break;
       default:
         FAIL() << "unsupported architecture " << arch.name;
@@ -367,7 +367,6 @@ inline bool should_skip_inst(std::string_view mn) {
       "s_sethalt",
       "s_sendmsg",
       "s_sendmsghalt",
-      "s_icache_inv",
       "s_nop",
       "s_getpc",
       "s_getreg",

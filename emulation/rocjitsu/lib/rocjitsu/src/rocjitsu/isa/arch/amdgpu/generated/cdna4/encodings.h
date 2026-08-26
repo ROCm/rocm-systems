@@ -420,13 +420,16 @@ public:
 class Sopp : public IsaInstruction<Isa> {
 public:
   Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn);
+  bool default_encoding();
   using OpEncoding = SoppMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 2> raw_words_{};
 };
 
 class Sopk : public IsaInstruction<Isa> {
 public:
   Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn);
+  bool default_encoding();
   bool hasImpliedLiteral();
   using OpEncoding = SopkMachineInst;
   const OpEncoding inst_;

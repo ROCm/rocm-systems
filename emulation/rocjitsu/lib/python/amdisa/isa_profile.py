@@ -54,6 +54,22 @@ class MemoryCoherencyModel(Enum):
     GFX12_SCOPE_TH = auto()  # RDNA4 — 2-bit SCOPE + TH hint
 
 
+class SwmmacLayout(Enum):
+    """Executor calling convention used by sparse WMMA instructions."""
+
+    NONE = auto()
+    FIXED_WAVE = auto()
+    RUNTIME_WAVE = auto()
+
+
+class MatrixLayout(Enum):
+    """Register/lane layout used by matrix instruction executors."""
+
+    MFMA_ACCUMULATOR = auto()
+    WMMA_REPLICATED_HALFWAVE = auto()
+    WMMA_SPLIT_K = auto()
+
+
 class DppOpcodeRule(Enum):
     """Opcode-level availability of a DPP source extension."""
 
@@ -558,8 +574,8 @@ class IsaProfile(ABC):
         """Cross-lane routing used by 8-bit B64 DS transpose loads.
 
         CDNA4 and older targets use the MFMA-oriented B64_TR_B8 routing.
-        Architectures with the 16x16 WMMA routing override this property so
-        opcode aliases cannot acquire different behavior from their spelling.
+        Architectures with target-specific DS B8 routing override this property
+        so opcode aliases cannot acquire different behavior from their spelling.
         """
         return 3
 
@@ -783,6 +799,21 @@ class IsaProfile(ABC):
         """
         return {}
 
+    def normalize_operand_field_name(self, enc_name: str, field_name: str) -> str:
+        """Return the normalized field name used by an instruction operand."""
+        return self.field_renames(enc_name).get(field_name, field_name)
+
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        """Return the normalized type used by an instruction operand."""
+        return operand_type
+
+    @property
+    def lowercase_operand_selector_names(self) -> bool:
+        """Whether predefined symbolic operand names normalize to lowercase."""
+        return False
+
     def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
         """Return the logical condition name to use in generated code.
 
@@ -997,6 +1028,34 @@ class _AmdgpuProfileBase(IsaProfile):
         """
         return True
 
+    def field_renames(self, enc_name: str) -> dict[str, str]:
+        # The public 1.1.1 snapshot gives literal extension DWORDs an
+        # explicit LITERAL field.  Preserve the established generated member
+        # name used by the earlier AMDGPU specifications.
+        return {'literal': 'simm32'}
+
+    @property
+    def lowercase_operand_selector_names(self) -> bool:
+        # The 1.1.1 XML snapshot uppercases symbolic selector names, unlike
+        # the preceding AMDGPU specs and their established disassembly.
+        return True
+
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        # Before schema 1.1.1, the 16-bit K operand in VOP2 MADMK/FMAMK
+        # instructions was represented by the 32-bit literal extension
+        # operand.  The newer XML calls the same encoded value OPR_SIMM16.
+        # Preserve the established literal identity (and hexadecimal
+        # disassembly) when the field rename identifies that extension.
+        if (
+            field_name == 'literal'
+            and operand_type == 'OPR_SIMM16'
+            and self.normalize_operand_field_name(enc_name, field_name) == 'simm32'
+        ):
+            return 'OPR_SIMM32'
+        return operand_type
+
     @property
     def flt_name_map(self) -> dict[float, str]:
         return _FLOAT_NAME_MAP
@@ -1206,6 +1265,16 @@ class _AmdgpuProfileBase(IsaProfile):
         return False
 
     @property
+    def swmmac_layout(self) -> SwmmacLayout:
+        """Sparse WMMA executor layout supported by this ISA."""
+        return SwmmacLayout.NONE
+
+    @property
+    def matrix_layout(self) -> MatrixLayout:
+        """Register/lane mapping used by matrix instructions."""
+        return MatrixLayout.MFMA_ACCUMULATOR
+
+    @property
     def flat_scratch_mechanism(self) -> str:
         """How scratch base is located: 'hwreg' (CDNA3/4) or 'sgpr_pair'."""
         return 'sgpr_pair'
@@ -1362,11 +1431,12 @@ class CdnaProfile(_AmdgpuProfileBase):
 
     def field_renames(self, enc_name: str) -> dict[str, str]:
         upper = enc_name.upper()
+        renames = dict(super().field_renames(enc_name))
         if upper == 'ENC_FLAT':
-            return self._FLAT_FIELD_RENAMES
+            renames.update(self._FLAT_FIELD_RENAMES)
         if upper == 'ENC_VOP3P':
-            return self._VOP3P_FIELD_RENAMES
-        return {}
+            renames.update(self._VOP3P_FIELD_RENAMES)
+        return renames
 
     @property
     def cmpx_writes_vcc(self) -> bool:
@@ -1689,7 +1759,7 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.0.0']
+        return ['1.0.0', '1.1.1']
 
     @property
     def max_enc_bits(self) -> int:
@@ -1796,6 +1866,17 @@ class Rdna3Profile(_AmdgpuProfileBase):
     _FLAT_SEGMENTS = frozenset({'GLOBAL', 'SCRATCH'})
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
+    _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
+        if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
+            return 'default'
+        return super().normalize_encoding_condition(enc_name, cond_name)
+
+    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+        if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
+            return False
+        return super().skip_inst_encoding(enc_name, enc_cond)
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -1855,7 +1936,7 @@ class Rdna3Profile(_AmdgpuProfileBase):
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.0.0', '1.1.0']
+        return ['1.0.0', '1.1.0', '1.1.1']
 
     @property
     def max_enc_bits(self) -> int:
@@ -1900,6 +1981,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
     @property
     def has_wmma(self) -> bool:
         return True
+
+    @property
+    def matrix_layout(self) -> MatrixLayout:
+        return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
     @property
     def has_vopd(self) -> bool:
@@ -1989,6 +2074,17 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
+    _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
+        if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
+            return 'default'
+        return super().normalize_encoding_condition(enc_name, cond_name)
+
+    def skip_inst_encoding(self, enc_name: str, enc_cond: str) -> bool:
+        if enc_name.upper() == 'ENC_SOP1' and enc_cond == self._SOP1_BASE_COND:
+            return False
+        return super().skip_inst_encoding(enc_name, enc_cond)
 
     @property
     def dpp_bound_ctrl_applies_to_inactive_sources(self) -> bool:
@@ -2052,7 +2148,7 @@ class Rdna4Profile(_AmdgpuProfileBase):
 
     @property
     def supported_versions(self) -> list[str]:
-        return ['1.1.0']
+        return ['1.1.0', '1.1.1']
 
     @property
     def max_enc_bits(self) -> int:
@@ -2101,6 +2197,14 @@ class Rdna4Profile(_AmdgpuProfileBase):
     @property
     def has_wmma(self) -> bool:
         return True
+
+    @property
+    def matrix_layout(self) -> MatrixLayout:
+        return MatrixLayout.WMMA_SPLIT_K
+
+    @property
+    def swmmac_layout(self) -> SwmmacLayout:
+        return SwmmacLayout.RUNTIME_WAVE
 
     @property
     def has_vopd(self) -> bool:
@@ -2211,9 +2315,9 @@ class Cdna5Profile(Rdna4Profile):
 
     @property
     def ds_b8_transpose_kind(self) -> int:
-        # gfx1250 opcode 0xfd retains the B64_TR_B8 routing. All of its
-        # mnemonic aliases must resolve through this one profile value.
-        return 3
+        # gfx1250 groups source lanes by four rows and two eight-column halves.
+        # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
+        return 7
 
     @property
     def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
@@ -2359,6 +2463,18 @@ class Cdna5Profile(Rdna4Profile):
         renames['literal'] = 'simm32'
         return renames
 
+    def normalize_operand_field_name(self, enc_name: str, field_name: str) -> str:
+        # Keep the concrete gfx1250 operand identity distinct from earlier
+        # CDNA/RDNA specs; its local generator path maps it to the renamed
+        # microcode member and must not join simm32-specific shared bodies.
+        return field_name
+
+    @property
+    def lowercase_operand_selector_names(self) -> bool:
+        # CDNA5 schema 1.2.0 intentionally uses uppercase symbolic names and
+        # the existing gfx1250 disassembly contract follows those spellings.
+        return False
+
     @property
     def supported_versions(self) -> list[str]:
         return ['1.2.0']
@@ -2366,6 +2482,10 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def wave_size_max(self) -> int:
         return 32
+
+    @property
+    def swmmac_layout(self) -> SwmmacLayout:
+        return SwmmacLayout.FIXED_WAVE
 
     @property
     def vop3_cmp_sdst_size_bits(self) -> int | None:
