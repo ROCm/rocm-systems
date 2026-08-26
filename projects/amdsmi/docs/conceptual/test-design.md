@@ -21,8 +21,9 @@ The test suite redesign has four goals:
    correct location; nothing else changes.
 3. **Selective execution** — CI and developers can run only the tests relevant to a component or
    feature without maintaining manual filter lists.
-4. **Test-type clarity** — Unit tests (no hardware) and functional tests (require hardware) are
-   structurally separated so they can run in different environments.
+4. **Test-type clarity** — Test types are structurally separated so they can run in different
+   environments. C++ unit tests never touch hardware; the Python `unit/` tree mixes logic-only
+   suites with live-device API suites (see the Test type taxonomy below).
 
 ## Component taxonomy
 
@@ -40,11 +41,31 @@ The test suite redesign has four goals:
 
 | Type | Directory | Hardware required | Framework |
 | :--- | :--- | :--- | :--- |
-| **Unit** | `unit/` | No — pure logic, static data, no device calls | C++: `TEST()` macro · Python: `unittest` |
+| **Unit** | `unit/` | No for C++; yes for the Python API suites — see below | C++: `TEST()` macro · Python: `unittest` |
 | **Functional** | `functional/` | Yes — runs against a live device | C++: `TestBase` lifecycle · Python: `unittest` |
 
 Performance benchmarks belong in `functional/` because they require a real device to produce
 meaningful timing data.
+
+### The Python API tier
+
+`unit/<component>/` owns per-API coverage for the Python bindings and drives a live device to get
+it. Each API gets one test that does two things, both built on
+[`common/common.py`](../../tests/python/common/common.py):
+
+| Driver | Contract |
+| :--- | :--- |
+| `reject()` | One deliberately invalid argument per call; the library must refuse it. The invalid value is always one the interface rejects before the C entry point, so a mutating API is reject-tested without touching the device. |
+| `expect()` | Valid arguments only. Prints the payload, checks it is structurally sound, and requires `AMDSMI_STATUS_SUCCESS`. A status from the not-supported family is reported, not failed. |
+
+Both cross every argument: each call repeats for every live processor handle and every enum value the
+remaining arguments take. A suite skips when the platform has no processor of its kind, and an
+individual API skips when every combination reports not-supported.
+
+`functional/` keeps what this tier cannot own: setters and reset paths, stateful lifecycles (counter
+create/control/destroy, partition change plus driver reload), performance benchmarks, and the handful
+of getters that need external state — a populated CPER ring, a live compute PID, a started
+notification stream.
 
 ## C++ test structure
 
@@ -359,15 +380,23 @@ tests/python/
 │   ├── common.py                      # Common base class, device enumeration, error mapping, runner machinery
 │   └── runcmd.py                      # CLI subprocess wrapper
 │
-├── unit/                              # No hardware required
+├── unit/                              # Logic tests plus the live-device API suites
 │   ├── __init__.py
 │   ├── test_module_isolation.py       # Guards that mock/ restores sys.modules and sys.path
 │   ├── gpu/
-│   │   ├── test_apu_metrics.py        # APU metrics interface helpers (unit conversions, N/A parity)
-│   │   └── ...
+│   │   ├── test_apu_metrics.py        # APU metrics interface helpers (no hardware)
+│   │   ├── test_power.py              # Every GPU power API: rejection + validated reads
+│   │   └── ...                        # clock, memory, thermal, ras, partition, pci, xgmi, ...
+│   ├── cpu/
+│   │   ├── test_hsmp.py               # Every CPU HSMP API: rejection + validated reads
+│   │   └── ...                        # identity, clock, power, thermal, dimm, energy
+│   ├── nic/
+│   │   ├── test_identity.py           # Every NIC discovery API: rejection + validated reads
+│   │   └── test_switch.py
 │   ├── system/
-│   │   ├── test_bdf.py                # BDF string parsing and formatting
-│   │   └── ...
+│   │   ├── test_bdf.py                # BDF string parsing and formatting (no hardware)
+│   │   ├── test_lifecycle.py          # init, discovery and version APIs
+│   │   └── test_topology.py           # topology, link and affinity APIs
 │   └── mock/                          # Suites that replace amdsmi or the CLI's imports
 │       ├── gpu/
 │       │   ├── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly
@@ -448,9 +477,12 @@ tests/python/
 
 **Files**: `test_{feature}.py` within the appropriate component subdirectory.
 
-**Classes**: One `unittest.TestCase` subclass per file, named `Test{Component}{Feature}`
-(for example, `TestGpuPower`, `TestCpuClock`, `TestSystemInit`). Classes inherit from
-`common.common.Common` for device enumeration and error-handling helpers.
+**Classes**: One test class per file, named `Test{Component}{Feature}` (for example,
+`TestGpuPower`, `TestCpuClock`, `TestSystemInit`). Unit API suites subclass
+`common.common.ApiTestCase`, which enumerates devices and provides `both()`, `reject_only()` and
+`expect_only()`; set its `HANDLE_KIND` class attribute to `"gpu"` (the default), `"cpu"` or `"nic"`.
+Functional and logic-only suites subclass `unittest.TestCase` and hold a `common.common.Common`
+instance for error-handling helpers.
 
 **Methods**: `test_{operation}[_{qualifier}]` (for example, `test_get_power_cap`,
 `test_set_power_cap_dry_run`).
@@ -470,7 +502,7 @@ of `-k`, skips tests whose id contains the pattern). Run from source by substitu
 /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py --list
 ```
 
-**All unit tests** (no hardware required):
+**All unit tests** (the per-component API suites need a live device; the logic tests do not):
 
 ```shell
 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
@@ -518,7 +550,7 @@ one way — **CLI tests are Python-only**, and the **read-only/read-write split 
 | Intent | Python | C++ (`amdsmitst`) |
 | :--- | :--- | :--- |
 | List all tests | `--list` / `-l` on each runner (`unit_tests.py`, `integration_test.py`, `cli_unit_test.py`) | `--gtest_list_tests` |
-| Unit only (no hardware) | `unit_tests.py -v` | `--gtest_filter="*Unit*"` |
+| Unit only | `unit_tests.py -v` — API suites need a live device, logic-only suites do not | `--gtest_filter="*Unit*"` |
 | All functional | `integration_test.py -v` | `--gtest_filter="*Functional*"` |
 | Functional read-only / read-write | Not distinguished — Python groups functional tests by component/feature, not by RO/RW | `--gtest_filter="*FunctionalReadOnly*"` / `"*FunctionalReadWrite*"` |
 | CLI tests | `cli_unit_test.py -v` | _Python-only — no C++ equivalent_ |
@@ -610,7 +642,7 @@ shown in parentheses.
 
 | Old file (`tests/python_unittest/`) | New location (`tests/python/`) |
 | :--- | :--- |
-| `unit_tests.py` | `unit/<component>/test_<feature>.py` (e.g. `unit/system/test_bdf.py`, `unit/gpu/test_apu_metrics.py`); suites that stub `sys.modules` live under `unit/mock/<component>/` |
+| `unit_tests.py` | `unit/<component>/test_<feature>.py` (e.g. `unit/system/test_bdf.py`, `unit/gpu/test_power.py`); suites that stub `sys.modules` live under `unit/mock/<component>/` |
 | `integration_test.py` | `functional/<component>/test_<feature>.py` (e.g. `functional/system/test_init.py`, `functional/gpu/test_power.py`, `functional/nic/test_discovery.py`) |
 | `partition_metric_unit_test.py` | `unit/mock/gpu/test_cli_metric_partition.py` |
 | `cli_unit_test.py` | `cli/test_<command>.py`, one per command (shared scaffolding in `cli/base.py`) |

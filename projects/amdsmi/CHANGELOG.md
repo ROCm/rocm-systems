@@ -8,7 +8,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added per-API Python test coverage under `tests/python/unit/`**.
+  - Every public API is driven with one deliberately invalid argument at a time and must reject it, and every getter is additionally called with valid arguments, printed, payload-checked, and required to return `AMDSMI_STATUS_SUCCESS`.
+  - A coverage guard (`tests/python/unit/test_api_coverage.py`) fails when a public API has no test, so new APIs cannot land untested.
+
 ### Changed
+
+- **`unit_tests.py` now requires a live device for the per-component API suites**.
+  - The logic-only suites still run anywhere. Suites for a processor kind the platform lacks skip their read path but still verify argument rejection.
+  - Positive getter coverage moved from `tests/python/functional/` into `tests/python/unit/`; 88 duplicated functional getter tests were removed. Any CI filter naming those test IDs needs updating.
 
 ### Optimized
 
