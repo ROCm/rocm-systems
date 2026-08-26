@@ -2802,6 +2802,41 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   code; the periodic physical gate remains applicable. E2E validation remains
   outside this work.
 
+### Slice 4T: delete parser-progress compatibility flags
+
+- **Immutable fact ownership:** Structural AMDGPU parsing is now the
+  `ProgramInventory::code_object_parsed()` fact. The builder publishes it only
+  after successful parsing, independently of whether the parsed target maps to
+  a supported semantic architecture. Copies, moves, retries, the production
+  pipeline, and hook diagnostics therefore observe it through the same
+  immutable program owner as target, architecture, and code-object identity.
+- **Completed deletion:** `ConSanResult::parsed_code_object` and
+  `visited_code_object` are gone, along with every assignment and retry check.
+  “Visited” merely restated that a C++ function had been entered; pristine
+  identity already proves that an inventory belongs to the supplied bytes.
+  Early configuration/capability rejection also no longer fabricates a
+  compatibility inventory solely to carry that progress bit: its typed code-
+  object identity remains in `TransformResult`, while its inventory stage is
+  correctly absent.
+- **Contract-test correction:** Inventory tests cover absent, pre-parse, parsed,
+  copied, and moved values. Pipeline tests now assert that a configuration
+  rejection leaves inventory absent and that a successful split result owns a
+  parsed inventory. Parse-failure and valid-but-unsupported-target tests assert
+  the immutable fact directly. Tests that merely asserted entry into
+  `try_patch_consan` lost that mechanism-shaped assertion while retaining
+  outcome, identity, diagnostic, and transactional-result checks.
+- **Deletion result:** Production source is 15 net lines smaller and source
+  plus tests is 26 net lines smaller. The compatibility result loses two fields
+  and early rejection loses its private inventory builder; no parallel parse
+  state or adapter was added.
+- **Completed checked-in gate:** The ConSan host gate passed 1,510 of 1,512
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 75.05
+  seconds. This state-ownership cutover does not change emitted device code;
+  the periodic physical gate remains applicable. E2E validation remains
+  outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

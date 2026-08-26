@@ -392,6 +392,10 @@ struct SynchronizationInventoryBuildView {
 /// `ProgramInventory`.
 struct ConSanProgramInventoryStorage {
   ConSanCodeObjectId code_object_id;
+  /// True only after the pristine bytes have passed structural AMDGPU code
+  /// object parsing. This is an immutable input fact, independent of whether
+  /// the target has a supported semantic architecture.
+  bool code_object_parsed = false;
   bool kernel_metadata_trustworthy = false;
   size_t malformed_kernel_metadata_note_count = 0;
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
@@ -427,6 +431,8 @@ public:
   [[nodiscard]] const ConSanCodeObjectId &code_object_id() const {
     return storage_ ? storage_->code_object_id : empty_storage().code_object_id;
   }
+  /// Return whether the input was structurally parsed as an AMDGPU code object.
+  [[nodiscard]] bool code_object_parsed() const { return storage_ && storage_->code_object_parsed; }
   [[nodiscard]] bool kernel_metadata_trustworthy() const {
     return storage_ && storage_->kernel_metadata_trustworthy;
   }
@@ -538,6 +544,7 @@ public:
   void set_code_object_facts(bool kernel_metadata_trustworthy,
                              size_t malformed_kernel_metadata_note_count, rj_code_arch_t arch,
                              rj_code_target_id_t target) {
+    storage_->code_object_parsed = true;
     storage_->kernel_metadata_trustworthy = kernel_metadata_trustworthy;
     storage_->malformed_kernel_metadata_note_count = malformed_kernel_metadata_note_count;
     storage_->arch = arch;

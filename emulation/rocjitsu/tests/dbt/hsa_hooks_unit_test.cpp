@@ -1029,7 +1029,6 @@ transform_override(std::span<const uint8_t>, const rocjitsu::ConSanRequest &requ
         result = *g_first_fault_application_result;
     }
   }
-  result.visited_code_object = true;
   result.flavor = *request.flavor;
   result.moi_engine = request.moi_engine;
   if (g_transform_override_models_fault_application) {
@@ -3812,7 +3811,6 @@ TEST(HsaHooksUnitTest, ConSanLogsSharedNamesForParsedTypedIdentities) {
   for (const TargetCase &target_case : cases) {
     SCOPED_TRACE(target_case.target_name);
     rocjitsu::ConSanResult result;
-    result.parsed_code_object = true;
     install_consan_test_program_identity(result, target_case.semantic_arch, target_case.target);
     result.outcome = target_case.semantic_arch == ROCJITSU_CODE_ARCH_INVALID
                          ? rocjitsu::ConSanTransformOutcome::Unsupported
@@ -3834,7 +3832,7 @@ TEST(HsaHooksUnitTest, ConSanProductionUnsupportedTargetPassesThroughWhenFailOpe
   direct_options.flavor = rocjitsu::ConSanFlavor::Moi;
   const rocjitsu::ConSanResult direct = rocjitsu::try_patch_consan(unsupported, direct_options);
   ASSERT_EQ(direct.outcome, rocjitsu::ConSanTransformOutcome::Unsupported);
-  ASSERT_TRUE(direct.parsed_code_object);
+  ASSERT_TRUE(direct.program_inventory.code_object_parsed());
   ASSERT_EQ(direct.program_inventory.arch(), ROCJITSU_CODE_ARCH_INVALID);
   ASSERT_FALSE(direct.program_inventory.text_sections().empty());
   ASSERT_FALSE(direct.program_inventory.kernels().empty());

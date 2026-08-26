@@ -292,7 +292,7 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
     const ConSanCodeObjectId &inventory_id = inventory.program_inventory.code_object_id();
-    if (!inventory.visited_code_object || inventory_id.byte_size != code_object_bytes.size())
+    if (inventory_id.byte_size != code_object_bytes.size())
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry does not match the original code-object size");
     if (!inventory_id.valid() || inventory_id != make_consan_code_object_id(code_object_bytes)) {
@@ -370,7 +370,6 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (const std::exception &error) {
     ConSanResult result;
-    result.visited_code_object = true;
     result.flavor = ConSanFlavor::Moi;
     result.moi_engine = inventory_engine;
     result.errors.emplace_back(std::string("ConSan MOI inventory retry threw an exception: ") +
@@ -378,7 +377,6 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (...) {
     ConSanResult result;
-    result.visited_code_object = true;
     result.flavor = ConSanFlavor::Moi;
     result.moi_engine = inventory_engine;
     result.errors.emplace_back("ConSan MOI inventory retry threw a non-standard exception");
@@ -400,14 +398,12 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
     return result;
   } catch (const std::exception &error) {
     ConSanResult result;
-    result.visited_code_object = true;
     result.flavor = options.flavor;
     result.moi_engine = options.moi_engine;
     result.errors.emplace_back(std::string("ConSan transform threw an exception: ") + error.what());
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (...) {
     ConSanResult result;
-    result.visited_code_object = true;
     result.flavor = options.flavor;
     result.moi_engine = options.moi_engine;
     result.errors.emplace_back("ConSan transform threw a non-standard exception");

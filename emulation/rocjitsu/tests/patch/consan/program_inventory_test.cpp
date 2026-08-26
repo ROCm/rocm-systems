@@ -206,6 +206,7 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   ProgramInventory empty;
   EXPECT_TRUE(empty.empty());
   EXPECT_FALSE(empty.code_object_id().valid());
+  EXPECT_FALSE(empty.code_object_parsed());
   EXPECT_FALSE(empty.kernel_metadata_trustworthy());
   EXPECT_EQ(empty.malformed_kernel_metadata_note_count(), 0u);
   EXPECT_EQ(empty.arch(), ROCJITSU_CODE_ARCH_INVALID);
@@ -217,6 +218,7 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   EXPECT_TRUE(empty.functions().empty());
   ProgramInventoryBuilder empty_content_builder;
   EXPECT_FALSE(empty_content_builder.view().empty());
+  EXPECT_FALSE(empty_content_builder.view().code_object_parsed());
   EXPECT_TRUE(empty_content_builder.view().text_sections().empty());
   EXPECT_TRUE(empty_content_builder.view().kernels().empty());
   EXPECT_TRUE(empty_content_builder.view().functions().empty());
@@ -246,6 +248,7 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
   ConSanResult copied = result;
   ConSanResult moved = std::move(copied);
   EXPECT_FALSE(result.program_inventory.empty());
+  EXPECT_TRUE(moved.program_inventory.code_object_parsed());
   EXPECT_TRUE(moved.program_inventory.kernel_metadata_trustworthy());
   EXPECT_EQ(moved.program_inventory.malformed_kernel_metadata_note_count(), 3u);
   EXPECT_EQ(moved.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA4);

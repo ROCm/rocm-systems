@@ -58,7 +58,6 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   const auto result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(result.visited_code_object);
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.flavor, ConSanFlavor::Moi);
   EXPECT_EQ(result.moi_engine, ConSanMoiEngine::RecordReplay);

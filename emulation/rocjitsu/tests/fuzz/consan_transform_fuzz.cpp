@@ -19,7 +19,7 @@ void require(bool condition) {
 
 void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOptions &options) {
   const rocjitsu::ConSanResult result = rocjitsu::try_patch_consan(input, options);
-  require(result.visited_code_object);
+  require(result.program_inventory.code_object_id() == rocjitsu::make_consan_code_object_id(input));
   require(result.input_size == input.size());
   if (result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid) {
     require(result.modified);

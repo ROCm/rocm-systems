@@ -403,10 +403,6 @@ struct ConSanMutationOutcome {
 };
 
 struct ConSanResult {
-  bool visited_code_object = false;
-  /// True after the input has been parsed as a structurally valid AMDGPU code
-  /// object. This remains true when its machine target is not enumerated.
-  bool parsed_code_object = false;
   bool modified = false;
   bool final_validation_passed = false;
   /// Both the pristine-to-mutation and mutation-to-instrumentation images were

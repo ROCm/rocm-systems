@@ -1447,7 +1447,7 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
     EXPECT_EQ(consan_arch_for_target(target_case.target), target_case.arch);
     const ConSanResult result = try_patch_consan(target_case.bytes, options);
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    EXPECT_TRUE(result.parsed_code_object);
+    EXPECT_TRUE(result.program_inventory.code_object_parsed());
     EXPECT_EQ(result.program_inventory.target(), target_case.target);
     EXPECT_EQ(result.program_inventory.arch(), target_case.arch);
   }

@@ -350,8 +350,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ASSERT_TRUE(coverage.set_lowering_outcome({1u}, ConSanLoweringOutcomeKind::Instrumented));
 
   ConSanResult mechanism;
-  mechanism.visited_code_object = true;
-  mechanism.parsed_code_object = true;
   mechanism.flavor = ConSanFlavor::Moi;
   mechanism.moi_engine = ConSanMoiEngine::RecordReplay;
   mechanism.program_inventory = inventory;
@@ -428,11 +426,8 @@ TEST(ConSanPipeline, InvalidConfigurationStopsBeforeLegacyLoweringWithTypedIssue
   EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
             ConSanPipelineStageStatus::Invalid);
 
-  const ConSanResult &legacy = result.legacy_mechanism();
-  EXPECT_FALSE(legacy.visited_code_object);
-  EXPECT_EQ(legacy.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_EQ(legacy.program_inventory.code_object_id(), result.code_object);
-  EXPECT_TRUE(legacy.errors.empty());
+  EXPECT_TRUE(result.program_inventory.empty());
+  EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_EQ(result.issues.front().detail, "invalid-sample-stride");
 }
 
@@ -701,8 +696,7 @@ TEST(ConSanPipeline, ProductionResultOwnsArtifactsWithoutLegacyProjection) {
   ASSERT_TRUE(split.well_formed()) << testing::PrintToString(split.issues);
   const ConSanResult &mechanism = split.legacy_mechanism();
 
-  EXPECT_TRUE(mechanism.visited_code_object);
-  EXPECT_TRUE(mechanism.parsed_code_object);
+  EXPECT_TRUE(split.program_inventory.code_object_parsed());
   EXPECT_EQ(split.program_inventory.code_object_id(), split.code_object);
   EXPECT_FALSE(split.observation_plan.probe_intents.empty());
   EXPECT_EQ(split.coverage_ledger.intent_entries().size(),

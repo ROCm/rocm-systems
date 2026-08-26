@@ -354,7 +354,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanResult result;
-  result.visited_code_object = true;
   result.flavor = options.flavor;
   result.moi_engine = options.moi_engine;
   result.carried_composite_instrumentation_stage = !carried_plans.empty();
@@ -659,7 +658,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     result.errors.emplace_back("ConSan could not parse AMDGPU code object");
     return result;
   }
-  result.parsed_code_object = true;
   const bool kernel_metadata_trustworthy = code_object->kernel_metadata_is_trustworthy();
   const size_t malformed_kernel_metadata_note_count =
       code_object->malformed_kernel_metadata_note_count();

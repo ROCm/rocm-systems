@@ -237,8 +237,7 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  EXPECT_TRUE(result.visited_code_object);
-  EXPECT_FALSE(result.parsed_code_object);
+  EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
@@ -410,8 +409,7 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  EXPECT_TRUE(result.visited_code_object);
-  EXPECT_FALSE(result.parsed_code_object);
+  EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
@@ -449,7 +447,7 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
     const ConSanResult result = try_patch_consan(bytes, options);
 
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
-    EXPECT_TRUE(result.parsed_code_object);
+    EXPECT_TRUE(result.program_inventory.code_object_parsed());
     EXPECT_FALSE(result.modified);
     EXPECT_TRUE(result.errors.empty());
     EXPECT_FALSE(result.program_inventory.semantic_arch_required());
@@ -491,8 +489,7 @@ TEST(ConSan, StubRejectsEmptyCodeObject) {
 
   const auto result = try_patch_consan(bytes, options);
 
-  EXPECT_TRUE(result.visited_code_object);
-  EXPECT_FALSE(result.parsed_code_object);
+  EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
@@ -907,7 +904,6 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
   auto expect_transactional_result = [&](std::span<const uint8_t> input,
                                          const ConSanTransformProfile &profile) {
     const ConSanResult result = try_patch_consan(input, profile.options);
-    EXPECT_TRUE(result.visited_code_object);
     EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(input));
     if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
       EXPECT_TRUE(result.modified);
@@ -1018,7 +1014,6 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
       make_rdna4_lds_code_object(text_words, "many_disjoint_patch_ranges");
 
   ConSanResult result;
-  result.visited_code_object = true;
   result.flavor = ConSanFlavor::SuperCollider;
   result.modified = true;
   result.elf_bytes = bytes;

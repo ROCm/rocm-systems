@@ -107,18 +107,6 @@ void add_contract_issue(TransformResult &result, ConSanPipelineStage stage,
   });
 }
 
-[[nodiscard]] ConSanResult make_rejected_legacy_result(const ConSanRequest &request,
-                                                       std::span<const uint8_t> code_object_bytes) {
-  ConSanResult result;
-  result.visited_code_object = false;
-  ProgramInventoryBuilder inventory_builder(code_object_bytes);
-  result.program_inventory = inventory_builder.view();
-  result.flavor = request.flavor.value_or(ConSanFlavor::None);
-  result.moi_engine = request.moi_engine;
-  result.outcome = ConSanTransformOutcome::Invalid;
-  return result;
-}
-
 [[nodiscard]] ConSanDispatchRequirements
 build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCoverageLedger &coverage,
                             std::span<const ConSanPatchInfo> patches) {
@@ -437,7 +425,7 @@ TransformResult TransformResult::publish_optional(
     stage_record(result, ConSanPipelineStage::FinalValidation).status =
         ConSanPipelineStageStatus::Invalid;
     stage_record(result, ConSanPipelineStage::Complete).status = ConSanPipelineStageStatus::Invalid;
-    result.legacy_compatibility_ = make_rejected_legacy_result(request, code_object_bytes);
+    result.legacy_compatibility_.outcome = ConSanTransformOutcome::Invalid;
     return result;
   }
   configuration.status = ConSanPipelineStageStatus::Completed;
@@ -453,7 +441,7 @@ TransformResult TransformResult::publish_optional(
     stage_record(result, ConSanPipelineStage::FinalValidation).status =
         ConSanPipelineStageStatus::Invalid;
     stage_record(result, ConSanPipelineStage::Complete).status = ConSanPipelineStageStatus::Invalid;
-    result.legacy_compatibility_ = make_rejected_legacy_result(request, code_object_bytes);
+    result.legacy_compatibility_.outcome = ConSanTransformOutcome::Invalid;
     return result;
   }
 
@@ -490,7 +478,7 @@ TransformResult TransformResult::publish_optional(
   const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
   if (flavor == ConSanFlavor::None) {
     capability_stage.status = ConSanPipelineStageStatus::NotApplicable;
-  } else if (result.legacy_compatibility_.parsed_code_object) {
+  } else if (result.program_inventory.code_object_parsed()) {
     capability_stage.status = consan_target_profile(result.program_inventory.target())
                                   ? ConSanPipelineStageStatus::Completed
                                   : ConSanPipelineStageStatus::Unsupported;
