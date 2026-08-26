@@ -271,8 +271,7 @@ not under `/opt/rocm`), network access, and a few minutes. It fetches the LLVM
 sources into a temporary directory it removes on exit.
 
 Before writing the file it checks that every mnemonic in the code objects of the
-local ROCm install has an entry. Pass `--corpus-root` when those code objects
-live outside `ROCM_PATH`, as they do in a ROCm Python wheel install.
+local ROCm install has an entry.
 
 ## Vendoring External Dependencies
 
