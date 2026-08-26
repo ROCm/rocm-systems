@@ -363,15 +363,14 @@ Examples:
         help="\t\t\tKernel filtering.",
     )
     profile_group.add_argument(
-        "-d",
-        "--dispatch",
+        "--kernel-iteration-range",
         type=str,
         metavar="",
         nargs="+",
-        dest="dispatch",
+        dest="kernel_iteration_range",
         required=False,
         help=(
-            "\t\t\tWhich dispatch iterations of each kernel to filter \n"
+            "\t\t\tWhich iterations of each kernel to profile \n"
             "\t\t\t(1-based; positive integer or 'start:end'/'start-end' \n"
             "\t\t\trange, e.g. 1 3:5 captures 1st, 3rd, 4th and 5th \n"
             "\t\t\titerations)."
@@ -783,7 +782,7 @@ Examples:
         metavar="",
         nargs="+",
         action="append",
-        help="\t\tSpecify dispatch id(s) for filtering.",
+        help="\t\tSpecify dispatch id(s) for filtering (1-based).",
     )
     analyze_group.add_argument(
         "-b",
