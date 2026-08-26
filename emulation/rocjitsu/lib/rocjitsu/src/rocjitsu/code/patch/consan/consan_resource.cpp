@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/consan_resource.h"
+#include "rocjitsu/code/patch/spill_manager.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 
 namespace rocjitsu {
@@ -161,6 +163,43 @@ ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
 
   plan.reason = ConSanRegisterPlanReason::NoLegalWindow;
   return plan;
+}
+
+ConSanResourcePlanSummary
+summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> plans,
+                                std::span<const ConSanPatchInfo> patches) {
+  ConSanResourcePlanSummary summary;
+  const std::array alternative_counts = {
+      &summary.alternative_selected,   &summary.alternative_rejected,
+      &summary.alternative_superseded, &summary.alternative_contributed,
+      &summary.alternative_vetoed,
+  };
+  static_assert(static_cast<size_t>(ConSanResourcePlanAlternativeOutcome::Vetoed) + 1u == 5u);
+  const std::array source_counts = {
+      &summary.unsupported_plans,       &summary.explicit_plans, &summary.dead_plans,
+      &summary.descriptor_growth_plans, &summary.spill_plans,
+  };
+  static_assert(static_cast<size_t>(ConSanRegisterAllocationSource::SpillRequired) + 1u == 5u);
+  for (const ConSanCandidateResourcePlan &plan : plans) {
+    for (const ConSanResourcePlanAlternative &alternative : plan.alternatives) {
+      ++summary.alternative_attempts;
+      const auto outcome = consan_resource_plan_alternative_outcome(plan, alternative);
+      ++*alternative_counts[static_cast<size_t>(outcome)];
+    }
+    ++*source_counts[static_cast<size_t>(plan.source)];
+    if (plan.source == ConSanRegisterAllocationSource::SpillRequired) {
+      summary.planned_spill_slot_bytes +=
+          static_cast<size_t>(plan.scratch_vgpr_count) * SpillManager::kSlotBytes;
+    }
+  }
+  for (const ConSanPatchInfo &patch : patches) {
+    if (patch.spilled_vgpr_count == 0)
+      continue;
+    ++summary.emitted_spill_patches;
+    summary.emitted_spill_slot_bytes +=
+        static_cast<size_t>(patch.spilled_vgpr_count) * SpillManager::kSlotBytes;
+  }
+  return summary;
 }
 
 } // namespace rocjitsu

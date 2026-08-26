@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 
 namespace rocjitsu {
 
@@ -42,5 +43,12 @@ struct ConSanRegisterPlan {
 /// @brief Plan explicit, dead, fresh, or spill-backed registers without mutation.
 [[nodiscard]] ConSanRegisterPlan plan_consan_registers(const ConSanRegisterRequest &request,
                                                        const RegisterSet &live_before);
+
+/// Summarizes resource decisions and emitted spill mechanics. This derived
+/// reporting view is not transform state: callers calculate it when needed
+/// instead of storing mutable data that can become stale as inputs change.
+[[nodiscard]] ConSanResourcePlanSummary
+summarize_consan_resource_plans(std::span<const ConSanCandidateResourcePlan> plans,
+                                std::span<const ConSanPatchInfo> patches);
 
 } // namespace rocjitsu

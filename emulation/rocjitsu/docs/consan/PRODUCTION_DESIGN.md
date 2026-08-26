@@ -2768,6 +2768,40 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   applicable because this slice changes only hook rendering. Physical and E2E
   execution are unaffected and remain outside this proportional gate.
 
+### Slice 4S: delete cached resource-summary state
+
+- **Single authoritative representation:** Resource plans and emitted patches
+  are the transform facts. Their aggregate counts are now calculated by the
+  pure shared resource-component function `summarize_consan_resource_plans`.
+  `ConSanResult` no longer carries a second mutable summary that had to be
+  cleared and recomputed at four control-flow exits and could become stale
+  whenever either authoritative collection changed.
+- **Completed consumer cutover:** Final validation derives its unsupported-plan
+  decision from the shared query, the hook derives the existing resource log
+  at its reporting boundary, and mechanism tests derive assertions from the
+  same immutable inputs. The hook alternative-telemetry fixture now constructs
+  the actual plan alternatives rather than manually setting unrelated cached
+  counters.
+- **Focused contract gate:** New resource-component tests cover every register
+  allocation source, every alternative outcome, selected-to-vetoed
+  normalization for an unsupported plan, planned and emitted spill-byte
+  aggregation, ignored non-spill patches, and empty input. Existing pipeline
+  tests continue to verify that real transforms produce the expected plans and
+  emitted spill mechanics.
+- **Size and ownership result:** Production source is one net line smaller.
+  Source plus tests grows by 75 net lines because the previously untested
+  hidden aggregation gained two focused behavioral tests. More importantly,
+  one compatibility-result field, its reset, four eager mutation sites, and
+  the private pipeline helper are deleted; the retained calculation now has
+  one documented, independently testable owner.
+- **Completed checked-in gate:** The ConSan host gate passed 1,510 of 1,512
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 64.95
+  seconds. This representation-only cutover does not change emitted device
+  code; the periodic physical gate remains applicable. E2E validation remains
+  outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

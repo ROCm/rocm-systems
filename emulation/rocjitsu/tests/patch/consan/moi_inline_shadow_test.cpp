@@ -1779,18 +1779,17 @@ TEST(ConSanMoi, Cdna4InlineShadowRecordsEveryRejectedFallbackAttempt) {
     EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, alternative),
               ConSanResourcePlanAlternativeOutcome::Rejected);
   }
-  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 3u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_selected, 0u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 3u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_superseded, 0u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_contributed, 0u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_vetoed, 0u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_attempts,
-            result.resource_plan_summary.alternative_selected +
-                result.resource_plan_summary.alternative_rejected +
-                result.resource_plan_summary.alternative_superseded +
-                result.resource_plan_summary.alternative_contributed +
-                result.resource_plan_summary.alternative_vetoed);
+  const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+  EXPECT_EQ(summary.alternative_attempts, 3u);
+  EXPECT_EQ(summary.alternative_selected, 0u);
+  EXPECT_EQ(summary.alternative_rejected, 3u);
+  EXPECT_EQ(summary.alternative_superseded, 0u);
+  EXPECT_EQ(summary.alternative_contributed, 0u);
+  EXPECT_EQ(summary.alternative_vetoed, 0u);
+  EXPECT_EQ(summary.alternative_attempts,
+            summary.alternative_selected + summary.alternative_rejected +
+                summary.alternative_superseded + summary.alternative_contributed +
+                summary.alternative_vetoed);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             0u);
@@ -1839,8 +1838,9 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsOverlappingDynamicStackAddress) {
             ConSanResourcePlanAlternativeKind::GuestOperandOverlapSpill);
   EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, plan.alternatives.front()),
             ConSanResourcePlanAlternativeOutcome::Selected);
-  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 1u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_selected, 1u);
+  const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+  EXPECT_EQ(summary.alternative_attempts, 1u);
+  EXPECT_EQ(summary.alternative_selected, 1u);
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -1957,12 +1957,13 @@ TEST(ConSanMoi, CdnaInlineShadowAtomicTrackingFitsSpillBackedTransactionWindow) 
     EXPECT_EQ(plan.alternatives[2].reason, plan.reason);
     EXPECT_EQ(consan_resource_plan_alternative_outcome(plan, plan.alternatives[2]),
               ConSanResourcePlanAlternativeOutcome::Contributed);
-    EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 3u);
-    EXPECT_EQ(result.resource_plan_summary.alternative_selected, 1u);
-    EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 0u);
-    EXPECT_EQ(result.resource_plan_summary.alternative_superseded, 1u);
-    EXPECT_EQ(result.resource_plan_summary.alternative_contributed, 1u);
-    EXPECT_EQ(result.resource_plan_summary.alternative_vetoed, 0u);
+    const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+    EXPECT_EQ(summary.alternative_attempts, 3u);
+    EXPECT_EQ(summary.alternative_selected, 1u);
+    EXPECT_EQ(summary.alternative_rejected, 0u);
+    EXPECT_EQ(summary.alternative_superseded, 1u);
+    EXPECT_EQ(summary.alternative_contributed, 1u);
+    EXPECT_EQ(summary.alternative_vetoed, 0u);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());

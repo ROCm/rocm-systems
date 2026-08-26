@@ -2437,7 +2437,7 @@ TEST(ConSanMoi, FirstLightProbeAutomaticallyGrowsOwningDescriptor) {
   EXPECT_EQ(plan.max_referenced_vgpr_count, 3);
   EXPECT_EQ(plan.scratch_vgpr, 4);
   EXPECT_EQ(plan.required_vgpr_count, 10);
-  EXPECT_EQ(result.resource_plan_summary.descriptor_growth_plans, 1u);
+  EXPECT_EQ(test_resource_plan_summary(result).descriptor_growth_plans, 1u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).scratch_vgpr, 4);
 
@@ -2857,7 +2857,7 @@ TEST(ConSanMoi, FirstLightProbeWritesOneNativeLdsAccessRecord) {
       only_non_entry_prologue_patch(result).original_size);
   ASSERT_TRUE(only_non_entry_prologue_patch(result).scratch_vgpr);
   EXPECT_EQ(*only_non_entry_prologue_patch(result).scratch_vgpr, 8u);
-  EXPECT_EQ(result.resource_plan_summary.explicit_plans, 1u);
+  EXPECT_EQ(test_resource_plan_summary(result).explicit_plans, 1u);
 
   const uint64_t base = *options.moi_report_buffer_address;
   const uint64_t access_record_base = base + sizeof(ConSanMoiReportHeader);
@@ -4030,11 +4030,12 @@ TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
   EXPECT_GE(patch.required_private_segment_size, unaligned_private_end);
   EXPECT_LT(patch.required_private_segment_size, unaligned_private_end + 32u);
   EXPECT_EQ(patch.required_private_segment_size % 32u, 0u);
-  EXPECT_EQ(result.resource_plan_summary.spill_plans, 1u);
+  const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+  EXPECT_EQ(summary.spill_plans, 1u);
   // The access probe owns a six-VGPR transient spill window, while the
   // entry-capture prologue independently spills its one-VGPR temporary.
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 28u);
+  EXPECT_EQ(summary.emitted_spill_patches, 2u);
+  EXPECT_EQ(summary.emitted_spill_slot_bytes, 28u);
 
   const auto wait = build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(wait);
@@ -7306,7 +7307,7 @@ TEST(ConSanMoi, BarrierRecordAutomaticallyPlansScratchAndScalarState) {
   });
   ASSERT_NE(plan, result.resource_plans.end());
   EXPECT_EQ(plan->scratch_vgpr, patch->scratch_vgpr);
-  EXPECT_EQ(result.resource_plan_summary.dead_plans, 1u);
+  EXPECT_EQ(test_resource_plan_summary(result).dead_plans, 1u);
   EXPECT_EQ(std::ranges::count(result.resource_plans, ConSanResourceSiteKind::Fence,
                                &ConSanCandidateResourcePlan::site_kind),
             0);
@@ -7335,9 +7336,10 @@ TEST(ConSanMoi, BarrierRecordForcedSpillUsesPlannedPrivateWindow) {
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->spilled_vgpr_count, 6u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
-  EXPECT_EQ(result.resource_plan_summary.spill_plans, 1u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
+  const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+  EXPECT_EQ(summary.spill_plans, 1u);
+  EXPECT_EQ(summary.emitted_spill_patches, 1u);
+  EXPECT_EQ(summary.emitted_spill_slot_bytes, 24u);
 }
 
 TEST(ConSanMoi, Rdna4DynamicStackBarrierRecordUsesSiteLocalSpillFrames) {
@@ -7411,9 +7413,10 @@ TEST(ConSanMoi, Cdna4BarrierRecordForcedSpillUsesNativePrivateWindows) {
   EXPECT_EQ(plan->scratch_vgpr_count, 6u);
   ASSERT_TRUE(plan->scratch_vgpr);
   EXPECT_EQ(*plan->scratch_vgpr % 2u, 0u);
-  EXPECT_EQ(result.resource_plan_summary.spill_plans, 1u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 1u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 24u);
+  const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+  EXPECT_EQ(summary.spill_plans, 1u);
+  EXPECT_EQ(summary.emitted_spill_patches, 1u);
+  EXPECT_EQ(summary.emitted_spill_slot_bytes, 24u);
 }
 
 TEST(ConSanMoi, RecordReplayPersistentEpochStillEmitsBarrierRecords) {
@@ -12492,7 +12495,7 @@ TEST(ConSanMoi, AtomicRecordAutomaticallyPlansScratch) {
       });
   ASSERT_NE(fence_plan, result.resource_plans.end());
   EXPECT_EQ(fence_plan->scratch_vgpr, fence_patch->scratch_vgpr);
-  EXPECT_EQ(result.resource_plan_summary.dead_plans, 2u);
+  EXPECT_EQ(test_resource_plan_summary(result).dead_plans, 2u);
 }
 
 TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
@@ -12529,13 +12532,14 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
     return warning.find("fence record patch rejected communication address: "
                         "scratch-operand-alias") != std::string::npos;
   }));
-  EXPECT_EQ(result.resource_plan_summary.spill_plans, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
+  const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+  EXPECT_EQ(summary.spill_plans, 2u);
+  EXPECT_EQ(summary.emitted_spill_patches, 2u);
   size_t emitted_spill_slot_bytes = 0u;
   for (const ConSanPatchInfo &item : result.patches) {
     emitted_spill_slot_bytes += static_cast<size_t>(item.spilled_vgpr_count) * sizeof(uint32_t);
   }
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, emitted_spill_slot_bytes);
+  EXPECT_EQ(summary.emitted_spill_slot_bytes, emitted_spill_slot_bytes);
 }
 
 TEST(ConSanMoi, Rdna4DynamicStackAtomicRecordUsesSiteLocalSpillFrames) {
@@ -12716,9 +12720,10 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
   EXPECT_EQ(plan->scratch_vgpr_count, 7u);
   ASSERT_TRUE(plan->scratch_vgpr);
   EXPECT_EQ(*plan->scratch_vgpr % 2u, 0u);
-  EXPECT_EQ(result.resource_plan_summary.spill_plans, 3u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_patches, 2u);
-  EXPECT_EQ(result.resource_plan_summary.emitted_spill_slot_bytes, 60u);
+  const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+  EXPECT_EQ(summary.spill_plans, 3u);
+  EXPECT_EQ(summary.emitted_spill_patches, 2u);
+  EXPECT_EQ(summary.emitted_spill_slot_bytes, 60u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1u);

@@ -18,6 +18,7 @@
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
+#include "rocjitsu/code/patch/consan/consan_resource.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_process_byte_budget.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_replay_provenance.h"
 #include "rocjitsu/hooks/consan/rj_hsa_dbi_sampled_sync.h"
@@ -4483,8 +4484,9 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                   sequence.execution_owners.size(), owners.names.c_str(), owners.proofs.c_str());
     }
     if (request.flavor == rocjitsu::ConSanFlavor::Moi) {
-      const rocjitsu::ConSanResourcePlanSummary &resource_summary =
-          patch_result.resource_plan_summary;
+      const rocjitsu::ConSanResourcePlanSummary resource_summary =
+          rocjitsu::summarize_consan_resource_plans(patch_result.resource_plans,
+                                                    patch_result.patches);
       log_message(kLogInfo,
                   "ConSan MOI resources reader=%llu explicit=%zu dead=%zu "
                   "descriptor_growth=%zu spill=%zu unsupported=%zu "

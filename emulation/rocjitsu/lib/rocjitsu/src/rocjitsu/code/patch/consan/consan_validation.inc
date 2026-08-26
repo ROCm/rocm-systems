@@ -4608,7 +4608,9 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
     return result;
   }
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
-      result.resource_plan_summary.unsupported_plans != 0 || has_unsupported_preflight(result)) {
+      summarize_consan_resource_plans(result.resource_plans, result.patches).unsupported_plans !=
+          0 ||
+      has_unsupported_preflight(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.mutation.applied_fault_logical_identity.reset();
   } else {

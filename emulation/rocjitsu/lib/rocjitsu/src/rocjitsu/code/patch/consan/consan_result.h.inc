@@ -507,7 +507,6 @@ struct ConSanResult {
   /// diagnostics while retaining parser and semantic-analysis warnings.
   size_t moi_stage_warning_begin = 0;
   std::vector<ConSanCandidateResourcePlan> resource_plans;
-  ConSanResourcePlanSummary resource_plan_summary;
   std::optional<ConSanFlatSelectionTelemetry> flat_selection_telemetry;
   std::vector<ConSanPatchInfo> patches;
   std::vector<uint8_t> elf_bytes;

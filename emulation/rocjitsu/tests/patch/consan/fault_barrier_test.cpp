@@ -511,7 +511,7 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
   EXPECT_EQ(result.mutation.fault.applied, 0u);
   EXPECT_FALSE(result.mutation.applied_fault_logical_identity);
   EXPECT_EQ(result.resource_plans.size(), 5u);
-  EXPECT_EQ(result.resource_plan_summary.unsupported_plans, 5u);
+  EXPECT_EQ(test_resource_plan_summary(result).unsupported_plans, 5u);
   EXPECT_TRUE(std::ranges::all_of(result.resource_plans, [](const auto &plan) {
     return plan.source == ConSanRegisterAllocationSource::Unsupported &&
            plan.reason == ConSanRegisterPlanReason::ForbiddenOverlap;

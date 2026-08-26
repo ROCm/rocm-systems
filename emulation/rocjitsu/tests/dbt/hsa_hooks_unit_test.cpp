@@ -5018,12 +5018,6 @@ TEST(HsaHooksUnitTest, ConSanResourcePlanFallbackTelemetryIsVisibleAtQualificati
        .outcome = rocjitsu::ConSanResourcePlanAlternativeOutcome::Rejected},
   };
   result.resource_plans.push_back(std::move(fence_plan));
-  result.resource_plan_summary.alternative_attempts = 5;
-  result.resource_plan_summary.alternative_selected = 1;
-  result.resource_plan_summary.alternative_rejected = 1;
-  result.resource_plan_summary.alternative_superseded = 1;
-  result.resource_plan_summary.alternative_contributed = 1;
-  result.resource_plan_summary.alternative_vetoed = 1;
 
   testing::internal::CaptureStderr();
   run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.elf_bytes);

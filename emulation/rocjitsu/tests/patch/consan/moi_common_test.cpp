@@ -1081,7 +1081,7 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_TRUE(result.resource_plans.front().owner_descriptor_file_offsets.empty());
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::MissingOwner);
-  EXPECT_EQ(result.resource_plan_summary.unsupported_plans, 1u);
+  EXPECT_EQ(test_resource_plan_summary(result).unsupported_plans, 1u);
 }
 
 TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {

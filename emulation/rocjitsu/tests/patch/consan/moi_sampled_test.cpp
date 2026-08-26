@@ -1490,12 +1490,13 @@ TEST(ConSanMoi, Cdna4SampledAtomicReportsGuestOperandOverlapFallback) {
   EXPECT_EQ(alternative.scratch_vgpr_count, 11u);
   EXPECT_EQ(consan_resource_plan_alternative_outcome(*atomic_plan, alternative),
             ConSanResourcePlanAlternativeOutcome::Selected);
-  EXPECT_EQ(result.resource_plan_summary.alternative_attempts, 1u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_selected, 1u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_rejected, 0u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_superseded, 0u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_contributed, 0u);
-  EXPECT_EQ(result.resource_plan_summary.alternative_vetoed, 0u);
+  const ConSanResourcePlanSummary summary = test_resource_plan_summary(result);
+  EXPECT_EQ(summary.alternative_attempts, 1u);
+  EXPECT_EQ(summary.alternative_selected, 1u);
+  EXPECT_EQ(summary.alternative_rejected, 0u);
+  EXPECT_EQ(summary.alternative_superseded, 0u);
+  EXPECT_EQ(summary.alternative_contributed, 0u);
+  EXPECT_EQ(summary.alternative_vetoed, 0u);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -2370,7 +2371,7 @@ TEST(ConSanMoi, SampledAtomicForcedSpillPreservesElevenVgprWindow) {
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->spilled_vgpr_count, 11u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
-  EXPECT_GE(result.resource_plan_summary.emitted_spill_patches, 1u);
+  EXPECT_GE(test_resource_plan_summary(result).emitted_spill_patches, 1u);
 }
 
 TEST(ConSanMoi, Rdna4DynamicStackSampledAtomicUsesSiteLocalSpillFrames) {
@@ -3583,7 +3584,7 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " plans=" << testing::PrintToString(result.resource_plans);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_EQ(result.resource_plan_summary.unsupported_plans, 0u);
+  EXPECT_EQ(test_resource_plan_summary(result).unsupported_plans, 0u);
   EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
 

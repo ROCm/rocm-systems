@@ -249,5 +249,72 @@ TEST(ConSanResourcePlan, ForbiddenFullFileHasTypedFailure) {
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::NoLegalWindow);
 }
 
+TEST(ConSanResourcePlanSummary, DerivesEveryPlanAndAlternativeOutcome) {
+  std::array<ConSanCandidateResourcePlan, 5> plans;
+  plans[0].source = ConSanRegisterAllocationSource::Explicit;
+  plans[0].alternatives = {
+      {.outcome = ConSanResourcePlanAlternativeOutcome::Selected},
+      {.outcome = ConSanResourcePlanAlternativeOutcome::Rejected},
+  };
+  plans[1].source = ConSanRegisterAllocationSource::LivenessDead;
+  plans[1].alternatives = {
+      {.outcome = ConSanResourcePlanAlternativeOutcome::Superseded},
+  };
+  plans[2].source = ConSanRegisterAllocationSource::DescriptorGrowth;
+  plans[2].alternatives = {
+      {.outcome = ConSanResourcePlanAlternativeOutcome::Contributed},
+  };
+  plans[3].source = ConSanRegisterAllocationSource::SpillRequired;
+  plans[3].scratch_vgpr_count = 3;
+  plans[3].alternatives = {
+      {.outcome = ConSanResourcePlanAlternativeOutcome::Vetoed},
+  };
+  plans[4].source = ConSanRegisterAllocationSource::Unsupported;
+  // A nominally selected fallback cannot remain selected when the complete
+  // resource plan is unsupported; the derived report classifies it as vetoed.
+  plans[4].alternatives = {
+      {.outcome = ConSanResourcePlanAlternativeOutcome::Selected},
+  };
+  std::array<ConSanPatchInfo, 3> patches;
+  patches[0].spilled_vgpr_count = 2;
+  patches[2].spilled_vgpr_count = 5;
+
+  const ConSanResourcePlanSummary summary = summarize_consan_resource_plans(plans, patches);
+
+  EXPECT_EQ(summary.explicit_plans, 1u);
+  EXPECT_EQ(summary.dead_plans, 1u);
+  EXPECT_EQ(summary.descriptor_growth_plans, 1u);
+  EXPECT_EQ(summary.spill_plans, 1u);
+  EXPECT_EQ(summary.unsupported_plans, 1u);
+  EXPECT_EQ(summary.planned_spill_slot_bytes, 12u);
+  EXPECT_EQ(summary.emitted_spill_patches, 2u);
+  EXPECT_EQ(summary.emitted_spill_slot_bytes, 28u);
+  EXPECT_EQ(summary.alternative_attempts, 6u);
+  EXPECT_EQ(summary.alternative_selected, 1u);
+  EXPECT_EQ(summary.alternative_rejected, 1u);
+  EXPECT_EQ(summary.alternative_superseded, 1u);
+  EXPECT_EQ(summary.alternative_contributed, 1u);
+  EXPECT_EQ(summary.alternative_vetoed, 2u);
+}
+
+TEST(ConSanResourcePlanSummary, EmptyInputProducesEmptySummary) {
+  const ConSanResourcePlanSummary summary = summarize_consan_resource_plans({}, {});
+
+  EXPECT_EQ(summary.explicit_plans, 0u);
+  EXPECT_EQ(summary.dead_plans, 0u);
+  EXPECT_EQ(summary.descriptor_growth_plans, 0u);
+  EXPECT_EQ(summary.spill_plans, 0u);
+  EXPECT_EQ(summary.unsupported_plans, 0u);
+  EXPECT_EQ(summary.planned_spill_slot_bytes, 0u);
+  EXPECT_EQ(summary.emitted_spill_patches, 0u);
+  EXPECT_EQ(summary.emitted_spill_slot_bytes, 0u);
+  EXPECT_EQ(summary.alternative_attempts, 0u);
+  EXPECT_EQ(summary.alternative_selected, 0u);
+  EXPECT_EQ(summary.alternative_rejected, 0u);
+  EXPECT_EQ(summary.alternative_superseded, 0u);
+  EXPECT_EQ(summary.alternative_contributed, 0u);
+  EXPECT_EQ(summary.alternative_vetoed, 0u);
+}
+
 } // namespace
 } // namespace rocjitsu

@@ -74,6 +74,11 @@ struct ConSanCandidateResourcePlan {
   std::vector<ConSanResourcePlanAlternative> alternatives;
 };
 
+/// Aggregate telemetry derived from completed resource plans and emitted
+/// patches. Its counters describe planner outcomes and the spill storage used
+/// by emitted mechanics. This type owns no transform state; construct it with
+/// `summarize_consan_resource_plans` whenever a diagnostic or test needs the
+/// reporting view.
 struct ConSanResourcePlanSummary {
   size_t explicit_plans = 0;
   size_t dead_plans = 0;

@@ -298,6 +298,14 @@ const ConSanPatchInfo &only_non_entry_prologue_patch(const ConSanResult &result)
   return *patch;
 }
 
+/// Derive resource telemetry from the authoritative plan and patch collections
+/// for tests that exercise the complete transform pipeline. Production does
+/// not cache this view in `ConSanResult`, so tests cannot accidentally assert
+/// against stale duplicated state either.
+ConSanResourcePlanSummary test_resource_plan_summary(const ConSanResult &result) {
+  return summarize_consan_resource_plans(result.resource_plans, result.patches);
+}
+
 ConSanRegisterRequest vgpr_request(uint16_t count, uint16_t current_allocation_count,
                                    uint16_t max_referenced_count) {
   ConSanRegisterRequest request;
