@@ -1008,10 +1008,11 @@ def test_analyze_per_kernel_export_output_format(
 
     with isa_paths[0].open(newline="", encoding="utf-8") as isa_file:
         header, *rows = list(csv.reader(isa_file))
-    assert header[:3] == [
+    assert header[:4] == [
         "Instruction line number",
         "Code object offset",
         "Instruction line",
+        "Instruction type",
     ]
     assert header[-3:] == ["Source", "Code object id", "Pid"]
     assert [row[0] for row in rows] == [
