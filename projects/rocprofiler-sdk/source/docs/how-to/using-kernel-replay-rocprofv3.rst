@@ -147,6 +147,12 @@ Limitations (CLI)
 * **Each** ``--pmc`` **group must fit one hardware pass.**
 * **Fixed pass count** equal to the number of collectable groups on that agent. No
   ``replay_continue_cb`` and no per-pass local-context toggles from the CLI.
+* **Counters only.** ``--att``, PC sampling, and ``--spm`` are rejected alongside
+  ``--kernel-replay-beta-enabled``. Because the CLI has no per-pass toggles, any other service
+  would remain enabled for every pass and report each kernel once per pass, all under the single
+  dispatch ID that replay reuses. The SDK itself is not restricted this way -- a custom tool can
+  enable and disable services per pass through the local-context API (see
+  :ref:`using-kernel-replay`) -- so this is a CLI limitation, not a hardware or SDK one.
 * **HIP graph launches are not replayed.** A graph seen while replay is active warns once and
   runs un-replayed (not a hard error).
 * **Only single-packet, single-dispatch submissions** are replayed.
