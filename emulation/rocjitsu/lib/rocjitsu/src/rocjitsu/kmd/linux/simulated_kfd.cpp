@@ -739,7 +739,7 @@ int SimulatedKfd::open() {
   for (auto &g : gpus_) {
     if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
       mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
-                            proc->page_table_generation());
+                            proc->page_table_generation(), proc->page_table_request_mutex());
       if (!daemon_mode_)
         mem->set_passthrough(true);
     }
@@ -801,7 +801,7 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     for (auto &g : gpus_) {
       if (auto *mem = g.soc ? g.soc->memory() : nullptr) {
         mem->register_process(pid, &proc->page_table_, &proc->page_table_mutex_,
-                              proc->page_table_generation());
+                              proc->page_table_generation(), proc->page_table_request_mutex());
         if (client_pid > 0)
           mem->set_process_client_pid(pid, client_pid);
       }
@@ -1975,6 +1975,25 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     return false;
 
   size_t aligned_size = (size + 0xFFF) & ~0xFFFULL;
+
+  // Every XCD of a fanned-out dispatch races here for the same process-wide pool
+  // VA, each having independently found it unbacked. Only the first may map it:
+  // mapping again would repoint the pool underneath waves the first XCD already
+  // launched and leak the original. The requested size is grid-scale and therefore
+  // identical for every XCD of one grid, so a pool already at least that large
+  // satisfies all of them and this covers the whole fan-out race.
+  //
+  // A later dispatch in the same process needing a LARGER pool still falls through
+  // and remaps, as it did before fan-out existed. That path is unchanged here.
+  std::lock_guard<std::mutex> scratch_lock(proc->scratch_backing_mutex_);
+  {
+    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
+    for (const auto &[handle, alloc] : proc->allocations_) {
+      if (alloc.gpu_va == gpu_va && alloc.size >= aligned_size)
+        return true;
+    }
+  }
+
   auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
   if (raw_fd < 0)
     return false;
@@ -2128,7 +2147,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // Queue IDs are process-local and start at one. Equivalent runtime queues in
   // different processes therefore share XCD resources while each process still
   // distributes additional queues across the device.
-  auto *target_cp = gpu->soc->assign_queue_cp(proc.next_queue_id_ - 1);
+  auto *target_cp = gpu->soc->assign_queue_owner_cp(proc.next_queue_id_ - 1);
   if (!target_cp)
     return -EINVAL;
 
@@ -2207,9 +2226,20 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     hw.doorbell_base = gs.doorbell_monitor_page;
     hw.last_doorbell = ~uint64_t(0);
     hw.host_accessible = true;
-    hw.is_sdma = (args->queue_type == 1 /*KFD_IOC_QUEUE_TYPE_SDMA*/ ||
-                  args->queue_type == 3 /*KFD_IOC_QUEUE_TYPE_SDMA_XGMI*/ ||
-                  args->queue_type == 4 /*KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID*/);
+    hw.is_sdma = (args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
+                  args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
+                  args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID);
+    // The topology advertises every XCD's compute units as one agent, so a
+    // compute dispatch must be able to reach all of them. Without this a
+    // single-queue application would only ever use the XCD that
+    // assign_queue_owner_cp() happened to pick.
+    //
+    // Named types only, rather than "anything that is not SDMA". SDMA queues are
+    // per-engine and are not spread, but an unrecognized queue_type is not
+    // thereby a compute queue, and device-wide replication should not be what an
+    // unsupported value silently acquires.
+    hw.xcd_fanout = (args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE ||
+                     args->queue_type == KFD_IOC_QUEUE_TYPE_COMPUTE_AQL);
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
     if (!hw.is_sdma)
       hw.queue_desc_va = args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);

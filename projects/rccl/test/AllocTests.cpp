@@ -138,7 +138,69 @@ TEST(Alloc, ncclCuMemFreeAddr)
         }
     );
 }
+
+TEST(Alloc, ncclCuMemGetAddressRange)
+{
+    RUN_ISOLATED_TEST(
+        "ncclCuMemGetAddressRange",
+        []()
+        {
+            CUdeviceptr  base         = 0;
+            size_t       baseSize     = 0;
+            int          numSegments  = 0;
+            bool         hasSysmem    = false;
+            ncclResult_t result       = ncclCuMemGetAddressRange(
+                static_cast<CUdeviceptr>(0x1000), 4096, &base, &baseSize, &numSegments, &hasSysmem);
+            ASSERT_EQ(result, ncclInternalError);
+        }
+    );
+}
 #endif // ROCM_VERSION < 70000
+
+TEST(Alloc, ncclCudaHostCalloc)
+{
+    RUN_ISOLATED_TEST(
+        "ncclCudaHostCalloc",
+        []()
+        {
+            // Initialize HIP device in forked process
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+            constexpr size_t N   = 256;
+            float*           ptr = nullptr;
+
+            ncclResult_t result = ncclCudaHostCalloc(&ptr, N);
+            ASSERT_EQ(result, ncclSuccess);
+            ASSERT_NE(ptr, nullptr);
+
+            // Verify the allocation is host (CPU) memory, not device memory.
+            hipPointerAttribute_t attr;
+            ASSERT_EQ(hipPointerGetAttributes(&attr, ptr), hipSuccess);
+            EXPECT_EQ(attr.type, hipMemoryTypeHost)
+                << "ncclCudaHostCalloc should allocate host (CPU) memory";
+
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+            // Verify the uncached flag was actually honored, not just requested.
+            unsigned int flags = 0;
+            ASSERT_EQ(hipHostGetFlags(&flags, ptr), hipSuccess);
+            EXPECT_TRUE(flags & hipHostMallocUncached)
+                << "HIP_HOST_UNCACHED_MEMORY is enabled but ncclCudaHostCalloc did not "
+                   "request uncached host memory (flags = "
+                << flags << ")";
+#endif
+
+            // The memory must be directly readable/writable from the CPU.
+            for(size_t i = 0; i < N; ++i)
+                EXPECT_EQ(ptr[i], 0.0f) << "Host memory not zero-initialized at index " << i;
+            for(size_t i = 0; i < N; ++i)
+                ptr[i] = static_cast<float>(i + 1);
+            for(size_t i = 0; i < N; ++i)
+                EXPECT_EQ(ptr[i], static_cast<float>(i + 1)) << "Host write/read mismatch at index " << i;
+
+            ASSERT_EQ(ncclCudaHostFree(ptr), ncclSuccess);
+        }
+    );
+}
 
 TEST(Alloc, NcclCudaMemcpy)
 {
