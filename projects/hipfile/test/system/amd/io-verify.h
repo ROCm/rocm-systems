@@ -7,7 +7,6 @@
 
 #include "backend/fallback.h"
 #include "hipfile-literals.h"
-#include "hipfile-warnings.h"
 #include "hipfile.h"
 
 #include "verify-kernel.h"
@@ -15,11 +14,9 @@
 #include "verify-pattern-bytes.h"
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
-#include <string>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
@@ -51,22 +48,6 @@ slackElems()
 {
     return 4_KiB / sizeof(int32_t);
 }
-
-// ---------------------------------------------------------------------------
-// Transfer-size test parameters.
-// ---------------------------------------------------------------------------
-struct SizeParam {
-    size_t      bytes;
-    std::string name;
-};
-
-HIPFILE_WARN_NO_EXIT_DTOR_OFF
-inline const std::array<SizeParam, 3> combined_sizes{{
-    {4_KiB, "sub_chunk"},
-    {kChunkBytes + 4_KiB, "cross_chunk"},
-    {2 * kChunkBytes, "multi_chunk"},
-}};
-HIPFILE_WARN_NO_EXIT_DTOR_ON
 
 // ---------------------------------------------------------------------------
 // File-extension cases.
