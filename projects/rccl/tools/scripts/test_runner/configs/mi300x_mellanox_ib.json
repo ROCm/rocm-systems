@@ -195,27 +195,66 @@
       },
       "tests": [
         {
+          "name": "UBR_MultiSegment_All_Core",
+          "test_filter": "UBR_MultiSegment.*-UBR_MultiSegment.Generic_Reuse:UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache:UBR_MultiSegment.Symmetric_Lsa:UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult:UBR_MultiSegment.Symmetric_LsaGin:UBR_MultiSegment.Symmetric_Elastic_Gating:UBR_MultiSegment.DeepEP_Hybrid*"
+        },
+        {
           "name": "UBR_MultiSegment_Generic_Reuse",
-          "description": "Register once, AllReduce twice - exercises the multi-segment registration reuse fast path (IPC or NET reuse)",
-          "test_filter": "UBR_MultiSegment.Generic_Reuse"
+          "test_filter": "UBR_MultiSegment.Generic_Reuse",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple"
+          }
         },
         {
-          "name": "UBR_MultiSegment_NetSegmentCountOddSizedHipMalloc",
-          "description": "NET segment count of an odd-sized hipMalloc registration must not walk past the allocation into the page-rounded tail",
-          "test_filter": "UBR_MultiSegment.NetSegmentCountOddSizedHipMalloc"
+          "name": "UBR_MultiSegment_Symmetric_Lsa_AFTER",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1"
+          }
         },
         {
-          "name": "UBR_MultiSegment_Symmetric_Elastic_Lsa",
-          "description": "LSA-only elastic buffer: symmetric window with a host-backed trailing segment (NCCL_ELASTIC_BUFFER_REGISTER=1)",
-          "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Lsa"
+          "name": "UBR_MultiSegment_Symmetric_Lsa_BEFORE",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult",
+          "env_variables": {
+            "RCCL_CE_ALLREDUCE": "1",
+            "NCCL_CTA_POLICY": "2"
+          }
         },
         {
-          "name": "UBR_MultiSegment_Symmetric_Elastic_Gating",
-          "description": "Elastic buffer gating: host-backed symmetric window must be rejected when NCCL_ELASTIC_BUFFER_REGISTER=0",
+          "name": "UBR_MultiSegment_Elastic_Gating",
           "test_filter": "UBR_MultiSegment.Symmetric_Elastic_Gating",
           "env_variables": {
             "NCCL_ELASTIC_BUFFER_REGISTER": "0"
           }
+        }
+      ]
+    },
+    "ubr_multisegment_ce_before": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1",
+        "NCCL_CTA_POLICY": "2"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_Generic_Reuse_BEFORE",
+          "test_filter": "UBR_MultiSegment.Generic_Reuse_BeforeCePlanBypassesRegistrationCache"
         }
       ]
     },
@@ -228,21 +267,21 @@
       "num_gpus": 2,
       "timeout": 300,
       "env_variables": {
+        "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "REG",
-        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
         "NCCL_WIN_ENABLE": "1",
+        "NCCL_ELASTIC_BUFFER_REGISTER": "1",
+        "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
       "tests": [
-        {
-          "name": "UBR_MultiSegment_Generic",
-          "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts the NET cache rcclNet.nSegments",
-          "test_filter": "UBR_MultiSegment.Generic"
-        },
         {
           "name": "UBR_MultiSegment_GenericGraph",
           "description": "Graph-captured AllReduce reusing a wider 8-segment graph record; asserts the NET cache counts the whole record",
@@ -250,6 +289,10 @@
           "env_variables": {
             "NCCL_GRAPH_REGISTER": "1"
           }
+        },
+        {
+          "name": "UBR_MultiSegment_Symmetric_LsaGin",
+          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
         },
         {
           "name": "UBR_MultiSegment_MultiSegmentRegisterOff_SliceSkipsNet",
@@ -269,14 +312,47 @@
           }
         },
         {
-          "name": "UBR_MultiSegment_Symmetric_LsaGin",
-          "description": "Cross-node ReduceScatter over multi-segment symmetric windows exercising both the LSA (intra-node) and GIN (inter-node) legs; requires >=2 nodes and >=2 ranks per node",
-          "test_filter": "UBR_MultiSegment.Symmetric_LsaGin"
-        },
-        {
           "name": "UBR_MultiSegment_NetProxyPartialFinalSegment",
           "description": "AllReduce over two full VMM mappings plus half of a third; the only test driving netIbRegMrMultiSeg with a clipped final MR. Requires exactly two nodes",
           "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment"
+        },
+        {
+          "name": "DeepEP_Hybrid_Positive_And_Stress",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridWindowRegistrationAndHandleReuse:RmaMultiSegmentMPITest.DeepEP_HybridImportedCpuSegmentIGet:RmaMultiSegmentMPITest.DeepEP_HybridMultiNodeIGetStress:RmaMultiSegmentMPITest.DeepEP_HybridOutOfRangeIGetRejected"
+        },
+        {
+          "name": "DeepEP_Hybrid_Elastic_Gating",
+          "test_filter": "UBR_MultiSegment.DeepEP_HybridElasticRegistrationDisabled",
+          "env_variables": {
+            "NCCL_ELASTIC_BUFFER_REGISTER": "0"
+          }
+        },
+        {
+          "name": "DeepEP_Elastic_Window_Registration",
+          "test_filter": "UBR_MultiSegment.DeepEP_ElasticWindowRegistration"
+        }
+      ]
+    },
+    "multisegment_transport_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_NET": "IB",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2"
+      },
+      "tests": [
+        {
+          "name": "MultiSegment_Transport_All_MultiNode",
+          "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
         }
       ]
     },
@@ -5196,6 +5272,21 @@
           "name": "Symk_AllGatherStoreData",
           "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
           "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
+        }
+      ]
+    },
+    "multisegment_host_boundary_math": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "MultiSegment_HostBoundaryMath_All",
+          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*"
         }
       ]
     }
