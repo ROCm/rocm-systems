@@ -101,8 +101,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     result.warnings.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return;
   }
-  std::vector<const ConSanMoiCandidate *> candidates =
-      find_inline_shadow_access_candidates(result, bytes, arch);
+  std::vector<const ConSanMoiCandidate *> candidates = find_inline_shadow_access_candidates(result);
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->text_offset < rhs->text_offset;
@@ -125,10 +124,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   // retaining independent provenance for every byte.
   const bool requires_wave_partitioned_exact_shadow =
       std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
-        const auto ranges = candidate_access_ranges(bytes, *candidate, arch);
-        return ranges && std::ranges::any_of(*ranges, [](const ConSanMoiAccessRange &range) {
-                 return range.byte_count < consan_moi_exact_shadow::granule_bytes;
-               });
+        return std::ranges::any_of(candidate->access_ranges, [](const ConSanMoiAccessRange &range) {
+          return range.byte_count < consan_moi_exact_shadow::granule_bytes;
+        });
       });
   if (options.moi_inline_workgroup_shadow && requires_wave_partitioned_exact_shadow) {
     result.warnings.emplace_back(
@@ -3266,8 +3264,8 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint16_t> private_owner_shift, bool runtime_workgroup_gate_in_body,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
-  const auto access_ranges = candidate_access_ranges(bytes, candidate, arch);
-  if (!access_ranges || access_ranges->empty()) {
+  const auto &access_ranges = candidate.access_ranges;
+  if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
     return std::nullopt;
   }
@@ -3425,7 +3423,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     }
   }
 
-  for (uint32_t range_index = 0; range_index < access_ranges->size(); ++range_index) {
+  for (uint32_t range_index = 0; range_index < access_ranges.size(); ++range_index) {
     std::vector<uint32_t> prior_record_indices;
     if (prior_first_record_index) {
       prior_record_indices.reserve(prior_access_range_count);
@@ -3438,7 +3436,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     uint32_t range_guest_instruction_offset = 0;
     uint32_t range_guest_instruction_word_count = 0;
     auto range_words = build_direct_sampled_watchpoint_range_words(
-        bytes, candidate, (*access_ranges)[range_index], options, arch,
+        bytes, candidate, access_ranges[range_index], options, arch,
         first_record_index + range_index * window_bank_count, prior_record_indices,
         window_bank_count, range_index == 0u && !spill_backed_operand_recovery,
         pending_acquire_owner_bank_count, preserved_lds_byte_offset_vgpr, spill,

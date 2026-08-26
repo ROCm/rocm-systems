@@ -193,11 +193,6 @@ struct ConSanMoiWorkgroupSources {
   auto operator<=>(const ConSanMoiWorkgroupSources &) const = default;
 };
 
-struct ConSanMoiAccessRange {
-  uint32_t static_byte_offset = 0;
-  uint32_t byte_count = 0;
-};
-
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
@@ -481,6 +476,20 @@ void warn_skipped_moi_flat_candidates(std::string_view container_name, bool in_k
   candidate.raw_scope = access.operands.raw_scope;
   candidate.raw_th = access.operands.raw_th;
   candidate.mnemonic = access.mnemonic;
+  for (const ConSanAccessRange &range : access.ranges) {
+    if (access.origin == ConSanAccessOrigin::Flat) {
+      candidate.access_ranges.push_back({.static_byte_offset = 0u, .byte_count = range.byte_width});
+      continue;
+    }
+    if (!range.static_byte_offset || *range.static_byte_offset < 0 ||
+        static_cast<uint64_t>(*range.static_byte_offset) > std::numeric_limits<uint32_t>::max()) {
+      continue;
+    }
+    candidate.access_ranges.push_back({
+        .static_byte_offset = static_cast<uint32_t>(*range.static_byte_offset),
+        .byte_count = range.byte_width,
+    });
+  }
   return candidate;
 }
 
@@ -845,107 +854,12 @@ two_address_native_lds_offset_scale(std::string_view mnemonic) {
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<std::vector<ConSanMoiAccessRange>>
-candidate_access_ranges(std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-                        rj_code_arch_t arch) {
-  const std::optional<uint32_t> byte_count = byte_count_for_candidate(candidate);
-  if (!byte_count)
-    return std::nullopt;
-
-  if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
-    if (candidate.direct_to_lds)
-      return std::vector<ConSanMoiAccessRange>{{0u, *byte_count}};
-    const std::optional<uint32_t> word0 = read_u32(bytes, candidate.file_offset);
-    if (!word0)
-      return std::nullopt;
-    if (is_single_range_native_lds_mnemonic(candidate.mnemonic, arch)) {
-      // VDS encodes a 16-bit single-address immediate. CDNA3/4 DS atomics use
-      // only the eight-bit offset0 field; offset1 is not part of their address.
-      const uint32_t static_byte_offset =
-          (consan_uses_gfx9_cdna_encoding(arch)) && candidate.kind == ConSanLdsAccessKind::Atomic
-              ? *word0 & 0xffu
-              : *word0 & 0xffffu;
-      return std::vector<ConSanMoiAccessRange>{{static_byte_offset, *byte_count}};
-    }
-
-    const std::optional<uint32_t> two_address_scale =
-        two_address_native_lds_offset_scale(candidate.mnemonic);
-    if (!two_address_scale)
-      return std::nullopt;
-    const uint32_t offset0 = *word0 & 0xffu;
-    const uint32_t offset1 = (*word0 >> 8u) & 0xffu;
-    return std::vector<ConSanMoiAccessRange>{
-        {offset0 * *two_address_scale, *byte_count},
-        {offset1 * *two_address_scale, *byte_count},
-    };
-  }
-
-  if (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
-      candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup)
-    return std::vector<ConSanMoiAccessRange>{{0u, *byte_count}};
-
-  return std::nullopt;
-}
-
-[[nodiscard]] bool is_first_light_native_lds_candidate(const ConSanMoiCandidate &candidate,
-                                                       std::span<const uint8_t> bytes,
-                                                       rj_code_arch_t arch) {
-  if (candidate.source != ConSanMoiCandidateSource::NativeLds)
-    return false;
-  return candidate_access_ranges(bytes, candidate, arch).has_value();
-}
-
-[[nodiscard]] bool is_first_light_flat_candidate(const ConSanMoiCandidate &candidate,
-                                                 rj_code_arch_t arch) {
-  if (candidate.source != ConSanMoiCandidateSource::FlatGroup &&
-      candidate.source != ConSanMoiCandidateSource::FlatMaybeGroup)
-    return false;
-  const bool rdna4_encoding = candidate.size == 3u * sizeof(uint32_t);
-  const bool cdna4_encoding =
-      candidate.size == 2u * sizeof(uint32_t) && candidate.raw_segment == 0u;
-  if (!rdna4_encoding && !cdna4_encoding)
-    return false;
-  if (!candidate.raw_ioffset)
-    return false;
-  if (*candidate.raw_ioffset != 0 && !is_rdna4_family_arch(arch))
-    return false;
-  if (is_rdna4_family_arch(arch) && (!candidate.raw_saddr || !candidate.raw_scale_offset))
-    return false;
-  const bool scalar_vector_address = is_rdna4_family_arch(arch) && candidate.raw_saddr &&
-                                     !is_vector_flat_no_saddr(*candidate.raw_saddr, arch);
-  if (!candidate.addr_vgpr || (*candidate.addr_vgpr >= 255 && !scalar_vector_address))
-    return false;
-  if (!is_supported_moi_flat_access_mnemonic(candidate.mnemonic))
-    return false;
-  return true;
-}
-
-[[nodiscard]] bool is_first_light_access_record_candidate(const ConSanMoiCandidate &candidate,
-                                                          std::span<const uint8_t> bytes,
-                                                          rj_code_arch_t arch) {
-  if (candidate.kind != ConSanLdsAccessKind::Read && candidate.kind != ConSanLdsAccessKind::Write &&
-      candidate.kind != ConSanLdsAccessKind::Atomic)
-    return false;
-  if (candidate.size == 0 || candidate.size % sizeof(uint32_t) != 0)
-    return false;
-  if (candidate.file_offset > bytes.size() || candidate.size > bytes.size() - candidate.file_offset)
-    return false;
-  if (!byte_count_for_candidate(candidate))
-    return false;
-  if (candidate.source == ConSanMoiCandidateSource::NativeLds)
-    return is_first_light_native_lds_candidate(candidate, bytes, arch);
-  return is_first_light_flat_candidate(candidate, arch);
-}
-
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
-find_first_light_access_record_candidates(const ConSanResult &result,
-                                          std::span<const uint8_t> bytes, rj_code_arch_t arch) {
+find_first_light_access_record_candidates(const ConSanResult &result) {
   std::vector<const ConSanMoiCandidate *> candidates;
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
-    if (!is_first_light_access_record_candidate(candidate, bytes, arch))
-      continue;
+  candidates.reserve(result.moi_candidates.size());
+  for (const ConSanMoiCandidate &candidate : result.moi_candidates)
     candidates.push_back(&candidate);
-  }
   return candidates;
 }
 

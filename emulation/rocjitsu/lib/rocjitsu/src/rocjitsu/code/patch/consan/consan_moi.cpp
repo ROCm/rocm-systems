@@ -691,7 +691,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   bool inline_atomic_without_access = false;
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow) {
     std::vector<const ConSanMoiCandidate *> inline_access_candidates =
-        find_inline_shadow_access_candidates(result, code_object_bytes, arch);
+        find_inline_shadow_access_candidates(result);
     apply_test_kernel_filter(inline_access_candidates, effective_options);
     effective_options.moi_inline_access_present = !inline_access_candidates.empty();
     inline_atomic_without_access = inline_access_candidates.empty() &&
@@ -1049,8 +1049,6 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = options.moi_engine;
-  const rj_code_arch_t arch = result.program_inventory.arch();
-
   size_t selected_candidate_count = 0;
   bool selected_flat_candidate = false;
   bool selected_dynamic_lds_owner = false;
@@ -1104,21 +1102,21 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     if (!supported_access_sites.contains(
             {candidate.container_name, candidate.in_kernel, candidate.text_offset}))
       continue;
-    const auto ranges = candidate_access_ranges(code_object_bytes, candidate, arch);
-    if (!ranges || ranges->empty())
+    const auto &ranges = candidate.access_ranges;
+    if (ranges.empty())
       continue;
     ++selected_candidate_count;
     selected_flat_candidate |= candidate.source == ConSanMoiCandidateSource::FlatGroup ||
                                candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup;
     selected_dynamic_lds_owner |= dynamic_lds_access_candidates[candidate_index];
     if (candidate.source == ConSanMoiCandidateSource::NativeLds) {
-      for (const ConSanMoiAccessRange &range : *ranges) {
+      for (const ConSanMoiAccessRange &range : ranges) {
         selected_native_lds_extent =
             std::max<uint64_t>(selected_native_lds_extent,
                                static_cast<uint64_t>(range.static_byte_offset) + range.byte_count);
       }
     }
-    inventory.access_range_count += ranges->size();
+    inventory.access_range_count += ranges.size();
   }
 
   const auto supported_count = [&](ConSanResourceSiteKind kind) {

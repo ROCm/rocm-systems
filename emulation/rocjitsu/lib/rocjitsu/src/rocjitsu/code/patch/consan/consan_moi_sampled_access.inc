@@ -134,7 +134,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     return;
   }
   std::vector<const ConSanMoiCandidate *> candidates =
-      find_first_light_access_record_candidates(result, bytes, arch);
+      find_first_light_access_record_candidates(result);
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->text_offset < rhs->text_offset;
@@ -176,10 +176,9 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   for (uint32_t i = 0; i < candidates.size(); ++i) {
     if (i % options.moi_sample_stride == options.moi_sample_offset) {
       ++sampled_filter_candidate_count;
-      const auto ranges = candidate_access_ranges(bytes, *candidates[i], arch);
-      if (ranges &&
-          ranges->size() <= std::numeric_limits<uint32_t>::max() - sampled_filter_range_count)
-        sampled_filter_range_count += static_cast<uint32_t>(ranges->size());
+      const auto &ranges = candidates[i]->access_ranges;
+      if (ranges.size() <= std::numeric_limits<uint32_t>::max() - sampled_filter_range_count)
+        sampled_filter_range_count += static_cast<uint32_t>(ranges.size());
     }
   }
   uint32_t window_bank_count = 1;
@@ -588,10 +587,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled probe skipped load/store site inside a relocated prefix");
       continue;
     }
-    const auto access_ranges = candidate_access_ranges(bytes, candidate, arch);
-    if (!access_ranges || access_ranges->empty())
+    const auto &access_ranges = candidate.access_ranges;
+    if (access_ranges.empty())
       continue;
-    const uint32_t range_count = static_cast<uint32_t>(access_ranges->size());
+    const uint32_t range_count = static_cast<uint32_t>(access_ranges.size());
     const uint32_t required_slots = range_count * window_bank_count;
     if (required_slots > max_access_record_slots - next_record_index) {
       capacity_limited = true;

@@ -821,9 +821,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !two_address_scale)
     return copy_original();
 
-  const auto ranges = candidate_access_ranges(bytes, candidate, arch);
+  const auto &ranges = candidate.access_ranges;
   const uint16_t element_dwords = static_cast<uint16_t>(candidate.width_bits / 32u);
-  if (!ranges || ranges->size() != 2u ||
+  if (ranges.size() != 2u ||
       (candidate.kind != ConSanLdsAccessKind::Read &&
        candidate.kind != ConSanLdsAccessKind::Write) ||
       (element_dwords != 1u && element_dwords != 2u) || replay_address_vgpr > 255u) {
@@ -876,8 +876,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     words.insert(words.end(), access.begin(), access.end());
     return true;
   };
-  if (!append_access((*ranges)[0], *first_data_vgpr) ||
-      !append_access((*ranges)[1], *second_data_vgpr)) {
+  if (!append_access(ranges[0], *first_data_vgpr) || !append_access(ranges[1], *second_data_vgpr)) {
     errors.emplace_back("ConSan MOI could not split a gfx1250 two-address guest access");
     return std::nullopt;
   }
@@ -975,13 +974,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     errors.emplace_back("ConSan MOI first-light probe could not determine LDS byte count");
     return std::nullopt;
   }
-  const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-      candidate_access_ranges(bytes, candidate, arch);
-  if (!access_ranges || access_ranges->empty()) {
+  const auto &access_ranges = candidate.access_ranges;
+  if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
     return std::nullopt;
   }
-  if (materialize_flat_address && access_ranges->size() != 1u) {
+  if (materialize_flat_address && access_ranges.size() != 1u) {
     errors.emplace_back("ConSan MOI flat-address probe requires one normalized access range");
     return std::nullopt;
   }
@@ -1141,7 +1139,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
     const uint64_t dynamic_record_base = base + layout.access_records_offset;
 
-    for (const ConSanMoiAccessRange &range : *access_ranges) {
+    for (const ConSanMoiAccessRange &range : access_ranges) {
       if (!append_save_moi_special_state(words, options, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
         return std::nullopt;
@@ -1830,7 +1828,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   // Each automatic publication represents one exact address group. Direct
   // caller-owned layouts retain their historical one-record capacity and let
   // the per-slot atomic claim elect the first lane that executes the site.
-  for (size_t range_index = 0; range_index < access_ranges->size(); ++range_index) {
+  for (size_t range_index = 0; range_index < access_ranges.size(); ++range_index) {
     const auto publication_done_label = sequence.make_label();
     const auto token_ready_label = sequence.make_label();
     const auto occupied_label = sequence.make_label();
@@ -1840,7 +1838,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto owner_saturation_label = sequence.make_label();
     const auto publication_observe_label = sequence.make_label();
     const auto publication_incomplete_label = sequence.make_label();
-    const ConSanMoiAccessRange &range = (*access_ranges)[range_index];
+    const ConSanMoiAccessRange &range = access_ranges[range_index];
     const uint32_t site_token =
         automatic_banked_capture ? logical_range_index + static_cast<uint32_t>(range_index) : 0u;
     const uint64_t access_record_base =
@@ -2636,25 +2634,11 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
                                        consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
 }
 
-[[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate,
-                                                     std::span<const uint8_t> bytes,
-                                                     rj_code_arch_t arch) {
-  const bool native_lds = candidate.source == ConSanMoiCandidateSource::NativeLds;
-  const bool normalized_flat = (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
-                                candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup) &&
-                               is_first_light_flat_candidate(candidate, arch);
-  if (!native_lds && !normalized_flat)
+[[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate) {
+  const auto &ranges = candidate.access_ranges;
+  if (ranges.empty())
     return false;
-  if (candidate.kind != ConSanLdsAccessKind::Read && candidate.kind != ConSanLdsAccessKind::Write &&
-      candidate.kind != ConSanLdsAccessKind::Atomic)
-    return false;
-  if (candidate.size == 0 || candidate.size % sizeof(uint32_t) != 0)
-    return false;
-  const std::optional<std::vector<ConSanMoiAccessRange>> ranges =
-      candidate_access_ranges(bytes, candidate, arch);
-  if (!ranges || ranges->empty())
-    return false;
-  for (const ConSanMoiAccessRange &range : *ranges) {
+  for (const ConSanMoiAccessRange &range : ranges) {
     const ConSanMoiLdsCellRange cell_range =
         consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
     if (cell_range.cell_count == 0)
@@ -2664,11 +2648,10 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
 }
 
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
-find_inline_shadow_access_candidates(const ConSanResult &result, std::span<const uint8_t> bytes,
-                                     rj_code_arch_t arch) {
+find_inline_shadow_access_candidates(const ConSanResult &result) {
   std::vector<const ConSanMoiCandidate *> candidates;
   for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
-    if (is_inline_shadow_access_candidate(candidate, bytes, arch))
+    if (is_inline_shadow_access_candidate(candidate))
       candidates.push_back(&candidate);
   }
   return candidates;

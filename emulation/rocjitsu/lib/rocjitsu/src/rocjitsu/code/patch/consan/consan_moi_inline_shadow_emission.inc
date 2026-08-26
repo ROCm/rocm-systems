@@ -2475,9 +2475,8 @@
     return std::nullopt;
   }
 
-  const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-      candidate_access_ranges(bytes, candidate, arch);
-  if (!access_ranges || access_ranges->empty()) {
+  const auto &access_ranges = candidate.access_ranges;
+  if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires a supported LDS access range");
     return std::nullopt;
   }
@@ -2832,7 +2831,7 @@
   const uint16_t local_old_value_vgpr =
       static_cast<uint16_t>(old_value_vgpr + (consan_uses_gfx9_cdna_encoding(arch) ? 1u : 0u));
 
-  for (const ConSanMoiAccessRange &range : *access_ranges) {
+  for (const ConSanMoiAccessRange &range : access_ranges) {
     ConSanMoiLdsCellRange cell_range;
     if (workgroup_shadow || !byte_granular_external_shadow) {
       cell_range = consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);

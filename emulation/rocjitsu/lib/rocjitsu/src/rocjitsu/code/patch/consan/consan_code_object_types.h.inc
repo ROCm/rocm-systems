@@ -336,6 +336,18 @@ enum class ConSanMoiCandidateSource : uint8_t {
   FlatMaybeGroup,
 };
 
+/// One normalized byte range retained by the temporary MOI lowering operand.
+///
+/// This is a compact projection of `ConSanAccessRange`: policy and inventory
+/// have already validated the semantic identity, while current emitters need
+/// only the nonnegative displacement and width used by device evidence.
+struct ConSanMoiAccessRange {
+  uint32_t static_byte_offset = 0;
+  uint32_t byte_count = 0;
+
+  bool operator==(const ConSanMoiAccessRange &) const = default;
+};
+
 struct ConSanMoiCandidate {
   std::string container_name;
   bool in_kernel = true;
@@ -366,6 +378,9 @@ struct ConSanMoiCandidate {
   std::optional<uint32_t> raw_scope;
   std::optional<uint32_t> raw_th;
   std::string mnemonic;
+  /// Normalized ranges copied from the admitted `ProgramInventory` site.
+  /// Lowering must not reopen pristine bytes to classify or decode them.
+  std::vector<ConSanMoiAccessRange> access_ranges;
 };
 
 /// Immutable original-program facts and decoded semantic inventory for one

@@ -51,7 +51,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     return;
   }
   std::vector<const ConSanMoiCandidate *> candidates =
-      find_first_light_access_record_candidates(result, bytes, arch);
+      find_first_light_access_record_candidates(result);
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->text_offset < rhs->text_offset;
@@ -967,21 +967,19 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         continue;
       required_private_bytes = std::max(required_private_bytes, scalar_spill->total_private_bytes);
     }
-    const std::optional<std::vector<ConSanMoiAccessRange>> access_ranges =
-        candidate_access_ranges(bytes, candidate, arch);
-    if (!access_ranges || access_ranges->empty()) {
+    const auto &access_ranges = candidate.access_ranges;
+    if (access_ranges.empty()) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe could not recover an admitted access range");
       continue;
     }
     const uint64_t candidate_record_count_wide =
-        static_cast<uint64_t>(access_ranges->size()) *
+        static_cast<uint64_t>(access_ranges.size()) *
         (options.moi_dynamic_access_records
              ? 1u
              : static_cast<uint64_t>(layout.record_replay_access_dispatch_bank_count) *
                    layout.record_replay_access_owner_bank_count);
-    if (access_ranges->size() >
-            std::numeric_limits<uint32_t>::max() - planned_logical_range_count ||
+    if (access_ranges.size() > std::numeric_limits<uint32_t>::max() - planned_logical_range_count ||
         candidate_record_count_wide > std::numeric_limits<uint32_t>::max()) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe skipped a supported load/store site whose "
@@ -1332,7 +1330,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     if (use_indirect_appended && !use_dense_call && !branch_only_scalar_spill)
       planned_anchor_end = candidate.text_offset + placement->original_size;
     planned_record_count += candidate_record_count;
-    planned_logical_range_count += static_cast<uint32_t>(access_ranges->size());
+    planned_logical_range_count += static_cast<uint32_t>(access_ranges.size());
     if (planned_patches.size() == selected_candidate_limit)
       break;
   }
@@ -1987,8 +1985,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                 describe_source(planned_patch.runtime_workgroup_sources->x) + "," +
                 describe_source(planned_patch.runtime_workgroup_sources->y) + "," +
                 describe_source(planned_patch.runtime_workgroup_sources->z) + "," +
-                describe_source(
-                    planned_patch.runtime_workgroup_sources->cluster_workgroup_id));
+                describe_source(planned_patch.runtime_workgroup_sources->cluster_workgroup_id));
             return;
           }
           dense_gate_words = std::move(*gate);

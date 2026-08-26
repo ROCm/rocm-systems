@@ -518,7 +518,9 @@ Record/Replay, Sampled, and Inline Shadow currently share a second pipeline:
 
 1. derive engine-effective options and clear prior lowering state from the
    mutable result;
-2. build and physically canonicalize MOI access candidates;
+2. project MOI access candidates, including normalized byte ranges, from the
+   access intents already admitted by policy and their matching inventory
+   sites; emitters do not re-decode range geometry from pristine bytes;
 3. attach gfx1250 VGPR-bank state where needed;
 4. append access and synchronization site dispositions;
 5. repeatedly build resource plans while automatic owner, dispatch, EXEC-save,

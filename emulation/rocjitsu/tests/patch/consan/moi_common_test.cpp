@@ -687,8 +687,9 @@ TEST(ConSanMoi, Cdna3Wave64DescriptorUsesEightVgprGranules) {
   EXPECT_EQ(result.resource_plans.front().current_vgpr_count, 32u);
 }
 
-TEST(ConSanMoi, Gfx1250TwoAddressLoadScratchAvoidsCompleteDestinationPair) {
-  constexpr auto load = cdna5::build_vds(cdna5::kDsLoad2addrStride64B32Vds, {.addr = 0, .vdst = 1});
+TEST(ConSanMoi, Gfx1250TwoAddressLoadUsesNormalizedRangesAndSafeScratch) {
+  constexpr auto load = cdna5::build_vds(cdna5::kDsLoad2addrStride64B32Vds,
+                                         {.offset0 = 3, .offset1 = 5, .addr = 0, .vdst = 1});
   const std::array<uint32_t, 3> text_words = {load[0], load[1],
                                               build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const std::vector<uint8_t> bytes = make_gfx1250_code_object(text_words, "two_address_load");
@@ -700,6 +701,21 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadScratchAvoidsCompleteDestinationPair) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
+  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  const ConSanAccessInventorySite &site = result.program_inventory.access_sites().front();
+  const ConSanMoiCandidate &candidate = result.moi_candidates.front();
+  ASSERT_EQ(site.ranges.size(), 2u);
+  ASSERT_EQ(candidate.access_ranges.size(), site.ranges.size());
+  for (size_t range_index = 0; range_index < site.ranges.size(); ++range_index) {
+    SCOPED_TRACE(range_index);
+    ASSERT_TRUE(site.ranges[range_index].static_byte_offset);
+    EXPECT_EQ(candidate.access_ranges[range_index].static_byte_offset,
+              *site.ranges[range_index].static_byte_offset);
+    EXPECT_EQ(candidate.access_ranges[range_index].byte_count, site.ranges[range_index].byte_width);
+  }
+  EXPECT_EQ(candidate.access_ranges[0].static_byte_offset, 3u * 256u);
+  EXPECT_EQ(candidate.access_ranges[1].static_byte_offset, 5u * 256u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   ASSERT_TRUE(result.resource_plans.front().scratch_vgpr);
   EXPECT_GE(*result.resource_plans.front().scratch_vgpr, 3u);
@@ -2229,8 +2245,23 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
       }
     }
     std::set<uint64_t> candidate_offsets;
-    for (const ConSanMoiCandidate &candidate : result.moi_candidates)
+    for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
       candidate_offsets.insert(candidate.text_offset);
+      const auto site = std::ranges::find_if(
+          result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &access) {
+            return access.physical_id.original_text_offset == candidate.text_offset &&
+                   access.container.name == candidate.container_name;
+          });
+      ASSERT_NE(site, result.program_inventory.access_sites().end());
+      ASSERT_EQ(candidate.access_ranges.size(), site->ranges.size());
+      for (size_t range_index = 0; range_index < site->ranges.size(); ++range_index) {
+        ASSERT_TRUE(site->ranges[range_index].static_byte_offset);
+        EXPECT_EQ(candidate.access_ranges[range_index].static_byte_offset,
+                  *site->ranges[range_index].static_byte_offset);
+        EXPECT_EQ(candidate.access_ranges[range_index].byte_count,
+                  site->ranges[range_index].byte_width);
+      }
+    }
 
     EXPECT_EQ(candidate_offsets, intended_offsets);
     EXPECT_EQ(result.moi_candidates.size(), intended_offsets.size());
