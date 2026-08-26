@@ -28,11 +28,16 @@ static __global__ void CLUSTER_DIMS(2, 1, 1)
   data[rank] = static_cast<int>(rank) + 1;  // publish before arrive
 
   auto tok = cluster.barrier_arrive();
-  const int local = static_cast<int>(rank) * 2;  // independent gap work
+  // Divergent gap work: rank r runs r iterations, so waves reach the wait at
+  // different times and some find the barrier already satisfied while others
+  // block. The recurrence is deliberately not affine, or the optimizer would
+  // close-form it and every thread would arrive together again.
+  unsigned local = 0;
+  for (unsigned k = 0; k < rank; ++k) local = (local * 3u + k) & 0xFFFFu;
   cluster.barrier_wait(std::move(tok));
 
   // Half a cluster away, so the peer is always in the other workgroup.
-  out[rank] = data[(rank + n / 2) % n] + local;
+  out[rank] = data[(rank + n / 2) % n] + static_cast<int>(local);
 }
 
 HIP_TEST_CASE(Unit_cluster_split_barrier) {
@@ -65,7 +70,9 @@ HIP_TEST_CASE(Unit_cluster_split_barrier) {
 
   for (unsigned i = 0; i < total; i++) {
     const unsigned peer = (i + total / 2) % total;
+    unsigned local = 0;
+    for (unsigned k = 0; k < i; ++k) local = (local * 3u + k) & 0xFFFFu;
     INFO("rank " << i << " peer " << peer);
-    REQUIRE(out[i] == static_cast<int>(peer) + 1 + 2 * static_cast<int>(i));
+    REQUIRE(out[i] == static_cast<int>(peer) + 1 + static_cast<int>(local));
   }
 }
