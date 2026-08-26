@@ -370,8 +370,14 @@ class Parser:
             addition_id = inst_node.attrib.get(ADDITION_SOURCE_ATTR)
             if addition_id is None:
                 continue
-            provenance = self._addition_by_id[addition_id]
             inst_name = xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME))
+            provenance = self._addition_by_id.get(addition_id)
+            if provenance is None:
+                raise IsaAdditionError(
+                    f'{self.isa_xml}: instruction {inst_name!r} has unknown '
+                    f'{ADDITION_SOURCE_ATTR} value {addition_id!r}; the attribute '
+                    'was not produced by a configured ISA additions document'
+                )
             for inst_enc_node in xs.get_node(inst_node, xs.INST_ENCODINGS):
                 enc_name = xs.get_node_text(
                     xs.get_node(inst_enc_node, xs.ENCODING_NAME)

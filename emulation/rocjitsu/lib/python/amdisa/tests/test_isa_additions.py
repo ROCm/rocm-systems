@@ -1013,6 +1013,28 @@ def test_cdna5_normalized_instruction_name_collision_is_rejected(tmp_path):
         )
 
 
+def test_parser_rejects_unknown_base_addition_provenance(tmp_path):
+    source_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / 'amdgpu_isa_cdna5.xml'
+    )
+    tree = elem_tree.parse(source_xml)
+    instruction = tree.find('./ISA/Instructions/Instruction')
+    instruction_name = instruction.findtext('InstructionName')
+    instruction.set(ADDITION_SOURCE_ATTR, 'unknown-addition')
+    base_xml = tmp_path / 'base-with-unknown-provenance.xml'
+    tree.write(base_xml, encoding='unicode')
+
+    with pytest.raises(
+        IsaAdditionError,
+        match=rf'{instruction_name}.*{ADDITION_SOURCE_ATTR}.*unknown-addition',
+    ):
+        Parser(str(base_xml), Cdna5Profile()).parse()
+
+
 def test_parser_retains_additions_provenance_on_added_instructions(tmp_path):
     base_xml = (
         Path(__file__).resolve().parents[6]
