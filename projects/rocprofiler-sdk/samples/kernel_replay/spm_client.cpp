@@ -56,8 +56,8 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     const bool counters = p->current_pass != kSpmPass;
     KR_CHECK((counters ? p->replay_local_enable_context_cb
                        : p->replay_local_disable_context_cb)(g_counters_ctx));
-    KR_CHECK(
-        (counters ? p->replay_local_disable_context_cb : p->replay_local_enable_context_cb)(g_spm_ctx));
+    KR_CHECK((counters ? p->replay_local_disable_context_cb
+                       : p->replay_local_enable_context_cb)(g_spm_ctx));
 }
 
 void

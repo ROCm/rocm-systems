@@ -86,8 +86,8 @@ set_context_for_pass(rocprofiler_callback_tracing_kernel_replay_data_t* payload,
                      bool                                               enabled)
 {
     if(context.handle == 0) return;
-    auto callback =
-        enabled ? payload->replay_local_enable_context_cb : payload->replay_local_disable_context_cb;
+    auto callback = enabled ? payload->replay_local_enable_context_cb
+                            : payload->replay_local_disable_context_cb;
     KR_CHECK(callback(context));
 }
 
