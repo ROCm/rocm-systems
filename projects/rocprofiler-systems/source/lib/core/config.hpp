@@ -150,7 +150,7 @@ get_setting_value(const std::string& _name)
 std::string
 get_config_file();
 
-Mode
+state::process::Mode
 get_mode();
 
 bool&
@@ -426,7 +426,6 @@ struct tmp_file
 
     bool open(int, int);
     bool open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
-    bool fopen(const char* = "r+");
     bool flush();
     bool close();
     bool remove();
@@ -435,7 +434,6 @@ struct tmp_file
 
     std::string  filename = {};
     std::fstream stream   = {};
-    FILE*        file     = nullptr;
     int          fd       = -1;
 
 private:
@@ -448,10 +446,10 @@ private:
 std::shared_ptr<tmp_file>
 get_tmp_file(std::string _basename, std::string _ext = "dat");
 
-CausalBackend
+state::process::CausalBackend
 get_causal_backend();
 
-CausalMode
+state::process::CausalMode
 get_causal_mode();
 
 bool

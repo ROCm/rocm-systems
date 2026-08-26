@@ -155,8 +155,8 @@ get_perfetto_track(CategoryT, FuncT&& desc_generator, Args&&... args)
 {
     auto uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(args)...);
 
-    std::lock_guard<std::mutex> lock{ get_perfetto_track_uuids_mutex() };
-    auto&                       track_uuids = get_perfetto_track_uuids();
+    const std::lock_guard<std::mutex> lock{ get_perfetto_track_uuids_mutex() };
+    auto&                             track_uuids = get_perfetto_track_uuids();
 
     if(track_uuids.find(uuid) == track_uuids.end())
     {

@@ -271,8 +271,8 @@ set_emitting_pid(int pid) noexcept
 {
     try
     {
-        const auto                  self = std::this_thread::get_id();
-        std::lock_guard<std::mutex> lk{ g_pid_owner_mutex };
+        const auto                        self = std::this_thread::get_id();
+        const std::lock_guard<std::mutex> lk{ g_pid_owner_mutex };
         if(t_emitting_pid >= 0)
         {
             auto it = g_pid_owner_tids.find(t_emitting_pid);

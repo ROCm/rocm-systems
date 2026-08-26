@@ -7,6 +7,9 @@ name: "Import Prep: Disable workflows"
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   disable-workflows:
     runs-on: ubuntu-24.04

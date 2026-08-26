@@ -10,6 +10,7 @@ import msgpack
 
 from rocm_kpack.ccob_parser import ExtractedCodeObject, extract_code_objects_from_fatbin
 from rocm_kpack.coff.surgery import CoffSurgery
+from rocm_kpack.elf.surgery import ElfSurgery
 from rocm_kpack.format_detect import detect_binary_format, UnsupportedBinaryFormat
 
 
@@ -20,6 +21,14 @@ class BinaryType(Enum):
     BUNDLED = (
         "bundled"  # Executables/libraries with device code section (ELF or PE/COFF)
     )
+
+
+def _target_gfx_arch(target: str) -> str | None:
+    """Return the base gfx architecture from a Clang offload target triple."""
+    _, separator, architecture = target.rpartition("--")
+    if not separator:
+        return None
+    return architecture.partition(":")[0]
 
 
 class Toolchain:
@@ -212,26 +221,41 @@ class BundledBinary:
     """
 
     def __init__(self, file_path: Path, *, toolchain: Toolchain | None = None):
-        # Initialize _temp_dir first to ensure cleanup works even if init fails
-        self._temp_dir: Path | None = None  # For extracted .hip_fatbin sections
-
         self.toolchain = toolchain or Toolchain()
         self.file_path = file_path
         self.binary_type = self._detect_binary_type()
 
     def unbundle(
-        self, *, dest_dir: Path | None = None, delete_on_close: bool = True
+        self,
+        *,
+        dest_dir: Path | None = None,
+        delete_on_close: bool = True,
+        gfx_arch: str | None = None,
     ) -> UnbundledContents:
         """Unbundles the binary, returning a context manager which can be used
         to hold the unbundled files open for as long as needed.
-        """
-        if dest_dir is None:
-            dest_dir = Path(tempfile.mkdtemp())
 
+        If ``gfx_arch`` is provided, only code objects for that base architecture
+        are written. Target features such as ``:xnack+`` do not affect matching.
+        """
         # Extract code objects once, then derive both the target list and
         # write the files from the same extraction result.
         code_objects = self._extract_code_objects()
+        if gfx_arch is not None:
+            code_objects = [
+                obj for obj in code_objects if _target_gfx_arch(obj.target) == gfx_arch
+            ]
+            if not code_objects:
+                raise ValueError(
+                    f"No code objects for architecture {gfx_arch!r} in {self.file_path}"
+                )
         target_list = self._build_target_list(code_objects)
+
+        # Do not create an owned temporary directory until extraction and
+        # filtering have succeeded. A no-match exception has no context manager
+        # to clean one created earlier.
+        if dest_dir is None:
+            dest_dir = Path(tempfile.mkdtemp())
 
         contents = UnbundledContents(
             self, dest_dir, delete_on_close=delete_on_close, target_list=target_list
@@ -248,7 +272,7 @@ class BundledBinary:
     def _detect_binary_type(self) -> BinaryType:
         """Detect if this is a standalone bundler file or a bundled binary.
 
-        For ELF, checks for .hip_fatbin section via readelf.
+        For ELF, checks for .hip_fatbin using the in-process ELF parser.
         For PE/COFF, checks for .hip_fat section via CoffSurgery.
         Files without device code sections are STANDALONE (.co files in bundler format).
 
@@ -265,18 +289,11 @@ class BundledBinary:
 
         if fmt == "elf":
             try:
-                result = subprocess.run(
-                    [str(self.toolchain.readelf), "-S", str(self.file_path.resolve())],
-                    capture_output=True,
-                    text=True,
-                    check=True,
+                return (
+                    BinaryType.BUNDLED
+                    if ElfSurgery.has_fatbin_section(self.file_path)
+                    else BinaryType.STANDALONE
                 )
-                if ".hip_fatbin" in result.stdout:
-                    return BinaryType.BUNDLED
-                else:
-                    return BinaryType.STANDALONE
-            except subprocess.CalledProcessError:
-                return BinaryType.STANDALONE
             except Exception as e:
                 raise RuntimeError(
                     f"Unexpected error detecting binary type for {self.file_path}: {e}"
@@ -294,23 +311,18 @@ class BundledBinary:
                     f"Unexpected error detecting binary type for {self.file_path}: {e}"
                 ) from e
 
-    def _get_bundler_input(self) -> Path:
-        """Get the file path to use as input to clang-offload-bundler.
+    def _get_bundler_data(self) -> bytes:
+        """Get the bytes containing the offload bundles.
 
-        For STANDALONE files, returns the file path directly.
-        For BUNDLED ELF binaries, extracts .hip_fatbin section via objcopy.
-        For BUNDLED PE/COFF binaries, extracts .hip_fat section via CoffSurgery.
+        For standalone files, this reads the file directly. For bundled ELF and
+        PE/COFF binaries, the in-process surgery classes extract the device-code
+        section. Unbundling therefore has no readelf or objcopy dependency.
 
         Returns:
-            Path to file in bundler format
+            Bytes in a supported fatbin format.
         """
         if self.binary_type == BinaryType.STANDALONE:
-            return self.file_path
-
-        if self._temp_dir is None:
-            self._temp_dir = Path(tempfile.mkdtemp())
-
-        fatbin_path = self._temp_dir / "fatbin.o"
+            return self.file_path.read_bytes()
 
         fmt = detect_binary_format(self.file_path)
         if fmt == "coff":
@@ -321,38 +333,21 @@ class BundledBinary:
                     f"PE binary {self.file_path} has no .hip_fat section"
                 )
             content = surgery.get_section_content(section)
-            content = content[: section.virtual_size]
-            fatbin_path.write_bytes(content)
+            return content[: section.virtual_size]
         else:
-            # ELF: extract .hip_fatbin section via objcopy
-            abs_file_path = self.file_path.resolve()
-            abs_fatbin_path = fatbin_path.resolve()
-            try:
-                self.toolchain.exec(
-                    [
-                        self.toolchain.objcopy,
-                        "--dump-section",
-                        f".hip_fatbin={abs_fatbin_path}",
-                        abs_file_path,
-                    ]
-                )
-            except subprocess.CalledProcessError as e:
-                error_output = e.output.decode() if e.output else "(no output)"
+            content = ElfSurgery.read_section(self.file_path, ".hip_fatbin")
+            if content is None:
                 raise RuntimeError(
-                    f"Failed to extract .hip_fatbin section from {self.file_path}. "
-                    f"objcopy exit code: {e.returncode}. Output: {error_output}"
-                ) from e
-
-        return fatbin_path
+                    f"ELF binary {self.file_path} has no readable .hip_fatbin section"
+                )
+            return content
 
     def _extract_code_objects(self) -> list[ExtractedCodeObject]:
         """Extract code objects from the fatbin data.
 
         Reads the bundler input once and parses all code objects.
         """
-        bundler_input = self._get_bundler_input()
-        data = bundler_input.read_bytes()
-        return extract_code_objects_from_fatbin(data)
+        return extract_code_objects_from_fatbin(self._get_bundler_data())
 
     def _build_target_list(
         self, code_objects: list[ExtractedCodeObject]
@@ -447,14 +442,11 @@ class BundledBinary:
             )
 
     def cleanup(self) -> None:
-        """Clean up temporary files created during operations."""
-        if self._temp_dir and self._temp_dir.exists():
-            shutil.rmtree(self._temp_dir)
-            self._temp_dir = None
+        """Retained for callers written before unbundling became in-process.
 
-    def __del__(self):
-        """Cleanup on deletion."""
-        self.cleanup()
+        BundledBinary no longer creates temporary files, so there is no work to
+        do. Keeping the method avoids needlessly breaking existing callers.
+        """
 
 
 def get_section_vaddr(

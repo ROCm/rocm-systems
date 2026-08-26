@@ -134,6 +134,10 @@ set(PYTEST_GENERATE_DEPENDENCIES
     ${ROCPROFSYS_PYTEST_FILES}
 )
 
+# Changes done in this file are used during the CTest generate step to append the
+# appropriate labels to the tests.
+list(APPEND PYTEST_GENERATE_DEPENDENCIES "${CMAKE_CURRENT_LIST_DIR}/test_categories.yaml")
+
 # The pytest CTest generation must wait for the base executables to exist,
 # but relinking them should not invalidate the generated CTest file.
 set(PYTEST_TARGET_DEPENDENCIES
