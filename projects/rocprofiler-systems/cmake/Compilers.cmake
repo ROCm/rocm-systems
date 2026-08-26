@@ -28,6 +28,30 @@ include(CMakeParseArguments)
 
 include(MacroUtilities)
 
+# ----------------------------------------------------------------------------------------#
+# minimum supported compiler versions
+#
+# GCC 11 is the first release with reasonably complete C++20 support; GCC 10 lacks
+# using enum, std::source_location, std::bit_cast, and <latch>/<barrier>/<semaphore>.
+# Older compilers may still build, so this is a warning rather than a hard error.
+# ----------------------------------------------------------------------------------------#
+set(ROCPROFSYS_GNU_MINIMUM_VERSION 11)
+
+foreach(_LANG C CXX)
+    if(
+        CMAKE_${_LANG}_COMPILER_ID STREQUAL "GNU"
+        AND CMAKE_${_LANG}_COMPILER_VERSION VERSION_LESS ROCPROFSYS_GNU_MINIMUM_VERSION
+    )
+        message(
+            WARNING
+            "${PROJECT_NAME} requires GCC >= ${ROCPROFSYS_GNU_MINIMUM_VERSION} for C++20 but "
+            "CMAKE_${_LANG}_COMPILER is GCC ${CMAKE_${_LANG}_COMPILER_VERSION} "
+            "(${CMAKE_${_LANG}_COMPILER}). This configuration is untested and unsupported; "
+            "the build is likely to fail. On RHEL 8, enable gcc-toolset-11 or later."
+        )
+    endif()
+endforeach()
+
 if("${LIBNAME}" STREQUAL "")
     string(TOLOWER "${PROJECT_NAME}" LIBNAME)
 endif()
