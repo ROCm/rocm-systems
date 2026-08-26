@@ -155,9 +155,9 @@ def test_pc_sampling_analyze_database_output(
                 "JOIN compute_kernel k ON ks.kernel_uuid = k.kernel_uuid"
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(
-                "SELECT kernel_name, offset, instruction, source, count, "
-                "count_issue, count_stall, wave_occupancy_percent, "
-                "active_thread_percent, stall_reason "
+                "SELECT kernel_name, offset, instruction, instruction_type, "
+                "source, count, count_issue, count_stall, "
+                "wave_occupancy_percent, active_thread_percent, stall_reason "
                 "FROM compute_pc_sampling_summary_view "
                 "ORDER BY kernel_name, offset",
                 conn,
@@ -209,6 +209,9 @@ def test_pc_sampling_analyze_database_output(
         assert inst_sample_total == state_total
         assert len(db_pc_sampling) == 19
         assert db_pc_sampling["count"].sum() == 857
+        # The static type is filled from the disassembly, so every sampled line
+        # of a real workload carries one.
+        assert db_pc_sampling["instruction_type"].notna().all()
         assert len(db_wave_metrics) == state_count
         # Every sample in this workload carries a full wave64 mask
         # (0xFFFFFFFFFFFFFFFF) against sysinfo wave_size 64, so each line is

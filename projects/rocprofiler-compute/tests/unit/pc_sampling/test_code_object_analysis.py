@@ -3,7 +3,6 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import common
 import pytest
@@ -183,16 +182,8 @@ def test_load_skips_malformed_json():
 # =============================================================================
 
 
-@pytest.fixture(autouse=True)
-def clear_table_cache():
-    """Drop the kept table so each test loads it again."""
-    InstructionPipelines.table = None
-    yield
-    InstructionPipelines.table = None
-
-
 @pytest.fixture
-def pipeline_table(tmp_path):
+def pipeline_table(tmp_path, monkeypatch):
     """Point the loader at a small generated table."""
     analysis_configs = tmp_path / "rocprof_compute_soc" / "analysis_configs"
     analysis_configs.mkdir(parents=True)
@@ -207,8 +198,8 @@ def pipeline_table(tmp_path):
         }),
         encoding="utf-8",
     )
-    with patch.object(code_object_analysis.config, "rocprof_compute_home", tmp_path):
-        yield
+    monkeypatch.setattr(InstructionPipelines, "table", None)
+    monkeypatch.setattr(code_object_analysis.config, "rocprof_compute_home", tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -227,8 +218,10 @@ def test_lookup_reads_the_leading_mnemonic(pipeline_table, instruction, expected
     assert InstructionPipelines.lookup(instruction) == expected
 
 
-def test_lookup_without_a_table_leaves_every_type_unset(tmp_path):
+def test_lookup_without_a_table_leaves_every_type_unset(tmp_path, monkeypatch):
     """A missing table degrades to empty types instead of failing analyze."""
-    with patch.object(code_object_analysis.config, "rocprof_compute_home", tmp_path):
-        assert InstructionPipelines.lookup("v_mov_b32_e32 v1, 0") is None
-        assert InstructionPipelines.lookup("s_waitcnt") is None
+    monkeypatch.setattr(InstructionPipelines, "table", None)
+    monkeypatch.setattr(code_object_analysis.config, "rocprof_compute_home", tmp_path)
+
+    assert InstructionPipelines.lookup("v_mov_b32_e32 v1, 0") is None
+    assert InstructionPipelines.lookup("s_waitcnt") is None

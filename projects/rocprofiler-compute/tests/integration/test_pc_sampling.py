@@ -506,5 +506,6 @@ def test_pc_sampling_with_sol_block(
     assert "21. PC Sampling" in captured.out
     # The "instruction" column header only renders when the table has rows.
     assert "instruction" in captured.out
+    assert "instruction_type" in captured.out
 
     common.clean_output_dir(config["cleanup"], workload_dir)
