@@ -13,7 +13,7 @@ For profiling long-running applications or services where restarting the applica
 
 .. note::
 
-   The target process must have attach support enabled before you can attach to it: start it with ``ROCP_TOOL_ATTACH=1`` set in its environment, or use a ``rocprofiler-register`` build configured with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. Without this, ``rocprofv3 --attach`` fails because the target process doesn't have the required attachment thread.
+   The target process must have attach support enabled before you can attach to it: use a ``rocprofiler-register`` build configured with ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. Without this, ``rocprofv3 --attach`` fails because the target process doesn't have the required attachment thread.
 
 Here is an example syntax for dynamic process attachment:
 
