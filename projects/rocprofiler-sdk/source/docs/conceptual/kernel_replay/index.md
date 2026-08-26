@@ -67,6 +67,15 @@ the stacked tool integration PR.
 - **[Memory snapshot and restore](kernel_replay_memory_snapshot.md)** — what is captured and what is
   excluded, the full in-memory copy (no dirty-page hashing), module-scope `__device__` variable
   capture, the decline-rather-than-corrupt failure policy, HIP graph behavior, and planned hashing.
+- **[Performance assessment](kernel_replay_performance.md)** — what replay costs and why: the
+  per-dispatch snapshot cost model, the range the regression tests actually cover, the specific
+  performance problems visible in the implementation, and how the cost behaves on MI250X, MI325X
+  and MI455X.
+- **[Test coverage](kernel_replay_testing.md)** — what replay is tested for at each level, which
+  checks need a GPU and which deliberately do not, the known gaps, and where a new test belongs.
+- **[Downstream tools](kernel_replay_downstream_tools.md)** — what it would take for
+  rocprofiler-compute, rocprofiler-systems and the rocprofv3 lite-trace fast path to use replay,
+  and which of them it is worth doing for.
 - **[Callback tracing API design](kernel_replay_callback_api_design.md)** — the design rationale and
   history behind the callback API. Read the pages above for current behavior; this one records how
   the design got there and what remains open.
