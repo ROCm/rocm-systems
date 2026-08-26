@@ -62,6 +62,7 @@ FANOUT_PROJECTS = {
     "hip-tests",
     "rocr-runtime",
     "amdsmi",
+    "rocprofiler-sdk",
 }
 
 
