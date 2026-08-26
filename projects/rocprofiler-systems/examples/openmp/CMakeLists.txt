@@ -31,5 +31,8 @@ rocprofiler_systems_custom_compilation(
 
 add_subdirectory(cg)
 add_subdirectory(lu)
-add_subdirectory(fortran)
+# ADDSPV workaround: flang can't lower Fortran offload for amdgcnspirv
+# ("Target.cpp:1957: not yet implemented: target not implemented"). Disabled
+# locally so the profiler-apps stage builds under the SPIRV CI matrix.
+# add_subdirectory(fortran)
 add_subdirectory(target)
