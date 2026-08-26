@@ -125,18 +125,11 @@ public:
     };
     SurfaceLayout GetSurfaceLayout() const;
 
-    // Interop paths:
-    rocDecStatus ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_handle);
-    uint64_t GetD3D12ResourceAllocationSize(int pic_idx);
+    // Interop path: tiled D3D12 decode texture -> linear staging buffer -> HIP import.
     rocDecStatus CopyToStagingBuffer(int pic_idx);
     rocDecStatus ExportStagingBufferHandle(int pic_idx, HANDLE &nt_handle);
     uint64_t GetStagingBufferSize(int pic_idx);
     void GetD3D12ResourceLayout(int pic_idx, uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
-    bool HasStagingBuffers() const { return !d3d12_staging_buffers_.empty() && d3d12_staging_buffers_[0] != nullptr; }
-    // EXPERIMENTAL CPU-staged path (functional workaround):
-    rocDecStatus MapSurfaceToCPU(int pic_idx, uint8_t** cpu_ptr, uint32_t &width, uint32_t &height,
-                                 uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes);
-    rocDecStatus UnmapSurface(int pic_idx);
 #else
     rocDecStatus ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc);
 #endif
@@ -164,7 +157,6 @@ private:
     HANDLE d3d12_fence_event_;
     uint64_t d3d12_fence_value_;
     std::vector<ID3D12Resource*> d3d12_staging_buffers_;  // Linear staging buffers (shared, for HIP import)
-    VAImage va_mapped_image_;                             // Current derived image for CPU mapping
 #endif
 
     VABufferID pic_params_buf_id_;

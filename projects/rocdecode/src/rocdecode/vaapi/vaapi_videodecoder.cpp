@@ -413,46 +413,6 @@ rocDecStatus VaapiVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus 
 }
 
 #ifdef _WIN32
-rocDecStatus VaapiVideoDecoder::ExportSurfaceNTHandle(int pic_idx, HANDLE &nt_handle) {
-    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
-    if (pic_idx >= va_surface_ids_.size()) {
-        FunctionExitLog(g_rocdec_logger);
-        return ROCDEC_INVALID_PARAMETER;
-    }
-
-    // Always use CreateSharedHandle on our pre-created D3D12 resource to produce the NT handle.
-    // This guarantees the handle type is a D3D12 shared handle, consistent with
-    // hipExternalMemoryHandleTypeD3D12Resource used by the caller.
-    // Note: vaExportSurfaceHandle(VA_SURFACE_ATTRIB_MEM_TYPE_NTHANDLE) is NOT used because
-    // the handle origin from vaon12 is unspecified — it may not be a D3D12 CreateSharedHandle
-    // handle, which would cause a type mismatch with hipImportExternalMemory.
-    if (pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr) {
-        CriticalLog(g_rocdec_logger, "No shared D3D12 resource for pic_idx=" + ROCDEC_TOSTR(pic_idx));
-        FunctionExitLog(g_rocdec_logger);
-        return ROCDEC_RUNTIME_ERROR;
-    }
-
-    HRESULT hr = d3d12_device_->CreateSharedHandle(d3d12_shared_resources_[pic_idx], nullptr, GENERIC_ALL, nullptr, &nt_handle);
-    if (FAILED(hr)) {
-        CriticalLog(g_rocdec_logger, "CreateSharedHandle failed, HRESULT=0x" +
-                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(hr));
-        FunctionExitLog(g_rocdec_logger);
-        return ROCDEC_RUNTIME_ERROR;
-    }
-
-    FunctionExitLog(g_rocdec_logger);
-    return ROCDEC_SUCCESS;
-}
-
-uint64_t VaapiVideoDecoder::GetD3D12ResourceAllocationSize(int pic_idx) {
-    if (d3d12_device_ == nullptr || pic_idx >= d3d12_shared_resources_.size() || d3d12_shared_resources_[pic_idx] == nullptr) {
-        return 0;
-    }
-    D3D12_RESOURCE_DESC desc = d3d12_shared_resources_[pic_idx]->GetDesc();
-    D3D12_RESOURCE_ALLOCATION_INFO alloc_info = d3d12_device_->GetResourceAllocationInfo(0, 1, &desc);
-    return alloc_info.SizeInBytes;
-}
-
 VaapiVideoDecoder::SurfaceLayout VaapiVideoDecoder::GetSurfaceLayout() const {
     SurfaceLayout layout = {};
     rocDecVideoSurfaceFormat fmt = decoder_create_info_.output_format;
@@ -630,56 +590,6 @@ uint64_t VaapiVideoDecoder::GetStagingBufferSize(int pic_idx) {
     }
     D3D12_RESOURCE_DESC desc = d3d12_staging_buffers_[pic_idx]->GetDesc();
     return desc.Width; // For buffers, Width is the size in bytes.
-}
-
-rocDecStatus VaapiVideoDecoder::MapSurfaceToCPU(int pic_idx, uint8_t** cpu_ptr, uint32_t &width, uint32_t &height,
-                                                uint32_t pitches[3], uint32_t offsets[3], uint32_t &num_planes) {
-    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
-    if (pic_idx >= va_surface_ids_.size()) {
-        FunctionExitLog(g_rocdec_logger);
-        return ROCDEC_INVALID_PARAMETER;
-    }
-
-    // Determine the pixel format matching our surfaces (NV12 for 8-bit 420, P010 for 10-bit, etc.)
-    VAImageFormat img_fmt = {};
-    if (decoder_create_info_.bit_depth_minus_8 == 0) {
-        img_fmt.fourcc = VA_FOURCC_NV12;
-    } else {
-        img_fmt.fourcc = VA_FOURCC_P010;
-    }
-
-    // Create a CPU-accessible image, copy surface data into it, then map.
-    // vaGetImage performs an internal GPU→CPU readback (unlike vaDeriveImage which
-    // tries zero-copy and fails on D3D12 DEFAULT heap surfaces).
-    CHECK_VAAPI(vaCreateImage(va_display_, &img_fmt,
-                              decoder_create_info_.width, decoder_create_info_.height, &va_mapped_image_));
-    CHECK_VAAPI(vaGetImage(va_display_, va_surface_ids_[pic_idx],
-                           0, 0, decoder_create_info_.width, decoder_create_info_.height,
-                           va_mapped_image_.image_id));
-
-    void* buf = nullptr;
-    CHECK_VAAPI(vaMapBuffer(va_display_, va_mapped_image_.buf, &buf));
-
-    *cpu_ptr = static_cast<uint8_t*>(buf);
-    width = va_mapped_image_.width;
-    height = va_mapped_image_.height;
-    num_planes = va_mapped_image_.num_planes;
-    for (uint32_t i = 0; i < num_planes && i < 3; i++) {
-        pitches[i] = va_mapped_image_.pitches[i];
-        offsets[i] = va_mapped_image_.offsets[i];
-    }
-
-    FunctionExitLog(g_rocdec_logger);
-    return ROCDEC_SUCCESS;
-}
-
-rocDecStatus VaapiVideoDecoder::UnmapSurface(int pic_idx) {
-    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
-    CHECK_VAAPI(vaUnmapBuffer(va_display_, va_mapped_image_.buf));
-    CHECK_VAAPI(vaDestroyImage(va_display_, va_mapped_image_.image_id));
-    memset(&va_mapped_image_, 0, sizeof(va_mapped_image_));
-    FunctionExitLog(g_rocdec_logger);
-    return ROCDEC_SUCCESS;
 }
 #else
 rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc) {
