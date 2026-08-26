@@ -346,8 +346,12 @@ def test_zero_and_false_are_not_treated_as_unset():
     """Only an explicit None means unset. A job that asked for 0 disagrees with one that asked
     for 1, and treating 0 as absent would let that difference through."""
     assert "some_count" in conflicts(
-        {"pmc": ["SQ_WAVES"], "some_count": 0},
-        {"pmc": ["GRBM_COUNT"], "some_count": 1},
+        {"pmc": ["SQ_WAVES"], "some_count": 1},
+        {"pmc": ["GRBM_COUNT"], "some_count": 0},
+    )
+    assert "some_flag" in conflicts(
+        {"pmc": ["SQ_WAVES"], "some_flag": True},
+        {"pmc": ["GRBM_COUNT"], "some_flag": False},
     )
 
 
