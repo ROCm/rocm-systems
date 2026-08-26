@@ -521,7 +521,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.final_validation_passed = false;
   result.elf_bytes.clear();
   result.moi_candidates.clear();
-  result.site_dispositions.clear();
   result.resource_plans.clear();
   result.resource_plan_summary = {};
   result.access_plans.clear();
@@ -569,22 +568,21 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         "ConSan MOI sampled engine skipped atomic ordering in a code object with no selected "
         "LDS access candidates");
   }
-  const size_t sync_admission_begin = result.site_dispositions.size();
-  append_moi_sync_site_dispositions(effective_options, result);
-  const auto sync_admission = std::span<const ConSanSiteDispositionRecord>(result.site_dispositions)
-                                  .subspan(sync_admission_begin);
   const bool has_supported_atomic_or_fence =
-      std::ranges::any_of(sync_admission, [&](const ConSanSiteDispositionRecord &site) {
-        return site.disposition == ConSanSiteDisposition::Supported &&
-               (site.site_kind == ConSanResourceSiteKind::Atomic ||
-                (effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-                 site.site_kind == ConSanResourceSiteKind::Fence));
-      });
+      std::ranges::any_of(result.observation_plan.atomic_site_decisions,
+                          [](const ConSanAtomicSiteDecision &decision) {
+                            return decision.kind == ConSanSiteDecisionKind::Admitted;
+                          }) ||
+      (effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
+       std::ranges::any_of(result.observation_plan.fence_site_decisions,
+                           [](const ConSanFenceSiteDecision &decision) {
+                             return decision.kind == ConSanSiteDecisionKind::Admitted;
+                           }));
   const bool has_supported_barrier =
-      std::ranges::any_of(sync_admission, [](const ConSanSiteDispositionRecord &site) {
-        return site.disposition == ConSanSiteDisposition::Supported &&
-               site.site_kind == ConSanResourceSiteKind::Barrier;
-      });
+      std::ranges::any_of(result.observation_plan.barrier_site_decisions,
+                          [](const ConSanBarrierSiteDecision &decision) {
+                            return decision.kind == ConSanSiteDecisionKind::Admitted;
+                          });
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
       effective_options.moi_track_barriers && !has_supported_barrier) {
     // The standard profile requests barrier tracking, but an access-only
@@ -596,21 +594,23 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         "ConSan MOI skipped barrier tracking for a code object with no admitted barrier sites");
   }
   const size_t supported_barrier_members =
-      std::ranges::count_if(sync_admission, [](const ConSanSiteDispositionRecord &site) {
-        return site.disposition == ConSanSiteDisposition::Supported &&
-               site.site_kind == ConSanResourceSiteKind::Barrier;
-      });
+      std::ranges::count_if(result.observation_plan.barrier_site_decisions,
+                            [](const ConSanBarrierSiteDecision &decision) {
+                              return decision.kind == ConSanSiteDecisionKind::Admitted;
+                            });
   AmdGpuCodeObject original_code_object(code_object_bytes.data(), code_object_bytes.size());
   const uint64_t original_text_size = original_code_object.text_sections().size() == 1
                                           ? original_code_object.text_sections().front()->size()
                                           : 0u;
   const bool has_stranded_record_replay_barrier =
       original_text_size != 0u &&
-      std::ranges::any_of(sync_admission, [&](const ConSanSiteDispositionRecord &site) {
-        return site.disposition == ConSanSiteDisposition::Supported &&
-               site.site_kind == ConSanResourceSiteKind::Barrier &&
-               !compute_sopp_branch_simm16(site.text_offset, original_text_size);
-      });
+      std::ranges::any_of(result.observation_plan.barrier_site_decisions,
+                          [&](const ConSanBarrierSiteDecision &decision) {
+                            return decision.kind == ConSanSiteDecisionKind::Admitted &&
+                                   !compute_sopp_branch_simm16(
+                                       decision.semantic_site.physical.original_text_offset,
+                                       original_text_size);
+                          });
   // Record/Replay's compact persistent-epoch operating point handles bounded
   // barrier inventories whose sites can reach the appended reservation without
   // the relocated dense router. A large generated object can strand even a
@@ -653,25 +653,23 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
       effective_options.moi_track_atomics && !atomic_or_fence_relevant) {
     // Atomic-token tracking enlarges every Inline access probe even though its
     // release/acquire tables can never be populated in an object with no
-    // admitted atomic event. Keep every typed unsupported disposition, but do
+    // admitted atomic event. Keep every typed unsupported decision, but do
     // not impose the unusable transaction path or its extra scratch demand.
-    for (const ConSanSiteDispositionRecord &site : sync_admission) {
-      if (site.site_kind != ConSanResourceSiteKind::Atomic ||
-          site.disposition != ConSanSiteDisposition::Unsupported)
+    for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
+      if (decision.kind != ConSanSiteDecisionKind::Unsupported)
         continue;
-      std::string reason = consan_site_disposition_reason_name(site.reason);
-      std::ranges::replace(reason, '_', '-');
-      result.warnings.emplace_back("ConSan MOI inline atomic ordering skipped " + reason + " in " +
-                                   site.container_name);
+      for (const std::string &container_name : decision.source_containers) {
+        result.warnings.emplace_back(
+            "ConSan MOI inline atomic ordering skipped " +
+            std::string(consan_atomic_policy_reason_name(decision.reason)) + " in " +
+            container_name);
+      }
     }
     effective_options.moi_track_atomics = false;
     result.warnings.emplace_back(
         "ConSan MOI skipped atomic ordering instrumentation for a code object with no relevant "
         "atomic sites");
   }
-  result.site_dispositions.erase(result.site_dispositions.begin() +
-                                     static_cast<std::ptrdiff_t>(sync_admission_begin),
-                                 result.site_dispositions.end());
   const bool explicit_persistent_state =
       effective_options.moi_owner_vgpr || effective_options.moi_epoch_vgpr;
   if (effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
@@ -769,12 +767,10 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     summarize_moi_resource_plans(result);
     return result;
   }
-  // Sampled persistent-state demand depends on semantic sync admission, not
-  // merely on the user's request to inventory barriers or atomics. Append its
-  // dispositions before choosing automatic owner/epoch VGPRs so a code object
-  // containing only rejected sync sites remains access-only instrumentation.
-  if (effective_options.moi_engine == ConSanMoiEngine::Sampled)
-    append_moi_sync_site_dispositions(effective_options, result);
+  // Sampled persistent-state demand depends on the immutable semantic sync
+  // admission plan, not merely on the user's request to inventory barriers or
+  // atomics. A code object containing only rejected sync sites remains
+  // access-only instrumentation.
   if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
@@ -838,8 +834,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     result.resolved_moi_dispatch_id_sgpr = effective_options.moi_dispatch_id_sgpr;
   if (!result.resolved_moi_dispatch_id_vgpr)
     result.resolved_moi_dispatch_id_vgpr = effective_options.moi_dispatch_id_vgpr;
-  if (effective_options.moi_engine != ConSanMoiEngine::Sampled)
-    append_moi_sync_site_dispositions(effective_options, result);
   if (effective_options.moi_report_buffer_address &&
       effective_options.moi_report_buffer_size < sizeof(ConSanMoiReportHeader)) {
     result.warnings.emplace_back("ConSan MOI report buffer is smaller than the report ABI header");
@@ -1092,28 +1086,18 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     inventory.access_range_count += ranges.size();
   }
 
-  const auto supported_count = [&](ConSanResourceSiteKind kind) {
-    return static_cast<uint64_t>(std::ranges::count_if(
-        result.site_dispositions, [&](const ConSanSiteDispositionRecord &site) {
-          return site.site_kind == kind && site.disposition == ConSanSiteDisposition::Supported;
+  const auto planned_count = [&](ConSanResourceSiteKind kind) {
+    return static_cast<uint64_t>(
+        std::ranges::count_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
+          return plan.site_kind == kind &&
+                 plan.source != ConSanRegisterAllocationSource::Unsupported;
         }));
   };
-  inventory.barrier_event_count = supported_count(ConSanResourceSiteKind::Barrier);
-  inventory.atomic_event_count = supported_count(ConSanResourceSiteKind::Atomic);
-  inventory.fence_event_count = supported_count(ConSanResourceSiteKind::Fence);
-  if (options.moi_engine == ConSanMoiEngine::RecordReplay) {
-    // Compatibility for synthetic pre-plan results injected by hook unit
-    // tests. Production results for every MOI engine return through the
-    // immutable observation-plan path above and never execute this rescan.
-    inventory.atomic_event_count = static_cast<uint64_t>(
-        std::ranges::count_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
-          return plan.site_kind == ConSanResourceSiteKind::Atomic;
-        }));
-    inventory.fence_event_count = static_cast<uint64_t>(
-        std::ranges::count_if(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
-          return plan.site_kind == ConSanResourceSiteKind::Fence;
-        }));
-  }
+  // Compatibility for synthetic pre-plan results injected by hook unit tests.
+  // Production results return through the immutable observation-plan path.
+  inventory.barrier_event_count = planned_count(ConSanResourceSiteKind::Barrier);
+  inventory.atomic_event_count = planned_count(ConSanResourceSiteKind::Atomic);
+  inventory.fence_event_count = planned_count(ConSanResourceSiteKind::Fence);
   inventory.diagnostic_count = std::max<uint64_t>(inventory.access_range_count, 1u);
   if (options.moi_engine == ConSanMoiEngine::RecordReplay && inventory.access_range_count != 0u) {
     inventory.record_replay_access_dispatch_bank_count =

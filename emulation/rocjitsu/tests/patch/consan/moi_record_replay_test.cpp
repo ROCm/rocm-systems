@@ -214,14 +214,6 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   ASSERT_EQ(result.sync_events.size(), 1u);
   EXPECT_EQ(result.sync_events.front().kind, ConSanSyncEventKind::Barrier);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
-  ASSERT_EQ(result.site_dispositions.size(), 2u);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Barrier,
-                               &ConSanSiteDispositionRecord::site_kind),
-            2u);
-  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &disposition) {
-    return disposition.site_kind == ConSanResourceSiteKind::Barrier &&
-           disposition.disposition == ConSanSiteDisposition::Supported;
-  }));
   ASSERT_EQ(std::ranges::count(result.observation_plan.site_decisions,
                                ConSanSiteDecisionKind::Admitted, &ConSanSiteDecision::kind),
             1u);
@@ -230,6 +222,8 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
             ConSanSiteDecisionKind::Admitted);
   EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().reason,
             ConSanBarrierPolicyReason::None);
+  EXPECT_EQ(result.observation_plan.barrier_site_decisions.front().source_containers,
+            (std::vector<std::string>{"shared_owner_0", "shared_owner_1"}));
   ASSERT_EQ(result.observation_plan.probe_intents.size(), 2u);
   const auto access_decision =
       std::ranges::find(result.observation_plan.site_decisions, ConSanSiteDecisionKind::Admitted,
@@ -385,13 +379,13 @@ TEST(ConSanMoi, RecordReplayDenseAliasedKernelBarriersUseKernelRelayBounds) {
                                &ConSanPatchInfo::kind),
             2u * kSiteCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
-                                  [](const ConSanSiteDispositionRecord &site) {
-                                    return site.site_kind == ConSanResourceSiteKind::Barrier &&
-                                           site.lowering_outcome ==
-                                               ConSanSiteLoweringOutcome::Patched;
-                                  }),
-            4u * kSiteCount);
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
+                                           ConSanLoweringOutcomeKind::Instrumented),
+            2u * kSiteCount);
+  EXPECT_TRUE(std::ranges::all_of(result.observation_plan.barrier_site_decisions,
+                                  [](const ConSanBarrierSiteDecision &decision) {
+                                    return decision.source_containers.size() == 2u;
+                                  }));
   EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind != ConSanPatchKind::TrampolineMoiBarrierRecord ||
            patch.owner_descriptor_file_offsets.size() == 2u;
@@ -517,7 +511,7 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "record_replay_retry_sync_inventory");
   const ConSanMoiAutoReportPlan report_plan = plan_consan_moi_auto_report(
-      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1, .barrier_event_count = 1});
+      {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1, .barrier_event_count = 2});
   ASSERT_TRUE(report_plan.complete());
   const auto layout_override = consan_moi_auto_report_layout_override(report_plan);
   ASSERT_TRUE(layout_override);
@@ -555,9 +549,18 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   EXPECT_NE(std::ranges::find(retried.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                               &ConSanPatchInfo::kind),
             retried.patches.end());
-  EXPECT_TRUE(std::ranges::any_of(retried.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Barrier &&
-           site.disposition == ConSanSiteDisposition::Supported;
+  EXPECT_EQ(retried.observation_plan, fresh.observation_plan);
+  EXPECT_EQ(consan_decision_count(retried.observation_plan.barrier_site_decisions,
+                                  ConSanSiteDecisionKind::Admitted),
+            2u);
+  ASSERT_EQ(retried.observation_plan.barrier_site_decisions.size(), 2u);
+  ASSERT_EQ(retried.observation_plan.barrier_site_decisions.front().intent_ids.size(), 1u);
+  ASSERT_EQ(retried.observation_plan.barrier_site_decisions.back().intent_ids.size(), 1u);
+  EXPECT_NE(retried.observation_plan.barrier_site_decisions.front().intent_ids,
+            retried.observation_plan.barrier_site_decisions.back().intent_ids);
+  EXPECT_EQ(retried.coverage_ledger, fresh.coverage_ledger);
+  EXPECT_TRUE(std::ranges::none_of(retried.coverage_ledger.intent_entries(), [](const auto &entry) {
+    return entry.lowering == ConSanLoweringOutcomeKind::Pending;
   }));
 }
 
@@ -3998,8 +4001,6 @@ TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
   EXPECT_EQ(result.resource_plans.front().original_private_segment_size, 32u);
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors)
-                               << " dispositions="
-                               << testing::PrintToString(result.site_dispositions)
                                << " resources=" << testing::PrintToString(result.resource_plans);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
@@ -6456,10 +6457,10 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
   ASSERT_TRUE(tautological_pc_compare);
   EXPECT_GT(std::ranges::count(dispatcher_words, *captured_key_compare), 0u);
   EXPECT_EQ(std::ranges::count(dispatcher_words, *tautological_pc_compare), 0u);
-  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
-    return site.disposition != ConSanSiteDisposition::Supported ||
-           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
-  }));
+  EXPECT_TRUE(std::ranges::all_of(
+      result.coverage_ledger.intent_entries(), [](const ConSanIntentCoverageEntry &entry) {
+        return entry.lowering == ConSanLoweringOutcomeKind::Instrumented;
+      }));
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -7137,14 +7138,6 @@ TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
       patched, result.kernels[0].barrier_sites[1].text_offset, sizeof(uint32_t));
   ASSERT_EQ(second_barrier.size(), 1u);
   EXPECT_EQ(second_barrier.front(), *barrier);
-  const auto redundant_disposition = std::ranges::find(
-      result.site_dispositions, ConSanSiteDispositionReason::RedundantAdjacentBarrier,
-      &ConSanSiteDispositionRecord::reason);
-  ASSERT_NE(redundant_disposition, result.site_dispositions.end());
-  EXPECT_EQ(redundant_disposition->disposition, ConSanSiteDisposition::NotApplicable);
-  EXPECT_EQ(redundant_disposition->lowering_outcome, ConSanSiteLoweringOutcome::NotApplicable);
-  EXPECT_STREQ(consan_site_disposition_reason_name(redundant_disposition->reason),
-               "redundant_adjacent_barrier");
   ASSERT_EQ(result.observation_plan.barrier_site_decisions.size(), 2u);
   EXPECT_EQ(result.observation_plan.barrier_site_decisions[0].kind,
             ConSanSiteDecisionKind::Admitted);
@@ -8333,9 +8326,7 @@ TEST(ConSanMoi, Cdna4FullPressureUsesProvenHybridPersistentRegisterHoles) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                               << " plans=" << testing::PrintToString(result.resource_plans)
-                               << " dispositions="
-                               << testing::PrintToString(result.site_dispositions);
+                               << " plans=" << testing::PrintToString(result.resource_plans);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
@@ -8558,8 +8549,7 @@ TEST(ConSanMoi, Cdna4RecordReplayMixesPrivateAndDynamicStackPersistentStateByOwn
   ASSERT_NE(private_prologue, result.patches.end());
   ASSERT_NE(register_prologue, result.patches.end())
       << "warnings=" << testing::PrintToString(result.warnings)
-      << " patches=" << testing::PrintToString(result.patches)
-      << " dispositions=" << testing::PrintToString(result.site_dispositions);
+      << " patches=" << testing::PrintToString(result.patches);
   EXPECT_EQ(private_prologue->owner_descriptor_file_offsets,
             std::vector<uint64_t>{fixed->descriptor_file_offset});
   EXPECT_EQ(register_prologue->owner_descriptor_file_offsets,
@@ -8621,14 +8611,12 @@ TEST(ConSanMoi, Cdna4RecordReplayRecoversDynamicOwnerAfterPrivateAbiResourceFail
         << " scratch_count=" << plan.scratch_vgpr_count
         << " owners=" << testing::PrintToString(plan.owner_descriptor_file_offsets);
   }
-  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
-    ASSERT_EQ(site.disposition, ConSanSiteDisposition::Supported);
-    EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Patched)
-        << "kind=" << static_cast<uint32_t>(site.site_kind) << " container=" << site.container_name
-        << " offset=" << site.text_offset << " mnemonic=" << site.mnemonic
-        << " reason=" << consan_site_lowering_reason_name(site.lowering_reason)
-        << " warnings=" << testing::PrintToString(result.warnings);
-  }
+  EXPECT_TRUE(std::ranges::all_of(result.coverage_ledger.intent_entries(),
+                                  [](const ConSanIntentCoverageEntry &entry) {
+                                    return entry.lowering ==
+                                           ConSanLoweringOutcomeKind::Instrumented;
+                                  }))
+      << "warnings=" << testing::PrintToString(result.warnings);
 }
 
 TEST(ConSanMoi, Cdna4RecordReplayCarriesMixedPersistentStateAcrossAtomicAndFenceRecords) {
@@ -8679,19 +8667,18 @@ TEST(ConSanMoi, Cdna4RecordReplayCarriesMixedPersistentStateAcrossAtomicAndFence
     EXPECT_FALSE(patch->persistent_owner_private_offset);
     EXPECT_FALSE(patch->persistent_record_replay_workgroup_private_offsets.complete());
   }
-  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
-    if (site.site_kind != ConSanResourceSiteKind::Atomic &&
-        site.site_kind != ConSanResourceSiteKind::Fence)
-      continue;
-    ASSERT_EQ(site.disposition, ConSanSiteDisposition::Supported)
-        << "container=" << site.container_name << " offset=" << site.text_offset
-        << " mnemonic=" << site.mnemonic;
-    EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Patched)
-        << "container=" << site.container_name << " offset=" << site.text_offset
-        << " mnemonic=" << site.mnemonic
-        << " reason=" << consan_site_lowering_reason_name(site.lowering_reason)
-        << " warnings=" << testing::PrintToString(result.warnings);
-  }
+  EXPECT_EQ(consan_decision_count(result.observation_plan.atomic_site_decisions,
+                                  ConSanSiteDecisionKind::Admitted),
+            result.observation_plan.atomic_site_decisions.size());
+  EXPECT_EQ(consan_decision_count(result.observation_plan.fence_site_decisions,
+                                  ConSanSiteDecisionKind::Admitted),
+            result.observation_plan.fence_site_decisions.size());
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.atomic_site_decisions,
+                                           ConSanLoweringOutcomeKind::Instrumented),
+            result.observation_plan.atomic_site_decisions.size());
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.fence_site_decisions,
+                                           ConSanLoweringOutcomeKind::Instrumented),
+            result.observation_plan.fence_site_decisions.size());
 }
 
 TEST(ConSanMoi, Cdna4RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
@@ -10395,12 +10382,11 @@ TEST(ConSanMoi, Gfx1250WaveScopeAtomicIsTypedNotApplicable) {
       try_patch_consan(make_gfx1250_code_object(text_words, "gfx1250_wave_atomic"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Atomic &&
-           site.disposition == ConSanSiteDisposition::NotApplicable &&
-           site.reason == ConSanSiteDispositionReason::UnsupportedScope &&
-           site.lowering_outcome == ConSanSiteLoweringOutcome::NotApplicable;
-  }));
+  ASSERT_EQ(result.observation_plan.atomic_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan.atomic_site_decisions.front().kind,
+            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(result.observation_plan.atomic_site_decisions.front().reason,
+            ConSanAtomicPolicyReason::UnsupportedScope);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             0u);
@@ -10440,11 +10426,9 @@ TEST(ConSanMoi, Gfx1250IsolatedLdsReleaseIsRetainedWithAccessReplay) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &disposition) {
-    return disposition.site_kind == ConSanResourceSiteKind::Atomic &&
-           disposition.disposition == ConSanSiteDisposition::Supported &&
-           disposition.reason == ConSanSiteDispositionReason::None;
-  }));
+  EXPECT_EQ(consan_decision_count(result.observation_plan.atomic_site_decisions,
+                                  ConSanSiteDecisionKind::Admitted),
+            1u);
 }
 
 TEST(ConSanMoi, Rdna4FamilyDenseAccessesShareOneWordCallRelay) {
@@ -10503,12 +10487,10 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
       words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
     }
     words.insert(words.end(), {
-                                  0xC4050018u,
-                                  0x40883804u,
+                                  0xC4050018u, 0x40883804u,
                                   0x00000005u, // buffer_load_b32 v4, v5, device
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC07Cu,
-                                  0x00080000u,
+                                  0xEE0AC07Cu, 0x00080000u,
                                   0x00000000u, // global_inv scope:device
                                   0xBFC00000u, // s_wait_loadcnt 0
                                   0xBE804EC1u, // s_barrier_signal -1
@@ -11447,13 +11429,8 @@ TEST(ConSanMoi, Rdna4DenseFunctionBarriersUseRelocatableRouter) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                &ConSanPatchInfo::kind),
             2u * kSiteCount);
-  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
-                                  [](const auto &site) {
-                                    return site.site_kind == ConSanResourceSiteKind::Barrier &&
-                                           !site.in_kernel &&
-                                           site.lowering_outcome ==
-                                               ConSanSiteLoweringOutcome::Patched;
-                                  }),
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
+                                           ConSanLoweringOutcomeKind::Instrumented),
             2u * kSiteCount);
 }
 
@@ -11649,10 +11626,11 @@ TEST(ConSanMoi, Gfx1250DenseAccessRouterPreservesOrdinaryAcquireSequence) {
     return patch.anchor_offset < result.sync_sequences.front().end_text_offset &&
            kAcquireOffset < patch_end;
   })) << testing::PrintToString(result.patches);
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [&](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Atomic && site.text_offset == kAcquireOffset &&
-           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
-  })) << testing::PrintToString(result.site_dispositions);
+  const ConSanAtomicSiteDecision *acquire_decision =
+      consan_atomic_decision_at(result, kAcquireOffset);
+  ASSERT_NE(acquire_decision, nullptr);
+  EXPECT_TRUE(consan_decision_has_lowering(result, *acquire_decision,
+                                           ConSanLoweringOutcomeKind::Instrumented));
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -11777,8 +11755,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   constexpr uint8_t kGuestVgprMsbMode = 0x01u;
   constexpr uint16_t kEncodedAddressVgpr = 30u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
-      0xDBFC0000u,
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
       0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
   };
   // Even when an inline body would fit in nearby padding, capturing an
@@ -12224,11 +12201,13 @@ TEST(ConSanMoi, FenceRecordAcceptsSupportedRdna4OrdinaryAcquireAddress) {
   ASSERT_EQ(result.kernels.size(), 1u);
   ASSERT_EQ(result.kernels.front().ordinary_memory_sites.size(), 1u);
   EXPECT_EQ(result.moi_fence_candidates.size(), 1u);
-  EXPECT_EQ(result.site_dispositions.size(), 1u);
   EXPECT_EQ(result.kernels.front().ordinary_memory_sites.front().support_reason,
             ConSanOrdinaryMemorySupportReason::Supported);
-  EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
-  EXPECT_EQ(result.site_dispositions.front().reason, ConSanSiteDispositionReason::None);
+  ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan.fence_site_decisions.front().kind,
+            ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(result.observation_plan.fence_site_decisions.front().reason,
+            ConSanFencePolicyReason::None);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1);
@@ -12310,14 +12289,12 @@ TEST(ConSanMoi, FenceRecordPatchRejectsStaleCommunicationIdentityWithoutGuessing
   EXPECT_EQ(std::ranges::count(result.resource_plans, ConSanResourceSiteKind::Fence,
                                &ConSanCandidateResourcePlan::site_kind),
             0);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Fence,
-                               &ConSanSiteDispositionRecord::site_kind),
-            2);
-  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind != ConSanResourceSiteKind::Fence ||
-           (site.disposition == ConSanSiteDisposition::Unsupported &&
-            site.reason == ConSanSiteDispositionReason::MissingCommunicationEvent);
-  }));
+  ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(
+      result.observation_plan.fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
+        return decision.kind == ConSanSiteDecisionKind::Unsupported &&
+               decision.reason == ConSanFencePolicyReason::MissingCommunicationEvent;
+      }));
   EXPECT_NE(std::ranges::find(result.warnings,
                               "ConSan MOI fence record patch rejected all qualified "
                               "communication events"),
@@ -12363,14 +12340,12 @@ TEST(ConSanMoi, FenceRecordTreatsUnownedRuntimeCommunicationAsNotApplicable) {
   EXPECT_EQ(std::ranges::count(result.resource_plans, ConSanResourceSiteKind::Fence,
                                &ConSanCandidateResourcePlan::site_kind),
             0);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Fence,
-                               &ConSanSiteDispositionRecord::site_kind),
-            2);
-  EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind != ConSanResourceSiteKind::Fence ||
-           (site.disposition == ConSanSiteDisposition::NotApplicable &&
-            site.reason == ConSanSiteDispositionReason::MissingCommunicationEvent);
-  }));
+  ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 2u);
+  EXPECT_TRUE(std::ranges::all_of(
+      result.observation_plan.fence_site_decisions, [](const ConSanFenceSiteDecision &decision) {
+        return decision.kind == ConSanSiteDecisionKind::NotApplicable &&
+               decision.reason == ConSanFencePolicyReason::MissingExecutionOwner;
+      }));
 }
 
 TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured) {
@@ -12741,20 +12716,12 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
     return warning.find("fence record patch rejected communication address: "
                         "scratch-operand-alias") != std::string::npos;
   }));
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Fence,
-                               &ConSanSiteDispositionRecord::site_kind),
-            2);
-  EXPECT_EQ(
-      std::ranges::count_if(result.site_dispositions,
-                            [](const auto &site) {
-                              return site.site_kind == ConSanResourceSiteKind::Fence &&
-                                     site.lowering_outcome ==
-                                         ConSanSiteLoweringOutcome::PlacementOrLoweringFailed &&
-                                     site.lowering_reason ==
-                                         ConSanSiteLoweringReason::InstrumentationPatchMissing &&
-                                     site.resource_reason == ConSanRegisterPlanReason::None;
-                            }),
-      1);
+  EXPECT_EQ(result.observation_plan.fence_site_decisions.size(), 2u);
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.fence_site_decisions,
+                                           ConSanLoweringOutcomeKind::PlacementRejected),
+            1u)
+      << "decisions=" << testing::PrintToString(result.observation_plan.fence_site_decisions)
+      << " ledger=" << testing::PrintToString(result.coverage_ledger.intent_entries());
 }
 
 TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
@@ -12919,10 +12886,9 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesAccessAndOrderingRecords) {
   EXPECT_EQ(access->anchor_offset, atomic->anchor_offset);
   EXPECT_NE(*access->relocated_guest_instruction_offset,
             *atomic->relocated_guest_instruction_offset);
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Atomic &&
-           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
-  }));
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.atomic_site_decisions,
+                                           ConSanLoweringOutcomeKind::Instrumented),
+            1u);
 }
 
 TEST(ConSanMoi, FirstLightProbeRejectsScratchVgprsOverlappingLdsAddress) {

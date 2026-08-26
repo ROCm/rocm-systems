@@ -479,7 +479,6 @@ struct ConSanResult : LegacyInventoryView, SynchronizationInventoryView {
   /// instrumentation composition. Empty when no mutation is committed.
   std::optional<std::string> applied_fault_logical_identity;
   std::vector<ConSanMoiCandidate> moi_candidates;
-  std::vector<ConSanSiteDispositionRecord> site_dispositions;
   /// True when sc_access_coverage_sites is the authoritative physical access
   /// denominator for this SuperCollider transform. Planning can promote a
   /// site to supported only after every alias and execution owner has a
@@ -551,10 +550,6 @@ consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
 [[nodiscard]] const char *consan_moi_candidate_source_name(ConSanMoiCandidateSource source);
 [[nodiscard]] const char *consan_lds_access_kind_name(ConSanLdsAccessKind kind);
 [[nodiscard]] const char *consan_flat_address_space_hint_name(ConSanFlatAddressSpaceHint hint);
-[[nodiscard]] const char *consan_site_disposition_name(ConSanSiteDisposition disposition);
-[[nodiscard]] const char *consan_site_disposition_reason_name(ConSanSiteDispositionReason reason);
-[[nodiscard]] const char *consan_site_lowering_outcome_name(ConSanSiteLoweringOutcome outcome);
-[[nodiscard]] const char *consan_site_lowering_reason_name(ConSanSiteLoweringReason reason);
 [[nodiscard]] ConSanInstallAction consan_install_action(const ConSanResult &result,
                                                         bool fail_closed);
 

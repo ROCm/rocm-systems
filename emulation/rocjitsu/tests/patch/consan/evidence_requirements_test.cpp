@@ -444,8 +444,7 @@ TEST(ConSanEvidenceRequirements,
                                 .add_fence()
                                 .build();
   // Contradictory mutable telemetry proves that the compatibility entry point
-  // no longer rescans resource plans, dispositions, patches, or object bytes.
-  result.site_dispositions.resize(19);
+  // no longer rescans resource plans, patches, or object bytes.
   result.resource_plans.resize(23);
   result.patches.resize(29);
   ConSanOptions options;
@@ -469,7 +468,6 @@ TEST(ConSanEvidenceRequirements,
           .add(ConSanProbeIntentKind::SampledAtomicOrdering,
                ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
           .build();
-  sampled_result.site_dispositions.resize(13);
   sampled_result.resource_plans.resize(17);
   sampled_result.patches.resize(19);
   ConSanOptions sampled_options;
@@ -482,7 +480,6 @@ TEST(ConSanEvidenceRequirements,
   ConSanResult inline_result;
   inline_result.install_program_inventory(fixture.inventory);
   inline_result.observation_plan = fixture.plan;
-  inline_result.site_dispositions.resize(23);
   inline_result.resource_plans.resize(29);
   inline_result.patches.resize(31);
   ConSanOptions inline_options;

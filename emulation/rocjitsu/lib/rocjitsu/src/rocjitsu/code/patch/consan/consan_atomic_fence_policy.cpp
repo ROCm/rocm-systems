@@ -114,8 +114,13 @@ source_container_names(std::span<const ConSanSyncEvent *const> aliases) {
   std::vector<std::string> result;
   result.reserve(aliases.size());
   for (const ConSanSyncEvent *event : aliases) {
-    if (std::ranges::find(result, event->container_name) == result.end())
-      result.push_back(event->container_name);
+    const std::span<const std::string> sources = event->source_containers.empty()
+                                                     ? std::span(&event->container_name, 1u)
+                                                     : std::span(event->source_containers);
+    for (const std::string &source : sources) {
+      if (std::ranges::find(result, source) == result.end())
+        result.push_back(source);
+    }
   }
   std::ranges::sort(result);
   return result;
@@ -124,7 +129,11 @@ source_container_names(std::span<const ConSanSyncEvent *const> aliases) {
 [[nodiscard]] bool filter_matches(std::span<const ConSanSyncEvent *const> aliases,
                                   std::string_view filter) {
   return filter.empty() || std::ranges::any_of(aliases, [&](const ConSanSyncEvent *event) {
-           return event->container_name.find(filter) != std::string::npos;
+           if (event->container_name.find(filter) != std::string::npos)
+             return true;
+           return std::ranges::any_of(event->source_containers, [&](const std::string &source) {
+             return source.find(filter) != std::string::npos;
+           });
          });
 }
 

@@ -184,6 +184,10 @@ struct ConSanSyncEvent {
   std::string confidence_reason;
   std::string identity;
   std::string code_object_fingerprint;
+  /// Every symbol-container name through which this physical event was
+  /// decoded. Analysis canonicalizes equivalent aliases into one event while
+  /// preserving this attribution for policy diagnostics and filtering.
+  std::vector<std::string> source_containers;
   std::string container_name;
   bool in_kernel = true;
   uint32_t occurrence = 0;

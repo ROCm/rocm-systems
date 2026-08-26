@@ -1504,9 +1504,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                                 << " plans=" << testing::PrintToString(result.resource_plans)
-                                 << " dispositions="
-                                 << testing::PrintToString(result.site_dispositions);
+                                 << " plans=" << testing::PrintToString(result.resource_plans);
     ASSERT_EQ(result.resource_plans.size(), 1u);
     EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
     EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 0u);
@@ -1620,9 +1618,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadUsesDisjointCompactSpillWindow) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                                 << " plans=" << testing::PrintToString(result.resource_plans)
-                                 << " dispositions="
-                                 << testing::PrintToString(result.site_dispositions);
+                                 << " plans=" << testing::PrintToString(result.resource_plans);
     ASSERT_EQ(result.resource_plans.size(), 1u);
     const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
     EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
@@ -1707,9 +1703,7 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                                 << " plans=" << testing::PrintToString(result.resource_plans)
-                                 << " dispositions="
-                                 << testing::PrintToString(result.site_dispositions);
+                                 << " plans=" << testing::PrintToString(result.resource_plans);
     EXPECT_EQ(result.resolved_moi_owner_vgpr, 29u);
     EXPECT_EQ(result.resolved_moi_epoch_vgpr, 30u);
     EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 31u);
@@ -9073,12 +9067,9 @@ TEST(ConSanMoi, InlineBarrierOnlyObjectPatchesBarrierWithoutEntryPrologue) {
   ASSERT_TRUE(visible_atomic);
   EXPECT_GE(count_subsequence(barrier_words, *visible_atomic), 1u);
   EXPECT_TRUE(validate_consan_modified_elf(make_rdna4_lds_code_object(text_words), result).empty());
-  const auto barrier_disposition =
-      std::ranges::find(result.site_dispositions, ConSanResourceSiteKind::Barrier,
-                        &ConSanSiteDispositionRecord::site_kind);
-  ASSERT_NE(barrier_disposition, result.site_dispositions.end());
-  EXPECT_EQ(barrier_disposition->lowering_outcome, ConSanSiteLoweringOutcome::Patched);
-  EXPECT_EQ(barrier_disposition->lowering_reason, ConSanSiteLoweringReason::None);
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
+                                           ConSanLoweringOutcomeKind::Instrumented),
+            1u);
 }
 
 TEST(ConSanMoi, InlineBarrierOnlySharedOwnerSkipsUnobservedEntryPrologue) {
@@ -9109,12 +9100,9 @@ TEST(ConSanMoi, InlineBarrierOnlySharedOwnerSkipsUnobservedEntryPrologue) {
                patch.owner_descriptor_file_offsets.end();
   });
   EXPECT_EQ(prologue, result.patches.end());
-  const auto barrier_disposition =
-      std::ranges::find(result.site_dispositions, ConSanResourceSiteKind::Barrier,
-                        &ConSanSiteDispositionRecord::site_kind);
-  ASSERT_NE(barrier_disposition, result.site_dispositions.end());
-  EXPECT_EQ(barrier_disposition->lowering_outcome, ConSanSiteLoweringOutcome::Patched);
-  EXPECT_EQ(barrier_disposition->lowering_reason, ConSanSiteLoweringReason::None);
+  EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
+                                           ConSanLoweringOutcomeKind::Instrumented),
+            1u);
 }
 
 TEST(ConSanMoi, InlineShadowBarrierEpochPatchTrampolinesBarrierAndSaturatesEpoch) {

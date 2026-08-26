@@ -857,18 +857,16 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                               << " dispositions="
-                               << testing::PrintToString(result.site_dispositions)
                                << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Atomic);
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_cmpstore_rtn_b32");
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Atomic &&
-           site.disposition == ConSanSiteDisposition::NotApplicable &&
-           site.reason == ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-  }));
+  ASSERT_EQ(result.observation_plan.atomic_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan.atomic_site_decisions.front().kind,
+            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(result.observation_plan.atomic_site_decisions.front().reason,
+            ConSanAtomicPolicyReason::UnqualifiedSyncSequence);
 }
 
 TEST(ConSanMoi, Cdna4HistogramLdsAtomicsAreAccessesButNotSynchronization) {
@@ -944,12 +942,11 @@ TEST(ConSanMoi, UnassociatedFenceIsNotApplicableOnEverySupportedTarget) {
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
     EXPECT_FALSE(result.moi_fence_candidates.front().eligible());
-    EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-      return site.site_kind == ConSanResourceSiteKind::Fence &&
-             site.disposition == ConSanSiteDisposition::NotApplicable &&
-             site.reason == ConSanSiteDispositionReason::IneligibleFence &&
-             site.lowering_outcome == ConSanSiteLoweringOutcome::NotApplicable;
-    }));
+    ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 1u);
+    EXPECT_EQ(result.observation_plan.fence_site_decisions.front().kind,
+              ConSanSiteDecisionKind::NotApplicable);
+    EXPECT_EQ(result.observation_plan.fence_site_decisions.front().reason,
+              ConSanFencePolicyReason::AssociationUnavailable);
   }
 }
 
@@ -967,12 +964,11 @@ TEST(ConSanMoi, Cdna4UnassociatedFenceIsNotApplicable) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.moi_fence_candidates.size(), 1u);
   EXPECT_FALSE(result.moi_fence_candidates.front().eligible());
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Fence &&
-           site.disposition == ConSanSiteDisposition::NotApplicable &&
-           site.reason == ConSanSiteDispositionReason::IneligibleFence &&
-           site.lowering_outcome == ConSanSiteLoweringOutcome::NotApplicable;
-  }));
+  ASSERT_EQ(result.observation_plan.fence_site_decisions.size(), 1u);
+  EXPECT_EQ(result.observation_plan.fence_site_decisions.front().kind,
+            ConSanSiteDecisionKind::NotApplicable);
+  EXPECT_EQ(result.observation_plan.fence_site_decisions.front().reason,
+            ConSanFencePolicyReason::AssociationUnavailable);
 }
 
 TEST(ConSanMoi, InventoriesDynamicStackMarker) {

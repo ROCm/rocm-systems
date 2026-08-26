@@ -403,11 +403,13 @@ make the implementation map precise:
 - `AMDGPU` is LLVM's ELF name for AMD GPU machine-code objects. A code-object
   **container** here is a text-bearing kernel or function region decoded as a
   unit.
-- A **candidate** is an inventory item not yet finally admitted. A
-  **disposition** is the current prototype's recorded decision about a site,
-  such as supported, unsupported, or not applicable. To **canonicalize aliases**
-  is to choose one physical-site representative when several analysis paths
-  refer to the same instruction.
+- A **candidate** is an inventory item not yet finally admitted. The retired
+  prototype used a second **site-disposition** record to repeat whether a site
+  was supported, unsupported, or not applicable. Production now records that
+  answer only in typed policy decisions. To **canonicalize aliases** is to
+  choose one physical-site representative when several analysis paths refer to
+  the same instruction while preserving every equivalent source-container
+  name.
 - **Engine-effective options** are the current mutable option values after the
   selected engine's defaults and derived choices have been applied. A
   **patch kind** is the prototype enum category attached to one emitted edit. Current
@@ -522,14 +524,13 @@ Record/Replay, Sampled, and Inline Shadow currently share a second pipeline:
    access intents already admitted by policy and their matching inventory
    sites; emitters do not re-decode range geometry from pristine bytes;
 3. attach gfx1250 VGPR-bank state where needed;
-4. retain synchronization site dispositions as a temporary lowerer adapter;
-   access policy and coverage stay exclusively in the typed plan and ledger;
+4. consume typed access and synchronization decisions and their probe intents;
 5. repeatedly build resource plans while automatic owner, dispatch, EXEC-save,
    persistent state, private state, spill, and per-owner assignments are chosen;
 6. invoke engine-specific access and synchronization lowerers;
 7. add the common kernel-entry prologue as applicable;
-8. publish access lowering directly from resource/placement state, while
-   temporarily joining synchronization patch state through its adapter; and
+8. publish every access and synchronization lowering outcome directly from
+   resource/placement state into the typed coverage ledger; and
 9. summarize registers, patches, coverage, warnings, report inventory, and
    transform outcome into `ConSanResult`.
 
@@ -2123,13 +2124,12 @@ conflicting aliases fail closed with a typed reason.
 intents and records a typed lowering outcome for every admitted intent. MOI
 candidate discovery is now restricted to admitted physical intents, and both
 MOI and SuperCollider project their current resource and placement outcomes
-back into the ledger. SuperCollider's former physical coverage list and MOI's
-synchronization site dispositions remain temporary diagnostic adapters; they
-are no longer the authority for applicability. MOI access dispositions have
-been deleted: admitted candidates come only from access intents, final
-lowering outcomes are published directly to those intents, and runtime
-coverage reads the pipeline's typed ledger after the compatibility result has
-been moved aside.
+back into the ledger. SuperCollider's physical coverage list remains a
+temporary adapter. Both MOI access and synchronization site-disposition lists
+have been deleted: admitted candidates come only from typed decisions and
+intents, final lowering outcomes are published directly to those intents, and
+runtime coverage reads the pipeline's typed ledger after the compatibility
+result has been moved aside.
 
 The focused `observation_plan_test.cpp` suite covers every enum and stable
 name, invalid sentinels, plan-local identities, construction invariants,
@@ -2150,8 +2150,8 @@ outcomes.
 - **Current temporary seam and consumers:** Current candidate, resource, and
   placement implementations still consume legacy shapes translated from the
   admitted intents. Their results are translated back into
-  `ConSanLoweringOutcomeKind`; the physical SuperCollider coverage list and MOI
-  disposition list remain compatibility and diagnostic projections only.
+  `ConSanLoweringOutcomeKind`; only the physical SuperCollider coverage list
+  remains as a compatibility projection.
 - **Test gate:** Pure four-engine policy matrices, physical-site coalescing,
   the complete common paired scenario set on all simulator targets,
   wide/group-FLAT and target-specific access contracts, then physical gfx950
@@ -2194,9 +2194,10 @@ covered but incomplete bounded runtime metadata.
 - **Completed temporary seam:** MOI and SuperCollider append barrier policy to
   their access plan before constructing the ledger. Current MOI resource and
   lowering candidates may only narrow physical insertion sites admitted by
-  barrier intents. Legacy site dispositions render typed barrier reasons, and
-  final resource/placement results publish through the intent ledger rather
-  than requiring consumers to infer barrier coverage from patch kinds.
+  barrier intents. Final resource/placement results publish directly through
+  the intent ledger; the hook's stable machine-readable diagnostic schema is
+  rendered from typed decisions, lowering entries, and resource plans rather
+  than from a second internal record.
 - **Completed test gate:** Focused units cover every enum spelling, request and
   result validity, plan composition and rollback, ledger ownership, all four
   engine contracts, paired-sequence coalescing, disabled/filter/runtime
@@ -2237,9 +2238,9 @@ not regress or conceal that limitation.
   `ConSanDynamicResultRequirement` retain every exclusion as machine-readable
   evidence instead of making warning strings part of control flow.
 - **Completed cutover:** Ordered native atomics and ordinary-memory/fence
-  sequences are qualified once by policy. Candidate retention, dispositions,
-  and the coverage ledger consume the published decisions; they no longer
-  rediscover eligibility in each engine. The policy uses synchronization-
+  sequences are qualified once by policy. Candidate retention and the coverage
+  ledger consume the published decisions; they no longer rediscover
+  eligibility in each engine. The policy uses synchronization-
   derived scope for ordinary sequences, admits the exact gfx1250 buffer form
   supported by Record/Replay lowering, and distinguishes guest synchronization
   from barriers introduced by ConSan itself.
@@ -2258,18 +2259,30 @@ not regress or conceal that limitation.
   fence-publication, and gfx1250 ordered-LDS coverage.
 - **Prerequisite:** Slices 3B and 4A.
 
-The completed host gate passed 1,449 of 1,451 ConSan tests, with the remaining
-two external-object benchmarks intentionally skipped, plus all 98 ConSan
-hook/runtime tests. All 2,908 emulator device rows passed in 70.71 seconds of
-wall time, and the relevant physical-gfx950 atomic, fence, Stream-K, and tree
-subset passed all 92 rows. Physical gfx950 `d128-block` E2E validation was
-accepted by all four engines, including complete observed barrier coverage
-(Record/Replay and Inline 119/119; Sampled 117/117). RocJitsu-emulated gfx1250
-accepted SuperCollider, Sampled, and Inline, with 18/18 access sites and the
-applicable barrier sites covered. Record/Replay retained its pre-existing
-yellow capacity condition: static coverage was complete (18/18 accesses and
-8/8 barriers), but the bounded replay metadata filled before dynamic analysis
-could complete.
+### Slice 4D: delete the MOI site-disposition compatibility ledger
+
+- **Completed deletion:** `ConSanSiteDispositionRecord`, its disposition and
+  lowering enums, all four stringifiers, the `ConSanResult` field, and the MOI
+  synchronization producer/adapter pass have been deleted. No production C++
+  control flow reads or writes the retired vocabulary.
+- **Single sources of truth:** `ConSanObservationPlan` owns semantic admission;
+  `ConSanCoverageLedger` owns per-intent lowering; resource plans own allocation
+  failures. The HSA hook keeps its external `coverage_site` log schema as a
+  rendering adapter over those typed values, so tooling compatibility does not
+  require duplicate internal state.
+- **Alias and aggregate contracts:** synchronization canonicalization retains
+  every equivalent source-container name. A multi-intent decision is complete
+  only when all required intents are instrumented; resource or placement loss
+  remains visible when another intent at the same semantic site succeeded.
+- **Test gate:** focused policy/retry/partial-lowering units, the complete
+  ConSan host suite, all HSA hook tests, and the complete simulator and physical
+  device matrices.
+
+The completed host gate passed 1,505 of 1,507 ConSan tests, with the remaining
+two external-object benchmarks intentionally skipped, plus all 197 ConSan
+hook/runtime tests and all 371 CPU-only validation-protocol tests. All 2,908
+emulator device rows passed in 71.74 seconds of wall time. The complete 593-row
+physical-gfx950 device matrix passed in 426.82 seconds of wall time.
 
 ### Slice 5A: Record/Replay evidence requirements
 

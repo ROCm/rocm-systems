@@ -248,6 +248,7 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.semantic_id.physical.original_text_offset = event.text_offset;
     event.semantic_id.domain = ConSanSemanticSiteDomain::SynchronizationEvent;
     event.code_object_fingerprint = fingerprint;
+    event.source_containers = {container.name};
     event.container_name = container.name;
     event.in_kernel = in_kernel;
     event.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
@@ -492,6 +493,14 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
       [](const ConSanSyncEvent &event) -> std::string_view { return event.container_name; },
       [&](const ConSanSyncEvent &lhs, const ConSanSyncEvent &rhs) {
         return container_entry(lhs) == container_entry(rhs) && sync_event_semantics_equal(lhs, rhs);
+      },
+      [](ConSanSyncEvent &retained, const ConSanSyncEvent &alias) {
+        retained.source_containers.insert(retained.source_containers.end(),
+                                          alias.source_containers.begin(),
+                                          alias.source_containers.end());
+        std::ranges::sort(retained.source_containers);
+        retained.source_containers.erase(std::ranges::unique(retained.source_containers).begin(),
+                                         retained.source_containers.end());
       });
 }
 

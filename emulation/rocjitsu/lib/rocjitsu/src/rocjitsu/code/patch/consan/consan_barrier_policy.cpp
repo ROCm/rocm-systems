@@ -67,8 +67,13 @@ container_names(std::span<const ConSanSyncEvent *const> aliases) {
   std::vector<std::string> names;
   names.reserve(aliases.size());
   for (const ConSanSyncEvent *event : aliases) {
-    if (std::ranges::find(names, event->container_name) == names.end())
-      names.push_back(event->container_name);
+    const std::span<const std::string> sources = event->source_containers.empty()
+                                                     ? std::span(&event->container_name, 1u)
+                                                     : std::span(event->source_containers);
+    for (const std::string &source : sources) {
+      if (std::ranges::find(names, source) == names.end())
+        names.push_back(source);
+    }
   }
   std::ranges::sort(names);
   return names;
@@ -169,10 +174,10 @@ plan_consan_barrier_observation(const ProgramInventory &inventory,
 
     const bool conflicting_alias = std::ranges::any_of(
         aliases, [&](const auto *alias) { return !event_semantics_equal(event, *alias); });
-    const bool filtered =
-        !request.container_filter.empty() && std::ranges::none_of(aliases, [&](const auto *alias) {
-          return alias->container_name.find(request.container_filter) != std::string::npos;
-        });
+    const bool filtered = !request.container_filter.empty() &&
+                          std::ranges::none_of(names, [&](const std::string &name) {
+                            return name.find(request.container_filter) != std::string::npos;
+                          });
     const bool only_runtime_kernels = std::ranges::all_of(aliases, [](const auto *alias) {
       return alias->in_kernel && runtime_kernel(alias->container_name);
     });

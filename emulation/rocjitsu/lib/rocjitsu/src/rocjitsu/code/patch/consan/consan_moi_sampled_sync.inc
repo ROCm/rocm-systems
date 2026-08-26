@@ -881,27 +881,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           sequence.container_name);
       if (!sequence.in_kernel)
         continue;
-      for (const std::string &identity : sequence.member_event_identities) {
-        const auto event =
-            std::ranges::find(result.sync_events, identity, &ConSanSyncEvent::identity);
-        if (event == result.sync_events.end())
-          continue;
-        const auto disposition = std::ranges::find_if(
-            result.site_dispositions, [&](const ConSanSiteDispositionRecord &site) {
-              return site.site_kind == ConSanResourceSiteKind::Barrier &&
-                     site.container_name == event->container_name &&
-                     site.in_kernel == event->in_kernel && site.text_offset == event->text_offset;
-            });
-        if (disposition == result.site_dispositions.end() ||
-            disposition->disposition != ConSanSiteDisposition::Supported)
-          continue;
-        // No memory-access window exists before this synchronization point,
-        // so there is no causal state for Sampled to publish. This is a typed
-        // non-applicable site, not lost coverage.
-        disposition->disposition = ConSanSiteDisposition::NotApplicable;
-        disposition->reason = ConSanSiteDispositionReason::NoPrecedingSampledWindow;
-        --result.sampled_barrier_applicable_event_count;
-      }
+      result.sampled_barrier_applicable_event_count -=
+          static_cast<uint32_t>(sequence.member_event_identities.size());
       continue;
     }
     const uint64_t representative_descriptor =

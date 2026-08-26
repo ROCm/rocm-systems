@@ -241,8 +241,6 @@ TEST(ConSanMoi, Gfx1100InlineAtomicAcquireUsesCompleteGfx11CacheSequence) {
       << " raw_th=" << testing::PrintToString(site.raw_th)
       << " returns=" << testing::PrintToString(site.returns_old_value);
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
-                               << " dispositions="
-                               << testing::PrintToString(result.site_dispositions)
                                << " kernels=" << testing::PrintToString(result.kernels);
   EXPECT_TRUE(result.final_validation_passed);
   const auto patch = std::ranges::find(
@@ -291,8 +289,6 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquireOutwaitsCausalSnapshotPublica
     ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " sequences=" << testing::PrintToString(result.sync_sequences)
                                  << " events=" << testing::PrintToString(result.sync_events)
-                                 << " dispositions="
-                                 << testing::PrintToString(result.site_dispositions)
                                  << " kernels=" << testing::PrintToString(result.kernels);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
@@ -351,8 +347,6 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
     ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " sequences=" << testing::PrintToString(result.sync_sequences)
                                  << " events=" << testing::PrintToString(result.sync_events)
-                                 << " dispositions="
-                                 << testing::PrintToString(result.site_dispositions)
                                  << " kernels=" << testing::PrintToString(result.kernels);
     const auto patch = std::ranges::find(
         result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
@@ -721,8 +715,6 @@ TEST(ConSanMoi, Cdna4InlineAtomicAcquireReleaseEmitsNativeTransaction) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors)
-                               << " dispositions="
-                               << testing::PrintToString(result.site_dispositions)
                                << " resources=" << testing::PrintToString(result.resource_plans);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
@@ -1018,8 +1010,6 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicReleaseCarriesClaimedPredecessor) {
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " errors=" << testing::PrintToString(result.errors)
-                                 << " dispositions="
-                                 << testing::PrintToString(result.site_dispositions)
                                  << " resources=" << testing::PrintToString(result.resource_plans);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_TRUE(result.final_validation_passed);
@@ -3293,8 +3283,8 @@ TEST(ConSanMoi, SampledAtomicTrackingRequiresSelectedReadyCausalWindow) {
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("no selected LDS access candidates") != std::string::npos;
   }));
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Atomic,
-                               &ConSanSiteDispositionRecord::site_kind),
+  EXPECT_EQ(consan_decision_count(result.observation_plan.atomic_site_decisions,
+                                  ConSanSiteDecisionKind::Admitted),
             0u);
 }
 
@@ -3565,12 +3555,11 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     exact_sequence.insert(exact_sequence.end(), {0xEE0AC000u, 0x00000000u, 0x00000000u});
     EXPECT_TRUE(contains_subsequence(cave, exact_sequence));
 
-    const auto disposition = std::ranges::find_if(result.site_dispositions, [&](const auto &site) {
-      return site.site_kind == ConSanResourceSiteKind::Fence &&
-             site.text_offset == semantic_fence.text_offset;
-    });
-    ASSERT_NE(disposition, result.site_dispositions.end());
-    EXPECT_EQ(disposition->lowering_outcome, ConSanSiteLoweringOutcome::Patched);
+    const ConSanFenceSiteDecision *decision =
+        consan_fence_decision_at(result, semantic_fence.text_offset);
+    ASSERT_NE(decision, nullptr);
+    EXPECT_TRUE(
+        consan_decision_has_lowering(result, *decision, ConSanLoweringOutcomeKind::Instrumented));
   }
 }
 

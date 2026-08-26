@@ -232,13 +232,6 @@ void TransformResult::discard_replacement(std::string warning) {
                                                ConSanLoweringOutcomeKind::ResourceRejected,
                                                "runtime-owned report allocation failed");
   }
-  for (ConSanSiteDispositionRecord &site : legacy_compatibility_.site_dispositions) {
-    if (site.lowering_outcome == ConSanSiteLoweringOutcome::Patched) {
-      site.lowering_outcome = ConSanSiteLoweringOutcome::ResourceFailed;
-      site.lowering_reason = ConSanSiteLoweringReason::UnsupportedResourcePlan;
-      site.resource_reason = ConSanRegisterPlanReason::InvalidRequest;
-    }
-  }
   outcome = ConSanTransformOutcome::Unsupported;
   final_validation_passed = false;
   replacement_bytes.clear();

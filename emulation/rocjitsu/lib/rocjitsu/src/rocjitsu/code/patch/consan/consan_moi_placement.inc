@@ -2004,15 +2004,16 @@ struct MoiResourcePlanningState {
     if (restrict_liveness_queries) {
       std::unordered_set<uint64_t> query_offsets;
       query_offsets.reserve(result.moi_candidates.size() + result.sync_events.size() +
-                            result.resource_plans.size() + result.kernels.size());
+                            result.resource_plans.size() +
+                            result.observation_plan.probe_intents.size() + result.kernels.size());
       for (const ConSanMoiCandidate &candidate : result.moi_candidates)
         query_offsets.insert(candidate.text_offset);
       for (const ConSanSyncEvent &event : result.sync_events)
         query_offsets.insert(event.text_offset);
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
         query_offsets.insert(plan.text_offset);
-      for (const ConSanSiteDispositionRecord &site : result.site_dispositions)
-        query_offsets.insert(site.text_offset);
+      for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
+        query_offsets.insert(intent.physical_site.original_text_offset);
       for (const ConSanMoiFenceCandidate &fence : result.moi_fence_candidates)
         query_offsets.insert(fence.text_offset);
       for (const ConSanKernelInfo &kernel : result.kernels) {
@@ -4055,11 +4056,11 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
   std::unordered_map<uint64_t, RegisterSet> unavailable_by_owner;
   std::unordered_set<uint64_t> included_site_offsets;
   included_site_offsets.reserve(result.moi_candidates.size() + result.resource_plans.size() +
-                                result.site_dispositions.size() + result.kernels.size());
+                                result.observation_plan.probe_intents.size() +
+                                result.kernels.size());
   const auto include_site = [&](uint64_t text_offset) {
-    // Site dispositions describe logical cells, so one physical instruction can
-    // appear many times.  Liveness and def/use are set unions and need only be
-    // incorporated once per instruction.
+    // Several semantic intents can name one physical instruction. Liveness and
+    // def/use are set unions and need only be incorporated once per instruction.
     if (!included_site_offsets.insert(text_offset).second)
       return;
     BasicBlock *block = block_for_offset(state.block_index, text_offset);
@@ -4086,10 +4087,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
     include_site(candidate.text_offset);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
     include_site(plan.text_offset);
-  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
-    if (site.disposition == ConSanSiteDisposition::Supported)
-      include_site(site.text_offset);
-  }
+  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
+    include_site(intent.physical_site.original_text_offset);
   // Inline's component-local transient window is established only inside an
   // access or synchronization body. Its RDNA entry relay and return use
   // special state, while persistent owner/epoch values live in VGPRs. Do not
@@ -4912,7 +4911,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   bool saw_site = false;
   std::unordered_set<uint64_t> included_site_offsets;
   included_site_offsets.reserve(result.moi_candidates.size() + result.resource_plans.size() +
-                                result.site_dispositions.size() + result.kernels.size());
+                                result.observation_plan.probe_intents.size() +
+                                result.kernels.size());
   const auto include_site = [&](uint64_t text_offset) {
     if (!included_site_offsets.insert(text_offset).second)
       return;
@@ -4936,10 +4936,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     include_site(candidate.text_offset);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
     include_site(plan.text_offset);
-  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
-    if (site.disposition == ConSanSiteDisposition::Supported)
-      include_site(site.text_offset);
-  }
+  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
+    include_site(intent.physical_site.original_text_offset);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     if (!plan.owner_descriptor_file_offsets.empty())
       include_site(plan.text_offset);
@@ -5824,22 +5822,11 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   const rj_code_arch_t arch = planning_state.arch;
   const bool has_supported_sampled_sync =
       options.moi_engine == ConSanMoiEngine::Sampled &&
-      std::ranges::any_of(result.resource_plans,
-                          [](const ConSanCandidateResourcePlan &plan) {
-                            return plan.site_kind == ConSanResourceSiteKind::Barrier ||
-                                   plan.site_kind == ConSanResourceSiteKind::Atomic;
-                          }) &&
-      std::ranges::any_of(result.site_dispositions, [&](const ConSanSiteDispositionRecord &site) {
-        if ((site.site_kind != ConSanResourceSiteKind::Barrier &&
-             site.site_kind != ConSanResourceSiteKind::Atomic) ||
-            site.disposition != ConSanSiteDisposition::Supported)
-          return false;
-        return std::ranges::any_of(
-            result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-              return plan.site_kind == site.site_kind && plan.text_offset == site.text_offset &&
-                     plan.source != ConSanRegisterAllocationSource::Unsupported &&
-                     !plan.owner_descriptor_file_offsets.empty();
-            });
+      std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
+        return (plan.site_kind == ConSanResourceSiteKind::Barrier ||
+                plan.site_kind == ConSanResourceSiteKind::Atomic) &&
+               plan.source != ConSanRegisterAllocationSource::Unsupported &&
+               !plan.owner_descriptor_file_offsets.empty();
       });
   // Runtime sampling is spatial: dispatch and workgroup identity select a
   // bank, while the LDS cell selects an address. No per-workitem sequence is
@@ -5848,10 +5835,9 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   const bool needs_inline_workgroup_key =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-        // Inline sync dispositions are appended only after persistent-state
-        // placement. Its operational resource plans have already filtered
-        // out semantically unsupported atomics, so they are the authoritative
-        // pre-placement signal here.
+        // Operational resource plans have already filtered out semantically
+        // unsupported atomics, so they are the authoritative pre-placement
+        // signal here.
         if (plan.source == ConSanRegisterAllocationSource::Unsupported ||
             plan.owner_descriptor_file_offsets.empty())
           return false;

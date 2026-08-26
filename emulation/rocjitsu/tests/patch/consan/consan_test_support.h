@@ -116,6 +116,77 @@ testing::AssertionResult consan_patch_succeeded(const ConSanResult &result) {
   });
 }
 
+[[nodiscard]] const ConSanBarrierSiteDecision *
+consan_barrier_decision_at(const ConSanResult &result, uint64_t text_offset) {
+  const auto decision = std::ranges::find_if(
+      result.observation_plan.barrier_site_decisions,
+      [&](const ConSanBarrierSiteDecision &candidate) {
+        return candidate.semantic_site.physical.original_text_offset == text_offset;
+      });
+  return decision == result.observation_plan.barrier_site_decisions.end() ? nullptr : &*decision;
+}
+
+[[nodiscard]] const ConSanAtomicSiteDecision *consan_atomic_decision_at(const ConSanResult &result,
+                                                                        uint64_t text_offset) {
+  const auto decision = std::ranges::find_if(
+      result.observation_plan.atomic_site_decisions,
+      [&](const ConSanAtomicSiteDecision &candidate) {
+        return candidate.semantic_site.physical.original_text_offset == text_offset;
+      });
+  return decision == result.observation_plan.atomic_site_decisions.end() ? nullptr : &*decision;
+}
+
+[[nodiscard]] const ConSanFenceSiteDecision *consan_fence_decision_at(const ConSanResult &result,
+                                                                      uint64_t text_offset) {
+  const auto decision = std::ranges::find_if(
+      result.observation_plan.fence_site_decisions, [&](const ConSanFenceSiteDecision &candidate) {
+        return candidate.semantic_site.physical.original_text_offset == text_offset;
+      });
+  return decision == result.observation_plan.fence_site_decisions.end() ? nullptr : &*decision;
+}
+
+template <typename Decision>
+[[nodiscard]] bool consan_decision_has_lowering(const ConSanResult &result,
+                                                const Decision &decision,
+                                                ConSanLoweringOutcomeKind outcome) {
+  if (decision.kind != ConSanSiteDecisionKind::Admitted || decision.intent_ids.empty())
+    return false;
+  const auto has = [&](ConSanLoweringOutcomeKind candidate) {
+    return std::ranges::any_of(decision.intent_ids, [&](ConSanProbeIntentId id) {
+      const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(id);
+      return entry != nullptr && entry->lowering == candidate;
+    });
+  };
+  ConSanLoweringOutcomeKind aggregate = ConSanLoweringOutcomeKind::Pending;
+  if (std::ranges::all_of(decision.intent_ids, [&](ConSanProbeIntentId id) {
+        const ConSanIntentCoverageEntry *entry = result.coverage_ledger.intent_entry(id);
+        return entry != nullptr && entry->lowering == ConSanLoweringOutcomeKind::Instrumented;
+      })) {
+    aggregate = ConSanLoweringOutcomeKind::Instrumented;
+  } else if (has(ConSanLoweringOutcomeKind::ResourceRejected)) {
+    aggregate = ConSanLoweringOutcomeKind::ResourceRejected;
+  } else if (has(ConSanLoweringOutcomeKind::PlacementRejected)) {
+    aggregate = ConSanLoweringOutcomeKind::PlacementRejected;
+  }
+  return aggregate == outcome;
+}
+
+template <typename Decisions>
+[[nodiscard]] size_t consan_decision_count(const Decisions &decisions,
+                                           ConSanSiteDecisionKind kind) {
+  return std::ranges::count_if(decisions,
+                               [&](const auto &decision) { return decision.kind == kind; });
+}
+
+template <typename Decisions>
+[[nodiscard]] size_t consan_decision_lowering_count(const ConSanResult &result,
+                                                    const Decisions &decisions,
+                                                    ConSanLoweringOutcomeKind outcome) {
+  return std::ranges::count_if(decisions, [&](const auto &decision) {
+    return consan_decision_has_lowering(result, decision, outcome);
+  });
+}
+
 template <size_t WordCount>
 std::array<uint32_t, WordCount> patched_words_at_file_offset(const ConSanResult &result,
                                                              size_t file_offset) {
@@ -1547,8 +1618,7 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
     };
   } else if (options.helper_has_ordinary_memory) {
     helper = {
-        0xEE050004u,
-        7u | (2u << 18u) | (1u << 20u),
+        0xEE050004u, 7u | (2u << 18u) | (1u << 20u),
         10u | (0xfffff0u << 8u), // global_load_b32 v7, v10, s[4:5] offset:-16
     };
   } else if (options.helper_has_ordered_atomic) {
@@ -1828,8 +1898,7 @@ std::vector<uint8_t> make_rdna4_two_kernel_aliased_ordered_atomic_code_object() 
       0x00000000u, // ds_store_b32 v0, v0
   };
   const std::array<uint32_t, 3> release = {
-      0xEE0B0000u,
-      0x00000000u,
+      0xEE0B0000u, 0x00000000u,
       0x00000000u, // global_wb
   };
   const size_t minimum_word_count =
@@ -2122,8 +2191,7 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u,
-      0x00980000u,
+      0xEE158004u, 0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -2183,9 +2251,7 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {
-      0xC40D4000u,
-      1u | (4u << 9u) | (2u << 18u) | (1u << 20u),
-      2u,
+      0xC40D4000u, 1u | (4u << 9u) | (2u << 18u) | (1u << 20u), 2u,
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words, "buffer_atomic_probe");
@@ -2216,9 +2282,7 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);

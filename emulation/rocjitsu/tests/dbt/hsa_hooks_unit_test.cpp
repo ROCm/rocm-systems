@@ -87,7 +87,10 @@ static_assert(
 
 template <typename Configure>
 void install_consan_test_program_inventory(rocjitsu::ConSanResult &result, Configure configure) {
-  rocjitsu::ProgramInventoryBuilder builder(result.program_inventory);
+  rocjitsu::ProgramInventoryBuilder builder =
+      result.program_inventory.code_object_id().valid()
+          ? rocjitsu::ProgramInventoryBuilder(result.program_inventory)
+          : rocjitsu::ProgramInventoryBuilder(std::span<const uint8_t>{});
   configure(builder);
   builder.rebuild_access_inventory({});
   result.install_program_inventory(builder.view());
@@ -1924,6 +1927,59 @@ uint64_t absolute_transform_test_reservation_bytes(uint64_t input_bytes, uint64_
   return transform_test_reservation_bytes(input_bytes, growth_limit);
 }
 
+void install_test_access_coverage(
+    rocjitsu::ConSanResult &result, size_t site_count,
+    rocjitsu::ConSanSiteDecisionKind decision_kind, rocjitsu::ConSanAccessPolicyReason reason,
+    rocjitsu::ConSanLoweringOutcomeKind lowering = rocjitsu::ConSanLoweringOutcomeKind::Pending) {
+  rocjitsu::ConSanObservationPlan plan;
+  plan.engine = rocjitsu::ConSanCapabilityEngine::RecordReplay;
+  plan.site_decisions.reserve(site_count);
+  if (decision_kind == rocjitsu::ConSanSiteDecisionKind::Admitted)
+    plan.probe_intents.reserve(site_count);
+  for (size_t index = 0; index < site_count; ++index) {
+    const rocjitsu::PhysicalSiteId physical{
+        .code_object = result.program_inventory.code_object_id(),
+        .original_text_offset = index * sizeof(uint32_t),
+    };
+    const rocjitsu::SemanticSiteId semantic{
+        .physical = physical,
+        .domain = rocjitsu::ConSanSemanticSiteDomain::Access,
+        .member_ordinal = 0u,
+        .range_ordinal = 0u,
+    };
+    std::vector<rocjitsu::ConSanProbeIntentId> intent_ids;
+    if (decision_kind == rocjitsu::ConSanSiteDecisionKind::Admitted) {
+      const rocjitsu::ConSanProbeIntentId id{static_cast<uint32_t>(plan.probe_intents.size())};
+      intent_ids.push_back(id);
+      plan.probe_intents.push_back({
+          .id = id,
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .physical_site = physical,
+          .covered_semantic_sites = {semantic},
+          .kind = rocjitsu::ConSanProbeIntentKind::AccessRecord,
+          .position = rocjitsu::ConSanProbePosition::Before,
+          .lane_mask = rocjitsu::ConSanLaneMaskPolicy::ActiveExecutionMask,
+          .requirement = rocjitsu::ConSanProbeRequirement::Required,
+          .synchronization_association = std::nullopt,
+          .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+      });
+    }
+    plan.site_decisions.push_back({
+        .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+        .semantic_site = semantic,
+        .kind = decision_kind,
+        .reason = reason,
+        .intent_ids = std::move(intent_ids),
+        .source_containers = {"test_access"},
+    });
+  }
+  ASSERT_TRUE(plan.valid());
+  result.observation_plan = std::move(plan);
+  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
+  for (const rocjitsu::ConSanProbeIntent &intent : result.observation_plan.probe_intents)
+    ASSERT_TRUE(result.coverage_ledger.set_lowering_outcome(intent.id, lowering));
+}
+
 rocjitsu::ConSanResult process_growth_replacement_result(size_t replacement_size = 12) {
   assert(replacement_size >= 4);
   rocjitsu::ConSanResult result;
@@ -1934,16 +1990,23 @@ rocjitsu::ConSanResult process_growth_replacement_result(size_t replacement_size
   result.final_validation_passed = true;
   result.elf_bytes.resize(replacement_size);
   std::ranges::copy(std::array<uint8_t, 4>{0x7f, 'E', 'L', 'F'}, result.elf_bytes.begin());
-  result.site_dispositions.push_back(
-      {.site_kind = rocjitsu::ConSanResourceSiteKind::Access,
-       .disposition = rocjitsu::ConSanSiteDisposition::Supported,
-       .reason = rocjitsu::ConSanSiteDispositionReason::None,
-       .container_name = "process_growth_test",
-       .in_kernel = true,
-       .text_offset = 0,
-       .mnemonic = "ds_load_b32",
-       .lowering_outcome = rocjitsu::ConSanSiteLoweringOutcome::Patched,
-       .lowering_reason = rocjitsu::ConSanSiteLoweringReason::None});
+  rocjitsu::ConSanMoiCandidate candidate;
+  candidate.container_name = "process_growth_test";
+  candidate.source = rocjitsu::ConSanMoiCandidateSource::NativeLds;
+  candidate.kind = rocjitsu::ConSanLdsAccessKind::Read;
+  candidate.size = sizeof(uint32_t);
+  candidate.width_bits = 32u;
+  candidate.addr_vgpr = 0u;
+  candidate.mnemonic = "ds_load_b32";
+  result.moi_candidates.push_back(std::move(candidate));
+  rocjitsu::ConSanCandidateResourcePlan resource_plan;
+  resource_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Access;
+  resource_plan.source = rocjitsu::ConSanRegisterAllocationSource::LivenessDead;
+  result.resource_plans.push_back(std::move(resource_plan));
+  rocjitsu::ConSanPatchInfo patch;
+  patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
+  patch.kind = rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore;
+  result.patches.push_back(std::move(patch));
   return result;
 }
 
@@ -4393,12 +4456,10 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchRejectsPrologueOnlyMoiMutation) {
   prologue_only.modified = true;
   prologue_only.final_validation_passed = true;
   prologue_only.elf_bytes = {0x7f, 'E', 'L', 'F', 'p', 'r', 'o', 'l'};
-  prologue_only.site_dispositions.push_back(
-      {.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic,
-       .disposition = rocjitsu::ConSanSiteDisposition::Supported,
-       .reason = rocjitsu::ConSanSiteDispositionReason::None,
-       .container_name = "supported_atomic",
-       .mnemonic = "global_atomic_add"});
+  rocjitsu::ConSanCandidateResourcePlan supported_atomic_plan;
+  supported_atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
+  supported_atomic_plan.source = rocjitsu::ConSanRegisterAllocationSource::LivenessDead;
+  prologue_only.resource_plans.push_back(supported_atomic_plan);
   rocjitsu::ConSanPatchInfo prologue_patch;
   prologue_patch.phase = rocjitsu::ConSanPatchPhase::Instrumentation;
   prologue_patch.kind = rocjitsu::ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
@@ -4411,7 +4472,7 @@ TEST(HsaHooksUnitTest, ConSanRequirePatchRejectsPrologueOnlyMoiMutation) {
   }
 
   rocjitsu::ConSanResult resource_plan_only = prologue_only;
-  resource_plan_only.site_dispositions.clear();
+  resource_plan_only.resource_plans.clear();
   rocjitsu::ConSanCandidateResourcePlan resource_plan;
   resource_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
   resource_plan.source = rocjitsu::ConSanRegisterAllocationSource::Unsupported;
@@ -5036,48 +5097,104 @@ rocjitsu::ConSanResult diagnostic_coverage_transform_result() {
   result.final_validation_passed = true;
   result.elf_bytes = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
 
-  auto append_site =
-      [&](rocjitsu::ConSanResourceSiteKind kind, rocjitsu::ConSanSiteDisposition disposition,
-          rocjitsu::ConSanSiteDispositionReason reason, rocjitsu::ConSanSiteLoweringOutcome outcome,
-          rocjitsu::ConSanSiteLoweringReason lowering_reason,
-          rocjitsu::ConSanRegisterPlanReason resource_reason, std::string container, bool in_kernel,
-          uint64_t text_offset, std::string mnemonic) {
-        rocjitsu::ConSanSiteDispositionRecord site;
-        site.site_kind = kind;
-        site.disposition = disposition;
-        site.reason = reason;
-        site.container_name = std::move(container);
-        site.in_kernel = in_kernel;
-        site.text_offset = text_offset;
-        site.mnemonic = std::move(mnemonic);
-        site.lowering_outcome = outcome;
-        site.lowering_reason = lowering_reason;
-        site.resource_reason = resource_reason;
-        result.site_dispositions.push_back(std::move(site));
-      };
-  append_site(
-      rocjitsu::ConSanResourceSiteKind::Access, rocjitsu::ConSanSiteDisposition::Unsupported,
-      rocjitsu::ConSanSiteDispositionReason::UnsupportedMnemonic,
-      rocjitsu::ConSanSiteLoweringOutcome::Unsupported,
-      rocjitsu::ConSanSiteLoweringReason::SemanticUnsupported,
-      rocjitsu::ConSanRegisterPlanReason::None, "unsupported_kernel", true, 0x10, "ds_load_b96");
-  append_site(rocjitsu::ConSanResourceSiteKind::Barrier, rocjitsu::ConSanSiteDisposition::Supported,
-              rocjitsu::ConSanSiteDispositionReason::None,
-              rocjitsu::ConSanSiteLoweringOutcome::ResourceFailed,
-              rocjitsu::ConSanSiteLoweringReason::UnsupportedResourcePlan,
-              rocjitsu::ConSanRegisterPlanReason::DynamicStack, "barrier_helper", false, 0x20,
-              "s_barrier_wait");
-  append_site(rocjitsu::ConSanResourceSiteKind::Atomic, rocjitsu::ConSanSiteDisposition::Supported,
-              rocjitsu::ConSanSiteDispositionReason::None,
-              rocjitsu::ConSanSiteLoweringOutcome::PlacementOrLoweringFailed,
-              rocjitsu::ConSanSiteLoweringReason::InstrumentationPatchMissing,
-              rocjitsu::ConSanRegisterPlanReason::None, "atomic_kernel", true, 0x30,
-              "global_atomic_add");
-  append_site(rocjitsu::ConSanResourceSiteKind::Fence, rocjitsu::ConSanSiteDisposition::Supported,
-              rocjitsu::ConSanSiteDispositionReason::None,
-              rocjitsu::ConSanSiteLoweringOutcome::Patched,
-              rocjitsu::ConSanSiteLoweringReason::None, rocjitsu::ConSanRegisterPlanReason::None,
-              "fence_kernel", true, 0x40, "fence");
+  const auto semantic_site = [&](uint64_t offset, rocjitsu::ConSanSemanticSiteDomain domain) {
+    return rocjitsu::SemanticSiteId{
+        .physical = {.code_object = result.program_inventory.code_object_id(),
+                     .original_text_offset = offset},
+        .domain = domain,
+        .member_ordinal = 0u,
+        .range_ordinal = 0u,
+    };
+  };
+  const rocjitsu::SemanticSiteId access =
+      semantic_site(0x10u, rocjitsu::ConSanSemanticSiteDomain::Access);
+  const rocjitsu::SemanticSiteId barrier =
+      semantic_site(0x20u, rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent);
+  const rocjitsu::SemanticSiteId atomic =
+      semantic_site(0x30u, rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent);
+  const rocjitsu::SemanticSiteId fence =
+      semantic_site(0x40u, rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent);
+  const rocjitsu::ConSanSynchronizationAssociationId atomic_association{"test-atomic"};
+  const rocjitsu::ConSanSynchronizationAssociationId fence_association{"test-fence"};
+  result.observation_plan = {
+      .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+      .site_decisions = {{
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .semantic_site = access,
+          .kind = rocjitsu::ConSanSiteDecisionKind::Unsupported,
+          .reason = rocjitsu::ConSanAccessPolicyReason::UnsupportedMnemonic,
+          .intent_ids = {},
+          .source_containers = {"unsupported_kernel"},
+      }},
+      .barrier_site_decisions = {{
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .semantic_site = barrier,
+          .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
+          .reason = rocjitsu::ConSanBarrierPolicyReason::None,
+          .intent_ids = {{0u}},
+          .source_containers = {"barrier_helper"},
+      }},
+      .atomic_site_decisions = {{
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .semantic_site = atomic,
+          .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
+          .capability = rocjitsu::ConSanCapabilityDisposition::Supported,
+          .reason = rocjitsu::ConSanAtomicPolicyReason::None,
+          .association = atomic_association,
+          .intent_ids = {{1u}},
+          .source_containers = {"atomic_kernel"},
+      }},
+      .fence_site_decisions = {{
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .semantic_site = fence,
+          .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
+          .capability = rocjitsu::ConSanCapabilityDisposition::Supported,
+          .reason = rocjitsu::ConSanFencePolicyReason::None,
+          .inventory_association = rocjitsu::ConSanFenceAssociation::Qualified,
+          .association = fence_association,
+          .intent_ids = {{2u}},
+          .source_containers = {"fence_kernel"},
+      }},
+      .probe_intents =
+          {
+              {.id = {0u},
+               .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+               .physical_site = barrier.physical,
+               .covered_semantic_sites = {barrier},
+               .kind = rocjitsu::ConSanProbeIntentKind::BarrierRecord,
+               .position = rocjitsu::ConSanProbePosition::After,
+               .lane_mask = rocjitsu::ConSanLaneMaskPolicy::ActiveExecutionMask,
+               .requirement = rocjitsu::ConSanProbeRequirement::Required,
+               .synchronization_association = std::nullopt,
+               .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None},
+              {.id = {1u},
+               .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+               .physical_site = atomic.physical,
+               .covered_semantic_sites = {atomic},
+               .kind = rocjitsu::ConSanProbeIntentKind::AtomicRecord,
+               .position = rocjitsu::ConSanProbePosition::After,
+               .lane_mask = rocjitsu::ConSanLaneMaskPolicy::ActiveExecutionMask,
+               .requirement = rocjitsu::ConSanProbeRequirement::Required,
+               .synchronization_association = atomic_association},
+              {.id = {2u},
+               .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+               .physical_site = fence.physical,
+               .covered_semantic_sites = {fence},
+               .kind = rocjitsu::ConSanProbeIntentKind::FenceRecord,
+               .position = rocjitsu::ConSanProbePosition::After,
+               .lane_mask = rocjitsu::ConSanLaneMaskPolicy::ActiveExecutionMask,
+               .requirement = rocjitsu::ConSanProbeRequirement::Required,
+               .synchronization_association = fence_association},
+          },
+  };
+  EXPECT_TRUE(result.observation_plan.valid());
+  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
+  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
+      {0u}, rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected));
+  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
+      {1u}, rocjitsu::ConSanLoweringOutcomeKind::PlacementRejected));
+  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
+      {2u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
   return result;
 }
 
@@ -5140,7 +5257,7 @@ TEST(HsaHooksUnitTest, ConSanCoverageUsesTypedPipelineLedgerAfterPublishingMecha
   const rocjitsu::ConSanResult result = typed_coverage_transform_result();
 
   testing::internal::CaptureStderr();
-  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.elf_bytes);
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 101u);
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_NE(log.find("ConSan coverage reader=101 flavor=moi engine=record_replay "
@@ -5159,61 +5276,42 @@ TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSource
   const rocjitsu::ConSanResult result = diagnostic_coverage_transform_result();
 
   testing::internal::CaptureStderr();
-  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.elf_bytes);
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 101u);
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_NE(log.find("ConSan coverage_site reader=101 kind=access disposition=unsupported "
                      "reason=unsupported_mnemonic outcome=unsupported "
                      "lowering_reason=semantic_unsupported resource_reason=none "
-                     "container=unsupported_kernel scope=kernel text=0x10 "
-                     "mnemonic=ds_load_b96"),
+                     "container=unsupported_kernel scope=kernel text=0x10 mnemonic=unknown"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("ConSan coverage_site reader=101 kind=barrier disposition=supported "
                      "reason=none outcome=resource_failed "
-                     "lowering_reason=unsupported_resource_plan resource_reason=dynamic_stack "
-                     "container=barrier_helper scope=function text=0x20 "
-                     "mnemonic=s_barrier_wait"),
+                     "lowering_reason=unsupported_resource_plan resource_reason=invalid_request "
+                     "container=barrier_helper scope=kernel text=0x20 mnemonic=unknown"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("ConSan coverage_site reader=101 kind=atomic disposition=supported "
                      "reason=none outcome=placement_or_lowering_failed "
                      "lowering_reason=instrumentation_patch_missing resource_reason=none "
-                     "container=atomic_kernel scope=kernel text=0x30 "
-                     "mnemonic=global_atomic_add"),
+                     "container=atomic_kernel scope=kernel text=0x30 mnemonic=unknown"),
             std::string::npos)
       << log;
   EXPECT_NE(log.find("ConSan coverage_site reader=101 kind=fence disposition=supported "
                      "reason=none outcome=patched lowering_reason=none resource_reason=none "
-                     "container=fence_kernel scope=kernel text=0x40 mnemonic=fence"),
+                     "container=fence_kernel scope=kernel text=0x40 mnemonic=unknown"),
             std::string::npos)
       << log;
 }
 
-TEST(HsaHooksUnitTest, ConSanHighCardinalityDiagnosticsUseBoundedBatchedWrites) {
+TEST(HsaHooksUnitTest, ConSanHighCardinalityTypedDiagnosticsUseBoundedBatchedWrites) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];
   rocjitsu::ConSanResult result = diagnostic_coverage_transform_result();
   constexpr size_t kRecordCount = 4096;
 
-  const rocjitsu::ConSanSiteDispositionRecord site_prototype = result.site_dispositions.front();
-  result.site_dispositions.clear();
-  result.site_dispositions.reserve(kRecordCount);
-  result.patches.reserve(kRecordCount);
-  for (size_t i = 0; i < kRecordCount; ++i) {
-    rocjitsu::ConSanSiteDispositionRecord site = site_prototype;
-    site.text_offset = i * 4u;
-    result.site_dispositions.push_back(std::move(site));
-
-    rocjitsu::ConSanPatchInfo patch;
-    patch.kind = rocjitsu::ConSanPatchKind::InlineMoiAccessRecordStore;
-    patch.anchor_offset = i * 4u;
-    patch.trampoline_offset = 0x100000u + i * 64u;
-    patch.original_size = 4u;
-    patch.trampoline_size = 64u;
-    result.patches.push_back(std::move(patch));
-  }
-
+  install_test_access_coverage(result, kRecordCount, rocjitsu::ConSanSiteDecisionKind::Unsupported,
+                               rocjitsu::ConSanAccessPolicyReason::UnsupportedMnemonic);
   const auto count_records = [](std::string_view log, std::string_view marker) {
     size_t count = 0;
     for (size_t offset = 0; (offset = log.find(marker, offset)) != std::string_view::npos;
@@ -5227,11 +5325,10 @@ TEST(HsaHooksUnitTest, ConSanHighCardinalityDiagnosticsUseBoundedBatchedWrites) 
   g_log_sink_max_write_size = 0;
   g_log_sink_writes_end_in_newline = true;
   g_log_sink_bytes.clear();
-  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.elf_bytes, false,
-                     false, capture_log_sink);
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 101u, {}, false, false,
+                     capture_log_sink);
 
   EXPECT_EQ(count_records(g_log_sink_bytes, "ConSan coverage_site "), kRecordCount);
-  EXPECT_EQ(count_records(g_log_sink_bytes, "ConSan proof patch "), kRecordCount);
   EXPECT_TRUE(g_log_sink_writes_end_in_newline);
   EXPECT_LE(g_log_sink_max_write_size, 1024u * 1024u);
   // This is a structural regression check for the reported per-record write
@@ -5380,23 +5477,40 @@ TEST(HsaHooksUnitTest, ConSanCoverageDoesNotResurrectNotApplicableResourcePlan) 
   result.modified = true;
   result.final_validation_passed = true;
   result.elf_bytes = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
-  result.site_dispositions.push_back(
-      {.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic,
-       .disposition = rocjitsu::ConSanSiteDisposition::NotApplicable,
-       .reason = rocjitsu::ConSanSiteDispositionReason::NoAtomicAcquireConsumer,
-       .container_name = "isolated_release",
-       .in_kernel = true,
-       .text_offset = 0x30,
-       .mnemonic = "ds_add_u32",
-       .lowering_outcome = rocjitsu::ConSanSiteLoweringOutcome::NotApplicable,
-       .lowering_reason = rocjitsu::ConSanSiteLoweringReason::SemanticNotApplicable});
+  const rocjitsu::SemanticSiteId atomic_site{
+      .physical = {.code_object = result.program_inventory.code_object_id(),
+                   .original_text_offset = 0x30u},
+      .domain = rocjitsu::ConSanSemanticSiteDomain::SynchronizationEvent,
+      .member_ordinal = 0u,
+      .range_ordinal = 0u,
+  };
+  result.observation_plan = {
+      .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+      .site_decisions = {},
+      .barrier_site_decisions = {},
+      .atomic_site_decisions = {{
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .semantic_site = atomic_site,
+          .kind = rocjitsu::ConSanSiteDecisionKind::NotApplicable,
+          .capability = rocjitsu::ConSanCapabilityDisposition::OutOfContract,
+          .reason = rocjitsu::ConSanAtomicPolicyReason::UnqualifiedSyncSequence,
+          .association = std::nullopt,
+          .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+          .intent_ids = {},
+          .source_containers = {"isolated_release"},
+      }},
+      .fence_site_decisions = {},
+      .probe_intents = {},
+  };
+  ASSERT_TRUE(result.observation_plan.valid());
+  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
   rocjitsu::ConSanCandidateResourcePlan atomic_plan;
   atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
   atomic_plan.text_offset = 0x30;
   result.resource_plans.push_back(std::move(atomic_plan));
 
   testing::internal::CaptureStderr();
-  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.elf_bytes);
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 101u);
   const std::string log = testing::internal::GetCapturedStderr();
 
   EXPECT_NE(log.find("atomic_discovered=0 atomic_supported=0 atomic_selected=0 "
@@ -5417,17 +5531,13 @@ rocjitsu::ConSanResult auto_report_atomic_transform_result() {
   result.elf_bytes = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
   rocjitsu::ConSanCandidateResourcePlan atomic_plan;
   atomic_plan.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic;
+  atomic_plan.source = rocjitsu::ConSanRegisterAllocationSource::LivenessDead;
   result.resource_plans.push_back(atomic_plan);
   install_consan_test_program_inventory(result, [](rocjitsu::ProgramInventoryBuilder &builder) {
     builder.kernels().emplace_back();
     builder.kernels().back().name = "auto_report_atomic";
     builder.kernels().back().atomic_sites.emplace_back();
   });
-  result.site_dispositions.push_back({.site_kind = rocjitsu::ConSanResourceSiteKind::Atomic,
-                                      .disposition = rocjitsu::ConSanSiteDisposition::Supported,
-                                      .reason = rocjitsu::ConSanSiteDispositionReason::None,
-                                      .container_name = "auto_report_atomic",
-                                      .mnemonic = "global_atomic_add"});
   return result;
 }
 
@@ -5453,13 +5563,6 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
   candidate.container_name = "auto_report_access";
   candidate.mnemonic = "ds_store_b32";
   result.moi_candidates.push_back(std::move(candidate));
-  result.site_dispositions.push_back({.site_kind = rocjitsu::ConSanResourceSiteKind::Access,
-                                      .disposition = rocjitsu::ConSanSiteDisposition::Supported,
-                                      .reason = rocjitsu::ConSanSiteDispositionReason::None,
-                                      .container_name = "auto_report_access",
-                                      .in_kernel = true,
-                                      .text_offset = 0u,
-                                      .mnemonic = "ds_store_b32"});
   if (owner_scope != AutoReplayOwnerScope::NoProvenance) {
     const auto append_patch = [&](uint32_t instruction_offset, uint64_t owner) {
       rocjitsu::ConSanPatchInfo patch;
@@ -5596,10 +5699,6 @@ TEST(HsaHooksUnitTest, ConSanAutoReportRejectsLiveFaultInventoryGrowth) {
   second_candidate.file_offset = 4u;
   second_candidate.text_offset = 4u;
   g_transform_override_live_fault_result->moi_candidates.push_back(std::move(second_candidate));
-  rocjitsu::ConSanSiteDispositionRecord second_site =
-      g_transform_override_live_fault_result->site_dispositions.back();
-  second_site.text_offset = 4u;
-  g_transform_override_live_fault_result->site_dispositions.push_back(std::move(second_site));
   g_transform_override_live_fault_result->resource_plans.push_back(
       g_transform_override_live_fault_result->resource_plans.front());
   g_transform_override_models_fault_application = true;

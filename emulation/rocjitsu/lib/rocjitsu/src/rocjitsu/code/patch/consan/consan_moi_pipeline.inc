@@ -761,282 +761,6 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
   }
 }
 
-void append_moi_site_disposition(ConSanResourceSiteKind kind, std::string_view container_name,
-                                 bool in_kernel, uint64_t text_offset, std::string_view mnemonic,
-                                 ConSanSiteDispositionReason reason, ConSanResult &result,
-                                 bool semantic_not_applicable = false) {
-  ConSanSiteDispositionRecord record;
-  record.site_kind = kind;
-  record.disposition = reason == ConSanSiteDispositionReason::None
-                           ? ConSanSiteDisposition::Supported
-                       : semantic_not_applicable ? ConSanSiteDisposition::NotApplicable
-                                                 : ConSanSiteDisposition::Unsupported;
-  record.reason = reason;
-  if (record.disposition == ConSanSiteDisposition::Supported) {
-    record.lowering_outcome = ConSanSiteLoweringOutcome::Pending;
-    record.lowering_reason = ConSanSiteLoweringReason::None;
-  } else if (record.disposition == ConSanSiteDisposition::NotApplicable) {
-    record.lowering_outcome = ConSanSiteLoweringOutcome::NotApplicable;
-    record.lowering_reason = ConSanSiteLoweringReason::SemanticNotApplicable;
-  } else {
-    record.lowering_outcome = ConSanSiteLoweringOutcome::Unsupported;
-    record.lowering_reason = ConSanSiteLoweringReason::SemanticUnsupported;
-  }
-  record.container_name = container_name;
-  record.in_kernel = in_kernel;
-  record.text_offset = text_offset;
-  record.mnemonic = mnemonic;
-  result.site_dispositions.push_back(std::move(record));
-}
-
-[[nodiscard]] const ConSanAtomicSiteDecision *
-atomic_policy_decision(const ConSanObservationPlan &plan, uint64_t text_offset) {
-  const auto decision = std::ranges::find_if(
-      plan.atomic_site_decisions, [&](const ConSanAtomicSiteDecision &candidate) {
-        return candidate.semantic_site.physical.original_text_offset == text_offset;
-      });
-  return decision == plan.atomic_site_decisions.end() ? nullptr : &*decision;
-}
-
-[[nodiscard]] ConSanSiteDispositionReason
-legacy_atomic_disposition_reason(ConSanAtomicPolicyReason reason) {
-  switch (reason) {
-  case ConSanAtomicPolicyReason::None:
-  case ConSanAtomicPolicyReason::TrackingDisabled:
-  case ConSanAtomicPolicyReason::EngineMutationOnly:
-  case ConSanAtomicPolicyReason::ContainerFilterExcluded:
-    return ConSanSiteDispositionReason::None;
-  case ConSanAtomicPolicyReason::MissingExecutionOwner:
-  case ConSanAtomicPolicyReason::MissingSampledAccessWindow:
-  case ConSanAtomicPolicyReason::UnqualifiedSyncSequence:
-  case ConSanAtomicPolicyReason::AmbiguousSequenceMembership:
-  case ConSanAtomicPolicyReason::ConflictingPhysicalAliases:
-    return ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-  case ConSanAtomicPolicyReason::TargetCapabilityUnavailable:
-  case ConSanAtomicPolicyReason::UnsupportedAddressSource:
-    return ConSanSiteDispositionReason::NonFlatAtomicAddress;
-  case ConSanAtomicPolicyReason::UnsupportedMemoryRole:
-    return ConSanSiteDispositionReason::UnsupportedMemoryRole;
-  case ConSanAtomicPolicyReason::MissingScope:
-    return ConSanSiteDispositionReason::MissingScope;
-  case ConSanAtomicPolicyReason::UnsupportedScope:
-    return ConSanSiteDispositionReason::UnsupportedScope;
-  case ConSanAtomicPolicyReason::InvalidAccessWidth:
-    return ConSanSiteDispositionReason::InvalidAccessWidth;
-  case ConSanAtomicPolicyReason::MissingOperands:
-    return ConSanSiteDispositionReason::MissingAtomicOperands;
-  case ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable:
-    return ConSanSiteDispositionReason::CompareExchangeOutcomeUnavailable;
-  case ConSanAtomicPolicyReason::UnsupportedDynamicOutcome:
-    return ConSanSiteDispositionReason::UnsupportedAtomicOutcome;
-  case ConSanAtomicPolicyReason::UnsupportedEncoding:
-    return ConSanSiteDispositionReason::UnsupportedAtomicEncoding;
-  case ConSanAtomicPolicyReason::Count:
-    break;
-  }
-  return ConSanSiteDispositionReason::UnsupportedAtomicEncoding;
-}
-
-template <typename Container>
-void append_moi_atomic_site_dispositions(const Container &container, const ConSanOptions &options,
-                                         ConSanResult &result) {
-  if (!options.moi_track_atomics ||
-      (!options.test_kernel_name_filter.empty() &&
-       container.name.find(options.test_kernel_name_filter) == std::string::npos))
-    return;
-  const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
-  if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
-    return;
-  for (const ConSanAtomicSite &site : container.atomic_sites) {
-    const ConSanAtomicSiteDecision *decision =
-        atomic_policy_decision(result.observation_plan, site.text_offset);
-    if (decision == nullptr) {
-      result.errors.emplace_back(
-          "ConSan MOI atomic policy lost its inventory site at text offset " +
-          std::to_string(site.text_offset));
-      continue;
-    }
-    const ConSanSiteDispositionReason reason = legacy_atomic_disposition_reason(decision->reason);
-    append_moi_site_disposition(ConSanResourceSiteKind::Atomic, container.name, in_kernel,
-                                site.text_offset, site.mnemonic, reason, result,
-                                decision->kind == ConSanSiteDecisionKind::NotApplicable);
-  }
-}
-
-void append_moi_ordered_ordinary_site_dispositions(const ConSanOptions &options,
-                                                   const ConSanResult &semantic_result,
-                                                   const MoiSyncInventoryIndex &sync_index,
-                                                   ConSanResult &result) {
-  if (!options.moi_track_atomics)
-    return;
-  (void)sync_index;
-  for (const ConSanAtomicSiteDecision &decision :
-       semantic_result.observation_plan.atomic_site_decisions) {
-    const auto event =
-        std::ranges::find_if(semantic_result.sync_events, [&](const auto &candidate) {
-          return candidate.kind == ConSanSyncEventKind::OrdinaryMemory &&
-                 candidate.semantic_id == decision.semantic_site;
-        });
-    if (event == semantic_result.sync_events.end())
-      continue;
-    const bool covered_by_record_replay_fence =
-        options.moi_engine == ConSanMoiEngine::RecordReplay &&
-        std::ranges::any_of(decision.intent_ids, [&](ConSanProbeIntentId id) {
-          const ConSanProbeIntent *intent = semantic_result.observation_plan.intent(id);
-          return intent != nullptr && intent->kind == ConSanProbeIntentKind::FenceRecord;
-        });
-    if (covered_by_record_replay_fence)
-      continue;
-    const ConSanSiteDispositionReason reason = legacy_atomic_disposition_reason(decision.reason);
-    for (const std::string &container_name : decision.source_containers) {
-      if ((!options.test_kernel_name_filter.empty() &&
-           container_name.find(options.test_kernel_name_filter) == std::string::npos) ||
-          (event->in_kernel && is_rocclr_runtime_kernel_name(container_name))) {
-        continue;
-      }
-      append_moi_site_disposition(ConSanResourceSiteKind::Atomic, container_name, event->in_kernel,
-                                  event->text_offset, event->mnemonic, reason, result,
-                                  decision.kind == ConSanSiteDecisionKind::NotApplicable);
-    }
-  }
-}
-
-[[nodiscard]] const ConSanBarrierSiteDecision *
-barrier_policy_decision(const ConSanObservationPlan &plan, uint64_t text_offset) {
-  const auto decision = std::ranges::find_if(
-      plan.barrier_site_decisions, [&](const ConSanBarrierSiteDecision &candidate) {
-        return candidate.semantic_site.physical.original_text_offset == text_offset;
-      });
-  return decision == plan.barrier_site_decisions.end() ? nullptr : &*decision;
-}
-
-[[nodiscard]] ConSanSiteDispositionReason
-legacy_barrier_disposition_reason(ConSanBarrierPolicyReason reason) {
-  switch (reason) {
-  case ConSanBarrierPolicyReason::None:
-  case ConSanBarrierPolicyReason::TrackingDisabled:
-  case ConSanBarrierPolicyReason::EngineMutationOnly:
-  case ConSanBarrierPolicyReason::ContainerFilterExcluded:
-  case ConSanBarrierPolicyReason::RuntimeKernelExcluded:
-    return ConSanSiteDispositionReason::None;
-  case ConSanBarrierPolicyReason::TargetCapabilityUnavailable:
-    return ConSanSiteDispositionReason::UnsupportedScope;
-  case ConSanBarrierPolicyReason::InvalidBarrierEncoding:
-    return ConSanSiteDispositionReason::InvalidBarrierEncoding;
-  case ConSanBarrierPolicyReason::UnqualifiedSyncSequence:
-  case ConSanBarrierPolicyReason::AmbiguousSequenceMembership:
-  case ConSanBarrierPolicyReason::MissingCompletingEvent:
-    return ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-  case ConSanBarrierPolicyReason::RedundantAdjacentFullBarrier:
-    return ConSanSiteDispositionReason::RedundantAdjacentBarrier;
-  case ConSanBarrierPolicyReason::ConflictingPhysicalAliases:
-    return ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-  case ConSanBarrierPolicyReason::Count:
-    break;
-  }
-  return ConSanSiteDispositionReason::UnqualifiedSyncSequence;
-}
-
-[[nodiscard]] ConSanSiteDispositionReason
-legacy_fence_disposition_reason(ConSanFencePolicyReason reason) {
-  switch (reason) {
-  case ConSanFencePolicyReason::None:
-  case ConSanFencePolicyReason::TrackingDisabled:
-  case ConSanFencePolicyReason::EngineMutationOnly:
-  case ConSanFencePolicyReason::ContainerFilterExcluded:
-    return ConSanSiteDispositionReason::None;
-  case ConSanFencePolicyReason::MissingExecutionOwner:
-  case ConSanFencePolicyReason::MissingCommunicationEvent:
-    return ConSanSiteDispositionReason::MissingCommunicationEvent;
-  case ConSanFencePolicyReason::AssociationUnavailable:
-  case ConSanFencePolicyReason::TargetCapabilityUnavailable:
-  case ConSanFencePolicyReason::ConflictingPhysicalAliases:
-    return ConSanSiteDispositionReason::IneligibleFence;
-  case ConSanFencePolicyReason::Count:
-    break;
-  }
-  return ConSanSiteDispositionReason::IneligibleFence;
-}
-
-template <typename Container>
-void append_moi_barrier_site_dispositions(const Container &container, const ConSanOptions &options,
-                                          const MoiSyncInventoryIndex &sync_index,
-                                          ConSanResult &result) {
-  if (!options.moi_track_barriers ||
-      (!options.test_kernel_name_filter.empty() &&
-       container.name.find(options.test_kernel_name_filter) == std::string::npos))
-    return;
-  const bool in_kernel = std::is_same_v<Container, ConSanKernelInfo>;
-  if (in_kernel && is_rocclr_runtime_kernel_name(container.name))
-    return;
-  for (const ConSanBarrierSite &site : container.barrier_sites) {
-    if (options.moi_engine == ConSanMoiEngine::InlineShadow &&
-        site.operation == ConSanBarrierSite::Operation::Signal) {
-      continue;
-    }
-    if (options.moi_engine == ConSanMoiEngine::InlineShadow && !in_kernel &&
-        (result.moi_persistent_vgprs_automatic || result.moi_private_epoch_automatic)) {
-      const ConSanCandidateResourcePlan *plan =
-          resource_plan_for_site(result, ConSanResourceSiteKind::Barrier, site.text_offset);
-      if (plan == nullptr || plan->owner_descriptor_file_offsets.empty())
-        continue;
-    }
-    (void)sync_index;
-    const ConSanBarrierSiteDecision *decision =
-        barrier_policy_decision(result.observation_plan, site.text_offset);
-    if (decision == nullptr) {
-      result.errors.emplace_back("ConSan MOI barrier policy lost its inventory site at text "
-                                 "offset " +
-                                 std::to_string(site.text_offset));
-      continue;
-    }
-    const ConSanSiteDispositionReason reason = legacy_barrier_disposition_reason(decision->reason);
-    const bool not_applicable = decision->kind == ConSanSiteDecisionKind::NotApplicable;
-    append_moi_site_disposition(ConSanResourceSiteKind::Barrier, container.name, in_kernel,
-                                site.text_offset, site.mnemonic, reason, result, not_applicable);
-  }
-}
-
-void append_moi_sync_site_dispositions(const ConSanOptions &options, ConSanResult &result) {
-  // Keep the semantic inventory immutable while appending to the disposition
-  // vector that is part of the same result.
-  const ConSanResult &semantic_result = result;
-  const MoiSyncInventoryIndex sync_index(semantic_result);
-  for (const ConSanKernelInfo &kernel : result.kernels) {
-    append_moi_atomic_site_dispositions(kernel, options, result);
-    append_moi_barrier_site_dispositions(kernel, options, sync_index, result);
-  }
-  for (const ConSanFunctionInfo &function : result.functions) {
-    append_moi_atomic_site_dispositions(function, options, result);
-    append_moi_barrier_site_dispositions(function, options, sync_index, result);
-  }
-  append_moi_ordered_ordinary_site_dispositions(options, semantic_result, sync_index, result);
-
-  if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::RecordReplay)
-    return;
-  for (const ConSanFenceSiteDecision &decision : result.observation_plan.fence_site_decisions) {
-    const ConSanSiteDispositionReason reason = legacy_fence_disposition_reason(decision.reason);
-    for (const std::string &container_name : decision.source_containers) {
-      if ((!options.test_kernel_name_filter.empty() &&
-           container_name.find(options.test_kernel_name_filter) == std::string::npos)) {
-        continue;
-      }
-      const auto fence = std::ranges::find_if(
-          result.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &candidate) {
-            return candidate.text_offset == decision.semantic_site.physical.original_text_offset &&
-                   candidate.container_name == container_name;
-          });
-      const bool in_kernel = fence == result.moi_fence_candidates.end() ? true : fence->in_kernel;
-      if (in_kernel && is_rocclr_runtime_kernel_name(container_name))
-        continue;
-      append_moi_site_disposition(ConSanResourceSiteKind::Fence, container_name, in_kernel,
-                                  decision.semantic_site.physical.original_text_offset, "fence",
-                                  reason, result,
-                                  decision.kind == ConSanSiteDecisionKind::NotApplicable);
-    }
-  }
-}
-
 [[nodiscard]] std::optional<ConSanResourceSiteKind>
 moi_instrumentation_patch_site_kind(const ConSanPatchInfo &patch) {
   switch (patch.kind) {
@@ -1149,53 +873,18 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
     }
   }
 
-  for (ConSanSiteDispositionRecord &site : result.site_dispositions) {
-    if (site.disposition == ConSanSiteDisposition::NotApplicable) {
-      site.lowering_outcome = ConSanSiteLoweringOutcome::NotApplicable;
-      site.lowering_reason = ConSanSiteLoweringReason::SemanticNotApplicable;
-      continue;
-    }
-    if (site.disposition == ConSanSiteDisposition::Unsupported) {
-      site.lowering_outcome = ConSanSiteLoweringOutcome::Unsupported;
-      site.lowering_reason = ConSanSiteLoweringReason::SemanticUnsupported;
-      continue;
-    }
-
-    const SiteKey key{site.site_kind, site.text_offset};
-    if (patched_sites.contains(key)) {
-      site.lowering_outcome = ConSanSiteLoweringOutcome::Patched;
-      site.lowering_reason = ConSanSiteLoweringReason::None;
-      site.resource_reason = ConSanRegisterPlanReason::None;
-      continue;
-    }
-
-    if (const auto failed = failed_sites.find(key); failed != failed_sites.end()) {
-      site.lowering_outcome = ConSanSiteLoweringOutcome::ResourceFailed;
-      site.lowering_reason = ConSanSiteLoweringReason::UnsupportedResourcePlan;
-      site.resource_reason = failed->second;
-      continue;
-    }
-
-    site.lowering_outcome = ConSanSiteLoweringOutcome::PlacementOrLoweringFailed;
-    site.lowering_reason = ConSanSiteLoweringReason::InstrumentationPatchMissing;
-    site.resource_reason = ConSanRegisterPlanReason::None;
-  }
-
-  // Access intents publish their result directly from resource and patch
-  // placement state. Synchronization lowerers still retain a temporary site
-  // disposition adapter; translate only those records until their incremental
-  // cutover removes the remaining compatibility ledger.
+  // Publish every admitted intent directly from resource and patch placement
+  // state. Semantic applicability remains immutable in the observation plan;
+  // lowering cannot overwrite it with a second disposition vocabulary.
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
     ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
     uint64_t disposition_offset = intent.physical_site.original_text_offset;
     std::string_view subject = "access";
-    bool access_intent = false;
     switch (intent.kind) {
     case ConSanProbeIntentKind::RedundantAccessObservation:
     case ConSanProbeIntentKind::AccessRecord:
     case ConSanProbeIntentKind::SampledAccess:
     case ConSanProbeIntentKind::ExactShadowAccess:
-      access_intent = true;
       break;
     case ConSanProbeIntentKind::BarrierRecord:
     case ConSanProbeIntentKind::SampledBarrierEpoch:
@@ -1237,52 +926,19 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
     case ConSanProbeIntentKind::Count:
       break;
     }
-    if (access_intent) {
-      const SiteKey key{ConSanResourceSiteKind::Access, disposition_offset};
-      if (patched_sites.contains(key)) {
-        (void)result.coverage_ledger.set_lowering_outcome(intent.id,
-                                                          ConSanLoweringOutcomeKind::Instrumented);
-      } else if (failed_sites.contains(key)) {
-        (void)result.coverage_ledger.set_lowering_outcome(
-            intent.id, ConSanLoweringOutcomeKind::ResourceRejected,
-            "MOI resource plan rejected the access");
-      } else {
-        (void)result.coverage_ledger.set_lowering_outcome(
-            intent.id, ConSanLoweringOutcomeKind::PlacementRejected,
-            "MOI lowerer emitted no access patch");
-      }
-      continue;
+    const SiteKey key{site_kind, disposition_offset};
+    if (patched_sites.contains(key)) {
+      (void)result.coverage_ledger.set_lowering_outcome(intent.id,
+                                                        ConSanLoweringOutcomeKind::Instrumented);
+    } else if (failed_sites.contains(key)) {
+      (void)result.coverage_ledger.set_lowering_outcome(
+          intent.id, ConSanLoweringOutcomeKind::ResourceRejected,
+          "MOI resource plan rejected the " + std::string(subject));
+    } else {
+      (void)result.coverage_ledger.set_lowering_outcome(
+          intent.id, ConSanLoweringOutcomeKind::PlacementRejected,
+          "MOI lowerer emitted no " + std::string(subject) + " patch");
     }
-    const auto site = std::ranges::find_if(result.site_dispositions, [&](const auto &candidate) {
-      return candidate.site_kind == site_kind && candidate.text_offset == disposition_offset;
-    });
-    ConSanLoweringOutcomeKind outcome = ConSanLoweringOutcomeKind::PlacementRejected;
-    std::string detail = "legacy MOI lowering published no " + std::string(subject) + " outcome";
-    if (site != result.site_dispositions.end()) {
-      switch (site->lowering_outcome) {
-      case ConSanSiteLoweringOutcome::Patched:
-        outcome = ConSanLoweringOutcomeKind::Instrumented;
-        detail.clear();
-        break;
-      case ConSanSiteLoweringOutcome::ResourceFailed:
-        outcome = ConSanLoweringOutcomeKind::ResourceRejected;
-        detail = "legacy MOI resource plan rejected the " + std::string(subject);
-        break;
-      case ConSanSiteLoweringOutcome::PlacementOrLoweringFailed:
-      case ConSanSiteLoweringOutcome::Pending:
-        outcome = ConSanLoweringOutcomeKind::PlacementRejected;
-        detail = "legacy MOI lowerer emitted no " + std::string(subject) + " patch";
-        break;
-      case ConSanSiteLoweringOutcome::NotApplicable:
-      case ConSanSiteLoweringOutcome::Unsupported:
-        // An admitted production intent cannot become semantically excluded
-        // during lowering. Preserve the inconsistency as a mechanism failure.
-        outcome = ConSanLoweringOutcomeKind::PlacementRejected;
-        detail = "legacy MOI lowering contradicted " + std::string(subject) + " admission";
-        break;
-      }
-    }
-    (void)result.coverage_ledger.set_lowering_outcome(intent.id, outcome, std::move(detail));
   }
 }
 
