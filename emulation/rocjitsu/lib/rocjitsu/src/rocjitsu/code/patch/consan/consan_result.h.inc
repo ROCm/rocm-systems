@@ -345,10 +345,6 @@ struct ConSanResult {
   /// payload. Final validation resolves these identities after text growth.
   std::vector<uint64_t> moi_full_workgroup_id_descriptor_offsets;
   uint64_t moi_report_dispatch_id = 0;
-  bool moi_persistent_vgprs_automatic = false;
-  bool moi_persistent_sgprs_automatic = false;
-  bool moi_private_epoch_automatic = false;
-  bool moi_exec_save_sgprs_automatic = false;
   /// Immutable semantic options captured before the first MOI planning pass.
   /// A report-buffer retry derives its options from this snapshot and can
   /// change only ConSanMoiReportRetryConfig fields plus the narrow live-fault

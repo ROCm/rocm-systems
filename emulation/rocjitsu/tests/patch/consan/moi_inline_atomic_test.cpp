@@ -1318,12 +1318,10 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
   EXPECT_EQ(*result.resolved_moi_workgroup_key_vgpr, *result.resolved_moi_epoch_vgpr + 1u);
-  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const auto plan = std::ranges::find_if(result.resource_plans, [](const auto &item) {
     return item.site_kind == ConSanResourceSiteKind::Atomic;
@@ -4705,8 +4703,6 @@ TEST(ConSanMoi, InlineAtomicOrderingAutomaticallyPlansAllRegisterState) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_EQ(std::ranges::count_if(result.patches,

@@ -873,8 +873,6 @@ TEST(ConSanMoi, RecordReplayBarrierRecordsUsePersistentEpochState) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.resolved_moi_owner_vgpr);
   EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,

@@ -713,7 +713,6 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
   EXPECT_EQ(*result.resolved_moi_workgroup_key_vgpr, *result.resolved_moi_epoch_vgpr + 1u);
@@ -1061,9 +1060,6 @@ TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
   ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
   ASSERT_TRUE(result.resolved_moi_persistent_workgroup_key_sgpr);
@@ -1216,7 +1212,6 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(result.moi_private_epoch_automatic) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("owner-private hardware dispatch-ID state") != std::string::npos;
@@ -1441,8 +1436,6 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_vgpr);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
 
@@ -2818,8 +2811,6 @@ TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_TRUE(result.program_inventory.kernels().front().has_dynamic_lds);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_TRUE(result.resolved_moi_owner_vgpr);
   EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_TRUE(result.resolved_moi_workgroup_key_vgpr);
@@ -4274,7 +4265,6 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
                                << " plans=" << result.resource_plans.size()
                                << " patches=" << result.patches.size()
                                << " warnings=" << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_EQ(result.resolved_moi_owner_vgpr, 1);
   EXPECT_EQ(result.resolved_moi_epoch_vgpr, 2);
   EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 3);
@@ -4421,7 +4411,6 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesScratchAndPersistentVgprs) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_EQ(result.resolved_moi_owner_vgpr, 1);
   EXPECT_EQ(result.resolved_moi_epoch_vgpr, 2);
   EXPECT_EQ(result.resolved_moi_workgroup_key_vgpr, 3);
@@ -4450,8 +4439,6 @@ TEST(ConSanMoi, InlineShadowGrowsPersistentVgprsInsteadOfReloadingHotOwnerState)
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_GT(*result.resolved_moi_owner_vgpr, 11u);
@@ -4481,8 +4468,6 @@ TEST(ConSanMoi, InlineShadowGrowsPersistentVgprsForDynamicStackOwner) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_GT(*result.resolved_moi_owner_vgpr, 11u);
@@ -4558,9 +4543,6 @@ TEST(ConSanMoi, Cdna4InlineShadowMovesEmptyAccumulatorBoundaryForDynamicStackSta
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &assignment =
       result.resolved_moi_persistent_vgpr_assignments.front();
@@ -4628,8 +4610,6 @@ TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u)
       << testing::PrintToString(result.warnings);
   const ConSanMoiPersistentVgprAssignment &assignment =
@@ -5000,9 +4980,6 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.resolved_moi_persistent_vgpr_assignments.empty());
   ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
   EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 40u);
@@ -5060,7 +5037,6 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesHwIdOwnerAndSpecialStateSgprs)
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified);
-  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   EXPECT_EQ(result.resolved_moi_owner_sgpr, result.resolved_moi_exec_save_sgpr);
   EXPECT_EQ(result.resolved_moi_dispatch_id_sgpr, 20);
   EXPECT_EQ(result.resolved_moi_exec_save_sgpr, 22);
@@ -5111,7 +5087,6 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified);
-  ASSERT_TRUE(result.moi_private_epoch_automatic);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -5213,7 +5188,6 @@ TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesInitializedLocalMirror) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.moi_private_epoch_automatic);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -5292,8 +5266,6 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
-  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   EXPECT_FALSE(result.resolved_moi_owner_vgpr);
   EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
 
@@ -6206,7 +6178,6 @@ TEST(ConSanMoi, Cdna4InlineShadowPackedTokenOwnerPreservesClobberedLoadAddress) 
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
   EXPECT_FALSE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
   const auto plan = std::ranges::find(result.resource_plans, ConSanResourceSiteKind::Access,
@@ -8296,7 +8267,6 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePersistentPairForEveryOwner) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_EQ(std::count_if(result.patches.begin(), result.patches.end(),
@@ -8439,7 +8409,6 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
                                << " plans=" << result.resource_plans.size()
                                << " patches=" << result.patches.size()
                                << " warnings=" << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -9032,7 +9001,6 @@ TEST(ConSanMoi, InlineBarrierOnlyObjectPatchesBarrierWithoutEntryPrologue) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             0);

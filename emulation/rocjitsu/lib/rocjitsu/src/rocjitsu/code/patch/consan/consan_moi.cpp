@@ -510,10 +510,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_dispatch_id_sgpr.reset();
   result.resolved_moi_dispatch_id_vgpr.reset();
   result.moi_report_dispatch_id = effective_options.moi_report_dispatch_id;
-  result.moi_persistent_vgprs_automatic = false;
-  result.moi_persistent_sgprs_automatic = false;
-  result.moi_private_epoch_automatic = false;
-  result.moi_exec_save_sgprs_automatic = false;
   result.modified = false;
   result.final_validation_passed = false;
   result.elf_bytes.clear();
@@ -729,7 +725,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   const std::optional<uint16_t> resolved_exec_before = result.resolved_moi_exec_save_sgpr;
   const std::vector<ConSanMoiTransientSgprAssignment> resolved_transient_before =
       result.resolved_moi_transient_sgpr_assignments;
-  const bool automatic_exec_before = result.moi_exec_save_sgprs_automatic;
   const size_t warnings_before_exec_planning = result.warnings.size();
   bool exec_planning_changed =
       configure_automatic_moi_exec_save_sgprs(effective_options, result, resource_planning_state);
@@ -743,7 +738,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     effective_options.moi_dynamic_stack_spill = true;
     result.resolved_moi_exec_save_sgpr = resolved_exec_before;
     result.resolved_moi_transient_sgpr_assignments = resolved_transient_before;
-    result.moi_exec_save_sgprs_automatic = automatic_exec_before;
     result.warnings.resize(warnings_before_exec_planning);
     rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
     exec_planning_changed =

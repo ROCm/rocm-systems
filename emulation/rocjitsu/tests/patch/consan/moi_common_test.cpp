@@ -1229,7 +1229,6 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
     ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr)
         << testing::PrintToString(result.warnings);
     ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
-    EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
     EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 80u);
     EXPECT_EQ(*result.resolved_moi_persistent_epoch_sgpr,
               *result.resolved_moi_persistent_owner_sgpr + 1u);
@@ -1341,11 +1340,9 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::LivenessDead);
   ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_TRUE(result.resolved_moi_owner_vgpr);
   EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
-  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const auto atomic_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
@@ -1672,7 +1669,6 @@ TEST(ConSanMoi, SharedPrivateOwnerSupportsMixedWaveSizesWithResidentWaveIdentity
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.final_validation_passed);
 }
 
@@ -3047,9 +3043,6 @@ TEST(ConSanMoi, AutomaticScalarPersistentStatePreservesGuestVgprAllocation) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
-  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   EXPECT_FALSE(result.resolved_moi_owner_vgpr);
   EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
   ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);

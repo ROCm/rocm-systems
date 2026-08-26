@@ -4762,7 +4762,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     options.automatic_moi_exec_save_sgprs = true;
     options.moi_exec_save_sgprs_persistent = options.moi_inline_workgroup_shadow;
     result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
-    result.moi_exec_save_sgprs_automatic = true;
     result.warnings.emplace_back("ConSan MOI automatically assigned EXEC-save SGPRs s" +
                                  std::to_string(base) + ":s" + std::to_string(base + count - 1u));
     return true;
@@ -4877,7 +4876,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       if (relocation_recovers_component &&
           (assigned_component_local || can_exclude_incompatible_component)) {
         result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
-        result.moi_exec_save_sgprs_automatic = true;
         result.warnings.emplace_back(
             "ConSan MOI reserved a high EXEC-save SGPR window, assigned component-local "
             "scalar state where available, and excluded incompatible owners");
@@ -4978,7 +4976,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       options.moi_exec_save_sgpr = static_cast<uint16_t>(base);
       options.automatic_moi_exec_save_sgprs = true;
       result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
-      result.moi_exec_save_sgprs_automatic = true;
       result.warnings.emplace_back(
           "ConSan MOI automatically assigned liveness-dead EXEC-save SGPRs s" +
           std::to_string(base) + ":s" + std::to_string(base + count - 1u));
@@ -5115,7 +5112,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
         options.moi_inline_dispatch_key_sgpr = dispatch_key;
         options.moi_inline_indirect_scc_sgpr = scc;
         result.resolved_moi_exec_save_sgpr = spill_base;
-        result.moi_exec_save_sgprs_automatic = true;
         result.warnings.emplace_back(
             "ConSan MOI automatically assigned spill-backed Inline SGPRs s" +
             std::to_string(*spill_base) + ":s" + std::to_string(*spill_base + count - 1u) +
@@ -5161,7 +5157,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       options.automatic_moi_partial_exec_save_sgprs = true;
       options.moi_exec_save_sgprs_persistent = true;
       result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
-      result.moi_exec_save_sgprs_automatic = true;
       result.warnings.emplace_back(
           "ConSan MOI reserved a high EXEC-save SGPR window and excluded only "
           "incompatible full-pressure owner groups");
@@ -5180,7 +5175,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     options.automatic_moi_partial_exec_save_sgprs = true;
     if (configure_automatic_moi_transient_sgpr_assignments(options, result, state)) {
       result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
-      result.moi_exec_save_sgprs_automatic = true;
       result.warnings.emplace_back(
           "ConSan MOI admitted full-pressure owners with component-local scalar state");
       return true;
@@ -5518,7 +5512,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanResult &
     if (!has_dynamic_stack_access_owner) {
       options.moi_init_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
-      result.moi_private_epoch_automatic = true;
       result.warnings.emplace_back(
           "ConSan MOI selected owner-private hardware dispatch-ID state because no persistent "
           "SGPR pair fits");
@@ -6076,7 +6069,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         !has_dynamic_stack_owner) {
       options.moi_init_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
-      result.moi_private_epoch_automatic = true;
       result.warnings.emplace_back(
           "ConSan MOI selected entry-captured private Record/Replay state below a CDNA "
           "ordinary-VGPR boundary");
@@ -6086,7 +6078,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !has_dynamic_stack_owner) {
       options.moi_init_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
-      result.moi_private_epoch_automatic = true;
       result.warnings.emplace_back(
           "ConSan MOI selected entry-snapshotted private owner/epoch state below a CDNA ordinary "
           "VGPR boundary for Sampled instrumentation");
@@ -6138,7 +6129,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         options.automatic_moi_persistent_sgprs = true;
         options.moi_prologue_scratch_vgpr_assignments = std::move(prologue_scratch);
         publish_scalar_persistent_state();
-        result.moi_persistent_sgprs_automatic = true;
         result.resolved_moi_prologue_scratch_vgpr_assignments =
             options.moi_prologue_scratch_vgpr_assignments;
         result.warnings.emplace_back(
@@ -6243,7 +6233,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         options.automatic_moi_persistent_sgprs = true;
         options.moi_prologue_scratch_vgpr_assignments = std::move(prologue_scratch);
         publish_scalar_persistent_state();
-        result.moi_persistent_sgprs_automatic = true;
         result.resolved_moi_prologue_scratch_vgpr_assignments =
             options.moi_prologue_scratch_vgpr_assignments;
         result.warnings.emplace_back(
@@ -6347,8 +6336,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           result.resolved_moi_epoch_vgpr = options.moi_epoch_vgpr;
           result.resolved_moi_record_replay_workgroup_sgprs =
               options.moi_record_replay_workgroup_sgprs;
-          result.moi_persistent_vgprs_automatic = true;
-          result.moi_persistent_sgprs_automatic = true;
           result.resolved_moi_prologue_scratch_vgpr_assignments.clear();
           result.warnings.emplace_back(
               "ConSan MOI assigned hybrid persistent vector owner/epoch and scalar "
@@ -6392,7 +6379,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       if (!has_dynamic_stack_owner) {
         options.moi_init_owner_epoch = true;
         options.automatic_moi_private_epoch = true;
-        result.moi_private_epoch_automatic = true;
         result.warnings.emplace_back(
             "ConSan MOI retained exact Record/Replay entry state in private storage below a "
             "CDNA AccVGPR boundary");
@@ -6493,7 +6479,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         options.automatic_moi_persistent_sgprs = true;
         options.moi_prologue_scratch_vgpr_assignments = std::move(*prologue_scratch);
         publish_scalar_persistent_state();
-        result.moi_persistent_sgprs_automatic = true;
         result.resolved_moi_prologue_scratch_vgpr_assignments =
             options.moi_prologue_scratch_vgpr_assignments;
         result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
@@ -6610,7 +6595,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         if (supports_private_component) {
           options.moi_init_owner_epoch = true;
           options.automatic_moi_private_epoch = true;
-          result.moi_private_epoch_automatic = true;
           assigned_private_component = true;
           result.warnings.emplace_back(
               "ConSan MOI selected component-local entry-snapshotted private persistent state "
@@ -6674,7 +6658,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       options.automatic_moi_dispatch_id_vgprs = true;
     }
     result.resolved_moi_persistent_vgpr_assignments = options.moi_persistent_vgpr_assignments;
-    result.moi_persistent_vgprs_automatic = options.automatic_moi_persistent_vgprs;
     result.warnings.emplace_back(
         assigned_private_component && options.automatic_moi_persistent_vgprs
             ? "ConSan MOI assigned component-local private and persistent VGPR state below CDNA "
@@ -6864,7 +6847,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       options.automatic_moi_persistent_sgprs = true;
       options.moi_prologue_scratch_vgpr_assignments = std::move(*prologue_scratch);
       publish_scalar_persistent_state();
-      result.moi_persistent_sgprs_automatic = true;
       result.resolved_moi_prologue_scratch_vgpr_assignments =
           options.moi_prologue_scratch_vgpr_assignments;
       result.warnings.emplace_back(
@@ -6900,7 +6882,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   if (needs_private_epoch && !has_dynamic_stack_owner) {
     options.moi_init_owner_epoch = true;
     options.automatic_moi_private_epoch = true;
-    result.moi_private_epoch_automatic = true;
     result.warnings.emplace_back(
         std::string("ConSan MOI automatically selected derived-owner/private-"
                     "epoch persistent state") +
@@ -6945,7 +6926,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
   result.resolved_moi_workgroup_key_vgpr = options.moi_workgroup_key_vgpr;
   result.resolved_moi_record_replay_workgroup_vgprs = options.moi_record_replay_workgroup_vgprs;
   result.resolved_moi_dispatch_id_vgpr = options.moi_dispatch_id_vgpr;
-  result.moi_persistent_vgprs_automatic = true;
   result.warnings.emplace_back(
       "ConSan MOI automatically assigned persistent " +
       std::string(has_explicit_owner_epoch ? "" : "owner/epoch") +

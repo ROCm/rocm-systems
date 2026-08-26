@@ -2956,6 +2956,37 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   periodic physical gate remains applicable. E2E validation remains outside
   this work.
 
+### Slice 4Y: delete mirrored persistent-state allocation flags
+
+- **Behavioral state contract:** Persistent vector state, persistent scalar
+  state, owner-private state, and the transient EXEC-save window are proved by
+  their resolved assignments and by the private offsets, descriptor updates,
+  prologues, instrumentation sequences, resource plans, and diagnostics that
+  consume them. The live lowering options retain internal automatic-selection
+  markers only for as long as subsequent lowering decisions require them.
+- **Completed deletion:** `ConSanResult` no longer carries the write-only
+  `moi_persistent_vgprs_automatic`, `moi_persistent_sgprs_automatic`,
+  `moi_private_epoch_automatic`, or `moi_exec_save_sgprs_automatic` flags.
+  Twenty placement exits no longer mirror option state into those fields. The
+  EXEC retry no longer snapshots and restores a boolean whose only purpose was
+  preserving that telemetry.
+- **Contract-test correction:** Across Record/Replay, Sampled, InlineShadow,
+  Inline atomic, and common multi-owner tests, resolved register tuples,
+  private-state offsets, exact patch kinds and encodings, descriptor growth,
+  warnings, resource plans, owner exclusions, and final validation continue to
+  distinguish every allocation fallback. One hundred twenty-five assertions
+  that only restated the removed booleans were deleted; no behavioral test case
+  or device workload was removed.
+- **Deletion result:** Production source is 30 lines smaller and source plus
+  tests is 155 lines smaller. No replacement state or adapter was added.
+- **Completed checked-in gate:** The ConSan host gate passed 1,508 of 1,510
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 67.75
+  seconds. This result-shape deletion does not change emitted device code; the
+  periodic physical gate remains applicable. E2E validation remains outside
+  this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

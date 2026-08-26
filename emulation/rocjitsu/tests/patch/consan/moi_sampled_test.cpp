@@ -427,7 +427,6 @@ TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("spill-safe body gate") != std::string::npos;
   }));
@@ -699,7 +698,6 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.final_validation_passed);
@@ -1648,7 +1646,6 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
 
         ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
         ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-        EXPECT_TRUE(result.moi_private_epoch_automatic);
         EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_sgprs.empty())
             << testing::PrintToString(result.warnings);
         EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.empty())
@@ -2109,7 +2106,6 @@ TEST(ConSanMoi, Cdna4SharedSampledAtomicSeparatesPersistentStateFromSpills) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
@@ -2188,8 +2184,6 @@ TEST(ConSanMoi, Cdna4SampledAtomicMaterializesAddressWithDynamicScalarState) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_TRUE(result.resolved_moi_persistent_owner_sgpr);
   EXPECT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
   const auto atomic_patch = std::ranges::find(
@@ -2406,8 +2400,6 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledAtomicUsesSiteLocalSpillFrames) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
@@ -3442,9 +3434,6 @@ TEST(ConSanMoi, Cdna4SampledMovesEmptyAccumulatorBoundaryForDynamicStackState) {
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_persistent_sgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &assignment =
       result.resolved_moi_persistent_vgpr_assignments.front();
@@ -3501,8 +3490,6 @@ TEST(ConSanMoi, Cdna4SampledMixesPrivateAndEmptyAccumulatorBoundaryState) {
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " plans=" << testing::PrintToString(result.resource_plans);
   EXPECT_TRUE(result.final_validation_passed);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &assignment =
       result.resolved_moi_persistent_vgpr_assignments.front();
@@ -3585,8 +3572,6 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
                                << " plans=" << testing::PrintToString(result.resource_plans);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_EQ(test_resource_plan_summary(result).unsupported_plans, 0u);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
 
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &persistent =
@@ -3695,7 +3680,6 @@ TEST(ConSanMoi, CdnaStrideOnePrivateStateMirrorsKernargPreloadEntry) {
         << "warnings=" << testing::PrintToString(result.warnings)
         << " errors=" << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.moi_private_epoch_automatic);
     EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
     EXPECT_FALSE(result.resolved_moi_dispatch_id_vgpr);
     const auto prologue =
@@ -3768,8 +3752,6 @@ TEST(ConSanMoi, CdnaStrideOneDynamicStackRedirectsBothKernargPreloadEntries) {
         << "warnings=" << testing::PrintToString(result.warnings)
         << " errors=" << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_FALSE(result.moi_private_epoch_automatic);
-    EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
     EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
     EXPECT_FALSE(result.resolved_moi_dispatch_id_vgpr);
     const auto prologue = std::ranges::find(
@@ -3822,8 +3804,6 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
-  EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
   const auto sampled_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(sampled_patch, result.patches.end());
@@ -3883,7 +3863,6 @@ TEST(ConSanMoi, Cdna4PrivateWorkgroupStateUsesSpillSafeSampledBodyGate) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -4112,8 +4091,6 @@ TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-      EXPECT_TRUE(result.moi_private_epoch_automatic);
-      EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
       const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
                patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
@@ -4213,9 +4190,6 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-    EXPECT_FALSE(result.moi_persistent_vgprs_automatic);
-    EXPECT_FALSE(result.moi_private_epoch_automatic);
     EXPECT_TRUE(result.resolved_moi_persistent_owner_sgpr);
     EXPECT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
     EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 40u);
@@ -4475,8 +4449,6 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-    EXPECT_FALSE(result.moi_private_epoch_automatic);
     ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 2u);
     const auto probe_assignment = std::ranges::find(
         result.resolved_moi_persistent_vgpr_assignments, probe_kernel->descriptor_file_offset,
@@ -4930,11 +4902,8 @@ TEST(ConSanMoi, DirectSampledProbeRuntimeAddressSelectionKeepsAllSitesPatchable)
   EXPECT_EQ(result.patches[0].sampled_window_bank_count, 8u);
   EXPECT_EQ(result.patches[1].sampled_first_slot, 8u);
   EXPECT_EQ(result.patches[1].sampled_window_bank_count, 8u);
-  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   EXPECT_TRUE(result.resolved_moi_dispatch_id_sgpr.has_value());
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);
@@ -5239,7 +5208,6 @@ TEST(ConSanMoi, DirectSampledProbeCanCheckPriorSlotInKernel) {
                                                ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
                                   }),
             2u);
-  EXPECT_TRUE(result.moi_exec_save_sgprs_automatic);
   ASSERT_TRUE(result.patches[1].scratch_vgpr);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
@@ -6487,7 +6455,6 @@ TEST(ConSanMoi, SampledRejectedBarriersStillPreserveAccessOwnerAtEntry) {
   EXPECT_TRUE(result.modified);
   EXPECT_TRUE(result.resolved_moi_owner_vgpr);
   EXPECT_TRUE(result.resolved_moi_epoch_vgpr);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);
@@ -6521,8 +6488,6 @@ TEST(ConSanMoi, SampledQualifiedBarrierPersistsOwnerAcrossAccessAndSync) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_vgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
@@ -8186,8 +8151,6 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledBarrierUsesSiteLocalSpillFrames) {
       << " warnings=" << testing::PrintToString(result.warnings)
       << " patches=" << testing::PrintToString(result.patches);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_persistent_sgprs_automatic);
-  EXPECT_FALSE(result.moi_private_epoch_automatic);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
@@ -8517,7 +8480,6 @@ TEST(ConSanMoi, SampledQualifiedBarrierUsesSpillBackedPersistentEpoch) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.moi_private_epoch_automatic);
   EXPECT_FALSE(result.resolved_moi_owner_vgpr);
   EXPECT_FALSE(result.resolved_moi_epoch_vgpr);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
