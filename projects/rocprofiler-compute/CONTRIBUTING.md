@@ -255,23 +255,20 @@ neither diagram can drift from the code. Do not edit the PNGs by hand.
 ## Instruction Execution Pipeline Table
 
 [`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.json`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.json)
-maps every instruction mnemonic to the pipeline that runs it (VALU, MATRIX,
-SCALAR, and so on). Analyze reads it to fill the instruction type of each
-disassembled line. It is generated from the AMDGPU TableGen files of the LLVM
-commit TheRock pins, not written by hand:
+is generated from the AMDGPU TableGen files of the LLVM commit TheRock pins, not
+written by hand. Rerun the generator when a new GPU family needs support, or when
+an instruction shows up with an empty type in analyze, and commit the regenerated
+file as is:
 
 ```bash
 ./tools/instruction_pipeline_generator.py
 ```
 
-Rerun it when a new GPU family needs support, or when an instruction shows up
-with an empty type in analyze, and commit the regenerated file as is. The script
-needs `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if they are
-not under `/opt/rocm`), network access, and a few minutes. It fetches the LLVM
-sources into a temporary directory it removes on exit.
-
-Before writing the file it checks that every mnemonic in the code objects of the
-local ROCm install has an entry.
+This requires `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if they
+are not under `/opt/rocm`), network access, and a few minutes. The generator
+fetches the LLVM sources into a temporary directory it removes on exit, and
+validates the result before writing, so a run that fails leaves the committed
+file untouched. Do not edit the JSON by hand.
 
 ## Vendoring External Dependencies
 
