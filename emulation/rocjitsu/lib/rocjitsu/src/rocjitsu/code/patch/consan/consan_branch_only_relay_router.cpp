@@ -1539,8 +1539,6 @@ void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
                        outcome.pristine_relay_occupancy_rejection_count);
   accumulate_saturated(telemetry.route_optimization_excess_relay_claim_count,
                        outcome.route_optimization_excess_relay_claim_count);
-  accumulate_saturated(telemetry.search_work_count, outcome.search_work_consumed);
-  accumulate_saturated(telemetry.scan_work_count, outcome.scan_work_consumed());
   accumulate_saturated(telemetry.route_optimization_search_work_count,
                        outcome.route_optimization_search_work_consumed);
   accumulate_saturated(telemetry.route_optimization_scan_work_count,

@@ -90,9 +90,9 @@ struct ConSanPatchedImageGrowthRejection {
 /// repair them. Excess relay claims count only relays retained above the first
 /// exact feasibility route while improving the primary owner-group objective.
 ///
-/// The compatibility search/scan totals remain stable. All search work is
-/// feasibility work. The scan phase counters expose the composition of scan
-/// work, while route-optimization work remains outside both totals.
+/// The work counters expose the individual routing phases rather than
+/// retaining aggregate compatibility totals. This keeps each observation
+/// attributable to the phase whose bound it validates.
 struct ConSanBranchOnlyRoutingTelemetry {
   size_t pair_attempt_count = 0;
   size_t plan_call_count = 0;
@@ -111,8 +111,6 @@ struct ConSanBranchOnlyRoutingTelemetry {
   size_t reservation_failure_count = 0;
   size_t exact_pair_fallback_attempt_count = 0;
   size_t greedy_pair_fallback_attempt_count = 0;
-  size_t search_work_count = 0;
-  size_t scan_work_count = 0;
   size_t route_optimization_search_work_count = 0;
   size_t route_optimization_scan_work_count = 0;
   size_t relay_qualification_work_count = 0;

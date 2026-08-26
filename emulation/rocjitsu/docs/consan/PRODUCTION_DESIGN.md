@@ -3140,6 +3140,38 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   periodic physical gate remains applicable. E2E validation remains outside
   this work.
 
+### Slice 4AE: delete aggregate branch-only routing work
+
+- **Phase-owned observations:** Branch-only relay routing retains work counts
+  for relay qualification, fallback setup, feasibility scanning, and route-
+  optimization search and scanning. Each counter names the phase whose bound
+  it can validate. The router's direct outcome continues to expose its
+  internal aggregate while a plan is being solved, where that value is used by
+  the focused complexity tests.
+- **Completed deletion:** `ConSanBranchOnlyRoutingTelemetry` no longer retains
+  `search_work_count` or `scan_work_count`. The former was an
+  undifferentiated feasibility-solver implementation detail and the latter was
+  the sum of three already-retained phase counters. Neither value had a
+  production reader. The result recorder no longer copies either aggregate.
+- **Contract-test correction:** The result-level routing test continues to
+  prove each exact phase count and every failure and strategy count. The RDNA4
+  far-body behavior test now proves qualification work plus actual fallback or
+  feasibility-scan work instead of only observing the deleted totals. Direct
+  router tests retain their aggregate bounded-work, deterministic-cost, and
+  limit-exhaustion assertions because those values remain meaningful inside
+  the solver contract.
+- **Deletion result:** Production source is four net lines smaller and source
+  plus tests is six net lines smaller. No compatibility accessor or derived
+  aggregate replaces the deleted fields.
+- **Completed checked-in gate:** The focused branch-only router and RDNA4
+  far-body gate passed all 91 tests. The ConSan host gate passed 1,509 of 1,511
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 61.44
+  seconds. This result-only deletion does not change emitted device code; the
+  periodic physical gate remains applicable. E2E validation remains outside
+  this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner

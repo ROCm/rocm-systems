@@ -7190,8 +7190,8 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   const ConSanBranchOnlyRoutingTelemetry &routing = result.lds_branch_only_routing_telemetry;
   EXPECT_GT(routing.pair_attempt_count, 0u);
   EXPECT_GT(routing.plan_call_count, 0u);
-  EXPECT_GT(routing.search_work_count, 0u);
-  EXPECT_GT(routing.scan_work_count, 0u);
+  EXPECT_GT(routing.relay_qualification_work_count, 0u);
+  EXPECT_GT(routing.fallback_setup_work_count + routing.feasibility_scan_work_count, 0u);
 }
 
 TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {

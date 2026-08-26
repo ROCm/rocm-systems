@@ -1837,8 +1837,6 @@ TEST(ConSanBranchOnlyRelayRouter, RecordsBatchedPlanAndFailureTelemetryWithShare
   EXPECT_EQ(telemetry.route_optimization_excess_relay_claim_count, 17u);
   EXPECT_EQ(telemetry.exact_pair_fallback_attempt_count, 2u);
   EXPECT_EQ(telemetry.greedy_pair_fallback_attempt_count, 1u);
-  EXPECT_EQ(telemetry.search_work_count, 17u);
-  EXPECT_EQ(telemetry.scan_work_count, 23u);
   EXPECT_EQ(telemetry.route_optimization_search_work_count, 29u);
   EXPECT_EQ(telemetry.route_optimization_scan_work_count, 31u);
   EXPECT_EQ(telemetry.relay_qualification_work_count, 5u);
