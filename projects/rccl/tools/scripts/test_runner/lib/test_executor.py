@@ -1311,8 +1311,17 @@ class TestExecutor:
                 map_by_arg = ""
             elif 'hostfile' in self.mpi_hosts:
                 host_arg = f"--hostfile {self.mpi_hosts['hostfile']} "
-                # Use PPR to control ranks per node with hostfile
-                map_by_arg = f"--map-by ppr:{num_gpus}:node " if num_nodes > 1 else ""
+                # Same fallback as the SLURM branch above: a CPU-only test
+                # declares num_gpus of 0, and ppr:0:node places nothing. Without
+                # an explicit ppr the hostfile's own slot counts govern
+                # placement instead of what this test asked for, which is how a
+                # single-node CPU-only test spilled onto -- or was refused by --
+                # a second host entry in the file. Applied for every node
+                # count, not only num_nodes > 1: a single declared node is a
+                # placement request in its own right, and the hostfile can list
+                # more hosts than that.
+                slots = num_gpus if num_gpus > 0 else -(-num_ranks // num_nodes)
+                map_by_arg = f"--map-by ppr:{slots}:node "
             else:
                 if num_nodes > 1:
                     print("WARNING: Multi-node test without hostfile or SLURM allocation")
