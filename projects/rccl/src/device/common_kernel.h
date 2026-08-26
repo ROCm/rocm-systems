@@ -9,9 +9,11 @@
 #define NCCL_COMMON_KERNEL_H_
 
 #include "device.h"
+#include "common.h"
 #include "op128.h"
 #include "nccl_device/utility.h"
 #include "reduce_kernel.h"
+#include "tdm/tdmCopy.h"
 #include <cstdio>
 #include <cstdint>
 
@@ -744,11 +746,66 @@ __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t re
                                                  dstPtrFn, /*&*/ nBytesBehind, /*&*/ nBytesAhead);
 }
 
+// System scope is required for peer visibility; non-temporal keeps remote data out of local caches.
+static constexpr CachePolicy kRcclTdmPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
+
+template <int useAcc, typename RedFn, typename T, int MultimemSrcs, int MultimemDsts, int PreOpSrcs, int Pipeline,
+          typename IntBytes>
+__device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp, int nSrcs, void** srcPtrs,
+                                           int nDsts, void** dstPtrs, IntBytes nElts) {
+#if TDM_SUPPORTED
+  if (!ncclShmem.comm.tdmSimpleEnable) return false;
+
+  if (MultimemSrcs || MultimemDsts || useAcc || Pipeline) {
+    printf("TDM copy not supported due to MultimemSrcs, MultimemDsts, useAcc, or Pipeline\n");
+    return false;
+  }
+  if (PreOpSrcs && !Apply_PreOp<RedFn, 1>::IsIdentity) {
+    printf("TDM copy not supported due to PreOpSrcs and non-identity PreOp\n");
+    return false;
+  }
+  if (nSrcs != 1 || (nDsts != 1 && nDsts != 2) || postOp) {
+    printf("TDM copy not supported due to nSrcs = (%d), nDsts = (%d), or postOp = (%d)\n", nSrcs, nDsts, postOp);
+    return false;
+  }
+  size_t bytes = (size_t)nElts * sizeof(T);
+  if (bytes < (size_t)ncclShmem.comm.tdmSimpleMinBytes) {
+    // printf("TDM copy not supported due to bytes < tdmSimpleMinBytes\n");
+    return false;
+  }
+
+  const void* src = srcPtrs[0];
+  for (int dst = 0; dst < nDsts; dst++) {
+    if (dstPtrs[dst] == nullptr || ((uintptr_t)dstPtrs[dst] & (RCCL_TDM_ALIGN - 1))) {
+      printf("TDM copy not supported due to unaligned or null dst[%d]\n", dst);
+      return false;
+    }
+  }
+
+  int base = threadIdx.x - thread;
+  if ((base | nThreads) & (WARP_SIZE - 1)) {
+    printf("TDM copy not supported due to unaligned base or nThreads\n");
+    return false;
+  }
+  uint32_t w0 = base / WARP_SIZE, w1 = w0 + nThreads / WARP_SIZE;
+  for (int dst = 0; dst < nDsts; dst++) {
+    tdm::tdmCopyByTeam<kRcclTdmPolicy>(dstPtrs[dst], src, bytes, ncclTdmStageForWarp(w0),
+                                       (size_t)(w1 - w0) * RCCL_TDM_STAGE_BYTES_PER_WARP, w0, w1);
+  }
+  return true;
+#else
+  return false;
+#endif
+}
+
 template <int Unroll, int useAcc, typename RedFn, typename T, int MultimemSrcs, int MinSrcs, int MaxSrcs,
           int MultimemDsts, int MinDsts, int MaxDsts, int PreOpSrcs, int Pipeline = 0, typename IntBytes>
 __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t redArg, bool postOp, int nSrcs,
                                            void** srcPtrs, int nDsts, void** dstPtrs, IntBytes nElts,
                                            void* accPtr = nullptr) {
+  if (tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(
+        thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
+    return;
   reduceCopy<Unroll, useAcc, RedFn, T, MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs,
              IntBytes, Pipeline>(
     thread, nThreads, redArg, postOp, nSrcs, [=] __device__(int i) { return srcPtrs[i]; }, nDsts,

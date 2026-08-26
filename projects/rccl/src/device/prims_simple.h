@@ -8,11 +8,7 @@
 
 #include "rccl_metadata.h"
 #include "network/unpack/unpack.h"
-#include "tdm/tdmCopy.h"
 #include <cassert>
-
-// System scope is required for peer visibility; non-temporal keeps remote data out of local caches.
-static constexpr CachePolicy kRcclTdmPolicy = createCachePolicy(TemporalHint::NT, MemScope::SYS);
 
 enum primsMode {
   primsModeDefault = 0,
@@ -214,74 +210,6 @@ class Primitives<T, RedOp, Fan, Direct,
     }
   }
 
-  // Copy-shaped slice via the TDM mover. False on any failed gate; caller then runs reduceCopy.
-  template <int PreOpSrcs>
-  __device__ __forceinline__ bool tryTdmCopy(int nSrcs, int nDsts, int nElts, bool postOp, bool recvConnSrc,
-                                             bool sendConnDst) {
-#if TDM_SUPPORTED
-    if (MultimemSrcs || MultimemDsts || useAcc || Pipeline) {
-      printf("TDM copy not supported due to MultimemSrcs, MultimemDsts, useAcc, or Pipeline\n");
-      return false;
-    }
-    if (PreOpSrcs && !Apply_PreOp<RedOp, 1>::IsIdentity) {
-      printf("TDM copy not supported due to PreOpSrcs and non-identity PreOp\n");
-      return false;
-    }
-    if (!ncclShmem.comm.tdmSimpleEnable) {
-      // printf("TDM copy not enabled\n");
-      return false;
-    }
-
-    if (nSrcs != 1 || (nDsts != 1 && nDsts != 2) || postOp) {
-      printf("TDM copy not supported due to nSrcs = (%d), nDsts = (%d), or postOp\n", nSrcs, nDsts);
-      return false;
-    }
-#if 0
-    if (recvConnSrc && !(ncclShmem.groups[group].recvConns[0]->flags & NCCL_TDM_ELIGIBLE))
-      return false;
-    if (sendConnDst && !(ncclShmem.groups[group].sendConns[0]->flags & NCCL_TDM_ELIGIBLE))
-      return false;
-#endif
-    size_t bytes = (size_t)nElts * sizeof(T);
-    if (bytes < (size_t)ncclShmem.comm.tdmSimpleMinBytes) {
-      printf("TDM copy not supported due to bytes < tdmSimpleMinBytes\n");
-      return false;
-    }
-
-    // void* dst = ncclShmem.groups[group].dsts[0];
-    // const void* src = ncclShmem.groups[group].srcs[0];
-    const void* src = ncclShmem.groups[group].srcs[0];
-    void** dsts = ncclShmem.groups[group].dsts;
-    // if (((uintptr_t)src | (uintptr_t)dst) & (RCCL_TDM_ALIGN - 1)) {
-    //   printf("TDM copy not supported due to unaligned src or dst\n");
-    //   return false;
-    // }
-    for (int dst = 0; dst < nDsts; dst++) {
-      if (dsts[dst] == nullptr || ((uintptr_t)dsts[dst] & (RCCL_TDM_ALIGN - 1))) {
-        printf("TDM copy not supported due to unaligned or null dst[%d]\n", dst);
-        return false;
-      }
-    }
-
-    // Team entry point takes block warp indices, and the tensor op needs a converged wave.
-    int base = tidInBlock - tid;
-    if ((base | nworkers) & (WARP_SIZE - 1)) {
-      printf("TDM copy not supported due to unaligned base or nworkers\n");
-      return false;
-    }
-    uint32_t w0 = base / WARP_SIZE, w1 = w0 + nworkers / WARP_SIZE;
-    // tdm::tdmCopyByTeam<kRcclTdmPolicy2>(dst, src, bytes, ncclTdmStageForWarp(w0),
-    //                                    (size_t)(w1 - w0) * RCCL_TDM_STAGE_BYTES_PER_WARP, w0, w1);
-    for (int dst = 0; dst < nDsts; dst++) {
-      tdm::tdmCopyByTeam<kRcclTdmPolicy>(dsts[dst], src, bytes, ncclTdmStageForWarp(w0),
-                                         (size_t)(w1 - w0) * RCCL_TDM_STAGE_BYTES_PER_WARP, w0, w1);
-    }
-    return true;
-#else
-    return false;
-#endif
-  }
-
   template <int DirectRecv1, int DirectSend1, int Recv, int Send, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void genericOp(intptr_t srcIx, intptr_t dstIx, int nelem, bool postOp) {
     constexpr int DirectRecv = /*1 &&*/ Direct && DirectRecv1;
@@ -372,8 +300,7 @@ class Primitives<T, RedOp, Fan, Direct,
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, Recv + Src, Recv * MaxRecv + Src, 0, 1, 1, PreOpSrcs,
                        Pipeline>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
                                  ncclShmem.groups[group].srcs, 1, ncclShmem.groups[group].dsts, workSize);
-          } else if (!tryTdmCopy<PreOpSrcs>(Recv * fan.nrecv() + Src, Send * fan.nsend() + Dst, workSize, postOp,
-                                            Recv * fan.nrecv() != 0, Send * fan.nsend() != 0)) {
+          } else {
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src, Recv * MaxRecv + Src, MultimemDsts,
                        Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline>(
               tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
