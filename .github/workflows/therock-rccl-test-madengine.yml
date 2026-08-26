@@ -90,7 +90,7 @@ jobs:
           fi
 
       - name: Install TheRock dependencies
-        run: pip3 install -r requirements.txt
+        run: python3 -m pip install -r requirements.txt
 
       - name: Resolve TheRock artifact run
         if: ${{ inputs.artifact_run_id == '' }}
