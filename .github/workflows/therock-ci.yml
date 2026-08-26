@@ -11,6 +11,7 @@ on:
       - synchronize
       - reopened
       - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       projects:
@@ -155,7 +156,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) &&
+        needs.setup.outputs.linux_projects != '[]'
+      }}
     strategy:
       fail-fast: false
       matrix:
@@ -183,7 +188,11 @@ jobs:
       id-token: write
     needs: setup
     # Build always runs for all PRs; tests are gated separately by run_mi455_test
-    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) &&
+        needs.setup.outputs.linux_projects != '[]'
+      }}
     uses: ./.github/workflows/therock-build-linux.yml
     with:
       package_version: ${{ needs.setup.outputs.package_version }}
@@ -199,7 +208,11 @@ jobs:
   therock-test-linux-mi455:
     name: Linux MI455 Test
     needs: [setup, therock-build-linux-mi455]
-    if: ${{ needs.setup.outputs.run_mi455_test == 'true' }}
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) &&
+        needs.setup.outputs.run_mi455_test == 'true'
+      }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       projects_to_test: "hip-tests, rocrtst"
@@ -211,7 +224,11 @@ jobs:
   therock-rccl-ci-linux:
     name: TheRock RCCL CI Linux
     needs: setup
-    if: ${{ needs.setup.outputs.run_linux_rccl_ci == 'true' }}
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) &&
+        needs.setup.outputs.run_linux_rccl_ci == 'true'
+      }}
     permissions:
       contents: read
       id-token: write
@@ -238,7 +255,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.windows_projects != '[]' }}
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:single-arch')) &&
+        needs.setup.outputs.windows_projects != '[]'
+      }}
     strategy:
       fail-fast: false
       matrix:
