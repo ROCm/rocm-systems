@@ -639,13 +639,10 @@ write_perfetto(
                                   "stream_id",
                                   itr.stream_id,
                                   [&](::perfetto::EventContext ctx) {
-                                      if(itr.graph_exec_id != 0)
-                                      {
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_exec_id", itr.graph_exec_id);
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_node_id", itr.graph_node_id);
-                                      }
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_exec_id", itr.graph_exec_id);
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_node_id", itr.graph_node_id);
                                   });
                 TRACE_EVENT_END(
                     sdk::perfetto_category<sdk::category::memory_copy>::name, *_track, itr.end);
@@ -881,13 +878,10 @@ write_perfetto(
                                   "stream_id",
                                   current.stream_id,
                                   [&](::perfetto::EventContext ctx) {
-                                      if(current.graph_exec_id != 0)
-                                      {
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_exec_id", current.graph_exec_id);
-                                          rocprofiler::sdk::add_perfetto_annotation(
-                                              ctx, "graph_node_id", current.graph_node_id);
-                                      }
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_exec_id", current.graph_exec_id);
+                                      rocprofiler::sdk::add_perfetto_annotation(
+                                          ctx, "graph_node_id", current.graph_node_id);
 
                                       for(auto& [counter_id, counter_value] : counter_id_value)
                                       {

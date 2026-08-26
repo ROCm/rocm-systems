@@ -514,11 +514,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             // Feature names are resolved in Python (features.py) and stored on
             // RocpdImportData.supported_features so C++ never duplicates version constants.
             auto schema_version = data.schema_version;
-            auto has_feature    = [&data](std::string_view name) {
-                const auto& feats = data.supported_features;
-                return std::find(feats.begin(), feats.end(), name) != feats.end();
-            };
-            const auto graph_launch_supported = has_feature("graph_launch");
+            // auto has_feature    = [&data](std::string_view name) {
+            //     const auto& feats = data.supported_features;
+            //     return std::find(feats.begin(), feats.end(), name) != feats.end();
+            // };
+            // const auto graph_launch_supported = has_feature("graph_launch");
 
             auto sqlgen_perf = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
@@ -542,38 +542,16 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                            pitr.guid,
                                            nitr.id,
                                            nitr.guid);
-                        auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl) {
-                            return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
-                                               "= {} AND pid = {}",
-                                               tbl,
-                                               pitr.guid,
-                                               nitr.id,
-                                               pitr.pid);
-                        };
-
-                        auto select_guid_nid_pid_and_condition =
-                            [&nitr, &pitr](std::string_view tbl, std::string_view condition) {
-                                return fmt::format("SELECT * FROM {} WHERE guid = '{}' AND nid "
-                                                   "= {} AND pid = {} AND {}",
-                                                   tbl,
-                                                   pitr.guid,
-                                                   nitr.id,
-                                                   pitr.pid,
-                                                   condition);
-                            };
-
-                        // For schemas < 3.0.2 the kernels/memory_copies views lack
-                        // graph_exec_id and graph_node_id.  Inject zero-valued aliases
-                        // so the deserializer always finds the expected column names and
-                        // we can use the single up-to-date struct types throughout.
-                        auto select_guid_nid_pid_3_0_1 = [&nitr, &pitr](std::string_view tbl) {
+                        auto select_guid_nid_pid = [&nitr, &pitr](std::string_view tbl,
+                                                                  std::string_view condition = {}) {
                             return fmt::format(
-                                "SELECT *, 0 AS graph_exec_id, 0 AS graph_node_id FROM {} "
-                                "WHERE guid = '{}' AND nid = {} AND pid = {}",
+                                "SELECT * FROM {} WHERE guid = '{}' AND nid "
+                                "= {} AND pid = {}{}",
                                 tbl,
                                 pitr.guid,
                                 nitr.id,
-                                pitr.pid);
+                                pitr.pid,
+                                condition.empty() ? std::string{} : fmt::format(" {}", condition));
                         };
 
                         // Exclude SPM samples from the Perfetto trace. SPM samples reference
@@ -583,7 +561,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         // The subquery against rocpd_kernel_dispatch is small (one row per
                         // dispatch, typically ~100s) and fast.
                         auto samples_condition =
-                            fmt::format("event_id NOT IN (SELECT event_id FROM "
+                            fmt::format("AND event_id NOT IN (SELECT event_id FROM "
                                         "rocpd_kernel_dispatch WHERE guid = '{}')",
                                         pitr.guid);
 
@@ -591,40 +569,20 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                             "Perfetto generation from SQL for process {} (total)", pitr.pid)};
 
                         auto kernels = rocpd::sql_generator<rocpd::types::kernel_dispatch>{
-                            conn,
-                            graph_launch_supported ? select_guid_nid_pid("kernels")
-                                                   : select_guid_nid_pid_3_0_1("kernels"),
-                            kernels_order_by};
+                            conn, select_guid_nid_pid("kernels"), kernels_order_by};
 
                         auto memory_allocations =
                             rocpd::sql_generator<rocpd::types::memory_allocation>{
                                 conn, select_guid_nid_pid("memory_allocations")};
 
                         auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                            conn,
-                            graph_launch_supported ? select_guid_nid_pid("memory_copies")
-                                                   : select_guid_nid_pid_3_0_1("memory_copies")};
+                            conn, select_guid_nid_pid("memory_copies")};
 
-                        // Schemas < 3.0.2 lack the graph_launches table/view entirely, so no
-                        // sql_generator can be constructed for it. Default to a valid, empty
-                        // generator and only build the real one below when the schema
-                        // supports it
-                        auto graph_launch_empty_gen =
-                            tool::empty_generator<rocpd::types::graph_launch>{};
-                        auto graph_launch_gen =
-                            std::optional<rocpd::sql_generator<rocpd::types::graph_launch>>{};
-                        const tool::generator<rocpd::types::graph_launch>* graph_launch_ptr =
-                            &graph_launch_empty_gen;
-
-                        if(graph_launch_supported)
-                        {
-                            // Build the real generator and update the pointer to it
-                            graph_launch_gen.emplace(conn, select_guid_nid_pid("graph_launches"));
-                            graph_launch_ptr = &*graph_launch_gen;
-                        }
-
-                        const tool::generator<rocpd::types::graph_launch>& graph_launches =
-                            *graph_launch_ptr;
+                        // Schemas < 3.0.2 lack the graph_launches table/view entirely, so allow
+                        // generator to be empty if the query for the view fails
+                        auto graph_launches =
+                            rocpd::sql_generator<rocpd::types::graph_launch, rocpd::optional_view>{
+                                conn, select_guid_nid_pid("graph_launches")};
 
                         auto scratch_memory = rocpd::sql_generator<rocpd::types::scratch_memory>{
                             conn, select_guid_nid_pid("scratch_memory")};
@@ -637,7 +595,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
                         auto samples = rocpd::sql_generator<rocpd::types::sample>{
                             conn,
-                            select_guid_nid_pid_and_condition("samples", samples_condition),
+                            select_guid_nid_pid("samples", samples_condition),
                             sample_order_by};
 
                         auto threads = rocpd::sql_generator<rocpd::types::thread>{
