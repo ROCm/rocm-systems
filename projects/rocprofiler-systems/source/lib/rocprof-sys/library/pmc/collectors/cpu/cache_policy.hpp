@@ -71,51 +71,56 @@ struct cache_policy
         const std::string freq_base = name<category::cpu_freq>::value;
         const std::string load_base = name<category::cpu_load>::value;
 
+        // The PMC info is registered once per socket under the bare metric name --
+        // that is the name the sampler emits in pmc_info_unique_id_t (see
+        // rocpd_processor_t::handle(const cpu_pmc_sample&)). The per-core
+        // "<metric> [socket] Core [cpu]" string identifies the track, not the PMC.
+        registry.add_pmc_info(
+            { /* type             = */ agent_type::CPU,
+              /* agent_type_index = */ socket_id,
+              /* target_arch      = */ target_arch,
+              /* event_code       = */ event_code,
+              /* instance_id      = */ instance_id,
+              /* name             = */ freq_base,
+              /* symbol           = */ freq_base,
+              /* description      = */ "CPU Core Frequency",
+              /* long_description = */ long_description,
+              /* component        = */ component,
+              /* units            = */ "MHz",
+              /* value_type       = */ rocprofsys::trace_cache::ABSOLUTE,
+              /* block            = */ block,
+              /* expression       = */ expression,
+              /* is_constant      = */ is_constant,
+              /* is_derived       = */ is_derived,
+              /* extdata          = */ extdata });
+
+        registry.add_pmc_info(
+            { /* type             = */ agent_type::CPU,
+              /* agent_type_index = */ socket_id,
+              /* target_arch      = */ target_arch,
+              /* event_code       = */ event_code,
+              /* instance_id      = */ instance_id,
+              /* name             = */ load_base,
+              /* symbol           = */ load_base,
+              /* description      = */ "CPU Core Load Percentage",
+              /* long_description = */ long_description,
+              /* component        = */ component,
+              /* units            = */ trace_cache::PERCENTAGE,
+              /* value_type       = */ rocprofsys::trace_cache::ABSOLUTE,
+              /* block            = */ block,
+              /* expression       = */ expression,
+              /* is_constant      = */ is_constant,
+              /* is_derived       = */ is_derived,
+              /* extdata          = */ extdata });
+
         for(const size_t cpu_id : monitored_cpus)
         {
-            const auto freq_name =
-                fmt::format("{} [{}] Core [{}]", freq_base, socket_id, cpu_id);
-            registry.add_pmc_info(
-                { /* type             = */ agent_type::CPU,
-                  /* agent_type_index = */ socket_id,
-                  /* target_arch      = */ target_arch,
-                  /* event_code       = */ event_code,
-                  /* instance_id      = */ instance_id,
-                  /* name             = */ freq_name.c_str(),
-                  /* symbol           = */ freq_name.c_str(),
-                  /* description      = */ "CPU Core Frequency",
-                  /* long_description = */ long_description,
-                  /* component        = */ component,
-                  /* units            = */ "MHz",
-                  /* value_type       = */ rocprofsys::trace_cache::ABSOLUTE,
-                  /* block            = */ block,
-                  /* expression       = */ expression,
-                  /* is_constant      = */ is_constant,
-                  /* is_derived       = */ is_derived,
-                  /* extdata          = */ extdata });
-            registry.add_track({ freq_name, std::nullopt, extdata });
-
-            const auto load_name =
-                fmt::format("{} [{}] Core [{}]", load_base, socket_id, cpu_id);
-            registry.add_pmc_info(
-                { /* type             = */ agent_type::CPU,
-                  /* agent_type_index = */ socket_id,
-                  /* target_arch      = */ target_arch,
-                  /* event_code       = */ event_code,
-                  /* instance_id      = */ instance_id,
-                  /* name             = */ load_name.c_str(),
-                  /* symbol           = */ load_name.c_str(),
-                  /* description      = */ "CPU Core Load Percentage",
-                  /* long_description = */ long_description,
-                  /* component        = */ component,
-                  /* units            = */ trace_cache::PERCENTAGE,
-                  /* value_type       = */ rocprofsys::trace_cache::ABSOLUTE,
-                  /* block            = */ block,
-                  /* expression       = */ expression,
-                  /* is_constant      = */ is_constant,
-                  /* is_derived       = */ is_derived,
-                  /* extdata          = */ extdata });
-            registry.add_track({ load_name, std::nullopt, extdata });
+            registry.add_track(
+                { fmt::format("{} [{}] Core [{}]", freq_base, socket_id, cpu_id),
+                  std::nullopt, extdata });
+            registry.add_track(
+                { fmt::format("{} [{}] Core [{}]", load_base, socket_id, cpu_id),
+                  std::nullopt, extdata });
         }
 
         if(!is_first_socket) return;
