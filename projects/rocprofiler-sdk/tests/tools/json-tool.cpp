@@ -542,8 +542,7 @@ struct scratch_memory_callback_record_t
 
         if constexpr(std::is_same<ArchiveT, cereal::BinaryOutputArchive>::value ||
                      std::is_same<ArchiveT, cereal::PortableBinaryOutputArchive>::value)
-        {
-        }
+        {}
         else
         {
             ar.setNextName("args");
@@ -572,11 +571,11 @@ struct profile_counting_record
     rocprofiler_dispatch_counting_service_record_t header = {};
     std::vector<rocprofiler_record_counter_t>      data   = {};
 
-    profile_counting_record()                                              = default;
-    ~profile_counting_record()                                             = default;
-    profile_counting_record(const profile_counting_record&)                = default;
-    profile_counting_record(profile_counting_record&&) noexcept            = default;
-    profile_counting_record& operator=(const profile_counting_record&)     = default;
+    profile_counting_record()                                   = default;
+    ~profile_counting_record()                                  = default;
+    profile_counting_record(const profile_counting_record&)     = default;
+    profile_counting_record(profile_counting_record&&) noexcept = default;
+    profile_counting_record& operator=(const profile_counting_record&) = default;
     profile_counting_record& operator=(profile_counting_record&&) noexcept = default;
 
     template <typename ArchiveT>
@@ -801,9 +800,9 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
 
     std::vector<rocprofiler_spm_parameters_t*> input_params{};
     auto                                       param = rocprofiler_spm_parameters_t{
-                                              .size = sizeof(rocprofiler_spm_parameters_t),
-                                              .type = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
-                                              .value = 1200};
+        .size = sizeof(rocprofiler_spm_parameters_t),
+        .type = ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
+        .value = 1200};
     input_params.push_back(&param);
     // Look for the counters contained in counters_to_collect in gpu_counters
     // Create a colleciton profile for the counters

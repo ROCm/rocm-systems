@@ -74,7 +74,7 @@ public:
         }
     }
 
-    EnvGuard(const EnvGuard&)            = delete;
+    EnvGuard(const EnvGuard&) = delete;
     EnvGuard& operator=(const EnvGuard&) = delete;
 
 private:

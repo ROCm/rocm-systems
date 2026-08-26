@@ -1017,8 +1017,7 @@ kfd_device_available()
 }  // namespace agent
 }  // namespace rocprofiler
 
-extern "C"
-{
+extern "C" {
 rocprofiler_status_t
 rocprofiler_query_available_agents(rocprofiler_agent_version_t             version,
                                    rocprofiler_query_available_agents_cb_t callback,
