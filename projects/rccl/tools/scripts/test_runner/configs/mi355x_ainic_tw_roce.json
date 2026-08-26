@@ -505,7 +505,7 @@
     { "config": "gin_ainic_backend",     "enabled": true },
     { "config": "bootstrap_socket_poll", "enabled": true, "smoke": true },
     { "config": "a_netib_multithread",   "enabled": true, "smoke": true },
-    { "config": "a_cast_multithread",    "enabled": true },
+    { "config": "a_cast_multithread",    "enabled": true, "smoke": true },
 
     { "config": "ib_baseline",           "enabled": true, "smoke": true },
     { "config": "cast_alltoall_full",    "enabled": true, "smoke": true },
