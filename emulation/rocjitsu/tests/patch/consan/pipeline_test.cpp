@@ -359,6 +359,10 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   mechanism.modified = true;
   mechanism.final_validation_passed = true;
   mechanism.elf_bytes = {0x7f, 'E', 'L', 'F'};
+  mechanism.fault_sites.emplace_back().identity = "published-fault-site";
+  mechanism.barrier_move_destinations.emplace_back().identity = "published-destination";
+  mechanism.fault_plans.emplace_back().primary_identity = "published-fault-plan";
+  mechanism.resource_plans.emplace_back().candidate_index = 7u;
   ConSanPatchInfo shared_segments;
   shared_segments.kind = ConSanPatchKind::InlineNopRewrite;
   shared_segments.required_private_segment_size = 40u;
@@ -386,6 +390,15 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       complete_runtime_capabilities(), BoundRuntimeResources{}, std::move(mechanism));
 
   ASSERT_TRUE(published.well_formed()) << testing::PrintToString(published.issues);
+  ASSERT_EQ(published.fault_sites.size(), 1u);
+  EXPECT_EQ(published.fault_sites.front().identity, "published-fault-site");
+  ASSERT_EQ(published.barrier_move_destinations.size(), 1u);
+  EXPECT_EQ(published.barrier_move_destinations.front().identity, "published-destination");
+  ASSERT_EQ(published.fault_plans.size(), 1u);
+  EXPECT_EQ(published.fault_plans.front().primary_identity, "published-fault-plan");
+  ASSERT_EQ(published.resource_plans.size(), 1u);
+  EXPECT_EQ(published.resource_plans.front().candidate_index, 7u);
+  ASSERT_EQ(published.patches.size(), 3u);
   ASSERT_EQ(published.dispatch_requirements.kernels.size(), 3u);
   EXPECT_EQ(published.dispatch_requirements.kernels[0], (ConSanKernelDispatchRequirement{
                                                             .kernel_name = "kernel_a",
@@ -678,7 +691,7 @@ TEST(ConSanPipeline, InstallActionTruthTableUsesOnlySplitStaticResult) {
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::LoadReplacement);
 }
 
-TEST(ConSanPipeline, ProductionResultOwnsArtifactsWithoutLegacyProjection) {
+TEST(ConSanPipeline, ProductionResultOwnsAllPublishedTransformArtifacts) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   const TransformPolicy transform_policy;
@@ -694,7 +707,6 @@ TEST(ConSanPipeline, ProductionResultOwnsArtifactsWithoutLegacyProjection) {
   TransformResult split = transform_consan(bytes, request, transform_policy, runtime_policy, debug,
                                            capabilities, resources);
   ASSERT_TRUE(split.well_formed()) << testing::PrintToString(split.issues);
-  const ConSanResult &mechanism = split.legacy_mechanism();
 
   EXPECT_TRUE(split.program_inventory.code_object_parsed());
   EXPECT_EQ(split.program_inventory.code_object_id(), split.code_object);
@@ -702,9 +714,8 @@ TEST(ConSanPipeline, ProductionResultOwnsArtifactsWithoutLegacyProjection) {
   EXPECT_EQ(split.coverage_ledger.intent_entries().size(),
             split.observation_plan.probe_intents.size());
   EXPECT_FALSE(split.replacement_bytes.empty());
-  EXPECT_TRUE(mechanism.elf_bytes.empty());
-  EXPECT_TRUE(mechanism.errors.empty());
-  EXPECT_FALSE(mechanism.patches.empty());
+  EXPECT_FALSE(split.patches.empty());
+  EXPECT_FALSE(split.resource_plans.empty());
   EXPECT_EQ(split.install_action(false), split.outcome == ConSanTransformOutcome::ModifiedValid
                                              ? ConSanInstallAction::LoadReplacement
                                              : ConSanInstallAction::LoadOriginal);
@@ -794,6 +805,38 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   EXPECT_EQ(retried.observation_plan, direct.observation_plan);
   EXPECT_EQ(retried.coverage_ledger, direct.coverage_ledger);
   EXPECT_EQ(retried.replacement_bytes, direct.replacement_bytes);
+  EXPECT_EQ(retried.patches.size(), direct.patches.size());
+  EXPECT_EQ(retried.resource_plans.size(), direct.resource_plans.size());
+  EXPECT_EQ(retried.fault_sites.size(), direct.fault_sites.size());
+  EXPECT_EQ(retried.barrier_move_destinations.size(), direct.barrier_move_destinations.size());
+  EXPECT_EQ(retried.fault_plans.size(), direct.fault_plans.size());
+}
+
+TEST(ConSanPipeline, MoiRetryRejectsAnOrdinaryResultWithoutRetainedInventory) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
+  const RuntimePolicy runtime_policy = enabled_runtime_policy();
+  const RuntimeCapabilities capabilities = complete_runtime_capabilities();
+  TransformResult ordinary =
+      transform_consan(bytes, request, TransformPolicy{}, runtime_policy, ConSanDebugOverrides{},
+                       capabilities, BoundRuntimeResources{});
+  ASSERT_TRUE(ordinary.evidence_requirements);
+  const auto &requirements =
+      std::get<ConSanRecordReplayEvidenceRequirements>(*ordinary.evidence_requirements);
+
+  BoundRuntimeResources resources;
+  resources.scope = ConSanRuntimeResourceScope::Executable;
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  resources.moi_report_buffer_size = requirements.abi_plan.required_bytes;
+  const TransformResult retried = retry_transform_consan_pristine_moi_inventory(
+      bytes, request, TransformPolicy{}, runtime_policy, ConSanDebugOverrides{}, MutationRequest{},
+      capabilities, resources, std::move(ordinary));
+
+  ASSERT_TRUE(retried.well_formed()) << testing::PrintToString(retried.issues);
+  EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
+  EXPECT_TRUE(std::ranges::any_of(retried.issues, [](const ConSanTransformIssue &issue) {
+    return issue.detail.find("no retained inventory") != std::string::npos;
+  })) << testing::PrintToString(retried.issues);
 }
 
 TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) {
@@ -835,11 +878,12 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   ASSERT_TRUE(mutated.well_formed()) << testing::PrintToString(mutated.issues);
   EXPECT_GT(mutated.mutation.fault.requested, 0u);
   EXPECT_NE(mutated.mutation, ConSanMutationOutcome{});
-  EXPECT_EQ(mutated.legacy_mechanism().mutation, ConSanMutationOutcome{});
+  EXPECT_FALSE(mutated.fault_sites.empty());
+  EXPECT_FALSE(mutated.fault_plans.empty());
   EXPECT_EQ(first.code_object, mutated.program_inventory.code_object_id());
 }
 
-TEST(ConSanPipeline, RuntimeDiscardKeepsTypedAndTemporaryMechanismStateCoherent) {
+TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   TransformResult inventory =
@@ -858,7 +902,7 @@ TEST(ConSanPipeline, RuntimeDiscardKeepsTypedAndTemporaryMechanismStateCoherent)
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), resources);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_FALSE(result.replacement_bytes.empty());
-  ASSERT_FALSE(result.legacy_mechanism().patches.empty());
+  ASSERT_FALSE(result.patches.empty());
   ASSERT_FALSE(result.dispatch_requirements.kernels.empty());
 
   result.discard_replacement("runtime report allocation failed");
@@ -870,8 +914,7 @@ TEST(ConSanPipeline, RuntimeDiscardKeepsTypedAndTemporaryMechanismStateCoherent)
   EXPECT_TRUE(result.dispatch_requirements.kernels.empty());
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadOriginal);
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
-  EXPECT_TRUE(result.legacy_mechanism().patches.empty());
-  EXPECT_EQ(result.legacy_mechanism().outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_TRUE(result.patches.empty());
   EXPECT_EQ(result.warnings.back(), "runtime report allocation failed");
   EXPECT_EQ(result.stage(ConSanPipelineStage::LegacyLowering)->status,
             ConSanPipelineStageStatus::Unsupported);

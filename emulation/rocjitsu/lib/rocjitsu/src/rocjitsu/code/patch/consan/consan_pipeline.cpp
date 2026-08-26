@@ -309,14 +309,10 @@ void TransformResult::discard_replacement(std::string warning) {
   outcome = ConSanTransformOutcome::Unsupported;
   final_validation_passed = false;
   replacement_bytes.clear();
+  patches.clear();
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
-  legacy_compatibility_.outcome = outcome;
-  legacy_compatibility_.modified = false;
-  legacy_compatibility_.final_validation_passed = false;
-  legacy_compatibility_.elf_bytes.clear();
-  legacy_compatibility_.patches.clear();
-  legacy_compatibility_.warnings = warnings;
+  moi_retry_inventory_.reset();
   stage_record(*this, ConSanPipelineStage::LegacyLowering).status =
       ConSanPipelineStageStatus::Unsupported;
   stage_record(*this, ConSanPipelineStage::FinalValidation).status =
@@ -340,9 +336,10 @@ TransformResult transform_consan_pristine_moi_inventory(
   legacy_options.moi_report_generation = 0;
   legacy_options.moi_report_dispatch_id = 0;
   legacy_options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
-  return publish_consan_mechanism_result(
+  return TransformResult::publish_optional(
       code_object_bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
-      capabilities, unbound_resources, try_patch_consan(code_object_bytes, legacy_options));
+      capabilities, unbound_resources, try_patch_consan(code_object_bytes, legacy_options),
+      /*retain_moi_retry_inventory=*/true);
 }
 
 TransformResult retry_transform_consan_pristine_moi_inventory(
@@ -364,8 +361,19 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
           },
       .fault = ConSanFaultMutationRetryConfig::from_options(options),
   };
-  ConSanResult retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory.legacy_compatibility_), retry, code_object_bytes);
+  ConSanResult retry_inventory;
+  if (inventory.moi_retry_inventory_) {
+    retry_inventory = std::move(*inventory.moi_retry_inventory_);
+  } else {
+    retry_inventory.errors.emplace_back("ConSan MOI retry received no retained inventory");
+  }
+  retry_inventory.fault_sites = std::move(inventory.fault_sites);
+  retry_inventory.barrier_move_destinations = std::move(inventory.barrier_move_destinations);
+  retry_inventory.fault_plans = std::move(inventory.fault_plans);
+  retry_inventory.resource_plans = std::move(inventory.resource_plans);
+  retry_inventory.patches = std::move(inventory.patches);
+  ConSanResult retried =
+      retry_patch_consan_moi_from_inventory(std::move(retry_inventory), retry, code_object_bytes);
   return publish_consan_mechanism_result(code_object_bytes, request, transform_policy,
                                          runtime_policy, debug, mutation, capabilities, resources,
                                          std::move(retried));
@@ -388,7 +396,7 @@ TransformResult transform_consan_with_mutation(
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources) {
   return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
                                            runtime_policy, debug, mutation, capabilities, resources,
-                                           std::nullopt);
+                                           std::nullopt, /*retain_moi_retry_inventory=*/false);
 }
 
 TransformResult publish_consan_mechanism_result(
@@ -399,7 +407,8 @@ TransformResult publish_consan_mechanism_result(
     ConSanResult mechanism_result) {
   return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
                                            runtime_policy, debug, mutation, capabilities, resources,
-                                           std::move(mechanism_result));
+                                           std::move(mechanism_result),
+                                           /*retain_moi_retry_inventory=*/false);
 }
 
 TransformResult TransformResult::publish_optional(
@@ -407,7 +416,7 @@ TransformResult TransformResult::publish_optional(
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-    std::optional<ConSanResult> supplied_mechanism) {
+    std::optional<ConSanResult> supplied_mechanism, bool retain_moi_retry_inventory) {
   TransformResult result;
   result.code_object = make_consan_code_object_id(code_object_bytes);
   initialize_stage_records(result);
@@ -425,7 +434,6 @@ TransformResult TransformResult::publish_optional(
     stage_record(result, ConSanPipelineStage::FinalValidation).status =
         ConSanPipelineStageStatus::Invalid;
     stage_record(result, ConSanPipelineStage::Complete).status = ConSanPipelineStageStatus::Invalid;
-    result.legacy_compatibility_.outcome = ConSanTransformOutcome::Invalid;
     return result;
   }
   configuration.status = ConSanPipelineStageStatus::Completed;
@@ -441,7 +449,6 @@ TransformResult TransformResult::publish_optional(
     stage_record(result, ConSanPipelineStage::FinalValidation).status =
         ConSanPipelineStageStatus::Invalid;
     stage_record(result, ConSanPipelineStage::Complete).status = ConSanPipelineStageStatus::Invalid;
-    result.legacy_compatibility_.outcome = ConSanTransformOutcome::Invalid;
     return result;
   }
 
@@ -460,10 +467,15 @@ TransformResult TransformResult::publish_optional(
   result.outcome = legacy.outcome;
   result.final_validation_passed = legacy.final_validation_passed;
   result.mutation = std::exchange(legacy.mutation, {});
+  result.fault_sites = std::move(legacy.fault_sites);
+  result.barrier_move_destinations = std::move(legacy.barrier_move_destinations);
+  result.fault_plans = std::move(legacy.fault_plans);
+  result.resource_plans = std::move(legacy.resource_plans);
+  result.patches = std::move(legacy.patches);
   result.warnings = std::move(legacy.warnings);
   if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
     result.dispatch_requirements = build_dispatch_requirements(
-        result.program_inventory, result.coverage_ledger, legacy.patches);
+        result.program_inventory, result.coverage_ledger, result.patches);
   }
   for (std::string &error : legacy.errors) {
     result.issues.push_back({
@@ -473,7 +485,8 @@ TransformResult TransformResult::publish_optional(
     });
   }
   legacy.errors.clear();
-  result.legacy_compatibility_ = std::move(legacy);
+  if (retain_moi_retry_inventory)
+    result.moi_retry_inventory_ = std::move(legacy);
 
   const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
   if (flavor == ConSanFlavor::None) {
@@ -583,7 +596,7 @@ TransformResult TransformResult::publish_optional(
       result.replacement_bytes.clear();
       result.dispatch_requirements = {};
       result.final_validation_passed = false;
-      result.legacy_compatibility_.patches.clear();
+      result.patches.clear();
     }
   }
 

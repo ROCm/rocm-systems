@@ -930,7 +930,7 @@ allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint64_t 
                                 uint64_t *registered_size, uint64_t *registered_generation);
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
                                        std::string_view input_fingerprint,
-                                       const ConSanResult &result);
+                                       std::span<const ConSanPatchInfo> patches);
 void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generation,
                                                hsa_executable_t executable);
 void discard_auto_moi_report_buffer(CoreApiTable *core, uint64_t reader, uint64_t generation);

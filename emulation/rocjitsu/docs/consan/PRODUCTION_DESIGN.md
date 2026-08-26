@@ -1126,13 +1126,14 @@ silently presented as `Completed`. `ConSanTransformIssue` gives request and
 capability failures a `ConSanContractIssue` payload while retaining legacy or
 validation detail without asking control flow to parse it.
 
-During incremental cutover, `TransformResult` privately owns a stripped
-compatibility result. Immutable inventory, observation plan, coverage,
-replacement bytes, status, and diagnostics live in the split result and are
-consumed there by the HSA coordinator. `legacy_mechanism()` exposes a read-only
-view of patch geometry and lowering telemetry until those values acquire
-narrower owners. Large replacement images remain single-owned, and the private
-value is not a second source of semantic or installation truth.
+`TransformResult` owns immutable inventory, observation plan, coverage,
+replacement bytes, status, diagnostics, mutation detail, resource plans, and
+emitted patch geometry. The HSA coordinator consumes these values directly;
+there is no public raw-lowering-result view. Only an address-free MOI sizing
+result privately retains the unmodified semantic state required by the bound
+retry, and ordinary or completed transforms never retain that state. Large
+replacement images and every published artifact therefore remain
+single-owned.
 
 `RunVerdict` is produced only after runtime evidence. It distinguishes:
 
@@ -3051,6 +3052,40 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   tests with two external-object benchmarks intentionally skipped, and the
   complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
   rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 67.35
+  seconds. The periodic physical gate remains applicable. E2E validation
+  remains outside this work.
+
+### Slice 4AB: remove the public raw-result compatibility view
+
+- **Completed artifact ownership:** `TransformResult` now directly owns the
+  emitted patch inventory, resource plans, fault sites, barrier-move
+  destinations, and fault plans. These are the retained inputs to supported
+  patch-proof, resource-qualification, mutation dry-run, and automatic-report
+  metadata behavior. The HSA coordinator and report registry consume those
+  typed fields directly instead of reaching through a second result object.
+- **Completed compatibility deletion:** The public `legacy_mechanism()` API is
+  gone, as are all production and ordinary-test callers. Ordinary and completed
+  transforms no longer retain a hidden `ConSanResult` after publication. Only
+  the address-free MOI report-sizing result retains a private unmodified retry
+  inventory, which the named bound-retry operation consumes and then destroys.
+  Runtime demotion destroys that retry inventory and clears the one published
+  patch inventory rather than synchronizing two public representations.
+- **Focused contract gate:** Pipeline tests independently cover publication of
+  all five artifact families, direct/retry artifact parity, mutation-detail
+  publication, patch removal during runtime demotion, and rejection when an
+  ordinary result is incorrectly passed to the inventory retry. The complete
+  hook gate protects the existing diagnostic and automatic-report mapping
+  output through the new owner.
+- **Size and ownership result:** Production grows by 27 net lines and source
+  plus tests by 70 net lines. The growth is the generously documented public
+  ownership and focused retry/artifact contract; it deletes the unrestricted
+  compatibility accessor and avoids retaining the much larger raw result in
+  every ordinary transform. No new public adapter or duplicate artifact
+  collection was introduced.
+- **Completed checked-in gate:** The ConSan host gate passed 1,509 of 1,511
+  tests with two external-object benchmarks intentionally skipped, and the
+  complete HSA-hook binary passed all 194 tests. All 2,878 simulator device
+  rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 60.82
   seconds. The periodic physical gate remains applicable. E2E validation
   remains outside this work.
 

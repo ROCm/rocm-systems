@@ -252,7 +252,7 @@ public:
   using Summary = AutoMoiReportSummary;
 
   void register_metadata(uint64_t reader, uint64_t generation, std::string_view input_fingerprint,
-                         const rocjitsu::ConSanResult &result) {
+                         std::span<const rocjitsu::ConSanPatchInfo> patches) {
     std::lock_guard lock(mutex_);
     auto entry = std::find_if(entries_.begin(), entries_.begin() + entry_count_,
                               [reader, generation](const Entry &item) {
@@ -271,7 +271,7 @@ public:
     size_t compact_patch_count = 0;
     size_t record_replay_patch_count = 0;
     size_t sampled_patch_count = 0;
-    for (const rocjitsu::ConSanPatchInfo &patch : result.patches) {
+    for (const rocjitsu::ConSanPatchInfo &patch : patches) {
       if (patch.kind == rocjitsu::ConSanPatchKind::InlineMoiAccessRecordStore ||
           patch.kind == rocjitsu::ConSanPatchKind::TrampolineMoiAccessRecordStore) {
         ++record_replay_patch_count;
@@ -2055,9 +2055,9 @@ bool allocate_auto_moi_report_buffer(CoreApiTable *core, hsa_agent_t agent, uint
 
 void register_auto_moi_report_metadata(uint64_t reader, uint64_t generation,
                                        std::string_view input_fingerprint,
-                                       const ConSanResult &result) {
+                                       std::span<const ConSanPatchInfo> patches) {
   AutoMoiReportBufferRegistry::instance().register_metadata(reader, generation, input_fingerprint,
-                                                            result);
+                                                            patches);
 }
 
 void bind_auto_moi_report_buffer_to_executable(uint64_t reader, uint64_t generation,

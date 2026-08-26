@@ -337,21 +337,23 @@ Each `TransformResult` records every stage exactly once:
 
 A stage is `Completed`, `Deferred`, `NotApplicable`, `Unsupported`, or
 `Invalid`. The result carries the pristine image identity, inventory,
-observation plan, coverage ledger, optional evidence requirements, structured
-issues, warnings, and validated replacement bytes. Runtime conflicts do not
-belong in this static result.
+observation plan, coverage ledger, optional evidence requirements, mutation
+sites and plans, resource plans, emitted patch inventory, structured issues,
+warnings, and validated replacement bytes. Runtime conflicts do not belong in
+this static result.
 
 `TransformResult::install_action` derives loader behavior from the static
-outcome and fail-closed policy. The HSA coordinator consumes the split result
-directly for outcome, diagnostics, replacement storage, and installation. A
-read-only `legacy_mechanism()` view temporarily exposes patch geometry and
-lowering telemetry that have not yet acquired narrower production owners; it
-is not a second source of control-plane truth.
+outcome and fail-closed policy. The HSA coordinator consumes the result
+directly for outcome, diagnostics, patch geometry, resource diagnostics,
+runtime metadata registration, replacement storage, and installation. There
+is no public raw-lowering-result view and no second source of control-plane or
+diagnostic truth.
 
 Automatic MOI report sizing also stays inside this boundary. The pristine
 inventory pass returns `TransformResult`, and the retry accepts that typed
-result plus the bound runtime resources. Only the named typed retry operation
-can unwrap the temporary mechanism state needed by the prototype retry.
+result plus the bound runtime resources. Only this address-free sizing result
+retains private lowering state, and only the named typed retry operation can
+consume it. Ordinary and completed transforms retain no hidden raw result.
 
 ## Runtime component and lifecycle
 

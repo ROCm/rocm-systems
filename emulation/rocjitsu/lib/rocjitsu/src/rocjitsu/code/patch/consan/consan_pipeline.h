@@ -350,6 +350,25 @@ public:
   /// Validation-only mutation facts produced by this static transform. These
   /// counts do not imply that the runtime installed the replacement image.
   ConSanMutationOutcome mutation;
+  /// Stable semantic sites eligible for validation-only fault selection.
+  /// These records support user-facing dry-run and qualification diagnostics;
+  /// they do not describe which mutation was ultimately installed.
+  std::vector<ConSanFaultSite> fault_sites;
+  /// Stable candidate destinations for a barrier-move mutation, including the
+  /// semantic and control-flow reason that each destination was accepted or
+  /// rejected.
+  std::vector<ConSanBarrierMoveDestination> barrier_move_destinations;
+  /// Concrete validation-only mutation plans selected from `fault_sites` and
+  /// `barrier_move_destinations`.
+  std::vector<ConSanFaultMutationPlan> fault_plans;
+  /// Resource alternatives considered by lowering. This is retained for
+  /// aggregate support diagnostics and explicit alternative chronology, not
+  /// as a second source of coverage or installation policy.
+  std::vector<ConSanCandidateResourcePlan> resource_plans;
+  /// Validated byte-level changes emitted by lowering. Final validation,
+  /// runtime metadata registration, and supported patch-proof diagnostics
+  /// consume this one inventory.
+  std::vector<ConSanPatchInfo> patches;
   /// Runtime dispatch contract derived once from validated lowering and typed
   /// semantic coverage, then bound to executable symbols by the HSA adapter.
   ConSanDispatchRequirements dispatch_requirements;
@@ -365,18 +384,11 @@ public:
   /// Derive loader policy solely from the split static result.
   [[nodiscard]] ConSanInstallAction install_action(bool fail_closed) const;
 
-  /// Read lowering telemetry whose typed production owner has not yet been
-  /// extracted. Runtime callers may use this for patch geometry, detailed
-  /// mutation site/plan records, and native-resource details only. Mutation
-  /// counts and stable applied identity, installation policy, replacement
-  /// bytes, diagnostics, inventory, observation policy, and coverage are owned
-  /// by this `TransformResult` and must be read here.
-  [[nodiscard]] const ConSanResult &legacy_mechanism() const { return legacy_compatibility_; }
-
   /// Demote an otherwise installable transform after a runtime-owned resource
-  /// operation fails. This keeps the typed outcome, stage records, replacement
-  /// storage, and temporary mechanism telemetry coherent without allowing the
-  /// runtime adapter to mutate either representation field by field.
+  /// operation fails. This keeps the outcome, stage records, replacement
+  /// storage, patch inventory, and private retry state coherent without
+  /// allowing the runtime adapter to mutate either representation field by
+  /// field.
   void discard_replacement(std::string warning);
 
 private:
@@ -407,10 +419,13 @@ private:
                    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
                    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
                    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-                   std::optional<ConSanResult> mechanism_result);
+                   std::optional<ConSanResult> mechanism_result,
+                   bool retain_moi_retry_inventory = false);
 
-  /// Prototype mechanism result with migrated artifacts moved out.
-  ConSanResult legacy_compatibility_;
+  /// Unmodified MOI semantic inventory retained only between automatic report
+  /// sizing and its bound retry. Ordinary and completed transforms never keep
+  /// this private lowering state.
+  std::optional<ConSanResult> moi_retry_inventory_;
 };
 
 /// Run the non-installable MOI inventory pass before runtime resources exist.
