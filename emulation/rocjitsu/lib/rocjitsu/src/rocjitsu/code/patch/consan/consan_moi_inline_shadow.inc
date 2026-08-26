@@ -3490,7 +3490,11 @@ moi_runtime_workgroup_gate_reserved_words(uint32_t guest_byte_count,
   // than the scalar form: v_readfirstlane plus its VALU-to-SALU dependency
   // wait. Keep the envelope exact enough that large generated objects do not
   // push otherwise-reachable relays beyond SOPP branch range.
-  constexpr uint64_t kXyzGateWordsWithoutGuest = 26u;
+  // The full-tuple Record/Replay gate also restores the saved SCC on its
+  // selected path. Account for that word in addition to the common XYZ gate
+  // and indirect-return envelope. The previous 26-word bound happened to fit
+  // scalar tuples, but rejected a valid vector XYZ+cluster tuple at emission.
+  constexpr uint64_t kXyzGateWordsWithoutGuest = 27u;
   constexpr uint64_t kVectorClusterMixWords = 3u;
   return kXyzGateWordsWithoutGuest + (has_cluster_workgroup_id ? kVectorClusterMixWords : 0u) +
          (static_cast<uint64_t>(guest_byte_count) + sizeof(uint32_t) - 1u) / sizeof(uint32_t);

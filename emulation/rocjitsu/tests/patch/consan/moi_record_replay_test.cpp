@@ -10687,6 +10687,42 @@ TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
             words.end());
 }
 
+TEST(ConSanMoi, Gfx1250DenseRuntimeGateSupportsVectorWorkgroupTupleWithCluster) {
+  constexpr uint32_t kAccessCount = 9u;
+  std::vector<uint32_t> text_words(
+      8u, build_s_mov_b32(/*sdst=*/0u, /*ssrc0=*/0u, ROCJITSU_CODE_ARCH_CDNA5));
+  for (uint32_t index = 0; index < kAccessCount; ++index) {
+    text_words.push_back(0xD8340000u | index * sizeof(uint32_t));
+    text_words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
+  }
+  text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
+
+  ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
+  options.scratch_vgpr = 8u;
+  options.moi_exec_save_sgpr = 40u;
+  options.moi_owner_vgpr = 38u;
+  options.moi_epoch_vgpr = 39u;
+  options.moi_record_replay_workgroup_vgprs = {
+      .x = 94u, .y = 95u, .z = 96u, .cluster_workgroup_id = 97u};
+  options.moi_init_owner_epoch = true;
+  options.moi_report_buffer_address = 0x123456780000ull;
+  options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0);
+  options.moi_runtime_sample_stride = 65'536u;
+  options.moi_track_barriers = false;
+  options.moi_track_atomics = false;
+  options.max_patches = kAccessCount;
+
+  const ConSanResult result = try_patch_consan(
+      make_gfx1250_code_object(text_words, "gfx1250_dense_vector_cluster_runtime_gate"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
+  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
+                               &ConSanPatchInfo::kind),
+            kAccessCount);
+}
+
 TEST(ConSanMoi, Cdna4DenseRecordReplayAccessesDoNotRequireBarrierRouter) {
   constexpr uint32_t kAccessCount = 9u;
   constexpr size_t kLargeTextWords = 33'000u;

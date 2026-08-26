@@ -1971,8 +1971,24 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               cave_text_offset, planned_patch.placement.return_target, runtime_gate_island_words,
               arch);
           if (!gate) {
+            const auto describe_source = [](const ConSanMoiWorkgroupSource &source) {
+              if (source.scalar_src)
+                return std::string("s") + std::to_string(*source.scalar_src);
+              if (source.vector_src)
+                return std::string("v") + std::to_string(*source.vector_src);
+              if (source.private_offset)
+                return std::string("private+") + std::to_string(*source.private_offset);
+              return std::string("absent");
+            };
             result.errors.emplace_back(
-                "ConSan MOI first-light probe could not encode its dense runtime gate");
+                "ConSan MOI first-light probe could not encode its dense runtime gate at " +
+                std::to_string(candidate.text_offset) + " with exec-save s" +
+                std::to_string(*candidate_options.moi_exec_save_sgpr) + " and workgroup sources " +
+                describe_source(planned_patch.runtime_workgroup_sources->x) + "," +
+                describe_source(planned_patch.runtime_workgroup_sources->y) + "," +
+                describe_source(planned_patch.runtime_workgroup_sources->z) + "," +
+                describe_source(
+                    planned_patch.runtime_workgroup_sources->cluster_workgroup_id));
             return;
           }
           dense_gate_words = std::move(*gate);
