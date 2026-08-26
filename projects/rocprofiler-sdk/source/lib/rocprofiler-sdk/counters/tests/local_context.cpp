@@ -139,7 +139,7 @@ TEST(core, local_context_override_stops_queue_cb)
         auto                                        active = as_active(ctx);
         kernel_replay::scoped_local_context_control loop{active};
         kernel_replay::set_toggles_armed(true);
-        EXPECT_EQ(kernel_replay::replay_local_stop_context({.handle = ctx.context_idx}),
+        EXPECT_EQ(kernel_replay::replay_local_disable_context({.handle = ctx.context_idx}),
                   ROCPROFILER_STATUS_SUCCESS);
         kernel_replay::set_toggles_armed(false);
 
@@ -177,14 +177,14 @@ TEST(core, local_context_override_restarts_queue_cb)
     kernel_replay::scoped_local_context_control loop{active};
 
     kernel_replay::set_toggles_armed(true);
-    EXPECT_EQ(kernel_replay::replay_local_stop_context({.handle = ctx.context_idx}),
+    EXPECT_EQ(kernel_replay::replay_local_disable_context({.handle = ctx.context_idx}),
               ROCPROFILER_STATUS_SUCCESS);
     kernel_replay::set_toggles_armed(false);
     invoke_queue_cb(ctx, &hits);
     EXPECT_EQ(hits.load(), 0);
 
     kernel_replay::set_toggles_armed(true);
-    EXPECT_EQ(kernel_replay::replay_local_start_context({.handle = ctx.context_idx}),
+    EXPECT_EQ(kernel_replay::replay_local_enable_context({.handle = ctx.context_idx}),
               ROCPROFILER_STATUS_SUCCESS);
     kernel_replay::set_toggles_armed(false);
     hits.store(0);
@@ -218,7 +218,7 @@ TEST(core, local_context_start_cannot_promote_globally_stopped)
     kernel_replay::scoped_local_context_control loop{active};
 
     kernel_replay::set_toggles_armed(true);
-    EXPECT_EQ(kernel_replay::replay_local_start_context({.handle = ctx.context_idx}),
+    EXPECT_EQ(kernel_replay::replay_local_enable_context({.handle = ctx.context_idx}),
               ROCPROFILER_STATUS_SUCCESS);
     kernel_replay::set_toggles_armed(false);
 

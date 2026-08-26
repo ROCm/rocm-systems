@@ -82,7 +82,7 @@ ROCPROFILER_EXTERN_C_INIT
  */
 typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
 {
-    uint64_t                           size;           ///< sizeof this struct (versioning)
+    uint64_t size;  ///< Size of this struct minus @c reserved_padding (versioning)
     rocprofiler_kernel_dispatch_info_t dispatch_info;  ///< Kernel dispatch info (always set)
 
     uint64_t (*pass_count_cb)(rocprofiler_kernel_dispatch_info_t dispatch_info,
@@ -97,8 +97,10 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
 
     uint64_t total_passes;
 
-    rocprofiler_status_t (*replay_local_start_context_cb)(rocprofiler_context_id_t context_id);
-    rocprofiler_status_t (*replay_local_stop_context_cb)(rocprofiler_context_id_t context_id);
+    rocprofiler_status_t (*replay_local_enable_context_cb)(rocprofiler_context_id_t context_id);
+    rocprofiler_status_t (*replay_local_disable_context_cb)(rocprofiler_context_id_t context_id);
+
+    uint8_t reserved_padding[64];  ///< reserved for extensions w/o ABI break
 
     /// @var pass_count_cb
     /// @brief [CONFIG] Tool-provided callback returning the number of replay passes.
@@ -128,21 +130,20 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     /// @brief [PASS] Total passes if known (the value passed to @c pass_count_cb),
     /// else 0. Read-only.
     ///
-    /// @var replay_local_start_context_cb
-    /// @var replay_local_stop_context_cb
-    /// @brief [PASS] Localized context toggles. The SDK populates these function
-    /// pointers before each PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the tool
-    /// invokes them instead of the global @ref rocprofiler_start_context /
-    /// @ref rocprofiler_stop_context to enable or disable an already-active context
-    /// for the current replay loop only. They record overrides in a thread-scoped map;
-    /// global context state is never modified. Semantics:
+    /// @var replay_local_enable_context_cb
+    /// @var replay_local_disable_context_cb
+    /// @brief [PASS] Per-pass context enable/disable mask. The SDK populates these function
+    /// pointers before each PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER; the tool calls them
+    /// to mark an already-active context enabled or disabled for the current replay loop
+    /// only. They record overrides in a thread-scoped map and do **not** invoke global
+    /// @ref rocprofiler_start_context / @ref rocprofiler_stop_context. Semantics:
     ///  - Only valid to call during PASS @ref ROCPROFILER_CALLBACK_PHASE_ENTER.
-    ///  - Sticky across passes: a context stopped in one pass stays stopped until it
-    ///    is started again within the same replay loop (and vice versa). A tool therefore
-    ///    positions a context once rather than re-issuing the same toggles every pass.
+    ///  - Sticky across passes: a context disabled in one pass stays disabled until it
+    ///    is enabled again within the same replay loop (and vice versa). A tool therefore
+    ///    positions a context once rather than re-issuing the same mask every pass.
     ///  - Scoped to the replay loop: each context's pre-replay active/inactive state
     ///    is restored once the loop completes. Global context state is never modified.
-    ///  - A local start only undoes a prior local stop; it cannot promote a context that is
+    ///  - A local enable only undoes a prior local disable; it cannot promote a context that is
     ///    globally inactive (its service/callback thread may already be stopped).
     ///  - Coverage varies by service. Kernel dispatch tracing and dispatch thread trace
     ///    observe a local stop only: they skip a dispatch whose context is forced off, and

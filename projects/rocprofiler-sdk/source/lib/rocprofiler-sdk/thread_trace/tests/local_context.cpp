@@ -135,7 +135,7 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
         auto                                        active = as_active(dummy);
         kernel_replay::scoped_local_context_control loop{active};
         kernel_replay::set_toggles_armed(true);
-        EXPECT_EQ(kernel_replay::replay_local_stop_context(params.context_id),
+        EXPECT_EQ(kernel_replay::replay_local_disable_context(params.context_id),
                   ROCPROFILER_STATUS_SUCCESS);
         kernel_replay::set_toggles_armed(false);
 
@@ -187,7 +187,7 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
         auto                                        active = as_active(dummy);
         kernel_replay::scoped_local_context_control loop{active};
         kernel_replay::set_toggles_armed(true);
-        EXPECT_EQ(kernel_replay::replay_local_start_context(params.context_id),
+        EXPECT_EQ(kernel_replay::replay_local_enable_context(params.context_id),
                   ROCPROFILER_STATUS_SUCCESS);
         kernel_replay::set_toggles_armed(false);
 

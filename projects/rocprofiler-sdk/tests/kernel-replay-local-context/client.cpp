@@ -172,9 +172,9 @@ maybe_local_toggle(rocprofiler_callback_tracing_kernel_replay_data_t* p,
 
     if(g_start_pass >= 0 && static_cast<int64_t>(p->current_pass) == g_start_pass)
     {
-        if(p->replay_local_start_context_cb)
+        if(p->replay_local_enable_context_cb)
         {
-            auto st = p->replay_local_start_context_cb(ctx);
+            auto st = p->replay_local_enable_context_cb(ctx);
             if(st == ROCPROFILER_STATUS_SUCCESS)
                 g_local_starts.fetch_add(1);
             else
@@ -187,9 +187,9 @@ maybe_local_toggle(rocprofiler_callback_tracing_kernel_replay_data_t* p,
 
     if(g_stop_pass >= 0 && static_cast<int64_t>(p->current_pass) == g_stop_pass)
     {
-        if(p->replay_local_stop_context_cb)
+        if(p->replay_local_disable_context_cb)
         {
-            auto st = p->replay_local_stop_context_cb(ctx);
+            auto st = p->replay_local_disable_context_cb(ctx);
             if(st == ROCPROFILER_STATUS_SUCCESS)
                 g_local_stops.fetch_add(1);
             else

@@ -54,7 +54,7 @@ deliberate:
 ## Localized context control
 
 The pointers are **wired**. During PASS `PHASE_ENTER` the SDK populates
-`replay_local_start_context_cb` / `replay_local_stop_context_cb`. Semantics:
+`replay_local_enable_context_cb` / `replay_local_disable_context_cb`. Semantics:
 
 - Only legal during PASS `PHASE_ENTER`.
 - Sticky across passes (avoids reprogramming PC sampling hardware on every pass).

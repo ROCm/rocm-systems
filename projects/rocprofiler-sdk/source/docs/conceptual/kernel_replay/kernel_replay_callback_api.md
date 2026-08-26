@@ -73,8 +73,10 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     uint64_t total_passes;    // 0 for an indefinite loop
 
     // [PASS] SDK-provided; the tool calls these during PASS PHASE_ENTER
-    rocprofiler_status_t (*replay_local_start_context_cb)(rocprofiler_context_id_t context_id);
-    rocprofiler_status_t (*replay_local_stop_context_cb)(rocprofiler_context_id_t context_id);
+    rocprofiler_status_t (*replay_local_enable_context_cb)(rocprofiler_context_id_t context_id);
+    rocprofiler_status_t (*replay_local_disable_context_cb)(rocprofiler_context_id_t context_id);
+
+    uint8_t reserved_padding[64];  // reserved for extensions w/o ABI break
 } rocprofiler_callback_tracing_kernel_replay_data_t;
 ```
 
@@ -102,6 +104,17 @@ Each pass produces its own kernel start/end timestamps in dispatch tracing and c
 Those timestamps differ per pass even though `dispatch_info.dispatch_id` is the same for all of
 them. Distinguish passes with `current_pass` (or the JSON `replay_pass` field on counter records),
 not with `dispatch_id` alone.
+
+### Correlation ids
+
+The SDK captures the thread, internal, and ancestor correlation ids once when the replay window
+opens and threads them through every `CONFIG` and `PASS` callback for that dispatch. They are the
+same on every pass, just like `dispatch_info.dispatch_id`. Record callbacks therefore arrive once
+per pass with identical correlation and dispatch ids but different start/end timestamps.
+
+Do not key side tables on `dispatch_id` alone when storing per-pass counter or trace data — merge
+on `(dispatch_id, current_pass)` or use pass-local state set during `PASS` `PHASE_ENTER`. On
+``rocprofv3``, the counter JSON `replay_pass` field (stacked tool PR) carries the pass index.
 
 ## Pass-count semantics
 
@@ -131,22 +144,23 @@ for example the number of counter groups collectable on the dispatch's agent.
 Tools frequently want different services active on different passes — for example collect hardware
 counters on every pass but PC sampling on the last pass only. Calling the global
 `rocprofiler_start_context()` / `rocprofiler_stop_context()` would leak those changes into other,
-non-replayed dispatches. Instead the tool calls the localized toggles delivered in the `PASS`
-payload:
+non-replayed dispatches. Instead the tool calls the localized enable/disable callbacks delivered in
+the `PASS` payload:
 
 ```c
-payload->replay_local_stop_context_cb(my_pc_sampling_ctx);
+payload->replay_local_disable_context_cb(my_pc_sampling_ctx);
 ```
 
 Contexts are configured and started **globally before replay** (outside the replay callbacks).
-The localized toggles only mask which of those already-active contexts participate in each pass;
-they do not create contexts and never mutate global state.
+The localized enable/disable calls only mask which of those already-active contexts participate in
+each pass; they do not create contexts, do not invoke global start/stop, and never mutate global
+state.
 
 Semantics:
 
 - **Only legal during `PASS` `PHASE_ENTER`.** Calls made outside that window return
   `ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR` and record nothing.
-- **Sticky across passes.** A context stopped in one pass stays stopped until it is started again
+- **Sticky across passes.** A context disabled in one pass stays disabled until it is enabled again
   within the same replay loop, and vice versa.
 - **Scoped to the replay loop.** Each context's pre-replay active or inactive state is in effect
   again once the loop completes.
@@ -267,6 +281,6 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Continue decision | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `should_continue_replay()` |
 | Dispatch info population | `source/lib/rocprofiler-sdk/kernel_replay/replay_callbacks.cpp` | `make_dispatch_info()` |
 | Operation name/id queries | `source/lib/rocprofiler-sdk/kernel_replay/kernel_replay.cpp` | `name_by_id()`, `id_by_name()` |
-| Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_start_context()`, `replay_local_stop_context()` |
+| Localized context callbacks | `source/lib/rocprofiler-sdk/kernel_replay/local_context.cpp` | `replay_local_enable_context()`, `replay_local_disable_context()` |
 | Replay loop and dispatch-id reservation | `source/lib/rocprofiler-sdk/hsa/queue.cpp` | `WriteInterceptor` |
 | Tests | `source/lib/rocprofiler-sdk/kernel_replay/tests/` | `local_context.cpp` |
