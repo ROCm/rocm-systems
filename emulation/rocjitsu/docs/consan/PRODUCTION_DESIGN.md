@@ -2616,6 +2616,35 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   dispatch-identity rows across the engines in 13.78 seconds. E2E validation
   remains outside this deletion work.
 
+### Slice 4N: delete hook rendering of prototype placement counters
+
+- **Completed deletion:** The HSA hook no longer renders SuperCollider flat
+  selection, discarded branch work, LDS relay routing, MOI relay routing,
+  reservoir allocation, or planner work counters from the compatibility
+  mechanism. These were exact implementation-work measurements, not semantic
+  coverage, evidence, mutation, capacity, or user-diagnostic contracts.
+- **Contract audit:** No validation parser, device oracle, or fault-inventory
+  collector consumes these five records. The only consumers outside the
+  lowerers were two hook tests that manufactured hundreds of arbitrary counter
+  values to preserve the exact prototype log spelling; those tests are
+  deleted. Stable patch timing, resource summaries, fault/site identities,
+  coverage, evidence loss, and analysis-verdict records remain unchanged.
+- **Retained component tests:** Relay-router and lowerer tests continue to use
+  the internal counters to prove bounded planning work, exhaustion reporting,
+  deterministic routing, reservoir reuse, and placement behavior. Removing a
+  cross-layer debug rendering therefore does not discard the tests that
+  falsify the underlying algorithms.
+- **Deletion result:** Production source is 127 net lines smaller and source
+  plus tests is 432 net lines smaller. No replacement projection, renderer, or
+  compatibility type was added.
+- **Completed checked-in gate:** The selected ConSan host suite passed 1,508
+  of 1,510 tests with two external-object benchmarks intentionally skipped,
+  and the complete HSA-hook suite passed all 194 tests. All 2,878 simulator
+  device rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in
+  65.52 seconds. The immediately preceding dispatch-contract slice exercised
+  the affected runtime seam on 44 physical-gfx950 rows; this log-only deletion
+  does not alter device execution. E2E validation remains outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner
