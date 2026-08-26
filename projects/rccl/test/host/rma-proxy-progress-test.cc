@@ -483,6 +483,44 @@ TEST_F(RmaProxyProgressTest, IssuePutSignal_NullRequestOnSuccess_ReturnsError) {
     EXPECT_EQ(inflight_[target], 0u);
 }
 
+// inflightRequests[] is indexed by TARGET rank while circularBuffers / cis /
+// pis / inProgressQueues are indexed by QUEUE peer. A target at its ceiling must
+// block the op even when the peer's own credit slot is idle.
+TEST_F(RmaProxyProgressTest, SinglePut_CreditIsPerTargetNotPerPeer) {
+    const int peer = 1;
+    const uint32_t target = 0;       // deliberately != peer
+
+    ctx_->maxInflightRequests = 1;
+    inflight_[target] = 1;           // the target is at its ceiling
+    inflight_[peer]   = 0;           // the peer's own slot is idle
+
+    PushPendingPutSignal(peer, target);
+
+    EXPECT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(net_.issueCalls, 0);   // blocked by the TARGET's credit
+    EXPECT_EQ(cis_[peer], 0u);
+    EXPECT_EQ(InProgressHead(peer), nullptr);
+}
+
+// Mixed-target group: each op is gated by its own target's credit, so a shortage
+// on one target head-of-line-blocks the group rather than letting a later op
+// through on a different target's budget.
+TEST_F(RmaProxyProgressTest, GroupPut_MixedTargets_GatedByEachOpsOwnTarget) {
+    const int peer = 1;
+
+    ctx_->maxInflightRequests = 2;
+    inflight_[1] = 2;                // target 1 exhausted; target 0 idle
+
+    ncclRmaProxyDesc* desc = PushPendingPutGroup(peer, {0, 1});
+
+    ASSERT_EQ(ncclRmaProxyPollNonPersistDesc(&rma_, ctx_.get(), peer), ncclSuccess);
+    EXPECT_EQ(desc->putSignalGroup.nIssued, 1);   // only the target-0 op issued
+    EXPECT_EQ(inflight_[0], 1u);
+    EXPECT_EQ(inflight_[1], 2u);                  // untouched
+    EXPECT_EQ(cis_[peer], 0u);                    // group stays pending
+    EXPECT_EQ(InProgressHead(peer), nullptr);
+}
+
 TEST_F(RmaProxyProgressTest, GroupPut_AllOpsFit_MovesToInProgressAndAdvancesCI) {
     const int peer = 1;
 
