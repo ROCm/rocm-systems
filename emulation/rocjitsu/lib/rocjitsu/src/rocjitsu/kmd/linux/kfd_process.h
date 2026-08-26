@@ -14,6 +14,7 @@
 
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/unique_handle.h"
 
@@ -192,22 +193,22 @@ public:
     /// debug session ends (DISABLE) or the process tears down. Engaged only in
     /// daemon mode; empty in local mode, where @ref dbg_fd is the debugger's own
     /// descriptor and is not owned here. RAII replaces an explicit close.
-    util::UniqueHandle owned_dbg_fd;
+    UniqueDriverFd owned_dbg_fd;
 
     /// @brief Debugger-authorized access to the target's address space.
     /// @details The ptrace parent opens /proc/<target>/mem and transfers it to
     /// the daemon, which cannot use process_vm_readv/process_vm_writev itself.
-    util::UniqueHandle target_mem_fd;
+    UniqueDriverFd target_mem_fd;
 
     /// @brief Pins the target process identity and reports target exit.
     /// @details Prevents a stale session from being mistaken for a later process
     /// that reuses the same numeric pid.
-    util::UniqueHandle target_pidfd;
+    UniqueDriverFd target_pidfd;
 
     /// @brief Pins the target's procfs directory used for ptrace authorization.
     /// @details Status is opened relative to this descriptor so authorization
     /// cannot silently switch to a process that reuses the numeric pid.
-    util::UniqueHandle target_procfd;
+    UniqueDriverFd target_procfd;
 
     /// @brief Mirrors @c kfd_process::debugger_process (stored as pid instead of pointer).
     /// Linux PID of the attached debugger (ptrace parent). 0 when not attached.
@@ -230,7 +231,7 @@ public:
     /// @brief Pins the debugger process identity and reports debugger exit.
     /// @details Mirrors the kernel's debugger-process notifier: the session is
     /// disabled when the debugger task exits, even if the target remains alive.
-    util::UniqueHandle debugger_pidfd;
+    UniqueDriverFd debugger_pidfd;
 
     /// @brief One programmed hardware address-watch register (TCP_WATCH0..3).
     struct AddressWatch {

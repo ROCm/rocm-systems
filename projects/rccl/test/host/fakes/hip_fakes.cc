@@ -296,12 +296,13 @@ const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
 hipError_t hipGetLastError(void) { return hipErrorInvalidValue; }
 
-hipError_t hipHostFree(void*) { return hipErrorInvalidValue; }
+hipError_t hipHostFree(void* ptr) { std::free(ptr); return hipSuccess; }
 
-hipError_t hipHostMalloc(void** ptr, size_t, unsigned int)
+hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int)
 {
-    if (ptr) *ptr = nullptr;
-    return hipErrorInvalidValue;
+    if (!ptr) return hipErrorInvalidValue;
+    *ptr = std::malloc(size ? size : 1);
+    return *ptr ? hipSuccess : hipErrorOutOfMemory;
 }
 
 hipError_t hipIpcCloseMemHandle(void*) { return hipErrorInvalidValue; }

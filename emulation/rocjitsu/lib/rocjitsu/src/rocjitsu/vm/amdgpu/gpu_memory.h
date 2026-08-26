@@ -245,9 +245,12 @@ public:
 
   /// @brief Read a contiguous range from simulated GPU memory.
   /// @details Handles each page through mapped host memory, client memory, or
-  /// sparse backing memory. A mapped access clipped by a host extent remains
-  /// zero-filled and emits a VM diagnostic so a future strict-fault mode can
-  /// reuse the same boundary detection.
+  /// sparse backing memory. Every path resolves a whole page chunk at a time,
+  /// so a read costs one page-table walk and one page-stripe lock per page it
+  /// touches rather than one per byte -- which is what makes this cheap enough
+  /// for the I$ to fill a line through. A mapped access clipped by a host
+  /// extent remains zero-filled and emits a VM diagnostic so a future
+  /// strict-fault mode can reuse the same boundary detection.
   void read_block(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid = 0) const {
     for_each_page_chunk(addr, dst.size(), [&](uint64_t ea, size_t offset, size_t chunk) {
       auto out = dst.subspan(offset, chunk);
@@ -255,8 +258,8 @@ public:
         return;
       if (vmid > 0 && read_client_memory(ea, out.data(), chunk, vmid))
         return;
-      for (size_t i = 0; i < chunk; ++i)
-        out[i] = simdojo::SparseMemory::read8(ea + i);
+      // The chunk is within one page, so this is a single sparse-page lock.
+      simdojo::SparseMemory::read_block(ea, out);
     });
   }
 
@@ -532,6 +535,45 @@ public:
     if (vmid > 0 && read_client_memory(addr, &val, 8, vmid))
       return val;
     return SparseMemory::read64(addr);
+  }
+
+  /// @brief Try to read a 64-bit location as ONE atomic acquire load.
+  /// @details An AQL write pointer, a read pointer, a completion-signal value: the
+  /// other side publishes these with a single atomic store. Copying them byte-wise
+  /// can observe a half-updated value, and -- just as damaging -- leaves the reader
+  /// with no happens-before edge to that store, so everything the store publishes
+  /// (the packet a new write index makes visible) is read unsynchronized too.
+  /// @returns false, writing nothing, when the eight bytes are not one aligned
+  ///          mapped span; the caller keeps whatever slower path it already had,
+  ///          since a split or unmapped range cannot be read atomically anyway.
+  [[nodiscard]] bool try_read_u64_atomic(uint64_t addr, uint64_t *out, uint32_t vmid) const {
+    constexpr size_t kLen = sizeof(uint64_t);
+    if (addr % alignof(uint64_t) != 0 || (addr & PAGE_MASK) + kLen > PAGE_SIZE)
+      return false;
+
+    bool loaded = false;
+    const bool mapped = with_page_mapping(
+        addr, vmid, [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
+          (void)passthrough_page; // Passthrough pages keep the addressability-checked copy.
+          if (!pte)
+            return;
+          uint8_t *whole = nullptr;
+          size_t spans = 0;
+          const size_t mapped_bytes =
+              for_each_mapped_span(*pte, addr & PAGE_MASK, kLen,
+                                   [&](size_t value_offset, uint8_t *host_ptr, size_t span_size) {
+                                     ++spans;
+                                     if (value_offset == 0 && span_size == kLen)
+                                       whole = host_ptr;
+                                   });
+          if (mapped_bytes != kLen || spans != 1 || whole == nullptr ||
+              reinterpret_cast<uintptr_t>(whole) % alignof(uint64_t) != 0)
+            return;
+          *out = std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(whole))
+                     .load(std::memory_order_acquire);
+          loaded = true;
+        });
+    return mapped && loaded;
   }
 
   void write8(uint64_t addr, uint8_t val, uint32_t vmid = 0) {
