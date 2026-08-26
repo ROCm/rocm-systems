@@ -239,10 +239,9 @@ class InstructionLine(Base):
         ForeignKey(f"{PREFIX}kernel_symbol.kernel_symbol_uuid"),
         nullable=False,
     )
-    # TODO: populate from the disassembled mnemonic. This is the static
-    # compiler class of the instruction at this offset (Matrix / Vector /
-    # Scalar / Branch), one value per line. Distinct from InstructionSample,
-    # which counts the issue state seen at each sample.
+    # The execution pipeline that runs the instruction at this offset (VALU /
+    # MATRIX / SCALAR / ...), one value per line. Distinct from
+    # InstructionSample, which counts the issue state seen at each sample.
     instruction_type_uuid = Column(
         Integer,
         ForeignKey(f"{PREFIX}instruction_type_lookup.instruction_type_lookup_uuid"),
