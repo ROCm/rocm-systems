@@ -261,14 +261,13 @@ bool TransformResult::well_formed() const {
   }
   switch (outcome) {
   case ConSanTransformOutcome::ModifiedValid:
-    if (!final_validation_passed || replacement_bytes.empty())
+    if (replacement_bytes.empty())
       return false;
     break;
   case ConSanTransformOutcome::Unchanged:
   case ConSanTransformOutcome::Unsupported:
   case ConSanTransformOutcome::Invalid:
-    if (final_validation_passed || !replacement_bytes.empty() ||
-        !dispatch_requirements.kernels.empty())
+    if (!replacement_bytes.empty() || !dispatch_requirements.kernels.empty())
       return false;
     break;
   default:
@@ -288,7 +287,7 @@ bool TransformResult::well_formed() const {
 ConSanInstallAction TransformResult::install_action(bool fail_closed) const {
   switch (outcome) {
   case ConSanTransformOutcome::ModifiedValid:
-    if (final_validation_passed && !replacement_bytes.empty())
+    if (!replacement_bytes.empty())
       return ConSanInstallAction::LoadReplacement;
     return ConSanInstallAction::Reject;
   case ConSanTransformOutcome::Unchanged:
@@ -307,7 +306,6 @@ void TransformResult::discard_replacement(std::string warning) {
                                                "runtime-owned report allocation failed");
   }
   outcome = ConSanTransformOutcome::Unsupported;
-  final_validation_passed = false;
   replacement_bytes.clear();
   patches.clear();
   dispatch_requirements = {};
@@ -461,7 +459,6 @@ TransformResult TransformResult::publish_optional(
   result.coverage_ledger = std::move(legacy.coverage_ledger);
   result.replacement_bytes = std::move(legacy.elf_bytes);
   result.outcome = legacy.outcome;
-  result.final_validation_passed = legacy.final_validation_passed;
   result.mutation = std::exchange(legacy.mutation, {});
   result.fault_sites = std::move(legacy.fault_sites);
   result.barrier_move_destinations = std::move(legacy.barrier_move_destinations);
@@ -594,7 +591,6 @@ TransformResult TransformResult::publish_optional(
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.replacement_bytes.clear();
       result.dispatch_requirements = {};
-      result.final_validation_passed = false;
       result.patches.clear();
     }
   }

@@ -78,7 +78,7 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.planned, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
@@ -137,7 +137,7 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.planned, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
@@ -216,7 +216,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
       << (execution.errors.empty() ? "" : execution.errors.front());
   EXPECT_TRUE(execution.modified);
   EXPECT_EQ(execution.mutation.fault.applied, 1u);
-  EXPECT_TRUE(execution.final_validation_passed);
+  EXPECT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(execution.patches.size(), 4u);
   EXPECT_TRUE(std::ranges::all_of(execution.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineBarrierIdScopeRewrite;
@@ -309,7 +309,7 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   const ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.mutation.applied_fault_logical_identity,
@@ -419,7 +419,7 @@ TEST(ConSan, FaultBarrierLifecycleComposesWithMoiAsOneRetainedMutation) {
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
@@ -502,7 +502,7 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(result.modified);
-  EXPECT_FALSE(result.final_validation_passed);
+  EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.staged_composition_validated);
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
@@ -682,7 +682,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
   const ConSanResult execution = try_patch_consan(bytes, options);
   ASSERT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(execution.errors);
-  EXPECT_TRUE(execution.final_validation_passed);
+  EXPECT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(execution.mutation.fault.requested, 1u);
   EXPECT_EQ(execution.mutation.fault.planned, 1u);
   EXPECT_EQ(execution.mutation.fault.applied, 1u);
@@ -829,7 +829,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceAcceptsBoundedQwenStylePairOnlyInFault
   const ConSanResult execution = try_patch_consan(bytes, execution_options);
   ASSERT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(execution.errors);
-  EXPECT_TRUE(execution.final_validation_passed);
+  EXPECT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(execution.mutation.fault.applied, 1u);
   EXPECT_EQ(execution.mutation.applied_fault_logical_identity, sequence->identity);
   ASSERT_EQ(execution.patches.size(), 2u);
@@ -929,7 +929,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCompletePairsAsOneMutation) {
   const ConSanResult execution = try_patch_consan(bytes, options);
   ASSERT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(execution.errors);
-  EXPECT_TRUE(execution.final_validation_passed);
+  EXPECT_EQ(execution.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(execution.mutation.fault.applied, 1u);
   ASSERT_EQ(execution.patches.size(), 4u);
   EXPECT_TRUE(std::ranges::all_of(execution.patches, [](const ConSanPatchInfo &patch) {
@@ -1201,7 +1201,7 @@ TEST(ConSan, FaultBarrierIdScopePairsBoundedSignalWaitWithInterveningInstruction
   ASSERT_TRUE(consan_patch_succeeded(applied)) << testing::PrintToString(applied.errors);
   EXPECT_TRUE(applied.modified);
   EXPECT_EQ(applied.mutation.fault.applied, 1u);
-  EXPECT_TRUE(applied.final_validation_passed);
+  EXPECT_EQ(applied.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSan, FaultBarrierIdScopeDryRunRejectsInexactAndInvalidTargets) {
@@ -1272,7 +1272,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   EXPECT_FALSE(result.elf_bytes.empty());
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 2u);
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineBarrierIdScopeRewrite);
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineBarrierIdScopeRewrite);

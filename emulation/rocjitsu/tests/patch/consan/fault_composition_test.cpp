@@ -114,7 +114,7 @@ TEST(ConSan, PerturbationEmissionOrdersBarrierSleepAtSelectedEdge) {
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
   EXPECT_EQ(release.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(release.modified);
-  EXPECT_TRUE(release.final_validation_passed);
+  EXPECT_EQ(release.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(release.mutation.perturbation.planned, 1u);
   EXPECT_EQ(release.mutation.perturbation.applied, 1u);
   ASSERT_EQ(release.patches.size(), 1u);
@@ -250,7 +250,7 @@ TEST(ConSan, AtomicOrderFaultComposesWithPerturbationAndAccessInstrumentation) {
   const ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.mutation.perturbation.applied, 1u);
@@ -289,7 +289,7 @@ TEST(ConSan, AtomicScopeFaultComposesWithPerturbationAndAccessInstrumentation) {
   const ConSanResult result = try_patch_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.mutation.perturbation.applied, 1u);
@@ -414,7 +414,7 @@ TEST(ConSan, BarrierCompositeRollsBackWhenDropDestroysSelectedEdge) {
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(result.modified);
-  EXPECT_FALSE(result.final_validation_passed);
+  EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.staged_composition_validated);
   EXPECT_TRUE(result.elf_bytes.empty());
   EXPECT_TRUE(result.patches.empty());
@@ -649,7 +649,7 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   const ConSanResult composed = try_patch_consan(bytes, options);
   ASSERT_TRUE(composed.errors.empty()) << testing::PrintToString(composed.errors);
   EXPECT_EQ(composed.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(composed.final_validation_passed);
+  EXPECT_EQ(composed.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(composed.mutation.perturbation.applied, 1u);
   ASSERT_EQ(composed.patches.size(), 2u);
   EXPECT_EQ(composed.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
@@ -676,7 +676,7 @@ TEST(ConSan, PerturbationCompositionSharesBudgetWithOneRedundantLdsAccess) {
   const ConSanResult all_supported = try_patch_consan(bytes, options);
   ASSERT_TRUE(all_supported.errors.empty()) << testing::PrintToString(all_supported.errors);
   EXPECT_EQ(all_supported.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(all_supported.final_validation_passed);
+  EXPECT_EQ(all_supported.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(all_supported.mutation.perturbation.applied, 1u);
   ASSERT_EQ(all_supported.patches.size(), 2u);
   EXPECT_EQ(all_supported.patches[0].kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
@@ -900,7 +900,7 @@ TEST(ConSan, PerturbationHostControlsAreStableExactAndFailClosed) {
   EXPECT_FALSE(unreachable.modified);
   EXPECT_TRUE(unreachable.elf_bytes.empty());
   EXPECT_TRUE(unreachable.patches.empty());
-  EXPECT_FALSE(unreachable.final_validation_passed);
+  EXPECT_NE(unreachable.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(unreachable.mutation.perturbation.planned, 1u);
   EXPECT_EQ(unreachable.mutation.perturbation.applied, 0u);
   EXPECT_TRUE(std::ranges::any_of(unreachable.warnings, [](const std::string &warning) {

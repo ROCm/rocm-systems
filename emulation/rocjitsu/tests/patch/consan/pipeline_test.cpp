@@ -356,7 +356,6 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   mechanism.coverage_ledger = coverage;
   mechanism.outcome = ConSanTransformOutcome::ModifiedValid;
   mechanism.modified = true;
-  mechanism.final_validation_passed = true;
   mechanism.elf_bytes = {0x7f, 'E', 'L', 'F'};
   mechanism.fault_sites.emplace_back().identity = "published-fault-site";
   mechanism.barrier_move_destinations.emplace_back().identity = "published-destination";
@@ -730,10 +729,7 @@ TEST(ConSanPipeline, InstallActionTruthTableUsesOnlySplitStaticResult) {
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
 
   result.outcome = ConSanTransformOutcome::ModifiedValid;
-  result.final_validation_passed = false;
   result.replacement_bytes = {1};
-  EXPECT_EQ(result.install_action(false), ConSanInstallAction::Reject);
-  result.final_validation_passed = true;
   result.replacement_bytes.clear();
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::Reject);
   result.replacement_bytes = {1};
@@ -959,7 +955,6 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
 
   ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_FALSE(result.final_validation_passed);
   EXPECT_TRUE(result.replacement_bytes.empty());
   EXPECT_TRUE(result.dispatch_requirements.kernels.empty());
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadOriginal);

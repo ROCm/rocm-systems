@@ -3473,6 +3473,37 @@ analysis completed.
   five supported targets pass in 64.71 seconds. E2E validation remains outside
   this work.
 
+### Slice 5J: make the transform outcome authoritative for validation
+
+- **Single state contract:** `ConSanTransformOutcome::ModifiedValid` means that
+  replacement bytes completed structural and semantic final validation. No
+  other outcome is validated or installable. The outcome and the presence of
+  replacement bytes are therefore sufficient to validate a result and derive
+  loader policy.
+- **Completed deletion:** Both `ConSanResult` and `TransformResult` no longer
+  carry a `final_validation_passed` boolean that duplicated the outcome. All
+  writes, clears, copies, well-formedness checks, loader-policy branches, and
+  staged-composition checks now use the authoritative enum. This removes the
+  formerly representable contradiction “ModifiedValid but not validated.”
+- **Contract-focused tests:** Existing final-validation assertions now check
+  `ModifiedValid` directly. The typed install-action truth table retains the
+  missing-replacement rejection case. The hook integration test that formerly
+  fabricated the contradictory boolean state now proves rejection of a
+  `ModifiedValid` fixture with missing replacement bytes. Retry equivalence
+  tests no longer compare the same outcome twice.
+- **Fuzzer maintenance:** The transform fuzzer now consumes the authoritative
+  outcome and `ProgramInventory` identity. Its unmatched-wait oracle derives
+  the original text-section file offset from `AmdGpuCodeObject`, replacing
+  stale references to raw result fields deleted in earlier slices. The normal
+  build does not configure fuzz targets, so the source was independently
+  syntax-checked with the build's Clang flags and profile definition.
+- **Deletion result:** Production source is 13 net lines smaller and source
+  plus tests is 33 net lines smaller.
+- **Completed checked-in gate:** The complete host gate passes 1,508 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 76.71
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

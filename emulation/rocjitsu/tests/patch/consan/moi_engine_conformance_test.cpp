@@ -59,7 +59,8 @@ TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors);
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
             kAccessCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
@@ -89,7 +90,8 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100NativeLdsAccess) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+        << testing::PrintToString(result.errors);
     EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1100);
     EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA3);
     EXPECT_EQ(
@@ -124,7 +126,8 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100SingletonWorkgroupBarrier) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+        << testing::PrintToString(result.errors);
     EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1100);
     EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA3);
     EXPECT_EQ(std::ranges::count(result.patches, expected_kind, &ConSanPatchInfo::kind), 1u)
@@ -159,7 +162,8 @@ TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) 
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+    ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+        << testing::PrintToString(result.errors);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
     const ConSanMoiCandidate &candidate = result.moi_candidates.front();
     EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
@@ -243,7 +247,8 @@ TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsR
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors);
   const auto patch =
       std::ranges::find(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -280,7 +285,8 @@ TEST_P(MoiEngineConformanceTest, InstrumentsEveryAdjacentAccessInsideRelocationR
   const auto result = try_patch_consan(bytes, conformance_options(test_case, 2));
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors);
   // Relocation must not silently consume another admitted source site: every
   // adjacent access retains an independently identifiable instrumentation patch.
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
@@ -321,7 +327,8 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
+      << testing::PrintToString(result.errors);
   EXPECT_EQ(std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);

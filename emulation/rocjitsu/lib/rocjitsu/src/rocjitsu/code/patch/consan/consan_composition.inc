@@ -267,7 +267,6 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
 [[nodiscard]] ConSanResult rollback_composite_mutation(ConSanResult result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.modified = false;
-  result.final_validation_passed = false;
   result.staged_composition_validated = false;
   result.elf_bytes.clear();
   result.patches.clear();
@@ -307,7 +306,6 @@ void reset_inventory_for_fault_planning(const ConSanOptions &options, ConSanResu
   // outcome or any mutation-stage state from the sizing pass.
   result.warnings.resize(result.moi_stage_warning_begin);
   result.outcome = ConSanTransformOutcome::Unchanged;
-  result.final_validation_passed = false;
   result.staged_composition_validated = false;
   result.mutation.fault.requested = requested_fault_mutation_count(options);
   result.mutation.fault.planned = 0;
@@ -562,7 +560,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     prepend_stage_diagnostics(instrument_result, mutation_stage);
     switch (instrument_result.outcome) {
     case ConSanTransformOutcome::ModifiedValid:
-      if (!fault_result.final_validation_passed || !instrument_result.final_validation_passed) {
+      if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid) {
         instrument_result.errors.emplace_back(
             "ConSan staged composition is missing an independently validated stage");
         instrument_result.outcome = ConSanTransformOutcome::Invalid;

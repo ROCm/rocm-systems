@@ -193,7 +193,6 @@ struct ConSanMutationOutcome {
 
 struct ConSanResult {
   bool modified = false;
-  bool final_validation_passed = false;
   /// Both the pristine-to-mutation and mutation-to-instrumentation images were
   /// independently structurally and semantically validated before their patch
   /// inventories were composed.

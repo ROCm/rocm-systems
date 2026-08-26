@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/patch/consan/consan.h"
 #include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
 
@@ -20,10 +21,8 @@ void require(bool condition) {
 void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOptions &options) {
   const rocjitsu::ConSanResult result = rocjitsu::try_patch_consan(input, options);
   require(result.program_inventory.code_object_id() == rocjitsu::make_consan_code_object_id(input));
-  require(result.input_size == input.size());
   if (result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid) {
     require(result.modified);
-    require(result.final_validation_passed);
     require(!result.elf_bytes.empty());
     require(!result.patches.empty());
     require(rocjitsu::validate_consan_modified_elf(input, result).empty());
@@ -37,9 +36,11 @@ void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOp
         abort_patch = &patch;
       }
       require(abort_patch != nullptr);
-      require(result.text_sections.size() == 1);
+      const rocjitsu::AmdGpuCodeObject original(input.data(), input.size());
+      require(original.is_valid());
+      require(original.text_sections().size() == 1);
       const uint64_t file_offset =
-          result.text_sections.front().file_offset + abort_patch->anchor_offset;
+          original.text_sections().front()->sectionOffset() + abort_patch->anchor_offset;
       require(file_offset + sizeof(uint32_t) <= input.size());
       require(file_offset + sizeof(uint32_t) <= result.elf_bytes.size());
       uint32_t original_word = 0;
@@ -52,7 +53,6 @@ void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOp
     }
   } else {
     require(!result.modified);
-    require(!result.final_validation_passed);
     require(result.elf_bytes.empty());
     require(result.patches.empty());
   }

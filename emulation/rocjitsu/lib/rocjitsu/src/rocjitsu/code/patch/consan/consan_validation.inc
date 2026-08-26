@@ -4579,7 +4579,6 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   // to turn an Unsupported result back into ModifiedValid.
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
     result.modified = false;
-    result.final_validation_passed = false;
     result.elf_bytes.clear();
     result.patches.clear();
     result.mutation.applied_fault_logical_identity.reset();
@@ -4598,7 +4597,6 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
                            std::make_move_iterator(validation_errors.end()));
       if (result.errors.empty()) {
         result.outcome = ConSanTransformOutcome::ModifiedValid;
-        result.final_validation_passed = true;
       } else {
         result.outcome = ConSanTransformOutcome::Invalid;
         result.modified = false;

@@ -573,7 +573,7 @@ TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
       const ConSanResult result = try_patch_consan(bytes, profile.options);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified);
-      EXPECT_FALSE(result.final_validation_passed);
+      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.elf_bytes.empty());
       EXPECT_TRUE(result.patches.empty());
     }
@@ -656,7 +656,7 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
       const ConSanResult result = try_patch_consan(damage.bytes, profile.options);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
       EXPECT_FALSE(result.modified);
-      EXPECT_FALSE(result.final_validation_passed);
+      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.elf_bytes.empty());
       EXPECT_TRUE(result.patches.empty());
       EXPECT_FALSE(result.program_inventory.kernel_metadata_trustworthy());
@@ -850,7 +850,7 @@ TEST(ConSan, ExcessiveAllocatedSectionAlignmentCannotDriveTextGrowthAllocation) 
       const ConSanResult result = try_patch_consan(bytes, profile.options);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified);
-      EXPECT_FALSE(result.final_validation_passed);
+      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.elf_bytes.empty());
       EXPECT_TRUE(result.patches.empty());
     }
@@ -871,13 +871,13 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
     EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(input));
     if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
       EXPECT_TRUE(result.modified);
-      EXPECT_TRUE(result.final_validation_passed);
+      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.elf_bytes.empty());
       EXPECT_FALSE(result.patches.empty());
       EXPECT_TRUE(validate_consan_modified_elf(input, result).empty());
     } else {
       EXPECT_FALSE(result.modified);
-      EXPECT_FALSE(result.final_validation_passed);
+      EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_TRUE(result.elf_bytes.empty());
       EXPECT_TRUE(result.patches.empty());
     }
@@ -910,7 +910,7 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
     SCOPED_TRACE(profile.name);
     const ConSanResult valid = try_patch_consan(bytes, profile.options);
     ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
-    EXPECT_TRUE(valid.final_validation_passed);
+    EXPECT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());
 
     ConSanResult wrong_target = valid;

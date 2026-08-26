@@ -339,8 +339,6 @@ public:
   std::vector<uint8_t> replacement_bytes;
   /// Final static transform classification.
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Invalid;
-  /// True only after structural and semantic validation of replacement bytes.
-  bool final_validation_passed = false;
   /// First typed configuration failure, or `None` after valid configuration.
   ConSanContractIssue configuration_issue = ConSanContractIssue::None;
   /// Machine-readable failures owned by static pipeline stages.

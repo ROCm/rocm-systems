@@ -285,7 +285,7 @@ TEST(ConSanMoi, Cdna4InlineShadowProbeEmitsNativeTransactions) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiExactShadowStore);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
@@ -388,7 +388,7 @@ TEST(ConSanMoi, CdnaInlineShadowMovesOnlyAnEmptyAccumulatorBoundaryForScratchGro
     ASSERT_NE(prologue, result.patches.end());
     EXPECT_EQ(access->anchor_offset, 0u);
     EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, access->trampoline_offset);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -453,7 +453,7 @@ TEST(ConSanMoi, CdnaInlineShadowGrowsUnifiedAllocationInsideEmptyAccumulatorGap)
     ASSERT_NE(prologue, result.patches.end());
     EXPECT_EQ(access->anchor_offset, 0u);
     EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, access->trampoline_offset);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -541,7 +541,7 @@ TEST(ConSanMoi, CdnaInlineShadowUsesTrustedMetadataToMoveRoundedEmptyAccumulator
         ASSERT_NE(prologue, result.patches.end());
         EXPECT_EQ(access->anchor_offset, 0u);
         EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, access->trampoline_offset);
-        EXPECT_TRUE(result.final_validation_passed);
+        EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       } else {
         EXPECT_EQ(result.resource_plans.front().source,
                   ConSanRegisterAllocationSource::Unsupported);
@@ -581,7 +581,7 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -642,7 +642,7 @@ TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -711,7 +711,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_TRUE(result.resolved_moi_epoch_vgpr);
   ASSERT_TRUE(result.resolved_moi_workgroup_key_vgpr);
   EXPECT_EQ(*result.resolved_moi_workgroup_key_vgpr, *result.resolved_moi_epoch_vgpr + 1u);
@@ -809,7 +809,7 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(result.resource_plans.front().scratch_vgpr_count, 16u);
@@ -938,7 +938,7 @@ TEST(ConSanMoi, Cdna4PrivateEpochProloguePreservesClobberedEntryAbiSgprs) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -997,7 +997,7 @@ TEST(ConSanMoi, Cdna4PrivateEpochLongReturnDoesNotClobberEntryAbiSgprs) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -1093,7 +1093,7 @@ TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
   EXPECT_GT(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc3,
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
             15u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner) {
@@ -1210,7 +1210,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       << " errors=" << testing::PrintToString(result.errors)
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("owner-private hardware dispatch-ID state") != std::string::npos;
@@ -1434,7 +1434,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
       << " errors=" << testing::PrintToString(result.errors)
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_TRUE(result.resolved_moi_dispatch_id_vgpr);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
 
@@ -1555,7 +1555,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
     EXPECT_LT(first_cas, second_reload);
     EXPECT_GE(count_subsequence(cave_words, reload_sequence), 2u)
         << "external publication must recover the guest address before indexing and diagnostics";
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -1646,7 +1646,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadUsesDisjointCompactSpillWindow) {
     ASSERT_NE(guest_position, cave_words.end());
     EXPECT_LT(restore_position, guest_position)
         << "the application load must execute after its disjoint spill window is restored";
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -1715,7 +1715,7 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
     EXPECT_EQ(
         AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
         7u);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -1850,7 +1850,7 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsOverlappingDynamicStackAddress) {
   reload_sequence.push_back(*wait);
   EXPECT_EQ(count_subsequence(cave_words, reload_sequence), 4u)
       << "both possible cells must recover the spilled address before publication and diagnosis";
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, CdnaInlineShadowAtomicTrackingFitsSpillBackedTransactionWindow) {
@@ -1959,7 +1959,7 @@ TEST(ConSanMoi, CdnaInlineShadowAtomicTrackingFitsSpillBackedTransactionWindow) 
         result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end());
     EXPECT_EQ(patch->spilled_vgpr_count, 24u);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -2033,7 +2033,7 @@ TEST(ConSanMoi, CdnaInlineShadowWideAccessReloadsAddressOutsideCellLoopState) {
     const uint16_t loop_counter = consan_detail::inline_shadow_loop_counter_vgpr(
         /*scratch_vgpr=*/0u, /*has_exec_save=*/true, /*track_atomics=*/false);
     EXPECT_LT(kPhaseSharedAddressVgpr, loop_counter);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -2109,7 +2109,7 @@ TEST(ConSanMoi, CdnaInlineShadowKeepsDisjointClobberedAddressInPlace) {
     ASSERT_NE(guest_position, cave_words.end());
     EXPECT_EQ(out_of_window_snapshot, cave_words.end())
         << "the compact spill must consume a disjoint address in place rather than clobbering v18";
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -2172,7 +2172,7 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsBothSpilledMaybeGroupAddressHalves) {
   high_sequence.push_back(*wait);
   EXPECT_EQ(count_subsequence(cave_words, low_sequence), 4u);
   EXPECT_EQ(count_subsequence(cave_words, high_sequence), 1u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4ExternalInlineShadowRetainsPrivateWorkgroupKey) {
@@ -3158,7 +3158,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowValidatesAtomicAccessCandidate) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Atomic);
   const auto exact_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -3189,7 +3189,7 @@ TEST(ConSanMoi, Gfx1250InlineGlobalShadowUsesLiteralDispatchIdAtFullScalarPressu
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_EQ(result.moi_report_dispatch_id, options.moi_report_dispatch_id);
   const auto exact_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -3235,7 +3235,7 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     // Complete owner coverage proves that this pair is absent from guest
     // code, so preserve runtime dispatch identity instead of falling back to
     // the configured literal merely because the live scalar set is sparse.
@@ -3295,7 +3295,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
       << testing::PrintToString(result.warnings);
   const ConSanMoiTransientSgprAssignment &assignment =
@@ -3422,7 +3422,7 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
       << testing::PrintToString(result.warnings);
   const ConSanMoiTransientSgprAssignment &assignment =
@@ -3529,7 +3529,7 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
       << testing::PrintToString(result.warnings);
   const ConSanMoiTransientSgprAssignment &assignment =
@@ -3637,7 +3637,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto patch = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &candidate) {
     return candidate.branch_only_continuation && candidate.anchor_offset == access_offset;
   });
@@ -3707,7 +3707,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRelocatesInstructionReservoirs) {
       "branch_only_instruction_reservoir");
   ASSERT_TRUE(consan_patch_succeeded(relocated)) << testing::PrintToString(relocated.errors);
   ASSERT_TRUE(relocated.modified) << testing::PrintToString(relocated.warnings);
-  ASSERT_TRUE(relocated.final_validation_passed);
+  ASSERT_EQ(relocated.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto branch_only =
       std::ranges::find(relocated.patches, true, &ConSanPatchInfo::branch_only_continuation);
   ASSERT_NE(branch_only, relocated.patches.end());
@@ -3765,7 +3765,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
   EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill);
   EXPECT_EQ(std::ranges::count_if(result.patches,
@@ -3827,7 +3827,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughSelectedAnchorTails) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto branch_patch_at = [&](size_t word) {
     return std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
       return patch.branch_only_continuation && patch.anchor_offset == word * sizeof(uint32_t);
@@ -4244,7 +4244,7 @@ TEST(ConSanMoi, InlineShadowSplitsLargeGfx1250TwoAddressGuestAccess) {
   EXPECT_TRUE(contains_subsequence(body, first));
   EXPECT_TRUE(contains_subsequence(body, second));
   EXPECT_FALSE(contains_subsequence(body, store));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
@@ -4539,7 +4539,7 @@ TEST(ConSanMoi, Cdna4InlineShadowMovesEmptyAccumulatorBoundaryForDynamicStackSta
       << " errors=" << testing::PrintToString(result.errors)
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &assignment =
       result.resolved_moi_persistent_vgpr_assignments.front();
@@ -4606,7 +4606,7 @@ TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
       << " errors=" << testing::PrintToString(result.errors)
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u)
       << testing::PrintToString(result.warnings);
   const ConSanMoiPersistentVgprAssignment &assignment =
@@ -4655,7 +4655,7 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   const auto fixed_access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
@@ -4748,7 +4748,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto transient = std::ranges::find(
       result.resolved_moi_transient_sgpr_assignments, full_pressure->descriptor_file_offset,
       &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
@@ -4885,7 +4885,7 @@ TEST(ConSanMoi, Cdna4InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " errors=" << testing::PrintToString(result.errors);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
@@ -4991,7 +4991,7 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, InlineShadowSpillingWorksWithoutMetadata) {
@@ -6347,7 +6347,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowCapturesHighBankLdsAddressBeforeScratchUse) {
   ASSERT_NE(guest, cave.end());
   ASSERT_NE(guest, cave.begin());
   EXPECT_EQ(*std::prev(guest), restore_guest);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
@@ -6377,7 +6377,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount)
@@ -6469,7 +6469,7 @@ TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowReservesRelocatedHostArm) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.moi_candidates.size(), kAccessCount);
   for (const ConSanMoiCandidate &candidate : result.moi_candidates)
     EXPECT_GT(candidate.size, sizeof(uint32_t));
@@ -6514,7 +6514,7 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesShareExplicitKeyRelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6592,7 +6592,7 @@ TEST(ConSanMoi, Cdna4FarInlineShadowAccessesShareExplicitKeyRelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6700,7 +6700,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6802,7 +6802,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowRouteRestoresGuestSccBeforeAccessBody) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6871,7 +6871,7 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesUseCalledFunctionHost) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6910,7 +6910,7 @@ TEST(ConSanMoi, Rdna4LargeInlineShadowCompositionUsesGeneralDenseRouting) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6942,7 +6942,7 @@ TEST(ConSanMoi, AutomaticTransientPlanningScalesAcrossIndependentKernels) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.program_inventory.kernels().size(), kKernelCount);
   EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), kAccessCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
@@ -6974,7 +6974,7 @@ TEST(ConSanMoi, AutomaticTransientEmissionScalesAcrossLargeKernel) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -7020,7 +7020,7 @@ TEST(ConSanMoi, Rdna4FarAccessAndAdjacentBarrierUseIndependentDenseRoutes) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const uint64_t first_access_offset = kFirstAccessWord * sizeof(uint32_t);
   const uint64_t barrier_signal_offset = (kFirstAccessWord + 2u) * sizeof(uint32_t);
   const uint64_t barrier_wait_offset = (kFirstAccessWord + 3u) * sizeof(uint32_t);
@@ -7069,7 +7069,7 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsAccessInsideItsPrefix) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -7131,7 +7131,7 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsIndirectIslandInsideItsPrefix) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
@@ -7178,7 +7178,7 @@ TEST(ConSanMoi, Cdna4FarInlineShadowBarrierUsesDenseRoute) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiInlineEpochBarrier,
                               &ConSanPatchInfo::kind),
             result.patches.end());
@@ -7225,7 +7225,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -7347,7 +7347,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits)
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto access_dispatcher =
       std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
@@ -7401,7 +7401,7 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowBarriersUseRelocatedRouter) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -7460,7 +7460,7 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -7496,7 +7496,7 @@ TEST(ConSanMoi, Rdna4SharedHelperBarrierUsesCommonPrivateEpochState) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
   const auto barrier = std::ranges::find(
@@ -7551,7 +7551,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kBarriersPerWindow);
@@ -7695,7 +7695,7 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
     checked_lane_spill = true;
   }
   EXPECT_TRUE(checked_lane_spill);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4InlinePrefersOwnerWideFreshWindowToObjectWideSiteDeadWindow) {
@@ -7786,7 +7786,7 @@ TEST(ConSanMoi, Cdna4InlinePrefersOwnerWideFreshWindowToObjectWideSiteDeadWindow
             2u)
       << testing::PrintToString(result.warnings) << "\n"
       << testing::PrintToString(result.resolved_moi_persistent_vgpr_assignments);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysicalVcc) {
@@ -7898,7 +7898,7 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
     checked_lane_spill = true;
   }
   EXPECT_TRUE(checked_lane_spill);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
@@ -8012,7 +8012,7 @@ TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
   // persistent epoch VGPR. They do not borrow the spill-backed access window.
   EXPECT_EQ(barrier_patch->spilled_vgpr_count, 0u);
   EXPECT_EQ(barrier_patch->required_private_segment_size, 0u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4InlineExcludesOnlyOwnerWithoutSpillRouter) {

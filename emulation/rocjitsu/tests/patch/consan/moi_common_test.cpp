@@ -626,7 +626,7 @@ TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-      EXPECT_TRUE(result.final_validation_passed);
+      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
       ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
       EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 96u);
@@ -1172,7 +1172,7 @@ TEST(ConSanMoi, Cdna4DirectScalarStateReusesUnreferencedSharedOwnerAllocation) {
     return !plan.has_indirect_sgpr_access && plan.sgpr_reference_coverage_complete &&
            plan.scalar_tail_floor < 80u;
   }));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
@@ -1254,7 +1254,7 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
           return plan.has_indirect_sgpr_access && plan.sgpr_reference_coverage_complete &&
                  plan.scalar_tail_floor >= 80u;
         }));
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -1312,7 +1312,7 @@ TEST(ConSanMoi, Cdna4SharedInlineExecSaveAvoidsEveryOwnerPhysicalVcc) {
     EXPECT_FALSE(sgpr_ranges_overlap(*result.resolved_moi_exec_save_sgpr,
                                      kConSanMoiInlineExecSaveSgprCount, vcc_base, 2u));
   }
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
@@ -1669,7 +1669,7 @@ TEST(ConSanMoi, SharedPrivateOwnerSupportsMixedWaveSizesWithResidentWaveIdentity
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
@@ -2634,7 +2634,7 @@ TEST(ConSanMoi, Cdna4OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
   EXPECT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_EQ(result.patches.size(), 1u);

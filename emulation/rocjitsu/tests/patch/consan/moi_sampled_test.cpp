@@ -320,7 +320,7 @@ TEST(ConSanMoi, Gfx1250DirectSampledProbePassesFinalValidation) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
@@ -364,7 +364,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPartitionRelayWindowsAcrossLargeKerne
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             2u * kAccessesPerWindow);
@@ -451,7 +451,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledPrivateStateUsesSpillSafeBodyGate) {
     ASSERT_TRUE(load);
     EXPECT_TRUE(contains_subsequence(cave, *load));
   }
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
@@ -515,7 +515,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledFastGateIncludesClusterWorkgroupId) {
   const std::array<uint32_t, 3> expected_cluster_mix = {*read_cluster, *dependency_wait,
                                                         *cluster_mix};
   EXPECT_TRUE(contains_subsequence(patched_words, expected_cluster_mix));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250DenseSampledGateReservesCodeObjectWideClusterTuple) {
@@ -553,7 +553,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledGateReservesCodeObjectWideClusterTuple) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
@@ -587,7 +587,7 @@ TEST(ConSanMoi, Gfx1250DenseSampledAccessesPreserveGuestVgprMsbMode) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -674,7 +674,7 @@ TEST(ConSanMoi, Gfx1250SampledCapturesHighBankLdsAddressBeforeSelectingScratchBa
   EXPECT_EQ(cave[guest_word - 1u], restore_guest);
   EXPECT_TRUE(std::equal(store.begin(), store.end(), cave.begin() + guest_word));
   EXPECT_EQ(cave[guest_word + store.size()], select_low);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
@@ -699,7 +699,7 @@ TEST(ConSanMoi, Cdna4DirectSampledProbeEmitsNativePublicationRecipes) {
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   const auto access = std::ranges::find(
       result.patches, ConSanPatchKind::InlineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
@@ -966,7 +966,7 @@ TEST(ConSanMoi, DirectSampledSplitsLargeGfx1250TwoAddressGuestAccess) {
   EXPECT_TRUE(contains_subsequence(body, first));
   EXPECT_TRUE(contains_subsequence(body, second));
   EXPECT_FALSE(contains_subsequence(body, store));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, SampledAtomicTrackingPublishesQualifiedTypedMetadata) {
@@ -1159,7 +1159,7 @@ TEST(ConSanMoi, SampledPatchesAliasedAtomicOnceForEveryOwner) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata) {
@@ -1181,7 +1181,7 @@ TEST(ConSanMoi, Gfx1250OrderedLdsAtomicComposesSampledAccessAndOrderingMetadata)
 
   ASSERT_TRUE(consan_patch_succeeded(result))
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;
@@ -1304,7 +1304,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicTracksCacheAssociatedOrdering) {
                                               ROCJITSU_CODE_ARCH_CDNA4);
     EXPECT_NE(std::find(trampoline.begin(), trampoline.end(), move), trampoline.end());
   }
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledRelocatesOrdinaryAtomicAcquireSequence) {
@@ -1325,7 +1325,7 @@ TEST(ConSanMoi, Cdna4SampledRelocatesOrdinaryAtomicAcquireSequence) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto acquire = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
            patch.anchor_offset == fixture.acquire_text_offset;
@@ -1428,7 +1428,7 @@ TEST(ConSanMoi, SampledRoutesOnlyNearestAcquireToEachPayloadWindow) {
     ASSERT_EQ(sync_patches.size(), 1u)
         << testing::PrintToString(result.patches) << testing::PrintToString(result.warnings);
     EXPECT_EQ(sync_patches.front()->anchor_offset, acquire_offsets.back());
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -1494,7 +1494,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicReportsGuestOperandOverlapFallback) {
   EXPECT_EQ(summary.alternative_superseded, 0u);
   EXPECT_EQ(summary.alternative_contributed, 0u);
   EXPECT_EQ(summary.alternative_vetoed, 0u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
@@ -1520,7 +1520,7 @@ TEST(ConSanMoi, Cdna4SampledBarrierPublishesSelectedEpochTransition) {
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                               &ConSanPatchInfo::kind),
             result.patches.end());
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
@@ -1756,7 +1756,7 @@ TEST(ConSanMoi, CdnaSampledAtomicUsesPrivatePersistentStateAtAccvgprBoundary) {
           return warning.find("sampled atomic sync could not lower associated") !=
                  std::string::npos;
         }));
-        EXPECT_TRUE(result.final_validation_passed);
+        EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       }
     }
   }
@@ -2080,7 +2080,7 @@ TEST(ConSanMoi, CdnaSampledVglobalMaterializesVectorAndScalarAddressesInScratchT
                               vector_source_vgpr(static_cast<uint16_t>(saved_address + 1u)),
                               target.arch)),
                 0u);
-      EXPECT_TRUE(result.final_validation_passed);
+      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     }
   }
 }
@@ -2140,7 +2140,7 @@ TEST(ConSanMoi, Cdna4SharedSampledAtomicSeparatesPersistentStateFromSpills) {
                 sizeof(descriptor));
     EXPECT_EQ(descriptor.private_segment_fixed_size, 112u);
   }
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledAtomicMaterializesAddressWithDynamicScalarState) {
@@ -2222,7 +2222,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicMaterializesAddressWithDynamicScalarState) {
   EXPECT_NE(std::ranges::find(cave, build_v_mov_b32_e32(static_cast<uint16_t>(saved_address + 1u),
                                                         vector_source_vgpr(1u), kArch)),
             cave.end());
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledAtomicRejectsFlatScratchScalarAlias) {
@@ -2411,7 +2411,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledAtomicUsesSiteLocalSpillFrames) {
   EXPECT_EQ(access->dynamic_private_segment_addend, access->spilled_vgpr_count * sizeof(uint32_t));
   EXPECT_GT(atomic->spilled_vgpr_count, 0u);
   EXPECT_EQ(atomic->dynamic_private_segment_addend, atomic->spilled_vgpr_count * sizeof(uint32_t));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, SampledAtomicEdgesAssociateWithTheirOrderedAccessWindows) {
@@ -2640,7 +2640,7 @@ TEST(ConSanMoi, Gfx1250SampledAutomaticExecSaveUsesOwnerLocalWindow) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   ASSERT_FALSE(result.resolved_moi_transient_sgpr_assignments.empty());
   EXPECT_EQ(std::ranges::count_if(result.patches,
@@ -2714,7 +2714,7 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverrideRetainsLivenessDeadGlobalExecWindow)
       << testing::PrintToString(result.warnings);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) {
@@ -2826,7 +2826,7 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
   }
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
@@ -2902,7 +2902,7 @@ TEST(ConSanMoi, Gfx1250SampledSpillsExecVccStateWithSeparateDeadDenseRouter) {
                patch.dynamic_private_segment_addend > 0u;
       }));
     }
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -2990,7 +2990,7 @@ TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeys) {
     ASSERT_TRUE(compare_key);
     EXPECT_EQ(std::ranges::count(dispatcher_words, *compare_key), 1u);
   }
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj_code_arch_t arch) {
@@ -3150,7 +3150,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
       ASSERT_TRUE(explicit_compare);
       EXPECT_EQ(std::ranges::count(dispatcher_words, *explicit_compare), 1u);
     }
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     return;
   }
   std::vector<uint32_t> actual_dispatch_keys;
@@ -3161,7 +3161,7 @@ void expect_sampled_dense_barrier_routes_through_dead_pair_under_scalar_spill(rj
   std::ranges::sort(expected_dispatch_keys);
   std::ranges::sort(actual_dispatch_keys);
   EXPECT_EQ(actual_dispatch_keys, expected_dispatch_keys);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250SampledDenseBarrierUsesCloneInvariantEntryKeysUnderScalarSpill) {
@@ -3224,7 +3224,7 @@ TEST(ConSanMoi, Rdna4SampledSpillBackedDenseHostKeepsCompleteEntryLayout) {
   EXPECT_GE(dense_host->original_size, 9u * sizeof(uint32_t));
   EXPECT_NE(entry_island.back(), filler)
       << "the eighth reserved word must belong to the emitted spill-backed entry sequence";
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) {
@@ -3290,7 +3290,7 @@ TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) 
   ASSERT_TRUE(tautological_pc_compare);
   EXPECT_GT(std::ranges::count(dispatcher_words, *captured_key_compare), 0u);
   EXPECT_EQ(std::ranges::count(dispatcher_words, *tautological_pc_compare), 0u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
@@ -3379,7 +3379,7 @@ TEST(ConSanMoi, Cdna4SampledSpillsFullPressureStateThroughDynamicStackFrame) {
     EXPECT_TRUE(contains_subsequence(cave, *scalar_store));
     EXPECT_TRUE(contains_subsequence(cave, *scalar_load));
   }
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledMovesEmptyAccumulatorBoundaryForDynamicStackState) {
@@ -3432,7 +3432,7 @@ TEST(ConSanMoi, Cdna4SampledMovesEmptyAccumulatorBoundaryForDynamicStackState) {
       << " errors=" << testing::PrintToString(result.errors)
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &assignment =
       result.resolved_moi_persistent_vgpr_assignments.front();
@@ -3488,7 +3488,7 @@ TEST(ConSanMoi, Cdna4SampledMixesPrivateAndEmptyAccumulatorBoundaryState) {
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " plans=" << testing::PrintToString(result.resource_plans);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
   const ConSanMoiPersistentVgprAssignment &assignment =
       result.resolved_moi_persistent_vgpr_assignments.front();
@@ -3569,7 +3569,7 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified) << "warnings=" << testing::PrintToString(result.warnings)
                                << " plans=" << testing::PrintToString(result.resource_plans);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(test_resource_plan_summary(result).unsupported_plans, 0u);
 
   ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
@@ -3695,7 +3695,7 @@ TEST(ConSanMoi, CdnaStrideOnePrivateStateMirrorsKernargPreloadEntry) {
     ASSERT_GT(prologue_words.size(), secondary_word);
     EXPECT_EQ(prologue_words[secondary_word], prologue_words.front())
         << "the +256 hardware entry must begin a mirrored private-state prologue";
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -3773,7 +3773,7 @@ TEST(ConSanMoi, CdnaStrideOneDynamicStackRedirectsBothKernargPreloadEntries) {
     const int64_t expected_entry = static_cast<int64_t>(patched.text_sections().front()->vaddr() +
                                                         prologue->trampoline_offset);
     EXPECT_EQ(redirected_entry, expected_entry);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -3827,7 +3827,7 @@ TEST(ConSanMoi, Cdna4Wave64AccvgprBoundarySampledUsesPrivatePersistentState) {
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
             AMDHSA_BITS_GET(original_descriptor.compute_pgm_rsrc3,
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4PrivateWorkgroupStateUsesSpillSafeSampledBodyGate) {
@@ -3887,7 +3887,7 @@ TEST(ConSanMoi, Cdna4PrivateWorkgroupStateUsesSpillSafeSampledBodyGate) {
     ASSERT_TRUE(load);
     EXPECT_TRUE(contains_subsequence(cave, *load));
   }
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4FullPressureSampledStoreRecoversSpilledAddressAfterGuest) {
@@ -3947,7 +3947,7 @@ TEST(ConSanMoi, Cdna4FullPressureSampledStoreRecoversSpilledAddressAfterGuest) {
   const auto reload_position = std::ranges::search(cave, reload_sequence).begin();
   ASSERT_NE(reload_position, cave.end());
   EXPECT_LT(guest_index, static_cast<size_t>(std::distance(cave.begin(), reload_position)));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4FullPressureSampledLoadKeepsResultOutsideRecoveredSpillWindow) {
@@ -3982,7 +3982,7 @@ TEST(ConSanMoi, Cdna4FullPressureSampledLoadKeepsResultOutsideRecoveredSpillWind
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   EXPECT_EQ(patch->scratch_vgpr, plan.scratch_vgpr);
   EXPECT_EQ(patch->spilled_vgpr_count, plan.scratch_vgpr_count);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4FullPressureSampledRead2B64KeepsFourRegisterResult) {
@@ -4020,7 +4020,7 @@ TEST(ConSanMoi, Cdna4FullPressureSampledRead2B64KeepsFourRegisterResult) {
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   EXPECT_EQ(patch->scratch_vgpr, 0u);
   EXPECT_EQ(patch->spilled_vgpr_count, 8u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4FullPressureSampledLoadRejectsDestinationOverlap) {
@@ -4131,7 +4131,7 @@ TEST(ConSanMoi, CdnaSampledBarrierUsesPrivatePersistentStateAtAccvgprBoundary) {
       EXPECT_TRUE(contains_subsequence(cave, *owner_load));
       EXPECT_NE(std::ranges::find(cave, *captured_owner), cave.end());
       EXPECT_EQ(std::ranges::find(cave, *live_owner), cave.end());
-      EXPECT_TRUE(result.final_validation_passed);
+      EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     }
   }
 }
@@ -4265,7 +4265,7 @@ TEST(ConSanMoi, CdnaSampledSynchronizationSpillsThroughDynamicStackFrame) {
         *result.resolved_moi_persistent_epoch_sgpr, epoch_vgpr, target.arch);
     ASSERT_TRUE(persist_epoch);
     EXPECT_NE(std::ranges::find(sync_cave, *persist_epoch), sync_cave.end());
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -4338,7 +4338,7 @@ TEST(ConSanMoi, CdnaSampledBarrierMaterializesNonzeroAbsoluteSlot) {
     ASSERT_TRUE(absolute_slot);
     std::vector<uint32_t> expected = *absolute_slot;
     EXPECT_TRUE(contains_subsequence(cave, expected));
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -4480,7 +4480,7 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
                  patch.anchor_offset == helper_atomic_offset;
         });
     ASSERT_NE(helper_atomic_patch, result.patches.end());
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -4608,7 +4608,7 @@ TEST(ConSanMoi, Gfx1250DynamicStackSampledStoreSpillsAcrossGuestOperands) {
   EXPECT_EQ(patch->dynamic_private_segment_addend, 6u * sizeof(uint32_t));
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.access_range_count, 1u);
   EXPECT_EQ(inventory.sampled_range_bank_count, 8u);
@@ -4662,7 +4662,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledSpillPlansScalarStateBeforeVgprGrowth) {
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.patches);
   EXPECT_EQ(patch->spilled_vgpr_count, 6u);
   EXPECT_EQ(patch->dynamic_private_segment_addend, (6u + 8u) * sizeof(uint32_t));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250DynamicStackSampledLoadUsesDisjointSpillWindow) {
@@ -4704,7 +4704,7 @@ TEST(ConSanMoi, Gfx1250DynamicStackSampledLoadUsesDisjointSpillWindow) {
   EXPECT_GT(*patch->scratch_vgpr, 4u);
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, DirectSampledProbeCanUseSleepDelay) {
@@ -5013,7 +5013,7 @@ TEST(ConSanMoi, Rdna3HighTransientSampledStateUsesFixedSgprPool) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
   EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 98u);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
@@ -5053,7 +5053,7 @@ TEST(ConSanMoi, Gfx1250RuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure)
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_EQ(std::ranges::count_if(result.patches,
                                   [](const ConSanPatchInfo &patch) {
@@ -5141,7 +5141,7 @@ TEST(ConSanMoi, CdnaRuntimeSamplingUsesLiteralDispatchIdAtFullScalarPressure) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
     const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
       return candidate.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
@@ -5262,7 +5262,7 @@ TEST(ConSanMoi, Gfx1250SampledFastGatesKeepThousandPackedSitesReachable) {
       make_gfx1250_code_object(text_words, "gfx1250_thousand_sampled_sites"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count_if(result.patches,
                                   [](const ConSanPatchInfo &patch) {
                                     return patch.kind ==
@@ -5482,7 +5482,7 @@ TEST(ConSanMoi, SampledMultiRangeReportSlotsDoNotConsumePatchBudgetAcrossTargets
     EXPECT_EQ(accesses[1]->sampled_window_bank_count, 8u);
     EXPECT_EQ(accesses[0]->sampled_first_slot, 0u);
     EXPECT_EQ(accesses[1]->sampled_first_slot, 16u);
-    EXPECT_TRUE(result.final_validation_passed);
+    EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   }
 }
 
@@ -6572,7 +6572,7 @@ TEST(ConSanMoi, SampledFarBarrierUsesReachableLocalIndirectEntryIsland) {
   EXPECT_TRUE(compute_sopp_branch_simm16(sync_patch->anchor_offset, island->trampoline_offset));
   EXPECT_FALSE(
       compute_sopp_branch_simm16(sync_patch->anchor_offset, sync_patch->trampoline_offset));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledAtomicPreservesReservedFarBarrierIsland) {
@@ -6627,7 +6627,7 @@ TEST(ConSanMoi, Cdna4SampledAtomicPreservesReservedFarBarrierIsland) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   const auto atomic_sync = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiSampledSyncMetadata &&
            patch.anchor_offset == atomic_offset;
@@ -6740,7 +6740,7 @@ TEST(ConSanMoi, Cdna4SampledOrdinaryAtomicRouteAvoidsLiveSpillBootstrap) {
       text_words_at_offset(patched, island->trampoline_offset, island->trampoline_size);
   ASSERT_GT(island_words.size(), 1u);
   EXPECT_NE(island_words[1], build_s_getpc_b64(/*sdst=*/0u, kArch));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, SampledDoesNotRelocateAcrossReconvergenceEntry) {
@@ -6863,7 +6863,7 @@ TEST(ConSanMoi, Cdna4SampledDenseAtomicKeepsFarOrderedEdgeComplete) {
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable indirect entry island") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
@@ -6896,7 +6896,7 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesShareExplicitKeyRelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -6958,7 +6958,7 @@ TEST(ConSanMoi, Cdna4DenseSampledAccessesShareExplicitKeyRelay) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount)
@@ -7018,7 +7018,7 @@ TEST(ConSanMoi, Cdna4DenseSampledRouteRestoresGuestSccBeforeAccessBody) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -7086,7 +7086,7 @@ TEST(ConSanMoi, Cdna4LargeSampledDenseDispatchReservesFarTargetRoutes) {
                                &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledDenseRelayDoesNotConsumeAccessInLaterGroup) {
@@ -7124,7 +7124,7 @@ TEST(ConSanMoi, Cdna4SampledDenseRelayDoesNotConsumeAccessInLaterGroup) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount)
@@ -7214,7 +7214,7 @@ TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {
   EXPECT_EQ(std::ranges::count(island, build_s_mov_b32(*assignment.dispatch_key_sgpr,
                                                        *assignment.indirect_pc_sgpr, kArch)),
             0u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSave) {
@@ -7256,7 +7256,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyScalarSpillGuardsEmptyExecBeforePerLaneSav
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
   const ConSanMoiTransientSgprAssignment &assignment =
       result.resolved_moi_transient_sgpr_assignments.front();
@@ -7333,7 +7333,7 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
   EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
@@ -7386,7 +7386,7 @@ TEST(ConSanMoi, Rdna3SampledPrivateOwnerCapturePrecedesEntryScalarSpillScratchCl
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.final_validation_passed);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
   const ConSanMoiTransientSgprAssignment &assignment =
       result.resolved_moi_transient_sgpr_assignments.front();
@@ -7469,7 +7469,7 @@ TEST(ConSanMoi, Cdna4SampledDenseBarrierKeepsFarSynchronizationComplete) {
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable entry island") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
@@ -7558,7 +7558,7 @@ TEST(ConSanMoi, Cdna4SampledFarBarrierUsesOwnerLocalScalarRoute) {
       text_words_at_offset(patched, routed_patch->trampoline_offset, routed_patch->trampoline_size);
   EXPECT_EQ(std::ranges::find(route_words, build_s_getpc_b64(kGlobalExecSaveSgpr, kArch)),
             route_words.end());
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Rdna4DenseSampledAccessesUseCalledFunctionHost) {
@@ -7599,7 +7599,7 @@ TEST(ConSanMoi, Rdna4DenseSampledAccessesUseCalledFunctionHost) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -7651,7 +7651,7 @@ TEST(ConSanMoi, Gfx1250SampledAccessDenseHostRejectsTransientSgprReferencesAndFa
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            patch.original_size != 0u;
   }));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
@@ -7699,7 +7699,7 @@ TEST(ConSanMoi, SampledSharedAccessRelayPreservesEntryIslandForFarBarrier) {
   ASSERT_NE(barrier, nullptr);
   EXPECT_TRUE(
       consan_decision_has_lowering(result, *barrier, ConSanLoweringOutcomeKind::Instrumented));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Rdna4SampledDenseBarrierRelayKeepsManyFarPairsReachable) {
@@ -7740,7 +7740,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierRelayKeepsManyFarPairsReachable) {
   EXPECT_TRUE(std::ranges::none_of(result.warnings, [](const std::string &warning) {
     return warning.find("no reachable entry island") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Rdna4SampledSingleStrandedBarrierUsesDenseRelay) {
@@ -7784,7 +7784,7 @@ TEST(ConSanMoi, Rdna4SampledSingleStrandedBarrierUsesDenseRelay) {
   EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             result.observation_plan.barrier_site_decisions.size());
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250SampledMixesDenseAndDirectBarrierRoutesAcrossKernels) {
@@ -7834,7 +7834,7 @@ TEST(ConSanMoi, Gfx1250SampledMixesDenseAndDirectBarrierRoutesAcrossKernels) {
   EXPECT_EQ(consan_decision_lowering_count(result, result.observation_plan.barrier_site_decisions,
                                            ConSanLoweringOutcomeKind::Instrumented),
             result.observation_plan.barrier_site_decisions.size());
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareGridIdentity) {
@@ -7915,7 +7915,7 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.moi_candidates.size(), kSiteCount);
   const auto is_access_patch = [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
@@ -8094,7 +8094,7 @@ TEST(ConSanMoi, SampledQualifiedBarrierAdmitsLongStraightLinePair) {
   });
   ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(patch->covered_sync_event_count, 2u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, SampledQualifiedBarrierForcedSpillPreservesCompleteVgprWindow) {
@@ -8163,7 +8163,7 @@ TEST(ConSanMoi, Rdna4DynamicStackSampledBarrierUsesSiteLocalSpillFrames) {
   EXPECT_EQ(barrier->spilled_vgpr_count, 9u);
   EXPECT_EQ(barrier->dynamic_private_segment_addend,
             barrier->spilled_vgpr_count * sizeof(uint32_t));
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Rdna4DynamicStackSampledRejectsMissingEntryPrologueScratch) {
@@ -8226,7 +8226,7 @@ TEST(ConSanMoi, Gfx1250SampledQualifiedBarrierUsesSpill) {
   EXPECT_EQ(patch->covered_sync_event_count, 2u);
   EXPECT_EQ(patch->spilled_vgpr_count, 7u);
   EXPECT_GT(patch->required_private_segment_size, 0u);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> trampoline =
@@ -8288,7 +8288,7 @@ TEST(ConSanMoi, Gfx1250SampledBarrierDoesNotGateWorkgroupsForAddressSampling) {
   EXPECT_LT(barrier, owner);
   EXPECT_EQ(std::ranges::find(trampoline, obsolete_workgroup_gate_shift), trampoline.end());
 
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
 TEST(ConSanMoi, Gfx1250SampledBarriersPartitionRelayWindowsAcrossLargeKernel) {
@@ -8332,7 +8332,7 @@ TEST(ConSanMoi, Gfx1250SampledBarriersPartitionRelayWindowsAcrossLargeKernel) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             2u)
@@ -8443,7 +8443,7 @@ TEST(ConSanMoi, Gfx1250SampledComposesWithAdjacentClusterBarrierDrop) {
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.final_validation_passed);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_TRUE(result.staged_composition_validated);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   for (const ConSanPatchInfo &mutation : result.patches) {
