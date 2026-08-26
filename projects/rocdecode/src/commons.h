@@ -66,10 +66,12 @@ enum RocDecLogLevel {
 
 #ifdef _WIN32
 #define GET_TIME_NS() ([]() -> uint64_t { \
-    static LARGE_INTEGER freq = {}; \
-    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq); \
-    LARGE_INTEGER cnt; QueryPerformanceCounter(&cnt); \
-    return static_cast<uint64_t>(cnt.QuadPart * 1000000000ULL / freq.QuadPart); }())
+    static const LARGE_INTEGER freq = []() { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); return f; }(); \
+    LARGE_INTEGER cnt{}; QueryPerformanceCounter(&cnt); \
+    if (freq.QuadPart <= 0) return 0ULL; \
+    const uint64_t sec = static_cast<uint64_t>(cnt.QuadPart / freq.QuadPart); \
+    const uint64_t rem = static_cast<uint64_t>(cnt.QuadPart % freq.QuadPart); \
+    return sec * 1000000000ULL + (rem * 1000000000ULL) / static_cast<uint64_t>(freq.QuadPart); }())
 #define FILENAME_ONLY (strrchr(__FILE__, '\\') ? strrchr(__FILE__, '\\') + 1 : (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__))
 #define GET_THREAD_ID() (static_cast<uint32_t>(GetCurrentThreadId()))
 #define GET_PID() (_getpid())
