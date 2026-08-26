@@ -71,6 +71,8 @@ the stacked tool integration PR.
   per-dispatch snapshot cost model, the range the regression tests actually cover, the specific
   performance problems visible in the implementation, and how the cost behaves on MI250X, MI325X
   and MI455X.
+- **[Test coverage](kernel_replay_testing.md)** — what replay is tested for at each level, which
+  checks need a GPU and which deliberately do not, the known gaps, and where a new test belongs.
 - **[Callback tracing API design](kernel_replay_callback_api_design.md)** — the design rationale and
   history behind the callback API. Read the pages above for current behavior; this one records how
   the design got there and what remains open.
