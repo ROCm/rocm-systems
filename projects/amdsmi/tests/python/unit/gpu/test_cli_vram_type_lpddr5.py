@@ -21,12 +21,12 @@
 
 """Mock-based unit test for ``amd-smi static --vram`` memory-type labelling.
 
-Regression guard for the LPDDR5 memory type. ``AMDSMI_VRAM_TYPE__MAX`` aliases
+Covers the LPDDR5 memory-type label. ``AMDSMI_VRAM_TYPE__MAX`` aliases
 the highest real enum value (``LPDDR5`` == 31), and the auto-generated
 ``amdsmi_vram_type_t__enumvalues`` map resolves that shared key to the ``__MAX``
 label. ``static.py`` special-cases the ``__MAX`` value and must translate it to
 ``LPDDR5``; it was previously mislabelled ``GDDR7``, which surfaced on gfx117x
-(Medusa) APUs whose unified memory reports as LPDDR5.
+APUs whose unified memory reports as LPDDR5.
 
 ``static.py`` is loaded from the source tree so the test exercises the code
 under development rather than a possibly-stale installed copy.
@@ -195,13 +195,32 @@ def _build_args():
 
 
 class TestCliVramTypeLpddr5(unittest.TestCase):
+    _SAVED_MODULE_NAMES = (
+        "amdsmi",
+        "amdsmi.amdsmi_interface",
+        "amdsmi.amdsmi_exception",
+        "amdsmi_helpers",
+        "amdsmi_cli_exceptions",
+    )
+
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(STATIC_PATH):
             raise unittest.SkipTest(f"amd-smi CLI static.py not found at {STATIC_PATH}")
+        # Snapshot any real amdsmi already loaded so the stub does not leak into
+        # sibling suites sharing the interpreter; restored in tearDownClass.
+        cls._saved_modules = {name: sys.modules.get(name) for name in cls._SAVED_MODULE_NAMES}
         cls.holder = {"info": copy.deepcopy(_BASE_VRAM_INFO)}
         _install_fake_modules(cls.holder)
         cls.static_module = _load_static_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, saved in cls._saved_modules.items():
+            if saved is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved
 
     def _run_vram(self, vram_type_value, fmt="human"):
         info = copy.deepcopy(_BASE_VRAM_INFO)
