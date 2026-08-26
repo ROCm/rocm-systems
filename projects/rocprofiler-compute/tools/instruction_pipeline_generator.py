@@ -78,35 +78,47 @@ FLAG_TO_PIPELINE = {
     "VALU": "VALU",
 }
 
-# Nothing in TableGen names these pipelines, so they are matched by name.
-BARRIER_PREFIXES = ("s_barrier",)
-BARRIER_NAMES = ("s_wakeup_barrier", "s_get_barrier_state")
-EXP_PREFIXES = ("s_sendmsg",)
-INTERNAL_PREFIXES = (
-    "s_wait",
-    "s_soft_wait",
-    "s_delay",
-    "s_set",
-    "s_sleep",
-    "s_monitor_sleep",
-    "s_ttrace",
-    "s_clause",
-    "s_inst_prefetch",
-    "s_incperflevel",
-    "s_decperflevel",
-    "s_icache_inv",
-    "s_denorm_mode",
-    "s_round_mode",
-    "s_singleuse_vdst",
-    "s_endpgm",
-    "s_code_end",
-    "s_nop",
-    "s_trap",
-    "s_wakeup",
+# Nothing in TableGen names these pipelines, so they are matched by name. The
+# barrier, message and wait instructions share the scalar encoding with plain
+# scalar ALU work, and global, scratch and flat share the FLAT encoding while
+# running on different pipelines. Tested in order, first match wins, and the
+# order is folded into PIPELINE_PRECEDENCE.
+NAME_RULES = (
+    (
+        "BARRIER",
+        ("s_barrier",),
+        ("s_wakeup_barrier", "s_get_barrier_state"),
+    ),
+    ("EXP", ("s_sendmsg",), ()),
+    (
+        "INTERNAL",
+        (
+            "s_wait",
+            "s_soft_wait",
+            "s_delay",
+            "s_set",
+            "s_sleep",
+            "s_monitor_sleep",
+            "s_ttrace",
+            "s_clause",
+            "s_inst_prefetch",
+            "s_incperflevel",
+            "s_decperflevel",
+            "s_icache_inv",
+            "s_denorm_mode",
+            "s_round_mode",
+            "s_singleuse_vdst",
+            "s_endpgm",
+            "s_code_end",
+            "s_nop",
+            "s_trap",
+            "s_wakeup",
+        ),
+        (),
+    ),
+    ("VMEM", ("global_", "scratch_"), ()),
+    ("FLAT", ("flat_",), ()),
 )
-# All three share the FLAT encoding but not the pipeline.
-VMEM_PREFIXES = ("global_", "scratch_")
-FLAT_PREFIXES = ("flat_",)
 
 # The encoding classes each name rule is allowed to win over. Everything the
 # name rules match is either a scalar instruction or a FLAT-encoded one.
@@ -244,6 +256,27 @@ def find_uncovered_mnemonics(
     return sorted(set(corpus_mnemonics) - set(table))
 
 
+def build_document(commit: str, table: dict[str, str]) -> dict:
+    """Wrap the table in the provenance and the full rule set behind it.
+
+    Every rule the classifier applies is recorded, the flag ones and the
+    hand-written name ones alike, so a reader can tell where any entry came
+    from and a regenerated file shows in its diff what moved. Analyze reads
+    only ``pipelines``.
+    """
+    return {
+        "repo": LLVM_REPO,
+        "commit": commit,
+        "precedence": list(PIPELINE_PRECEDENCE),
+        "flag_to_pipeline": FLAG_TO_PIPELINE,
+        "name_rules": {
+            pipeline: {"prefixes": list(prefixes), "names": list(names)}
+            for pipeline, prefixes, names in NAME_RULES
+        },
+        "pipelines": dict(sorted(table.items())),
+    }
+
+
 def parse_corpus_mnemonics(disassembly: str) -> set[str]:
     """Collect the mnemonics of an llvm-objdump disassembly listing."""
     mnemonics: set[str] = set()
@@ -323,16 +356,9 @@ def _matches_pipeline(pipeline: str, spelling: str, flags: set[str]) -> bool:
 
 def _name_rule_pipeline(spelling: str) -> Optional[str]:
     """Return the pipeline a hand-written name rule gives this name, if any."""
-    if spelling.startswith(BARRIER_PREFIXES) or spelling in BARRIER_NAMES:
-        return "BARRIER"
-    if spelling.startswith(EXP_PREFIXES):
-        return "EXP"
-    if spelling.startswith(INTERNAL_PREFIXES):
-        return "INTERNAL"
-    if spelling.startswith(VMEM_PREFIXES):
-        return "VMEM"
-    if spelling.startswith(FLAT_PREFIXES):
-        return "FLAT"
+    for pipeline, prefixes, names in NAME_RULES:
+        if spelling.startswith(prefixes) or spelling in names:
+            return pipeline
     return None
 
 
@@ -458,16 +484,9 @@ def _collect_corpus_mnemonics(rocm_path: Path, objdump: Path) -> set[str]:
 
 
 def _write_table(output_path: Path, commit: str, table: dict[str, str]) -> None:
-    """Write the table with the provenance and rules it was built from."""
-    document = {
-        "repo": LLVM_REPO,
-        "commit": commit,
-        "precedence": list(PIPELINE_PRECEDENCE),
-        "flag_to_pipeline": FLAG_TO_PIPELINE,
-        "pipelines": dict(sorted(table.items())),
-    }
+    """Write the generated document."""
     with open(output_path, "w", encoding="utf-8") as output_file:
-        json.dump(document, output_file, indent=2, sort_keys=False)
+        json.dump(build_document(commit, table), output_file, indent=2)
         output_file.write("\n")
 
 
