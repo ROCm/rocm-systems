@@ -269,11 +269,6 @@ struct ConSanResult {
   /// payload. Final validation resolves these identities after text growth.
   std::vector<uint64_t> moi_full_workgroup_id_descriptor_offsets;
   uint64_t moi_report_dispatch_id = 0;
-  /// Immutable semantic options captured before the first MOI planning pass.
-  /// A report-buffer retry derives its options from this snapshot and can
-  /// change only ConSanMoiReportRetryConfig fields plus the narrow live-fault
-  /// selection carried by ConSanFaultMutationRetryConfig.
-  std::optional<ConSanOptions> moi_inventory_options;
   /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;
   /// Target-neutral policy output retained independently of current lowering

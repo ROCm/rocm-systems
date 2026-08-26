@@ -853,7 +853,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
   if (options.flavor == ConSanFlavor::Moi) {
     result.moi_stage_warning_begin = result.warnings.size();
-    result.moi_inventory_options = options;
     // Incremental MOI passes reparse their current result. Release the
     // pristine inventory parser before entering them so its backing image,
     // section objects and names, and derived state cannot overlap every

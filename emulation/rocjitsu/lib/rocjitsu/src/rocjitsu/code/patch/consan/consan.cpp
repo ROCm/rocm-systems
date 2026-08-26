@@ -274,7 +274,7 @@ bool consan_supercollider_supports_lds_site(const ConSanLdsSite &site, rj_code_a
   return is_supported_check_trap_site(site, arch);
 }
 
-ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
+ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSanOptions options,
                                                    const ConSanMoiInventoryRetryConfig &retry,
                                                    std::span<const uint8_t> code_object_bytes) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
@@ -282,12 +282,6 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory,
                                                        code_object_bytes.size());
   const ConSanMoiEngine inventory_engine = inventory.moi_engine;
   try {
-    if (!inventory.moi_inventory_options)
-      inventory.errors.emplace_back("ConSan MOI inventory retry has no immutable option snapshot");
-    ConSanOptions options;
-    options.flavor = ConSanFlavor::Moi;
-    if (inventory.moi_inventory_options)
-      options = *inventory.moi_inventory_options;
     options.patched_image_growth_input_bytes = code_object_bytes.size();
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");

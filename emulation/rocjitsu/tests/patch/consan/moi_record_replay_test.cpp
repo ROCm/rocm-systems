@@ -481,8 +481,8 @@ TEST(ConSanMoi, ReportBufferRetryMatchesFreshRecordReplayTransform) {
       .dispatch_id = options.moi_report_dispatch_id,
   };
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt},
-      bytes);
+      std::move(inventory), inventory_options,
+      ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt}, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -533,8 +533,8 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
       .dispatch_id = options.moi_report_dispatch_id,
   };
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt},
-      bytes);
+      std::move(inventory), inventory_options,
+      ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt}, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -574,7 +574,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   const auto expect_invalid = [&](ConSanResult inventory, std::span<const uint8_t> retry_bytes,
                                   std::string_view expected_error) {
     const ConSanResult result = retry_patch_consan_moi_from_inventory(
-        std::move(inventory),
+        std::move(inventory), inventory_options,
         ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt}, retry_bytes);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
     EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {

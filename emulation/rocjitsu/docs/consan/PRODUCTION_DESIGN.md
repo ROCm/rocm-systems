@@ -3325,6 +3325,36 @@ analysis completed.
   and emitted device code are unchanged; E2E validation remains outside this
   work.
 
+### Slice 5D: delete the raw retry option snapshot
+
+- **Typed reconstruction:** Automatic-report retry now reconstructs its
+  pristine lowering options from `ConSanRequest`, `TransformPolicy`,
+  `RuntimePolicy`, `ConSanDebugOverrides`, `RuntimeCapabilities`, and an
+  explicitly unbound resource value. The live `MutationRequest` and bound
+  report allocation remain the only narrow changes applied by the existing
+  retry contract.
+- **Completed deletion:** `ConSanResult` no longer embeds an optional copy of
+  the large mutable `ConSanOptions` aggregate. The initial MOI analysis no
+  longer writes that snapshot, and raw mechanism retry receives its pristine
+  options explicitly instead of treating a previous output as hidden input.
+  The typed result privately retains only the one-bit extended-barrier shape
+  choice that cannot yet be recovered from the other typed inputs.
+- **Contract coverage:** The raw retry tests pass their original pristine
+  configuration explicitly and continue to compare report-only, synchronization,
+  malformed-inventory, disabled-fault, late-fault, extended-barrier, and
+  fallback behavior with fresh transforms. Typed pipeline tests independently
+  compare retained-inventory retry with a direct typed transform and verify the
+  extended-barrier shape choice and clearing of premature runtime binding.
+- **Size result:** Production line count is unchanged: typed reconstruction and
+  the documented private shape bit replace the deleted snapshot plumbing.
+  Object state is materially smaller and more narrowly owned because every
+  ordinary `ConSanResult` no longer carries storage for an optional
+  `ConSanOptions`.
+- **Completed checked-in gate:** All 11 focused retry tests pass. The complete
+  host gate passes 1,509 tests with the two expected benchmark-object skips;
+  all 194 hook tests pass; and all 2,878 simulator-device tests pass in 60.74
+  seconds of wall time. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

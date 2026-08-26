@@ -313,6 +313,7 @@ void TransformResult::discard_replacement(std::string warning) {
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
   moi_retry_inventory_.reset();
+  moi_retry_preserves_extended_barrier_pairs_ = false;
   stage_record(*this, ConSanPipelineStage::LegacyLowering).status =
       ConSanPipelineStageStatus::Unsupported;
   stage_record(*this, ConSanPipelineStage::FinalValidation).status =
@@ -336,10 +337,12 @@ TransformResult transform_consan_pristine_moi_inventory(
   legacy_options.moi_report_generation = 0;
   legacy_options.moi_report_dispatch_id = 0;
   legacy_options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
-  return TransformResult::publish_optional(
+  TransformResult result = TransformResult::publish_optional(
       code_object_bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
       capabilities, unbound_resources, try_patch_consan(code_object_bytes, legacy_options),
       /*retain_moi_retry_inventory=*/true);
+  result.moi_retry_preserves_extended_barrier_pairs_ = preserve_extended_barrier_pairs;
+  return result;
 }
 
 TransformResult retry_transform_consan_pristine_moi_inventory(
@@ -350,6 +353,11 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
     TransformResult inventory) {
   const ConSanOptions options = LegacyOptionsAdapter::adapt(
       request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
+  ConSanOptions inventory_options =
+      LegacyOptionsAdapter::adapt(request, transform_policy, runtime_policy, debug,
+                                  MutationRequest{}, capabilities, BoundRuntimeResources{});
+  inventory_options.qualify_extended_barrier_pairs =
+      inventory.moi_retry_preserves_extended_barrier_pairs_;
   const ConSanMoiInventoryRetryConfig retry{
       .report =
           {
@@ -372,8 +380,8 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
   retry_inventory.fault_plans = std::move(inventory.fault_plans);
   retry_inventory.resource_plans = std::move(inventory.resource_plans);
   retry_inventory.patches = std::move(inventory.patches);
-  ConSanResult retried =
-      retry_patch_consan_moi_from_inventory(std::move(retry_inventory), retry, code_object_bytes);
+  ConSanResult retried = retry_patch_consan_moi_from_inventory(
+      std::move(retry_inventory), std::move(inventory_options), retry, code_object_bytes);
   return publish_consan_mechanism_result(code_object_bytes, request, transform_policy,
                                          runtime_policy, debug, mutation, capabilities, resources,
                                          std::move(retried));

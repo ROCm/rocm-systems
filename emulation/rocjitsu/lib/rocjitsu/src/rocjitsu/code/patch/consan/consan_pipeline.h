@@ -426,6 +426,10 @@ private:
   /// sizing and its bound retry. Ordinary and completed transforms never keep
   /// this private lowering state.
   std::optional<ConSanResult> moi_retry_inventory_;
+  /// Whether the retained pristine inventory included the extended barrier
+  /// pairs needed by a possible late-bound fault. This is the sole semantic
+  /// shape choice that is not already recoverable from the typed retry inputs.
+  bool moi_retry_preserves_extended_barrier_pairs_ = false;
 };
 
 /// Run the non-installable MOI inventory pass before runtime resources exist.

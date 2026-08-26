@@ -115,7 +115,7 @@ TEST(ConSanMoi, FaultRetryRejectsDryRunFaultRequest) {
   ConSanOptions dry_run = release_last_record_replay_options(/*with_atomic_fault=*/true);
   dry_run.fault_dry_run = true;
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), moi_inventory_retry_config(dry_run), bytes);
+      std::move(inventory), inventory_options, moi_inventory_retry_config(dry_run), bytes);
 
   EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(retried.modified);
@@ -143,7 +143,7 @@ TEST(ConSanMoi, AtomicWrongAddressRetryFromInventoryMatchesFreshLiveTransform) {
   inventory.final_validation_passed = true;
   const ConSanResult fresh = try_patch_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), moi_inventory_retry_config(live), bytes);
+      std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
 
   ASSERT_EQ(retried.outcome, fresh.outcome)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
@@ -174,7 +174,7 @@ TEST(ConSanMoi, UnsatisfiedLateFaultRetryMatchesFreshRejection) {
   live.fault_site_identity = "missing-site";
   const ConSanResult fresh = try_patch_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), moi_inventory_retry_config(live), bytes);
+      std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
 
   EXPECT_EQ(retried.outcome, fresh.outcome);
   EXPECT_EQ(retried.mutation.fault.applied, 0u);
@@ -193,9 +193,9 @@ TEST(ConSanMoi, DisabledFaultProjectionUsesReportOnlyRetryPath) {
   live.moi_report_buffer_address = 0x123456780000ull;
   live.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   const ConSanResult absent = retry_patch_consan_moi_from_inventory(
-      inventory, moi_inventory_retry_config(live, /*bind_fault=*/false), bytes);
-  const ConSanResult disabled =
-      retry_patch_consan_moi_from_inventory(inventory, moi_inventory_retry_config(live), bytes);
+      inventory, inventory_options, moi_inventory_retry_config(live, /*bind_fault=*/false), bytes);
+  const ConSanResult disabled = retry_patch_consan_moi_from_inventory(
+      inventory, inventory_options, moi_inventory_retry_config(live), bytes);
 
   EXPECT_EQ(disabled.outcome, absent.outcome);
   EXPECT_EQ(disabled.modified, absent.modified);
@@ -261,7 +261,8 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   const ConSanMoiInventoryRetryConfig retry_config = moi_inventory_retry_config(live);
   ConSanResult retry_inventory = inventory;
   const auto [retried, retry_ms] = timed([&] {
-    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), retry_config, bytes);
+    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), inventory_options,
+                                                 retry_config, bytes);
   });
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
@@ -325,7 +326,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
   ConSanResult retry_inventory = inventory;
   const auto [fresh, fresh_ms] = timed([&] { return try_patch_consan(bytes, live); });
   const auto [retried, retry_ms] = timed([&] {
-    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory),
+    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), inventory_options,
                                                  moi_inventory_retry_config(live), bytes);
   });
 
@@ -639,7 +640,8 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
           },
       .fault = ConSanFaultMutationRetryConfig::from_options(live_options),
   };
-  const ConSanResult retried = retry_patch_consan_moi_from_inventory(pristine, retry, bytes);
+  const ConSanResult retried =
+      retry_patch_consan_moi_from_inventory(pristine, pristine_options, retry, bytes);
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
   EXPECT_EQ(retried.mutation.fault.applied, 1u);
@@ -697,7 +699,7 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
             1u);
   const ConSanResult fresh = try_patch_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), moi_inventory_retry_config(live), bytes);
+      std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
 
   EXPECT_EQ(fresh.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_EQ(retried.outcome, fresh.outcome);
@@ -751,7 +753,7 @@ TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
 
   const ConSanResult fresh = try_patch_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), moi_inventory_retry_config(live), bytes);
+      std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
   ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(fresh.errors);
   EXPECT_EQ(retried.outcome, fresh.outcome);
