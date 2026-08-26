@@ -1935,6 +1935,17 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
                     if (!result.ok) return result;
                     NetMHandleWorkerGuard mhGuard(mh, NetMHandleWorkerDeleter(net_, comm));
 
+                    // hipMalloc can hand back recycled memory, and the pattern is the
+                    // same seed every cycle for this worker: an untouched receive
+                    // buffer that already holds a prior transfer's bytes would verify
+                    // clean without this transfer ever landing. Clear it first, as the
+                    // other GPU receive tests do.
+                    if (rank == 0 && hipMemset(devBuf, 0, sz) != hipSuccess) {
+                        result.ok = false;
+                        result.msg = "GPU buffer clear failed";
+                        return result;
+                    }
+
                     if (rank == 1
                         && initializeBufferWithPattern<uint8_t>(devBuf, sz,
                                                                 makeBytePattern(seed))
