@@ -464,6 +464,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetDefaultHostGpu(HSAuint32 *NodeId,
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   return HSAKMT_STATUS_NOT_SUPPORTED;
+}
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,
                                              HSAuint64 MemorySizeInBytes) {
