@@ -58,7 +58,10 @@ def main() -> int:
     ap.add_argument("--client", type=Path, required=True)
     ap.add_argument("--ballast-mb", type=int, default=32)
     ap.add_argument("--launches", type=int, default=4)
-    ap.add_argument("--passes", type=int, nargs="+", default=[1, 3, 5, 8])
+    # Starts at 2, not 1: a pass count of 1 is not replayed (no snapshot, no restore), so including
+    # it makes the first pairwise ratio measure the cost of enabling replay rather than per-pass
+    # scaling. See the header comment in run_and_validate.py.
+    ap.add_argument("--passes", type=int, nargs="+", default=[2, 3, 5, 8])
     ap.add_argument(
         "--slack",
         type=float,
