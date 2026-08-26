@@ -80,10 +80,9 @@ set(BITCODE_GPU_ARCHS_FULL "${_BITCODE_FULL_LIST}" CACHE STRING
 
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and clang backend compilation.
-# -fgpu-rdc marks each TU as part of a larger relocatable-device-code program,
-# so real per-TU -O3 never DCEs genuinely external-linkage device functions
-# even with zero in-TU callers (mirrors the flag already used to build
-# librocshmem.a itself in src/CMakeLists.txt).
+# -fgpu-rdc mirrors the flag used to build librocshmem.a in src/CMakeLists.txt.
+# -Xclang -disable-llvm-passes (added per-arch below) is what actually stops
+# per-TU DCE of these in-TU-uncalled __device__ functions.
 set(BITCODE_COMPILE_FLAGS_BASE
     -Wall
     -Wextra
@@ -186,12 +185,9 @@ endif()
 #
 # __device__ API functions (rocshmem_quiet, rocshmem_barrier_wg, etc.) have no
 # caller within their own TU -- they are public API for code that doesn't
-# exist yet at build time. BITCODE_COMPILE_FLAGS_BASE carries -fgpu-rdc, which
-# tells clang/LLVM this TU is part of a larger program, so real per-TU -O3
-# never strips genuinely external-linkage device functions. Each source is
-# compiled at real -O3, then all per-arch .bc files are merged with llvm-link
-# and reoptimized with opt -O3 once real cross-TU callers exist in the merged
-# module. This mirrors the approach in CMakeDeviceBitcodeTester.cmake.
+# exist yet at build time. -Xclang -disable-llvm-passes skips per-TU DCE so
+# these survive; -O3 optimization actually happens once, via opt -O3 below,
+# after llvm-link merges all per-arch .bc files. Mirrors CMakeDeviceBitcodeTester.cmake.
 set(ALL_BITCODE_OUTPUTS)
 foreach(gpu_arch ${BITCODE_GPU_ARCHS})
   # Resolve the full arch string (with feature suffixes) for this base arch, so
@@ -214,7 +210,8 @@ foreach(gpu_arch ${BITCODE_GPU_ARCHS})
     endif()
   endif()
 
-  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${_FULL_ARCH})
+  set(_COMPILE_FLAGS ${BITCODE_COMPILE_FLAGS_BASE} --offload-arch=${_FULL_ARCH}
+                     -Xclang -disable-llvm-passes)
   set(BITCODE_OBJECTS_${gpu_arch})
   foreach(src_file ${BITCODE_SOURCES})
     get_filename_component(src_name ${src_file} NAME_WE)

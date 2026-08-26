@@ -62,13 +62,8 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   # The kernel is compiled fresh (it stands in for an end user's own code),
   # then linked directly against BITCODE_OUTPUT_${GPU_ARCH} -- the exact
   # librocshmem_device_${GPU_ARCH}.bc that DeviceBitcode.cmake already built
-  # and ships to real users. This mirrors the real end-user distribution
-  # contract instead of independently recompiling BITCODE_SOURCES a second
-  # time. BITCODE_COMPILE_FLAGS_BASE carries -fgpu-rdc, so real per-TU -O3
-  # never DCEs genuinely external-linkage device functions even with zero
-  # in-TU callers, which is what makes it safe for both the kernel and the
-  # production bitcode to be compiled/optimized independently before being
-  # merged and re-optimized here.
+  # and ships to real users -- instead of independently recompiling
+  # BITCODE_SOURCES a second time.
   add_custom_command(
     OUTPUT ${KERNEL_BC}
     COMMAND ${LLVM_CLANG}
