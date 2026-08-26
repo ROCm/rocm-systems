@@ -112,7 +112,9 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorIsFatal) {
                 // Warm the scheduler up before arming, as the serial body does.
                 result = WorkerSendRecvPattern(rank, pair, buffer, size, 300, mhandle,
                                                WorkerSeed(threadIdx, 0));
-                if (!result.ok) return result;
+                if (!result.ok)
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                             &bufferGuard);
 
                 if (rank == 0) {
                     // Posting this receive is what lets the peer reach the injected
@@ -451,7 +453,9 @@ TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
 
                 result = WorkerSendRecvPattern(rank, pair, buffer, size, 4999, mhandle,
                                                WorkerSeed(threadIdx, 0));
-                if (!result.ok) return result;
+                if (!result.ok)
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                             &bufferGuard);
 
                 if (rank == 1) {
                     result = WorkerCastFaultSetDelay(pair.sendComm, /*qpIdx=*/0,
@@ -464,7 +468,9 @@ TEST_F(NetIbMPITest, FaultInjCastDelayDataIntegrity) {
                 for (int i = 0; i < kThreadedMsgs; i++) {
                     result = WorkerSendRecvPattern(rank, pair, buffer, size, 5000 + i, mhandle,
                                                    seed, kLargeTransferTimeoutMs);
-                    if (!result.ok) return result;
+                    if (!result.ok)
+                        return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                                 &bufferGuard);
                 }
 
                 if (rank == 1) return WorkerCastFaultClear(pair.sendComm);
@@ -716,7 +722,9 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
 
                 result = WorkerSendRecvPattern(rank, faulted, buffer, size, 500, faultedMh,
                                                WorkerSeed(threadIdx, 0));
-                if (!result.ok) return result;
+                if (!result.ok)
+                    return WorkerRetainAfterAbandonedRequest(result, faulted, rank, &faultedGuard,
+                                                             &bufferGuard);
 
                 if (rank == 0) {
                     // Flushed rather than left hanging: phase 2 reuses this buffer,
@@ -759,7 +767,9 @@ TEST_F(NetIbMPITest, FaultInjCastQpErrorClearRecovers) {
 
                 result = WorkerSendRecvPattern(rank, fresh, buffer, size, 502, freshMh,
                                                WorkerSeed(threadIdx, 7));
-                if (!result.ok) return result;
+                if (!result.ok)
+                    return WorkerRetainAfterAbandonedRequest(result, fresh, rank, &freshGuard,
+                                                             &bufferGuard);
 
                 if (rank == 1) {
                     const int fatalCount = WorkerCastFatalCount(fresh.sendComm);
@@ -1060,7 +1070,9 @@ TEST_F(NetIbMPITest, FailoverCqeErrorRecovered) {
 
                 result = WorkerSendRecvPattern(rank, pair, buffer, size, 600, mhandle,
                                                WorkerSeed(threadIdx, 0));
-                if (!result.ok) return result;
+                if (!result.ok)
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                             &bufferGuard);
 
                 return WorkerCastFailoverTransfer(rank, pair, buffer, size, 601, mhandle,
                                                   WorkerSeed(threadIdx, 1), /*messages=*/1, &atFailure,
@@ -1503,7 +1515,9 @@ TEST_F(NetIbMPITest, FailoverLargeMessageDataIntegrity) {
 
                 result = WorkerSendRecvPattern(rank, pair, buffer, size, 900, mhandle,
                                                WorkerSeed(threadIdx, 0), kLargeTransferTimeoutMs);
-                if (!result.ok) return result;
+                if (!result.ok)
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                             &bufferGuard);
 
                 return WorkerCastFailoverTransfer(rank, pair, buffer, size, 901, mhandle,
                                                   WorkerSeed(threadIdx, 1), /*messages=*/1, &atFailure,
@@ -1827,7 +1841,9 @@ TEST_F(NetIbMPITest, FailoverMultiRequestInFlight) {
 
                 result = WorkerSendRecvPattern(rank, pair, buffer, size, 1200, mhandle,
                                                WorkerSeed(threadIdx, 0));
-                if (!result.ok) return result;
+                if (!result.ok)
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                             &bufferGuard);
 
                 // This test is about requests already in flight when the link
                 // dies, so the fault lands after every message is posted.
@@ -2128,7 +2144,9 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
 
                 result = WorkerSendRecvPattern(rank, pair, buffer, size, 1300, mhandle,
                                                WorkerSeed(threadIdx, 0));
-                if (!result.ok) return result;
+                if (!result.ok)
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                             &bufferGuard);
 
                 // QP 0 is broken while the connection is idle: the serial body's
                 // in-flight break needs an MPI handshake a worker cannot make. Gated so
@@ -2141,7 +2159,8 @@ TEST_F(NetIbMPITest, RecoverySuccessRestoresTraffic) {
                 }
                 result = WorkerTransferAcrossQpFailure(rank, pair, buffer, size, 1301, mhandle,
                                                       WorkerSeed(threadIdx, 1),
-                                                      kLargeTransferTimeoutMs);
+                                                      kLargeTransferTimeoutMs, &mhandleGuard,
+                                                      &bufferGuard);
                 if (!result.ok) {
                     result.msg = "failover transfer after the link failure: " + result.msg;
                     return result;
@@ -2541,7 +2560,9 @@ TEST_F(NetIbMPITest, PostRecoveryPingPongHoldsSync) {
 
             result = WorkerSendRecvPattern(rank, pair, buffer, kMsgSize, 1400, mhandle,
                                            WorkerSeed(threadIdx, 0));
-            if (!result.ok) return result;
+            if (!result.ok)
+                return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                         &bufferGuard);
 
             // QP 0 broken while idle, then the transfer; both sides enter recovery.
             if (!WorkerRendezvous(atFailure, nThreads, 3000)) {
@@ -2551,7 +2572,8 @@ TEST_F(NetIbMPITest, PostRecoveryPingPongHoldsSync) {
             }
             result = WorkerTransferAcrossQpFailure(rank, pair, buffer, kMsgSize, 1401, mhandle,
                                                    WorkerSeed(threadIdx, 1),
-                                                   kLargeTransferTimeoutMs);
+                                                   kLargeTransferTimeoutMs, &mhandleGuard,
+                                                   &bufferGuard);
             if (!result.ok) {
                 result.msg = "failover transfer after the link failure: " + result.msg;
                 return result;
@@ -4106,7 +4128,9 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
             // Every worker starts from a working connection.
             result = WorkerSendRecvPattern(rank, pair, buffer, size, 800, mhandle,
                                            WorkerSeed(threadIdx, 0));
-            if (!result.ok) return result;
+            if (!result.ok)
+                return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                         &bufferGuard);
 
             const bool victim = (threadIdx == 0);
             if (victim) {
@@ -4185,7 +4209,8 @@ TEST_F(NetIbMPITest, FaultIsolationAcrossWorkers) {
                     // Counted even on failure: the victim is waiting for this, and
                     // its own timeout would bury the real error under a second one.
                     bystandersDone.fetch_add(1, std::memory_order_release);
-                    return result;
+                    return WorkerRetainAfterAbandonedRequest(result, pair, rank, &mhandleGuard,
+                                                             &bufferGuard);
                 }
             }
             bystandersDone.fetch_add(1, std::memory_order_release);
