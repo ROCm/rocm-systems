@@ -2490,6 +2490,43 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in 75.19
   seconds of wall time. E2E validation remains outside this deletion work.
 
+### Slice 4K: delete legacy static-coverage reconstruction
+
+- **Completed deletion and ownership cutover:** The HSA hook now computes its
+  static coverage summary exclusively from `TransformResult::coverage_ledger`.
+  The duplicate scans over MOI candidates, resource plans, synchronization
+  inventories, and emitted patch kinds are gone, including the Sampled and
+  InlineShadow special cases that attempted to reconstruct semantic
+  applicability after lowering.
+- **Strict-installation contract:** `RJ_CONSAN_REQUIRE_PATCH` now asks the
+  typed observation plan whether any semantic probe was requested and the
+  coverage ledger whether any requested probe was instrumented. A structural
+  prologue or dispatcher cannot satisfy the guard, resource- or placement-
+  rejected probes remain visible failures, and a valid empty plan requires no
+  instrumentation. Legacy candidates and patch mnemonics have no vote.
+- **One semantic denominator:** Coverage groups typed semantic decisions by
+  resource kind and original physical site, then reads each cited intent's
+  durable lowering outcome. Unsupported, resource-rejected, placement-
+  rejected, instrumented, and expert-limit states therefore use the same
+  denominator as policy and lowering instead of an architecture-specific hook
+  approximation.
+- **Test cutover:** The hook regression covers pending, resource-rejected, and
+  instrumented MOI plans for Record/Replay, Sampled, and InlineShadow, plus the
+  existing SuperCollider cases. The obsolete hook-local B96 mnemonic test was
+  deleted because architecture-aware B96 admission is already covered at the
+  shared capability and lowerer boundaries and in paired device contracts.
+  Fault-reservation fixtures now publish explicit typed plans, while process-
+  memory fixtures publish a valid empty plan and no longer fabricate candidate
+  or resource-plan telemetry unrelated to memory accounting.
+- **Deletion result:** Production source is 134 net lines smaller. Source plus
+  tests is 167 net lines smaller; test deletions remove assertions about the
+  discarded reconstruction while retaining the typed behavioral guards.
+- **Completed checked-in gate:** The complete RocJitsu host binary passed
+  5,600 of 5,604 tests with four intentional skips; the complete HSA-hook
+  binary passed all 196 tests. All 2,878 simulator device rows across gfx942,
+  gfx950, gfx1100, gfx1201, and gfx1250 passed in 71.72 seconds of wall time.
+  E2E validation remains outside this deletion work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner
