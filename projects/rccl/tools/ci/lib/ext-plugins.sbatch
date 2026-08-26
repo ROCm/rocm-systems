@@ -214,6 +214,10 @@ _tt0=$(date +%s)
 _pt(){ echo "PHASE_TS $1 epoch=$(date +%s) iso=$(date -Is) elapsed=$(( $(date +%s) - _tt0 ))s"; }
 _pt "test:start"
 echo "==> [5/5] run ext-plugins pytest (-m 'ext_mixed or ext_tuner')"
+# UCX mpirun registers RDMA memory via ibv_reg_mr; SLURM jobs submitted from the
+# GHA runner often inherit RLIMIT_MEMLOCK=8192 kB. Raise it for pytest/mpirun.
+ulimit -l unlimited 2>/dev/null || echo "WARN: could not raise RLIMIT_MEMLOCK (ulimit -l)"
+echo "==> RLIMIT_MEMLOCK (ulimit -l) = $(ulimit -l)"
 set -a
 # shellcheck source=/dev/null
 source "${workdir}/.ci-out/ompi-ucx.env"
