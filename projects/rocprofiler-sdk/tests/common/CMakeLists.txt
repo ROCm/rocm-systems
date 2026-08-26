@@ -223,14 +223,6 @@ function(rocprofiler_add_integration_execute_test NAME)
 
     rocprofiler_set_integration_test_name(arg_NAME "${NAME}" "execute")
 
-    if(arg_WSL_TIMEOUT_SCALE AND (NOT DEFINED arg_TIMEOUT OR "${arg_TIMEOUT}" STREQUAL ""
-                                 ))
-        message(
-            FATAL_ERROR
-                "rocprofiler_add_integration_execute_test: WSL_TIMEOUT_SCALE requires TIMEOUT for ${NAME} (${arg_NAME})"
-            )
-    endif()
-
     if("${arg_ENVIRONMENT}" MATCHES "LD_PRELOAD=.*")
         message(
             FATAL_ERROR
