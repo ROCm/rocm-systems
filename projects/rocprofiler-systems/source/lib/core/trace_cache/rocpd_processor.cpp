@@ -304,7 +304,15 @@ rocpd_processor_t::handle(const in_time_sample& its)
     profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
     pmc_uid.name = its.track_name;
 
-    m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+    try
+    {
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+    } catch(const std::runtime_error& e)
+    {
+        LOG_WARNING("In-time sample skipped: PMC info not registered for "
+                    "track_name={}: {}",
+                    its.track_name, e.what());
+    }
 }
 
 void
@@ -350,7 +358,15 @@ rocpd_processor_t::handle(const pmc_event_with_sample& pmc)
     pmc_uid.name     = pmc.pmc_info_name;
     pmc_uid.agent_id = make_agent_uid(agent_ref);
 
-    m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+    try
+    {
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+    } catch(const std::runtime_error& e)
+    {
+        LOG_WARNING("PMC event skipped: PMC info not registered for "
+                    "pmc_info_name={}: {}",
+                    pmc.pmc_info_name, e.what());
+    }
 }
 
 void
@@ -398,7 +414,15 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        try
+        {
+            m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        } catch(const std::runtime_error& e)
+        {
+            LOG_WARNING("GPU PMC sample skipped: PMC info not registered for "
+                        "pmc_name={}: {}",
+                        pmc_name, e.what());
+        }
     };
 
     const auto& m       = gpu_pmc.metric_values;
@@ -589,7 +613,15 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        try
+        {
+            m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        } catch(const std::runtime_error& e)
+        {
+            LOG_WARNING("NIC PMC sample skipped: PMC info not registered for "
+                        "pmc_name={}: {}",
+                        pmc_name, e.what());
+        }
     };
 
     const auto& mtrcs   = nic_sample.metric_values;
@@ -679,7 +711,16 @@ rocpd_processor_t::handle(
         pmc_uid.name     = info.pmc_info_name;
         pmc_uid.agent_id = agent_uid;
 
-        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        try
+        {
+            m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        } catch(const std::runtime_error& e)
+        {
+            LOG_WARNING("GPU perf-counter sample skipped: PMC info not registered for "
+                        "pmc_info_name={}: {}",
+                        info.pmc_info_name, e.what());
+            continue;
+        }
     }
 }
 
@@ -771,7 +812,15 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        try
+        {
+            m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        } catch(const std::runtime_error& e)
+        {
+            LOG_WARNING("CPU PMC sample skipped: PMC info not registered for "
+                        "pmc_name={}: {}",
+                        pmc_name, e.what());
+        }
     };
 
     const auto& enabled_m = cpu_pmc_smpl.enabled_metric;
@@ -936,6 +985,11 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
         LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
                     "device_type={}: {}",
                     kfd.device_id, kfd.device_type, e.what());
+    } catch(const std::runtime_error& e)
+    {
+        LOG_WARNING("KFD PMC event skipped: PMC info not registered for "
+                    "pmc_info_name={}: {}",
+                    kfd.pmc_info_name, e.what());
     }
 }
 
