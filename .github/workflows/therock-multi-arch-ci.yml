@@ -141,6 +141,17 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      # =====================================================================
+      # TEMPORARY (stage skip) -- track/remove via ROCm/rocm-libraries#11195
+      # This intentionally builds only the stages a PR touches to speed up
+      # per-PR CI. It is an interim measure until TheRock's automatic
+      # stage-REUSE is stable; reuse rebuilds nothing but still provides every
+      # artifact (via copy), so downstream builds/tests see a complete set.
+      # Removal plan: once reuse is enabled, drop the skip wiring and flip
+      # stage_reuse_mode to reuse-stage (see "Skip now, reuse later" below).
+      # Trade-off acknowledged: while active, skipped stages produce no
+      # artifacts, so downstream jobs only see the built subset.
+      # =====================================================================
       # Per-PR stage SKIP (not reuse): the configure job maps the changed
       # projects to the minimal set of build stages via TheRock's build topology
       # and returns every other stage in `skip_stages`. We pass that list through
