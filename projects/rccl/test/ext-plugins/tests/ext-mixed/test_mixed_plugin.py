@@ -125,11 +125,12 @@ def _gpu_count():
 def test_mixed_runtime_load(paths):
     """RCCL must load both net and tuner from the single mixed shared object.
 
-    The plugin loader is a per-process property, so this runs the collective in a
-    single multi-GPU process (all_reduce_perf -g 2). rccl-tests may be built with
-    MPI (USE_MPI=ON), in which case the binary calls MPI_Init and must be launched
-    via mpirun; when an OpenMPI is available it is run through `mpirun -np 1`,
-    otherwise (a non-MPI binary) it is run bare.
+    Each process loads the plugins independently, so a 2-rank all_reduce exercises
+    the reuse path. rccl-tests may be built with MPI (USE_MPI=ON): that binary
+    calls MPI_Init and hangs if launched bare under OpenMPI 5.x (PMIx/PRTE), so
+    when an OpenMPI is available it is launched via `mpirun -np 2` with one GPU per
+    rank (-g 1), matching the device-api suite. Without OpenMPI (a non-MPI binary)
+    it runs bare in one process with two GPUs (-g 2) for the same 2-rank collective.
     """
     so_path = _build_mixed_plugin()
 
@@ -155,20 +156,20 @@ def test_mixed_runtime_load(paths):
         }
     )
 
-    perf_args = [perf_bin, "-b", "8", "-e", "1M", "-f", "4", "-g", "2", "-n", "5", "-w", "2"]
-
     # A USE_MPI=ON rccl-tests binary calls MPI_Init and hangs if launched bare
-    # under OpenMPI 5.x (PMIx/PRTE). When an OpenMPI is available, launch the one
-    # process via `mpirun -np 1` so MPI initializes cleanly; the loader is still
-    # per-process, so a single rank with -g 2 exercises the reuse path just as a
-    # bare run would. mpirun forwards this env (NCCL_NET_PLUGIN etc.) to the rank.
+    # under OpenMPI 5.x (PMIx/PRTE). When an OpenMPI is available, launch it via
+    # `mpirun -np 2` with one GPU per rank (-g 1), matching the device-api suite;
+    # mpirun forwards this env (NCCL_NET_PLUGIN etc.) to the ranks. Without an
+    # OpenMPI (a non-MPI binary), run bare in one process with two GPUs (-g 2) for
+    # the same 2-rank collective.
     mpirun = os.path.join(paths.OMPI_INSTALL_DIR, "bin", "mpirun")
     if os.path.exists(mpirun):
         env["PATH"] = f"{paths.OMPI_INSTALL_DIR}/bin:{env.get('PATH', '')}"
         env["LD_LIBRARY_PATH"] = f"{paths.OMPI_INSTALL_DIR}/lib:{env['LD_LIBRARY_PATH']}"
-        args = [mpirun, "-np", "1"] + perf_args
+        args = [mpirun, "-np", "2", "-x", "LD_LIBRARY_PATH",
+                perf_bin, "-b", "8", "-e", "1M", "-f", "4", "-g", "1", "-n", "5", "-w", "2"]
     else:
-        args = perf_args
+        args = [perf_bin, "-b", "8", "-e", "1M", "-f", "4", "-g", "2", "-n", "5", "-w", "2"]
 
     log_dir = os.path.join(paths.LOGDIR, "mixed_plugin_test_logs")
     os.makedirs(log_dir, exist_ok=True)
