@@ -318,9 +318,11 @@ issues, warnings, and validated replacement bytes. Runtime conflicts do not
 belong in this static result.
 
 `TransformResult::install_action` derives loader behavior from the static
-outcome and fail-closed policy. `take_legacy_result()` is an explicit rvalue-only
-projection for hook code that has not yet migrated from `ConSanResult`; new
-consumers must use the split result directly.
+outcome and fail-closed policy. The HSA coordinator consumes the split result
+directly for outcome, diagnostics, replacement storage, and installation. A
+read-only `legacy_mechanism()` view temporarily exposes patch geometry and
+lowering telemetry that have not yet acquired narrower production owners; it
+is not a second source of control-plane truth.
 
 ## Runtime component and lifecycle
 

@@ -240,11 +240,13 @@ struct ConSanTransformIssue {
 /// address-free evidence requirements, validated replacement bytes, and typed
 /// failures from the prototype's large mutable `ConSanResult`. The private
 /// compatibility value retains only mechanism telemetry and fields not yet
-/// migrated; `take_legacy_result()` is the explicit temporary projection for
-/// old consumers. A result never contains runtime conflict evidence and makes
-/// no race-free claim. Public fields allow precise construction and invariant
-/// testing during the migration, while production creates values only through
-/// `transform_consan` or `transform_consan_with_mutation`.
+/// migrated. It is exposed read-only while those fields acquire narrower
+/// production owners; caller-visible outcome, installation, diagnostics, and
+/// replacement storage must not be reconstructed from it. A result never
+/// contains runtime conflict evidence and makes no race-free claim. Public
+/// fields allow precise construction and invariant testing during the
+/// migration, while production creates values only through `transform_consan`
+/// or `transform_consan_with_mutation`.
 class TransformResult {
 public:
   TransformResult() = default;
@@ -285,10 +287,18 @@ public:
   /// Derive loader policy solely from the split static result.
   [[nodiscard]] ConSanInstallAction install_action(bool fail_closed) const;
 
-  /// Reconstitute the prototype result for a consumer not yet migrated to the
-  /// split contract. This rvalue-only operation transfers replacement bytes
-  /// and artifacts back without copying a potentially large code object.
-  [[nodiscard]] ConSanResult take_legacy_result() &&;
+  /// Read lowering telemetry whose typed production owner has not yet been
+  /// extracted. Runtime callers may use this for patch geometry, mutation
+  /// telemetry, and native-resource details only. Installation policy,
+  /// replacement bytes, diagnostics, inventory, observation policy, and
+  /// coverage are owned by this `TransformResult` and must be read here.
+  [[nodiscard]] const ConSanResult &legacy_mechanism() const { return legacy_compatibility_; }
+
+  /// Demote an otherwise installable transform after a runtime-owned resource
+  /// operation fails. This keeps the typed outcome, stage records, replacement
+  /// storage, and temporary mechanism telemetry coherent without allowing the
+  /// runtime adapter to mutate either representation field by field.
+  void discard_replacement(std::string warning);
 
 private:
   friend class LegacyConSanLowering;
@@ -337,6 +347,33 @@ public:
       const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
       const ConSanDebugOverrides &debug, const MutationRequest &mutation,
       const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources);
+
+  /// Validate the typed front end, invoke `run()` only when those contracts
+  /// admit lowering, and publish the result through `TransformResult`.
+  [[nodiscard]] static TransformResult
+  run_and_publish(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+                  const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+                  const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+                  const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources);
+
+  /// Publish a mechanism result already produced by the inventory-retry or
+  /// hook-test seam through the same typed pipeline contract as an ordinary
+  /// lowering. This is the only compatibility entry for results not produced
+  /// by `run()` and disappears with the legacy retry boundary.
+  [[nodiscard]] static TransformResult
+  publish(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+          const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+          const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+          const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
+          ConSanResult legacy_result);
+
+private:
+  [[nodiscard]] static TransformResult
+  publish_optional(std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+                   const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+                   const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+                   const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
+                   std::optional<ConSanResult> legacy_result);
 };
 
 /// Run the ordinary observation pipeline. Fault mutation and timing

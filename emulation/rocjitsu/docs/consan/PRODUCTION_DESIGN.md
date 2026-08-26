@@ -1126,9 +1126,10 @@ validation detail without asking control flow to parse it.
 During incremental cutover, `TransformResult` privately owns a stripped
 compatibility result. Immutable inventory, observation plan, coverage,
 replacement bytes, status, and diagnostics live in the split result and are
-moved back only by the rvalue-only `take_legacy_result()` adapter. This keeps
-large replacement images single-owned and makes every unmigrated consumer
-explicit. The private value is not a second source of semantic truth.
+consumed there by the HSA coordinator. `legacy_mechanism()` exposes a read-only
+view of patch geometry and lowering telemetry until those values acquire
+narrower owners. Large replacement images remain single-owned, and the private
+value is not a second source of semantic or installation truth.
 
 `RunVerdict` is produced only after runtime evidence. It distinguishes:
 
@@ -1961,7 +1962,7 @@ The focused `request_contract_test.cpp` host suite covers defaults, value
 semantics, all validation and sentinel branches, mode conflicts, sampling and
 register boundaries, every mutation predicate, pristine mutation projection,
 both physical and simulator capability fixtures, every missing required
-runtime fact, all resource lifetimes, issue naming, fresh legacy projection,
+runtime fact, all resource lifetimes, issue naming, fresh legacy adapter input,
 and typed-entry equivalence. The hook suite retains load-only Record/Replay
 activation, fail-open/fail-closed, parser, allocation, and lifecycle coverage.
 The completed cutover gate is the full ConSan host suite, all HSA-hook units,
@@ -2387,7 +2388,7 @@ analysis completed.
   cross-type relationships, configuration/capability short-circuiting,
   immutable fingerprints, all four evidence variants, absent/complete/wrong-
   schema/undersized bindings, installation truth tables, deterministic input
-  preservation, exact legacy projection, and distinct ordinary/mutation entry
+  preservation, exact split/mechanism agreement, and distinct ordinary/mutation entry
   points. The complete ConSan host gate passed 1,498 tests with two intentional
   external-object benchmark skips; all 98 selected hook and transform-memory
   tests passed.
@@ -2429,10 +2430,10 @@ analysis completed.
   prototype. `LegacyConSanLowering` may translate those values into mechanism
   shape, but may not originate target-neutral admission, report sizing,
   runtime allocation, or trust policy.
-- **Honest deviations from the end-state diagrams:** The HSA adapter still
-  projects a successful `TransformResult` to `ConSanResult` because automatic
-  allocation retry, fault installation telemetry, and reader registration
-  consume prototype mechanism fields. The logical pipeline stages still wrap
+- **Honest deviations from the end-state diagrams:** The HSA adapter consumes
+  `TransformResult` directly, but automatic allocation retry, fault
+  installation telemetry, and reader registration still use its read-only
+  legacy mechanism view. The logical pipeline stages still wrap
   a monolithic lowerer rather than distinct parser, resource, emitter, and
   finalizer calls. `consan.h` still exposes prototype data structures used by
   mechanism helpers even though it exposes no transform function. These are
@@ -2449,12 +2450,11 @@ The remaining lowerer responsibilities are explicit:
 | Inline Shadow | Workgroup shadow layout, owner/epoch state, inline conflict checks, and device report lowering | Isolate the on-device state backend behind the same observation/resource boundaries while DBI support evolves |
 | Mutation and composition | Recursive dry-run/live composition, pristine mutation inventory, perturbation composition, and exact-one application telemetry | Make mutation an explicit consumer of immutable inventory and a separate transform composition layer |
 | Shared mechanism | Register allocation, spilling, wait preservation, branch reservoirs/relays, code-object growth, patch application, ABI retry, and final ELF validation | Extract resource planning, placement/emission, and transactional finalization in that order, shared by every engine and target |
-| HSA lifecycle compatibility | Automatic allocation/retry inputs, reader/executable registration metadata, and installation telemetry still consume the legacy projection | Teach the runtime coordinator to consume `TransformResult` plus a separate mechanism-telemetry value, then delete `take_legacy_result()` |
+| HSA lifecycle compatibility | The runtime coordinator now consumes `TransformResult` directly; automatic allocation/retry and reader/executable metadata still read a bounded legacy mechanism view | Extract the remaining patch geometry and allocation/retry telemetry into narrowly owned values, then delete the mechanism view |
 
-- **Next component order:** First migrate the HSA runtime coordinator off the
-  result projection. Second extract shared decode/inventory. Third separate
+- **Next component order:** First extract shared decode/inventory. Second separate
   shared resource planning from engine-specific evidence semantics, beginning
-  with Record/Replay because it is the near-term DBI client. Fourth isolate
+  with Record/Replay because it is the near-term DBI client. Third isolate
   placement/emission and transactional finalization. At each boundary, delete
   the corresponding `ConSanOptions`/`ConSanResult` fields and extend the focused
   type tests before proceeding.

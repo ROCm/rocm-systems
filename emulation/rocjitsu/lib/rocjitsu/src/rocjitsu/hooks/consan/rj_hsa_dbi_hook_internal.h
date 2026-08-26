@@ -978,6 +978,4 @@ extern std::atomic<ConSanTransformOverride> g_test_consan_transform_override;
 
 [[gnu::format(printf, 2, 3)]] void log_message(int required_level, const char *format, ...);
 
-ConSanResult run_consan_transform(std::span<const uint8_t> bytes, const ConSanOptions &options);
-
 } // namespace rocjitsu::consan_hook

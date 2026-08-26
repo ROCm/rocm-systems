@@ -227,21 +227,35 @@ ConSanInstallAction TransformResult::install_action(bool fail_closed) const {
   return ConSanInstallAction::Reject;
 }
 
-ConSanResult TransformResult::take_legacy_result() && {
-  ConSanResult result = std::move(legacy_compatibility_);
-  result.install_program_inventory(std::move(program_inventory));
-  result.observation_plan = std::move(observation_plan);
-  result.coverage_ledger = std::move(coverage_ledger);
-  result.elf_bytes = std::move(replacement_bytes);
-  result.outcome = outcome;
-  result.modified = outcome == ConSanTransformOutcome::ModifiedValid;
-  result.final_validation_passed = final_validation_passed;
-  result.warnings = std::move(warnings);
-  result.errors.clear();
-  result.errors.reserve(issues.size());
-  for (ConSanTransformIssue &issue : issues)
-    result.errors.push_back(std::move(issue.detail));
-  return result;
+void TransformResult::discard_replacement(std::string warning) {
+  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
+    (void)coverage_ledger.set_lowering_outcome(intent.id,
+                                               ConSanLoweringOutcomeKind::ResourceRejected,
+                                               "runtime-owned report allocation failed");
+  }
+  for (ConSanSiteDispositionRecord &site : legacy_compatibility_.site_dispositions) {
+    if (site.lowering_outcome == ConSanSiteLoweringOutcome::Patched) {
+      site.lowering_outcome = ConSanSiteLoweringOutcome::ResourceFailed;
+      site.lowering_reason = ConSanSiteLoweringReason::UnsupportedResourcePlan;
+      site.resource_reason = ConSanRegisterPlanReason::InvalidRequest;
+    }
+  }
+  outcome = ConSanTransformOutcome::Unsupported;
+  final_validation_passed = false;
+  replacement_bytes.clear();
+  warnings.push_back(std::move(warning));
+  legacy_compatibility_.outcome = outcome;
+  legacy_compatibility_.modified = false;
+  legacy_compatibility_.final_validation_passed = false;
+  legacy_compatibility_.elf_bytes.clear();
+  legacy_compatibility_.patches.clear();
+  legacy_compatibility_.warnings = warnings;
+  stage_record(*this, ConSanPipelineStage::LegacyLowering).status =
+      ConSanPipelineStageStatus::Unsupported;
+  stage_record(*this, ConSanPipelineStage::FinalValidation).status =
+      ConSanPipelineStageStatus::NotApplicable;
+  stage_record(*this, ConSanPipelineStage::Complete).status =
+      ConSanPipelineStageStatus::Unsupported;
 }
 
 ConSanResult LegacyConSanLowering::run_pristine_moi_inventory(
@@ -288,6 +302,37 @@ TransformResult transform_consan_with_mutation(
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources) {
+  return LegacyConSanLowering::run_and_publish(code_object_bytes, request, transform_policy,
+                                               runtime_policy, debug, mutation, capabilities,
+                                               resources);
+}
+
+TransformResult
+LegacyConSanLowering::publish(std::span<const uint8_t> code_object_bytes,
+                              const ConSanRequest &request, const TransformPolicy &transform_policy,
+                              const RuntimePolicy &runtime_policy,
+                              const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+                              const RuntimeCapabilities &capabilities,
+                              const BoundRuntimeResources &resources, ConSanResult legacy) {
+  return publish_optional(code_object_bytes, request, transform_policy, runtime_policy, debug,
+                          mutation, capabilities, resources, std::move(legacy));
+}
+
+TransformResult LegacyConSanLowering::run_and_publish(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources) {
+  return publish_optional(code_object_bytes, request, transform_policy, runtime_policy, debug,
+                          mutation, capabilities, resources, std::nullopt);
+}
+
+TransformResult LegacyConSanLowering::publish_optional(
+    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
+    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
+    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
+    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
+    std::optional<ConSanResult> supplied_legacy) {
   TransformResult result;
   result.code_object = make_consan_code_object_id(code_object_bytes);
   initialize_stage_records(result);
@@ -327,9 +372,10 @@ TransformResult transform_consan_with_mutation(
     return result;
   }
 
-  ConSanResult legacy =
-      LegacyConSanLowering::run(code_object_bytes, request, transform_policy, runtime_policy, debug,
-                                mutation, capabilities, resources);
+  ConSanResult legacy = supplied_legacy
+                            ? std::move(*supplied_legacy)
+                            : run(code_object_bytes, request, transform_policy, runtime_policy,
+                                  debug, mutation, capabilities, resources);
   result.program_inventory = legacy.program_inventory;
   result.observation_plan = std::move(legacy.observation_plan);
   result.coverage_ledger = std::move(legacy.coverage_ledger);

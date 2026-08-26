@@ -186,11 +186,12 @@ TEST(ConSanPipeline, InvalidConfigurationStopsBeforeLegacyLoweringWithTypedIssue
   EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
             ConSanPipelineStageStatus::Invalid);
 
-  const ConSanResult legacy = std::move(result).take_legacy_result();
+  const ConSanResult &legacy = result.legacy_mechanism();
   EXPECT_FALSE(legacy.visited_code_object);
   EXPECT_EQ(legacy.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(legacy.input_size, bytes.size());
-  EXPECT_EQ(legacy.errors, (std::vector<std::string>{"invalid-sample-stride"}));
+  EXPECT_TRUE(legacy.errors.empty());
+  EXPECT_EQ(result.issues.front().detail, "invalid-sample-stride");
 }
 
 TEST(ConSanPipeline, MissingRuntimeBackendStopsAtCapabilityBoundary) {
@@ -429,7 +430,7 @@ TEST(ConSanPipeline, InstallActionTruthTableUsesOnlySplitStaticResult) {
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::LoadReplacement);
 }
 
-TEST(ConSanPipeline, LegacyProjectionRestoresArtifactsWithoutChangingObservableResult) {
+TEST(ConSanPipeline, ProductionResultOwnsArtifactsWithoutLegacyProjection) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   const TransformPolicy transform_policy;
@@ -444,25 +445,24 @@ TEST(ConSanPipeline, LegacyProjectionRestoresArtifactsWithoutChangingObservableR
   TransformResult split = transform_consan(bytes, request, transform_policy, runtime_policy, debug,
                                            capabilities, resources);
   ASSERT_TRUE(split.well_formed()) << testing::PrintToString(split.issues);
-  const ConSanResult projected = std::move(split).take_legacy_result();
+  const ConSanResult &mechanism = split.legacy_mechanism();
 
-  EXPECT_EQ(projected.visited_code_object, direct.visited_code_object);
-  EXPECT_EQ(projected.parsed_code_object, direct.parsed_code_object);
-  EXPECT_EQ(projected.input_fingerprint, direct.input_fingerprint);
-  EXPECT_EQ(projected.outcome, direct.outcome);
-  EXPECT_EQ(projected.modified, direct.modified);
-  EXPECT_EQ(projected.final_validation_passed, direct.final_validation_passed);
-  EXPECT_EQ(projected.program_inventory.code_object_id(),
-            direct.program_inventory.code_object_id());
-  EXPECT_EQ(projected.observation_plan, direct.observation_plan);
-  EXPECT_EQ(projected.coverage_ledger, direct.coverage_ledger);
-  EXPECT_EQ(projected.elf_bytes, direct.elf_bytes);
-  EXPECT_EQ(projected.errors, direct.errors);
-  EXPECT_EQ(projected.warnings, direct.warnings);
-  EXPECT_EQ(consan_install_action(projected, false),
-            projected.outcome == ConSanTransformOutcome::ModifiedValid
-                ? ConSanInstallAction::LoadReplacement
-                : ConSanInstallAction::LoadOriginal);
+  EXPECT_EQ(mechanism.visited_code_object, direct.visited_code_object);
+  EXPECT_EQ(mechanism.parsed_code_object, direct.parsed_code_object);
+  EXPECT_EQ(mechanism.input_fingerprint, direct.input_fingerprint);
+  EXPECT_EQ(split.outcome, direct.outcome);
+  EXPECT_EQ(split.final_validation_passed, direct.final_validation_passed);
+  EXPECT_EQ(split.program_inventory.code_object_id(), direct.program_inventory.code_object_id());
+  EXPECT_EQ(split.observation_plan, direct.observation_plan);
+  EXPECT_EQ(split.coverage_ledger, direct.coverage_ledger);
+  EXPECT_EQ(split.replacement_bytes, direct.elf_bytes);
+  ASSERT_EQ(split.issues.size(), direct.errors.size());
+  for (size_t index = 0; index < split.issues.size(); ++index)
+    EXPECT_EQ(split.issues[index].detail, direct.errors[index]);
+  EXPECT_EQ(split.warnings, direct.warnings);
+  EXPECT_EQ(split.install_action(false), split.outcome == ConSanTransformOutcome::ModifiedValid
+                                             ? ConSanInstallAction::LoadReplacement
+                                             : ConSanInstallAction::LoadOriginal);
 }
 
 TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrierPairs) {
@@ -549,9 +549,48 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   TransformResult mutated = transform_consan_with_mutation(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
   ASSERT_TRUE(mutated.well_formed()) << testing::PrintToString(mutated.issues);
-  const ConSanResult mutation_projection = std::move(mutated).take_legacy_result();
-  EXPECT_GT(mutation_projection.requested_fault_mutations, 0u);
-  EXPECT_EQ(first.code_object, mutation_projection.program_inventory.code_object_id());
+  EXPECT_GT(mutated.legacy_mechanism().requested_fault_mutations, 0u);
+  EXPECT_EQ(first.code_object, mutated.program_inventory.code_object_id());
+}
+
+TEST(ConSanPipeline, RuntimeDiscardKeepsTypedAndTemporaryMechanismStateCoherent) {
+  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
+  const ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
+  TransformResult inventory =
+      transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
+                       ConSanDebugOverrides{}, complete_runtime_capabilities(), {});
+  ASSERT_TRUE(inventory.evidence_requirements);
+  const auto &requirements =
+      std::get<ConSanRecordReplayEvidenceRequirements>(*inventory.evidence_requirements);
+
+  BoundRuntimeResources resources;
+  resources.scope = ConSanRuntimeResourceScope::Executable;
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  resources.moi_report_buffer_size = requirements.abi_plan.required_bytes;
+  TransformResult result =
+      transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
+                       ConSanDebugOverrides{}, complete_runtime_capabilities(), resources);
+  ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
+  ASSERT_FALSE(result.replacement_bytes.empty());
+  ASSERT_FALSE(result.legacy_mechanism().patches.empty());
+
+  result.discard_replacement("runtime report allocation failed");
+
+  ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
+  EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_FALSE(result.final_validation_passed);
+  EXPECT_TRUE(result.replacement_bytes.empty());
+  EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadOriginal);
+  EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
+  EXPECT_TRUE(result.legacy_mechanism().patches.empty());
+  EXPECT_EQ(result.legacy_mechanism().outcome, ConSanTransformOutcome::Unsupported);
+  EXPECT_EQ(result.warnings.back(), "runtime report allocation failed");
+  EXPECT_EQ(result.stage(ConSanPipelineStage::LegacyLowering)->status,
+            ConSanPipelineStageStatus::Unsupported);
+  EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
+            ConSanPipelineStageStatus::NotApplicable);
+  EXPECT_EQ(result.stage(ConSanPipelineStage::Complete)->status,
+            ConSanPipelineStageStatus::Unsupported);
 }
 
 } // namespace
