@@ -237,12 +237,31 @@ python3 -m pip install --quiet --disable-pip-version-check -r "${ext_dir}/requir
 
 # conftest.py resolves assets/logs from the current working directory.
 cd "${ext_dir}"
+
+# Each tuner test captures the whole rccl-tests stdout, RCCL debug logging
+# included. ${workdir} lives on the shared NFS mount the GHA runner uses, and
+# writing those logs there is what dominates the suite runtime: the same
+# broadcast run takes 5.9s with its 57 MB log on node-local disk and 865s with it
+# on that NFS. Keep the logs node-local (world-writable /tmp, so this works for
+# any user the job runs as) and copy them back afterwards for artifact upload.
+export RCCL_EXT_PLUGINS_LOGDIR="${SLURM_TMPDIR:-/tmp}/rccl-ext-plugins-logs-${jid}"
+rm -rf "${RCCL_EXT_PLUGINS_LOGDIR}"
+mkdir -p "${RCCL_EXT_PLUGINS_LOGDIR}"
+echo "    RCCL_EXT_PLUGINS_LOGDIR=${RCCL_EXT_PLUGINS_LOGDIR}"
+
 # Safety net: cap any single test at 10 min (pytest-timeout, signal method so it
 # interrupts a blocked subprocess). A hung test then fails fast instead of eating
 # the whole SLURM allocation, and the remaining tests still run.
+pytest_rc=0
 python3 -m pytest -v -rs --color=no --timeout=600 --timeout-method=signal \
-  -m "ext_mixed or ext_tuner"
+  -m "ext_mixed or ext_tuner" || pytest_rc=$?
+
+mkdir -p "${ext_dir}/logs"
+cp -r "${RCCL_EXT_PLUGINS_LOGDIR}/." "${ext_dir}/logs/" 2>/dev/null || true
+echo "==> test logs copied to ${ext_dir}/logs ($(du -sh "${ext_dir}/logs" 2>/dev/null | cut -f1))"
 _pt "test:end"
+# Make pytest's status the status of this block so the sentinel logic below runs.
+(exit "${pytest_rc}")
 } > "${test_out}" 2> "${test_err}" || test_rc=$?
 echo "==> test phase logs: ${test_out} / ${test_err}"
 if [[ "${test_rc}" -ne 0 ]]; then
