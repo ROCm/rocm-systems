@@ -1325,6 +1325,20 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     {
       bool userOptedHigher = false;
       int upper = ncclP2pChannelsUpperBound(comm, &userOptedHigher);
+      // When the user set MAX_P2P_NCHANNELS, it is also a downward cap. pow2Up(p2pnChannelsPerPeer)
+      // (single-node doubling on gfx942/950/1250) would otherwise raise the pool above a small
+      // request such as NCCL_MAX_P2P_NCHANNELS=1. pow2Up of the user max keeps the existing
+      // non-pow2 rounding (48 -> 64).
+      if (ncclParamMaxP2pNChannels() != -2) {
+        int userMax = pow2Up(std::max(1, ncclMaxP2pNchannels()));
+        int minP2p = (int)ncclParamMinP2pNChannels();
+        if (minP2p > userMax) {
+          INFO(NCCL_GRAPH | NCCL_ENV,
+               "NCCL_MAX_P2P_NCHANNELS=%d overrides NCCL_MIN_P2P_NCHANNELS=%d; using %d P2P channels",
+               (int)ncclParamMaxP2pNChannels(), minP2p, userMax);
+        }
+        upper = std::min(upper, userMax);
+      }
       comm->p2pnChannels = std::min(std::max(pow2Up(comm->p2pnChannels), pow2Up(comm->p2pnChannelsPerPeer)), upper);
       if (!userOptedHigher) {
         // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
