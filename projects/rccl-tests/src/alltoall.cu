@@ -543,14 +543,15 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
     return testSuccess;
   }
 
-  // Mode 1 (augment): print the extra device-only line next to the graph numbers.
+  // Mode 1 (augment): buffer the extra device-only line; TimeTest flushes it after
+  // writeBenchmarkLineTerminator so the row is not split between OOP/IP columns.
   if (args->proc == 0 && args->thread == 0 && devUs > 0.0) {
     double sec = devUs * 1.0e-6;
     double algBw = (double)(perPeerBytes * (size_t)nRanksGlobal) / 1.0e9 / sec;
     double busBw = algBw * ((double)(nRanksGlobal - 1) / (double)nRanksGlobal);
-    printf("#[a2a-devtime] size %12zu B  tier %-3s  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
-           perPeerBytes * (size_t)nRanksGlobal, tierName, gridCtas, loop, skip, devUs, algBw, busBw);
-    fflush(stdout);
+    snprintf(args->devtimeAugmentLine, sizeof(args->devtimeAugmentLine),
+             "#[a2a-devtime] size %12zu B  tier %-3s  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
+             perPeerBytes * (size_t)nRanksGlobal, tierName, gridCtas, loop, skip, devUs, algBw, busBw);
   }
   return testSuccess;
 }
