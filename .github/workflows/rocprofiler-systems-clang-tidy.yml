@@ -50,22 +50,21 @@ jobs:
 
       - name: Install clang-tidy
         run: |
-          apt-get update
-          apt-get install -y clang-tidy-18
+          python3 -m pip install --break-system-packages clang-tidy==22.1.8
+          clang-tidy --version
 
       - name: CMake configure
         working-directory: projects/rocprofiler-systems
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global --add safe.directory "$PWD"
-          cmake --preset debug
+          cmake --preset debug-mpi
 
       - name: Run clang-tidy-check
         working-directory: projects/rocprofiler-systems
         run: |
           python3 scripts/clang-tidy-check.py \
             --base "origin/${{ github.base_ref }}" \
-            --build-path build/debug \
+            --build-path build/debug-mpi \
             -j $(nproc) \
-            --timeout 120 \
-            --clang-tidy-binary clang-tidy-18
+            --timeout 600

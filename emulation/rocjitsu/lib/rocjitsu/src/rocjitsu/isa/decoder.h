@@ -9,6 +9,7 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "util/arena_alloc.h"
 
@@ -38,8 +39,15 @@ public:
 
   /// @brief Decode a binary instruction.
   /// @param[in] inst Pointer to the binary instruction encoding.
-  /// @returns Decoded Instruction pointer (pool or heap allocated).
-  virtual Instruction *decode(const rj_code_binary_inst_t *inst) = 0;
+  /// @param[in] emit_error Diagnostic destination for rejected encodings.
+  /// @returns A decoded instruction (pool or heap allocated), or failure.
+  virtual DecodeResult decode(const rj_code_binary_inst_t *inst,
+                              const DecodeErrorEmitter &emit_error) = 0;
+
+  /// @brief Decode silently, for expected speculative rejection.
+  DecodeResult decode(const rj_code_binary_inst_t *inst) {
+    return decode(inst, DecodeErrorEmitter{});
+  }
 
   /// @brief Maximum encoded instruction width and decode lookahead, in 32-bit words.
   /// @returns A nonzero bound covering both every raw-pointer read and the size of every
@@ -54,8 +62,10 @@ public:
   /// its location in a larger text stream.
   /// @param[in] inst Pointer to the binary instruction encoding.
   /// @param[in] src_loc Source byte offset in the decoded text stream.
-  /// @returns Decoded Instruction pointer (pool or heap allocated).
-  Instruction *decode(const rj_code_binary_inst_t *inst, uint64_t src_loc);
+  /// @param[in] emit_error Diagnostic destination for rejected encodings.
+  /// @returns A decoded instruction (pool or heap allocated), or failure.
+  DecodeResult decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
+                      const DecodeErrorEmitter &emit_error = {});
 
   /// @brief Create a decoder for the given architecture.
   static std::unique_ptr<Decoder> create(rj_code_arch_t arch);
@@ -86,7 +96,8 @@ protected:
   using DeallocFn = void (*)(void *, void *);
 
   static void activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool);
-  static void validate_instruction_operands(const Instruction &inst);
+  static Result validate_instruction_operands(const Instruction &inst,
+                                              const DecodeErrorEmitter &emit_error);
 
   Pool pool_;
 };
@@ -99,12 +110,15 @@ public:
   explicit IsaDecoder(const IsaExecutionBackend *execution_backend = nullptr)
       : execution_backend_(execution_backend) {}
 
-  Instruction *decode(const rj_code_binary_inst_t *inst) override {
+  DecodeResult decode(const rj_code_binary_inst_t *inst,
+                      const DecodeErrorEmitter &emit_error) override {
     ScopedIsaExecutionBackend scope(execution_backend_);
-    auto result = Isa::Decoder::decode(inst);
-    if (result)
-      validate_instruction_operands(*result);
-    return result.release();
+    DecodeResult result = Isa::Decoder::decode(inst, emit_error);
+    if (result.failed()) [[unlikely]]
+      return Result::failure();
+    if (validate_instruction_operands(*result.value(), emit_error).failed()) [[unlikely]]
+      return Result::failure();
+    return result;
   }
 
   std::size_t max_instruction_words() const override { return Isa::Decoder::kMaxInstructionWords; }

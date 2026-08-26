@@ -8,7 +8,6 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/target_registry.h"
-#include "util/except.h"
 
 #include <array>
 #include <cstdlib>
@@ -91,17 +90,14 @@ DecodeRecord decode_window(Decoder &decoder, std::span<const uint8_t> bytes) {
       words[word] |= static_cast<uint32_t>(bytes[word * sizeof(uint32_t) + byte]) << (byte * 8);
   }
 
-  std::unique_ptr<Instruction> inst;
-  try {
-    inst.reset(decoder.decode(words.data()));
-  } catch (const util::InvalidInst &error) {
+  util::StringDiagnostic rejection;
+  DecodeResult decoded = decoder.decode(words.data(), rejection.emitter());
+  if (decoded.failed()) {
     DecodeRecord record;
-    record.rejection = error.what();
+    record.rejection = rejection.message();
     return record;
   }
-
-  if (!inst)
-    fail_invariant("a successful decode returned null");
+  std::unique_ptr<Instruction> inst = std::move(decoded).value();
 
   const int size = inst->size();
   if (size != 4 && size != 8 && size != 12 && size != 16)

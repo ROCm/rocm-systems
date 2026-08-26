@@ -50,7 +50,7 @@ enum class ScalarSop2Op {
       return std::nullopt;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     // gfx1250 retains the legacy 32-bit arithmetic opcodes and adds the
     // SCC-neutral 64-bit scalar add used by its canonical PC builders.
     switch (op) {
@@ -148,7 +148,7 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, 
   constexpr uint16_t kLiteral64Operand = 254;
   constexpr uint16_t kInlineInt0 = 128;
 
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     // gfx1250's SCC-neutral s_add_nc_u64 is both the compiler's canonical PC
     // materialization and the smallest safe relocation replacement. Positive
     // 32-bit deltas need one literal word; negative or wider deltas use the

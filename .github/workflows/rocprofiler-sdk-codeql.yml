@@ -111,6 +111,8 @@ jobs:
         submodules: 'false'
 
     - name: Init/Update submodules
+      timeout-minutes: 15
+      continue-on-error: true
       shell: bash
       run: |
         git config --global --add safe.directory '*'
