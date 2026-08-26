@@ -11,7 +11,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* Renamed the profile-mode dispatch filter to `--kernel-iteration-range`, matching the rocprofv3 option it drives. The `-d` and `--dispatch` spellings are no longer accepted in profile mode. Analyze-mode `-d` and `--dispatch` are unchanged.
+* Renamed the profile-mode dispatch filter to `--kernel-iteration-range`, matching the rocprofv3 option it drives. `--dispatch` is no longer accepted in profile mode, and `-d` there is now the short form of `--output-directory`, also matching rocprofv3. Update any profile command using `-d` to select dispatches, since it now sets the output directory instead. Analyze-mode `-d` and `--dispatch` are unchanged.
 
 * gfx115x Memory Chart improvements.
   * Renamed memory chart metric names for more clarity.
