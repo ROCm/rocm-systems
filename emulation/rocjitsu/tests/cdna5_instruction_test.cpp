@@ -1231,6 +1231,46 @@ TEST(Gfx1250SimulationTest, DsStorexchg2addrB64ExchangesBothAddresses) {
   EXPECT_EQ(returned1, kOld1);
 }
 
+TEST(Gfx1250SimulationTest, NonReturningDsAddU32DoesNotWriteVgpr) {
+  Gfx1250Sim sim;
+  auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  auto &cu = *sim.cu();
+  wf->set_lds_base(cu.allocate_lds(64));
+  constexpr uint32_t kAddr = 1;
+  constexpr uint32_t kData = 2;
+  constexpr uint32_t kUnusedVdst = 4;
+  constexpr uint32_t kAddress = 0x20;
+  constexpr uint32_t kInitial = 0x1020'3040u;
+  constexpr uint32_t kAddend = 0x0102'0304u;
+  constexpr uint32_t kVgprSentinel = 0xA1A2'A3A4u;
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  cu.write_vgpr(vb + kAddr, 0, kAddress);
+  cu.write_vgpr(vb + kData, 0, kAddend);
+  cu.write_vgpr(vb + kUnusedVdst, 0, kVgprSentinel);
+  cu.lds().write32(wf->lds_base() + kAddress, kInitial);
+
+  cdna5::VdsMachineInst raw{};
+  raw.addr = kAddr;
+  raw.data0 = kData;
+  raw.vdst = kUnusedVdst;
+  auto *inst = new cdna5::DsAddU32Vds(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+  inst->execute_impl(*wf);
+
+  auto *state = inst->data_as<amdgpu::VectorMemState>();
+  ASSERT_NE(state, nullptr);
+  EXPECT_FALSE(state->is_load);
+
+  amdgpu::LocalMemPipeline local_pipeline;
+  local_pipeline.issue(inst, *wf);
+
+  EXPECT_EQ(cu.lds().read32(wf->lds_base() + kAddress), kInitial + kAddend);
+  EXPECT_EQ(cu.read_vgpr(vb + kUnusedVdst, 0), kVgprSentinel);
+}
+
 TEST(Gfx1250SimulationTest, NonReturningDsAddU64DoesNotWriteVgpr) {
   Gfx1250Sim sim;
   auto *wf = sim.dispatch_scratch_wf(kGfx1250Wave32VgprAllocation);
