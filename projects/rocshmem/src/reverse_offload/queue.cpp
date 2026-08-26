@@ -85,7 +85,7 @@ void Queue::flush_hdp() {
 
 void Queue::sfence_flush_hdp() {
   if (envvar::ro::net_cpu_queue) {
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(_M_X64)
     asm volatile("sfence" ::: "memory");
 #elif defined(__powerpc__)
     asm volatile("lwsync" ::: "memory");
