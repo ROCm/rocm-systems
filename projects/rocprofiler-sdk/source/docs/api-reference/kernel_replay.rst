@@ -73,7 +73,7 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_kernel_replay_data_t*`
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_ENTER``
      - Read ``current_pass`` / ``total_passes``. Optionally call
-       ``replay_local_start_context_cb`` / ``replay_local_stop_context_cb``.
+       ``replay_local_enable_context_cb`` / ``replay_local_disable_context_cb``.
    * - ``ROCPROFILER_KERNEL_REPLAY_PASS``
      - ``PHASE_EXIT``
      - Pass complete; ``replay_continue_cb`` (if set) runs after this.

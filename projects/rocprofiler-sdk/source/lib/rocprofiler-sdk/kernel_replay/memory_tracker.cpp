@@ -261,6 +261,11 @@ memory_tracker_init(hsa::hsa_core_table_t* table, uint64_t lib_instance)
     // convention -- see scratch_memory.cpp.)
     if(lib_instance > 0) return;
 
+    // Idempotent on this table: restore_table may call memory_tracker_init again after putting the
+    // original pointers back; std::call_once would skip that re-hook. Guard against a second install
+    // on an already-wrapped table (which would capture our wrapper as next_* and recurse).
+    if(table->hsa_memory_allocate_fn == memory_tracker::memory_allocate_wrapper) return;
+
     memory_tracker::next_memory_allocate = table->hsa_memory_allocate_fn;
     memory_tracker::next_memory_free     = table->hsa_memory_free_fn;
     table->hsa_memory_allocate_fn        = memory_tracker::memory_allocate_wrapper;
@@ -276,6 +281,9 @@ memory_tracker_init(hsa::hsa_amd_ext_table_t* table, uint64_t lib_instance)
     // as next_pool_allocate and recurse. (Keying on lib_instance matches the copy/update_table
     // convention -- see scratch_memory.cpp.)
     if(lib_instance > 0) return;
+
+    // Idempotent on this table -- see memory_tracker_init(hsa_core_table_t*) above.
+    if(table->hsa_amd_memory_pool_allocate_fn == memory_tracker::pool_allocate_wrapper) return;
 
     memory_tracker::next_pool_allocate     = table->hsa_amd_memory_pool_allocate_fn;
     memory_tracker::next_pool_free         = table->hsa_amd_memory_pool_free_fn;
