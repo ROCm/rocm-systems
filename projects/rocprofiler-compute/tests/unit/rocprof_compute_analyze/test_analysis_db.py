@@ -2775,6 +2775,7 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
         "Instruction line number",
         "Code object offset",
         "Instruction line",
+        "Instruction type",
         "Total count",
         "Active count",
         "Stall count",
@@ -2790,6 +2791,7 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
             "1",
             str(0x10),
             "v_mov",
+            "",
             "1",
             "0",
             "1",
@@ -2801,6 +2803,33 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
             "42",
         ]
     ]
+
+
+def test_run_analysis_isa_file_carries_the_static_instruction_type(tmp_path):
+    """Real mnemonics get a pipeline; an unclassified one leaves the cell empty."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data = make_pc_sampling_tool_data()
+    tool_data["strings"]["pc_sample_instructions"] = [
+        "v_mov_b32_e32 v1, 0",
+        "not_an_instruction",
+    ]
+    # Both offsets belong to one kernel, so one file holds both rows.
+    tool_data["kernel_symbols"][1]["kernel_id"] = 100
+    tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (
+        100
+    )
+
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {str(workload_path): [tool_data]},
+    )
+    run_source_export_analysis(analyzer)
+
+    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+
+    type_column = header.index("Instruction type")
+    assert [row[type_column] for row in rows] == ["VALU", ""]
 
 
 def test_run_analysis_isa_stall_columns_follow_the_workloads_reasons(tmp_path):
@@ -2867,7 +2896,7 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
 
     assert stall_reason_columns(header) == []
     # host_trap knows the sample landed, but not whether the wave issued.
-    assert rows[0][3:6] == ["1", "", ""]
+    assert rows[0][4:7] == ["1", "", ""]
 
 
 def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):

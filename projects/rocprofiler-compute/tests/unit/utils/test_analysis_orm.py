@@ -18,6 +18,7 @@ from utils.analysis_orm import (
     Dispatch,
     InstructionLine,
     InstructionSourceLine,
+    InstructionTypeLookup,
     Kernel,
     KernelSymbol,
     PCSampleStallReason,
@@ -36,6 +37,7 @@ PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
     "kernel_name",
     "offset",
     "instruction",
+    "instruction_type",
     "source",
     "count",
     "count_issue",
@@ -146,6 +148,7 @@ def add_pc_sampling_state(
     stall_count: int | None = 2,
     stall_reasons: dict[str, int] | None = None,
     code_object_id: int = 5,
+    instruction_type: str | None = None,
 ) -> PCSampleState:
     """Insert one sampled instruction state with optional stall-reason children."""
     code_object = CodeObjectStore(
@@ -157,6 +160,11 @@ def add_pc_sampling_state(
     instruction_line = InstructionLine(
         code_object_offset=offset,
         instruction=instruction,
+        instruction_type_lookup=(
+            Database.get_or_create_type(InstructionTypeLookup, instruction_type)
+            if instruction_type is not None
+            else None
+        ),
         kernel_symbol=KernelSymbol(code_object_store=code_object, kernel=kernel),
     )
     add_source_frames(session, workload, instruction_line, source)
@@ -511,6 +519,7 @@ def test_pc_sampling_summary_view_flattens_normalized_tables(db_session):
             "kernel_name": "vecCopy",
             "offset": 0x10,
             "instruction": "v_mov",
+            "instruction_type": None,
             "source": "/s/a.cpp:1",
             "count": 3,
             "count_issue": 1,
@@ -545,6 +554,34 @@ def test_instruction_line_static_type_defaults_to_none(db_session):
 
     assert sample_state.instruction_line.instruction_type_uuid is None
     assert sample_state.instruction_line.instruction_type_lookup is None
+
+
+def test_pc_sampling_summary_view_carries_the_static_instruction_type(db_session):
+    """The type comes from the lookup table, and is empty when unclassified."""
+    workload = Workload(name="w", sub_name="s")
+    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    add_pc_sampling_state(
+        db_session,
+        workload=workload,
+        kernel=kernel,
+        pid=42,
+        instruction="v_mov_b32_e32 v1, 0",
+        instruction_type="VALU",
+    )
+    add_pc_sampling_state(
+        db_session,
+        workload=workload,
+        kernel=kernel,
+        pid=42,
+        offset=0x20,
+        instruction="not_an_instruction",
+        code_object_id=6,
+    )
+    Database.create_views()
+    db_session.commit()
+
+    rows = fetch_pc_sampling_summary_rows(db_session)
+    assert [row["instruction_type"] for row in rows] == ["VALU", None]
 
 
 def test_pc_sampling_summary_view_separates_states_by_code_object(db_session):

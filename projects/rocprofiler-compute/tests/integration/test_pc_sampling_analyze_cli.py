@@ -155,8 +155,8 @@ def test_pc_sampling_analyze_database_output(
                 "JOIN compute_kernel k ON ks.kernel_uuid = k.kernel_uuid"
             ).fetchone()[0]
             db_pc_sampling = pd.read_sql_query(
-                "SELECT kernel_name, offset, instruction, source, count, "
-                "count_issue, count_stall, stall_reason "
+                "SELECT kernel_name, offset, instruction, instruction_type, "
+                "source, count, count_issue, count_stall, stall_reason "
                 "FROM compute_pc_sampling_summary_view "
                 "ORDER BY kernel_name, offset",
                 conn,
@@ -201,6 +201,9 @@ def test_pc_sampling_analyze_database_output(
         assert inst_sample_total == state_total
         assert len(db_pc_sampling) == 19
         assert db_pc_sampling["count"].sum() == 857
+        # The static type is filled from the disassembly, so every sampled line
+        # of a real workload carries one.
+        assert db_pc_sampling["instruction_type"].notna().all()
         assert pc_sampling_views == [("compute_pc_sampling_summary_view",)]
         assert db_dispatch_count == 3
         assert db_code_object_process_ids == [(698961,)]

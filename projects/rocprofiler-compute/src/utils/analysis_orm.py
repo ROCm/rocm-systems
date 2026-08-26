@@ -835,6 +835,7 @@ class Database:
                 CodeObjectStore.pid.label("pid"),
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
+                InstructionTypeLookup.text.label("instruction_type"),
                 PCSampleState.total_count.label("count"),
                 PCSampleState.issue_count.label("count_issue"),
                 PCSampleState.stall_count.label("count_stall"),
@@ -856,6 +857,12 @@ class Database:
             )
             .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
             .join(Workload, CodeObjectStore.workload_id == Workload.workload_id)
+            # A mnemonic the pipeline table does not hold has no type.
+            .outerjoin(
+                InstructionTypeLookup,
+                InstructionLine.instruction_type_uuid
+                == InstructionTypeLookup.instruction_type_lookup_uuid,
+            )
             # A line the disassembly holds but no sample landed on has no state.
             .outerjoin(
                 PCSampleState,
@@ -1029,6 +1036,7 @@ class Database:
                 Kernel.kernel_name,
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
+                InstructionTypeLookup.text.label("instruction_type"),
                 source_chain_subquery.c.source.label("source"),
                 PCSampleState.total_count.label("count"),
                 PCSampleState.issue_count.label("count_issue"),
@@ -1049,6 +1057,12 @@ class Database:
                 KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
             )
             .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
+            # A mnemonic the pipeline table does not hold has no type.
+            .outerjoin(
+                InstructionTypeLookup,
+                InstructionLine.instruction_type_uuid
+                == InstructionTypeLookup.instruction_type_lookup_uuid,
+            )
             # host_trap samples have no stall reasons, so the subquery is empty.
             .outerjoin(
                 stall_reason_json_subquery,

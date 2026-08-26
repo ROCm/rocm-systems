@@ -50,6 +50,7 @@ HOST_TRAP_DISPLAY_COLUMNS = [
     "pid",
     "source_line",
     "instruction",
+    "instruction_type",
     "code_object_id",
     "offset",
     "count",
@@ -59,6 +60,7 @@ STOCHASTIC_DISPLAY_COLUMNS = [
     "pid",
     "source_line",
     "instruction",
+    "instruction_type",
     "code_object_id",
     "offset",
     "count",
@@ -640,6 +642,21 @@ def setup_pc_sampling_data(
     )
 
 
+def test_load_pc_sampling_data_carries_the_static_instruction_type() -> None:
+    """The CLI table types every row, whichever sampling method ran."""
+    df = load_pc_sampling_data(
+        make_pc_sampling_workload(),
+        "offset",
+        [setup_pc_sampling_data(method="host_trap")],
+    )
+
+    # The workload filters to one kernel, which owns the first two offsets.
+    assert dict(zip(df["instruction"], df["instruction_type"], strict=True)) == {
+        "v_mov_b32": "VALU",
+        "s_waitcnt": "INTERNAL",
+    }
+
+
 @pytest.mark.parametrize(
     "method, sorting_type",
     [
@@ -1124,8 +1141,8 @@ def test_load_pc_sampling_data_rejects_conflicting_methods() -> None:
 @pytest.mark.parametrize(
     "populated, expected_column_count",
     [
-        ("host_trap", 7),  # host_trap-only is detected
-        ("both", 10),  # stochastic wins when both arrays are populated
+        ("host_trap", 8),  # host_trap-only is detected
+        ("both", 11),  # stochastic wins when both arrays are populated
     ],
 )
 def test_load_pc_sampling_data_method_detection(
