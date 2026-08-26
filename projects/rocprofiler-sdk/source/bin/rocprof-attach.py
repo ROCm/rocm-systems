@@ -31,7 +31,7 @@ import time
 
 ROCPROF_ATTACH_DIR = os.path.dirname(os.path.realpath(__file__))
 ROCM_DIR = os.path.dirname(ROCPROF_ATTACH_DIR)
-ROCPROF_ATTACH_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-rocattach.so"
+ROCPROF_ATTACH_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-rocattach.so.1"
 
 
 def parse_arguments(args=None):
@@ -107,7 +107,7 @@ def parse_arguments(args=None):
     advanced_options.add_argument(
         "--attach-library",
         help="""Library used to attach and detach from the target process. Default will work for nearly all configurations.
-  Defaults to rocprofiler-sdk-rocattach.so from this ROCm install, i.e. <ROCmdirectory>/lib/rocprofiler-sdk-rocattach.so
+  Defaults to the rocprofiler-sdk-rocattach SONAME from this ROCm install, i.e. <ROCmdirectory>/lib/librocprofiler-sdk-rocattach.so.1
   Can also be specified in environment variable ROCPROF_ATTACH_LIBRARY. This option overrides the environment variable if both are set.""",
         type=str,
         required=False,

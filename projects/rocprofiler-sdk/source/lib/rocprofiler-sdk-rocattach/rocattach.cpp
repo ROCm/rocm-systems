@@ -310,7 +310,7 @@ setup(int pid)
     // ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution context (setuid/setgid,
     // file capabilities, etc.), so an unprivileged user cannot cause a privileged attach
     // helper to inject an arbitrary library.
-    constexpr auto default_tool_lib_path = std::string_view{"librocprofiler-sdk-tool.so"};
+    constexpr auto default_tool_lib_path = std::string_view{"librocprofiler-sdk-tool.so.1"};
     auto           tool_lib_path_env     = std::string{default_tool_lib_path};
     auto           tool_lib_path_override =
         rocprofiler::common::get_env_optional("ROCPROF_ATTACH_TOOL_LIBRARY");
