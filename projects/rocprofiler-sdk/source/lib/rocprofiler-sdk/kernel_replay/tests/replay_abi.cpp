@@ -183,8 +183,8 @@ TEST(kernel_replay_abi, callback_signatures_are_pinned)
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_continue_cb), continue_fn>::value));
     EXPECT_TRUE(
         (std::is_same<decltype(replay_data_t{}.replay_local_enable_context_cb), toggle_fn>::value));
-    EXPECT_TRUE(
-        (std::is_same<decltype(replay_data_t{}.replay_local_disable_context_cb), toggle_fn>::value));
+    EXPECT_TRUE((
+        std::is_same<decltype(replay_data_t{}.replay_local_disable_context_cb), toggle_fn>::value));
 }
 
 // A zeroed record must mean "do not replay this dispatch". The header documents a NULL

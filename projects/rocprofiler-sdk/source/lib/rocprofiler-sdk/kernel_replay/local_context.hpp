@@ -24,17 +24,18 @@
 
 // Localized context control for kernel replay (see experimental/kernel_replay.h). During a replay
 // loop the tool may enable/disable individual contexts per pass through the SDK-provided
-// replay_local_enable_context / replay_local_disable_context callbacks. Those decisions are recorded in
-// a thread-local override that lives only for the loop and is never written to global context
-// state, so only the replaying thread's dispatches (this agent, serialized by the per-agent replay
-// lock) observe them. Service consumers query local_context_override() at dispatch time to honor
-// it.
+// replay_local_enable_context / replay_local_disable_context callbacks. Those decisions are
+// recorded in a thread-local override that lives only for the loop and is never written to global
+// context state, so only the replaying thread's dispatches (this agent, serialized by the per-agent
+// replay lock) observe them. Service consumers query local_context_override() at dispatch time to
+// honor it.
 //
 // Two thread-local scopes are involved, both managed by the SDK (never by the tool):
 //  - loop scope (scoped_local_context_control): the override map is live for the whole replay loop,
 //    so services can query it while a pass dispatches. The map persists across passes, which gives
 //    the "sticky" semantics (a toggle stays in effect until changed within the same loop).
-//  - arm window (set_toggles_armed): the enable/disable callbacks are only legal while the tool's PASS
+//  - arm window (set_toggles_armed): the enable/disable callbacks are only legal while the tool's
+//  PASS
 //    PHASE_ENTER callback runs; execute_pass_phase_enter() arms them around that callback and
 //    disarms after, so a call made outside that window fails.
 
