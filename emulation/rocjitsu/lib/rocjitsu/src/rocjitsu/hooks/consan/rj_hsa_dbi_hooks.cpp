@@ -4287,16 +4287,16 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
           static_cast<unsigned long long>(code_object_reader.handle),
           rj_code_target_name(transform_result.program_inventory.target()),
           rj_code_arch_name(rj_code_arch_for_target(transform_result.program_inventory.target())),
-          patch_result.program_inventory.text_sections().size(),
-          patch_result.program_inventory.kernels().size(),
-          patch_result.program_inventory.functions().size());
+          transform_result.program_inventory.text_sections().size(),
+          transform_result.program_inventory.kernels().size(),
+          transform_result.program_inventory.functions().size());
     }
     log_message(kLogInfo, "ConSan fault inventory reader=%llu sites=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),
                 patch_result.fault_sites.size());
     for (const rocjitsu::ConSanFaultSite &site : patch_result.fault_sites) {
       const OwnerLogFields owners =
-          owner_log_fields(site.execution_owners, patch_result.program_inventory.kernels());
+          owner_log_fields(site.execution_owners, transform_result.program_inventory.kernels());
       log_message(kLogVerbose,
                   "ConSan fault site reader=%llu identity=%s kind=%s container=%s "
                   "container_kind=%s occurrence=%u text_offset=0x%llx file_offset=0x%llx "
@@ -4321,8 +4321,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 patch_result.barrier_move_destinations.size());
     for (const rocjitsu::ConSanBarrierMoveDestination &destination :
          patch_result.barrier_move_destinations) {
-      const OwnerLogFields owners =
-          owner_log_fields(destination.execution_owners, patch_result.program_inventory.kernels());
+      const OwnerLogFields owners = owner_log_fields(destination.execution_owners,
+                                                     transform_result.program_inventory.kernels());
       std::string reason =
           destination.rejection_reason.empty() ? "-" : destination.rejection_reason;
       std::ranges::replace(reason, ' ', '-');
@@ -4419,13 +4419,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         static_cast<unsigned long long>(code_object_reader.handle), mutation.perturbation.requested,
         mutation.perturbation.planned, mutation.perturbation.applied, config->sc_perturb_max,
         config->sc_perturb_required_count, config->sc_perturb_sleep);
-    const rocjitsu::SynchronizationInventoryView sync = patch_result.program_inventory.sync();
+    const rocjitsu::SynchronizationInventoryView sync = transform_result.program_inventory.sync();
     log_message(kLogInfo, "ConSan sync inventory reader=%llu events=%zu",
                 static_cast<unsigned long long>(code_object_reader.handle),
                 sync.sync_events.size());
     for (const rocjitsu::ConSanSyncEvent &event : sync.sync_events) {
       const OwnerLogFields owners =
-          owner_log_fields(event.execution_owners, patch_result.program_inventory.kernels());
+          owner_log_fields(event.execution_owners, transform_result.program_inventory.kernels());
       std::string reason = event.confidence_reason;
       std::ranges::replace(reason, ' ', '-');
       const std::string static_offset =
@@ -4478,7 +4478,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                 sync.sync_sequences.size());
     for (const rocjitsu::ConSanSyncSequence &sequence : sync.sync_sequences) {
       const OwnerLogFields owners =
-          owner_log_fields(sequence.execution_owners, patch_result.program_inventory.kernels());
+          owner_log_fields(sequence.execution_owners, transform_result.program_inventory.kernels());
       std::string reason = sequence.confidence_reason;
       std::ranges::replace(reason, ' ', '-');
       std::string members;
@@ -4706,7 +4706,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     size_t function_flat_maybe_private_hint_count = 0;
     size_t function_flat_global_hint_count = 0;
     size_t function_flat_unknown_hint_count = 0;
-    for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.program_inventory.kernels()) {
+    for (const rocjitsu::ConSanKernelInfo &kernel : transform_result.program_inventory.kernels()) {
       switch (kernel.preflight_action) {
       case rocjitsu::ConSanPreflightAction::Candidate:
         ++candidate_kernel_count;
@@ -4733,7 +4733,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       flat_unknown_hint_count += kernel.stats.flat_unknown_hint_count;
     }
     for (const rocjitsu::ConSanFunctionInfo &function :
-         patch_result.program_inventory.functions()) {
+         transform_result.program_inventory.functions()) {
       function_lds_site_count += function.lds_sites.size();
       for (const rocjitsu::ConSanLdsSite &site : function.lds_sites) {
         if (site.supported_mvp)
@@ -4760,11 +4760,11 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         "function_flat_global_hints=%zu function_flat_unknown_hints=%zu patches=%zu "
         "modified=%s",
         static_cast<unsigned long long>(code_object_reader.handle),
-        patch_result.program_inventory.kernels().size(), candidate_kernel_count,
+        transform_result.program_inventory.kernels().size(), candidate_kernel_count,
         skipped_kernel_count, rejected_kernel_count, supported_lds_site_count, flat_site_count,
         flat_group_hint_count, flat_private_hint_count, flat_maybe_group_hint_count,
         flat_maybe_private_hint_count, flat_global_hint_count, flat_unknown_hint_count,
-        patch_result.program_inventory.functions().size(), function_lds_site_count,
+        transform_result.program_inventory.functions().size(), function_lds_site_count,
         function_supported_lds_site_count, function_flat_site_count, function_flat_group_hint_count,
         function_flat_private_hint_count, function_flat_maybe_group_hint_count,
         function_flat_maybe_private_hint_count, function_flat_global_hint_count,
@@ -4922,183 +4922,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                              [](rocjitsu::ConSanFencePolicyReason reason) {
                                return rocjitsu::consan_fence_policy_reason_name(reason);
                              });
-    for (const rocjitsu::ConSanTextSection &text : patch_result.program_inventory.text_sections()) {
-      log_message(kLogVerbose, "ConSan text reader=%llu name=%s file=0x%llx vaddr=0x%llx size=%llu",
-                  static_cast<unsigned long long>(code_object_reader.handle), text.name.c_str(),
-                  static_cast<unsigned long long>(text.file_offset),
-                  static_cast<unsigned long long>(text.virtual_address),
-                  static_cast<unsigned long long>(text.size));
-    }
-    for (const rocjitsu::ConSanKernelInfo &kernel : patch_result.program_inventory.kernels()) {
-      if (kernel.has_text_range) {
-        log_message(
-            kLogDebug,
-            "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
-            "text_file=0x%llx entry_text=0x%llx code_size=%llu decoded=%s "
-            "dynamic_stack=%s "
-            "insts=%llu lds_reads=%llu lds_writes=%llu lds_atomics=%llu ds_other=%llu "
-            "flat_reads=%llu flat_writes=%llu flat_atomics=%llu flat_group_hints=%llu "
-            "flat_private_hints=%llu flat_maybe_group_hints=%llu "
-            "flat_maybe_private_hints=%llu flat_global_hints=%llu "
-            "flat_unknown_hints=%llu global_mem=%llu scratch_mem=%llu barriers=%llu "
-            "waits=%llu fences=%llu decode_errors=%llu "
-            "preflight=%s",
-            static_cast<unsigned long long>(code_object_reader.handle), kernel.name.c_str(),
-            static_cast<unsigned long long>(kernel.descriptor_file_offset),
-            static_cast<unsigned long long>(kernel.text_file_offset),
-            static_cast<unsigned long long>(kernel.entry_text_offset),
-            static_cast<unsigned long long>(kernel.code_size), kernel.decoded ? "true" : "false",
-            kernel.uses_dynamic_stack ? (*kernel.uses_dynamic_stack ? "true" : "false") : "unknown",
-            static_cast<unsigned long long>(kernel.stats.instruction_count),
-            static_cast<unsigned long long>(kernel.stats.lds_read_count),
-            static_cast<unsigned long long>(kernel.stats.lds_write_count),
-            static_cast<unsigned long long>(kernel.stats.lds_atomic_count),
-            static_cast<unsigned long long>(kernel.stats.ds_other_count),
-            static_cast<unsigned long long>(kernel.stats.flat_read_count),
-            static_cast<unsigned long long>(kernel.stats.flat_write_count),
-            static_cast<unsigned long long>(kernel.stats.flat_atomic_count),
-            static_cast<unsigned long long>(kernel.stats.flat_group_hint_count),
-            static_cast<unsigned long long>(kernel.stats.flat_private_hint_count),
-            static_cast<unsigned long long>(kernel.stats.flat_maybe_group_hint_count),
-            static_cast<unsigned long long>(kernel.stats.flat_maybe_private_hint_count),
-            static_cast<unsigned long long>(kernel.stats.flat_global_hint_count),
-            static_cast<unsigned long long>(kernel.stats.flat_unknown_hint_count),
-            static_cast<unsigned long long>(kernel.stats.global_memory_count),
-            static_cast<unsigned long long>(kernel.stats.scratch_memory_count),
-            static_cast<unsigned long long>(kernel.stats.barrier_count),
-            static_cast<unsigned long long>(kernel.stats.wait_count),
-            static_cast<unsigned long long>(kernel.stats.fence_like_count),
-            static_cast<unsigned long long>(kernel.stats.decode_error_count),
-            preflight_action_name(kernel.preflight_action));
-      } else {
-        log_message(kLogDebug,
-                    "ConSan kernel reader=%llu name=%s kd_file=0x%llx "
-                    "text_range=unavailable decoded=%s dynamic_stack=%s decode_errors=%llu "
-                    "preflight=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle), kernel.name.c_str(),
-                    static_cast<unsigned long long>(kernel.descriptor_file_offset),
-                    kernel.decoded ? "true" : "false",
-                    kernel.uses_dynamic_stack ? (*kernel.uses_dynamic_stack ? "true" : "false")
-                                              : "unknown",
-                    static_cast<unsigned long long>(kernel.stats.decode_error_count),
-                    preflight_action_name(kernel.preflight_action));
-      }
-      for (const std::string &reason : kernel.preflight_reasons) {
-        log_message(kLogInfo, "ConSan preflight reader=%llu kernel=%s action=%s reason=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle), kernel.name.c_str(),
-                    preflight_action_name(kernel.preflight_action), reason.c_str());
-      }
-      for (const rocjitsu::ConSanLdsSite &site : kernel.lds_sites) {
-        log_message(kLogVerbose,
-                    "ConSan lds-site reader=%llu kernel=%s kind=%s supported=%s "
-                    "mnemonic=%s text=0x%llx file=0x%llx size=%u width=%u "
-                    "dst_vgpr=%s addr_vgpr=%s data_vgpr=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle), kernel.name.c_str(),
-                    lds_access_kind_name(site.kind), site.supported_mvp ? "true" : "false",
-                    site.mnemonic.c_str(), static_cast<unsigned long long>(site.text_offset),
-                    static_cast<unsigned long long>(site.file_offset), site.size, site.width_bits,
-                    site.dst_vgpr ? std::to_string(*site.dst_vgpr).c_str() : "-",
-                    site.addr_vgpr ? std::to_string(*site.addr_vgpr).c_str() : "-",
-                    site.data_vgpr ? std::to_string(*site.data_vgpr).c_str() : "-");
-      }
-      for (const rocjitsu::ConSanFlatSite &site : kernel.flat_sites) {
-        log_message(kLogVerbose,
-                    "ConSan flat-site reader=%llu kernel=%s kind=%s "
-                    "mnemonic=%s text=0x%llx file=0x%llx size=%u width=%u "
-                    "dst_vgpr=%s addr_vgpr=%s data_vgpr=%s addr_hint=%s raw_saddr=%s "
-                    "raw_vaddr=%s raw_vsrc=%s raw_vdst=%s raw_ioffset=%s "
-                    "raw_scope=%s raw_th=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle), kernel.name.c_str(),
-                    lds_access_kind_name(site.kind), site.mnemonic.c_str(),
-                    static_cast<unsigned long long>(site.text_offset),
-                    static_cast<unsigned long long>(site.file_offset), site.size, site.width_bits,
-                    site.dst_vgpr ? std::to_string(*site.dst_vgpr).c_str() : "-",
-                    site.addr_vgpr ? std::to_string(*site.addr_vgpr).c_str() : "-",
-                    site.data_vgpr ? std::to_string(*site.data_vgpr).c_str() : "-",
-                    flat_address_space_hint_name(site.address_space_hint),
-                    site.raw_saddr ? std::to_string(*site.raw_saddr).c_str() : "-",
-                    site.raw_vaddr ? std::to_string(*site.raw_vaddr).c_str() : "-",
-                    site.raw_vsrc ? std::to_string(*site.raw_vsrc).c_str() : "-",
-                    site.raw_vdst ? std::to_string(*site.raw_vdst).c_str() : "-",
-                    site.raw_ioffset ? std::to_string(*site.raw_ioffset).c_str() : "-",
-                    site.raw_scope ? std::to_string(*site.raw_scope).c_str() : "-",
-                    site.raw_th ? std::to_string(*site.raw_th).c_str() : "-");
-      }
-    }
-    for (const rocjitsu::ConSanFunctionInfo &function :
-         patch_result.program_inventory.functions()) {
-      log_message(kLogVerbose,
-                  "ConSan function reader=%llu name=%s text_file=0x%llx "
-                  "entry_text=0x%llx code_size=%llu decoded=%s insts=%llu lds_reads=%llu "
-                  "lds_writes=%llu lds_atomics=%llu ds_other=%llu flat_reads=%llu "
-                  "flat_writes=%llu flat_atomics=%llu flat_group_hints=%llu "
-                  "flat_private_hints=%llu flat_maybe_group_hints=%llu "
-                  "flat_maybe_private_hints=%llu flat_global_hints=%llu "
-                  "flat_unknown_hints=%llu global_mem=%llu scratch_mem=%llu barriers=%llu "
-                  "waits=%llu fences=%llu decode_errors=%llu",
-                  static_cast<unsigned long long>(code_object_reader.handle), function.name.c_str(),
-                  static_cast<unsigned long long>(function.text_file_offset),
-                  static_cast<unsigned long long>(function.entry_text_offset),
-                  static_cast<unsigned long long>(function.code_size),
-                  function.decoded ? "true" : "false",
-                  static_cast<unsigned long long>(function.stats.instruction_count),
-                  static_cast<unsigned long long>(function.stats.lds_read_count),
-                  static_cast<unsigned long long>(function.stats.lds_write_count),
-                  static_cast<unsigned long long>(function.stats.lds_atomic_count),
-                  static_cast<unsigned long long>(function.stats.ds_other_count),
-                  static_cast<unsigned long long>(function.stats.flat_read_count),
-                  static_cast<unsigned long long>(function.stats.flat_write_count),
-                  static_cast<unsigned long long>(function.stats.flat_atomic_count),
-                  static_cast<unsigned long long>(function.stats.flat_group_hint_count),
-                  static_cast<unsigned long long>(function.stats.flat_private_hint_count),
-                  static_cast<unsigned long long>(function.stats.flat_maybe_group_hint_count),
-                  static_cast<unsigned long long>(function.stats.flat_maybe_private_hint_count),
-                  static_cast<unsigned long long>(function.stats.flat_global_hint_count),
-                  static_cast<unsigned long long>(function.stats.flat_unknown_hint_count),
-                  static_cast<unsigned long long>(function.stats.global_memory_count),
-                  static_cast<unsigned long long>(function.stats.scratch_memory_count),
-                  static_cast<unsigned long long>(function.stats.barrier_count),
-                  static_cast<unsigned long long>(function.stats.wait_count),
-                  static_cast<unsigned long long>(function.stats.fence_like_count),
-                  static_cast<unsigned long long>(function.stats.decode_error_count));
-      for (const rocjitsu::ConSanLdsSite &site : function.lds_sites) {
-        log_message(kLogVerbose,
-                    "ConSan function-lds-site reader=%llu function=%s kind=%s "
-                    "supported=%s mnemonic=%s text=0x%llx file=0x%llx size=%u width=%u "
-                    "dst_vgpr=%s addr_vgpr=%s data_vgpr=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle),
-                    function.name.c_str(), lds_access_kind_name(site.kind),
-                    site.supported_mvp ? "true" : "false", site.mnemonic.c_str(),
-                    static_cast<unsigned long long>(site.text_offset),
-                    static_cast<unsigned long long>(site.file_offset), site.size, site.width_bits,
-                    site.dst_vgpr ? std::to_string(*site.dst_vgpr).c_str() : "-",
-                    site.addr_vgpr ? std::to_string(*site.addr_vgpr).c_str() : "-",
-                    site.data_vgpr ? std::to_string(*site.data_vgpr).c_str() : "-");
-      }
-      for (const rocjitsu::ConSanFlatSite &site : function.flat_sites) {
-        log_message(kLogVerbose,
-                    "ConSan function-flat-site reader=%llu function=%s kind=%s "
-                    "mnemonic=%s text=0x%llx file=0x%llx size=%u width=%u "
-                    "dst_vgpr=%s addr_vgpr=%s data_vgpr=%s addr_hint=%s raw_saddr=%s "
-                    "raw_vaddr=%s raw_vsrc=%s raw_vdst=%s raw_ioffset=%s raw_scope=%s "
-                    "raw_th=%s",
-                    static_cast<unsigned long long>(code_object_reader.handle),
-                    function.name.c_str(), lds_access_kind_name(site.kind), site.mnemonic.c_str(),
-                    static_cast<unsigned long long>(site.text_offset),
-                    static_cast<unsigned long long>(site.file_offset), site.size, site.width_bits,
-                    site.dst_vgpr ? std::to_string(*site.dst_vgpr).c_str() : "-",
-                    site.addr_vgpr ? std::to_string(*site.addr_vgpr).c_str() : "-",
-                    site.data_vgpr ? std::to_string(*site.data_vgpr).c_str() : "-",
-                    flat_address_space_hint_name(site.address_space_hint),
-                    site.raw_saddr ? std::to_string(*site.raw_saddr).c_str() : "-",
-                    site.raw_vaddr ? std::to_string(*site.raw_vaddr).c_str() : "-",
-                    site.raw_vsrc ? std::to_string(*site.raw_vsrc).c_str() : "-",
-                    site.raw_vdst ? std::to_string(*site.raw_vdst).c_str() : "-",
-                    site.raw_ioffset ? std::to_string(*site.raw_ioffset).c_str() : "-",
-                    site.raw_scope ? std::to_string(*site.raw_scope).c_str() : "-",
-                    site.raw_th ? std::to_string(*site.raw_th).c_str() : "-");
-      }
-    }
     for (const rocjitsu::ConSanPatchInfo &patch : patch_result.patches) {
       const std::string scratch_vgpr =
           patch.scratch_vgpr ? std::to_string(*patch.scratch_vgpr) : "-";

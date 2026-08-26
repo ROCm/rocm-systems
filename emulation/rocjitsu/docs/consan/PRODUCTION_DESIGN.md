@@ -2678,6 +2678,36 @@ physical-gfx950 device matrix passed in 426.82 seconds of wall time.
   67.92 seconds. This output-only slice does not alter physical device
   execution. E2E validation remains outside this work.
 
+### Slice 4P: delete raw program-inventory dump records
+
+- **Completed ownership cutover:** Every hook-side inventory query now reads
+  `TransformResult::program_inventory`, including owner attribution,
+  synchronization records, kernel/function summary counts, and the parsed
+  code-object summary. The hook no longer reaches through the compatibility
+  result to obtain an alternate view of the same immutable program facts.
+- **Completed deletion:** The per-section, per-kernel, per-function, per-LDS-
+  site, and per-FLAT-site dumps are gone. They repeated the complete decoded
+  inventory in a hook-specific textual schema, exposed raw operands and
+  preflight mechanics, and had no supported parser or behavioral test
+  consumer. Retaining them would make the runtime adapter a second inventory
+  presentation layer and preserve a large compatibility-result traversal.
+- **Preserved contracts:** The compact program summary, semantic fault and
+  synchronization records used by validation tooling, typed coverage and
+  coverage-site records, resource qualification summaries, patch proof, and
+  analysis verdict remain. This deletion therefore removes decoded-structure
+  debugging rather than sanitizer behavior, trust evidence, or supported
+  qualification output.
+- **Deletion result:** Production source is 177 net lines smaller. No new
+  renderer, projection, compatibility type, or replacement output schema was
+  added.
+- **Completed checked-in gate:** The selected ConSan host suite passed 1,508
+  of 1,510 tests with two external-object benchmarks intentionally skipped,
+  and the complete HSA-hook binary passed all 194 tests. All 2,878 simulator
+  device rows across gfx942, gfx950, gfx1100, gfx1201, and gfx1250 passed in
+  72.16 seconds. This output-only cutover does not alter device execution;
+  physical qualification remains covered by the immediately preceding
+  physical tranche. E2E validation remains outside this work.
+
 ### Slice 5A: Record/Replay evidence requirements
 
 - **Completed boundary and contract:** The pure Record/Replay evidence planner
