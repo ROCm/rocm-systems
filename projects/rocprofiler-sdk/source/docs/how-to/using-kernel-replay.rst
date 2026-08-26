@@ -123,8 +123,8 @@ exactly one kernel completion regardless of pass count.
 Localized context control
 =========================
 
-During ``PASS`` ``PHASE_ENTER`` the payload carries ``replay_local_start_context_cb`` /
-``replay_local_stop_context_cb``. Use them to enable or disable other contexts for that pass
+During ``PASS`` ``PHASE_ENTER`` the payload carries ``replay_local_enable_context_cb`` /
+``replay_local_disable_context_cb``. Use them to enable or disable other contexts for that pass
 (for example counters every pass, PC sampling once) without calling global
 ``rocprofiler_start_context`` / ``rocprofiler_stop_context``, which would leak into non-replayed
 dispatches.

@@ -540,9 +540,9 @@ WriteInterceptor(const void* packets,
                                     rocprofiler_dispatch_id_t reserved_dispatch_id = 0) {
         auto transformed_packets = packet_vector_t{};
 
-        auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
-        auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
-        auto ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
+        auto thr_id           = corr_id->thread_idx;
+        auto internal_corr_id = corr_id->internal;
+        auto ancestor_corr_id = corr_id->ancestor;
 
         using packet_data_array_t = queue_info_session_t::packet_data_array_t;
 
@@ -919,12 +919,9 @@ WriteInterceptor(const void* packets,
     // tool. Non-graph single dispatches replay as usual below.
     if(has_kernel_replay && pkt_count == 1 && num_dispatch_packets == 1 && !graph_launch_active)
     {
-        // corr_id is null for dispatches submitted outside a tracked correlation scope (direct-HSA
-        // submissions, for example). has_kernel_replay is process-global, so this block is reached
-        // for those too -- guard the same way process_packet_batch does above.
-        const auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
-        const auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
-        const auto ancestor_corr_id = (corr_id) ? corr_id->ancestor : 0;
+        const auto thr_id           = corr_id->thread_idx;
+        const auto internal_corr_id = corr_id->internal;
+        const auto ancestor_corr_id = corr_id->ancestor;
         const auto dispatch_pkt     = packets_arr[0];
 
         // Reserve the dispatch id before CONFIG so pass_count_cb and every CONFIG/PASS callback see
@@ -1016,7 +1013,7 @@ WriteInterceptor(const void* packets,
 
             // Localized context control for this replay loop. This guard installs the thread-local
             // routing that connects the tool's PASS toggle callbacks (writers, via
-            // replay_local_start/stop_context) to the services that read it at dispatch (via
+            // replay_local_enable/disable_context) to the services that read it at dispatch (via
             // kernel_replay::local_context_override). It lives for the whole loop and is torn down
             // when the guard exits; global context state is never touched. It captures the contexts
             // active now (loop start) as the toggle mask, so a tool may only enable/disable one of

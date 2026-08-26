@@ -70,13 +70,13 @@ set_toggles_armed(bool armed)
 }
 
 rocprofiler_status_t
-replay_local_start_context(rocprofiler_context_id_t context_id)
+replay_local_enable_context(rocprofiler_context_id_t context_id)
 {
     return record_override(context_id, true);
 }
 
 rocprofiler_status_t
-replay_local_stop_context(rocprofiler_context_id_t context_id)
+replay_local_disable_context(rocprofiler_context_id_t context_id)
 {
     return record_override(context_id, false);
 }

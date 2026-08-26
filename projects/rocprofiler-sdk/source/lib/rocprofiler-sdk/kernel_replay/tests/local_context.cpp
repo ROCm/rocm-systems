@@ -61,8 +61,8 @@ struct fake_active_contexts
 TEST(kernel_replay_local_context, inactive_outside_loop)
 {
     EXPECT_FALSE(lc::local_context_override({1}).has_value());
-    EXPECT_EQ(lc::replay_local_start_context({1}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
-    EXPECT_EQ(lc::replay_local_stop_context({1}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
+    EXPECT_EQ(lc::replay_local_enable_context({1}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
+    EXPECT_EQ(lc::replay_local_disable_context({1}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
     EXPECT_FALSE(lc::local_context_override({1}).has_value());
     EXPECT_FALSE(lc::local_context_has_overrides());  // no active loop on this thread
 }
@@ -73,7 +73,7 @@ TEST(kernel_replay_local_context, loop_without_arm_rejects_toggles)
     fake_active_contexts             active{7};
     lc::scoped_local_context_control loop{active.array};
 
-    EXPECT_EQ(lc::replay_local_start_context({7}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
+    EXPECT_EQ(lc::replay_local_enable_context({7}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
     EXPECT_FALSE(lc::local_context_override({7}).has_value());
     EXPECT_FALSE(lc::local_context_has_overrides());  // loop active but nothing recorded
 }
@@ -86,17 +86,17 @@ TEST(kernel_replay_local_context, armed_toggles_record_and_stick)
     lc::scoped_local_context_control loop{active.array};
 
     lc::set_toggles_armed(true);
-    EXPECT_EQ(lc::replay_local_start_context({3}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_enable_context({3}), ROCPROFILER_STATUS_SUCCESS);
     lc::set_toggles_armed(false);
     EXPECT_TRUE(lc::local_context_has_overrides());  // an override is now recorded
 
     // arm window closed: the override sticks, but a new toggle is rejected.
     ASSERT_TRUE(lc::local_context_override({3}).has_value());
     EXPECT_TRUE(*lc::local_context_override({3}));
-    EXPECT_EQ(lc::replay_local_stop_context({3}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
+    EXPECT_EQ(lc::replay_local_disable_context({3}), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
 
     lc::set_toggles_armed(true);
-    EXPECT_EQ(lc::replay_local_stop_context({3}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_disable_context({3}), ROCPROFILER_STATUS_SUCCESS);
     lc::set_toggles_armed(false);
     ASSERT_TRUE(lc::local_context_override({3}).has_value());
     EXPECT_FALSE(*lc::local_context_override({3}));
@@ -109,8 +109,8 @@ TEST(kernel_replay_local_context, per_context_independent)
     lc::scoped_local_context_control loop{active.array};
 
     lc::set_toggles_armed(true);
-    EXPECT_EQ(lc::replay_local_start_context({1}), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(lc::replay_local_stop_context({2}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_enable_context({1}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_disable_context({2}), ROCPROFILER_STATUS_SUCCESS);
     lc::set_toggles_armed(false);
 
     EXPECT_TRUE(*lc::local_context_override({1}));
@@ -125,7 +125,7 @@ TEST(kernel_replay_local_context, override_cleared_after_loop)
         fake_active_contexts             active{5};
         lc::scoped_local_context_control loop{active.array};
         lc::set_toggles_armed(true);
-        EXPECT_EQ(lc::replay_local_start_context({5}), ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_EQ(lc::replay_local_enable_context({5}), ROCPROFILER_STATUS_SUCCESS);
         lc::set_toggles_armed(false);
         EXPECT_TRUE(*lc::local_context_override({5}));
     }
@@ -147,7 +147,7 @@ TEST(kernel_replay_local_context, simulated_replay_loop_and_misbehaving_tool)
     const auto tool_pass_enter = [&](int pass) {
         if(pass == 1)
         {
-            EXPECT_EQ(lc::replay_local_stop_context(timing), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(lc::replay_local_disable_context(timing), ROCPROFILER_STATUS_SUCCESS);
         }
     };
 
@@ -177,7 +177,7 @@ TEST(kernel_replay_local_context, simulated_replay_loop_and_misbehaving_tool)
 
     // A misbehaving tool stashes a toggle and fires it mid-dispatch (no arm window open): the call
     // is rejected and changes nothing.
-    EXPECT_EQ(lc::replay_local_start_context(timing), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
+    EXPECT_EQ(lc::replay_local_enable_context(timing), ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR);
     EXPECT_FALSE(lc::local_context_override(timing).value_or(true));  // still off
 }
 
@@ -191,12 +191,12 @@ TEST(kernel_replay_local_context, toggle_rejects_context_inactive_pre_replay)
     lc::set_toggles_armed(true);
 
     // 5 was active pre-replay: a local stop and a later re-start are both honored.
-    EXPECT_EQ(lc::replay_local_stop_context({5}), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(lc::replay_local_start_context({5}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_disable_context({5}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_enable_context({5}), ROCPROFILER_STATUS_SUCCESS);
 
     // 9 was not active pre-replay, so both start and stop are rejected and record nothing.
-    EXPECT_EQ(lc::replay_local_start_context({9}), ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED);
-    EXPECT_EQ(lc::replay_local_stop_context({9}), ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED);
+    EXPECT_EQ(lc::replay_local_enable_context({9}), ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED);
+    EXPECT_EQ(lc::replay_local_disable_context({9}), ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED);
 
     lc::set_toggles_armed(false);
     EXPECT_FALSE(lc::local_context_override({9}).has_value());  // nothing recorded for 9
@@ -210,8 +210,8 @@ TEST(kernel_replay_local_context, last_write_wins_in_arm_window)
     lc::scoped_local_context_control loop{active.array};
 
     lc::set_toggles_armed(true);
-    EXPECT_EQ(lc::replay_local_start_context({9}), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(lc::replay_local_stop_context({9}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_enable_context({9}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_disable_context({9}), ROCPROFILER_STATUS_SUCCESS);
     lc::set_toggles_armed(false);
 
     ASSERT_TRUE(lc::local_context_override({9}).has_value());
@@ -255,9 +255,9 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
         lc::set_toggles_armed(true);
         if(pass == 1)
         {
-            EXPECT_EQ(lc::replay_local_stop_context(att), ROCPROFILER_STATUS_SUCCESS);
-            EXPECT_EQ(lc::replay_local_stop_context(spm), ROCPROFILER_STATUS_SUCCESS);
-            EXPECT_EQ(lc::replay_local_stop_context(pcs), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(lc::replay_local_disable_context(att), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(lc::replay_local_disable_context(spm), ROCPROFILER_STATUS_SUCCESS);
+            EXPECT_EQ(lc::replay_local_disable_context(pcs), ROCPROFILER_STATUS_SUCCESS);
         }
         lc::set_toggles_armed(false);
 
@@ -288,7 +288,7 @@ TEST(kernel_replay_local_context, consumer_no_promotion_of_globally_stopped)
     fake_active_contexts             active{counters.handle};
     lc::scoped_local_context_control loop{active.array};
     lc::set_toggles_armed(true);
-    EXPECT_EQ(lc::replay_local_start_context(counters), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(lc::replay_local_enable_context(counters), ROCPROFILER_STATUS_SUCCESS);
     lc::set_toggles_armed(false);
 
     EXPECT_TRUE(*lc::local_context_override(counters));

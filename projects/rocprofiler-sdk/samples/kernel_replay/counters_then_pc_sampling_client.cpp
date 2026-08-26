@@ -56,14 +56,14 @@ kernel_replay_cb(rocprofiler_callback_tracing_record_t record, rocprofiler_user_
     // agent-wide today). Never enable both services on one pass.
     if(p->current_pass == kPcsPass)
     {
-        if(g_counters_ctx.handle != 0 && p->replay_local_stop_context_cb)
-            KR_CHECK(p->replay_local_stop_context_cb(g_counters_ctx));
-        if(g_pcs_available && p->replay_local_start_context_cb)
-            KR_CHECK(p->replay_local_start_context_cb(g_pcs_ctx));
+        if(g_counters_ctx.handle != 0 && p->replay_local_disable_context_cb)
+            KR_CHECK(p->replay_local_disable_context_cb(g_counters_ctx));
+        if(g_pcs_available && p->replay_local_enable_context_cb)
+            KR_CHECK(p->replay_local_enable_context_cb(g_pcs_ctx));
     }
-    else if(g_pcs_available && p->replay_local_stop_context_cb)
+    else if(g_pcs_available && p->replay_local_disable_context_cb)
     {
-        KR_CHECK(p->replay_local_stop_context_cb(g_pcs_ctx));
+        KR_CHECK(p->replay_local_disable_context_cb(g_pcs_ctx));
     }
 }
 
@@ -134,7 +134,7 @@ configure_pcs()
             g_pcs_ctx, id, cfg.method, cfg.unit, cfg.min_interval, g_pcs_buffer, 0);
         if(st == ROCPROFILER_STATUS_SUCCESS) any = true;
     }
-    // Start globally so replay_local_start/stop can record sticky overrides. PC sampling
+    // Start globally so replay_local_enable/disable can record sticky overrides. PC sampling
     // is agent-wide and does not honor local stop yet; counter passes rely on separate
     // replay passes and locally stopping counters on the PCS pass.
     if(any) KR_CHECK(rocprofiler_start_context(g_pcs_ctx));
