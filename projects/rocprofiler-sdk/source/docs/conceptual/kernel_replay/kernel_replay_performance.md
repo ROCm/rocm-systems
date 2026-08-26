@@ -70,6 +70,46 @@ consequences:
 The consequence worth stating plainly: **the suite is a smoke test that replay still works, not a
 performance gate.**
 
+## Why the scaling baseline is P=2, not P=1
+
+The scaling tests compare a baseline pass count against a higher one. The baseline is **P=2**, and
+that choice is load-bearing.
+
+A `pass_count_cb` returning `1` means the dispatch is **not replayed**: it takes the ordinary
+single-dispatch path with no snapshot and no restore (see `experimental/kernel_replay.h`). Timing
+P=1 therefore times a bare dispatch. Measured on MI325X (Debug, 64 MB ballast, 8 dispatches):
+
+| Passes | Median wall time | Replayed |
+|---|---|---|
+| 1 | 2.9 ms | no |
+| 2 | 728 ms | yes |
+| 3 | 846 ms | yes |
+| 5 | 786 ms | yes |
+
+Replay cost here is dominated by the **fixed** cost of snapshot/restore, not by the pass count. A
+P=5/P=1 ratio is therefore about **280x**, and P=3/P=1 about **58x** -- ratios that report the price
+of enabling replay at all, and that no linear-scaling cap can express. Against a P=2 baseline the
+same runs give roughly **1.1x**, comfortably inside the cap, and the number now moves only when
+per-pass cost changes -- which is the regression the test exists to catch.
+
+### Alternatives considered
+
+- **(b) Keep the P=1 baseline, make the scaling check advisory** behind
+  `ROCPROFILER_PERF_STRICT_CEILING`, the way the absolute ceiling already works. Rejected: it
+  removes the only per-commit scaling signal, leaving nothing that fails on a real regression.
+- **(c) Keep P=1 and raise the caps** to measured values (~400x and ~100x). Rejected: it bakes a
+  machine- and build-type-specific constant into the gate, and a genuine per-pass regression would
+  hide comfortably under a 400x cap.
+
+### Known gaps
+
+- These numbers come from a **Debug** build. Release will differ, so the caps are deliberately loose
+  rather than tuned to one machine.
+- `snap_bandwidth_meets_floor_*` are timing-sensitive and can fail under concurrent GPU load while
+  passing on rerun. They gate a bandwidth floor, not correctness.
+- The fixed-cost-dominates result above is itself a finding: at these sizes the suite barely
+  exercises per-pass scaling, which reinforces the smoke-test caveat in the previous section.
+
 ## Specific performance problems in the current implementation
 
 These are candidates identified by reading the code. Each needs measurement before it is treated as
