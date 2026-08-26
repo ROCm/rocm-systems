@@ -177,6 +177,12 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm*, int* gdrSupport) {
   if (gdrSupport) *gdrSupport = g_gdrSupportValue;
   return ncclSuccess;
 }
+// fillInfo MLOPart PCI-function fallback (init.cc ~1093): empty class keeps
+// isGpu=0 so existing tests' default busId=0 path stays a no-op.
+ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* /*busId*/, char* deviceClass, size_t maxLen) {
+  if (deviceClass && maxLen > 0) deviceClass[0] = '\0';
+  return ncclSuccess;
+}
 ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 4321; }
 // DMA-BUF export function pointer (dmaBufSupported gate): NULL -> unsupported.
