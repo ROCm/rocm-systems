@@ -338,6 +338,225 @@ for the DBI discussion.
 - We have a concise, concrete DBI requirements and questions package with which
   to join the framework design discussion next week.
 
+## Complete the internal reimplementation and delete the prototype
+
+The production contracts and migration boundary now exist, but most of the
+mechanism still runs through `LegacyConSanLowering`. The next internal phase is
+therefore not another round of additive architecture work. It is a
+deletion-driven completion of the reimplementation: move one coherent
+responsibility at a time behind the production interfaces, switch all of its
+consumers, and remove the superseded prototype implementation immediately.
+
+This phase optimizes jointly for three outcomes:
+
+1. minimize the total amount of post-reimplementation ConSan implementation
+   code;
+2. maximize the portion that consists of conceptually clean, independently
+   understandable components; and
+3. maximize genuine sharing across all five targets while confining necessary
+   ISA and ABI differences to narrow target adapters.
+
+The work is constrained by the checked-in tests. Host unit tests and checked-in
+device tests, including correct/incorrect pairs on every supported emulated
+target and the applicable physical-gfx950 tests, remain green throughout the
+migration. End-to-end workload revalidation is deliberately outside this
+phase: do not wait for, rerun, or update the E2E status matrices merely to
+qualify these internal cutovers. E2E qualification will resume after the
+internal implementation has converged.
+
+### Quantitative starting point
+
+Measured against `origin/shared/rocjitsu/sanitizers` at `97c1640b2f65`, and
+excluding tests, documentation, and build files, the implementation changed as
+follows:
+
+| Metric | Origin | Current starting point |
+| --- | ---: | ---: |
+| Implementation files | 63 | 73 |
+| Physical source lines | 92,182 | 100,116 |
+| Estimated code lines, excluding comments and blanks | 83,660 | 89,549 |
+| Code in entirely architecture-neutral files | 16,744 (20.0%) | 19,920 (22.2%) |
+| Code in target-aware or mixed files | 66,916 (80.0%) | 69,629 (77.8%) |
+| Physical lines in files larger than 2,000 lines | 69,134 (75.0%) | 69,350 (69.3%) |
+
+The two include-assembled prototype lowerers and the main HSA hook coordinator
+still contain approximately 72,224 physical lines. File-level target awareness
+is only an upper bound on architecture-specific code because the mixed files
+also contain shared algorithms. Conversely, a target-neutral filename is not
+proof of a clean abstraction. Track both mechanical measurements and a manual
+component-ownership audit.
+
+The new production layer has so far increased total code because it was placed
+around the old implementation. Completion must reverse that trend. The final
+tree must be materially smaller than the origin baseline, not merely smaller
+than the additive current starting point. Do not set an artificial line-count
+floor: continue deleting while the retained behavioral contracts and clear
+component ownership permit it.
+
+### Deletion and design rules
+
+- Treat every old/new compatibility seam as temporary inventory with a named
+  deletion slice. A migrated responsibility is not complete while its old
+  implementation, alternate entry point, projection type, or selection flag
+  remains reachable.
+- Prefer adapting consumers to an existing production contract over adding a
+  second abstraction. Before introducing a type, helper, or layer, identify
+  which retained duplication it removes and why an existing RocJitsu or ConSan
+  facility cannot own the responsibility.
+- A normal completed slice is net-negative in implementation lines. A
+  temporarily net-positive slice requires a concrete deletion amount and
+  immediate follow-up cutover in the same short series. Do not accumulate
+  scaffolding whose deletion payoff depends on a distant final switch.
+- Extract semantics, not textual similarity. Share policy, inventory,
+  resource intent, evidence, validation, and orchestration across targets.
+  Keep only instruction encoding, ABI state, target resource limits, and
+  capability facts behind target-specific interfaces.
+- Do not create a generic layer that merely moves five target branches into a
+  larger switch. A clean target adapter presents a small semantic operation or
+  capability contract and owns the native distinction completely.
+- Prefer existing RocJitsu decoders, instruction builders, liveness, spilling,
+  placement, patching, and code-object facilities. Delete private ConSan
+  equivalents when the shared facility can express the required invariant.
+- Keep the four engines distinct where their evidence semantics differ, but
+  give them one shared inventory, site identity, resource vocabulary,
+  transactional transform, coverage model, and target-lowering boundary.
+- A component is conceptually clean only if its responsibility and
+  non-responsibilities can be stated briefly, its inputs and outputs use the
+  production contracts, dependencies point in one direction, target behavior
+  is explicit data or a narrow adapter, and its reasonably testable behavior
+  has focused unit coverage. File splitting alone does not count.
+- Delete dead declarations, compatibility aliases, duplicated comments,
+  redundant validation, unused options, and tests of unreachable private
+  mechanisms along with the implementation they described. Preserve or
+  rewrite behavioral tests; do not preserve mechanism tests solely to justify
+  dead production code.
+
+### Ordered migration and deletion sequence
+
+The ordering below follows dependency direction and is intended to prevent a
+second implementation from growing beside the first. Before each slice, use
+call-site and test evidence to refine its exact deletion set. Split a slice if
+it cannot be switched and deleted under one proportional test gate.
+
+1. **Close the control-plane seam.** Make the HSA coordinator and all ordinary
+   callers consume `TransformResult` directly. Remove legacy result projection,
+   mutable-option entry points, test-only bypasses that no longer test a live
+   contract, and the corresponding hook-side branching. Keep the hook itself
+   for now, but reduce it to lifecycle coordination rather than transformation
+   policy.
+2. **Establish one shared inventory.** Move decode, code-object identity,
+   execution ownership, access, synchronization, and physical-site alias facts
+   into `ProgramInventory`. Migrate consumers one fact family at a time and
+   delete the matching candidate discovery and per-engine analysis code after
+   each cutover. No engine may maintain a second normalized view of the same
+   instruction facts.
+3. **Consolidate semantic policy.** Route access, barrier, atomic, fence,
+   confidence, and exclusion decisions through the production policy
+   interfaces. Replace workload-shaped and target-shaped conditionals with
+   documented semantic rules or target capability data, then delete the old
+   decision paths and redundant validation.
+4. **Unify resource intent and planning.** Have every engine describe required
+   scratch state, report storage, preserved registers, dispatch identity, and
+   placement constraints through one shared resource vocabulary. Reuse the
+   RocJitsu liveness, spilling, growth, and placement substrate. Delete
+   per-engine and per-target resource bookkeeping as each consumer migrates.
+5. **Isolate native target lowering.** Define the smallest semantic emission
+   interface needed by the engines and implement genuine target differences
+   with existing instrumentation builders and capability profiles. Migrate
+   complete operations—not arbitrary utility fragments—across all five
+   targets, and delete their target switches from engine bodies immediately.
+   Keep a ledger of every remaining target name in ConSan production code and
+   require a first-principles ISA or ABI justification for it.
+6. **Migrate engine lowering incrementally.** Start with Record/Replay because
+   its host-evidence path most directly exercises the production contracts,
+   while extracting only mechanics that the other engines genuinely share.
+   Then migrate Sampled, SuperCollider, and Inline Shadow as independent
+   component series. Within an engine, cut over access, synchronization, and
+   evidence operations separately when that yields smaller deletable slices.
+   Do not retain a mode-wide legacy fallback after its final operation moves.
+7. **Make transformation transactional once.** Consolidate mutation
+   composition, relocation, final validation, coverage accounting, and
+   unchanged/replacement installation decisions behind the production
+   pipeline. Delete parallel validation and rollback paths from both prototype
+   lowerers and from the hook.
+8. **Separate runtime evidence from hook lifecycle.** Keep report layout,
+   allocation lifetime, dispatch binding, decoding, trust evaluation, and
+   diagnostic rendering in individually owned components. Reduce the main hook
+   coordinator by moving retained behavior to those components, then delete
+   duplicated buffer, replay, sampling, teardown, and error-presentation paths.
+9. **Remove the prototype boundary.** Delete `LegacyConSanLowering`, the old
+   include-assembled entry points, unreachable option/result compatibility
+   fields, and every temporary comparison or fallback seam. Re-audit all
+   remaining `.inc` files and large translation units: retain a large component
+   only when its conceptual cohesion is stronger than the benefit of further
+   separation.
+10. **Perform the final minimization audit.** Search for duplicated target
+    predicates, duplicate engine mechanics, one-consumer abstractions,
+    redundant representations, pass-through wrappers, dead feature flags, and
+    private copies of shared RocJitsu functionality. Delete or collapse them,
+    update `DESIGN.md` to describe only the resulting implementation, and
+    repeat the quantitative audit against both the origin and current starting
+    points.
+
+### Test gate for every slice
+
+Use the fastest gate that can falsify the slice while iterating, but no slice is
+complete until its broader checked-in gate passes:
+
+1. add or update focused host unit tests for the component contract before or
+   with the implementation;
+2. run the affected engine's paired correct/incorrect device tests on every
+   supported architecture, generalizing the device contract when the behavior
+   is cross-cutting;
+3. run all ConSan host tests and all non-physical ConSan device tests before
+   committing the completed cutover;
+4. run the serialized physical-gfx950 device suite periodically and before a
+   migration tranche is declared complete; and
+5. run all checked-in ConSan tests after any shared inventory, resource,
+   lowering, placement, validation, or runtime-lifecycle cutover.
+
+If a checked-in test fails, first assume a regression. Fix the implementation
+and add the narrowest regression test that would have caught the issue. A test
+may change only after a separate contract audit shows that it entrenched a
+prototype mechanism rather than observable behavior; replace it with the
+strongest target-neutral behavioral contract available. Never weaken a test to
+make a deletion possible.
+
+Do not use E2E workload latency as an iteration gate in this phase. E2E status
+files remain unchanged unless E2E validation is explicitly resumed later.
+
+### Progress accounting and exit criteria
+
+At every completed migration tranche, record:
+
+- physical, nonblank, and comment-excluded implementation lines;
+- lines added, deleted, and net change for the tranche;
+- code in wholly architecture-neutral versus target-aware files, supplemented
+  by a manual estimate of genuinely shared versus specialized responsibility;
+- every remaining production target discriminator and its justified owner;
+- lines and responsibilities still reachable through legacy entry points;
+- concentration in large include-assembled or mixed-responsibility files; and
+- host, emulated-device, and physical-device test results.
+
+The internal reimplementation is complete only when:
+
+- no production or ordinary test caller can reach `LegacyConSanLowering`, and
+  the type and its superseded implementation have been deleted;
+- the post-reimplementation implementation is materially smaller than the
+  83,660-line comment-excluded origin baseline, with no avoidable duplicated
+  old/new framework or one-consumer abstraction left behind;
+- shared sanitizer semantics and engine-independent mechanics have exactly one
+  implementation, and target-specific code is confined to narrow, documented
+  ISA, ABI, and capability boundaries;
+- all retained components satisfy the conceptual-cleanliness criteria above,
+  with any remaining large or mixed component explicitly justified;
+- `DESIGN.md` describes the code that actually exists rather than a destination
+  layered over a prototype;
+- all checked-in ConSan host and device tests pass on every applicable target,
+  including the physical gfx950 suite; and
+- the tree contains no temporary migration switch, comparison path, legacy
+  projection, or scheduled deletion deferred to a later global cutover.
+
 ## Phase 2: Align and migrate with DBI
 
 Begin this phase after the scoped Phase 1 implementation is complete and its
