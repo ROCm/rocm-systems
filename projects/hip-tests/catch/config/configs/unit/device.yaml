@@ -6,6 +6,48 @@ device:
   Unit_hipChooseDevice_NegTst:
     <<: *level_2
     tags: [query, P0]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_AttributeDomains:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_AttributesMatchProperties:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_CapabilityConsistency:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_Basic:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_Repeated:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_MultiDevice:
+    <<: *level_2
+    tags: [multigpu, query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_MultiThreaded:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_DoesNotSynchronize:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_PayloadVisibleToKernel:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_AfterDeviceReset:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_NotCapturedByGraph:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Negative_Parameters:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Negative_FailureSetsLastErrorOnly:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceFlushGPUDirectRDMAWrites_Negative_AttributeQuery:
+    <<: *level_2
+    tags: [query]
   Unit_hipDeviceComputeCapability_Negative:
     <<: *level_2
     tags: [query, P0]

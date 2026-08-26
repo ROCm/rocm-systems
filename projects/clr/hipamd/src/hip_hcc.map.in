@@ -703,6 +703,7 @@ local:
 hip_7.15 {
 global:
     hipMemGetDefaultMemPool;
+    hipDeviceFlushGPUDirectRDMAWrites;
 local:
     *;
 } hip_7.14;

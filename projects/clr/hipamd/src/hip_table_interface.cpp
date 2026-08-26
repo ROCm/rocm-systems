@@ -3363,3 +3363,9 @@ hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* locati
   return hip::GetHipDispatchTable()->hipMemGetDefaultMemPool_fn(memPool, location, type);
   CATCH;
 }
+hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
+                                             hipFlushGPUDirectRDMAWritesScope scope) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceFlushGPUDirectRDMAWrites_fn(target, scope);
+  CATCH;
+}
