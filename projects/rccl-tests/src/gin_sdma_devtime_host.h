@@ -7,11 +7,36 @@
 #ifndef RCCL_TESTS_GIN_SDMA_DEVTIME_HOST_H_
 #define RCCL_TESTS_GIN_SDMA_DEVTIME_HOST_H_
 
-// Pure host helpers shared by BenchTime (common.cu), gin_sdma_devtime.h, and
-// gin_sdma_devtime_host_test.cpp. Keeps zero-time guards and stamp-reduction
-// math testable without GPU/MPI.
+#include <cstdio>
+#include <string>
+
+// Pure host helpers shared by BenchTime (common.cu), gin_sdma_devtime.h, util.cu,
+// and gin_sdma_devtime_host_test.cpp. Keeps zero-time guards, stamp-reduction
+// math, and skipped-row output contract testable without GPU/MPI.
 
 namespace rccl_tests_devtime {
+
+// Out-of-place column filler when BenchTime skipMetricRow is set (matches
+// writeBenchMarkLineNullBody() in util.cu). Preserves row layout so the
+// in-place pass lands in the in-place column, not the out-of-place slot.
+inline constexpr char kSkippedOutOfPlaceColumnFiller[] =
+    "                                ";
+inline constexpr char kSkippedOutOfPlaceJsonKey[] = "out_of_place";
+inline constexpr std::size_t kSkippedOutOfPlaceColumnFillerLen =
+    sizeof(kSkippedOutOfPlaceColumnFiller) - 1;
+
+inline void emitSkippedOutOfPlaceColumnToStdout() {
+  std::fputs(kSkippedOutOfPlaceColumnFiller, stdout);
+}
+
+inline std::string skippedOutOfPlaceJsonNullFragment() {
+  return std::string("\"") + kSkippedOutOfPlaceJsonKey + "\":null";
+}
+
+inline std::string goldenSkippedRowStdoutFragment(const char* afterPreamble,
+                                                  const char* inPlaceBody) {
+  return std::string(afterPreamble) + kSkippedOutOfPlaceColumnFiller + inPlaceBody;
+}
 
 inline double normalizeElapsedPerIter(double elapsedSec, int iters, int aggIters) {
   const double iterScale = (double)iters * aggIters;
