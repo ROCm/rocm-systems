@@ -593,7 +593,12 @@ void GraphExecSegmented::BuildSyncPlan() {
     const bool completion_signal_needed = (hw_slot >= 0);
 
     auto& lastBatch = segBatch.packet_batches.back();
-    if (last_node_uncaptured && completion_signal_needed) {
+    // A segment whose trailing nodes emit no packets at all (e.g. a leaf segment
+    // holding only an empty node) has nothing to carry the signal, so it needs a
+    // standalone barrier just like an uncaptured trailing node. Without this the
+    // slot allocated in PASS 1 is never signalled and the leaf sync in
+    // EnqueueSegmentedGraph waits on it forever.
+    if (completion_signal_needed && (last_node_uncaptured || lastBatch.dispatchPackets.empty())) {
       uint8_t* completion_barrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
@@ -604,7 +609,7 @@ void GraphExecSegmented::BuildSyncPlan() {
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal, segment.id});
-    } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
+    } else if (completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
