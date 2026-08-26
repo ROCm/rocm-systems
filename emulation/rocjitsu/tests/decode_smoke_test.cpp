@@ -1482,12 +1482,61 @@ TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "ds_read2st64_b32");
-  EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243");
+  EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243 offset0:70 offset1:71");
 
   InstDefUse def_use(*inst);
   EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 62, 2}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 62, 2}));
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 243, 1}));
+}
+
+TEST(Cdna3DecodeTest, DsDisassemblyPreservesEncodedOffsets) {
+  struct Case {
+    uint32_t words[2];
+    const char *expected;
+  };
+  const Case cases[] = {
+      {{0xD83E0800u, 0x00000A45u}, "ds_write_b16 v69, v10 offset:2048"},
+      {{0xD8F00800u, 0x22000022u}, "ds_read2st64_b64 v[34:37], v34 offset1:8"},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  for (const Case &test : cases) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, test.words));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->disassemble(), test.expected);
+  }
+}
+
+TEST(Cdna3DecodeTest, GlobalDisassemblySignExtendsSegmentOffset) {
+  const uint32_t words[] = {
+      0xDC489000u,
+      0x567F0002u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(), "global_load_ushort v86, v[2:3] offset:-4096");
+}
+
+TEST(Cdna3DecodeTest, PkFmacF16AcceptsSdwaEncoding) {
+  const uint32_t words[] = {
+      0x796666F9u,
+      0x66666666u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_pk_fmac_f16_sdwa");
+  EXPECT_EQ(inst->size(), 8);
+  EXPECT_EQ(inst->disassemble(),
+            "v_pk_fmac_f16_sdwa v179, v179, v102, v51 clamp mul:2 dst_sel:DWORD "
+            "dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:DWORD");
 }
 
 TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {

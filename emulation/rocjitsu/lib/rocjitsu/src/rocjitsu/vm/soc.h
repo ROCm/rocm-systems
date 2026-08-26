@@ -99,14 +99,18 @@ public:
   /// @returns Const reference to the vector of XCD pointers.
   const std::vector<amdgpu::Xcd *> &xcds() const { return xcds_; }
 
-  /// @brief MES-like queue assignment across XCD command processors.
+  /// @brief Pick the XCD command processor that will own a HW queue.
   ///
   /// @details On real MI300X hardware, the MES firmware distributes HW queues
   /// across XCDs. Use the process-local queue ordinal so equivalent queues from
-  /// independent processes compete for the same XCD resources.
+  /// independent processes compete for the same XCD resources. The owner reads
+  /// the queue's ring and holds each dispatch's completion signal. It is not the
+  /// only XCD that runs the work: a queue marked HwQueue::xcd_fanout spreads each
+  /// dispatch over every XCD, and which XCD owns the queue does not change the
+  /// workgroup-to-XCD mapping.
   ///
   /// @returns Pointer to the selected CommandProcessor, or nullptr if no XCDs.
-  amdgpu::CommandProcessor *assign_queue_cp(uint32_t queue_ordinal) {
+  amdgpu::CommandProcessor *assign_queue_owner_cp(uint32_t queue_ordinal) {
     if (xcds_.empty())
       return nullptr;
     uint32_t idx = queue_ordinal % static_cast<uint32_t>(xcds_.size());
