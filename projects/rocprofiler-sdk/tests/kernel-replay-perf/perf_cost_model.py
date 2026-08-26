@@ -8,6 +8,10 @@
 
 import os
 
+# Optional[...] rather than the PEP 604 "float | None": these annotations are evaluated when the
+# module is imported, and the CI runners include distros whose system Python predates 3.10.
+from typing import Optional
+
 # Conservative host-link floor (GB/s). Intentionally low for heterogeneous CI
 # including older AMD GPUs. Override locally for tighter checks:
 #   ROCPROFILER_KR_MIN_SNAP_GBPS=8
@@ -29,8 +33,8 @@ def model_max_ms(
     ballast_mb: int,
     launches: int,
     passes: int,
-    min_gbps: float | None = None,
-    margin: float | None = None,
+    min_gbps: Optional[float] = None,
+    margin: Optional[float] = None,
 ) -> float:
     gbps = DEFAULT_MIN_GBPS if min_gbps is None else min_gbps
     overhead = DEFAULT_OVERHEAD_MARGIN if margin is None else margin
