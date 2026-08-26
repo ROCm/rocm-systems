@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -35,10 +36,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -51,6 +54,9 @@
 #include <vector>
 
 namespace rocjitsu {
+namespace test {
+class ComputeUnitTestAccess;
+}
 namespace amdgpu {
 
 class CommandProcessor;
@@ -242,7 +248,18 @@ public:
   }
   using AluExceptionHandler = std::function<bool(Wavefront &wf)>;
   void set_alu_exception_handler(AluExceptionHandler cb) { alu_exception_handler_ = std::move(cb); }
-  void set_debug_active(bool active) { debug_active_.store(active, std::memory_order_relaxed); }
+  /// @brief Mark a debug session as attached to or detached from this CU.
+  /// @details Every transition publishes an I$ invalidation. A debugger writes
+  /// breakpoints straight into code memory with none of the maintenance that
+  /// invalidates the I$, and it can do so without any wave on this CU issuing
+  /// during the session -- attach, plant a breakpoint on a stopped wave, detach.
+  /// The invalidation is only published here, not applied: this runs on the
+  /// ioctl thread, and the I$ is lock-free precisely because the CU's own thread
+  /// is its sole accessor. That thread consumes it at its next fetch.
+  void set_debug_active(bool active) {
+    if (debug_active_.exchange(active, std::memory_order_relaxed) != active)
+      inst_cache_debug_epoch_.fetch_add(1, std::memory_order_release);
+  }
   bool debug_active() const { return debug_active_.load(std::memory_order_relaxed); }
 
   /// @brief Set the command processor for WG completion notification.
@@ -306,6 +323,7 @@ public:
   /// @brief Set the execution plugin group (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+    observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
   }
 
   /// @brief Return the execution plugin group.
@@ -344,6 +362,9 @@ public:
 
   /// @brief Return the L1 Vector Cache (V$).
   L1VectorCache &l1_vector() { return l1_vector_; }
+
+  /// @brief Return the per-CU instruction cache (I$).
+  InstructionCache &instruction_cache() { return inst_cache_; }
 
   /// @brief Return the shared L2 cache.
   L2Cache *l2() const { return l2_; }
@@ -398,6 +419,7 @@ public:
     });
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
+    inst_cache_.invalidate_all();
     l2_->flush_all(vmid);
   }
 
@@ -405,6 +427,7 @@ public:
     (void)vmid;
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
+    inst_cache_.invalidate_all();
   }
 
   /// @brief Set (or replace) the shared GPU memory pointer.
@@ -519,9 +542,9 @@ public:
   // TODO(newling) consider cmake flag to build without plugins, this call
   // overhead might be non-negligible.
   uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (auto *wf = sgpr_to_wave_[reg_idx]) {
-      plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
-    }
+    if (observes_sgpr_reads_)
+      if (auto *wf = sgpr_owner(reg_idx))
+        plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
     return sgpr_file_[reg_idx];
   }
 
@@ -749,6 +772,17 @@ protected:
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
 
+  /// @brief Apply any I$ invalidation a debug attach or detach published.
+  /// @details Runs on this CU's own thread, which is the I$'s sole accessor.
+  /// See set_debug_active() for why the transition cannot invalidate directly.
+  void sync_inst_cache_debug_epoch() {
+    const uint64_t epoch = inst_cache_debug_epoch_.load(std::memory_order_acquire);
+    if (epoch == inst_cache_debug_epoch_seen_)
+      return;
+    inst_cache_.invalidate_all();
+    inst_cache_debug_epoch_seen_ = epoch;
+  }
+
   /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
 
@@ -815,6 +849,16 @@ protected:
   L2Cache *l2_;
   L1ScalarCache l1_scalar_;
   L1VectorCache l1_vector_;
+  InstructionCache inst_cache_;
+  /// @brief Debug attach/detach transitions seen by set_debug_active().
+  std::atomic<uint64_t> inst_cache_debug_epoch_{0};
+  /// @brief The epoch this CU's thread has already invalidated the I$ for.
+  uint64_t inst_cache_debug_epoch_seen_ = 0;
+  /// @brief Dispatch whose launch invalidation the I$ has already taken.
+  /// @details Held as 64 bits so the initial value is outside the 32-bit
+  /// dispatch-ID space and the first dispatch, including ID 0, still
+  /// invalidates.
+  uint64_t inst_cache_dispatch_id_ = ~uint64_t{0};
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
@@ -857,20 +901,45 @@ protected:
   uint64_t private_aperture_limit_ = 0;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+  bool observes_sgpr_reads_ = false;
 
-  /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
-  /// Populated at dispatch_wf time. Null entries mean "not allocated".
-  std::vector<Wavefront *> sgpr_to_wave_;
-  /// Populated by the ISA-specific subclass (which owns the VGPR file).
-  virtual void fill_vgpr_to_wave(uint32_t /*base*/, uint32_t /*count*/, Wavefront * /*wf*/) {}
+  /// @brief Resolve the owner of a physical SGPR from its allocation block.
+  /// @details Power-of-two block sizes use a shift on the instruction read path;
+  /// other target configurations retain exact division semantics.
+  Wavefront *sgpr_owner(uint32_t reg_idx) const {
+    const uint32_t block = sgpr_block_shift_ != kVariableSgprBlockShift
+                               ? reg_idx >> sgpr_block_shift_
+                               : reg_idx / config_.sgprs_per_wf;
+    const auto &allocation = sgpr_block_owners_[block];
+    return reg_idx < allocation.end ? allocation.owner : nullptr;
+  }
+
+  static constexpr uint32_t kVariableSgprBlockShift = std::numeric_limits<uint32_t>::max();
+  struct SgprBlockOwner {
+    Wavefront *owner = nullptr;
+    uint32_t end = 0;
+  };
+  /// Reverse lookup: SGPR allocation block -> owning wavefront (for race detection).
+  /// One entry per hardware wave slot replaces one pointer per physical SGPR,
+  /// while end preserves the requested-register boundary for plugin observation.
+  std::vector<SgprBlockOwner> sgpr_block_owners_;
+  uint32_t sgpr_block_shift_ = kVariableSgprBlockShift;
+  /// Record or clear the owner of one VGPR allocation block.
+  /// @param base Allocation-block-aligned physical VGPR base.
+  /// @param wf Owning wavefront, or nullptr when the block is freed.
+  virtual void set_vgpr_block_owner(uint32_t base, Wavefront *wf) = 0;
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
   bool functional_yield_requested_ = false;
 
   friend class CommandProcessor;
+  friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 
+inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
+  return raw_cu().instruction_cache();
+}
 inline L1ScalarCache &InstructionComputeUnitView::l1_scalar() { return raw_cu().l1_scalar(); }
 inline L1VectorCache &InstructionComputeUnitView::l1_vector() { return raw_cu().l1_vector(); }
 inline L2Cache *InstructionComputeUnitView::l2() const { return raw_cu().l2(); }
@@ -1035,7 +1104,6 @@ public:
         Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : accvgpr_physical_base + Isa::MAX_ACC_VGPRS_PER_WF;
     vgprs_per_block_ = std::max(config.vgprs_per_wf, accvgpr_physical_limit);
     vgpr_file_.init(config.num_wf_slots * vgprs_per_block_, vgprs_per_block_);
-    vgpr_to_wave_.resize(config.num_wf_slots * vgprs_per_block_, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -1050,23 +1118,29 @@ public:
   void notify_vgpr_read_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx])
+    if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
   }
 
   void notify_vgpr_write_by_reg(
       uint32_t reg_idx, uint64_t lane_mask,
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx])
+    if (auto *wf = vgpr_owner(reg_idx))
       this->notify_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
   }
 
   const Wavefront *vgpr_owner(uint32_t reg_idx) const override {
-    return reg_idx < vgpr_to_wave_.size() ? vgpr_to_wave_[reg_idx] : nullptr;
+    if (vgprs_per_block_ == 0)
+      return nullptr;
+    const size_t block = reg_idx / vgprs_per_block_;
+    return block < this->config_.num_wf_slots ? vgpr_block_owners_[block] : nullptr;
   }
 
-  void fill_vgpr_to_wave(uint32_t base, uint32_t count, Wavefront *wf) override {
-    std::fill(vgpr_to_wave_.begin() + base, vgpr_to_wave_.begin() + base + count, wf);
+  void set_vgpr_block_owner(uint32_t base, Wavefront *wf) override {
+    assert(vgprs_per_block_ != 0 && base % vgprs_per_block_ == 0);
+    const size_t block = base / vgprs_per_block_;
+    assert(block < this->config_.num_wf_slots);
+    vgpr_block_owners_[block] = wf;
   }
 
   /// @brief Write a value to the VGPR file.
@@ -1109,7 +1183,7 @@ protected:
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override {
     vgpr_file_.free(base);
-    fill_vgpr_to_wave(base, vgprs_per_block_, nullptr);
+    set_vgpr_block_owner(base, nullptr);
   }
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
@@ -1139,7 +1213,11 @@ protected:
 
 private:
   VgprFile vgpr_file_{"vgpr"};
-  std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
+  /// One owner per register-file allocation block. Every VGPR in a block has
+  /// the same owner, so a per-register reverse map would duplicate each pointer
+  /// @c vgprs_per_block_ times. The array is sized by wave slots because the
+  /// register file currently contains exactly one allocation block per slot.
+  std::array<Wavefront *, Isa::MAX_WF_SLOTS> vgpr_block_owners_{};
   uint32_t vgprs_per_block_ = 0;
 };
 

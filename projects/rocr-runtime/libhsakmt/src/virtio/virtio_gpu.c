@@ -29,6 +29,7 @@
 #include <fcntl.h>
 
 #include "virtio_gpu.h"
+#include "libhsakmt.h"
 
 #define SHMEM_SZ (80 * 0x1000)
 
@@ -304,7 +305,7 @@ int virtio_gpu_kfd_open(void) {
   if (num_devices <= 0) return -1;
 
   for (i = 0; i < num_devices; i++) {
-    fd = open(devices[i]->nodes[DRM_NODE_RENDER], O_RDWR | O_CLOEXEC);
+    fd = hsakmt_open(devices[i]->nodes[DRM_NODE_RENDER], O_RDWR | O_CLOEXEC);
     if (fd < 0) continue;
 
     struct virgl_renderer_capset_hsakmt caps;

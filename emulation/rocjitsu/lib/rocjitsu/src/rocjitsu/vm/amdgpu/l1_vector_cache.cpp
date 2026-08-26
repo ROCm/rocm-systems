@@ -68,14 +68,12 @@ L1VectorCache::L1VectorCache(L2Cache *l2)
 L1VectorCache::~L1VectorCache() = default;
 
 void L1VectorCache::set_l2(L2Cache *l2) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   l2_ = l2;
 }
 
 void L1VectorCache::set_memory(GpuMemory *mem) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   memory_ = mem;
 }
 
@@ -212,8 +210,7 @@ void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t ele
                          uint32_t num_elems, uint8_t *dst, Mtype mtype, bool non_temporal,
                          bool request_l1_bypass, uint32_t wf_size, uint32_t vmid,
                          uint32_t addr_stride, std::span<const uint64_t> element_lane_masks) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   uint32_t stride = num_elems * elem_size;
   // Scratch swizzle: consecutive dwords of one lane's private space sit
   // addr_stride bytes apart, the hardware dword-interleaved layout rocm-dbgapi
@@ -275,8 +272,7 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
                           uint32_t num_elems, const uint8_t *src, Mtype mtype, bool non_temporal,
                           uint32_t wf_size, uint32_t vmid, uint32_t addr_stride,
                           std::span<const uint64_t> element_lane_masks) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   uint32_t stride = num_elems * elem_size;
   const uint32_t active_lanes = std::popcount(lane_mask);
   ++store_count_;
@@ -339,30 +335,27 @@ void L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, uint32_t el
 }
 
 void L1VectorCache::invalidate(uint64_t addr, uint32_t vmid) {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
+  synchronize_epoch();
   cache_.invalidate(addr, vmid);
 }
 
 void L1VectorCache::invalidate_all() {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
-  invalidate_all_locked();
+  synchronize_epoch();
+  invalidate_all_lines();
 }
 
 void L1VectorCache::flush_all() {
-  auto coherence_guard = DeviceCacheCoherence::instance().acquire_l1_access();
-  synchronize_epoch_locked();
-  invalidate_all_locked();
+  synchronize_epoch();
+  invalidate_all_lines();
 }
 
-void L1VectorCache::invalidate_all_locked() { cache_.invalidate_all(); }
+void L1VectorCache::invalidate_all_lines() { cache_.invalidate_all(); }
 
-void L1VectorCache::synchronize_epoch_locked() {
+void L1VectorCache::synchronize_epoch() {
   const uint64_t current_epoch = DeviceCacheCoherence::instance().current_epoch();
   if (coherence_epoch_ == current_epoch)
     return;
-  invalidate_all_locked();
+  invalidate_all_lines();
   coherence_epoch_ = current_epoch;
 }
 
