@@ -1057,29 +1057,6 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     if (kernel.has_dynamic_lds)
       dynamic_lds_descriptors.insert(kernel.descriptor_file_offset);
   }
-  struct AccessSiteKey {
-    std::string_view container_name;
-    bool in_kernel = true;
-    uint64_t text_offset = 0;
-
-    bool operator==(const AccessSiteKey &) const = default;
-  };
-  struct AccessSiteKeyHash {
-    [[nodiscard]] size_t operator()(const AccessSiteKey &key) const {
-      size_t hash = std::hash<std::string_view>{}(key.container_name);
-      hash ^= std::hash<uint64_t>{}(key.text_offset) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
-      hash ^= std::hash<bool>{}(key.in_kernel) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
-      return hash;
-    }
-  };
-  std::unordered_set<AccessSiteKey, AccessSiteKeyHash> supported_access_sites;
-  supported_access_sites.reserve(result.site_dispositions.size());
-  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
-    if (site.site_kind == ConSanResourceSiteKind::Access &&
-        site.disposition == ConSanSiteDisposition::Supported) {
-      supported_access_sites.insert({site.container_name, site.in_kernel, site.text_offset});
-    }
-  }
   std::vector<bool> dynamic_lds_access_candidates(result.moi_candidates.size(), false);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     if (plan.site_kind != ConSanResourceSiteKind::Access ||
@@ -1098,9 +1075,6 @@ inventory_consan_moi_auto_report(const ConSanResult &result, const ConSanOptions
     if (selected_candidate_count >= selected_candidate_limit)
       break;
     const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
-    if (!supported_access_sites.contains(
-            {candidate.container_name, candidate.in_kernel, candidate.text_offset}))
-      continue;
     const auto &ranges = candidate.access_ranges;
     if (ranges.empty())
       continue;

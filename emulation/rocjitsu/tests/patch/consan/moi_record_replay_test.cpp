@@ -213,16 +213,13 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   EXPECT_FALSE(result.moi_candidates.front().kernel_descriptor_file_offset);
   ASSERT_EQ(result.sync_events.size(), 1u);
   EXPECT_EQ(result.sync_events.front().kind, ConSanSyncEventKind::Barrier);
-  ASSERT_EQ(result.site_dispositions.size(), 3u);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Access,
-                               &ConSanSiteDispositionRecord::site_kind),
-            1u);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+  ASSERT_EQ(result.site_dispositions.size(), 2u);
   EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Barrier,
                                &ConSanSiteDispositionRecord::site_kind),
             2u);
   EXPECT_TRUE(std::ranges::all_of(result.site_dispositions, [](const auto &disposition) {
-    return (disposition.site_kind == ConSanResourceSiteKind::Access ||
-            disposition.site_kind == ConSanResourceSiteKind::Barrier) &&
+    return disposition.site_kind == ConSanResourceSiteKind::Barrier &&
            disposition.disposition == ConSanSiteDisposition::Supported;
   }));
   ASSERT_EQ(std::ranges::count(result.observation_plan.site_decisions,
@@ -1961,12 +1958,7 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_b16");
   EXPECT_EQ(result.moi_candidates.front().text_offset, 0u);
-  const auto access_dispositions =
-      std::ranges::count_if(result.site_dispositions, [](const ConSanSiteDispositionRecord &site) {
-        return site.site_kind == ConSanResourceSiteKind::Access;
-      });
-  EXPECT_EQ(access_dispositions, 1u);
-  EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
+  EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
   EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 1u);
@@ -2370,10 +2362,7 @@ TEST(ConSanMoi, FirstLightProbeAutomaticallyUsesDeadVgprs) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::LivenessDead);
   EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 1);
-  ASSERT_EQ(result.site_dispositions.size(), 1u);
-  EXPECT_EQ(result.site_dispositions.front().lowering_outcome, ConSanSiteLoweringOutcome::Patched);
-  EXPECT_EQ(result.site_dispositions.front().lowering_reason, ConSanSiteLoweringReason::None);
-  EXPECT_EQ(result.site_dispositions.front().resource_reason, ConSanRegisterPlanReason::None);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).kind,
             ConSanPatchKind::InlineMoiAccessRecordStore);
@@ -2638,9 +2627,7 @@ TEST(ConSanMoi, Rdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
-  ASSERT_EQ(result.site_dispositions.size(), 1u);
-  EXPECT_EQ(result.site_dispositions.front().lowering_outcome, ConSanSiteLoweringOutcome::Patched);
-  EXPECT_EQ(result.site_dispositions.front().lowering_reason, ConSanSiteLoweringReason::None);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
   });
@@ -2739,9 +2726,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
-  ASSERT_EQ(result.site_dispositions.size(), 1u);
-  EXPECT_EQ(result.site_dispositions.front().lowering_outcome, ConSanSiteLoweringOutcome::Patched);
-  EXPECT_EQ(result.site_dispositions.front().lowering_reason, ConSanSiteLoweringReason::None);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore;
   });
@@ -3073,10 +3058,7 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
     ASSERT_EQ(result.moi_candidates.size(), 1u);
     EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
     EXPECT_EQ(result.moi_candidates.front().width_bits, expected_width_bits);
-    ASSERT_EQ(result.site_dispositions.size(), 1u);
-    EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
-    EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
-              ConSanSiteLoweringOutcome::Patched);
+    EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
     const ConSanMoiAutoReportInventory inventory =
         inventory_consan_moi_auto_report(result, options, bytes);
@@ -3148,10 +3130,8 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
       ASSERT_TRUE(result.moi_candidates.front().data_vgpr);
       EXPECT_EQ(*result.moi_candidates.front().data_vgpr, expected_value_vgpr);
     }
-    ASSERT_EQ(result.site_dispositions.size(), 1u);
-    EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
-    EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
-              ConSanSiteLoweringOutcome::Patched);
+    EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+    EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
     const ConSanMoiAutoReportInventory inventory =
         inventory_consan_moi_auto_report(result, options, bytes);
@@ -6972,13 +6952,7 @@ TEST(ConSanMoi, Rdna4DenseFunctionAccessesUseRelocatableHost) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
-                                  [](const auto &site) {
-                                    return site.site_kind == ConSanResourceSiteKind::Access &&
-                                           !site.in_kernel &&
-                                           site.lowering_outcome ==
-                                               ConSanSiteLoweringOutcome::Patched;
-                                  }),
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
             kAccessCount);
 }
 
@@ -8525,13 +8499,9 @@ TEST(ConSanMoi, CdnaRecordReplayMovesOnlyEmptyAccumulatorBoundaryForDynamicStack
       EXPECT_GT(
           AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
           31u);
-      EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
-                                      [](const auto &site) {
-                                        return site.disposition ==
-                                                   ConSanSiteDisposition::Supported &&
-                                               site.lowering_outcome ==
-                                                   ConSanSiteLoweringOutcome::Patched;
-                                      }),
+      EXPECT_EQ(std::ranges::count(result.coverage_ledger.intent_entries(),
+                                   ConSanLoweringOutcomeKind::Instrumented,
+                                   &ConSanIntentCoverageEntry::lowering),
                 2u);
     }
   }
@@ -8595,20 +8565,14 @@ TEST(ConSanMoi, Cdna4RecordReplayMixesPrivateAndDynamicStackPersistentStateByOwn
   EXPECT_EQ(register_prologue->owner_descriptor_file_offsets,
             std::vector<uint64_t>{dynamic->descriptor_file_offset});
   EXPECT_TRUE(private_prologue->persistent_record_replay_workgroup_private_offsets.complete());
-  ASSERT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteDisposition::Supported,
-                               &ConSanSiteDispositionRecord::disposition),
-            4u);
-  for (const ConSanSiteDispositionRecord &site : result.site_dispositions) {
-    if (site.disposition != ConSanSiteDisposition::Supported)
-      continue;
-    EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Patched)
-        << "kind=" << static_cast<uint32_t>(site.site_kind) << " container=" << site.container_name
-        << " offset=" << site.text_offset << " mnemonic=" << site.mnemonic
-        << " outcome=" << consan_site_lowering_outcome_name(site.lowering_outcome)
-        << " reason=" << consan_site_lowering_reason_name(site.lowering_reason)
-        << " warnings=" << testing::PrintToString(result.warnings)
-        << " plans=" << testing::PrintToString(result.resource_plans);
-  }
+  ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 4u);
+  EXPECT_TRUE(std::ranges::all_of(result.coverage_ledger.intent_entries(),
+                                  [](const ConSanIntentCoverageEntry &entry) {
+                                    return entry.lowering ==
+                                           ConSanLoweringOutcomeKind::Instrumented;
+                                  }))
+      << "warnings=" << testing::PrintToString(result.warnings)
+      << " plans=" << testing::PrintToString(result.resource_plans);
 }
 
 TEST(ConSanMoi, Cdna4RecordReplayRecoversDynamicOwnerAfterPrivateAbiResourceFailure) {
@@ -10400,11 +10364,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
   EXPECT_EQ(result.moi_candidates.front().raw_ioffset, 16);
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Access &&
-           site.disposition == ConSanSiteDisposition::Supported &&
-           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
-  }));
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -10543,10 +10503,12 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
       words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
     }
     words.insert(words.end(), {
-                                  0xC4050018u, 0x40883804u,
+                                  0xC4050018u,
+                                  0x40883804u,
                                   0x00000005u, // buffer_load_b32 v4, v5, device
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC07Cu, 0x00080000u,
+                                  0xEE0AC07Cu,
+                                  0x00080000u,
                                   0x00000000u, // global_inv scope:device
                                   0xBFC00000u, // s_wait_loadcnt 0
                                   0xBE804EC1u, // s_barrier_signal -1
@@ -11815,7 +11777,8 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   constexpr uint8_t kGuestVgprMsbMode = 0x01u;
   constexpr uint16_t kEncodedAddressVgpr = 30u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
+      0xDBFC0000u,
       0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
   };
   // Even when an inline body would fit in nearby padding, capturing an

@@ -1181,19 +1181,21 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
     site.resource_reason = ConSanRegisterPlanReason::None;
   }
 
-  // Site dispositions remain the temporary adapter into current MOI resource
-  // and placement code. Publish every final access/synchronization outcome
-  // through stable intent IDs so production coverage no longer requires a
-  // consumer to scan patch kinds or warning strings.
+  // Access intents publish their result directly from resource and patch
+  // placement state. Synchronization lowerers still retain a temporary site
+  // disposition adapter; translate only those records until their incremental
+  // cutover removes the remaining compatibility ledger.
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
     ConSanResourceSiteKind site_kind = ConSanResourceSiteKind::Access;
     uint64_t disposition_offset = intent.physical_site.original_text_offset;
     std::string_view subject = "access";
+    bool access_intent = false;
     switch (intent.kind) {
     case ConSanProbeIntentKind::RedundantAccessObservation:
     case ConSanProbeIntentKind::AccessRecord:
     case ConSanProbeIntentKind::SampledAccess:
     case ConSanProbeIntentKind::ExactShadowAccess:
+      access_intent = true;
       break;
     case ConSanProbeIntentKind::BarrierRecord:
     case ConSanProbeIntentKind::SampledBarrierEpoch:
@@ -1234,6 +1236,22 @@ void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
     }
     case ConSanProbeIntentKind::Count:
       break;
+    }
+    if (access_intent) {
+      const SiteKey key{ConSanResourceSiteKind::Access, disposition_offset};
+      if (patched_sites.contains(key)) {
+        (void)result.coverage_ledger.set_lowering_outcome(intent.id,
+                                                          ConSanLoweringOutcomeKind::Instrumented);
+      } else if (failed_sites.contains(key)) {
+        (void)result.coverage_ledger.set_lowering_outcome(
+            intent.id, ConSanLoweringOutcomeKind::ResourceRejected,
+            "MOI resource plan rejected the access");
+      } else {
+        (void)result.coverage_ledger.set_lowering_outcome(
+            intent.id, ConSanLoweringOutcomeKind::PlacementRejected,
+            "MOI lowerer emitted no access patch");
+      }
+      continue;
     }
     const auto site = std::ranges::find_if(result.site_dispositions, [&](const auto &candidate) {
       return candidate.site_kind == site_kind && candidate.text_offset == disposition_offset;

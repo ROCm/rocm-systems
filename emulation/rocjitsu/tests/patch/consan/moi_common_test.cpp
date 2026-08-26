@@ -632,15 +632,16 @@ TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
       EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 96u);
       EXPECT_LT(*result.resolved_moi_exec_save_sgpr, 96u);
 
-      const auto low = std::ranges::find(result.site_dispositions, 0u,
-                                         &ConSanSiteDispositionRecord::text_offset);
-      const auto high = std::ranges::find(result.site_dispositions, kHighPressureEntry,
-                                          &ConSanSiteDispositionRecord::text_offset);
-      ASSERT_NE(low, result.site_dispositions.end());
-      ASSERT_NE(high, result.site_dispositions.end());
-      EXPECT_EQ(low->lowering_outcome, ConSanSiteLoweringOutcome::Patched);
-      EXPECT_EQ(high->lowering_outcome, ConSanSiteLoweringOutcome::ResourceFailed);
-      EXPECT_EQ(high->resource_reason, ConSanRegisterPlanReason::ForbiddenOverlap);
+      const ConSanIntentCoverageEntry *low = consan_access_coverage_at(result, 0u);
+      const ConSanIntentCoverageEntry *high = consan_access_coverage_at(result, kHighPressureEntry);
+      ASSERT_NE(low, nullptr);
+      ASSERT_NE(high, nullptr);
+      EXPECT_EQ(low->lowering, ConSanLoweringOutcomeKind::Instrumented);
+      EXPECT_EQ(high->lowering, ConSanLoweringOutcomeKind::ResourceRejected);
+      const auto high_plan = std::ranges::find(result.resource_plans, kHighPressureEntry,
+                                               &ConSanCandidateResourcePlan::text_offset);
+      ASSERT_NE(high_plan, result.resource_plans.end());
+      EXPECT_EQ(high_plan->reason, ConSanRegisterPlanReason::ForbiddenOverlap);
       EXPECT_TRUE(std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
         return patch.phase == ConSanPatchPhase::Instrumentation && patch.anchor_offset == 0u;
       }));
@@ -817,15 +818,7 @@ void expect_moi_engines_admit_native_b96_accesses(
         expected.insert(expected.end(), add_byte_count->begin(), add_byte_count->end());
         EXPECT_TRUE(contains_subsequence(body, expected));
       }
-      EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
-                                      [](const ConSanSiteDispositionRecord &site) {
-                                        return site.site_kind == ConSanResourceSiteKind::Access &&
-                                               site.disposition ==
-                                                   ConSanSiteDisposition::Supported &&
-                                               site.lowering_outcome ==
-                                                   ConSanSiteLoweringOutcome::Patched;
-                                      }),
-                1);
+      EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
     }
   }
 }
@@ -870,11 +863,7 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Atomic);
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_cmpstore_rtn_b32");
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Access &&
-           site.disposition == ConSanSiteDisposition::Supported &&
-           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
-  }));
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
     return site.site_kind == ConSanResourceSiteKind::Atomic &&
            site.disposition == ConSanSiteDisposition::NotApplicable &&
@@ -922,16 +911,8 @@ TEST(ConSanMoi, Cdna4HistogramLdsAtomicsAreAccessesButNotSynchronization) {
   EXPECT_TRUE(std::ranges::all_of(result.moi_candidates, [](const auto &candidate) {
     return candidate.kind == ConSanLdsAccessKind::Atomic;
   }));
-  EXPECT_EQ(std::ranges::count_if(result.site_dispositions,
-                                  [](const auto &site) {
-                                    return site.site_kind == ConSanResourceSiteKind::Access &&
-                                           site.disposition == ConSanSiteDisposition::Supported;
-                                  }),
-            5u);
-  EXPECT_TRUE(std::ranges::any_of(result.site_dispositions, [](const auto &site) {
-    return site.site_kind == ConSanResourceSiteKind::Access &&
-           site.lowering_outcome == ConSanSiteLoweringOutcome::Patched;
-  }));
+  EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 5u);
+  EXPECT_GT(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 0u);
   EXPECT_TRUE(std::ranges::none_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
   }));
@@ -2392,16 +2373,11 @@ TEST(ConSanMoi, UnsupportedOnlyAccessRemainsApplicableInPreFilterLedger) {
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     EXPECT_TRUE(result.moi_candidates.empty());
-    ASSERT_EQ(result.site_dispositions.size(), 1u);
-    const ConSanSiteDispositionRecord &site = result.site_dispositions.front();
-    EXPECT_EQ(site.site_kind, ConSanResourceSiteKind::Access);
-    EXPECT_EQ(site.disposition, ConSanSiteDisposition::Unsupported);
-    EXPECT_EQ(site.reason, ConSanSiteDispositionReason::MissingAddressOperand);
-    EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Unsupported);
-    EXPECT_EQ(site.lowering_reason, ConSanSiteLoweringReason::SemanticUnsupported);
-    EXPECT_EQ(site.mnemonic, "ds_load_addtid_b32");
-    EXPECT_STREQ(consan_site_disposition_name(site.disposition), "unsupported");
-    EXPECT_STREQ(consan_site_disposition_reason_name(site.reason), "missing_address_operand");
+    ASSERT_EQ(result.observation_plan.site_decisions.size(), 1u);
+    const ConSanSiteDecision &decision = result.observation_plan.site_decisions.front();
+    EXPECT_EQ(decision.kind, ConSanSiteDecisionKind::Unsupported);
+    EXPECT_EQ(decision.reason, ConSanAccessPolicyReason::MissingAddressOperand);
+    EXPECT_TRUE(decision.intent_ids.empty());
   }
 }
 
@@ -2417,18 +2393,15 @@ TEST(ConSanMoi, MixedAccessLedgerRetainsSupportedAndUnsupportedFinalCodeSites) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.site_dispositions.size(), 2u);
-  EXPECT_EQ(result.site_dispositions[0].disposition, ConSanSiteDisposition::Supported);
-  EXPECT_EQ(result.site_dispositions[0].reason, ConSanSiteDispositionReason::None);
-  EXPECT_EQ(result.site_dispositions[0].mnemonic, "ds_store_b32");
-  EXPECT_EQ(result.site_dispositions[0].lowering_outcome,
-            ConSanSiteLoweringOutcome::PlacementOrLoweringFailed);
-  EXPECT_EQ(result.site_dispositions[0].lowering_reason,
-            ConSanSiteLoweringReason::InstrumentationPatchMissing);
-  EXPECT_EQ(result.site_dispositions[1].disposition, ConSanSiteDisposition::Unsupported);
-  EXPECT_EQ(result.site_dispositions[1].reason, ConSanSiteDispositionReason::MissingAddressOperand);
-  EXPECT_EQ(result.site_dispositions[1].mnemonic, "ds_load_addtid_b32");
-  EXPECT_EQ(result.site_dispositions[1].lowering_outcome, ConSanSiteLoweringOutcome::Unsupported);
+  ASSERT_EQ(result.observation_plan.site_decisions.size(), 2u);
+  EXPECT_EQ(result.observation_plan.site_decisions[0].kind, ConSanSiteDecisionKind::Admitted);
+  EXPECT_EQ(result.observation_plan.site_decisions[0].reason, ConSanAccessPolicyReason::None);
+  EXPECT_EQ(result.observation_plan.site_decisions[1].kind, ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(result.observation_plan.site_decisions[1].reason,
+            ConSanAccessPolicyReason::MissingAddressOperand);
+  ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
+            ConSanLoweringOutcomeKind::PlacementRejected);
 }
 
 TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) {

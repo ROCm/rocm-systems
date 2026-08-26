@@ -4787,19 +4787,17 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
   ASSERT_NE(persistent, result.resolved_moi_persistent_vgpr_assignments.end())
       << testing::PrintToString(result.warnings);
   EXPECT_TRUE(persistent->dispatch_id_vgpr);
-  const auto full_access_site =
-      std::ranges::find_if(result.site_dispositions, [](const ConSanSiteDispositionRecord &site) {
-        return site.container_name == "lds_helper" &&
-               site.site_kind == ConSanResourceSiteKind::Access;
-      });
-  ASSERT_NE(full_access_site, result.site_dispositions.end());
-  EXPECT_EQ(full_access_site->lowering_outcome, ConSanSiteLoweringOutcome::Patched)
-      << "lowering_reason=" << static_cast<unsigned>(full_access_site->lowering_reason)
-      << " resource_reason=" << static_cast<unsigned>(full_access_site->resource_reason)
-      << " text=" << full_access_site->text_offset;
+  const auto full_access_candidate = std::ranges::find(
+      result.moi_candidates, std::string_view("lds_helper"), &ConSanMoiCandidate::container_name);
+  ASSERT_NE(full_access_candidate, result.moi_candidates.end());
+  const ConSanIntentCoverageEntry *full_access_site =
+      consan_access_coverage_at(result, full_access_candidate->text_offset);
+  ASSERT_NE(full_access_site, nullptr);
+  EXPECT_EQ(full_access_site->lowering, ConSanLoweringOutcomeKind::Instrumented)
+      << full_access_site->detail;
   const auto full_access_plan =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-        return plan.text_offset == full_access_site->text_offset &&
+        return plan.text_offset == full_access_candidate->text_offset &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       });
   ASSERT_NE(full_access_plan, result.resource_plans.end());
@@ -4807,10 +4805,10 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
       << "reason=" << static_cast<unsigned>(full_access_plan->reason)
       << " scratch=" << testing::PrintToString(full_access_plan->scratch_vgpr)
       << " count=" << full_access_plan->scratch_vgpr_count;
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteLoweringOutcome::Patched,
-                               &ConSanSiteDispositionRecord::lowering_outcome),
-            4u)
-      << testing::PrintToString(result.site_dispositions);
+  EXPECT_EQ(std::ranges::count(result.coverage_ledger.intent_entries(),
+                               ConSanLoweringOutcomeKind::Instrumented,
+                               &ConSanIntentCoverageEntry::lowering),
+            4u);
   const auto access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
             patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
@@ -6984,12 +6982,7 @@ TEST(ConSanMoi, AutomaticTransientPlanningScalesAcrossIndependentKernels) {
   EXPECT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(result.final_validation_passed);
   EXPECT_EQ(result.kernels.size(), kKernelCount);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Access,
-                               &ConSanSiteDispositionRecord::site_kind),
-            kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteDisposition::Supported,
-                               &ConSanSiteDispositionRecord::disposition),
-            kAccessCount);
+  EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), kAccessCount);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             1u);
@@ -7118,10 +7111,8 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsAccessInsideItsPrefix) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteLoweringOutcome::Patched,
-                               &ConSanSiteDispositionRecord::lowering_outcome),
-            kAccessCount)
-      << testing::PrintToString(result.site_dispositions);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kAccessCount);
   const auto access_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end());
@@ -7195,10 +7186,8 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsIndirectIslandInsideItsPrefix) {
   });
   ASSERT_NE(entry_island, result.patches.end()) << testing::PrintToString(entry_island_offsets);
   EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, entry_island->trampoline_offset);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteLoweringOutcome::Patched,
-                               &ConSanSiteDispositionRecord::lowering_outcome),
-            kAccessCount)
-      << testing::PrintToString(result.site_dispositions);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+            kAccessCount);
 }
 
 TEST(ConSanMoi, Cdna4FarInlineShadowBarrierUsesDenseRoute) {

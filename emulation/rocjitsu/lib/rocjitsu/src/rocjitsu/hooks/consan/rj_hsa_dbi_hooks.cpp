@@ -511,12 +511,82 @@ void finalize_consan_coverage_kind(ConSanStaticCoverageKind &kind, const HookCon
 }
 
 [[nodiscard]] ConSanStaticCoverage
-compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookConfig &config) {
+compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookConfig &config,
+                               const rocjitsu::ConSanCoverageLedger *pipeline_ledger = nullptr) {
   ConSanStaticCoverage coverage;
   coverage.expert_limit = config.max_patches_explicit;
   bool has_durable_moi_lowering_outcomes = false;
   if (result.flavor == rocjitsu::ConSanFlavor::Moi) {
-    if (!result.site_dispositions.empty()) {
+    const rocjitsu::ConSanCoverageLedger &ledger =
+        pipeline_ledger == nullptr ? result.coverage_ledger : *pipeline_ledger;
+    const bool has_typed_moi_coverage =
+        !ledger.site_decisions().empty() || !ledger.barrier_site_decisions().empty() ||
+        !ledger.atomic_site_decisions().empty() || !ledger.fence_site_decisions().empty();
+    if (has_typed_moi_coverage) {
+      struct TypedSiteCoverage {
+        rocjitsu::ConSanResourceSiteKind kind = rocjitsu::ConSanResourceSiteKind::Access;
+        uint64_t text_offset = 0;
+        bool supported = false;
+        std::vector<rocjitsu::ConSanProbeIntentId> intents;
+      };
+      std::vector<TypedSiteCoverage> sites;
+      const auto append_decisions = [&](const auto &decisions,
+                                        rocjitsu::ConSanResourceSiteKind kind) {
+        for (const auto &decision : decisions) {
+          if (decision.kind == rocjitsu::ConSanSiteDecisionKind::NotApplicable)
+            continue;
+          const uint64_t text_offset = decision.semantic_site.physical.original_text_offset;
+          auto site = std::ranges::find_if(sites, [&](const TypedSiteCoverage &candidate) {
+            return candidate.kind == kind && candidate.text_offset == text_offset;
+          });
+          if (site == sites.end()) {
+            sites.push_back({
+                .kind = kind,
+                .text_offset = text_offset,
+                .supported = false,
+                .intents = {},
+            });
+            site = std::prev(sites.end());
+          }
+          if (decision.kind != rocjitsu::ConSanSiteDecisionKind::Admitted)
+            continue;
+          site->supported = true;
+          for (rocjitsu::ConSanProbeIntentId id : decision.intent_ids) {
+            if (std::ranges::find(site->intents, id) == site->intents.end())
+              site->intents.push_back(id);
+          }
+        }
+      };
+      append_decisions(ledger.site_decisions(), rocjitsu::ConSanResourceSiteKind::Access);
+      append_decisions(ledger.barrier_site_decisions(), rocjitsu::ConSanResourceSiteKind::Barrier);
+      append_decisions(ledger.atomic_site_decisions(), rocjitsu::ConSanResourceSiteKind::Atomic);
+      append_decisions(ledger.fence_site_decisions(), rocjitsu::ConSanResourceSiteKind::Fence);
+      has_durable_moi_lowering_outcomes = true;
+      for (const TypedSiteCoverage &site : sites) {
+        ConSanStaticCoverageKind &kind = consan_coverage_kind(coverage, site.kind);
+        ++kind.discovered;
+        if (!site.supported)
+          continue;
+        ++kind.supported;
+        bool all_instrumented = !site.intents.empty();
+        bool resource_rejected = false;
+        for (rocjitsu::ConSanProbeIntentId id : site.intents) {
+          const rocjitsu::ConSanIntentCoverageEntry *entry = ledger.intent_entry(id);
+          if (entry == nullptr ||
+              entry->lowering != rocjitsu::ConSanLoweringOutcomeKind::Instrumented)
+            all_instrumented = false;
+          if (entry != nullptr &&
+              entry->lowering == rocjitsu::ConSanLoweringOutcomeKind::ResourceRejected)
+            resource_rejected = true;
+        }
+        if (all_instrumented)
+          ++kind.patched;
+        else if (resource_rejected)
+          ++kind.resource_failed;
+        else
+          ++kind.placement_or_lowering_failed;
+      }
+    } else if (!result.site_dispositions.empty()) {
       has_durable_moi_lowering_outcomes = std::ranges::none_of(
           result.site_dispositions, [](const rocjitsu::ConSanSiteDispositionRecord &site) {
             return site.disposition == rocjitsu::ConSanSiteDisposition::Supported &&
@@ -554,35 +624,37 @@ compute_consan_static_coverage(const rocjitsu::ConSanResult &result, const HookC
                                                             result.program_inventory.arch());
           }));
     }
-    const auto has_disposition_kind = [&](rocjitsu::ConSanResourceSiteKind wanted) {
-      return std::ranges::any_of(result.site_dispositions,
-                                 [&](const rocjitsu::ConSanSiteDispositionRecord &site) {
-                                   return site.site_kind == wanted;
-                                 });
-    };
-    for (const rocjitsu::ConSanCandidateResourcePlan &plan : result.resource_plans) {
-      ConSanStaticCoverageKind &kind = consan_coverage_kind(coverage, plan.site_kind);
-      // A semantic disposition ledger is authoritative even when every site
-      // of a kind is NotApplicable. Resource plans are created before final
-      // semantic pruning and must not resurrect those sites in the coverage
-      // denominator.
-      if (!has_disposition_kind(plan.site_kind)) {
-        ++kind.discovered;
-        ++kind.supported;
+    if (!has_typed_moi_coverage) {
+      const auto has_disposition_kind = [&](rocjitsu::ConSanResourceSiteKind wanted) {
+        return std::ranges::any_of(result.site_dispositions,
+                                   [&](const rocjitsu::ConSanSiteDispositionRecord &site) {
+                                     return site.site_kind == wanted;
+                                   });
+      };
+      for (const rocjitsu::ConSanCandidateResourcePlan &plan : result.resource_plans) {
+        ConSanStaticCoverageKind &kind = consan_coverage_kind(coverage, plan.site_kind);
+        // A semantic disposition ledger is authoritative even when every site
+        // of a kind is NotApplicable. Resource plans are created before final
+        // semantic pruning and must not resurrect those sites in the coverage
+        // denominator.
+        if (!has_disposition_kind(plan.site_kind)) {
+          ++kind.discovered;
+          ++kind.supported;
+        }
+        if (!has_durable_moi_lowering_outcomes &&
+            plan.source == rocjitsu::ConSanRegisterAllocationSource::Unsupported)
+          ++kind.resource_failed;
       }
-      if (!has_durable_moi_lowering_outcomes &&
-          plan.source == rocjitsu::ConSanRegisterAllocationSource::Unsupported)
-        ++kind.resource_failed;
-    }
-    // Access candidates and access resource plans describe the same sites.
-    // Keep the semantic candidate inventory as the authoritative access count.
-    if (result.site_dispositions.empty()) {
-      coverage.access.discovered = result.moi_candidates.size();
-      coverage.access.supported = static_cast<uint64_t>(std::count_if(
-          result.moi_candidates.begin(), result.moi_candidates.end(), [&](const auto &candidate) {
-            return is_supported_require_patch_moi_candidate(candidate,
-                                                            result.program_inventory.arch());
-          }));
+      // Access candidates and access resource plans describe the same sites.
+      // Keep the semantic candidate inventory as the authoritative access count.
+      if (result.site_dispositions.empty()) {
+        coverage.access.discovered = result.moi_candidates.size();
+        coverage.access.supported = static_cast<uint64_t>(std::count_if(
+            result.moi_candidates.begin(), result.moi_candidates.end(), [&](const auto &candidate) {
+              return is_supported_require_patch_moi_candidate(candidate,
+                                                              result.program_inventory.arch());
+            }));
+      }
     }
     const bool has_inline_exact_patch =
         std::ranges::any_of(result.patches, [](const rocjitsu::ConSanPatchInfo &patch) {
@@ -3200,7 +3272,7 @@ hsa_status_t HSA_API rj_dbi_code_object_reader_create_from_memory(
 
 std::shared_ptr<const std::vector<uint8_t>>
 snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
-  struct stat file_stat {};
+  struct stat file_stat{};
   if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 || size == 0 ||
       static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max() ||
       offset > static_cast<size_t>(file_stat.st_size) ||
@@ -3230,7 +3302,7 @@ snapshot_code_object_file_range(hsa_file_t file, size_t offset, size_t size) {
 }
 
 std::shared_ptr<const std::vector<uint8_t>> snapshot_code_object_file(hsa_file_t file) {
-  struct stat file_stat {};
+  struct stat file_stat{};
   if (fstat(file, &file_stat) != 0 || file_stat.st_size <= 0 ||
       static_cast<uintmax_t>(file_stat.st_size) > std::numeric_limits<size_t>::max())
     return {};
@@ -5299,7 +5371,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         function_flat_unknown_hint_count, patch_result.patches.size(),
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
                                                                                     : "false");
-    static_coverage_storage = compute_consan_static_coverage(patch_result, *config);
+    static_coverage_storage =
+        compute_consan_static_coverage(patch_result, *config, &transform_result.coverage_ledger);
     const ConSanStaticCoverage &static_coverage = *static_coverage_storage;
     log_message(
         kLogInfo,

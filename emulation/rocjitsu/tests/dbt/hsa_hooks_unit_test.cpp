@@ -5081,6 +5081,78 @@ rocjitsu::ConSanResult diagnostic_coverage_transform_result() {
   return result;
 }
 
+rocjitsu::ConSanResult typed_coverage_transform_result() {
+  rocjitsu::ConSanResult result;
+  install_consan_test_program_identity(result, ROCJITSU_CODE_ARCH_RDNA4,
+                                       ROCJITSU_CODE_TARGET_GFX1201);
+  result.flavor = rocjitsu::ConSanFlavor::Moi;
+  result.moi_engine = rocjitsu::ConSanMoiEngine::RecordReplay;
+  result.outcome = rocjitsu::ConSanTransformOutcome::ModifiedValid;
+  result.modified = true;
+  result.final_validation_passed = true;
+  result.elf_bytes = {0x7f, 'E', 'L', 'F', 'p', 'a', 't', 'c', 'h'};
+
+  const rocjitsu::PhysicalSiteId physical{
+      .code_object = result.program_inventory.code_object_id(),
+      .original_text_offset = 0x10u,
+  };
+  const rocjitsu::SemanticSiteId semantic{
+      .physical = physical,
+      .domain = rocjitsu::ConSanSemanticSiteDomain::Access,
+      .member_ordinal = 0u,
+      .range_ordinal = 0u,
+  };
+  result.observation_plan = {
+      .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+      .site_decisions = {{
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .semantic_site = semantic,
+          .kind = rocjitsu::ConSanSiteDecisionKind::Admitted,
+          .reason = rocjitsu::ConSanAccessPolicyReason::None,
+          .intent_ids = {{0u}},
+          .source_containers = {"typed_kernel"},
+      }},
+      .barrier_site_decisions = {},
+      .atomic_site_decisions = {},
+      .fence_site_decisions = {},
+      .probe_intents = {{
+          .id = {0u},
+          .engine = rocjitsu::ConSanCapabilityEngine::RecordReplay,
+          .physical_site = physical,
+          .covered_semantic_sites = {semantic},
+          .kind = rocjitsu::ConSanProbeIntentKind::AccessRecord,
+          .position = rocjitsu::ConSanProbePosition::Before,
+          .lane_mask = rocjitsu::ConSanLaneMaskPolicy::ActiveExecutionMask,
+          .requirement = rocjitsu::ConSanProbeRequirement::Required,
+          .synchronization_association = std::nullopt,
+          .dynamic_result = rocjitsu::ConSanDynamicResultRequirement::None,
+      }},
+  };
+  result.coverage_ledger = rocjitsu::ConSanCoverageLedger(result.observation_plan);
+  EXPECT_TRUE(result.coverage_ledger.set_lowering_outcome(
+      {0u}, rocjitsu::ConSanLoweringOutcomeKind::Instrumented));
+  return result;
+}
+
+TEST(HsaHooksUnitTest, ConSanCoverageUsesTypedPipelineLedgerAfterPublishingMechanismResult) {
+  ScopedEnvVar log_level("RJ_CONSAN_LOG", "1");
+  const ConSanHookProfile &profile = kConSanHookProfiles[1];
+  const rocjitsu::ConSanResult result = typed_coverage_transform_result();
+
+  testing::internal::CaptureStderr();
+  run_hook_load_case(profile, false, result, HSA_STATUS_SUCCESS, 102u, result.elf_bytes);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(log.find("ConSan coverage reader=101 flavor=moi engine=record_replay "
+                     "analysis_complete=true"),
+            std::string::npos)
+      << log;
+  EXPECT_NE(log.find("access_discovered=1 access_supported=1 access_selected=1 "
+                     "access_patched=1"),
+            std::string::npos)
+      << log;
+}
+
 TEST(HsaHooksUnitTest, ConSanCoverageSiteDiagnosticsRetainStableReasonsAndSourceLocations) {
   ScopedEnvVar log_level("RJ_CONSAN_LOG", "3");
   const ConSanHookProfile &profile = kConSanHookProfiles[1];

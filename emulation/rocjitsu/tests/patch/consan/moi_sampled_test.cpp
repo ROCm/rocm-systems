@@ -911,15 +911,10 @@ TEST(ConSanMoi, DirectSampledProbeRequiresCapacityForEveryLdsAccessRange) {
   EXPECT_TRUE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified);
   EXPECT_TRUE(result.patches.empty());
-  ASSERT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Access,
-                               &ConSanSiteDispositionRecord::site_kind),
-            1u);
-  const auto access_site =
-      std::ranges::find(result.site_dispositions, ConSanResourceSiteKind::Access,
-                        &ConSanSiteDispositionRecord::site_kind);
-  ASSERT_NE(access_site, result.site_dispositions.end());
-  EXPECT_EQ(access_site->disposition, ConSanSiteDisposition::Supported);
-  EXPECT_EQ(access_site->reason, ConSanSiteDispositionReason::None);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
+  ASSERT_EQ(result.coverage_ledger.intent_entries().size(), 1u);
+  EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
+            ConSanLoweringOutcomeKind::PlacementRejected);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("cannot retain every range") != std::string::npos;
   }));
@@ -4736,8 +4731,7 @@ TEST(ConSanMoi, Gfx1250DynamicStackSampledLoadUsesDisjointSpillWindow) {
   const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
   EXPECT_EQ(plan.source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(plan.reason, ConSanRegisterPlanReason::None);
-  ASSERT_EQ(result.site_dispositions.size(), 1u);
-  EXPECT_EQ(result.site_dispositions.front().lowering_outcome, ConSanSiteLoweringOutcome::Patched);
+  EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
   const auto patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiSampledWatchpointStore, &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
@@ -7986,9 +7980,7 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiSampledSyncMetadata,
                                &ConSanPatchInfo::kind),
             kSiteCount);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Access,
-                               &ConSanSiteDispositionRecord::site_kind),
-            kSiteCount);
+  EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), kSiteCount);
   EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanResourceSiteKind::Barrier,
                                &ConSanSiteDispositionRecord::site_kind),
             4u * kSiteCount);

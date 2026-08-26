@@ -875,12 +875,10 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
               patch.owner_descriptor_file_offsets.end());
   }
   EXPECT_GE(nested_patch_count, 2u);
-  const auto post_return_disposition =
-      std::ranges::find(result.site_dispositions, 24u, &ConSanSiteDispositionRecord::text_offset);
-  ASSERT_NE(post_return_disposition, result.site_dispositions.end());
-  EXPECT_EQ(post_return_disposition->lowering_outcome, ConSanSiteLoweringOutcome::Patched)
-      << "lowering reason=" << static_cast<int>(post_return_disposition->lowering_reason)
-      << " resource reason=" << static_cast<int>(post_return_disposition->resource_reason);
+  const ConSanIntentCoverageEntry *post_return_coverage = consan_access_coverage_at(result, 24u);
+  ASSERT_NE(post_return_coverage, nullptr);
+  EXPECT_EQ(post_return_coverage->lowering, ConSanLoweringOutcomeKind::Instrumented)
+      << post_return_coverage->detail;
   const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   });

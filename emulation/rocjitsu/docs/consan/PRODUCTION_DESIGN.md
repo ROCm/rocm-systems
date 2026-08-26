@@ -522,13 +522,14 @@ Record/Replay, Sampled, and Inline Shadow currently share a second pipeline:
    access intents already admitted by policy and their matching inventory
    sites; emitters do not re-decode range geometry from pristine bytes;
 3. attach gfx1250 VGPR-bank state where needed;
-4. append access and synchronization site dispositions;
+4. retain synchronization site dispositions as a temporary lowerer adapter;
+   access policy and coverage stay exclusively in the typed plan and ledger;
 5. repeatedly build resource plans while automatic owner, dispatch, EXEC-save,
    persistent state, private state, spill, and per-owner assignments are chosen;
 6. invoke engine-specific access and synchronization lowerers;
 7. add the common kernel-entry prologue as applicable;
-8. infer lowering success by joining emitted patch kinds back to site
-   dispositions; and
+8. publish access lowering directly from resource/placement state, while
+   temporarily joining synchronization patch state through its adapter; and
 9. summarize registers, patches, coverage, warnings, report inventory, and
    transform outcome into `ConSanResult`.
 
@@ -2123,10 +2124,12 @@ intents and records a typed lowering outcome for every admitted intent. MOI
 candidate discovery is now restricted to admitted physical intents, and both
 MOI and SuperCollider project their current resource and placement outcomes
 back into the ledger. SuperCollider's former physical coverage list and MOI's
-site dispositions remain temporary diagnostic adapters; they are no longer the
-authority for access applicability. For complete MOI inventory sites, a
-comparison check still requires the new policy and the legacy exact-mnemonic
-classifier to agree while later placement slices retain the old lowerers.
+synchronization site dispositions remain temporary diagnostic adapters; they
+are no longer the authority for applicability. MOI access dispositions have
+been deleted: admitted candidates come only from access intents, final
+lowering outcomes are published directly to those intents, and runtime
+coverage reads the pipeline's typed ledger after the compatibility result has
+been moved aside.
 
 The focused `observation_plan_test.cpp` suite covers every enum and stable
 name, invalid sentinels, plan-local identities, construction invariants,

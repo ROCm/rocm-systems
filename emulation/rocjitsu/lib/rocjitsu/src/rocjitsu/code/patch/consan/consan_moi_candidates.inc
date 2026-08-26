@@ -412,46 +412,6 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
   return candidate;
 }
 
-[[nodiscard]] ConSanSiteDispositionReason
-legacy_access_disposition_reason(ConSanAccessPolicyReason reason) {
-  switch (reason) {
-  case ConSanAccessPolicyReason::None:
-    return ConSanSiteDispositionReason::None;
-  case ConSanAccessPolicyReason::NonAccessInstruction:
-  case ConSanAccessPolicyReason::OperationKindExcluded:
-    return ConSanSiteDispositionReason::NonAccessInstruction;
-  case ConSanAccessPolicyReason::InvalidInstructionSize:
-    return ConSanSiteDispositionReason::InvalidInstructionSize;
-  case ConSanAccessPolicyReason::InvalidAccessWidth:
-    return ConSanSiteDispositionReason::InvalidAccessWidth;
-  case ConSanAccessPolicyReason::MissingAddressOperand:
-    return ConSanSiteDispositionReason::MissingAddressOperand;
-  case ConSanAccessPolicyReason::InstructionOutOfBounds:
-    return ConSanSiteDispositionReason::InstructionOutOfBounds;
-  case ConSanAccessPolicyReason::UnsupportedFlatEncoding:
-    return ConSanSiteDispositionReason::UnsupportedFlatEncoding;
-  case ConSanAccessPolicyReason::NonzeroFlatOffset:
-    return ConSanSiteDispositionReason::NonzeroFlatOffset;
-  case ConSanAccessPolicyReason::ReservedFlatAddressRegister:
-    return ConSanSiteDispositionReason::ReservedFlatAddressRegister;
-  case ConSanAccessPolicyReason::NonGroupAddressSpace:
-    return ConSanSiteDispositionReason::NonGroupAddressSpace;
-  case ConSanAccessPolicyReason::FlatProvenancePolicyExcluded:
-    return ConSanSiteDispositionReason::FlatProvenancePolicyExcluded;
-  case ConSanAccessPolicyReason::RangeEncodingUnavailable:
-  case ConSanAccessPolicyReason::UnsupportedMnemonic:
-  case ConSanAccessPolicyReason::ConflictingPhysicalAliases:
-    return ConSanSiteDispositionReason::UnsupportedMnemonic;
-  case ConSanAccessPolicyReason::AccessFamilyDisabled:
-  case ConSanAccessPolicyReason::ReservedForSynchronizationPolicy:
-  case ConSanAccessPolicyReason::ContainerFilterExcluded:
-  case ConSanAccessPolicyReason::TargetCapabilityUnavailable:
-  case ConSanAccessPolicyReason::Count:
-    break;
-  }
-  return ConSanSiteDispositionReason::UnsupportedMnemonic;
-}
-
 /// Project admitted access intents into the temporary operand shape consumed
 /// by current lowerers. Policy is the sole candidate selector; this adapter
 /// copies the matching normalized facts and cannot reclassify a site.
@@ -477,8 +437,9 @@ void append_moi_candidates(const ProgramInventory &inventory, const ConSanObserv
 }
 
 /// Run pure access and synchronization policies, initialize the production
-/// coverage ledger, and project one legacy disposition per physical access
-/// for lowerers that have not yet migrated to plan-local intent identifiers.
+/// coverage ledger. Current access lowerers consume the admitted candidate
+/// projection; policy decisions and final coverage retain the complete typed
+/// account of excluded and admitted sites.
 [[nodiscard]] bool initialize_moi_access_observation_plan(
     const ProgramInventory &inventory, ConSanFlatProvenanceMode mode, const ConSanOptions &options,
     const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites, ConSanResult &result) {
@@ -593,39 +554,6 @@ void append_moi_candidates(const ProgramInventory &inventory, const ConSanObserv
     return false;
   }
 
-  std::unordered_set<uint64_t> projected_physical_sites;
-  for (const ConSanSiteDecision &decision : result.observation_plan.site_decisions) {
-    if (decision.kind == ConSanSiteDecisionKind::NotApplicable ||
-        !projected_physical_sites.insert(decision.semantic_site.physical.original_text_offset)
-             .second) {
-      continue;
-    }
-    const auto access = std::ranges::find_if(inventory.access_sites(), [&](const auto &candidate) {
-      return candidate.physical_id == decision.semantic_site.physical;
-    });
-    if (access == inventory.access_sites().end()) {
-      result.errors.emplace_back("ConSan MOI access policy lost its inventory site");
-      return false;
-    }
-    const ConSanSiteDispositionReason reason = legacy_access_disposition_reason(decision.reason);
-    ConSanSiteDispositionRecord record;
-    record.site_kind = ConSanResourceSiteKind::Access;
-    record.disposition = decision.kind == ConSanSiteDecisionKind::Admitted
-                             ? ConSanSiteDisposition::Supported
-                             : ConSanSiteDisposition::Unsupported;
-    record.reason = reason;
-    record.container_name = access->container.name;
-    record.in_kernel = access->container.kind == ConSanProgramContainerKind::Kernel;
-    record.text_offset = access->physical_id.original_text_offset;
-    record.mnemonic = access->mnemonic;
-    record.lowering_outcome = record.disposition == ConSanSiteDisposition::Supported
-                                  ? ConSanSiteLoweringOutcome::Pending
-                                  : ConSanSiteLoweringOutcome::Unsupported;
-    record.lowering_reason = record.disposition == ConSanSiteDisposition::Supported
-                                 ? ConSanSiteLoweringReason::None
-                                 : ConSanSiteLoweringReason::SemanticUnsupported;
-    result.site_dispositions.push_back(std::move(record));
-  }
   return true;
 }
 

@@ -1597,9 +1597,7 @@ TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
   EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
-  ASSERT_EQ(result.site_dispositions.size(), 1u);
-  EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
-  EXPECT_EQ(result.site_dispositions.front().reason, ConSanSiteDispositionReason::None);
+  ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
 }
 
 std::vector<uint8_t> make_cdna4_padded_group_flat_code_object() {
@@ -2215,11 +2213,9 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
         EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
         EXPECT_EQ(candidate.width_bits, form.memory_width_bits);
         EXPECT_TRUE(consan_moi_supports_flat_access_mnemonic(candidate.mnemonic));
-        ASSERT_EQ(result.site_dispositions.size(), 1u);
-        EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
-        EXPECT_EQ(result.site_dispositions.front().reason, ConSanSiteDispositionReason::None);
-        EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
-                  ConSanSiteLoweringOutcome::Patched);
+        ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+        ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+                  1u);
         ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
         EXPECT_TRUE(result.final_validation_passed);
       }
@@ -2354,11 +2350,9 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
         ASSERT_TRUE(semantics);
         EXPECT_EQ(semantics->placement, form.placement);
         EXPECT_TRUE(consan_moi_supports_flat_access_mnemonic(candidate.mnemonic));
-        ASSERT_EQ(result.site_dispositions.size(), 1u);
-        EXPECT_EQ(result.site_dispositions.front().disposition, ConSanSiteDisposition::Supported);
-        EXPECT_EQ(result.site_dispositions.front().reason, ConSanSiteDispositionReason::None);
-        EXPECT_EQ(result.site_dispositions.front().lowering_outcome,
-                  ConSanSiteLoweringOutcome::Patched);
+        ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
+        ASSERT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented),
+                  1u);
         ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
         EXPECT_TRUE(result.final_validation_passed);
       }
@@ -2391,14 +2385,6 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
             ConSanAccessPolicyReason::UnsupportedMnemonic);
   EXPECT_TRUE(result.observation_plan.probe_intents.empty());
   EXPECT_TRUE(result.coverage_ledger.intent_entries().empty());
-  ASSERT_EQ(result.site_dispositions.size(), 1u);
-  const ConSanSiteDispositionRecord &site = result.site_dispositions.front();
-  EXPECT_EQ(site.site_kind, ConSanResourceSiteKind::Access);
-  EXPECT_EQ(site.mnemonic, "flat_load_dwordx3");
-  EXPECT_EQ(site.disposition, ConSanSiteDisposition::Unsupported);
-  EXPECT_EQ(site.reason, ConSanSiteDispositionReason::UnsupportedMnemonic);
-  EXPECT_EQ(site.lowering_outcome, ConSanSiteLoweringOutcome::Unsupported);
-  EXPECT_EQ(site.lowering_reason, ConSanSiteLoweringReason::SemanticUnsupported);
 }
 
 TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
@@ -2657,9 +2643,7 @@ TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
   EXPECT_EQ(result.moi_candidates[0].width_bits, 16u);
   EXPECT_EQ(result.moi_candidates[1].mnemonic, "flat_load_ushort");
   EXPECT_EQ(result.moi_candidates[1].width_bits, 16u);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteDisposition::Supported,
-                               &ConSanSiteDispositionRecord::disposition),
-            2);
+  EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(
       std::ranges::count_if(result.patches,
                             [](const ConSanPatchInfo &patch) {
@@ -2716,9 +2700,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
   EXPECT_EQ(result.moi_candidates[0].width_bits, 16u);
   EXPECT_EQ(result.moi_candidates[1].mnemonic, "flat_load_u16");
   EXPECT_EQ(result.moi_candidates[1].width_bits, 16u);
-  EXPECT_EQ(std::ranges::count(result.site_dispositions, ConSanSiteDisposition::Supported,
-                               &ConSanSiteDispositionRecord::disposition),
-            2);
+  EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(
       std::ranges::count_if(result.patches,
                             [](const ConSanPatchInfo &patch) {
@@ -3700,7 +3682,9 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ASSERT_TRUE(atomic);
   EXPECT_EQ(*atomic, (std::array<uint32_t, 3>{0xEC0D407Cu, 0x02180002u, 0x00000002u}));
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      (*atomic)[0],
+      (*atomic)[1],
+      (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   ConSanOptions options;
