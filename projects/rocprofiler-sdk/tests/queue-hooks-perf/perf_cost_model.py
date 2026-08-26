@@ -7,6 +7,10 @@
 
 import os
 
+# Optional[...] rather than the PEP 604 "float | None": these annotations are evaluated when the
+# module is imported, and the CI runners include distros whose system Python predates 3.10.
+from typing import Optional
+
 # Per-dispatch counter instrumentation allowance (ms).
 PER_DISPATCH_MS = float(os.environ.get("ROCPROFILER_QH_PER_DISPATCH_MS", "3.0"))
 
@@ -19,9 +23,9 @@ OVERHEAD_MARGIN = float(os.environ.get("ROCPROFILER_QH_OVERHEAD_MARGIN", "8.0"))
 
 def model_max_ms(
     launches: int,
-    per_dispatch_ms: float | None = None,
-    fixed_ms: float | None = None,
-    margin: float | None = None,
+    per_dispatch_ms: Optional[float] = None,
+    fixed_ms: Optional[float] = None,
+    margin: Optional[float] = None,
 ) -> float:
     per = PER_DISPATCH_MS if per_dispatch_ms is None else per_dispatch_ms
     fixed = FIXED_OVERHEAD_MS if fixed_ms is None else fixed_ms
