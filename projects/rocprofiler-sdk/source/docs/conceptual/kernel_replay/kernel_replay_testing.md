@@ -43,11 +43,17 @@ The public headers are meant to be consumed by C tools. Nothing else in the tree
 — the directory named `c-tool` is a `LANGUAGES CXX` project — so a C++-only construct reaching a
 public header would not be noticed until a downstream tool failed to build.
 
-`replay_abi_c.c` is compiled as C99 for exactly that reason, and its existence as a build input is
+`replay_abi_c.c` is compiled as C for exactly that reason, and its existence as a build input is
 half of what it is for. The other half is that it reports what C computes for the record's layout,
 which the C++ side compares field by field. That catches the case a compile check alone cannot: a
 header change both languages accept but interpret differently, where a C tool reads the wrong bytes
 with nothing failing to build.
+
+The pattern is not new here: `source/lib/aqlprofile/core/tests/aql_profile_v2_c_test.c` mixes a C
+translation unit into a gtest executable the same way, with `C_STANDARD` pinned on the target so
+the check means the same thing regardless of the toolchain's default dialect. That is the only
+other place in the tree where a header is compiled as C, and it covers an internal aqlprofile
+header rather than a public SDK one.
 
 ### The performance harness itself
 
@@ -70,19 +76,45 @@ collapse into the single application run that replay produces.
 These are known gaps, listed so they are not rediscovered:
 
 - **No GPU-free exercise of the replay window.** The drain, snapshot, pass loop and restore sequence
-  in `hsa/queue.cpp` is only reachable with a device. There is no mock HSA queue that a synthetic
-  dispatch could be pushed through, so the loop's control flow — decline paths, early exit, the
-  restore-failure abort — is untested except on hardware.
-- **No build test for the public headers as an installed package.** CI's "Test Install Build" step
-  rebuilds `samples/` and `tests/` against `/opt/rocprofiler-sdk`, which does compile the public
-  headers, but only as far as those trees happen to include them. Nothing asserts that every public
-  header is self-contained, and nothing compiles them as C.
+  in `hsa/queue.cpp` is only reachable with a device, and the loop's control flow — decline paths,
+  early exit, the restore-failure abort — is untested except on hardware.
+
+  There is no mock HSA stack anywhere in the SDK to build such a test on. What exists is a set of
+  partial fakes, and none of them reach far enough: the `FakeQueue` used by the counters, SPM and
+  thread-trace local-context tests supplies only an agent and a queue id and still calls
+  `hsa_init()`, so it needs ROCr even though it never dispatches; `counters/tests/hsa_tables.cpp`
+  builds an API table out of the *real* `hsa_*` function pointers and deliberately leaves the
+  intercept-registration entries unwired. The closest thing to a synthetic packet flow is
+  `source/lib/rocprofiler-sdk/tests/queue_interposition.cpp`, which drives ring buffers and
+  doorbells with no device — but it exercises `process_doorbell_impl`, not `Queue::WriteInterceptor`,
+  which is where replay lives.
+
+  A harness for the replay window would need a `Queue` test double that can be handed synthetic
+  packet batches, host-backed stand-ins for the memory tracker and snapshot, and an HSA table stub
+  whose intercept registration actually works. That is new infrastructure rather than an extension
+  of what is there.
+- **No build test for the public headers as a whole.** CI's "Test Install Build" and "Test Installed
+  Packages" steps rebuild `samples/` and `tests/` against the install tree, which does compile the
+  public headers, but only as far as those trees happen to include them. Nothing asserts that every
+  public header is self-contained, and outside the kernel replay header added here, none of them are
+  compiled as C. There is no `try_compile` or `check_cxx_source_compiles` anywhere in the SDK's CMake
+  — the only compile probes are `check_cxx_compiler_flag` calls for warning flags.
 - **No compile-time budget.** Build time is not measured, so a template or header change that makes
-  the SDK slower to build is invisible.
+  the SDK slower to build is invisible. There is no `CMAKE_RULE_LAUNCH_COMPILE` wrapper or
+  build-duration reporting in CI.
+- **No ABI checker.** Layout is asserted by hand where someone thought to do it — `offsetof` tests
+  for `rocprofiler_agent_t`, `static_assert`s on the HSA packet types, the `ROCP_SDK_ENFORCE_ABI`
+  macros for dispatch tables, and now the replay record — but nothing compares built artifacts
+  across versions the way `abidiff` would.
 - **No multi-GPU coverage at any level.**
 - **No test that a HIP graph launch declines replay visibly.** The behaviour is documented and
   warns once, but nothing asserts it, so a workload that captures graphs — which is the default for
   much of PyTorch and vLLM — would silently get no replay.
+
+Static analysis is in better shape than the build checks: clang-tidy runs on the MI325 CI matrix
+entry (`--linter clang-tidy`, opt-in locally via `ROCPROFILER_ENABLE_CLANG_TIDY`), and CodeQL has its
+own workflow. The `kernel_replay/tests` directory calls `rocprofiler_deactivate_clang_tidy()`, as
+every test directory does, so the tests themselves are not linted — only the code they exercise.
 
 ## Choosing a benchmark framework
 
