@@ -985,7 +985,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   }
 #endif
 
-  int record = per_iter_timing;
+  int record = per_iter_timing && !deviceOnly;
   if (record) TESTCHECK(initEvents(args, iters));
 
   // Performance Benchmark
