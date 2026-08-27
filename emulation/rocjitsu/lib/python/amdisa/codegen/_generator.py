@@ -383,8 +383,13 @@ class CodeGenerator:
 
     @property
     def generated_dir_name(self) -> str:
-        """Filesystem directory for this ISA's generated and handwritten files."""
+        """Filesystem directory for this ISA's generated files."""
         return self.isa_spec.generated_dir_name
+
+    @property
+    def handwritten_dir_name(self) -> str:
+        """Profile directory containing this ISA's handwritten files."""
+        return self.isa_spec.arch_name
 
     @property
     def cpp_namespace(self) -> str:
@@ -1468,7 +1473,7 @@ class CodeGenerator:
 
         arch = self.cpp_namespace
         generated_arch = self.config.generated_include(self.generated_dir_name)
-        handwritten_arch = self.config.handwritten_include(self.generated_dir_name)
+        handwritten_arch = self.config.handwritten_include(self.handwritten_dir_name)
         execution_ids = ''.join(
             f'  {class_name},\n' for class_name in self._split_execution_classes
         )
@@ -3535,7 +3540,7 @@ class CodeGenerator:
             True,
             [
                 (
-                    self.config.handwritten_include(self.generated_dir_name, 'isa.h'),
+                    self.config.handwritten_include(self.handwritten_dir_name, 'isa.h'),
                     False,
                 ),
                 (
@@ -4937,9 +4942,24 @@ class CodeGenerator:
         """
         if sem.name in self._TRAP_RETURN_NAMES:
             # Return from exception: restore the PC the trap handler saved in
-            # ssrc0. The 48-bit mask drops the status bits the hardware packs
-            # into the high half, and the instruction size is subtracted
-            # because the interpreter advances the PC after execute() returns.
+            # ssrc0. gfx12.5 has a 57-bit PC; older targets use 48 address bits.
+            # The instruction size is subtracted because the interpreter
+            # advances the PC after execute() returns.
+            pc_mask = (
+                '0x01FFFFFFFFFFFFFFULL'
+                if sem.name == 'S_RFE_I64'
+                else '0x0000FFFFFFFFFFFFULL'
+            )
+            split_state_status_restore = (
+                '  // GFX12 returns the interrupted wave state while preserving the handler\'s\n'
+                '  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.\n'
+                '  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {\n'
+                '    uint32_t restored_status = wf.trap_saved_status();\n'
+                '    restored_status = keep_halted ? (restored_status | kStatusHalt)\n'
+                '                                   : (restored_status & ~kStatusHalt);\n'
+                '    wf.set_status_raw(restored_status);\n'
+                '  }\n'
+            )
             return (
                 # Bare operand and size_ spellings: that is the arch-local form
                 # every generated execute_impl() uses, and
@@ -4948,8 +4968,12 @@ class CodeGenerator:
                 # here instead compiles only on the ISAs that happen to share
                 # the body -- S_RFE_I64 is gfx1250-only, so it does not.
                 '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);\n'
-                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
+                f'  constexpr uint64_t kPcAddressMask = {pc_mask};\n'
                 '  wf.pc = (saved_pc & kPcAddressMask) - size_;\n'
+                '\n'
+                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                '  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;\n'
+                f'{split_state_status_restore}'
                 '\n'
                 '  // Returning from the handler puts the interrupted EXEC back. The handler runs\n'
                 '  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to\n'
@@ -4965,8 +4989,7 @@ class CodeGenerator:
                 '\n'
                 '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
                 '  // stopped for the debugger; honour that on the way out.\n'
-                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
-                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
+                '  if (keep_halted) {\n'
                 '    wf.set_debug_single_step(false);\n'
                 '    wf.set_debug_halted(true);\n'
                 '  } else {\n'
@@ -8240,6 +8263,8 @@ class CodeGenerator:
     def _can_force_shared_simd_probe(
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> bool:
+        if not self.config.use_shared_execute_helpers:
+            return False
         if inst is None or self._requires_arch_local_execute(inst, enc_name):
             return False
         if self._shared_execute_key_denied(inst.mnemonic, inst, enc_name):
@@ -8568,7 +8593,7 @@ class CodeGenerator:
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
-        When ``shared_plan`` is set (``--multi`` mode), universal instructions
+        When ``shared_plan`` is set, universal instructions
         are emitted into ``shared/<enc>.h/.cpp`` in the ``rocjitsu::amdgpu``
         namespace.  Per-ISA files include the shared header and emit
         ``using amdgpu::<ClassName>;`` aliases for universals, plus full
@@ -11080,7 +11105,7 @@ class CodeGenerator:
                         [
                             (
                                 self.config.handwritten_include(
-                                    self.generated_dir_name, 'addr_calc.h'
+                                    self.handwritten_dir_name, 'addr_calc.h'
                                 ),
                                 False,
                             ),
@@ -11119,7 +11144,7 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             self.config.handwritten_include(
-                                self.generated_dir_name, 'mma_exec.h'
+                                self.handwritten_dir_name, 'mma_exec.h'
                             ),
                             False,
                         )
@@ -11144,6 +11169,17 @@ class CodeGenerator:
                     'RegisterAccess' in str(impl)
                     for impl in class_func_impls.model + class_func_impls.execution
                 )
+                uses_pseudo_scalar = any(
+                    'pseudo_scalar::' in str(impl)
+                    for impl in class_func_impls.model + class_func_impls.execution
+                )
+                if uses_pseudo_scalar:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h',
+                            False,
+                        )
+                    )
                 if has_sem:
                     cpp_includes.extend(
                         [
@@ -11225,8 +11261,8 @@ class CodeGenerator:
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
-                # Portable SIMD probes can delegate even outside --multi mode,
-                # so this cannot be gated solely on shared_plan.
+                # Portable SIMD probes can delegate even without a shared
+                # plan, so this cannot be gated solely on shared_plan.
                 def _delegates_to_shared(i: Instruction) -> bool:
                     if not self.semantics or i.name not in self.semantics.instructions:
                         return False
@@ -11238,7 +11274,7 @@ class CodeGenerator:
                 if has_shared:
                     cpp_includes.append(
                         (
-                            self.config.generated_include('shared', 'execute_shared.h'),
+                            self.config.shared_generated_include('execute_shared.h'),
                             False,
                         )
                     )
@@ -11253,7 +11289,7 @@ class CodeGenerator:
                     ),
                     (
                         self.config.handwritten_include(
-                            self.generated_dir_name, 'isa.h'
+                            self.handwritten_dir_name, 'isa.h'
                         ),
                         False,
                     ),
@@ -11480,7 +11516,7 @@ class CodeGenerator:
         with open(insts_h_path, 'w') as f:
             f.write(''.join(insts_h_lines))
 
-        # Shared execute templates are written by _run_multi after all ISAs
+        # Shared execute templates are written by the CLI after all ISAs
         # are processed, using the accumulated _shared_execute_bodies dict.
         # Individual ISA codegens just collect; they don't write.
 
@@ -11567,6 +11603,7 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
+                'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h': 'pseudo_scalar::',
             }
             result: list[tuple[str, bool]] = []
             for include, system in cpp_includes:
@@ -12079,7 +12116,7 @@ class CodeGenerator:
                 if classifier is None:
                     lines.append(probe)
                 else:
-                    lines.append('  if (!(wf.mode_raw() & kAluExceptionModeMask)) {')
+                    lines.append('  if (!alu_exception_trap_enables(wf)) {')
                     lines.append(probe.replace('  ', '    ', 1))
                     lines.append('  }')
             lines.append(prefixed_body)
@@ -14041,7 +14078,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         ).append(resolve_code)
 
         operand_header_includes = [
-            (self.config.handwritten_include(self.generated_dir_name, 'isa.h'), False),
+            (
+                self.config.handwritten_include(self.handwritten_dir_name, 'isa.h'),
+                False,
+            ),
             (
                 self.config.generated_include(
                     self.generated_dir_name, 'operand_types.h'
