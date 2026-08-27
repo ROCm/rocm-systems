@@ -2146,12 +2146,6 @@ TEST(ConSanMoi, ReportAbiHeaderCarriesVersionedLayout) {
   EXPECT_GT(default_sampled_layout.sampled_watchpoint_capacity, 0u);
   EXPECT_EQ(default_sampled_layout.barrier_record_capacity, 0u);
   EXPECT_EQ(default_sampled_layout.atomic_record_capacity, 0u);
-  EXPECT_TRUE(consan_moi_report_layout_has_required_capacities(
-      default_sampled_layout, ConSanMoiEngine::Sampled, /*track_barriers=*/true,
-      /*track_atomics=*/false));
-  EXPECT_TRUE(consan_moi_report_layout_has_required_capacities(
-      default_sampled_layout, ConSanMoiEngine::Sampled, /*track_barriers=*/false,
-      /*track_atomics=*/true));
 
   constexpr ConSanMoiReportBufferLayout default_inline_layout =
       consan_moi_inline_shadow_report_buffer_layout_for_bytes(
@@ -10416,12 +10410,10 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
       words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
     }
     words.insert(words.end(), {
-                                  0xC4050018u,
-                                  0x40883804u,
+                                  0xC4050018u, 0x40883804u,
                                   0x00000005u, // buffer_load_b32 v4, v5, device
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC07Cu,
-                                  0x00080000u,
+                                  0xEE0AC07Cu, 0x00080000u,
                                   0x00000000u, // global_inv scope:device
                                   0xBFC00000u, // s_wait_loadcnt 0
                                   0xBE804EC1u, // s_barrier_signal -1
@@ -11651,8 +11643,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   constexpr uint8_t kGuestVgprMsbMode = 0x01u;
   constexpr uint16_t kEncodedAddressVgpr = 30u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
-      0xDBFC0000u,
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
       0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
   };
   // Even when an inline body would fit in nearby padding, capturing an

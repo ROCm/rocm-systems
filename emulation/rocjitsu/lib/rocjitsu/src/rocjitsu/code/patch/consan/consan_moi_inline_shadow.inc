@@ -85,7 +85,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
     return;
   }
 
-  const ConSanMoiReportBufferLayout layout = resolve_inline_report_layout(options);
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
   if (options.max_patches == 0)
     return;
   if (!validate_inline_shadow_exec_save_sgpr(options, arch, result.warnings))

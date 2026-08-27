@@ -285,38 +285,36 @@ TEST(ConSanMoiAutoReportPlan, RecordReplayCapacityValidationRejectsMalformedHash
       {.engine = ConSanMoiEngine::RecordReplay, .access_range_count = 1u});
   ASSERT_TRUE(plan.complete());
   const auto valid = plan.layout;
-  ASSERT_TRUE(consan_moi_report_layout_has_required_capacities(valid, ConSanMoiEngine::RecordReplay,
-                                                               /*track_barriers=*/false,
-                                                               /*track_atomics=*/false));
+  const auto accepted = [&](const ConSanMoiReportBufferLayout &candidate) {
+    return revalidate_consan_moi_report_layout(candidate, ConSanMoiEngine::RecordReplay,
+                                               plan.required_bytes)
+        .valid;
+  };
+  ASSERT_TRUE(accepted(valid));
 
   auto malformed = valid;
   malformed.record_replay_dispatch_token_capacity = 3u;
-  EXPECT_FALSE(consan_moi_report_layout_has_required_capacities(
-      malformed, ConSanMoiEngine::RecordReplay, false, false));
+  EXPECT_FALSE(accepted(malformed));
 
   malformed = valid;
   malformed.record_replay_dispatch_token_capacity =
       kConSanMoiRecordReplayMaximumDispatchTokenCount * 2u;
-  EXPECT_FALSE(consan_moi_report_layout_has_required_capacities(
-      malformed, ConSanMoiEngine::RecordReplay, false, false));
+  EXPECT_FALSE(accepted(malformed));
 
   malformed = valid;
   malformed.record_replay_logical_access_range_count = 0u;
-  EXPECT_FALSE(consan_moi_report_layout_has_required_capacities(
-      malformed, ConSanMoiEngine::RecordReplay, false, false));
+  EXPECT_FALSE(accepted(malformed));
 
   malformed = valid;
   malformed.record_replay_logical_access_range_count =
       malformed.access_record_capacity / (malformed.record_replay_access_dispatch_bank_count *
                                           malformed.record_replay_access_owner_bank_count) +
       1u;
-  EXPECT_FALSE(consan_moi_report_layout_has_required_capacities(
-      malformed, ConSanMoiEngine::RecordReplay, false, false));
+  EXPECT_FALSE(accepted(malformed));
 
   malformed = valid;
   --malformed.access_record_capacity;
-  EXPECT_FALSE(consan_moi_report_layout_has_required_capacities(
-      malformed, ConSanMoiEngine::RecordReplay, false, false));
+  EXPECT_FALSE(accepted(malformed));
 }
 
 TEST(ConSanMoiAutoReportPlan, SampledSeparatesBanksFromMultiCellWatchpoints) {

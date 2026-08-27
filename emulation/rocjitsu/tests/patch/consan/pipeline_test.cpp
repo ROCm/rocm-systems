@@ -450,6 +450,7 @@ TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
   EXPECT_EQ(open.program_inventory.arch(), closed.program_inventory.arch());
   EXPECT_EQ(open.program_inventory.target(), closed.program_inventory.target());
   EXPECT_EQ(open.observation_plan, closed.observation_plan);
+  EXPECT_EQ(open.evidence_intent_plan, closed.evidence_intent_plan);
   EXPECT_EQ(open.coverage_ledger, closed.coverage_ledger);
   EXPECT_EQ(open.replacement, closed.replacement);
   EXPECT_EQ(open.outcome, closed.outcome);
@@ -467,6 +468,9 @@ TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) 
         bytes, request, TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
         complete_runtime_capabilities(), BoundRuntimeResources{});
     ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.evidence_intent_plan) << testing::PrintToString(result.errors);
+    EXPECT_TRUE(result.evidence_intent_plan->well_formed());
+    EXPECT_EQ(*result.evidence_intent_plan, plan_consan_evidence_intents(result.observation_plan));
     ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.errors);
     EXPECT_TRUE(std::holds_alternative<ExpectedEvidence>(*result.evidence_requirements));
     EXPECT_EQ(result.stage(ConSanPipelineStage::ProgramInventory)->status,
@@ -689,6 +693,17 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   malformed = good;
   ProgramInventoryBuilder foreign(std::array<uint8_t, 2>{7, 8});
   malformed.program_inventory = foreign.view();
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = good;
+  ASSERT_TRUE(malformed.evidence_intent_plan);
+  ASSERT_FALSE(malformed.evidence_intent_plan->intents.empty());
+  malformed.evidence_intent_plan->intents.front().element_count++;
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = good;
+  malformed.evidence_intent_plan.reset();
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = good;
+  malformed.evidence_requirements.reset();
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   ASSERT_TRUE(malformed.evidence_requirements);

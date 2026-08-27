@@ -11,8 +11,7 @@ void try_apply_first_light_access_record_patch(
     return;
   }
 
-  const ConSanMoiReportBufferLayout layout = resolve_record_replay_report_layout(
-      options, options.moi_track_barriers, options.moi_track_atomics, options.moi_track_atomics);
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
   if (options.moi_runtime_sample_stride == 0 || options.moi_runtime_sample_stride > (1u << 24u) ||
       (options.moi_runtime_sample_stride & (options.moi_runtime_sample_stride - 1u)) != 0u ||
       options.moi_runtime_sample_offset >= options.moi_runtime_sample_stride) {

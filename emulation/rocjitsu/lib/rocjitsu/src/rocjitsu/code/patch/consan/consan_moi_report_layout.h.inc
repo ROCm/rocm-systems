@@ -351,6 +351,117 @@ consan_evidence_requirement_reason_name(ConSanEvidenceRequirementReason reason) 
 static_assert(kConSanEvidenceRequirementReasons.size() ==
               static_cast<size_t>(ConSanEvidenceRequirementReason::Count));
 
+/// Buffer-independent role played by one admitted observation in the
+/// evidence protocol.
+///
+/// This vocabulary is deliberately smaller than `ConSanProbeIntentKind`.
+/// Probe kinds retain flavor policy (for example, sampled versus exact access),
+/// while these roles state only what evidence must survive for report sizing
+/// and interpretation. The layout planner therefore consumes roles without
+/// reinterpreting flavor policy or examining instruction bytes.
+enum class ConSanEvidenceIntentKind : uint8_t {
+  /// Retain evidence for every logical memory range covered by the probe.
+  Access,
+  /// Retain a barrier event or completed barrier-sequence epoch.
+  Barrier,
+  /// Retain ordering evidence for one admitted atomic communication.
+  Atomic,
+  /// Retain one Record/Replay fence-association event.
+  Fence,
+  /// Preserve an effective address for a later synchronization observation;
+  /// this operation consumes lowering state but no independent report slot.
+  AddressCapture,
+  /// Publish SuperCollider's fixed sticky mismatch marker.
+  StickyMarker,
+  /// One-past-the-end iteration bound; never an evidence intent.
+  Count,
+};
+
+/// Complete iterable set of buffer-independent evidence-intent kinds.
+inline constexpr std::array<ConSanEvidenceIntentKind, 6> kConSanEvidenceIntentKinds = {
+    ConSanEvidenceIntentKind::Access,         ConSanEvidenceIntentKind::Barrier,
+    ConSanEvidenceIntentKind::Atomic,         ConSanEvidenceIntentKind::Fence,
+    ConSanEvidenceIntentKind::AddressCapture, ConSanEvidenceIntentKind::StickyMarker,
+};
+
+/// Return the stable diagnostic spelling of an evidence-intent kind.
+[[nodiscard]] constexpr std::string_view
+consan_evidence_intent_kind_name(ConSanEvidenceIntentKind kind) {
+  switch (kind) {
+  case ConSanEvidenceIntentKind::Access:
+    return "access";
+  case ConSanEvidenceIntentKind::Barrier:
+    return "barrier";
+  case ConSanEvidenceIntentKind::Atomic:
+    return "atomic";
+  case ConSanEvidenceIntentKind::Fence:
+    return "fence";
+  case ConSanEvidenceIntentKind::AddressCapture:
+    return "address-capture";
+  case ConSanEvidenceIntentKind::StickyMarker:
+    return "sticky-marker";
+  case ConSanEvidenceIntentKind::Count:
+    break;
+  }
+  return "invalid-evidence-intent-kind";
+}
+
+static_assert(kConSanEvidenceIntentKinds.size() ==
+              static_cast<size_t>(ConSanEvidenceIntentKind::Count));
+
+/// One admitted policy observation translated into report-facing meaning.
+///
+/// `source_intent` preserves the stable link to the observation plan.
+/// `semantic_sites` retains the exact logical facts being evidenced, while
+/// `element_count` states the number of ABI-level evidence elements required
+/// by this role. It is zero only for address capture, one for single-event or
+/// sticky-marker evidence, and may exceed one for coalesced access ranges or
+/// barrier sequences. The value owns no buffer address, byte offset, target
+/// encoding, allocation lifetime, or hook state.
+struct ConSanEvidenceIntent {
+  /// Plan-local observation intent from which this evidence was derived.
+  ConSanProbeIntentId source_intent;
+  /// Flavor-neutral role consumed by report sizing and interpretation.
+  ConSanEvidenceIntentKind kind = ConSanEvidenceIntentKind::Count;
+  /// Stable semantic identities whose behavior this evidence represents.
+  std::vector<SemanticSiteId> semantic_sites;
+  /// Number of retained evidence elements required by the current protocol.
+  uint64_t element_count = 0;
+
+  bool operator==(const ConSanEvidenceIntent &) const = default;
+};
+
+/// Complete address-free evidence-policy output consumed by report planning.
+///
+/// Construction accepts exactly one valid `ConSanObservationPlan` and maps
+/// its flavor-specific probe vocabulary to the smaller evidence-role
+/// vocabulary above. A successful plan is deterministic and ordered by source
+/// intent. A failed plan carries a typed reason and no partial intents, so ABI
+/// sizing cannot accidentally proceed from a truncated policy result.
+struct ConSanEvidenceIntentPlan {
+  /// Engine whose evidence contract owns every intent in this plan.
+  ConSanCapabilityEngine engine = ConSanCapabilityEngine::Count;
+  /// Deterministically ordered, buffer-independent evidence intents.
+  std::vector<ConSanEvidenceIntent> intents;
+  /// Construction result; `None` denotes a complete usable plan.
+  ConSanEvidenceRequirementReason reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+
+  /// Return whether identities, roles, domains, and element counts form the
+  /// complete schema for the selected engine.
+  [[nodiscard]] bool well_formed() const;
+
+  bool operator==(const ConSanEvidenceIntentPlan &) const = default;
+};
+
+/// Translate flavor policy into the sole report-facing intent authority.
+///
+/// The function reads no program bytes or runtime resources. Semantic facts
+/// remain stable identities from the observation plan; later layout code may
+/// join those identities to `ProgramInventory` only where a capacity depends
+/// on an immutable program property such as an InlineShadow LDS aperture.
+[[nodiscard]] ConSanEvidenceIntentPlan
+plan_consan_evidence_intents(const ConSanObservationPlan &observation_plan);
+
 /// Caller policy controlling bounded Record/Replay evidence capacity.
 ///
 /// A zero byte ceiling means the engine safety ceiling. The optional physical
@@ -401,8 +512,17 @@ struct ConSanRecordReplayEvidenceRequirements {
 };
 
 /// Derive the complete address-free Record/Replay evidence contract from an
-/// immutable semantic plan. The function performs no allocation, reads no
-/// code-object bytes, and does not inspect patches or resource assignments.
+/// already-classified evidence-intent plan. The function performs no
+/// allocation, reads no code-object bytes, and does not inspect patches or
+/// resource assignments.
+[[nodiscard]] ConSanRecordReplayEvidenceRequirements
+plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+                                   const ConSanRecordReplayCapacityPolicy &capacity_policy = {});
+
+/// Compatibility entry point that classifies an immutable observation plan
+/// through `plan_consan_evidence_intents` before deriving Record/Replay
+/// capacity. Production pipeline code publishes and passes that intermediate
+/// contract explicitly; direct callers cannot bypass the canonical mapping.
 [[nodiscard]] ConSanRecordReplayEvidenceRequirements
 plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
                                    const ConSanRecordReplayCapacityPolicy &capacity_policy = {});
@@ -550,8 +670,15 @@ using ConSanEvidenceRequirements =
 [[nodiscard]] bool
 consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &requirements);
 
-/// Derive Sampled evidence solely from a typed observation plan and capacity
-/// policy. The function reads no code bytes, patches, or resource assignments.
+/// Derive Sampled evidence solely from an already-classified evidence-intent
+/// plan and capacity policy. The function reads no code bytes, patches, or
+/// resource assignments.
+[[nodiscard]] ConSanSampledEvidenceRequirements
+plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
+                             const ConSanSampledCapacityPolicy &capacity_policy = {});
+
+/// Compatibility entry point that classifies an immutable observation plan
+/// through the canonical intent planner before deriving Sampled capacity.
 [[nodiscard]] ConSanSampledEvidenceRequirements
 plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
                              const ConSanSampledCapacityPolicy &capacity_policy = {});
@@ -561,11 +688,24 @@ plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
 /// mutable resource assignments.
 [[nodiscard]] ConSanInlineShadowEvidenceRequirements
 plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
+                                   const ConSanEvidenceIntentPlan &evidence_intents,
+                                   const ConSanInlineShadowCapacityPolicy &capacity_policy = {});
+
+/// Compatibility entry point that classifies an immutable observation plan
+/// through the canonical intent planner before joining immutable program
+/// facts needed for InlineShadow capacity.
+[[nodiscard]] ConSanInlineShadowEvidenceRequirements
+plan_consan_inline_shadow_evidence(const ProgramInventory &inventory,
                                    const ConSanObservationPlan &observation_plan,
                                    const ConSanInlineShadowCapacityPolicy &capacity_policy = {});
 
 /// Derive the fixed SuperCollider marker contract from a typed observation
 /// plan. No report-layout or allocation mechanism participates.
+[[nodiscard]] ConSanSuperColliderEvidenceRequirements
+plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_intents);
+
+/// Compatibility entry point that classifies an immutable observation plan
+/// through the canonical intent planner before deriving marker storage.
 [[nodiscard]] ConSanSuperColliderEvidenceRequirements
 plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan);
 

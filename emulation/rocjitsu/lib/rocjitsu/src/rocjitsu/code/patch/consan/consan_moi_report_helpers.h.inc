@@ -531,57 +531,6 @@ consan_moi_inline_shadow_report_buffer_layout_for_bytes(
   return layout;
 }
 
-/// Returns whether an engine-specific report layout contains every region
-/// required by the enabled instrumentation. Direct Sampled synchronization
-/// uses paired sampled metadata, not the generic Record/Replay record arrays.
-[[nodiscard]] constexpr bool
-consan_moi_report_layout_has_required_capacities(const ConSanMoiReportBufferLayout &layout,
-                                                 ConSanMoiEngine engine, bool track_barriers,
-                                                 bool track_atomics) {
-  if (!layout.valid)
-    return false;
-  if (engine == ConSanMoiEngine::Sampled)
-    return layout.sampled_watchpoint_capacity != 0 && layout.sampled_causal_window_capacity != 0 &&
-           layout.sampled_sync_metadata_capacity != 0 &&
-           layout.sampled_pending_acquire_capacity != 0;
-  if (engine == ConSanMoiEngine::InlineShadow)
-    return layout.diagnostic_capacity != 0 && layout.exact_shadow_entry_capacity != 0 &&
-           layout.inline_exact_dispatch_bank_count != 0 &&
-           (layout.inline_exact_dispatch_bank_count &
-            (layout.inline_exact_dispatch_bank_count - 1u)) == 0u &&
-           (!track_atomics || layout.inline_atomic_release_capacity != 0);
-  const bool dispatch_table_valid = (layout.record_replay_dispatch_token_capacity == 0u &&
-                                     layout.record_replay_access_dispatch_bank_count == 1u) ||
-                                    (layout.record_replay_dispatch_token_capacity != 0u &&
-                                     layout.record_replay_dispatch_token_capacity <=
-                                         kConSanMoiRecordReplayMaximumDispatchTokenCount &&
-                                     (layout.record_replay_dispatch_token_capacity &
-                                      (layout.record_replay_dispatch_token_capacity - 1u)) == 0u);
-  const uint64_t anticipated_identity_count =
-      static_cast<uint64_t>(layout.record_replay_logical_access_range_count) *
-      layout.record_replay_access_dispatch_bank_count *
-      layout.record_replay_access_owner_bank_count * layout.record_replay_address_group_headroom;
-  const bool access_table_valid =
-      layout.record_replay_dispatch_token_capacity == 0u ||
-      (layout.record_replay_logical_access_range_count != 0u &&
-       anticipated_identity_count <= layout.access_record_capacity &&
-       (layout.access_record_capacity & (layout.access_record_capacity - 1u)) == 0u);
-  return layout.access_record_capacity != 0 && dispatch_table_valid && access_table_valid &&
-         layout.record_replay_access_dispatch_bank_count != 0 &&
-         (layout.record_replay_access_dispatch_bank_count &
-          (layout.record_replay_access_dispatch_bank_count - 1u)) == 0u &&
-         layout.record_replay_access_owner_bank_count != 0 &&
-         (layout.record_replay_access_owner_bank_count &
-          (layout.record_replay_access_owner_bank_count - 1u)) == 0u &&
-         layout.record_replay_address_group_headroom != 0 &&
-         layout.record_replay_address_group_headroom <=
-             kConSanMoiRecordReplayMaximumAddressGroupsPerWave &&
-         (layout.record_replay_address_group_headroom &
-          (layout.record_replay_address_group_headroom - 1u)) == 0u &&
-         (!track_barriers || layout.barrier_record_capacity != 0) &&
-         (!track_atomics || layout.atomic_record_capacity != 0);
-}
-
 [[nodiscard]] constexpr bool
 consan_moi_report_layout_matches_header(const ConSanMoiReportHeader &header,
                                         const ConSanMoiReportBufferLayout &layout,

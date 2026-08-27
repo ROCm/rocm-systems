@@ -11,9 +11,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
     result.warnings.emplace_back("ConSan MOI fence record patch requires a MOI report buffer");
     return;
   }
-  const ConSanMoiReportBufferLayout layout =
-      resolve_record_replay_report_layout(options, options.moi_track_barriers,
-                                          /*include_atomics=*/true, /*include_fences=*/true);
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
   const uint32_t max_candidates = std::min(options.max_patches, layout.fence_record_capacity);
   if (max_candidates == 0) {
     result.warnings.emplace_back("ConSan MOI fence record patch has no fence record capacity");

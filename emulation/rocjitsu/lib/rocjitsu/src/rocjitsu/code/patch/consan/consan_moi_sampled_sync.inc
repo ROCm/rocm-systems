@@ -679,7 +679,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
         "ConSan MOI sampled barrier sync requires a supported report-buffer target");
     return;
   }
-  const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
   struct SelectedWindow {
     const ConSanPatchInfo *patch = nullptr;
     const ConSanMoiCandidate *access = nullptr;
@@ -1542,7 +1542,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         "ConSan MOI sampled atomic sync requires a supported report-buffer target");
     return;
   }
-  const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
   const uint32_t selected_window_count = static_cast<uint32_t>(
       std::count_if(result.patches.begin(), result.patches.end(), [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||

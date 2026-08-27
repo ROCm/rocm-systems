@@ -1353,8 +1353,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                      static_cast<uint32_t>(reserved_words));
   }
   std::vector<size_t> dense_fallback_indices;
-  const ConSanMoiReportBufferLayout record_layout = resolve_record_replay_report_layout(
-      options, /*include_barriers=*/true, options.moi_track_atomics, options.moi_track_atomics);
+  const ConSanMoiReportBufferLayout record_layout = resolve_moi_report_layout(options);
   const auto build_engine_barrier_body =
       [&](const PlannedInlineEpochBarrier &planned, MoiOptions candidate_options,
           uint32_t original_barrier_word, uint64_t body_offset, uint64_t return_offset,
@@ -2374,8 +2373,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
         "ConSan MOI barrier record patch requires room for access and barrier records");
     return;
   }
-  const ConSanMoiReportBufferLayout layout = resolve_record_replay_report_layout(
-      options, /*include_barriers=*/true, options.moi_track_atomics, options.moi_track_atomics);
+  const ConSanMoiReportBufferLayout layout = resolve_moi_report_layout(options);
   const uint32_t max_candidates = std::min(options.max_patches, layout.barrier_record_capacity);
   if (max_candidates == 0) {
     result.warnings.emplace_back("ConSan MOI barrier record patch has no barrier record capacity");

@@ -227,8 +227,11 @@ bool TransformResult::well_formed() const {
   }
   if (!program_inventory.empty() && program_inventory.code_object_id() != code_object)
     return false;
-  if (evidence_requirements &&
-      (!observation_plan.valid() ||
+  if (evidence_intent_plan.has_value() != evidence_requirements.has_value())
+    return false;
+  if (evidence_intent_plan &&
+      (!observation_plan.valid() || !evidence_intent_plan->well_formed() ||
+       *evidence_intent_plan != plan_consan_evidence_intents(observation_plan) ||
        !consan_evidence_requirements_well_formed(*evidence_requirements))) {
     return false;
   }
@@ -419,27 +422,31 @@ TransformResult TransformResult::publish_optional(
   }
 
   if (result.observation_plan.valid()) {
+    result.evidence_intent_plan = plan_consan_evidence_intents(result.observation_plan);
     const std::optional<uint64_t> maximum_access_probe_count =
         transform_policy.max_patches_is_expert_limit
             ? std::optional<uint64_t>{transform_policy.max_patches}
             : std::nullopt;
     if (flavor == ConSanFlavor::SuperCollider) {
-      result.evidence_requirements = plan_consan_supercollider_evidence(result.observation_plan);
+      result.evidence_requirements =
+          plan_consan_supercollider_evidence(*result.evidence_intent_plan);
     } else if (flavor == ConSanFlavor::Moi) {
       switch (request.moi_engine) {
       case ConSanMoiEngine::RecordReplay:
         result.evidence_requirements = plan_consan_record_replay_evidence(
-            result.observation_plan, {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
-                                      .maximum_access_probe_count = maximum_access_probe_count});
+            *result.evidence_intent_plan,
+            {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
+             .maximum_access_probe_count = maximum_access_probe_count});
         break;
       case ConSanMoiEngine::Sampled:
         result.evidence_requirements = plan_consan_sampled_evidence(
-            result.observation_plan, {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
-                                      .maximum_access_probe_count = maximum_access_probe_count});
+            *result.evidence_intent_plan,
+            {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
+             .maximum_access_probe_count = maximum_access_probe_count});
         break;
       case ConSanMoiEngine::InlineShadow:
         result.evidence_requirements = plan_consan_inline_shadow_evidence(
-            result.program_inventory, result.observation_plan,
+            result.program_inventory, *result.evidence_intent_plan,
             {.caller_ceiling_bytes = request.moi_auto_report_buffer_size,
              .maximum_access_probe_count = maximum_access_probe_count,
              .maximum_workgroup_lds_bytes = capabilities.max_workgroup_lds_bytes});
@@ -450,7 +457,8 @@ TransformResult TransformResult::publish_optional(
 
   ConSanPipelineStageState &evidence_stage =
       stage_record(result, ConSanPipelineStage::EvidenceRequirements);
-  if (result.evidence_requirements &&
+  if (result.evidence_intent_plan && result.evidence_intent_plan->well_formed() &&
+      result.evidence_requirements &&
       consan_evidence_requirements_well_formed(*result.evidence_requirements)) {
     evidence_stage.status = ConSanPipelineStageStatus::Completed;
   } else if (flavor == ConSanFlavor::None || !result.observation_plan.valid()) {

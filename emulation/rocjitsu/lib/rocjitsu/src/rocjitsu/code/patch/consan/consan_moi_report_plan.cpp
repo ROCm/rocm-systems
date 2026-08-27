@@ -274,30 +274,6 @@ void alias_unused_regions(ConSanMoiReportBufferLayout &layout, size_t offset) {
 
 } // namespace
 
-bool ConSanRecordReplayEvidenceRequirements::well_formed() const {
-  if (reason != ConSanEvidenceRequirementReason::None ||
-      sizing_inventory.engine != ConSanMoiEngine::RecordReplay ||
-      abi_plan.layout.engine != ConSanMoiEngine::RecordReplay ||
-      !runtime_requirements.host_device_visible_memory ||
-      !runtime_requirements.host_device_coherent_memory ||
-      !runtime_requirements.device_atomic_publication || !runtime_requirements.executable_binding ||
-      runtime_requirements.max_workgroup_lds_bytes ||
-      runtime_requirements.dispatch_segment_binding ||
-      !runtime_requirements.minimum_report_allocation_bytes ||
-      *runtime_requirements.minimum_report_allocation_bytes != abi_plan.required_bytes) {
-    return false;
-  }
-  if (abi_plan.outcome == ConSanMoiAutoReportPlanOutcome::Count ||
-      abi_plan.reason == ConSanMoiAutoReportPlanReason::Count)
-    return false;
-  if (plan_consan_moi_auto_report(sizing_inventory, abi_plan.ceiling_bytes) != abi_plan)
-    return false;
-  if (abi_plan.complete())
-    return abi_plan.reason == ConSanMoiAutoReportPlanReason::None && abi_plan.layout.valid &&
-           abi_plan.layout.required_bytes == abi_plan.required_bytes;
-  return abi_plan.reason != ConSanMoiAutoReportPlanReason::None && !abi_plan.layout.valid;
-}
-
 namespace {
 
 [[nodiscard]] bool common_moi_evidence_is_well_formed(
@@ -331,10 +307,153 @@ void add_saturating(uint64_t &count, uint64_t increment) {
               : count + increment;
 }
 
-[[nodiscard]] bool intent_covers_only(const ConSanProbeIntent &intent,
-                                      ConSanSemanticSiteDomain domain) {
-  return std::ranges::all_of(intent.covered_semantic_sites,
-                             [&](const SemanticSiteId &site) { return site.domain == domain; });
+[[nodiscard]] constexpr bool valid_evidence_engine(ConSanCapabilityEngine engine) {
+  return static_cast<uint8_t>(engine) < static_cast<uint8_t>(ConSanCapabilityEngine::Count);
+}
+
+[[nodiscard]] constexpr bool valid_evidence_intent_kind(ConSanEvidenceIntentKind kind) {
+  return static_cast<uint8_t>(kind) < static_cast<uint8_t>(ConSanEvidenceIntentKind::Count);
+}
+
+[[nodiscard]] constexpr bool engine_accepts_evidence_kind(ConSanCapabilityEngine engine,
+                                                          ConSanEvidenceIntentKind kind) {
+  switch (engine) {
+  case ConSanCapabilityEngine::SuperCollider:
+    return kind == ConSanEvidenceIntentKind::StickyMarker;
+  case ConSanCapabilityEngine::RecordReplay:
+    return kind == ConSanEvidenceIntentKind::Access || kind == ConSanEvidenceIntentKind::Barrier ||
+           kind == ConSanEvidenceIntentKind::Atomic || kind == ConSanEvidenceIntentKind::Fence ||
+           kind == ConSanEvidenceIntentKind::AddressCapture;
+  case ConSanCapabilityEngine::Sampled:
+  case ConSanCapabilityEngine::InlineShadow:
+    return kind == ConSanEvidenceIntentKind::Access || kind == ConSanEvidenceIntentKind::Barrier ||
+           kind == ConSanEvidenceIntentKind::Atomic ||
+           kind == ConSanEvidenceIntentKind::AddressCapture;
+  case ConSanCapabilityEngine::Count:
+    break;
+  }
+  return false;
+}
+
+[[nodiscard]] std::optional<ConSanEvidenceIntentKind>
+classify_evidence_intent(ConSanCapabilityEngine engine, ConSanProbeIntentKind kind) {
+  switch (kind) {
+  case ConSanProbeIntentKind::RedundantAccessObservation:
+    if (engine == ConSanCapabilityEngine::SuperCollider)
+      return ConSanEvidenceIntentKind::StickyMarker;
+    break;
+  case ConSanProbeIntentKind::AccessRecord:
+    if (engine == ConSanCapabilityEngine::RecordReplay)
+      return ConSanEvidenceIntentKind::Access;
+    break;
+  case ConSanProbeIntentKind::SampledAccess:
+    if (engine == ConSanCapabilityEngine::Sampled)
+      return ConSanEvidenceIntentKind::Access;
+    break;
+  case ConSanProbeIntentKind::ExactShadowAccess:
+    if (engine == ConSanCapabilityEngine::InlineShadow)
+      return ConSanEvidenceIntentKind::Access;
+    break;
+  case ConSanProbeIntentKind::BarrierRecord:
+    if (engine == ConSanCapabilityEngine::RecordReplay)
+      return ConSanEvidenceIntentKind::Barrier;
+    break;
+  case ConSanProbeIntentKind::SampledBarrierEpoch:
+    if (engine == ConSanCapabilityEngine::Sampled)
+      return ConSanEvidenceIntentKind::Barrier;
+    break;
+  case ConSanProbeIntentKind::ExactBarrierEpoch:
+    if (engine == ConSanCapabilityEngine::InlineShadow)
+      return ConSanEvidenceIntentKind::Barrier;
+    break;
+  case ConSanProbeIntentKind::AtomicAddressCapture:
+    if (engine == ConSanCapabilityEngine::RecordReplay ||
+        engine == ConSanCapabilityEngine::Sampled ||
+        engine == ConSanCapabilityEngine::InlineShadow) {
+      return ConSanEvidenceIntentKind::AddressCapture;
+    }
+    break;
+  case ConSanProbeIntentKind::AtomicRecord:
+    if (engine == ConSanCapabilityEngine::RecordReplay)
+      return ConSanEvidenceIntentKind::Atomic;
+    break;
+  case ConSanProbeIntentKind::SampledAtomicOrdering:
+    if (engine == ConSanCapabilityEngine::Sampled)
+      return ConSanEvidenceIntentKind::Atomic;
+    break;
+  case ConSanProbeIntentKind::ExactAtomicOrdering:
+    if (engine == ConSanCapabilityEngine::InlineShadow)
+      return ConSanEvidenceIntentKind::Atomic;
+    break;
+  case ConSanProbeIntentKind::FenceRecord:
+    if (engine == ConSanCapabilityEngine::RecordReplay)
+      return ConSanEvidenceIntentKind::Fence;
+    break;
+  case ConSanProbeIntentKind::Count:
+    break;
+  }
+  return std::nullopt;
+}
+
+[[nodiscard]] constexpr ConSanSemanticSiteDomain
+evidence_intent_domain(ConSanEvidenceIntentKind kind) {
+  return kind == ConSanEvidenceIntentKind::Access || kind == ConSanEvidenceIntentKind::StickyMarker
+             ? ConSanSemanticSiteDomain::Access
+             : ConSanSemanticSiteDomain::SynchronizationEvent;
+}
+
+[[nodiscard]] uint64_t
+expected_evidence_element_count(ConSanCapabilityEngine engine, ConSanEvidenceIntentKind kind,
+                                std::span<const SemanticSiteId> semantic_sites) {
+  switch (kind) {
+  case ConSanEvidenceIntentKind::Access:
+    return semantic_sites.size();
+  case ConSanEvidenceIntentKind::Barrier:
+    return engine == ConSanCapabilityEngine::RecordReplay ? 1u : semantic_sites.size();
+  case ConSanEvidenceIntentKind::Atomic:
+  case ConSanEvidenceIntentKind::Fence:
+  case ConSanEvidenceIntentKind::StickyMarker:
+    return 1u;
+  case ConSanEvidenceIntentKind::AddressCapture:
+  case ConSanEvidenceIntentKind::Count:
+    return 0u;
+  }
+  return 0u;
+}
+
+[[nodiscard]] std::vector<const ConSanEvidenceIntent *>
+accumulate_moi_evidence_counts(const ConSanEvidenceIntentPlan &plan,
+                               std::optional<uint64_t> maximum_access_probe_count,
+                               ConSanMoiAutoReportInventory &inventory) {
+  std::vector<const ConSanEvidenceIntent *> retained_accesses;
+  uint64_t selected_access_probe_count = 0;
+  for (const ConSanEvidenceIntent &intent : plan.intents) {
+    switch (intent.kind) {
+    case ConSanEvidenceIntentKind::Access:
+      if (maximum_access_probe_count &&
+          selected_access_probe_count >= *maximum_access_probe_count) {
+        break;
+      }
+      ++selected_access_probe_count;
+      retained_accesses.push_back(&intent);
+      add_saturating(inventory.access_range_count, intent.element_count);
+      break;
+    case ConSanEvidenceIntentKind::Barrier:
+      add_saturating(inventory.barrier_event_count, intent.element_count);
+      break;
+    case ConSanEvidenceIntentKind::Atomic:
+      add_saturating(inventory.atomic_event_count, intent.element_count);
+      break;
+    case ConSanEvidenceIntentKind::Fence:
+      add_saturating(inventory.fence_event_count, intent.element_count);
+      break;
+    case ConSanEvidenceIntentKind::AddressCapture:
+    case ConSanEvidenceIntentKind::StickyMarker:
+    case ConSanEvidenceIntentKind::Count:
+      break;
+    }
+  }
+  return retained_accesses;
 }
 
 [[nodiscard]] const ConSanAccessInventorySite *
@@ -346,7 +465,87 @@ find_inventory_access_range(const ProgramInventory &inventory, const SemanticSit
   return site == inventory.access_sites().end() ? nullptr : &*site;
 }
 
+[[nodiscard]] ConSanEvidenceRequirementReason
+validate_evidence_intent_input(const ConSanEvidenceIntentPlan &plan,
+                               ConSanCapabilityEngine expected_engine) {
+  if (plan.reason != ConSanEvidenceRequirementReason::None)
+    return plan.reason;
+  if (!plan.well_formed())
+    return ConSanEvidenceRequirementReason::InvalidIntentPayload;
+  if (plan.engine != expected_engine)
+    return ConSanEvidenceRequirementReason::WrongEngine;
+  return ConSanEvidenceRequirementReason::None;
+}
+
 } // namespace
+
+bool ConSanEvidenceIntentPlan::well_formed() const {
+  if (reason != ConSanEvidenceRequirementReason::None || !valid_evidence_engine(engine))
+    return false;
+  for (size_t index = 0; index < intents.size(); ++index) {
+    const ConSanEvidenceIntent &intent = intents[index];
+    if (intent.source_intent.value != index || !valid_evidence_intent_kind(intent.kind) ||
+        !engine_accepts_evidence_kind(engine, intent.kind) || intent.semantic_sites.empty() ||
+        std::ranges::any_of(intent.semantic_sites,
+                            [](const SemanticSiteId &site) { return !site.valid(); }) ||
+        std::ranges::any_of(intent.semantic_sites,
+                            [&](const SemanticSiteId &site) {
+                              return site.domain != evidence_intent_domain(intent.kind);
+                            }) ||
+        intent.element_count !=
+            expected_evidence_element_count(engine, intent.kind, intent.semantic_sites)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+ConSanEvidenceIntentPlan
+plan_consan_evidence_intents(const ConSanObservationPlan &observation_plan) {
+  ConSanEvidenceIntentPlan plan;
+  plan.engine = observation_plan.engine;
+  if (!observation_plan.valid()) {
+    plan.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+    return plan;
+  }
+
+  plan.intents.reserve(observation_plan.probe_intents.size());
+  for (const ConSanProbeIntent &probe : observation_plan.probe_intents) {
+    const std::optional<ConSanEvidenceIntentKind> kind =
+        classify_evidence_intent(observation_plan.engine, probe.kind);
+    if (!kind) {
+      plan.intents.clear();
+      plan.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
+      return plan;
+    }
+    ConSanEvidenceIntent intent{
+        .source_intent = probe.id,
+        .kind = *kind,
+        .semantic_sites = probe.covered_semantic_sites,
+    };
+    intent.element_count =
+        expected_evidence_element_count(plan.engine, intent.kind, intent.semantic_sites);
+    if (std::ranges::any_of(intent.semantic_sites, [&](const SemanticSiteId &site) {
+          return site.domain != evidence_intent_domain(intent.kind);
+        })) {
+      plan.intents.clear();
+      plan.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+      return plan;
+    }
+    plan.intents.push_back(std::move(intent));
+  }
+  plan.reason = ConSanEvidenceRequirementReason::None;
+  if (!plan.well_formed()) {
+    plan.intents.clear();
+    plan.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+  }
+  return plan;
+}
+
+bool ConSanRecordReplayEvidenceRequirements::well_formed() const {
+  return common_moi_evidence_is_well_formed(reason, ConSanMoiEngine::RecordReplay,
+                                            runtime_requirements, sizing_inventory, abi_plan);
+}
 
 bool ConSanSampledEvidenceRequirements::well_formed() const {
   if (sizing_inventory.diagnostic_count != sizing_inventory.access_range_count ||
@@ -411,74 +610,18 @@ bool consan_evidence_requirements_well_formed(const ConSanEvidenceRequirements &
 }
 
 ConSanRecordReplayEvidenceRequirements
-plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
+plan_consan_record_replay_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
                                    const ConSanRecordReplayCapacityPolicy &capacity_policy) {
   ConSanRecordReplayEvidenceRequirements requirements;
-  if (!observation_plan.valid()) {
-    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+  requirements.reason =
+      validate_evidence_intent_input(evidence_intents, ConSanCapabilityEngine::RecordReplay);
+  if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
-  }
-  if (observation_plan.engine != ConSanCapabilityEngine::RecordReplay) {
-    requirements.reason = ConSanEvidenceRequirementReason::WrongEngine;
-    return requirements;
-  }
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::RecordReplay;
-  uint64_t selected_access_probe_count = 0;
-  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
-    switch (intent.kind) {
-    case ConSanProbeIntentKind::AccessRecord:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::Access)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      if (capacity_policy.maximum_access_probe_count &&
-          selected_access_probe_count >= *capacity_policy.maximum_access_probe_count) {
-        break;
-      }
-      ++selected_access_probe_count;
-      add_saturating(inventory.access_range_count, intent.covered_semantic_sites.size());
-      break;
-    case ConSanProbeIntentKind::BarrierRecord:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      add_saturating(inventory.barrier_event_count, 1u);
-      break;
-    case ConSanProbeIntentKind::AtomicRecord:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      add_saturating(inventory.atomic_event_count, 1u);
-      break;
-    case ConSanProbeIntentKind::FenceRecord:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      add_saturating(inventory.fence_event_count, 1u);
-      break;
-    case ConSanProbeIntentKind::AtomicAddressCapture:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      break;
-    case ConSanProbeIntentKind::RedundantAccessObservation:
-    case ConSanProbeIntentKind::SampledAccess:
-    case ConSanProbeIntentKind::ExactShadowAccess:
-    case ConSanProbeIntentKind::SampledBarrierEpoch:
-    case ConSanProbeIntentKind::ExactBarrierEpoch:
-    case ConSanProbeIntentKind::SampledAtomicOrdering:
-    case ConSanProbeIntentKind::ExactAtomicOrdering:
-    case ConSanProbeIntentKind::Count:
-      requirements.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
-      return requirements;
-    }
-  }
+  (void)accumulate_moi_evidence_counts(evidence_intents, capacity_policy.maximum_access_probe_count,
+                                       inventory);
   const bool has_evidence = inventory.access_range_count != 0u ||
                             inventory.barrier_event_count != 0u ||
                             inventory.atomic_event_count != 0u || inventory.fence_event_count != 0u;
@@ -501,69 +644,26 @@ plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan
   return requirements;
 }
 
+ConSanRecordReplayEvidenceRequirements
+plan_consan_record_replay_evidence(const ConSanObservationPlan &observation_plan,
+                                   const ConSanRecordReplayCapacityPolicy &capacity_policy) {
+  return plan_consan_record_replay_evidence(plan_consan_evidence_intents(observation_plan),
+                                            capacity_policy);
+}
+
 ConSanSampledEvidenceRequirements
-plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
+plan_consan_sampled_evidence(const ConSanEvidenceIntentPlan &evidence_intents,
                              const ConSanSampledCapacityPolicy &capacity_policy) {
   ConSanSampledEvidenceRequirements requirements;
-  if (!observation_plan.valid()) {
-    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+  requirements.reason =
+      validate_evidence_intent_input(evidence_intents, ConSanCapabilityEngine::Sampled);
+  if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
-  }
-  if (observation_plan.engine != ConSanCapabilityEngine::Sampled) {
-    requirements.reason = ConSanEvidenceRequirementReason::WrongEngine;
-    return requirements;
-  }
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::Sampled;
-  uint64_t selected_access_probe_count = 0;
-  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
-    switch (intent.kind) {
-    case ConSanProbeIntentKind::SampledAccess:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::Access)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      if (capacity_policy.maximum_access_probe_count &&
-          selected_access_probe_count >= *capacity_policy.maximum_access_probe_count) {
-        break;
-      }
-      ++selected_access_probe_count;
-      add_saturating(inventory.access_range_count, intent.covered_semantic_sites.size());
-      break;
-    case ConSanProbeIntentKind::SampledBarrierEpoch:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      add_saturating(inventory.barrier_event_count, intent.covered_semantic_sites.size());
-      break;
-    case ConSanProbeIntentKind::AtomicAddressCapture:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      break;
-    case ConSanProbeIntentKind::SampledAtomicOrdering:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      add_saturating(inventory.atomic_event_count, 1u);
-      break;
-    case ConSanProbeIntentKind::RedundantAccessObservation:
-    case ConSanProbeIntentKind::AccessRecord:
-    case ConSanProbeIntentKind::ExactShadowAccess:
-    case ConSanProbeIntentKind::BarrierRecord:
-    case ConSanProbeIntentKind::ExactBarrierEpoch:
-    case ConSanProbeIntentKind::AtomicRecord:
-    case ConSanProbeIntentKind::ExactAtomicOrdering:
-    case ConSanProbeIntentKind::FenceRecord:
-    case ConSanProbeIntentKind::Count:
-      requirements.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
-      return requirements;
-    }
-  }
+  (void)accumulate_moi_evidence_counts(evidence_intents, capacity_policy.maximum_access_probe_count,
+                                       inventory);
 
   constexpr uint64_t kSampledBanksPerLogicalRange = 8u;
   const uint64_t access_banks =
@@ -593,115 +693,74 @@ plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
   return requirements;
 }
 
+ConSanSampledEvidenceRequirements
+plan_consan_sampled_evidence(const ConSanObservationPlan &observation_plan,
+                             const ConSanSampledCapacityPolicy &capacity_policy) {
+  return plan_consan_sampled_evidence(plan_consan_evidence_intents(observation_plan),
+                                      capacity_policy);
+}
+
 ConSanInlineShadowEvidenceRequirements
 plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
-                                   const ConSanObservationPlan &observation_plan,
+                                   const ConSanEvidenceIntentPlan &evidence_intents,
                                    const ConSanInlineShadowCapacityPolicy &capacity_policy) {
   ConSanInlineShadowEvidenceRequirements requirements;
-  if (!observation_plan.valid()) {
-    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
+  requirements.reason =
+      validate_evidence_intent_input(evidence_intents, ConSanCapabilityEngine::InlineShadow);
+  if (requirements.reason != ConSanEvidenceRequirementReason::None)
     return requirements;
-  }
-  if (observation_plan.engine != ConSanCapabilityEngine::InlineShadow) {
-    requirements.reason = ConSanEvidenceRequirementReason::WrongEngine;
-    return requirements;
-  }
 
   ConSanMoiAutoReportInventory inventory;
   inventory.engine = ConSanMoiEngine::InlineShadow;
-  uint64_t selected_access_probe_count = 0;
+  const std::vector<const ConSanEvidenceIntent *> retained_accesses =
+      accumulate_moi_evidence_counts(evidence_intents, capacity_policy.maximum_access_probe_count,
+                                     inventory);
   bool requires_full_lds_aperture = false;
   uint64_t declared_lds_extent = 0;
   uint64_t native_static_extent = 0;
-  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
-    switch (intent.kind) {
-    case ConSanProbeIntentKind::ExactShadowAccess: {
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::Access)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
+  for (const ConSanEvidenceIntent *intent : retained_accesses) {
+    add_saturating(inventory.inline_compact_token_mapping_count, 1u);
+    for (const SemanticSiteId &range_id : intent->semantic_sites) {
+      const ConSanAccessInventorySite *site =
+          find_inventory_access_range(program_inventory, range_id);
+      if (!site) {
+        requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
         return requirements;
       }
-      if (capacity_policy.maximum_access_probe_count &&
-          selected_access_probe_count >= *capacity_policy.maximum_access_probe_count) {
-        break;
+      requires_full_lds_aperture |= site->origin == ConSanAccessOrigin::Flat;
+      if (const auto range = std::ranges::find(site->ranges, range_id, &ConSanAccessRange::id);
+          range != site->ranges.end() && range->static_byte_offset &&
+          *range->static_byte_offset >= 0) {
+        native_static_extent =
+            std::max(native_static_extent,
+                     util::saturating_add(static_cast<uint64_t>(*range->static_byte_offset),
+                                          static_cast<uint64_t>(range->byte_width)));
       }
-      ++selected_access_probe_count;
-      add_saturating(inventory.access_range_count, intent.covered_semantic_sites.size());
-      add_saturating(inventory.inline_compact_token_mapping_count, 1u);
-      for (const SemanticSiteId &range_id : intent.covered_semantic_sites) {
-        const ConSanAccessInventorySite *site =
-            find_inventory_access_range(program_inventory, range_id);
-        if (!site) {
+
+      // Group-FLAT addressing already selects the complete architectural
+      // aperture. It does not need a kernel-owner join merely to recover a
+      // smaller fixed descriptor declaration, and shared helper ownership
+      // may intentionally remain unresolved at this stage.
+      if (site->origin == ConSanAccessOrigin::Flat)
+        continue;
+
+      std::vector<uint64_t> owners = site->execution_owner_descriptor_file_offsets;
+      if (owners.empty() && site->container.kernel_descriptor_file_offset)
+        owners.push_back(*site->container.kernel_descriptor_file_offset);
+      if (owners.empty()) {
+        requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
+        return requirements;
+      }
+      for (uint64_t owner_offset : owners) {
+        const ConSanKernelInfo *owner = program_inventory.find_kernel_by_descriptor(owner_offset);
+        if (owner == nullptr || !owner->declared_group_segment_bytes) {
           requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
           return requirements;
         }
-        requires_full_lds_aperture |= site->origin == ConSanAccessOrigin::Flat;
-        if (const auto range = std::ranges::find(site->ranges, range_id, &ConSanAccessRange::id);
-            range != site->ranges.end() && range->static_byte_offset &&
-            *range->static_byte_offset >= 0) {
-          native_static_extent =
-              std::max(native_static_extent,
-                       util::saturating_add(static_cast<uint64_t>(*range->static_byte_offset),
-                                            static_cast<uint64_t>(range->byte_width)));
-        }
-
-        // Group-FLAT addressing already selects the complete architectural
-        // aperture. It does not need a kernel-owner join merely to recover a
-        // smaller fixed descriptor declaration, and shared helper ownership
-        // may intentionally remain unresolved at this stage.
-        if (site->origin == ConSanAccessOrigin::Flat)
-          continue;
-
-        std::vector<uint64_t> owners = site->execution_owner_descriptor_file_offsets;
-        if (owners.empty() && site->container.kernel_descriptor_file_offset)
-          owners.push_back(*site->container.kernel_descriptor_file_offset);
-        if (owners.empty()) {
-          requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
-          return requirements;
-        }
-        for (uint64_t owner_offset : owners) {
-          const ConSanKernelInfo *owner = program_inventory.find_kernel_by_descriptor(owner_offset);
-          if (owner == nullptr || !owner->declared_group_segment_bytes) {
-            requirements.reason = ConSanEvidenceRequirementReason::MissingInventoryFact;
-            return requirements;
-          }
-          declared_lds_extent =
-              std::max<uint64_t>(declared_lds_extent, *owner->declared_group_segment_bytes);
-          requires_full_lds_aperture |= owner->has_dynamic_lds;
-        }
+        declared_lds_extent =
+            std::max<uint64_t>(declared_lds_extent, *owner->declared_group_segment_bytes);
+        requires_full_lds_aperture |= owner->has_dynamic_lds;
       }
-      break;
-    }
-    case ConSanProbeIntentKind::ExactBarrierEpoch:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      add_saturating(inventory.barrier_event_count, intent.covered_semantic_sites.size());
-      break;
-    case ConSanProbeIntentKind::AtomicAddressCapture:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      break;
-    case ConSanProbeIntentKind::ExactAtomicOrdering:
-      if (!intent_covers_only(intent, ConSanSemanticSiteDomain::SynchronizationEvent)) {
-        requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-        return requirements;
-      }
-      add_saturating(inventory.atomic_event_count, 1u);
-      break;
-    case ConSanProbeIntentKind::RedundantAccessObservation:
-    case ConSanProbeIntentKind::AccessRecord:
-    case ConSanProbeIntentKind::SampledAccess:
-    case ConSanProbeIntentKind::BarrierRecord:
-    case ConSanProbeIntentKind::SampledBarrierEpoch:
-    case ConSanProbeIntentKind::AtomicRecord:
-    case ConSanProbeIntentKind::SampledAtomicOrdering:
-    case ConSanProbeIntentKind::FenceRecord:
-    case ConSanProbeIntentKind::Count:
-      requirements.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
-      return requirements;
     }
   }
 
@@ -743,37 +802,34 @@ plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
   return requirements;
 }
 
-ConSanSuperColliderEvidenceRequirements
-plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan) {
-  ConSanSuperColliderEvidenceRequirements requirements;
-  if (!observation_plan.valid()) {
-    requirements.reason = ConSanEvidenceRequirementReason::InvalidObservationPlan;
-    return requirements;
-  }
-  if (observation_plan.engine != ConSanCapabilityEngine::SuperCollider) {
-    requirements.reason = ConSanEvidenceRequirementReason::WrongEngine;
-    return requirements;
-  }
+ConSanInlineShadowEvidenceRequirements
+plan_consan_inline_shadow_evidence(const ProgramInventory &program_inventory,
+                                   const ConSanObservationPlan &observation_plan,
+                                   const ConSanInlineShadowCapacityPolicy &capacity_policy) {
+  return plan_consan_inline_shadow_evidence(
+      program_inventory, plan_consan_evidence_intents(observation_plan), capacity_policy);
+}
 
-  bool has_observation = false;
-  for (const ConSanProbeIntent &intent : observation_plan.probe_intents) {
-    if (intent.kind != ConSanProbeIntentKind::RedundantAccessObservation) {
-      requirements.reason = ConSanEvidenceRequirementReason::UnexpectedIntentKind;
-      return requirements;
-    }
-    if (!intent_covers_only(intent, ConSanSemanticSiteDomain::Access)) {
-      requirements.reason = ConSanEvidenceRequirementReason::InvalidIntentPayload;
-      return requirements;
-    }
-    has_observation = true;
-  }
-  requirements.marker_bytes = has_observation ? sizeof(uint32_t) : 0u;
+ConSanSuperColliderEvidenceRequirements
+plan_consan_supercollider_evidence(const ConSanEvidenceIntentPlan &evidence_intents) {
+  ConSanSuperColliderEvidenceRequirements requirements;
+  requirements.reason =
+      validate_evidence_intent_input(evidence_intents, ConSanCapabilityEngine::SuperCollider);
+  if (requirements.reason != ConSanEvidenceRequirementReason::None)
+    return requirements;
+
+  requirements.marker_bytes = evidence_intents.intents.empty() ? 0u : sizeof(uint32_t);
   requirements.runtime_requirements.host_device_visible_memory = true;
   requirements.runtime_requirements.host_device_coherent_memory = true;
   requirements.runtime_requirements.minimum_report_allocation_bytes = requirements.marker_bytes;
   requirements.runtime_requirements.executable_binding = true;
   requirements.reason = ConSanEvidenceRequirementReason::None;
   return requirements;
+}
+
+ConSanSuperColliderEvidenceRequirements
+plan_consan_supercollider_evidence(const ConSanObservationPlan &observation_plan) {
+  return plan_consan_supercollider_evidence(plan_consan_evidence_intents(observation_plan));
 }
 
 ConSanMoiAutoReportPlan plan_consan_moi_auto_report(const ConSanMoiAutoReportInventory &inventory,

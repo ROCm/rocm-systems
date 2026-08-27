@@ -230,6 +230,11 @@ public:
   ConSanCodeObjectId code_object;
   /// Every pipeline contract exactly once, indexed by `ConSanPipelineStage`.
   std::array<ConSanPipelineStageState, kConSanPipelineStages.size()> stages;
+  /// Canonical, address-free translation of flavor policy into the evidence
+  /// roles that report sizing must retain. This is published independently of
+  /// the ABI-bearing requirement below so later stages never have to recover
+  /// policy meaning by inspecting report capacities or emitted patches.
+  std::optional<ConSanEvidenceIntentPlan> evidence_intent_plan;
   /// Address-free engine-specific report/marker contract when applicable.
   std::optional<ConSanEvidenceRequirements> evidence_requirements;
   /// Runtime dispatch contract derived once from validated lowering and typed

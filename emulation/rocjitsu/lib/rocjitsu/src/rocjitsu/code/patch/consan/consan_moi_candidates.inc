@@ -67,31 +67,26 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna
 }
 inline constexpr uint64_t kAmdhsaKernelEntryAlignment = 256;
 
-[[nodiscard]] ConSanMoiReportBufferLayout resolve_inline_report_layout(const MoiOptions &options) {
+/// Resolve the sole concrete report geometry consumed by MOI lowering.
+/// Automatic runtime binding supplies its canonical planned layout; explicit
+/// raw buffers retain their engine-specific compatibility geometry. No engine
+/// planner may independently reinterpret capacities after this boundary.
+[[nodiscard]] ConSanMoiReportBufferLayout resolve_moi_report_layout(const MoiOptions &options) {
   if (options.moi_report_layout) {
-    return revalidate_consan_moi_report_layout(
-        *options.moi_report_layout, ConSanMoiEngine::InlineShadow, options.moi_report_buffer_size);
-  }
-  return consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
-}
-
-[[nodiscard]] ConSanMoiReportBufferLayout resolve_sampled_report_layout(const MoiOptions &options) {
-  if (options.moi_report_layout) {
-    return revalidate_consan_moi_report_layout(*options.moi_report_layout, ConSanMoiEngine::Sampled,
+    return revalidate_consan_moi_report_layout(*options.moi_report_layout, options.moi_engine,
                                                options.moi_report_buffer_size);
   }
-  return consan_moi_direct_sampled_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
-}
-
-[[nodiscard]] ConSanMoiReportBufferLayout
-resolve_record_replay_report_layout(const MoiOptions &options, bool include_barriers,
-                                    bool include_atomics, bool include_fences) {
-  if (options.moi_report_layout) {
-    return revalidate_consan_moi_report_layout(
-        *options.moi_report_layout, ConSanMoiEngine::RecordReplay, options.moi_report_buffer_size);
+  switch (options.moi_engine) {
+  case ConSanMoiEngine::RecordReplay:
+    return consan_moi_report_buffer_layout_for_bytes(
+        options.moi_report_buffer_size, options.moi_track_barriers, options.moi_track_atomics,
+        options.moi_track_atomics);
+  case ConSanMoiEngine::Sampled:
+    return consan_moi_direct_sampled_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
+  case ConSanMoiEngine::InlineShadow:
+    return consan_moi_inline_shadow_report_buffer_layout_for_bytes(options.moi_report_buffer_size);
   }
-  return consan_moi_report_buffer_layout_for_bytes(options.moi_report_buffer_size, include_barriers,
-                                                   include_atomics, include_fences);
+  return {};
 }
 
 /// Automatic Record/Replay access banks promise exact dispatch/site/workgroup/

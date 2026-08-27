@@ -205,6 +205,8 @@ TEST(ConSanEvidenceRequirements, EnumContractsAreExhaustiveNamedAndRejectInvalid
   expect_evidence_enum_contract(
       kConSanEvidenceRequirementReasons, ConSanEvidenceRequirementReason::Count,
       consan_evidence_requirement_reason_name, "invalid-evidence-requirement-reason");
+  expect_evidence_enum_contract(kConSanEvidenceIntentKinds, ConSanEvidenceIntentKind::Count,
+                                consan_evidence_intent_kind_name, "invalid-evidence-intent-kind");
 
   constexpr std::array outcomes = {
       ConSanMoiAutoReportPlanOutcome::Complete,
@@ -224,6 +226,144 @@ TEST(ConSanEvidenceRequirements, EnumContractsAreExhaustiveNamedAndRejectInvalid
   expect_evidence_enum_contract(reasons, ConSanMoiAutoReportPlanReason::Count,
                                 consan_moi_auto_report_plan_reason_name,
                                 "invalid_auto_report_plan_reason");
+}
+
+TEST(ConSanEvidenceRequirements, OneAddressFreeIntentPlanOwnsEveryEngineReportRole) {
+  const auto verify = [](const ConSanObservationPlan &observation,
+                         std::initializer_list<ConSanEvidenceIntentKind> kinds,
+                         std::initializer_list<uint64_t> element_counts) {
+    const ConSanEvidenceIntentPlan evidence = plan_consan_evidence_intents(observation);
+    ASSERT_TRUE(evidence.well_formed());
+    ASSERT_EQ(evidence.intents.size(), kinds.size());
+    ASSERT_EQ(evidence.intents.size(), element_counts.size());
+    size_t index = 0;
+    for (ConSanEvidenceIntentKind kind : kinds) {
+      EXPECT_EQ(evidence.intents[index].source_intent.value, index);
+      EXPECT_EQ(evidence.intents[index].kind, kind);
+      ++index;
+    }
+    index = 0;
+    for (uint64_t element_count : element_counts)
+      EXPECT_EQ(evidence.intents[index++].element_count, element_count);
+  };
+
+  verify(EvidenceObservationPlanBuilder(ConSanCapabilityEngine::RecordReplay)
+             .add(ConSanProbeIntentKind::AccessRecord, ConSanSemanticSiteDomain::Access, 2)
+             .add(ConSanProbeIntentKind::BarrierRecord,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 3)
+             .add(ConSanProbeIntentKind::AtomicAddressCapture,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+             .add(ConSanProbeIntentKind::AtomicRecord,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+             .add(ConSanProbeIntentKind::FenceRecord,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+             .build(),
+         {ConSanEvidenceIntentKind::Access, ConSanEvidenceIntentKind::Barrier,
+          ConSanEvidenceIntentKind::AddressCapture, ConSanEvidenceIntentKind::Atomic,
+          ConSanEvidenceIntentKind::Fence},
+         {2, 1, 0, 1, 1});
+  verify(EvidenceObservationPlanBuilder(ConSanCapabilityEngine::Sampled)
+             .add(ConSanProbeIntentKind::SampledAccess, ConSanSemanticSiteDomain::Access, 3)
+             .add(ConSanProbeIntentKind::SampledBarrierEpoch,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 2)
+             .add(ConSanProbeIntentKind::AtomicAddressCapture,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+             .add(ConSanProbeIntentKind::SampledAtomicOrdering,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+             .build(),
+         {ConSanEvidenceIntentKind::Access, ConSanEvidenceIntentKind::Barrier,
+          ConSanEvidenceIntentKind::AddressCapture, ConSanEvidenceIntentKind::Atomic},
+         {3, 2, 0, 1});
+  verify(EvidenceObservationPlanBuilder(ConSanCapabilityEngine::InlineShadow)
+             .add(ConSanProbeIntentKind::ExactShadowAccess, ConSanSemanticSiteDomain::Access, 4)
+             .add(ConSanProbeIntentKind::ExactBarrierEpoch,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 2)
+             .add(ConSanProbeIntentKind::AtomicAddressCapture,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+             .add(ConSanProbeIntentKind::ExactAtomicOrdering,
+                  ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+             .build(),
+         {ConSanEvidenceIntentKind::Access, ConSanEvidenceIntentKind::Barrier,
+          ConSanEvidenceIntentKind::AddressCapture, ConSanEvidenceIntentKind::Atomic},
+         {4, 2, 0, 1});
+  verify(EvidenceObservationPlanBuilder(ConSanCapabilityEngine::SuperCollider)
+             .add(ConSanProbeIntentKind::RedundantAccessObservation,
+                  ConSanSemanticSiteDomain::Access, 2)
+             .build(),
+         {ConSanEvidenceIntentKind::StickyMarker}, {1});
+}
+
+TEST(ConSanEvidenceRequirements, EvidenceIntentPlanRejectsPartialOrCrossEngineSchemas) {
+  const ConSanObservationPlan observation =
+      EvidenceObservationPlanBuilder(ConSanCapabilityEngine::RecordReplay)
+          .add(ConSanProbeIntentKind::AccessRecord, ConSanSemanticSiteDomain::Access, 2)
+          .build();
+  const ConSanEvidenceIntentPlan canonical = plan_consan_evidence_intents(observation);
+  ASSERT_TRUE(canonical.well_formed());
+
+  ConSanEvidenceIntentPlan malformed = canonical;
+  malformed.intents.front().source_intent = {1};
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = canonical;
+  malformed.intents.front().kind = ConSanEvidenceIntentKind::Count;
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = canonical;
+  malformed.intents.front().semantic_sites.front().domain =
+      ConSanSemanticSiteDomain::SynchronizationEvent;
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = canonical;
+  ++malformed.intents.front().element_count;
+  EXPECT_FALSE(malformed.well_formed());
+  malformed = canonical;
+  malformed.engine = ConSanCapabilityEngine::SuperCollider;
+  EXPECT_FALSE(malformed.well_formed());
+
+  ConSanObservationPlan foreign = observation;
+  foreign.probe_intents.front().kind = ConSanProbeIntentKind::SampledAccess;
+  ASSERT_TRUE(foreign.valid());
+  const ConSanEvidenceIntentPlan rejected = plan_consan_evidence_intents(foreign);
+  EXPECT_EQ(rejected.reason, ConSanEvidenceRequirementReason::UnexpectedIntentKind);
+  EXPECT_TRUE(rejected.intents.empty());
+  EXPECT_FALSE(rejected.well_formed());
+}
+
+TEST(ConSanEvidenceRequirements, TypedIntentPlansAreTheOnlyEvidenceSizingInputs) {
+  const ConSanObservationPlan record_replay =
+      RecordReplayObservationPlanBuilder().add_access(2).add_barrier().add_atomic().build();
+  const ConSanEvidenceIntentPlan record_replay_intents =
+      plan_consan_evidence_intents(record_replay);
+  ASSERT_TRUE(record_replay_intents.well_formed());
+  EXPECT_EQ(plan_consan_record_replay_evidence(record_replay_intents),
+            plan_consan_record_replay_evidence(record_replay));
+  EXPECT_EQ(plan_consan_sampled_evidence(record_replay_intents).reason,
+            ConSanEvidenceRequirementReason::WrongEngine);
+
+  const ConSanObservationPlan sampled =
+      EvidenceObservationPlanBuilder(ConSanCapabilityEngine::Sampled)
+          .add(ConSanProbeIntentKind::SampledAccess, ConSanSemanticSiteDomain::Access, 2)
+          .add(ConSanProbeIntentKind::SampledAtomicOrdering,
+               ConSanSemanticSiteDomain::SynchronizationEvent, 1, true)
+          .build();
+  EXPECT_EQ(plan_consan_sampled_evidence(plan_consan_evidence_intents(sampled)),
+            plan_consan_sampled_evidence(sampled));
+
+  const InlineEvidenceFixture inline_fixture =
+      make_inline_evidence_fixture(/*flat=*/false, /*dynamic_lds=*/false, 4096);
+  EXPECT_EQ(plan_consan_inline_shadow_evidence(inline_fixture.inventory,
+                                               plan_consan_evidence_intents(inline_fixture.plan)),
+            plan_consan_inline_shadow_evidence(inline_fixture.inventory, inline_fixture.plan));
+
+  const ConSanObservationPlan supercollider =
+      EvidenceObservationPlanBuilder(ConSanCapabilityEngine::SuperCollider)
+          .add(ConSanProbeIntentKind::RedundantAccessObservation, ConSanSemanticSiteDomain::Access)
+          .build();
+  EXPECT_EQ(plan_consan_supercollider_evidence(plan_consan_evidence_intents(supercollider)),
+            plan_consan_supercollider_evidence(supercollider));
+
+  ConSanEvidenceIntentPlan malformed = record_replay_intents;
+  malformed.intents.front().element_count++;
+  EXPECT_EQ(plan_consan_record_replay_evidence(malformed).reason,
+            ConSanEvidenceRequirementReason::InvalidIntentPayload);
 }
 
 TEST(ConSanEvidenceRequirements, EmptyRecordReplayPlanProducesOneAddressFreeHeaderContract) {
