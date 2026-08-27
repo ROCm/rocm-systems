@@ -37,8 +37,8 @@
 #include <string>
 #include <vector>
 
+#include "rocm/sha2/sha256.h"
 #include "src/hmac.h"
-#include "src/sha256.h"
 
 namespace {
 
