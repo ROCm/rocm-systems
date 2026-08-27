@@ -777,10 +777,12 @@ SuperCollider, MOI resource admission, prologue planning, and final validation
 all use `descriptor_vgpr_allocation_count`,
 `descriptor_ordinary_vgpr_allocation_count`, and
 `descriptor_sgpr_allocation_count`. The ordinary-VGPR query applies CDNA's
-descriptor-defined AccVGPR boundary. MOI separately retains the unclamped
-unified allocation count only where it must decide whether that boundary backs
-a live accumulator bank; this is a distinct resource fact rather than another
-decoder for the ordinary allocation.
+descriptor-defined AccVGPR boundary. The queries live in
+`consan_descriptor.h`; their wave-size and field-granularity inputs come from
+RocJitsu's generic kernel-descriptor decoder. This matters for gfx1250, whose
+Wave32 execution is architectural and does not depend on a producer setting the
+legacy descriptor Wave32 bit. Analysis and both engine families therefore
+cannot disagree about the register allocation represented by one descriptor.
 
 Inventory-shape decisions use the typed caller inputs even while the old
 lowerer remains mutable. In particular,

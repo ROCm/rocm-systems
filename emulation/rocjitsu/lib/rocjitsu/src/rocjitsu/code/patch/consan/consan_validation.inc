@@ -4330,7 +4330,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
       continue;
     }
     if (requirement.required_vgpr_count != 0) {
-      const std::optional<uint16_t> actual_vgprs = descriptor_vgpr_allocation_count(
+      const std::optional<uint16_t> actual_vgprs = read_descriptor_vgpr_allocation_count(
           result.replacement, replacement_kernel.descriptor_file_offset, arch);
       if (!actual_vgprs || *actual_vgprs < requirement.required_vgpr_count) {
         errors.emplace_back(

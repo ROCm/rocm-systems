@@ -817,7 +817,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       }
       const auto owner_shift =
           owner_options.automatic_moi_private_epoch
-              ? moi_descriptor_owner_shift(bytes, owner.descriptor_file_offset, result.errors)
+              ? moi_descriptor_owner_shift(bytes, owner.descriptor_file_offset, arch, result.errors)
               : std::optional<uint16_t>(0u);
       if (!workgroup_sources || !owner_shift ||
           (common_workgroup_sources && *common_workgroup_sources != *workgroup_sources) ||

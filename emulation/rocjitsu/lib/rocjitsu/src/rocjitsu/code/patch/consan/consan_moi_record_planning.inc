@@ -87,8 +87,8 @@ plan_moi_record_event(std::span<const uint8_t> bytes, ConSanTransformArtifacts &
     ResolvedMoiScratchPlan owner_resources = resources;
     if (active_private_segment_size)
       owner_resources.original_private_segment_size = *active_private_segment_size;
-    private_owner =
-        resolve_moi_private_record_owner(bytes, owner_resources, *private_layout, result.warnings);
+    private_owner = resolve_moi_private_record_owner(bytes, owner_resources, *private_layout, arch,
+                                                     result.warnings);
     if (!private_owner)
       return std::nullopt;
   }

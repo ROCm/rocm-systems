@@ -1129,7 +1129,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         }
         std::optional<uint16_t> private_owner_shift;
         if (access_patch->persistent_owner_private_offset) {
-          private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+          private_owner_shift =
+              common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
           if (!private_owner_shift)
             continue;
         }

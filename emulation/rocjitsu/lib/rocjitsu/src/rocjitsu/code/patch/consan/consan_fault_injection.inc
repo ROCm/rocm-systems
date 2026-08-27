@@ -1880,7 +1880,7 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
   const uint32_t physical_target_address_vgpr = address_bank * 256u + target_address_vgpr;
   for (const ConSanExecutionOwner &owner : selected->execution_owners) {
     const auto allocated =
-        descriptor_vgpr_allocation_count(original_bytes, owner.descriptor_file_offset, arch);
+        read_descriptor_vgpr_allocation_count(original_bytes, owner.descriptor_file_offset, arch);
     if (!allocated) {
       result.errors.emplace_back(
           "ConSan LDS address fault could not read an execution-owner descriptor");

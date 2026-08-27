@@ -6484,6 +6484,39 @@ for nominal line-count reductions.
 - **Batched gate:** Compilation and the broader checked-in gate are deferred to
   the current deletion tranche. E2E validation remains outside this work.
 
+### Slice 5DL: make descriptor resource facts genuinely shared
+
+- **One descriptor authority:** `consan_descriptor.h` now owns ConSan's
+  descriptor VGPR granularity, unified allocation, ordinary/AccVGPR boundary,
+  and SGPR allocation queries. Analysis, SuperCollider, MOI resource admission,
+  MOI prologue planning, and final validation all consume those functions. The
+  analysis-local decoders and MOI's wave-size, granularity, and nominally
+  distinct unified-allocation decoders are deleted.
+- **Reuse the lower-level contract:** ConSan gets wave size and descriptor-field
+  granularity from RocJitsu's generic kernel-descriptor decoder. In particular,
+  gfx1250 is mandatory Wave32 even when a code-object producer leaves the
+  legacy `ENABLE_WAVEFRONT_SIZE32` bit clear. Propagating the architecture to
+  owner derivation removes the former implicit RDNA-style interpretation.
+- **Contract coverage:**
+  `DescriptorResourceFactsShareTargetWaveAndAccumulatorSemantics` directly
+  covers bit-clear gfx1250, RDNA Wave64/Wave32 variation, CDNA4's accumulator
+  boundary, gfx1250's selectable-bank model, and bounded SGPR decoding. It and
+  six existing generic/ConSan descriptor tests pass. The bit-clear gfx1250 case
+  is a regression test for behavior that the deleted private decoder got wrong.
+  The shared-owner SuperCollider contract drives scratch past gfx1250's first
+  16-register granule, preserving its intended every-owner growth check without
+  relying on the former Wave64 misdecode.
+- **Accounting:** Across the 18 affected implementation files, physical lines
+  change from 47,523 to 47,524, nonblank lines from 46,035 to 46,034, and
+  estimated comment-excluded code lines from 43,794 to 43,785. The slice adds
+  124 and deletes 123 physical implementation lines: one net physical line buys
+  the documented shared header while deleting nine executable/declarative code
+  lines. Together with Slice 5DJ's initial consumer cutover, descriptor
+  ownership is both smaller and singular.
+- **Batched gate:** The library and test binary compile, and the seven focused
+  descriptor tests pass. The broader checked-in gate is deferred to the current
+  deletion tranche. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

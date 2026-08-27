@@ -160,7 +160,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           {.descriptor_file_offset = kernel.descriptor_file_offset,
            .scope = std::move(*scope),
            .liveness = nullptr,
-           .wavefront_size = descriptor_wavefront_size(arch, descriptor)});
+           .wavefront_size = kernel_wavefront_size(arch, descriptor)});
       ScReservoirOwnerContext &context = reservoir_owner_contexts.back();
       context.liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(context.scope.blocks),
                                                             LivenessAnalysisOptions{},
@@ -724,8 +724,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const auto owner_context = std::ranges::find(
           reservoir_owner_contexts, owner, &ScReservoirOwnerContext::descriptor_file_offset);
       const auto allocated_vgprs =
-          descriptor_ordinary_vgpr_allocation_count(original_bytes, owner, arch);
-      const auto unified_vgprs = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
+          read_descriptor_ordinary_vgpr_allocation_count(original_bytes, owner, arch);
+      const auto unified_vgprs = read_descriptor_vgpr_allocation_count(original_bytes, owner, arch);
       const Instruction *owner_site_inst =
           owner_context == reservoir_owner_contexts.end()
               ? nullptr

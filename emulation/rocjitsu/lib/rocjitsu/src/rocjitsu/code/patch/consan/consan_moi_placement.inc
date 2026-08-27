@@ -492,12 +492,6 @@ void append_nop_padding_to_alignment(std::vector<uint8_t> &bytes, uint64_t align
   return true;
 }
 
-[[nodiscard]] uint32_t moi_descriptor_wavefront_size(const KD &desc) {
-  const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
-                                      kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
-  return wave32 ? 32 : 64;
-}
-
 [[nodiscard]] uint32_t moi_descriptor_user_sgpr_count(const KD &desc) {
   return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
 }
@@ -797,22 +791,6 @@ moi_persistent_or_descriptor_workgroup_sources(std::span<const uint8_t> image,
                                           uses_gfx1250_cluster_workgroup_id);
 }
 
-[[nodiscard]] uint32_t moi_descriptor_vgpr_granularity(const KD &desc, rj_code_arch_t arch) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  const auto kernel_profile =
-      profile ? consan_kernel_target_profile(*profile, moi_descriptor_wavefront_size(desc))
-              : std::nullopt;
-  return kernel_profile ? kernel_profile->vgpr_allocation_granularity : 0u;
-}
-
-[[nodiscard]] uint32_t moi_descriptor_unified_vgpr_allocation_count(const KD &desc,
-                                                                    rj_code_arch_t arch) {
-  const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
-  const uint32_t granulated =
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-  return (granulated + 1u) * granularity;
-}
-
 struct MoiSgprRange {
   uint16_t base = 0;
   uint16_t width = 0;
@@ -820,6 +798,7 @@ struct MoiSgprRange {
 
 [[nodiscard]] std::optional<uint16_t> moi_descriptor_owner_shift(std::span<const uint8_t> image,
                                                                  uint64_t descriptor_file_offset,
+                                                                 rj_code_arch_t arch,
                                                                  std::vector<std::string> &errors) {
   if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset) {
     errors.emplace_back("ConSan MOI owner derivation descriptor exceeds ELF bytes");
@@ -828,7 +807,7 @@ struct MoiSgprRange {
 
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-  return moi_descriptor_wavefront_size(desc) == 32 ? 5 : 6;
+  return kernel_wavefront_size(arch, desc) == 32 ? 5 : 6;
 }
 
 [[nodiscard]] bool grow_moi_descriptor_vgpr_allocation(KD &desc, uint32_t required_count,
@@ -844,10 +823,10 @@ struct MoiSgprRange {
     if (encoded_accum_offset != 0u) {
       const uint32_t accvgpr_base =
           (encoded_accum_offset + 1u) * profile->accumulator_offset_granularity;
-      const uint32_t unified_count = moi_descriptor_unified_vgpr_allocation_count(desc, arch);
+      const uint32_t unified_count = descriptor_vgpr_allocation_count(desc, arch);
       if (required_count <= unified_count)
         return true;
-      const uint32_t granularity = moi_descriptor_vgpr_granularity(desc, arch);
+      const uint32_t granularity = descriptor_vgpr_granularity(desc, arch);
       const uint32_t rounded_required = util::align_up(required_count, granularity);
       if (rounded_required <= accvgpr_base) {
         // ACCUM_OFFSET can name an empty ordinary/accumulator boundary above
@@ -882,7 +861,7 @@ struct MoiSgprRange {
   if (required_count <= descriptor_vgpr_allocation_count(desc, arch))
     return true;
 
-  const uint32_t granularity = std::max<uint32_t>(moi_descriptor_vgpr_granularity(desc, arch), 1u);
+  const uint32_t granularity = std::max<uint32_t>(descriptor_vgpr_granularity(desc, arch), 1u);
   const uint32_t rounded = ((required_count + granularity - 1u) / granularity) * granularity;
   if (rounded > kMaxVgprs)
     return false;
@@ -2071,8 +2050,7 @@ struct MoiResourcePlanningState {
         if (encoded_accum_offset != 0u) {
           const uint32_t accvgpr_base =
               std::min<uint32_t>(kMaxVgprs, (encoded_accum_offset + 1u) * 4u);
-          const uint32_t unified_vgpr_count =
-              moi_descriptor_unified_vgpr_allocation_count(descriptor, arch);
+          const uint32_t unified_vgpr_count = descriptor_vgpr_allocation_count(descriptor, arch);
           stored.ordinary_vgpr_limit = static_cast<uint16_t>(accvgpr_base);
           stored.cdna_accvgpr_boundary_is_allocation_tail = unified_vgpr_count <= accvgpr_base;
           stored.can_move_empty_cdna_accvgpr_boundary =

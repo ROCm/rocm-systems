@@ -574,11 +574,14 @@ and the instrumentation builders directly; MOI uses the descriptor, CFG-window,
 and workgroup-source contracts directly. Nine one-line renames no longer hide
 which established component owns those operations.
 
-MOI no longer maintains private descriptor allocation-count implementations.
-Its VGPR, ordinary-VGPR/AccVGPR-boundary, and SGPR admission paths consume the
-same descriptor queries as shared analysis, SuperCollider, and final
-validation. The one remaining MOI-specific unified-VGPR query deliberately
-answers a different question needed to distinguish a live accumulator bank.
+Descriptor register facts now have one ConSan authority in
+`consan_descriptor.h`. Analysis, SuperCollider, MOI admission and prologue
+planning, and final validation consume the same VGPR,
+ordinary-VGPR/AccVGPR-boundary, and SGPR queries. Wave size and descriptor
+granularity come from RocJitsu's generic kernel-descriptor contract, so gfx1250
+is treated as mandatory Wave32 even when a producer omits the legacy Wave32
+bit. The former analysis-local and MOI-local decoders, including MOI's
+nominally distinct but equivalent unified-allocation query, are gone.
 
 Synchronization inventory shape now comes directly from the typed request,
 debug, and mutation contract. The mutable `ConSanOptions` compatibility object

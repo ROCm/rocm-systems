@@ -12,63 +12,8 @@ decode_bounded_instruction(Decoder &decoder, std::span<const uint32_t> words,
   return std::move(decoded).value();
 }
 
-[[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
-                                                                 uint32_t wavefront_size) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  const auto kernel_profile =
-      profile ? consan_kernel_target_profile(*profile, wavefront_size) : std::nullopt;
-  return kernel_profile ? kernel_profile->vgpr_allocation_granularity : 0u;
-}
-
-[[nodiscard]] uint32_t descriptor_wavefront_size(rj_code_arch_t arch, const KD &desc) {
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  if (profile && profile->supports_wave32) {
-    const bool wave32 = AMDHSA_BITS_GET(desc.kernel_code_properties,
-                                        kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
-    return wave32 ? 32 : 64;
-  }
-  return 64;
-}
-
-[[nodiscard]] uint16_t descriptor_vgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
-  const uint32_t wavefront_size = descriptor_wavefront_size(arch, desc);
-  const uint32_t granularity = descriptor_vgpr_granularity_for_wavefront(arch, wavefront_size);
-  const uint32_t granulated =
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
-  const uint32_t allocated = (granulated + 1u) * std::max(granularity, 1u);
-  return static_cast<uint16_t>(std::min<uint32_t>(allocated, REGISTER_SET_MAX_VGPRS));
-}
-
-/// Return the portion of a CDNA unified VGPR allocation that belongs to the
-/// ordinary v-register file. ACCUM_OFFSET is a hard boundary whenever the
-/// rounded descriptor allocation extends beyond it: registers at and above
-/// that point back live AccVGPR storage and are not scratch merely because the
-/// ordinary-register liveness set does not mention them.
-[[nodiscard]] uint16_t descriptor_ordinary_vgpr_allocation_count(const KD &desc,
-                                                                 rj_code_arch_t arch) {
-  const uint16_t unified_count = descriptor_vgpr_allocation_count(desc, arch);
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  if (!profile || profile->accumulator_model != ConSanAccumulatorModel::DescriptorPartitioned)
-    return unified_count;
-
-  const uint32_t encoded_accum_offset =
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-  // Zero is the descriptor default for kernels without an accumulator bank.
-  // Treat a boundary as active only when the producer selected a nonzero
-  // ACCUM_OFFSET; this matches the existing resource planner and avoids
-  // truncating ordinary-only kernels to four registers.
-  if (encoded_accum_offset == 0u)
-    return unified_count;
-  const uint32_t accvgpr_base =
-      (encoded_accum_offset + 1u) * profile->accumulator_offset_granularity;
-  return unified_count > accvgpr_base
-             ? static_cast<uint16_t>(std::min<uint32_t>(accvgpr_base, REGISTER_SET_MAX_VGPRS))
-             : unified_count;
-}
-
-[[nodiscard]] std::optional<uint16_t>
-descriptor_ordinary_vgpr_allocation_count(std::span<const uint8_t> image,
-                                          uint64_t descriptor_file_offset, rj_code_arch_t arch) {
+[[nodiscard]] std::optional<uint16_t> read_descriptor_ordinary_vgpr_allocation_count(
+    std::span<const uint8_t> image, uint64_t descriptor_file_offset, rj_code_arch_t arch) {
   if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset)
     return std::nullopt;
   KD desc{};
@@ -77,21 +22,13 @@ descriptor_ordinary_vgpr_allocation_count(std::span<const uint8_t> image,
 }
 
 [[nodiscard]] std::optional<uint16_t>
-descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
-                                 rj_code_arch_t arch) {
+read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
+                                      uint64_t descriptor_file_offset, rj_code_arch_t arch) {
   if (descriptor_file_offset > image.size() || sizeof(KD) > image.size() - descriptor_file_offset)
     return std::nullopt;
   KD desc{};
   std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
   return descriptor_vgpr_allocation_count(desc, arch);
-}
-
-[[nodiscard]] uint16_t descriptor_sgpr_allocation_count(const KD &desc, rj_code_arch_t arch) {
-  constexpr uint32_t kMaxOrdinarySgprs = 106u;
-  const uint32_t granulated = AMDHSA_BITS_GET(
-      desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  return static_cast<uint16_t>(
-      std::min<uint32_t>(amdgpu_kernel_descriptor_sgpr_count(granulated, arch), kMaxOrdinarySgprs));
 }
 
 [[nodiscard]] bool grow_descriptor_sgpr_allocation(KD &desc, uint16_t required_count,
@@ -143,7 +80,7 @@ descriptor_vgpr_allocation_count(std::span<const uint8_t> image, uint64_t descri
   if (required_count <= descriptor_vgpr_allocation_count(desc, arch))
     return true;
 
-  const uint32_t wavefront_size = descriptor_wavefront_size(arch, desc);
+  const uint32_t wavefront_size = kernel_wavefront_size(arch, desc);
   const uint32_t granularity =
       std::max<uint32_t>(descriptor_vgpr_granularity_for_wavefront(arch, wavefront_size), 1u);
   const uint32_t rounded =

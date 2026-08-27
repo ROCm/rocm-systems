@@ -481,11 +481,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           auto [cached, inserted] =
               direct_owner_shift_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
           if (inserted) {
-            cached->second = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+            cached->second =
+                common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
           }
           private_owner_shift = cached->second;
         } else {
-          private_owner_shift = common_moi_private_owner_shift(bytes, *resources, result.warnings);
+          private_owner_shift =
+              common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
         }
         if (!private_owner_shift)
           continue;
@@ -1959,7 +1961,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   std::optional<uint32_t> derived_owner_word;
   if (!options.moi_owner_vgpr && candidate.kernel_descriptor_file_offset) {
     const auto owner_shift =
-        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+        moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     if (!owner_shift)
       return std::nullopt;
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);

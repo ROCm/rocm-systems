@@ -2646,7 +2646,7 @@ void try_apply_owner_epoch_prologue_patch(
       KD original_descriptor{};
       std::memcpy(&original_descriptor, bytes.data() + kernel.descriptor_file_offset,
                   sizeof(original_descriptor));
-      if (sgpr_count > moi_descriptor_wavefront_size(original_descriptor)) {
+      if (sgpr_count > kernel_wavefront_size(arch, original_descriptor)) {
         result.outcome = ConSanTransformOutcome::Unsupported;
         result.warnings.emplace_back(
             "ConSan MOI entry scalar window exceeds one wave-local VGPR carrier");
@@ -2657,7 +2657,7 @@ void try_apply_owner_epoch_prologue_patch(
       const uint32_t original_allocation =
           descriptor_ordinary_vgpr_allocation_count(original_descriptor, arch);
       const uint32_t unified_allocation =
-          moi_descriptor_unified_vgpr_allocation_count(original_descriptor, arch);
+          descriptor_vgpr_allocation_count(original_descriptor, arch);
       const bool has_live_accvgpr_bank = original_allocation < unified_allocation;
       const uint32_t tail_begin = std::max(original_allocation, entry_abi_vgpr_count);
       const uint32_t tail_end = has_live_accvgpr_bank ? original_allocation : kMaxVgprs;
@@ -2952,8 +2952,8 @@ void try_apply_owner_epoch_prologue_patch(
       if (prologue_return_relay)
         prologue_return_target = *prologue_return_relay;
     }
-    const std::optional<uint16_t> owner_shift =
-        moi_descriptor_owner_shift(active_bytes, kernel.descriptor_file_offset, result.errors);
+    const std::optional<uint16_t> owner_shift = moi_descriptor_owner_shift(
+        active_bytes, kernel.descriptor_file_offset, arch, result.errors);
     if (!owner_shift)
       return;
     auto words = build_owner_epoch_prologue_words(

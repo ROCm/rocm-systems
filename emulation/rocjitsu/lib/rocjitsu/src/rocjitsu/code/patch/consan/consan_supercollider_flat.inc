@@ -699,7 +699,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                                      KernelBlockScope(owner_context->scope.blocks)))
                 .first;
       }
-      const auto allocated_vgprs = descriptor_vgpr_allocation_count(original_bytes, owner, arch);
+      const auto allocated_vgprs =
+          read_descriptor_vgpr_allocation_count(original_bytes, owner, arch);
       const Instruction *owner_site_inst =
           owner_context == nullptr
               ? nullptr

@@ -3355,7 +3355,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         return std::nullopt;
       }
       const auto owner_shift =
-          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
       const auto load_owner = instrumentation::build_private_load_b32(
           materialized_owner, *private_layout->owner_offset, arch);
       const auto wait_owner = instrumentation::build_s_wait_private_load0(arch);

@@ -68,12 +68,12 @@ moi_resident_wave_hwreg(rj_code_arch_t arch) {
 
 [[nodiscard]] std::optional<uint16_t>
 common_moi_private_owner_shift(std::span<const uint8_t> image,
-                               const ResolvedMoiScratchPlan &resources,
+                               const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
                                std::vector<std::string> &warnings) {
   std::optional<uint16_t> common_shift;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     std::vector<std::string> errors;
-    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, errors);
+    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, arch, errors);
     if (!shift) {
       warnings.insert(warnings.end(), errors.begin(), errors.end());
       return std::nullopt;
@@ -103,12 +103,12 @@ struct MoiPrivateRecordOwnerPlan {
 
 [[nodiscard]] std::optional<MoiPrivateRecordOwnerPlan> resolve_moi_private_record_owner(
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources,
-    const MoiPrivateEpochLayout &layout, std::vector<std::string> &warnings) {
+    const MoiPrivateEpochLayout &layout, rj_code_arch_t arch, std::vector<std::string> &warnings) {
   if (!layout.owner_offset) {
     warnings.emplace_back("ConSan MOI private owner requires an entry-captured owner slot");
     return std::nullopt;
   }
-  const auto common_shift = common_moi_private_owner_shift(image, resources, warnings);
+  const auto common_shift = common_moi_private_owner_shift(image, resources, arch, warnings);
   if (!common_shift)
     return std::nullopt;
   return MoiPrivateRecordOwnerPlan{.offset = *layout.owner_offset,
@@ -138,7 +138,7 @@ struct MoiRecordOwnerDerivation {
                           " requires an owning kernel descriptor");
       return std::nullopt;
     }
-    owner_shift = moi_descriptor_owner_shift(bytes, *descriptor_file_offset, errors);
+    owner_shift = moi_descriptor_owner_shift(bytes, *descriptor_file_offset, arch, errors);
     if (!owner_shift)
       return std::nullopt;
   }
@@ -179,7 +179,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   std::optional<uint64_t> representative;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     std::vector<std::string> errors;
-    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, errors);
+    const auto shift = moi_descriptor_owner_shift(image, descriptor_offset, arch, errors);
     const auto workgroup_sources =
         moi_descriptor_workgroup_sources(image, descriptor_offset, arch, errors);
     if (!shift || !workgroup_sources) {
@@ -382,7 +382,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
     errors.emplace_back("ConSan MOI sampled sync has an invalid private owner/epoch plan");
     return false;
   }
-  const auto owner_shift = moi_descriptor_owner_shift(bytes, descriptor_file_offset, errors);
+  const auto owner_shift = moi_descriptor_owner_shift(bytes, descriptor_file_offset, arch, errors);
   const auto load_epoch =
       instrumentation::build_private_load_b32(*options.moi_epoch_vgpr, layout.epoch_offset, arch);
   const auto load_owner =
@@ -1005,7 +1005,7 @@ private:
     std::optional<uint16_t> owner_shift = private_owner_shift;
     if (!owner_shift && candidate.kernel_descriptor_file_offset) {
       owner_shift =
-          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, errors);
+          moi_descriptor_owner_shift(bytes, *candidate.kernel_descriptor_file_offset, arch, errors);
     }
     if (!owner_shift)
       return std::nullopt;

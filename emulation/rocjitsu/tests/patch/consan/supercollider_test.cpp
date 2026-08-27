@@ -1024,33 +1024,14 @@ TEST(ConSan, FlatCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
       0x00000000u, // v_mov_b32_e64 v0, s0
       0xD5810001u,
       0x00000001u, // v_mov_b32_e64 v1, s1
-      0xEC05007Cu,
-      0x00000002u,
+      0xEC05007Cu, 0x00000002u,
       0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xEC05007Cu,
-      0x00000006u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xEC05007Cu, 0x00000006u,
       0x00000000u, // flat_load_b32
                    // v6, v[0:1]
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
-      0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u, 0xBF800000u, 0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -6488,7 +6469,11 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
   fixture.first_vgpr_granulated = 0u;
   fixture.second_vgpr_granulated = 0u;
   fixture.first_continuation_live_vgprs = {0u};
-  fixture.second_continuation_live_vgprs = {0u, 3u, 4u, 5u, 6u, 7u};
+  // gfx1250 descriptor value zero already allocates v0:v15. Keep that whole
+  // interval unavailable so the shared helper really requires growth to the
+  // second mandatory-Wave32 descriptor granule.
+  fixture.second_continuation_live_vgprs = {0u, 3u,  4u,  5u,  6u,  7u,  8u,
+                                            9u, 10u, 11u, 12u, 13u, 14u, 15u};
   std::vector<uint8_t> bytes =
       make_two_kernel_shared_helper_code_object(fixture, ROCJITSU_CODE_ARCH_RDNA4, helper_words);
   mutate_elf_header(bytes,
@@ -6518,7 +6503,7 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
   });
   ASSERT_NE(patch, result.patches.end());
   ASSERT_TRUE(patch->scratch_vgpr);
-  EXPECT_EQ(*patch->scratch_vgpr, 8u);
+  EXPECT_EQ(*patch->scratch_vgpr, 16u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[0], first_owner->descriptor_file_offset);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[1], second_owner->descriptor_file_offset);
