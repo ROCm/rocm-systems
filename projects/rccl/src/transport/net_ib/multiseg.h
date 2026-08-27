@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 // Cap on physical segments per registered buffer for the classic NET/IB path.
 // Mirrors NCCL_RMA_MAX_SEGMENTS (net_ib/gin.cc): a ROCm/HIP dma-buf export only
@@ -25,6 +26,32 @@
 #ifndef NCCL_IB_MAX_SEGMENTS
 #define NCCL_IB_MAX_SEGMENTS 16
 #endif
+
+// Connect-time capability encoded in the reserved tail of the fixed-size
+// devName field. This preserves the legacy metadata size and every legacy
+// field offset, so old and new peers can complete the same wire exchange.
+#define NCCL_IB_CAP_MULTISEG (1u << 0)
+#define NCCL_IB_CONNECT_CAPS_MAGIC 0x4d534547u
+
+struct ncclIbConnectCapsTrailer {
+  uint32_t magic;
+  uint32_t caps;
+};
+
+static inline void ncclIbSetConnectCaps(char* devName, size_t len, uint32_t caps) {
+  if (len <= sizeof(struct ncclIbConnectCapsTrailer)) return;
+  const size_t off = len - sizeof(struct ncclIbConnectCapsTrailer);
+  const struct ncclIbConnectCapsTrailer trailer = {NCCL_IB_CONNECT_CAPS_MAGIC, caps};
+  devName[off - 1] = '\0';
+  std::memcpy(devName + off, &trailer, sizeof(trailer));
+}
+
+static inline uint32_t ncclIbGetConnectCaps(const char* devName, size_t len) {
+  if (len < sizeof(struct ncclIbConnectCapsTrailer)) return 0;
+  struct ncclIbConnectCapsTrailer trailer;
+  std::memcpy(&trailer, devName + len - sizeof(trailer), sizeof(trailer));
+  return trailer.magic == NCCL_IB_CONNECT_CAPS_MAGIC ? trailer.caps : 0;
+}
 
 // Return the index of the segment that fully contains [addr, addr+len), or -1
 // if addr is outside every segment or the range straddles a segment boundary

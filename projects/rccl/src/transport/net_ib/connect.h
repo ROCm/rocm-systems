@@ -61,12 +61,16 @@ struct ncclIbConnectionMetadata {
   // The receiver side gets in this member, from the sender, the address of the
   // memory to which the receiver writes the CTS messages.
   uint64_t addr;
-  uint32_t caps;
   int ndevs;
   int tc;
   int sl;
   int isP2p;
 };
+static_assert(offsetof(struct ncclIbConnectionMetadata, ndevs) ==
+                offsetof(struct ncclIbConnectionMetadata, addr) + sizeof(uint64_t),
+              "connection metadata tail must remain wire-compatible");
+static_assert(sizeof(struct ncclIbConnectionMetadata) == offsetof(struct ncclIbConnectionMetadata, isP2p) + sizeof(int),
+              "connection metadata must not add trailing wire bytes");
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 ncclResult_t ncclIbQpInit(struct ncclIbQp* qp);
