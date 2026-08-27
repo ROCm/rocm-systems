@@ -392,6 +392,7 @@ class RocUberTraceCaptureMgr final : public ICaptureMgr,
   // enable SQTT register access through its normal profiling-mode ioctl path.
   bool BeginSqttTrace(VirtualGPU* gpu);
   void EndSqttTrace(VirtualGPU* gpu);
+
   void CollectSqttResults(VirtualGPU* gpu);
   void FreeSqttResources();
 
