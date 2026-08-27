@@ -8,6 +8,9 @@
  * librccl.so; every dependency the source references is satisfied by no-op
  * stubs in DevRuntimeTestsStubs.cc (including host-memory fakes for the HIP
  * VMM driver API).
+ *
+ * Suites appear in the same order as the functions they cover in
+ * dev_runtime.cc.
  *************************************************************************/
 
 #include DEV_RUNTIME_CC_PATH
@@ -18,181 +21,36 @@
 #include <memory>
 #include <vector>
 
-// Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
-// a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.
-class SymMemoryObtainTest : public ::testing::Test {
-protected:
-  std::unique_ptr<ncclComm> commStorage;
-  ncclComm* comm = nullptr;
-  int lsaRank0 = 0;
-
-  void SetUp() override {
-    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
-    comm = commStorage.get();
-
-    comm->nRanks = 1;
-    comm->rank = 0;
-    comm->cudaDev = 0;
-    comm->bootstrap = reinterpret_cast<void*>(0x1);  // opaque; bootstrap* are stubbed
-    comm->globalRmaProxySupport = false;
-    comm->config.numRmaCtx = 0;
-
-    ncclDevrState* devr = &comm->devrState;
-    devr->lsaSelf = 0;
-    devr->lsaSize = 1;
-    devr->nLsaTeams = 1;
-    devr->lsaRankList = &lsaRank0;
-    devr->granularity = 4096;
-    devr->bigSize = 1 << 20;
-    devr->ginEnabled = false;
-    devr->lsaFlatBase = nullptr;
-    devr->memHead = nullptr;
-    devr->teamHead = nullptr;
-  }
-};
-
-// Regression guard for the window memory leak. Obtaining then destroying the
-// memory must run the free path, which unlinks mem from devrState.memHead.
-TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
-  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
-  void* userAddr = reinterpret_cast<void*>(0x100000);
-  const size_t size = 4096;
-
-  struct ncclDevrMemory* mem = nullptr;
-  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, size, /*winFlags=*/0, &mem),
-            ncclSuccess);
-  ASSERT_NE(mem, nullptr);
-  ASSERT_EQ(comm->devrState.memHead, mem);
-
-  symMemoryDestroy(comm, mem);
-
-  EXPECT_EQ(comm->devrState.memHead, nullptr);
-}
-
 // ---------------------------------------------------------------------------
-// AICOMRCCL-835 finalize-drain coverage.
-//
-// A Device-API consumer can create a symmetric-window resource (leaving an
-// ncclDevrMemory on devrState.memHead) without a matching destroy. ncclDevrFinalize
-// must drain those leftovers before freeing the LSA flat VA reservation. This
-// test drives the *real* init/finalize lifecycle (ncclDevrInitOnce pairs with
-// ncclDevrFinalize) so the state is self-consistent, then asserts the drain
-// empties memHead.
-class DevrFinalizeDrainTest : public ::testing::Test {
-protected:
-  std::unique_ptr<ncclComm> commStorage;
-  std::unique_ptr<ncclPeerInfo> peerStorage;
-  ncclComm* comm = nullptr;
+// ncclSymIsHostSegment: true for host-NUMA, and on AMD from ROCm 7.12 also for
+// plain host. The second arm is #if-gated, so the guard is mirrored below to
+// keep the suite passing on either toolchain.
 
-  void SetUp() override {
-    commStorage = std::make_unique<ncclComm>();
-    comm = commStorage.get();
-
-    comm->nRanks = 1;
-    comm->rank = 0;
-    comm->cudaDev = 0;
-    comm->localRanks = 1;
-    comm->bootstrap = reinterpret_cast<void*>(0x1);
-    comm->symmetricSupport = 1;  // required to reach the AICOMRCCL-835 drain block
-    comm->globalRmaProxySupport = false;
-    comm->config.numRmaCtx = 0;
-
-    // ncclDevrInitOnce (with WIN_STRIDE unset) sizes bigSize from peerInfo.
-    peerStorage = std::make_unique<ncclPeerInfo>();
-    peerStorage->totalGlobalMem = 1 << 20;
-    comm->peerInfo = peerStorage.get();
-  }
-};
-
-TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
-  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
-
-  // Simulate a resource window whose owning devcomm was never destroyed: obtain
-  // symmetric memory and leave it linked on memHead.
-  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
-  void* userAddr = reinterpret_cast<void*>(0x100000);
-  struct ncclDevrMemory* mem = nullptr;
-  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
-            ncclSuccess);
-  ASSERT_EQ(comm->devrState.memHead, mem);
-
-  // Finalize must drain the leftover before freeing the flat VA reservation.
-  ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
-
-  EXPECT_EQ(comm->devrState.memHead, nullptr);
+// Branch: the unconditional host-NUMA check.
+TEST(SymIsHostSegment, HostNuma_ReturnsTrue) {
+  EXPECT_TRUE(ncclSymIsHostSegment(hipMemLocationTypeHostNuma));
 }
 
+#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
+// Branch: AMD allocates host segments as plain host, so they count as sysmem.
+TEST(SymIsHostSegment, Host_ReturnsTrue) {
+  EXPECT_TRUE(ncclSymIsHostSegment(hipMemLocationTypeHost));
+}
+#else
+// Without the AMD arm compiled in, plain host is not a sysmem segment.
+TEST(SymIsHostSegment, Host_ReturnsFalse) {
+  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeHost));
+}
+#endif
 
-// ---------------------------------------------------------------------------
-
-// ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
-// Each && arm short-circuits, so each needs its own test.
-
-// Branch: win == nullptr.
-TEST(DevrWindowPredicates, IsMultiSegment_NullWindow_ReturnsFalse) {
-  struct ncclDevrWindow* win{};
-  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(win));
+// Falls through every check.
+TEST(SymIsHostSegment, Device_ReturnsFalse) {
+  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeDevice));
 }
 
-// Branch: win->memory == nullptr.
-TEST(DevrWindowPredicates, IsMultiSegment_NullMemory_ReturnsFalse) {
-  struct ncclDevrWindow win{};
-  win.memory = nullptr;
-  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(&win));
-}
-
-// Branch: maxGlobalNumSegments == 1, the boundary of `> 1`.
-TEST(DevrWindowPredicates, IsMultiSegment_SingleSegment_ReturnsFalse) {
-  struct ncclDevrWindow win{};
-  struct ncclDevrMemory memory{};
-  memory.maxGlobalNumSegments = 1;
-  win.memory = &memory;
-  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(&win));
-}
-
-// All conditions pass.
-TEST(DevrWindowPredicates, IsMultiSegment_MultipleSegments_ReturnsTrue) {
-  struct ncclDevrWindow win{};
-  struct ncclDevrMemory memory{};
-  memory.maxGlobalNumSegments = 2;
-  win.memory = &memory;
-  EXPECT_TRUE(ncclDevrWindowIsMultiSegment(&win));
-}
-
-
-// ---------------------------------------------------------------------------
-
-// ncclDevrWindowHasSysmemSegment: same shape, ending in globalHasSysmemSegment.
-
-// Branch: win == nullptr.
-TEST(DevrWindowPredicates, HasSysmemSegment_NullWindow_ReturnsFalse) {
-  struct ncclDevrWindow* win{};
-  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(win));
-}
-
-// Branch: win->memory == nullptr.
-TEST(DevrWindowPredicates, HasSysmemSegment_NullMemory_ReturnsFalse) {
-  struct ncclDevrWindow win{};
-  win.memory = nullptr;
-  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(&win));
-}
-
-// Branch: no rank has a sysmem segment.
-TEST(DevrWindowPredicates, HasSysmemSegment_NoSysmemSegment_ReturnsFalse) {
-  struct ncclDevrWindow win{};
-  struct ncclDevrMemory memory{};
-  memory.globalHasSysmemSegment = false;
-  win.memory = &memory;
-  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(&win));
-}
-
-// All conditions pass.
-TEST(DevrWindowPredicates, HasSysmemSegment_HasSysmemSegment_ReturnsTrue) {
-  struct ncclDevrWindow win{};
-  struct ncclDevrMemory memory{};
-  memory.globalHasSysmemSegment = true;
-  win.memory = &memory;
-  EXPECT_TRUE(ncclDevrWindowHasSysmemSegment(&win));
+// Zero value, as a value-initialised symLsaMessage::type would hold.
+TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
+  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeInvalid));
 }
 
 
@@ -306,33 +164,180 @@ TEST_F(DevrIsOneLsaTeamTest, LsaSizeBelowNRanks_ReturnsFalse) {
 
 
 // ---------------------------------------------------------------------------
-// ncclSymIsHostSegment: true for host-NUMA, and on AMD from ROCm 7.12 also for
-// plain host. The second arm is #if-gated, so the guard is mirrored below to
-// keep the suite passing on either toolchain.
+// ncclDevrFinalize, AICOMRCCL-835 finalize-drain coverage.
+//
+// A Device-API consumer can create a symmetric-window resource (leaving an
+// ncclDevrMemory on devrState.memHead) without a matching destroy. ncclDevrFinalize
+// must drain those leftovers before freeing the LSA flat VA reservation. This
+// test drives the *real* init/finalize lifecycle (ncclDevrInitOnce pairs with
+// ncclDevrFinalize) so the state is self-consistent, then asserts the drain
+// empties memHead.
+class DevrFinalizeDrainTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  std::unique_ptr<ncclPeerInfo> peerStorage;
+  ncclComm* comm = nullptr;
 
-// Branch: the unconditional host-NUMA check.
-TEST(SymIsHostSegment, HostNuma_ReturnsTrue) {
-  EXPECT_TRUE(ncclSymIsHostSegment(hipMemLocationTypeHostNuma));
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();
+    comm = commStorage.get();
+
+    comm->nRanks = 1;
+    comm->rank = 0;
+    comm->cudaDev = 0;
+    comm->localRanks = 1;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);
+    comm->symmetricSupport = 1;  // required to reach the AICOMRCCL-835 drain block
+    comm->globalRmaProxySupport = false;
+    comm->config.numRmaCtx = 0;
+
+    // ncclDevrInitOnce (with WIN_STRIDE unset) sizes bigSize from peerInfo.
+    peerStorage = std::make_unique<ncclPeerInfo>();
+    peerStorage->totalGlobalMem = 1 << 20;
+    comm->peerInfo = peerStorage.get();
+  }
+};
+
+TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+
+  // Simulate a resource window whose owning devcomm was never destroyed: obtain
+  // symmetric memory and leave it linked on memHead.
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* userAddr = reinterpret_cast<void*>(0x100000);
+  struct ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  ASSERT_EQ(comm->devrState.memHead, mem);
+
+  // Finalize must drain the leftover before freeing the flat VA reservation.
+  ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
+
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
-#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
-// Branch: AMD allocates host segments as plain host, so they count as sysmem.
-TEST(SymIsHostSegment, Host_ReturnsTrue) {
-  EXPECT_TRUE(ncclSymIsHostSegment(hipMemLocationTypeHost));
-}
-#else
-// Without the AMD arm compiled in, plain host is not a sysmem segment.
-TEST(SymIsHostSegment, Host_ReturnsFalse) {
-  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeHost));
-}
-#endif
 
-// Falls through every check.
-TEST(SymIsHostSegment, Device_ReturnsFalse) {
-  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeDevice));
+// ---------------------------------------------------------------------------
+// symMemoryObtain / symMemoryDestroy.
+//
+// Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
+// a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.
+class SymMemoryObtainTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  int lsaRank0 = 0;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+
+    comm->nRanks = 1;
+    comm->rank = 0;
+    comm->cudaDev = 0;
+    comm->bootstrap = reinterpret_cast<void*>(0x1);  // opaque; bootstrap* are stubbed
+    comm->globalRmaProxySupport = false;
+    comm->config.numRmaCtx = 0;
+
+    ncclDevrState* devr = &comm->devrState;
+    devr->lsaSelf = 0;
+    devr->lsaSize = 1;
+    devr->nLsaTeams = 1;
+    devr->lsaRankList = &lsaRank0;
+    devr->granularity = 4096;
+    devr->bigSize = 1 << 20;
+    devr->ginEnabled = false;
+    devr->lsaFlatBase = nullptr;
+    devr->memHead = nullptr;
+    devr->teamHead = nullptr;
+  }
+};
+
+// Regression guard for the window memory leak. Obtaining then destroying the
+// memory must run the free path, which unlinks mem from devrState.memHead.
+TEST_F(SymMemoryObtainTest, DestroyFreesMemory) {
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  void* userAddr = reinterpret_cast<void*>(0x100000);
+  const size_t size = 4096;
+
+  struct ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, userAddr, size, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  ASSERT_NE(mem, nullptr);
+  ASSERT_EQ(comm->devrState.memHead, mem);
+
+  symMemoryDestroy(comm, mem);
+
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
-// Zero value, as a value-initialised symLsaMessage::type would hold.
-TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
-  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeInvalid));
+
+// ---------------------------------------------------------------------------
+// ncclDevrWindowIsMultiSegment: win && win->memory && maxGlobalNumSegments > 1.
+// Each && arm short-circuits, so each needs its own test.
+
+// Branch: win == nullptr.
+TEST(DevrWindowPredicates, IsMultiSegment_NullWindow_ReturnsFalse) {
+  struct ncclDevrWindow* win{};
+  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(win));
+}
+
+// Branch: win->memory == nullptr.
+TEST(DevrWindowPredicates, IsMultiSegment_NullMemory_ReturnsFalse) {
+  struct ncclDevrWindow win{};
+  win.memory = nullptr;
+  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(&win));
+}
+
+// Branch: maxGlobalNumSegments == 1, the boundary of `> 1`.
+TEST(DevrWindowPredicates, IsMultiSegment_SingleSegment_ReturnsFalse) {
+  struct ncclDevrWindow win{};
+  struct ncclDevrMemory memory{};
+  memory.maxGlobalNumSegments = 1;
+  win.memory = &memory;
+  EXPECT_FALSE(ncclDevrWindowIsMultiSegment(&win));
+}
+
+// All conditions pass.
+TEST(DevrWindowPredicates, IsMultiSegment_MultipleSegments_ReturnsTrue) {
+  struct ncclDevrWindow win{};
+  struct ncclDevrMemory memory{};
+  memory.maxGlobalNumSegments = 2;
+  win.memory = &memory;
+  EXPECT_TRUE(ncclDevrWindowIsMultiSegment(&win));
+}
+
+
+// ---------------------------------------------------------------------------
+// ncclDevrWindowHasSysmemSegment: same shape, ending in globalHasSysmemSegment.
+
+// Branch: win == nullptr.
+TEST(DevrWindowPredicates, HasSysmemSegment_NullWindow_ReturnsFalse) {
+  struct ncclDevrWindow* win{};
+  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(win));
+}
+
+// Branch: win->memory == nullptr.
+TEST(DevrWindowPredicates, HasSysmemSegment_NullMemory_ReturnsFalse) {
+  struct ncclDevrWindow win{};
+  win.memory = nullptr;
+  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(&win));
+}
+
+// Branch: no rank has a sysmem segment.
+TEST(DevrWindowPredicates, HasSysmemSegment_NoSysmemSegment_ReturnsFalse) {
+  struct ncclDevrWindow win{};
+  struct ncclDevrMemory memory{};
+  memory.globalHasSysmemSegment = false;
+  win.memory = &memory;
+  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(&win));
+}
+
+// All conditions pass.
+TEST(DevrWindowPredicates, HasSysmemSegment_HasSysmemSegment_ReturnsTrue) {
+  struct ncclDevrWindow win{};
+  struct ncclDevrMemory memory{};
+  memory.globalHasSysmemSegment = true;
+  win.memory = &memory;
+  EXPECT_TRUE(ncclDevrWindowHasSysmemSegment(&win));
 }
