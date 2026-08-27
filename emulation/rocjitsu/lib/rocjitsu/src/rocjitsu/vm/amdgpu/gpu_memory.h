@@ -29,6 +29,7 @@
 #include <string>
 #include <sys/uio.h>
 #include <type_traits>
+#include <unistd.h>
 #include <unordered_map>
 #include <utility>
 
@@ -410,14 +411,14 @@ public:
     assert((size == 4 || size == 8) && (addr & PAGE_MASK) + size <= PAGE_SIZE);
 
     if (vmid == 0) {
-      atomic_rmw_unmapped(addr, size, 0, fn);
+      atomic_rmw_unmapped(addr, size, 0, vmid, fn);
       return;
     }
 
     std::shared_lock vmid_lock(vmid_mutex_);
     auto vmid_entry = vmid_table_.find(vmid);
     if (vmid_entry == vmid_table_.end()) {
-      atomic_rmw_unmapped(addr, size, 0, fn);
+      atomic_rmw_unmapped(addr, size, 0, vmid, fn);
       return;
     }
 
@@ -431,7 +432,7 @@ public:
       return;
     }
 
-    atomic_rmw_unmapped(addr, size, entry.client_pid, fn);
+    atomic_rmw_unmapped(addr, size, entry.client_pid, vmid, fn);
   }
 
   /// @brief Copy a contiguous range between two VMID-scoped addresses.
@@ -727,6 +728,11 @@ public:
 private:
   friend class GpuMemoryTestAccess;
 
+  enum class ProcessVmFailureMode {
+    Warn,
+    SuppressExpectedEfault,
+  };
+
   // The largest supported atomic is eight bytes, so discard the three byte
   // offset bits before choosing a lock stripe.
   static constexpr unsigned kBackingAtomicGranuleShift = 3;
@@ -768,31 +774,50 @@ private:
   }
 
   template <typename F>
-  void atomic_rmw_unmapped(uint64_t addr, uint32_t size, pid_t client_pid, F &fn) {
+  void atomic_rmw_unmapped(uint64_t addr, uint32_t size, pid_t client_pid, uint32_t vmid, F &fn) {
     auto *target = reinterpret_cast<uint8_t *>(addr);
     if (passthrough_ && addr < kUserSpaceLimit && size <= kUserSpaceLimit - addr &&
         target != nullptr) {
+      // A wave-scoped translation miss may still be a legitimate pageable host
+      // pointer in local mode. Access it through the kernel so a wild GPU VA
+      // returns EFAULT and falls back to sparse storage instead of delivering a
+      // host SIGSEGV. VMID zero remains the explicit direct-passthrough API.
+      if (vmid != 0) {
+        atomic_rmw_fallback(addr, size, getpid(), ProcessVmFailureMode::SuppressExpectedEfault, fn);
+        return;
+      }
       if (addressable_prefix(target, size) == size)
         atomic_rmw_mapped(target, fn);
       else
         atomic_rmw_discarded(fn);
       return;
     }
-    atomic_rmw_fallback(addr, size, client_pid, fn);
+    atomic_rmw_fallback(addr, size, client_pid, ProcessVmFailureMode::Warn, fn);
   }
 
   template <typename F>
-  void atomic_rmw_fallback(uint64_t addr, uint32_t size, pid_t client_pid, F &fn) {
-    uintptr_t key = static_cast<uintptr_t>(addr ^ (addr >> 32));
-    if (client_pid > 0)
-      key ^= static_cast<uintptr_t>(client_pid) * kClientPidHashSalt;
-    else
-      key ^= reinterpret_cast<uintptr_t>(this);
+  void atomic_rmw_fallback(uint64_t addr, uint32_t size, pid_t client_pid,
+                           ProcessVmFailureMode failure_mode, F &fn) {
+    uintptr_t key;
+    if (failure_mode == ProcessVmFailureMode::SuppressExpectedEfault) {
+      // Self-passthrough aliases name the same host bytes as VMID-zero and
+      // identity-mapped PTE accesses, so all three must rendezvous on the raw
+      // host-address stripe used by atomic_rmw_mapped().
+      assert(client_pid == getpid());
+      key = static_cast<uintptr_t>(addr);
+    } else {
+      key = static_cast<uintptr_t>(addr ^ (addr >> 32));
+      if (client_pid > 0)
+        key ^= static_cast<uintptr_t>(client_pid) * kClientPidHashSalt;
+      else
+        key ^= reinterpret_cast<uintptr_t>(this);
+    }
 
     std::lock_guard lock(backing_atomic_mutex(key));
     std::array<uint8_t, sizeof(uint64_t)> value{};
     const bool client_storage =
-        client_pid > 0 && read_client_memory_for_pid(addr, value.data(), size, client_pid);
+        client_pid > 0 &&
+        read_client_memory_for_pid(addr, value.data(), size, client_pid, failure_mode);
     if (!client_storage) {
       for (uint32_t i = 0; i < size; ++i)
         value[i] = simdojo::SparseMemory::read8(addr + i);
@@ -801,7 +826,7 @@ private:
     fn(value.data());
 
     if (client_storage) {
-      write_client_memory_for_pid(addr, value.data(), size, client_pid);
+      write_client_memory_for_pid(addr, value.data(), size, client_pid, failure_mode);
       return;
     }
     for (uint32_t i = 0; i < size; ++i)
@@ -1315,7 +1340,8 @@ private:
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
     std::memset(dst, 0, len);
-    return with_page_mapping(
+    bool passthrough_copied = true;
+    const bool mapping_found = with_page_mapping(
         addr, vmid, [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
           const size_t access_begin = addr & PAGE_MASK;
           if (pte) {
@@ -1328,18 +1354,29 @@ private:
               note_clipped_mapped_access("read", addr, len, vmid);
             return;
           }
+          if (vmid != 0) {
+            // Passthrough is enabled only when target and simulator share an
+            // address space. Let the kernel perform the actual self-copy: a
+            // legitimate pageable pointer preserves identity semantics, while
+            // an invalid GPU VA fails with EFAULT instead of crashing the host.
+            passthrough_copied = read_client_memory_for_pid(
+                addr, dst, len, getpid(), ProcessVmFailureMode::SuppressExpectedEfault);
+            return;
+          }
           auto *host_ptr = passthrough_page + access_begin;
           for_each_addressable_span(host_ptr, len, [&](size_t value_offset, size_t span_size) {
             std::memcpy(static_cast<uint8_t *>(dst) + value_offset, host_ptr + value_offset,
                         span_size);
           });
         });
+    return mapping_found && passthrough_copied;
   }
 
   bool write_mapped(uint64_t addr, const void *src, size_t len, uint32_t vmid) {
     if ((addr & PAGE_MASK) + len > PAGE_SIZE)
       return false;
-    return with_page_mapping(
+    bool passthrough_copied = true;
+    const bool mapping_found = with_page_mapping(
         addr, vmid, [&](const KfdProcess::PageTableEntry *pte, uint8_t *passthrough_page) {
           const size_t access_begin = addr & PAGE_MASK;
           if (pte) {
@@ -1353,12 +1390,18 @@ private:
               note_clipped_mapped_access("write", addr, len, vmid);
             return;
           }
+          if (vmid != 0) {
+            passthrough_copied = write_client_memory_for_pid(
+                addr, src, len, getpid(), ProcessVmFailureMode::SuppressExpectedEfault);
+            return;
+          }
           auto *host_ptr = passthrough_page + access_begin;
           for_each_addressable_span(host_ptr, len, [&](size_t value_offset, size_t span_size) {
             std::memcpy(host_ptr + value_offset, static_cast<const uint8_t *>(src) + value_offset,
                         span_size);
           });
         });
+    return mapping_found && passthrough_copied;
   }
 
   /// @brief Run @p fn over a fully-backed, page-bounded host span with the
@@ -1458,18 +1501,20 @@ private:
       if (rc == static_cast<ssize_t>(len))
         return true;
     }
-    return read_client_memory_for_pid(addr, dst, len, client_pid_for_vmid(vmid));
+    return read_client_memory_for_pid(addr, dst, len, client_pid_for_vmid(vmid),
+                                      ProcessVmFailureMode::Warn);
   }
 
-  static bool read_client_memory_for_pid(uint64_t addr, void *dst, size_t len, pid_t pid) {
+  static bool read_client_memory_for_pid(uint64_t addr, void *dst, size_t len, pid_t pid,
+                                         ProcessVmFailureMode failure_mode) {
     if (pid <= 0)
       return false;
     iovec local{dst, len};
     iovec remote{reinterpret_cast<void *>(addr), len};
     ssize_t rc = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+    const int saved_errno = errno;
     if (rc != static_cast<ssize_t>(len)) {
-      util::Logger::warn("process_vm_readv failed: addr=0x", std::hex, addr, " pid=", std::dec, pid,
-                         " rc=", rc, " errno=", errno);
+      note_process_vm_failure("process_vm_readv", addr, len, pid, rc, saved_errno, failure_mode);
       return false;
     }
     return true;
@@ -1483,21 +1528,33 @@ private:
       if (rc == static_cast<ssize_t>(len))
         return true;
     }
-    return write_client_memory_for_pid(addr, src, len, client_pid_for_vmid(vmid));
+    return write_client_memory_for_pid(addr, src, len, client_pid_for_vmid(vmid),
+                                       ProcessVmFailureMode::Warn);
   }
 
-  static bool write_client_memory_for_pid(uint64_t addr, const void *src, size_t len, pid_t pid) {
+  static bool write_client_memory_for_pid(uint64_t addr, const void *src, size_t len, pid_t pid,
+                                          ProcessVmFailureMode failure_mode) {
     if (pid <= 0)
       return false;
     iovec local{const_cast<void *>(src), len};
     iovec remote{reinterpret_cast<void *>(addr), len};
     ssize_t rc = process_vm_writev(pid, &local, 1, &remote, 1, 0);
+    const int saved_errno = errno;
     if (rc != static_cast<ssize_t>(len)) {
-      util::Logger::warn("process_vm_writev failed: addr=0x", std::hex, addr, " pid=", std::dec,
-                         pid, " rc=", rc, " errno=", errno);
+      note_process_vm_failure("process_vm_writev", addr, len, pid, rc, saved_errno, failure_mode);
       return false;
     }
     return true;
+  }
+
+  static void note_process_vm_failure(const char *operation, uint64_t addr, size_t len, pid_t pid,
+                                      ssize_t rc, int saved_errno,
+                                      ProcessVmFailureMode failure_mode) {
+    if (failure_mode == ProcessVmFailureMode::SuppressExpectedEfault && rc == -1 &&
+        saved_errno == EFAULT)
+      return;
+    util::Logger::warn(operation, " failed: addr=0x", std::hex, addr, " pid=", std::dec, pid,
+                       " size=", len, " rc=", rc, " errno=", saved_errno);
   }
 
   simdojo::Port *cpl_ = nullptr;

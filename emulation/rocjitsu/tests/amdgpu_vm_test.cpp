@@ -47,6 +47,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <new>
@@ -1663,6 +1664,60 @@ TEST(GpuMemoryThreadingTest, AtomicRmwKeepsStorageIdentityAcrossConcurrentMap) {
   EXPECT_EQ(*target, 2u);
 }
 
+TEST(GpuMemoryThreadingTest, SelfPassthroughAtomicSerializesWithVmidZeroAlias) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kVmid = 17;
+
+  KfdProcess process(kVmid);
+  memory.register_process(kVmid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  alignas(uint32_t) uint32_t backing = 0;
+  const uint64_t addr = reinterpret_cast<uint64_t>(&backing);
+  std::promise<void> vmid_zero_has_read;
+  std::promise<void> release_vmid_zero;
+  auto release = release_vmid_zero.get_future().share();
+  std::promise<void> vmid_atomic_done;
+  auto done = vmid_atomic_done.get_future();
+
+  std::thread vmid_zero_atomic([&] {
+    memory.atomic_rmw(
+        addr, sizeof(backing),
+        [&](uint8_t *storage) {
+          uint32_t value = 0;
+          std::memcpy(&value, storage, sizeof(value));
+          vmid_zero_has_read.set_value();
+          release.wait();
+          ++value;
+          std::memcpy(storage, &value, sizeof(value));
+        },
+        0);
+  });
+  vmid_zero_has_read.get_future().wait();
+
+  std::thread vmid_atomic([&] {
+    memory.atomic_rmw(
+        addr, sizeof(backing),
+        [](uint8_t *storage) {
+          uint32_t value = 0;
+          std::memcpy(&value, storage, sizeof(value));
+          ++value;
+          std::memcpy(storage, &value, sizeof(value));
+        },
+        kVmid);
+    vmid_atomic_done.set_value();
+  });
+
+  EXPECT_EQ(done.wait_for(std::chrono::milliseconds(250)), std::future_status::timeout)
+      << "registered-VMID self-passthrough atomic bypassed the VMID-zero host-address lock";
+  release_vmid_zero.set_value();
+  vmid_zero_atomic.join();
+  vmid_atomic.join();
+
+  EXPECT_EQ(backing, 2u);
+}
+
 TEST(GpuMemoryThreadingTest, ReadersRemainSafeWhilePagesAreRemapped) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
@@ -1739,6 +1794,61 @@ TEST(GpuMemoryTest, RegisteredVmidPassthroughMissRespectsUserSpaceLimit) {
   EXPECT_EQ(memory.resolve_host_ptr(kUserSpaceLimit + KfdProcess::kPageSize + 0x123, kPid),
             nullptr);
   EXPECT_EQ(memory.resolve_host_ptr(0x4000, kPid), reinterpret_cast<uint8_t *>(0x4000));
+}
+
+TEST(GpuMemoryTest, RegisteredVmidPassthroughMissSafelyAccessesLocalHostMemory) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  uint32_t backing = 0x12345678;
+  const uint64_t addr = reinterpret_cast<uint64_t>(&backing);
+  EXPECT_EQ(memory.read32(addr, kPid), backing);
+
+  constexpr uint32_t kReplacement = 0xa5a55a5a;
+  memory.write32(addr, kReplacement, kPid);
+  EXPECT_EQ(backing, kReplacement);
+
+  memory.atomic_rmw(
+      addr, sizeof(backing),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kPid);
+  EXPECT_EQ(backing, kReplacement + 1);
+}
+
+TEST(GpuMemoryTest, RegisteredVmidInvalidPassthroughMissUsesSparseFallback) {
+  amdgpu::GpuMemory memory("memory");
+  memory.set_passthrough(true);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kUnmappedAddr = 0x4000;
+
+  KfdProcess process(kPid);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+
+  constexpr uint32_t kInitial = 41;
+  memory.write32(kUnmappedAddr, kInitial, kPid);
+  EXPECT_EQ(memory.read32(kUnmappedAddr, kPid), kInitial);
+
+  memory.atomic_rmw(
+      kUnmappedAddr, sizeof(uint32_t),
+      [](uint8_t *storage) {
+        uint32_t value = 0;
+        std::memcpy(&value, storage, sizeof(value));
+        ++value;
+        std::memcpy(storage, &value, sizeof(value));
+      },
+      kPid);
+  EXPECT_EQ(memory.read32(kUnmappedAddr, kPid), kInitial + 1);
 }
 
 TEST(GpuMemoryTest, UnregisteredVmidPassthroughRespectsUserSpaceLimit) {
