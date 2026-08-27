@@ -17,7 +17,6 @@ namespace {
 static_assert(
     std::same_as<decltype(retry_patch_consan_moi_from_inventory(
                      std::declval<ConSanTransformArtifacts>(), std::declval<ConSanOptions>(),
-                     std::declval<const ConSanMoiInventoryRetryConfig &>(),
                      std::declval<std::span<const uint8_t>>())),
                  ConSanTransformArtifacts>);
 
@@ -39,15 +38,6 @@ static_assert(
   return options;
 }
 
-[[nodiscard]] ConSanMoiInventoryRetryConfig moi_inventory_retry_config(const ConSanOptions &options,
-                                                                       bool bind_fault = true) {
-  return {
-      .resources = static_cast<const BoundRuntimeResources &>(options),
-      .fault =
-          bind_fault ? std::optional{static_cast<const MutationRequest &>(options)} : std::nullopt,
-  };
-}
-
 TEST(ConSanMoi, FaultRetryRejectsDryRunFaultRequest) {
   const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
   ConSanOptions inventory_options = release_last_record_replay_options(/*with_atomic_fault=*/false);
@@ -58,8 +48,8 @@ TEST(ConSanMoi, FaultRetryRejectsDryRunFaultRequest) {
 
   ConSanOptions dry_run = release_last_record_replay_options(/*with_atomic_fault=*/true);
   dry_run.fault_dry_run = true;
-  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), inventory_options, moi_inventory_retry_config(dry_run), bytes);
+  const ConSanTransformArtifacts retried =
+      retry_patch_consan_moi_from_inventory(std::move(inventory), dry_run, bytes);
 
   EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(retried.modified());
@@ -85,8 +75,8 @@ TEST(ConSanMoi, AtomicWrongAddressRetryFromInventoryMatchesFreshLiveTransform) {
   // explicitly instead of relying only on the ordinary Unchanged case.
   inventory.outcome = ConSanTransformOutcome::Unsupported;
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, live);
-  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
+  const ConSanTransformArtifacts retried =
+      retry_patch_consan_moi_from_inventory(std::move(inventory), live, bytes);
 
   ASSERT_EQ(retried.outcome, fresh.outcome)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
@@ -115,35 +105,14 @@ TEST(ConSanMoi, UnsatisfiedLateFaultRetryMatchesFreshRejection) {
   ConSanOptions live = release_last_record_replay_options(/*with_atomic_fault=*/true);
   live.fault_site_identity = "missing-site";
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, live);
-  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
+  const ConSanTransformArtifacts retried =
+      retry_patch_consan_moi_from_inventory(std::move(inventory), live, bytes);
 
   EXPECT_EQ(retried.outcome, fresh.outcome);
   EXPECT_EQ(retried.mutation.fault.applied, 0u);
   EXPECT_EQ(retried.replacement, fresh.replacement);
   EXPECT_EQ(retried.errors, fresh.errors);
   EXPECT_EQ(retried.warnings, fresh.warnings);
-}
-
-TEST(ConSanMoi, DisabledTypedFaultUsesReportOnlyRetryPath) {
-  const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
-  ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
-  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
-  ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
-
-  ConSanOptions live = inventory_options;
-  live.moi_report_buffer_address = 0x123456780000ull;
-  live.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
-  const ConSanTransformArtifacts absent = retry_patch_consan_moi_from_inventory(
-      inventory, inventory_options, moi_inventory_retry_config(live, /*bind_fault=*/false), bytes);
-  const ConSanTransformArtifacts disabled = retry_patch_consan_moi_from_inventory(
-      inventory, inventory_options, moi_inventory_retry_config(live), bytes);
-
-  EXPECT_EQ(disabled.outcome, absent.outcome);
-  EXPECT_EQ(disabled.modified(), absent.modified());
-  EXPECT_EQ(disabled.replacement, absent.replacement);
-  EXPECT_EQ(disabled.errors, absent.errors);
-  EXPECT_EQ(disabled.warnings, absent.warnings);
 }
 
 TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
@@ -199,11 +168,9 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   const auto [fresh, fresh_ms] = timed([&] { return test_lower_consan(bytes, live); });
   ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(fresh.errors) << testing::PrintToString(fresh.warnings);
-  const ConSanMoiInventoryRetryConfig retry_config = moi_inventory_retry_config(live);
   ConSanTransformArtifacts retry_inventory = inventory;
   const auto [retried, retry_ms] = timed([&] {
-    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), inventory_options,
-                                                 retry_config, bytes);
+    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), live, bytes);
   });
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
@@ -267,8 +234,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
   ConSanTransformArtifacts retry_inventory = inventory;
   const auto [fresh, fresh_ms] = timed([&] { return test_lower_consan(bytes, live); });
   const auto [retried, retry_ms] = timed([&] {
-    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), inventory_options,
-                                                 moi_inventory_retry_config(live), bytes);
+    return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), live, bytes);
   });
 
   ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
@@ -562,12 +528,8 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   ASSERT_EQ(live.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(live.errors) << testing::PrintToString(live.warnings);
   ASSERT_EQ(live.mutation.fault.applied, 1u);
-  const ConSanMoiInventoryRetryConfig retry{
-      .resources = static_cast<const BoundRuntimeResources &>(live_options),
-      .fault = static_cast<const MutationRequest &>(live_options),
-  };
   const ConSanTransformArtifacts retried =
-      retry_patch_consan_moi_from_inventory(pristine, pristine_options, retry, bytes);
+      retry_patch_consan_moi_from_inventory(pristine, live_options, bytes);
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
   EXPECT_EQ(retried.mutation.fault.applied, 1u);
@@ -623,8 +585,8 @@ TEST(ConSanMoi, LateIncompleteBarrierDropRetryMatchesFreshSafety) {
                                ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
             0u);
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, live);
-  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
+  const ConSanTransformArtifacts retried =
+      retry_patch_consan_moi_from_inventory(std::move(inventory), live, bytes);
 
   EXPECT_EQ(fresh.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_EQ(retried.outcome, fresh.outcome);
@@ -677,8 +639,8 @@ TEST(ConSanMoi, LateExactBarrierDropRetryMatchesFreshTransform) {
             0u);
 
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, live);
-  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
+  const ConSanTransformArtifacts retried =
+      retry_patch_consan_moi_from_inventory(std::move(inventory), live, bytes);
   ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(fresh.errors);
   EXPECT_EQ(retried.outcome, fresh.outcome);

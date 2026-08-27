@@ -255,10 +255,11 @@ public:
 
 private:
   friend struct TransformResultTestAccess;
-  friend TransformResult transform_consan_pristine_moi_inventory(
-      std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
-      const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
-      const RuntimeCapabilities &, const BoundRuntimeResources &);
+  friend TransformResult
+  transform_consan_pristine_moi_inventory(std::span<const uint8_t>, const ConSanRequest &,
+                                          const TransformPolicy &, const RuntimePolicy &,
+                                          const ConSanDebugOverrides &, const MutationRequest &,
+                                          const RuntimeCapabilities &);
   friend TransformResult retry_transform_consan_pristine_moi_inventory(
       std::span<const uint8_t>, const ConSanRequest &, const TransformPolicy &,
       const RuntimePolicy &, const ConSanDebugOverrides &, const MutationRequest &,
@@ -295,7 +296,7 @@ private:
     std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
-    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources);
+    const RuntimeCapabilities &capabilities);
 
 /// Bind runtime resources and lower a previously typed pristine MOI inventory.
 [[nodiscard]] TransformResult retry_transform_consan_pristine_moi_inventory(

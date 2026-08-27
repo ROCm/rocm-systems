@@ -1284,6 +1284,7 @@ try_patch_consan_moi(ConSanTransformArtifacts result, const ConSanOptions &optio
 /// inventory produced for the same bytes and engine. This is used after a
 /// runtime-sized report buffer and, optionally, a live fault selection become
 /// available.
-[[nodiscard]] ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
-    ConSanTransformArtifacts inventory, ConSanOptions inventory_options,
-    const ConSanMoiInventoryRetryConfig &retry, std::span<const uint8_t> code_object_bytes);
+[[nodiscard]] ConSanTransformArtifacts
+retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory,
+                                      ConSanOptions bound_options,
+                                      std::span<const uint8_t> code_object_bytes);

@@ -5833,6 +5833,26 @@ analysis completed.
   physical-gfx950 cross-engine smoke pass. E2E validation remains outside this
   deletion work.
 
+### Slice 5CP: delete the partial retry capsule
+
+- **One bound lowerer state:** The internal retry now receives one
+  `ConSanOptions` already constructed from the request, mutation, runtime
+  capabilities, and bound resources. It no longer accepts a second object and
+  mutates its resource and fault base subobjects after construction.
+- **No bound-pristine state:** The pristine inventory entry has no
+  `BoundRuntimeResources` parameter and constructs/publishes the explicit
+  unbound value itself. Callers cannot supply an address only for the entry to
+  clear five fields again.
+- **Completed deletion:** The one-consumer `ConSanMoiInventoryRetryConfig`, its
+  optional absent-versus-empty mutation state, all construction sites, and the
+  now-meaningless equality test for those two shapes are gone.
+- **Accounting:** Implementation files add 32 and delete 50 physical lines
+  (net -18); the complete tranche adds 68 and deletes 140 (net -72), including
+  tests simplified to pass the exact live lowerer state.
+- **Checked-in gate:** All 1,531 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across the five targets pass. E2E
+  validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

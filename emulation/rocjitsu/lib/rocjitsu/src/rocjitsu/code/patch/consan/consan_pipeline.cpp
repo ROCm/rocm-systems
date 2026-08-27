@@ -261,21 +261,18 @@ void TransformResult::discard_replacement(std::string warning) {
       ConSanPipelineStageStatus::Unsupported;
 }
 
-TransformResult transform_consan_pristine_moi_inventory(
-    std::span<const uint8_t> code_object_bytes, const ConSanRequest &request,
-    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
-    const ConSanDebugOverrides &debug, const MutationRequest &disabled_mutation,
-    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &unbound_resources) {
+TransformResult transform_consan_pristine_moi_inventory(std::span<const uint8_t> code_object_bytes,
+                                                        const ConSanRequest &request,
+                                                        const TransformPolicy &transform_policy,
+                                                        const RuntimePolicy &runtime_policy,
+                                                        const ConSanDebugOverrides &debug,
+                                                        const MutationRequest &disabled_mutation,
+                                                        const RuntimeCapabilities &capabilities) {
   ConSanOptions legacy_options(request, transform_policy, debug, disabled_mutation, capabilities,
-                               unbound_resources);
-  legacy_options.moi_report_buffer_address.reset();
-  legacy_options.moi_report_buffer_size = 0;
-  legacy_options.moi_report_layout.reset();
-  legacy_options.moi_report_generation = 0;
-  legacy_options.moi_report_dispatch_id = 0;
+                               BoundRuntimeResources{});
   TransformResult result = TransformResult::publish_optional(
       code_object_bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
-      capabilities, unbound_resources, lower_consan(code_object_bytes, legacy_options));
+      capabilities, BoundRuntimeResources{}, lower_consan(code_object_bytes, legacy_options));
   result.moi_retry_inventory_available_ = true;
   return result;
 }
@@ -286,18 +283,13 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
     TransformResult inventory) {
-  ConSanOptions inventory_options(request, transform_policy, debug, MutationRequest{}, capabilities,
-                                  BoundRuntimeResources{});
-  const ConSanMoiInventoryRetryConfig retry{
-      .resources = resources,
-      .fault = mutation,
-  };
+  ConSanOptions retry_options(request, transform_policy, debug, mutation, capabilities, resources);
   ConSanTransformArtifacts retry_inventory =
       std::move(static_cast<ConSanTransformArtifacts &>(inventory));
   if (!inventory.moi_retry_inventory_available_)
     retry_inventory.errors.emplace_back("ConSan MOI retry requires a pristine inventory result");
   ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-      std::move(retry_inventory), std::move(inventory_options), retry, code_object_bytes);
+      std::move(retry_inventory), std::move(retry_options), code_object_bytes);
   return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
                                            runtime_policy, debug, mutation, capabilities, resources,
                                            std::move(retried));

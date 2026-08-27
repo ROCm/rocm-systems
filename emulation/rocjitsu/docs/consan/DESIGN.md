@@ -420,9 +420,13 @@ is no public raw-lowering-result view and no second source of control-plane or
 diagnostic truth.
 
 Automatic MOI report sizing also stays inside this boundary. The pristine
-inventory pass returns `TransformResult`, and the retry accepts that typed
-result plus the bound runtime resources. A private provenance bit prevents any
-ordinary result from masquerading as a retry inventory. A late-bound
+inventory pass returns `TransformResult` and has no runtime-resource argument,
+so an address-bearing “pristine” inventory is unrepresentable. The retry
+accepts that typed result plus the bound runtime resources. A private
+provenance bit prevents any ordinary result from masquerading as a retry
+inventory. Internally, the retry lowerer receives one fully bound
+`ConSanOptions`; there is no second partial retry configuration to merge into
+it. A late-bound
 validation fault rebuilds a fresh transform from the pristine bytes; normal
 runtime binding reuses the immutable inventory without carrying a parallel
 mutation-specific inventory shape. Ordinary and completed transforms retain

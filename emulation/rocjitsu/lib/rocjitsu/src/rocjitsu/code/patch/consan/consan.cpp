@@ -281,9 +281,10 @@ bool consan_supercollider_supports_access(const ConSanAccessInventorySite &acces
       arch);
 }
 
-ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
-    ConSanTransformArtifacts inventory_artifacts, ConSanOptions options,
-    const ConSanMoiInventoryRetryConfig &retry, std::span<const uint8_t> code_object_bytes) {
+ConSanTransformArtifacts
+retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifacts,
+                                      ConSanOptions options,
+                                      std::span<const uint8_t> code_object_bytes) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
@@ -332,20 +333,18 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
       return finalize_consan_result(std::move(inventory), code_object_bytes);
     }
 
-    static_cast<BoundRuntimeResources &>(options) = retry.resources;
     // The retry replaces diagnostics from the unbound sizing attempt. The
     // immutable inventory, policy, and coverage records carry its semantic
     // output without requiring warning provenance in private working state.
     inventory.warnings.clear();
-    const bool has_late_fault = retry.fault && retry.fault->has_fault_mutation();
-    if (has_late_fault && retry.fault->fault_dry_run) {
+    const bool has_late_fault = options.has_fault_mutation();
+    if (has_late_fault && options.fault_dry_run) {
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry accepts only a live late-bound fault selection");
       inventory.outcome = ConSanTransformOutcome::Invalid;
       return finalize_consan_result(std::move(inventory), code_object_bytes);
     }
     if (has_late_fault) {
-      static_cast<MutationRequest &>(options) = *retry.fault;
       options.faults_preapplied = false;
       // A pristine report-sizing inventory deliberately excludes the live
       // mutation. Rebuild for the rare late-fault path instead of coupling

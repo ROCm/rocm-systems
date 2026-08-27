@@ -761,7 +761,7 @@ TEST(ConSanPipeline, ExtendedBarrierInventoryShapeUsesOnlyTypedSemanticInputs) {
   EXPECT_FALSE(consan_requires_extended_barrier_pairs(request, debug, mutation));
 }
 
-TEST(ConSanPipeline, PristineMoiInventoryClearsBindingAndUsesTypedRequestShape) {
+TEST(ConSanPipeline, PristineMoiInventoryUsesTypedRequestShapeWithoutBinding) {
   std::array<uint32_t, 17> text_words{};
   text_words[0] = 0xBE804EC1u; // s_barrier_signal -1
   std::fill(text_words.begin() + 1, text_words.begin() + 15,
@@ -776,21 +776,17 @@ TEST(ConSanPipeline, PristineMoiInventoryClearsBindingAndUsesTypedRequestShape) 
   TransformPolicy transform_policy;
   transform_policy.max_patches = 16;
 
-  BoundRuntimeResources supplied_binding;
-  supplied_binding.scope = ConSanRuntimeResourceScope::Executable;
-  supplied_binding.moi_report_buffer_address = 0x123456780000ull;
-  supplied_binding.moi_report_buffer_size = 64u * 1024u * 1024u;
-  const TransformResult cleared_binding = transform_consan_pristine_moi_inventory(
+  const TransformResult inventory = transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, enabled_runtime_policy(), ConSanDebugOverrides{},
-      MutationRequest{}, complete_runtime_capabilities(), supplied_binding);
+      MutationRequest{}, complete_runtime_capabilities());
 
-  const auto cleared_sync = cleared_binding.program_inventory.sync().sync_sequences;
-  EXPECT_EQ(std::ranges::count(cleared_sync, ConSanSyncOperation::BarrierFull,
-                               &ConSanSyncSequence::operation),
-            0u);
-  EXPECT_TRUE(cleared_binding.replacement.empty());
-  ASSERT_FALSE(cleared_sync.empty());
-  EXPECT_TRUE(cleared_binding.evidence_requirements);
+  const auto sync = inventory.program_inventory.sync().sync_sequences;
+  EXPECT_EQ(
+      std::ranges::count(sync, ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
+      0u);
+  EXPECT_TRUE(inventory.replacement.empty());
+  ASSERT_FALSE(sync.empty());
+  EXPECT_TRUE(inventory.evidence_requirements);
 }
 
 TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
@@ -803,7 +799,7 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   const RuntimeCapabilities capabilities = complete_runtime_capabilities();
 
   TransformResult inventory = transform_consan_pristine_moi_inventory(
-      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, {});
+      bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities);
   ASSERT_TRUE(inventory.well_formed()) << testing::PrintToString(inventory.errors);
   ASSERT_TRUE(inventory.evidence_requirements);
   const auto &requirements =

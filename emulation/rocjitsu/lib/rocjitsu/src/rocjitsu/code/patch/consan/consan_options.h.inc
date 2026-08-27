@@ -859,15 +859,6 @@ struct ConSanOptions : ConSanRequest,
          (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
 }
 
-struct ConSanMoiInventoryRetryConfig {
-  /// Complete typed runtime binding selected after address-free inventory.
-  BoundRuntimeResources resources;
-  /// Complete typed mutation selected after the pristine inventory pass. A
-  /// disengaged value and a value with no fault mutation both select the
-  /// report-only retry path.
-  std::optional<MutationRequest> fault;
-};
-
 [[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
   return options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
 }

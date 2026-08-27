@@ -474,13 +474,8 @@ TEST(ConSanMoi, ReportBufferRetryMatchesFreshRecordReplayTransform) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, options);
-  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), inventory_options,
-      ConSanMoiInventoryRetryConfig{
-          .resources = static_cast<const BoundRuntimeResources &>(options),
-          .fault = std::nullopt,
-      },
-      bytes);
+  const ConSanTransformArtifacts retried =
+      retry_patch_consan_moi_from_inventory(std::move(inventory), options, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -522,13 +517,8 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   options.moi_report_buffer_size = report_plan.required_bytes;
   options.moi_report_layout = *bound_layout;
   const ConSanTransformArtifacts fresh = test_lower_consan(bytes, options);
-  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
-      std::move(inventory), inventory_options,
-      ConSanMoiInventoryRetryConfig{
-          .resources = static_cast<const BoundRuntimeResources &>(options),
-          .fault = std::nullopt,
-      },
-      bytes);
+  const ConSanTransformArtifacts retried =
+      retry_patch_consan_moi_from_inventory(std::move(inventory), options, bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -564,12 +554,13 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   BoundRuntimeResources resources;
   resources.moi_report_buffer_address = 0x123456780000ull;
   resources.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+  ConSanOptions retry_options = inventory_options;
+  static_cast<BoundRuntimeResources &>(retry_options) = resources;
   const auto expect_invalid = [&](ConSanTransformArtifacts inventory,
                                   std::span<const uint8_t> retry_bytes,
                                   std::string_view expected_error) {
-    const ConSanTransformArtifacts result = retry_patch_consan_moi_from_inventory(
-        std::move(inventory), inventory_options,
-        ConSanMoiInventoryRetryConfig{.resources = resources, .fault = std::nullopt}, retry_bytes);
+    const ConSanTransformArtifacts result =
+        retry_patch_consan_moi_from_inventory(std::move(inventory), retry_options, retry_bytes);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
     EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {
       return error.find(expected_error) != std::string::npos;
@@ -10425,12 +10416,10 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
       words.push_back(0x00000000u); // ds_store_b32 v0, v0 offset:index*4
     }
     words.insert(words.end(), {
-                                  0xC4050018u,
-                                  0x40883804u,
+                                  0xC4050018u, 0x40883804u,
                                   0x00000005u, // buffer_load_b32 v4, v5, device
                                   0xBFC00000u, // s_wait_loadcnt 0
-                                  0xEE0AC07Cu,
-                                  0x00080000u,
+                                  0xEE0AC07Cu, 0x00080000u,
                                   0x00000000u, // global_inv scope:device
                                   0xBFC00000u, // s_wait_loadcnt 0
                                   0xBE804EC1u, // s_barrier_signal -1
@@ -11660,8 +11649,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   constexpr uint8_t kGuestVgprMsbMode = 0x01u;
   constexpr uint16_t kEncodedAddressVgpr = 30u;
   std::vector<uint32_t> text_words = {
-      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch),
-      0xDBFC0000u,
+      *build_gfx1250_s_set_vgpr_msb(kGuestVgprMsbMode, kArch), 0xDBFC0000u,
       0x0000001Eu, // ds_load_b128 v[0:3], v30 /* physical v286 */
   };
   // Even when an inline body would fit in nearby padding, capturing an

@@ -114,16 +114,14 @@ rocjitsu::TransformResult run_consan_pristine_moi_inventory(
     const rocjitsu::TransformPolicy &transform_policy,
     const rocjitsu::RuntimePolicy &runtime_policy, const rocjitsu::ConSanDebugOverrides &debug,
     const rocjitsu::MutationRequest &disabled_mutation,
-    const rocjitsu::RuntimeCapabilities &capabilities,
-    const rocjitsu::BoundRuntimeResources &unbound_resources) {
+    const rocjitsu::RuntimeCapabilities &capabilities) {
   if (const ConSanTransformOverride override =
           g_test_consan_transform_override.load(std::memory_order_acquire)) {
     return override(bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
-                    capabilities, unbound_resources);
+                    capabilities, rocjitsu::BoundRuntimeResources{});
   }
-  return rocjitsu::transform_consan_pristine_moi_inventory(bytes, request, transform_policy,
-                                                           runtime_policy, debug, disabled_mutation,
-                                                           capabilities, unbound_resources);
+  return rocjitsu::transform_consan_pristine_moi_inventory(
+      bytes, request, transform_policy, runtime_policy, debug, disabled_mutation, capabilities);
 }
 
 rocjitsu::TransformResult retry_consan_moi_transform(
@@ -3909,7 +3907,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       const auto inventory_begin = std::chrono::steady_clock::now();
       rocjitsu::TransformResult inventory = run_consan_pristine_moi_inventory(
           std::span<const uint8_t>(bytes, size), request, transform_policy, runtime_policy,
-          debug_overrides, inventory_mutation, runtime_capabilities, runtime_resources);
+          debug_overrides, inventory_mutation, runtime_capabilities);
       log_message(kLogInfo, "ConSan MOI inventory end reader=%llu elapsed_ms=%.3f",
                   static_cast<unsigned long long>(code_object_reader.handle),
                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -

@@ -432,8 +432,11 @@ Current deletion progress has closed the public/control-plane result seam:
 `ConSanResult` has no remaining declaration or use, completed MOI register
 allocation has one typed artifact, and late-bound validation faults rebuild
 from pristine bytes instead of requiring a specially shaped retained
-inventory. The next high-payoff seam is the raw mutable-options lowerer and its
-duplicated per-engine planning state, not another result adapter.
+inventory. The one-consumer retry configuration and the pristine inventory's
+runtime-binding parameter are also gone; a retry constructs one fully bound
+lowerer state, while an address-bearing pristine inventory is unrepresentable.
+The next high-payoff seam is the raw mutable-options lowerer and its duplicated
+per-engine planning state, not another result adapter.
 
 ### Deletion and design rules
 
