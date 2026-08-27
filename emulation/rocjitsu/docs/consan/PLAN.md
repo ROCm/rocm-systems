@@ -550,6 +550,11 @@ the one-purpose `kernel_entry_offsets` helper no longer build private variants;
 the directly tested contract is target-neutral and continues to use
 RocJitsu's decoder and `BasicBlock` implementation.
 
+Inline Shadow's acquired-epoch token payload layout now likewise has one ABI
+authority. Reservation, scan, and final-validation code consume the same
+payload-word offset array; the three copied field inventories are deleted, and
+the existing focused ABI layout test pins every included word.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

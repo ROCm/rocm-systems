@@ -8383,6 +8383,10 @@ TEST(ConSanMoi, InlineAbiV6LayoutIsCheckedBoundedAndNonAliasing) {
   static_assert(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version) == 40);
   static_assert(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one) == 44);
   static_assert(offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version) == 48);
+  constexpr std::array<size_t, 12> expected_token_payload_offsets = {
+      4u, 8u, 12u, 16u, 20u, 24u, 28u, 32u, 36u, 40u, 44u, 48u,
+  };
+  static_assert(kConSanMoiInlineAcquiredEpochTokenPayloadOffsets == expected_token_payload_offsets);
   static_assert(sizeof(ConSanMoiInlineCausalSnapshot) == 40);
 
   constexpr uint64_t metadata_bytes = sizeof(ConSanMoiInlineAtomicReleaseSlot) +

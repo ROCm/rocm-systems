@@ -3766,20 +3766,6 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
                  (owner_between == 1u || (claimed_acquire_release_arch && owner_between == 6u)) &&
                  (!claimed_compare_exchange || publisher_owner_count == 1u);
 
-    constexpr std::array<size_t, 12> kTokenPayloadOffsets = {
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) + sizeof(uint32_t),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) + sizeof(uint32_t),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
-        offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
-    };
     const auto version_before = instrumentation::build_flat_load_b32(
         snapshot_address, static_cast<uint16_t>(scratch + 17u), arch,
         offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, version));
@@ -3789,7 +3775,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
     bool token_loads_valid = version_before && version_after &&
                              !positions(*version_before).empty() &&
                              !positions(*version_after).empty();
-    for (size_t offset : kTokenPayloadOffsets) {
+    for (size_t offset : kConSanMoiInlineAcquiredEpochTokenPayloadOffsets) {
       const auto load =
           instrumentation::build_flat_load_b32(snapshot_address, temporary, arch, offset);
       token_loads_valid &= load && !positions(*load).empty();

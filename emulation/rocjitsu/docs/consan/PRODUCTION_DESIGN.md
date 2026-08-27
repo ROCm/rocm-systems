@@ -6338,6 +6338,27 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DF: give acquired-token payload layout one ABI authority
+
+- **One payload definition:**
+  `kConSanMoiInlineAcquiredEpochTokenPayloadOffsets` names every 32-bit payload
+  word that must be zero for an acquired-token slot to be empty. The seqlock
+  version and structure padding remain deliberately outside that definition.
+  Token reservation, token scanning, and final emitted-code validation consume
+  the same ABI-derived array instead of maintaining three field inventories.
+- **Contract coverage:** The focused Inline Shadow ABI test pins the complete
+  ordered offset array alongside every field offset, size, and alignment
+  assertion. Existing token publication, rollback, malformed-state, device
+  ordering, and final-validation tests continue to exercise each consumer.
+- **Accounting:** Across the three affected implementation files, physical
+  lines fall from 9,235 to 9,214, nonblank lines from 8,962 to 8,941, and
+  estimated comment-excluded code lines from 8,555 to 8,529. The slice adds 27
+  and deletes 48 physical implementation lines, a net deletion of 21.
+- **Checked-in gate:** The complete build, all 1,531 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

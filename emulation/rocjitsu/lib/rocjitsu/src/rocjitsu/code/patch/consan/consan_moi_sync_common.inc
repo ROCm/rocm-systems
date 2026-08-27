@@ -611,7 +611,8 @@ atomic_scalar_clause_for_site(const MoiSyncInventoryIndex &sync_index,
   return sequence == nullptr ? std::nullopt : sequence->scalar_clause_text_offset;
 }
 
-void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSanTransformArtifacts &result,
+void append_atomic_record_candidates(const ConSanKernelInfo &kernel,
+                                     const ConSanTransformArtifacts &result,
                                      const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
   if (is_rocclr_runtime_kernel_name(kernel.name))
@@ -638,7 +639,8 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
   }
 }
 
-void append_atomic_record_candidates(const ConSanFunctionInfo &function, const ConSanTransformArtifacts &result,
+void append_atomic_record_candidates(const ConSanFunctionInfo &function,
+                                     const ConSanTransformArtifacts &result,
                                      const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
   const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
@@ -1253,21 +1255,6 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   if (!save_exec(eligible) || !save_exec(winners))
     return false;
 
-  constexpr std::array<size_t, 12> kPayloadOffsets = {
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) + sizeof(uint32_t),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) + sizeof(uint32_t),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
-  };
-
   // Phase one: reserve every required destination odd. Empty and exact stable
   // pair slots are accepted; all other states remove the lane from winners.
   for (uint16_t index = 0; index < 5u; ++index) {
@@ -1285,7 +1272,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     words.push_back(*empty);
     if (!narrow_vcc())
       return false;
-    for (size_t offset : kPayloadOffsets) {
+    for (size_t offset : kConSanMoiInlineAcquiredEpochTokenPayloadOffsets) {
       if (!append_load_u32_vgpr_at_offset(words, base, offset, value, arch))
         return false;
       const auto zero =
@@ -2262,21 +2249,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
                                       version_before, arch) ||
       !require_literal(version_before, 0, /*equal=*/true))
     return false;
-  constexpr std::array<size_t, 12> kTokenPayloadOffsets = {
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) + sizeof(uint32_t),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) + sizeof(uint32_t),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
-      offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
-  };
-  for (size_t offset : kTokenPayloadOffsets) {
+  for (size_t offset : kConSanMoiInlineAcquiredEpochTokenPayloadOffsets) {
     if (!load_require_literal(offset, 0, /*equal=*/true))
       return false;
   }

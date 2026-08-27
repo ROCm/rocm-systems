@@ -268,6 +268,26 @@ struct alignas(8) ConSanMoiInlineAcquiredEpochTokenSlot {
 
 static_assert(sizeof(ConSanMoiInlineAcquiredEpochTokenSlot) == 56);
 
+/// Every 32-bit payload word whose zero state distinguishes an empty acquired
+/// token slot from a partially published or stale token. The seqlock `version`
+/// word is intentionally excluded because readers load it before and after the
+/// payload; structure tail padding is likewise not evidence. Publication,
+/// reuse, and final validation must consume this one ABI-derived list.
+inline constexpr std::array<size_t, 12> kConSanMoiInlineAcquiredEpochTokenPayloadOffsets = {
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_owner_id),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_owner_id),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, producer_epoch_plus_one),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, workgroup_key),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, kind),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, dispatch_id) + sizeof(uint32_t),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_address) + sizeof(uint32_t),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, source_release_version),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, consumer_epoch_plus_one),
+    offsetof(ConSanMoiInlineAcquiredEpochTokenSlot, reservation_version),
+};
+
 inline constexpr uint32_t kConSanMoiInlineCausalSnapshotEntryCapacity = 4;
 
 enum class ConSanMoiInlineCausalSnapshotFlag : uint32_t {

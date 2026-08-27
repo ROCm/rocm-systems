@@ -338,6 +338,13 @@ caves, dense dispatchers, branch islands, or relays. It updates code and kernel
 resource metadata together, reparses and validates the result, and publishes
 replacement bytes only after final validation.
 
+Inline Shadow's acquired-epoch token ABI also owns one canonical list of its
+32-bit payload-word offsets. Reservation, empty-slot recognition, token scans,
+and final native-code validation use that list; the seqlock version word and
+structure padding are intentionally excluded. Adding or moving a payload field
+therefore changes one documented ABI value and its focused layout test rather
+than three independent native-code loops.
+
 Dense routing has one shared topology contract across access, barrier, and
 atomic planners in Record/Replay, Sampled, and Inline Shadow.
 `MoiDenseRouteSite` retains only a typed kernel/function owner, pristine-text
