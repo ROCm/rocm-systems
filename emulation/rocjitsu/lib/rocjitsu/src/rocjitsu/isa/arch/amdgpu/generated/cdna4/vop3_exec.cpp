@@ -1006,72 +1006,6 @@ void VCosF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-void VExpLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() {
-      float v = [&]() {
-        float v = amdgpu::transcendental::exp_f32([&]() {
-          float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-          if (inst_.abs & (1u << 0))
-            sv = std::fabs(sv);
-          if (inst_.neg & (1u << 0))
-            sv = -sv;
-          return sv;
-        }());
-        const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-            wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
-        if (effective_omod == 1)
-          v *= 2.0f;
-        else if (effective_omod == 2)
-          v *= 4.0f;
-        else if (effective_omod == 3)
-          v *= 0.5f;
-        v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
-        return v;
-      }();
-      if (inst_.clamp)
-        v = amdgpu::clamp_floating_result(v, wf);
-      return v;
-    }()));
-  }
-}
-
-void VLogLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, std::bit_cast<uint32_t>([&]() {
-      float v = [&]() {
-        float v = amdgpu::transcendental::log_f32([&]() {
-          float sv = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-          if (inst_.abs & (1u << 0))
-            sv = std::fabs(sv);
-          if (inst_.neg & (1u << 0))
-            sv = -sv;
-          return sv;
-        }());
-        const uint32_t effective_omod = amdgpu::fp_mode::effective_omod(
-            wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst_.omod);
-        if (effective_omod == 1)
-          v *= 2.0f;
-        else if (effective_omod == 2)
-          v *= 4.0f;
-        else if (effective_omod == 3)
-          v *= 0.5f;
-        v = amdgpu::fp_mode::finalize_omod_f32(v, effective_omod);
-        return v;
-      }();
-      if (inst_.clamp)
-        v = amdgpu::clamp_floating_result(v, wf);
-      return v;
-    }()));
-  }
-}
-
 void VCvtNormI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -2040,27 +1974,7 @@ void VFmacF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPkFmacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t rawd = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
-    uint32_t omod = amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
-                                                        wf.ieee_mode(), true, inst_.omod);
-    uint32_t r0 = amdgpu::fp_mode::fma_f16(
-        static_cast<uint16_t>(raw0), static_cast<uint16_t>(raw1), static_cast<uint16_t>(rawd),
-        inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u, inst_.neg & 2u, false,
-        wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(),
-        amdgpu::floating_clamp_nan_to_zero(wf));
-    uint32_t r1 = amdgpu::fp_mode::fma_f16(
-        static_cast<uint16_t>(raw0 >> 16), static_cast<uint16_t>(raw1 >> 16),
-        static_cast<uint16_t>(rawd >> 16), inst_.abs & 1u, inst_.abs & 2u, false, inst_.neg & 1u,
-        inst_.neg & 2u, false, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod,
-        inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf));
-    amdgpu::sdwa::write_lane<true>(*this, wf, vdst, lane, r0 | (r1 << 16));
-  }
+  amdgpu::execute_v_pk_fmac_f16_vop3(*this, wf);
 }
 
 void VXnorB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -2465,17 +2379,7 @@ void VDivFixupLegacyF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCvtPkaccumU8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float fval = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    uint32_t byte_sel = amdgpu::RegisterAccess(wf).read_lane(src1, lane) & 3;
-    uint32_t old = amdgpu::RegisterAccess(wf).read_lane(vdst, lane);
-    uint32_t byte = static_cast<uint32_t>(std::clamp(fval, 0.0f, 255.0f));
-    uint32_t mask = ~(0xFFu << (byte_sel * 8));
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane, (old & mask) | (byte << (byte_sel * 8)));
-  }
+  amdgpu::execute_v_cvt_pkaccum_u8_f32_vop3(*this, wf);
 }
 
 void VMadU32U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
