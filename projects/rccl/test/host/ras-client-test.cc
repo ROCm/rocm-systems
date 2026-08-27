@@ -2515,3 +2515,377 @@ TEST_F(RasClientMicrotest, ConnectHandshake_ReadFailsWithEagainOnce_RetriesOnceT
   EXPECT_FALSE(LogHas(out.log, "read socket: "));
   ExpectClosedExactlyOnce(kSocketFd);
 }
+
+
+// ===========================================================================
+// connectToNCCL: the "TIMEOUT" negotiation (timeout >= 0), the socket-timeout
+// bump (if (timeout)), and the fail:/timeout: labels. Driven on the file-scope
+// `timeout` static; the resolve/connect walk and the protocol handshake ahead
+// of the block run on the fakes' defaults.
+// ===========================================================================
+
+namespace {
+
+// The handshake ahead of the block consumes one scripted read, so every pass
+// through connectToNCCL needs a server hello before the reply it waits on.
+constexpr const char kCtServerHello[] = "SERVER PROTOCOL 2\n";
+constexpr const char kCtClientHello[] = "CLIENT PROTOCOL 2\n";
+
+// tv starts at {TIMEOUT_INCREMENT, 0} and the bump adds timeout + EXTRA(5), so
+// 37 yields 43 -- a value no operand-dropping mutant of that line also reaches.
+constexpr int kCtDistinctTimeout = 37;
+
+struct CtSetsockoptCall {
+  int optname;
+  long tvSec;
+  long tvUsec;
+};
+
+// g_lastSetsockopt* keeps only the final call, which cannot see a dropped or
+// swapped call earlier in the walk; render the whole sequence as one string.
+std::string CtTrace(const std::vector<CtSetsockoptCall>& calls) {
+  std::string out;
+  for (const CtSetsockoptCall& c : calls) {
+    if (c.optname == SO_SNDTIMEO) {
+      out += "SNDTIMEO";
+    } else if (c.optname == SO_RCVTIMEO) {
+      out += "RCVTIMEO";
+    } else {
+      out += std::to_string(c.optname);
+    }
+    out += "={" + std::to_string(c.tvSec) + "," + std::to_string(c.tvUsec) + "} ";
+  }
+  return out;
+}
+
+void CtRecord(std::vector<CtSetsockoptCall>* into, int optname, const void* optval, socklen_t optlen) {
+  struct timeval tv = {-1, -1};
+  if (optval && optlen >= static_cast<socklen_t>(sizeof tv)) {
+    std::memcpy(&tv, optval, sizeof tv);
+  }
+  into->push_back(CtSetsockoptCall{optname, static_cast<long>(tv.tv_sec), static_cast<long>(tv.tv_usec)});
+}
+
+size_t CtCount(const std::string& hay, const std::string& needle) {
+  size_t n = 0;
+  for (size_t p = hay.find(needle); p != std::string::npos; p = hay.find(needle, p + needle.size())) {
+    ++n;
+  }
+  return n;
+}
+
+}  // namespace
+
+// timeout < 0 skips the negotiation but is still truthy, so the bump runs with
+// the RAS_COLLECTIVE_LEG_TIMEOUT_SEC arm: 1 + 5 + 5 == 11.
+TEST_F(RasClientMicrotest, ConnectTimeout_NegativeTimeout_SkipsNegotiationAndBumpsRcvtimeoToLegPlusExtra) {
+  timeout = -1;
+  ScriptReadData(kCtServerHello);
+
+  std::vector<CtSetsockoptCall> opts;
+  int rc = -1;
+  std::string log;
+  {
+    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) {
+      CtRecord(&opts, optname, optval, optlen);
+      return 0;
+    });
+    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    EXPECT_EQ(3, sso.calls);
+  }
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("", log);
+  EXPECT_EQ(std::string(kCtClientHello), g_writtenData);  // no TIMEOUT line was sent
+  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={11,0} ", CtTrace(opts));
+  EXPECT_EQ(42, sock);
+  EXPECT_TRUE(g_closedFds.empty());
+  EXPECT_EQ(1, g_freeaddrinfoCalls);
+}
+
+// timeout == 0 is >= 0 so the negotiation runs, yet it is falsy, so the bump --
+// and with it every setsockopt in the whole function -- is skipped.
+TEST_F(RasClientMicrotest, ConnectTimeout_ZeroTimeout_NegotiatesZeroAndIssuesNoSetsockopt) {
+  timeout = 0;
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("OK\n");
+
+  std::vector<CtSetsockoptCall> opts;
+  int rc = -1;
+  std::string log;
+  {
+    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) {
+      CtRecord(&opts, optname, optval, optlen);
+      return 0;
+    });
+    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    EXPECT_EQ(0, sso.calls);
+  }
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("", log);
+  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 0\n", g_writtenData);
+  EXPECT_EQ("", CtTrace(opts));
+  EXPECT_EQ(42, sock);
+  EXPECT_TRUE(g_closedFds.empty());
+}
+
+// timeout > 0: the exact bytes on the wire, and 1 + 37 + 5 == 43 on SO_RCVTIMEO.
+TEST_F(RasClientMicrotest, ConnectTimeout_PositiveTimeout_SendsExactTimeoutLineAndBumpsRcvtimeoBySumOfTimeoutAndExtra) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("OK\n");
+
+  std::vector<CtSetsockoptCall> opts;
+  int rc = -1;
+  std::string log;
+  {
+    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) {
+      CtRecord(&opts, optname, optval, optlen);
+      return 0;
+    });
+    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    EXPECT_EQ(3, sso.calls);
+  }
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("", log);
+  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  EXPECT_EQ(42, sock);
+  EXPECT_TRUE(g_closedFds.empty());
+  EXPECT_EQ(1, g_freeaddrinfoCalls);
+}
+
+// strcasecmp, not strcmp: a lowercase reply is still accepted.
+TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersLowercaseOk_IsAcceptedCaseInsensitively) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("ok\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("", log);
+  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
+  EXPECT_EQ(43, g_lastSetsockoptTimeval.tv_sec);
+  EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
+}
+
+// Whole-string compare: "OKAY\n" shares its first two bytes with "OK\n", so a
+// prefix-only compare would wrongly accept it.
+TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersOkay_ReportsUnexpectedResponseAndReturnsOne) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("OKAY\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);  // the handshake copy passed
+  EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: OKAY\n\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+  ASSERT_EQ(1u, g_closedFds.size());
+  EXPECT_EQ(42, g_closedFds[0]);
+  EXPECT_EQ(1, g_freeaddrinfoCalls);  // fail: sees addrInfo already nulled
+}
+
+// The expected reply carries a trailing newline; a bare "OK" is a mismatch.
+TEST_F(RasClientMicrotest, ConnectTimeout_ServerAnswersOkWithoutNewline_ReportsUnexpectedResponseAndReturnsOne) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("OK");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, "Unexpected response from NCCL: OK\n")) << log;
+  EXPECT_FALSE(LogHas(log, "NCCL unexpectedly closed the connection"));
+  ASSERT_EQ(1u, g_closedFds.size());
+  EXPECT_EQ(42, g_closedFds[0]);
+}
+
+// bytes == 0: the script is exhausted after the handshake, so the reply is EOF.
+TEST_F(RasClientMicrotest, ConnectTimeout_ServerClosesAfterTimeoutRequest_ReportsUnexpectedCloseAndReturnsOne) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, "NCCL unexpectedly closed the connection\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Unexpected response from NCCL"));
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+  ASSERT_EQ(1u, g_closedFds.size());
+  EXPECT_EQ(42, g_closedFds[0]);
+  EXPECT_EQ(1, g_freeaddrinfoCalls);
+}
+
+// bytes < 0 with a non-EAGAIN errno: perror and fail, never the retry label.
+TEST_F(RasClientMicrotest, ConnectTimeout_ReplyReadFailsWithConnectionReset_ReportsPerrorAndReturnsOne) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptRead(-1, ECONNRESET, "");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+
+  const std::string expected = std::string("read socket: ") + std::strerror(ECONNRESET) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+  ASSERT_EQ(1u, g_closedFds.size());
+  EXPECT_EQ(42, g_closedFds[0]);
+}
+
+// The TIMEOUT write failing with a non-EAGAIN errno: perror and fail.
+TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithBrokenPipe_ReportsPerrorAndReturnsOne) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+
+  int rc = -1;
+  std::string log;
+  {
+    // Content-keyed so only the block's own write fails; the handshake's must not.
+    ScopedHook wr(g_write, [](int, const void* buf, size_t count) -> ssize_t {
+      const std::string chunk(static_cast<const char*>(buf), count);
+      if (chunk.compare(0, 8, "TIMEOUT ") == 0) {
+        errno = EPIPE;
+        return -1;
+      }
+      g_writtenData.append(chunk);
+      return static_cast<ssize_t>(count);
+    });
+    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    EXPECT_EQ(2, wr.calls);
+  }
+
+  const std::string expected = std::string("write to socket: ") + std::strerror(EPIPE) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ(std::string(kCtClientHello), g_writtenData);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+  ASSERT_EQ(1u, g_closedFds.size());
+  EXPECT_EQ(42, g_closedFds[0]);
+}
+
+// goto timeout from the reply read: close, retry the whole walk once, succeed.
+// The script's tail is EOF, so a mutant that keeps retrying still terminates.
+TEST_F(RasClientMicrotest, ConnectTimeout_ReplyReadFailsWithEagain_RetriesOnceThenSucceeds) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptRead(-1, EAGAIN, "");
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("OK\n");
+
+  std::vector<CtSetsockoptCall> opts;
+  int rc = -1;
+  std::string log;
+  {
+    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) {
+      CtRecord(&opts, optname, optval, optlen);
+      return 0;
+    });
+    log = CaptureLog([&]() { rc = connectToNCCL(); });
+  }
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(1u, CtCount(log, "Connection timed out; retrying...\n"));
+  EXPECT_FALSE(LogHas(log, "read socket"));
+  EXPECT_EQ("CLIENT PROTOCOL 2\nTIMEOUT 37\nCLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  ASSERT_EQ(1u, g_closedFds.size());
+  EXPECT_EQ(42, g_closedFds[0]);
+  EXPECT_EQ(2, g_freeaddrinfoCalls);
+  EXPECT_EQ(42, sock);
+}
+
+// goto timeout from the TIMEOUT write. The hook fails exactly one write ever,
+// which is what keeps the retry loop from spinning forever.
+TEST_F(RasClientMicrotest, ConnectTimeout_RequestWriteFailsWithEagain_RetriesOnceThenSucceeds) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("OK\n");
+
+  bool stalledOnce = false;
+  int rc = -1;
+  std::string log;
+  {
+    ScopedHook wr(g_write, [&](int, const void* buf, size_t count) -> ssize_t {
+      const std::string chunk(static_cast<const char*>(buf), count);
+      if (!stalledOnce && chunk.compare(0, 8, "TIMEOUT ") == 0) {
+        stalledOnce = true;
+        errno = EAGAIN;
+        return -1;
+      }
+      g_writtenData.append(chunk);
+      return static_cast<ssize_t>(count);
+    });
+    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    EXPECT_EQ(4, wr.calls);
+  }
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(1u, CtCount(log, "Connection timed out; retrying...\n"));
+  EXPECT_FALSE(LogHas(log, "write to socket"));
+  EXPECT_EQ("CLIENT PROTOCOL 2\nCLIENT PROTOCOL 2\nTIMEOUT 37\n", g_writtenData);
+  ASSERT_EQ(1u, g_closedFds.size());
+  EXPECT_EQ(42, g_closedFds[0]);
+  EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
+  EXPECT_EQ(43, g_lastSetsockoptTimeval.tv_sec);
+  EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
+}
+
+// The bump's setsockopt failure is non-fatal: it is reported and 0 is returned.
+TEST_F(RasClientMicrotest, ConnectTimeout_BumpSetsockoptFails_ReportsPerrorAndStillReturnsZero) {
+  timeout = kCtDistinctTimeout;
+  ScriptReadData(kCtServerHello);
+  ScriptReadData("OK\n");
+
+  std::vector<CtSetsockoptCall> opts;
+  int rc = -1;
+  std::string log;
+  {
+    // Keyed on the bumped tv so the connect walk's two 1-second calls still pass.
+    ScopedHook sso(g_setsockopt, [&](int, int, int optname, const void* optval, socklen_t optlen) -> int {
+      CtRecord(&opts, optname, optval, optlen);
+      if (opts.back().tvSec != TIMEOUT_INCREMENT) {
+        errno = ENOPROTOOPT;
+        return -1;
+      }
+      return 0;
+    });
+    log = CaptureLog([&]() { rc = connectToNCCL(); });
+    EXPECT_EQ(3, sso.calls);
+  }
+
+  const std::string expected = std::string("setsockopt: ") + std::strerror(ENOPROTOOPT) + "\n";
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(1u, CtCount(log, expected));
+  EXPECT_EQ("SNDTIMEO={1,0} RCVTIMEO={1,0} RCVTIMEO={43,0} ", CtTrace(opts));
+  EXPECT_EQ(42, sock);
+  EXPECT_TRUE(g_closedFds.empty());
+}
+
+// fail: with sock still -1 -- the guard is what keeps close(-1) from happening.
+TEST_F(RasClientMicrotest, ConnectFailLabel_SockNeverOpened_ReturnsOneAndClosesNothing) {
+  g_addrinfoCount = 0;  // no candidate address, so the connect walk never runs
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = connectToNCCL(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Failed to connect to the NCCL RAS service!\n")) << log;
+  EXPECT_TRUE(g_closedFds.empty());
+  EXPECT_EQ(-1, sock);
+  EXPECT_EQ(1, g_freeaddrinfoCalls);  // the walk's own free; fail: adds no second
+}
