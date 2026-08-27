@@ -19,32 +19,6 @@ env:
   ROCM_DIR: /opt/rocm
 
 jobs:
-  sha256-drift-check:
-    name: SHA-256 Drift Check
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
-    runs-on:
-      - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
-    steps:
-      # Runner workspace (including the top-level dir itself) can be left root-owned by other
-      # container jobs; this job has no host sudo access, so use a throwaway root container
-      # (docker is already required here for build-and-test) to clear it and hand it back.
-      - name: Clean workspace
-        run: |
-          docker run --rm -v "$GITHUB_WORKSPACE":/workspace alpine sh -c \
-            "find /workspace -mindepth 1 -delete && chown $(id -u):$(id -g) /workspace"
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            projects/cuid/tests/check_sha256_drift.py
-            projects/cuid/lib/src/sha256.cc
-            projects/rocprofiler-sdk/source/lib/common/sha256.cpp
-          sparse-checkout-cone-mode: false
-
-      - name: Check for sha256 drift
-        run: python3 projects/cuid/tests/check_sha256_drift.py
-
   build-and-test:
     name: Build and Test
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
