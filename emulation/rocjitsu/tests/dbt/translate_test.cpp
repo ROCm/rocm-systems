@@ -777,7 +777,7 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchIsSuccessfulNoOp) {
             "unchanged");
 }
 
-TEST(BinaryTranslatorE2E, RejectsUnsupportedGfx1250Gfx1251TranslationInBothDirections) {
+TEST(BinaryTranslatorE2E, RejectsUnsupportedCrossTargetCdna5TranslationInBothDirections) {
   constexpr std::array<std::pair<uint32_t, uint32_t>, 2> kDirections{{
       {EF_AMDGPU_MACH_AMDGCN_GFX1251, EF_AMDGPU_MACH_AMDGCN_GFX1250},
       {EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1251},
@@ -796,7 +796,7 @@ TEST(BinaryTranslatorE2E, RejectsUnsupportedGfx1250Gfx1251TranslationInBothDirec
 
     EXPECT_FALSE(result.ok());
     EXPECT_TRUE(std::ranges::any_of(result.diagnostics, [](const auto &diagnostic) {
-      return diagnostic.message == "cross-variant gfx1250/gfx1251 translation is unsupported";
+      return diagnostic.message == "cross-target CDNA5 translation is unsupported";
     })) << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
   }
 }

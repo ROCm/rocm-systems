@@ -27,7 +27,7 @@ class Decoder;
 struct IsaTargetCapabilities {
   uint64_t instruction_features = 0;
   /// Whether the selected provider implements execution for this target.
-  bool execution_implemented = true;
+  bool execution_implemented = false;
 };
 
 /// @brief Non-owning code-object identity published by an AMDGPU ISA target.

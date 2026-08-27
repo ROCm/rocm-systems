@@ -10,9 +10,9 @@
 ///        provider-selected target registry in rj_code.cpp.
 ///
 /// Covers the only currently supported targets (gfx90a, gfx942, gfx950,
-/// gfx1200, gfx1201, gfx1250) plus an unknown-machine-flag case to guard the
-/// INVALID sentinel and prevent a future edit from silently aliasing one target
-/// onto another.
+/// gfx1200, gfx1201, gfx1250, gfx1251) plus an unknown-machine-flag case to
+/// guard the INVALID sentinel and prevent a future edit from silently aliasing
+/// one target onto another.
 
 // \NPI new GPU: extend these tests with its provider-owned MACH/triple binding.
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -305,6 +305,10 @@ TEST(GfxCodeObjectTargets, FatbinMetadataRequiresMatchingConcreteTargetIdentity)
   AmdGpuCodeObject legacy_fallback(unknown.data(), unknown.size(), "hip", "gfx1250");
   ASSERT_TRUE(legacy_fallback.is_valid());
   EXPECT_EQ(legacy_fallback.target_id(), ROCJITSU_CODE_TARGET_GFX1250);
+
+  AmdGpuCodeObject elf_fallback(gfx1251.data(), gfx1251.size(), "hip", "gfx9999");
+  ASSERT_TRUE(elf_fallback.is_valid());
+  EXPECT_EQ(elf_fallback.target_id(), ROCJITSU_CODE_TARGET_GFX1251);
 }
 
 // Machine flags outside the supported set must surface as

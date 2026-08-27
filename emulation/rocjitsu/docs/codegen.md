@@ -181,8 +181,7 @@ base XML and all ISA additions are parsed, and before semantics derivation and
 code generation:
 
 ```bash
-python -m amdisa \
-  --multi cdna5:/path/to/amdgpu_isa_cdna5.xml \
+python -m amdisa cdna5:/path/to/amdgpu_isa_cdna5.xml \
   --isa-additions cdna5:/path/to/cdna5-additions.xml \
   --isa-variants cdna5:/path/to/cdna5-variants.json \
   --isa-output /path/to/isa-output \

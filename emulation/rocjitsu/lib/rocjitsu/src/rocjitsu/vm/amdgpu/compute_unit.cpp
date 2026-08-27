@@ -126,6 +126,19 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
 std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
                                                          GpuMemory *memory, L2Cache *l2,
                                                          simdojo::ExecMode exec_mode) {
+  if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
+    const IsaTargetRegistry &registry = default_isa_target_registry();
+    const IsaTargetDescriptor *target_descriptor = registry.find(config.target);
+    const IsaGpuTargetDescription *target_binding = registry.find_gpu_target(config.target);
+    if (target_descriptor == nullptr || target_binding == nullptr)
+      throw util::ConfigError("unsupported concrete GPU target");
+    if (target_descriptor->architecture_id != config.arch)
+      throw util::ConfigError("concrete GPU target does not belong to the configured architecture");
+    if (!target_descriptor->supports_execution ||
+        !target_binding->capabilities.execution_implemented)
+      throw util::ConfigError("execution is not implemented for the concrete GPU target");
+  }
+
   // Helper: instantiate the ISA-specific CU for the given execution mode.
 #define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
   case ARCH_ENUM:                                                                                  \

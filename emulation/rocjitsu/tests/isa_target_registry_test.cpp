@@ -78,6 +78,7 @@ static_assert(!std::is_default_constructible_v<IsaTargetRegistry>);
 static_assert(!std::is_move_constructible_v<IsaTargetRegistry>);
 static_assert(!std::is_copy_constructible_v<IsaTargetRegistry>);
 static_assert(std::is_trivially_copyable_v<IsaTargetDescriptor>);
+static_assert(!IsaTargetCapabilities{}.execution_implemented);
 using FixtureTargetArray = std::array<IsaTargetDescriptor, 1>;
 static_assert(std::is_constructible_v<IsaTargetRegistry, const FixtureTargetArray &>);
 static_assert(!std::is_constructible_v<IsaTargetRegistry, FixtureTargetArray &>);
@@ -424,6 +425,15 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
       registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1251);
   ASSERT_NE(gfx1250_binding, nullptr);
   ASSERT_NE(gfx1251_binding, nullptr);
+  constexpr std::array kExecutableTargets{
+      ROCJITSU_CODE_TARGET_GFX90A,  ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,
+      ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
+  };
+  for (rj_code_target_id_t target : kExecutableTargets) {
+    const IsaGpuTargetDescription *binding = registry.find_gpu_target(target);
+    ASSERT_NE(binding, nullptr);
+    EXPECT_TRUE(binding->capabilities.execution_implemented);
+  }
   EXPECT_EQ(gfx1250_binding->gfx_target_version, 120500u);
   EXPECT_EQ(gfx1251_binding->gfx_target_version, 120501u);
   EXPECT_TRUE(gfx1250_binding->capabilities.execution_implemented);

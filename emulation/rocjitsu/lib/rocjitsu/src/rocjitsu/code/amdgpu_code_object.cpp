@@ -170,13 +170,14 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
   // A recognized bundle target and inner ELF machine are two declarations of
   // the same concrete GPU identity. Accepting a disagreement here would let
   // callers select a decoder using the bundle while patching code for another
-  // target. Unknown legacy metadata retains the established bundle fallback.
+  // target. When only one declaration is recognized, retain that concrete
+  // identity instead of degrading it to the INVALID wildcard.
   if (bundle_target != ROCJITSU_CODE_TARGET_INVALID && elf_target != ROCJITSU_CODE_TARGET_INVALID &&
       bundle_target != elf_target) {
     is_valid_ = false;
     return;
   }
-  target_id_ = bundle_target;
+  target_id_ = bundle_target != ROCJITSU_CODE_TARGET_INVALID ? bundle_target : elf_target;
 }
 
 AmdGpuCodeObject::~AmdGpuCodeObject() = default;

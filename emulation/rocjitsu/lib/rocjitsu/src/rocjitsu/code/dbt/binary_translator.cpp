@@ -518,15 +518,21 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
       return error(DiagnosticKind::Legalization, "gfx1250 A0-to-B0 translation is not supported");
   }
 
+  const uint32_t target_machine = target_mach & EF_AMDGPU_MACH;
+  const IsaTargetRegistry &registry = default_isa_target_registry();
+  const auto is_concrete_cdna5_target = [&](uint32_t machine) {
+    const IsaGpuTargetDescription *target = registry.find_gpu_target_by_elf_machine(machine);
+    const IsaTargetDescriptor *descriptor =
+        target != nullptr ? registry.find(target->public_id) : nullptr;
+    return descriptor != nullptr && descriptor->architecture_id == ROCJITSU_CODE_ARCH_CDNA5;
+  };
   if (guest_arch == ROCJITSU_CODE_ARCH_CDNA5 && host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      source_mach != (target_mach & EF_AMDGPU_MACH) &&
-      (source_mach == EF_AMDGPU_MACH_AMDGCN_GFX1251 ||
-       (target_mach & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1251)) {
-    // Same-architecture translation otherwise copies raw encodings. gfx1250 and gfx1251 have
-    // different instruction legality, and no concrete-target legalization contract exists, so
-    // cross-variant translation is unsupported.
-    return error(DiagnosticKind::Legalization,
-                 "cross-variant gfx1250/gfx1251 translation is unsupported");
+      source_mach != target_machine && is_concrete_cdna5_target(source_mach) &&
+      is_concrete_cdna5_target(target_machine)) {
+    // Same-architecture translation otherwise copies raw encodings. Different concrete CDNA5
+    // targets may have different instruction legality, and no cross-target legalization contract
+    // exists.
+    return error(DiagnosticKind::Legalization, "cross-target CDNA5 translation is unsupported");
   }
 
   if (patcher.text_bytes().empty()) {
