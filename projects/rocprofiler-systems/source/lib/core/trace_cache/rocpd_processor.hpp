@@ -60,7 +60,8 @@ private:
      *
      * @param event_data The PMC event data to insert.
      * @param unique_id The unique ID of the PMC.
-     * @param context The context of the PMC event. Used as a warning prefix: ex., "CPU PMC sample".
+     * @param context The context of the PMC event. Used as a warning prefix: ex., "CPU
+     * PMC sample".
      */
     void try_insert_pmc_event(
         const profiler_hub::writer_types::pmc_event_data_t&     event_data,
@@ -75,7 +76,7 @@ private:
 
     // PMC keys that have already been warned about
     std::unordered_set<std::string> m_unregistered_pmcs_already_warned;
-    std::size_t m_dropped_pmc_events_count = 0;
+    std::size_t                     m_dropped_pmc_events_count = 0;
 };
 
 }  // namespace trace_cache

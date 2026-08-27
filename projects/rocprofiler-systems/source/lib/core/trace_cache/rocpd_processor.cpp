@@ -970,7 +970,7 @@ rocpd_processor_t::try_insert_pmc_event(
     {
         ++m_dropped_pmc_events_count;
 
-        auto key = std::string{ unique_id.name};
+        auto key = std::string{ unique_id.name };
 
         // Build the key for the PMC info. Two agents missing the same PMC info will
         // warn separately.
@@ -978,13 +978,14 @@ rocpd_processor_t::try_insert_pmc_event(
         {
             const auto& agent_id = unique_id.agent_id.value();
             key += fmt::format(" [{}:{}]", agent_id.agent_type.value_or("unknown"),
-                                agent_id.type_index);
+                               agent_id.type_index);
         }
 
-        if (m_unregistered_pmcs_already_warned.emplace(std::move(key)).second) {
+        if(m_unregistered_pmcs_already_warned.emplace(std::move(key)).second)
+        {
             LOG_WARNING("{} skipped: PMC info not registered for name={} - {}. "
-                    "Further samples for this PMC will be dropped without warning.",
-                    context, unique_id.name, e.what());
+                        "Further samples for this PMC will be dropped without warning.",
+                        context, unique_id.name, e.what());
         }
     }
 }
@@ -1021,8 +1022,9 @@ rocpd_processor_t::finalize_processing()
     if(m_dropped_pmc_events_count > 0)
     {
         // Sorted so the message is reproducible across runs.
-        auto counters = std::vector<std::string>{ m_unregistered_pmcs_already_warned.begin(),
-                                                  m_unregistered_pmcs_already_warned.end() };
+        auto counters =
+            std::vector<std::string>{ m_unregistered_pmcs_already_warned.begin(),
+                                      m_unregistered_pmcs_already_warned.end() };
         std::sort(counters.begin(), counters.end());
 
         LOG_WARNING("Rocpd processor finalized with {} PMC event(s) dropped across {} "
