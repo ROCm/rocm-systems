@@ -241,7 +241,7 @@ test_moi_dispatch_id_sgpr(const ConSanTransformArtifacts &result) {
 /// excluding per-owner persistent VGPR tuples.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_dispatch_id_vgpr(const ConSanTransformArtifacts &result) {
-  return result.moi_operating_point.dispatch_id_vgpr;
+  return result.moi_operating_point.moi_dispatch_id_vgpr;
 }
 
 /// Return the owner-component scalar overrides frozen after placement.
@@ -1872,8 +1872,7 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
     };
   } else if (options.helper_has_ordinary_memory) {
     helper = {
-        0xEE050004u,
-        7u | (2u << 18u) | (1u << 20u),
+        0xEE050004u, 7u | (2u << 18u) | (1u << 20u),
         10u | (0xfffff0u << 8u), // global_load_b32 v7, v10, s[4:5] offset:-16
     };
   } else if (options.helper_has_ordered_atomic) {
@@ -2153,8 +2152,7 @@ std::vector<uint8_t> make_rdna4_two_kernel_aliased_ordered_atomic_code_object() 
       0x00000000u, // ds_store_b32 v0, v0
   };
   const std::array<uint32_t, 3> release = {
-      0xEE0B0000u,
-      0x00000000u,
+      0xEE0B0000u, 0x00000000u,
       0x00000000u, // global_wb
   };
   const size_t minimum_word_count =
@@ -2447,8 +2445,7 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u,
-      0x00980000u,
+      0xEE158004u, 0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -2508,9 +2505,7 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {
-      0xC40D4000u,
-      1u | (4u << 9u) | (2u << 18u) | (1u << 20u),
-      2u,
+      0xC40D4000u, 1u | (4u << 9u) | (2u << 18u) | (1u << 20u), 2u,
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words, "buffer_atomic_probe");
@@ -2541,9 +2536,7 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0],
-      (*atomic)[1],
-      (*atomic)[2],
+      (*atomic)[0], (*atomic)[1], (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);

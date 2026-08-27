@@ -358,34 +358,6 @@ struct ConSanMoiTransientSgprAssignment {
   auto operator<=>(const ConSanMoiTransientSgprAssignment &) const = default;
 };
 
-/// Authoritative accepted resource and state selection for one MOI transform.
-///
-/// An operating point is the complete combination of allocations and
-/// representation choices accepted after admission, requirement collection,
-/// and placement succeed. Lowering may select one code-object-wide transient
-/// scalar ABI and override it for independent owner components. Those
-/// selections are input to several emitted patches, not properties that can be
-/// reconstructed from any single patch record. Placement builds this value
-/// incrementally; emission and final validation consume the same accepted
-/// value. It contains no rejected search candidates or retry-control flags.
-///
-/// Stage 2 is moving the remaining private/LDS, persistence, and preservation
-/// choices here from `ConSanOptions`; the register members below are the first
-/// authoritative portion of that cutover.
-struct ConSanMoiOperatingPoint {
-  /// Per-owner persistent vector tuples selected when one code-object-wide
-  /// tuple cannot satisfy every owner's ordinary-VGPR boundary.
-  std::vector<ConSanMoiPersistentVgprAssignment> owner_persistent_vgprs;
-  /// Code-object-wide transient scalar ABI used by owners without an override.
-  ConSanMoiTransientSgprState default_transient_sgprs;
-  /// Per-owner-component transient scalar overrides selected by placement.
-  std::vector<ConSanMoiTransientSgprAssignment> owner_transient_sgprs;
-  /// Code-object-wide persistent hardware dispatch-ID pair held in VGPRs.
-  std::optional<uint16_t> dispatch_id_vgpr;
-
-  bool operator==(const ConSanMoiOperatingPoint &) const = default;
-};
-
 /// User-visible sanitizer choices that determine which semantic observations
 /// ConSan requests from a code object.
 ///
@@ -887,6 +859,33 @@ struct ConSanMoiResolvedState {
   std::optional<uint16_t> moi_workgroup_key_vgpr;
 
   bool operator==(const ConSanMoiResolvedState &) const = default;
+};
+
+/// Authoritative accepted resource and state selection for one MOI transform.
+///
+/// An operating point is the complete combination of allocations,
+/// representation choices, and persistence proofs accepted after admission,
+/// requirement collection, and placement succeed. The inherited resolved
+/// state records code-object-wide choices, while the members declared here
+/// record assignments that can differ among independent owner components.
+/// Those facts are input to several emitted patches, not properties that can
+/// be reconstructed from any single patch record. Placement builds this value
+/// incrementally; emission and final validation consume the same accepted
+/// value. It contains no rejected search candidates or retry-control flags.
+///
+/// `ConSanMoiResolvedState` remains as a named base only while legacy emitters
+/// consume its individual fields. Stage 2 removes that compatibility surface
+/// one representation at a time without creating a second published result.
+struct ConSanMoiOperatingPoint : ConSanMoiResolvedState {
+  /// Per-owner persistent vector tuples selected when one code-object-wide
+  /// tuple cannot satisfy every owner's ordinary-VGPR boundary.
+  std::vector<ConSanMoiPersistentVgprAssignment> owner_persistent_vgprs;
+  /// Code-object-wide transient scalar ABI used by owners without an override.
+  ConSanMoiTransientSgprState default_transient_sgprs;
+  /// Per-owner-component transient scalar overrides selected by placement.
+  std::vector<ConSanMoiTransientSgprAssignment> owner_transient_sgprs;
+
+  bool operator==(const ConSanMoiOperatingPoint &) const = default;
 };
 
 /// Transitional aggregate used only by MOI planning and legacy emitters.

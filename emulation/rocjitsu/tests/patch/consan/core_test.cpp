@@ -86,17 +86,20 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
   persistent_state.descriptor_file_offset = 64u;
   persistent_state.owner_vgpr = 16u;
   persistent_state.epoch_vgpr = 17u;
-  const ConSanMoiOperatingPoint allocation{
-      .owner_persistent_vgprs = {persistent_state},
-      .default_transient_sgprs = default_state,
-      .owner_transient_sgprs = {owner_state},
-      .dispatch_id_vgpr = 12u,
-  };
+  ConSanMoiOperatingPoint allocation;
+  allocation.automatic_moi_private_epoch = true;
+  allocation.owner_persistent_vgprs = {persistent_state};
+  allocation.default_transient_sgprs = default_state;
+  allocation.owner_transient_sgprs = {owner_state};
+  allocation.moi_dispatch_id_vgpr = 12u;
 
   EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
   EXPECT_EQ(allocation, ConSanMoiOperatingPoint(allocation));
 
   ConSanMoiOperatingPoint changed = allocation;
+  changed.automatic_moi_private_epoch = false;
+  EXPECT_NE(changed, allocation);
+  changed = allocation;
   changed.owner_persistent_vgprs.clear();
   EXPECT_NE(changed, allocation);
   changed = allocation;
@@ -106,7 +109,7 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
   changed.owner_transient_sgprs.clear();
   EXPECT_NE(changed, allocation);
   changed = allocation;
-  changed.dispatch_id_vgpr.reset();
+  changed.moi_dispatch_id_vgpr.reset();
   EXPECT_NE(changed, allocation);
 }
 

@@ -4377,6 +4377,8 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesScratchAndPersistentVgprs) {
   EXPECT_EQ(test_moi_owner_vgpr(result), 1);
   EXPECT_EQ(test_moi_epoch_vgpr(result), 2);
   EXPECT_EQ(test_moi_workgroup_key_vgpr(result), 3);
+  EXPECT_TRUE(result.moi_operating_point.automatic_moi_persistent_vgprs);
+  EXPECT_EQ(result.moi_operating_point.moi_workgroup_key_vgpr, 3u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });

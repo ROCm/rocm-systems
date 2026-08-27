@@ -3254,7 +3254,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
                !patch.persistent_dispatch_id_private_offset &&
                !result.moi_operating_point.default_transient_sgprs.dispatch_id_sgpr &&
-               !result.moi_operating_point.dispatch_id_vgpr &&
+               !result.moi_operating_point.moi_dispatch_id_vgpr &&
                !owner_local_dispatch_vgpr(patch) &&
                !consan_arch_uses_literal_dispatch_identity(arch);
       });
@@ -3463,7 +3463,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     std::optional<uint16_t> expected_dispatch_sgpr =
         result.moi_operating_point.default_transient_sgprs.dispatch_id_sgpr;
     std::optional<uint16_t> expected_dispatch_vgpr =
-        result.moi_operating_point.dispatch_id_vgpr;
+        result.moi_operating_point.moi_dispatch_id_vgpr;
     const auto &assignments = result.moi_operating_point.owner_transient_sgprs;
     if (!patch.persistent_dispatch_id_private_offset && !assignments.empty()) {
       // A partially admitted code-object-wide pair can be unavailable to one
@@ -3652,8 +3652,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
   for (const ConSanPatchInfo &patch : result.patches) {
     if (!is_release_transaction(patch))
       continue;
-    if (!patch.scratch_vgpr ||
-        !result.moi_operating_point.default_transient_sgprs.exec_save_sgpr ||
+    if (!patch.scratch_vgpr || !result.moi_operating_point.default_transient_sgprs.exec_save_sgpr ||
         patch.trampoline_offset > text.size() ||
         patch.trampoline_size > text.size() - patch.trampoline_offset ||
         patch.trampoline_size % sizeof(uint32_t) != 0) {

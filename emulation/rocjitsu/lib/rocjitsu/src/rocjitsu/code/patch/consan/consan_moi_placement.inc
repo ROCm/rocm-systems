@@ -1459,6 +1459,8 @@ apply_moi_transient_sgpr_assignment(MoiOptions &options, const ConSanMoiOperatin
 /// the transform leaves lowering. Per-owner assignments are already built in
 /// the typed allocation and must not be copied from mutable lowerer options.
 void freeze_moi_operating_point(const MoiOptions &options, ConSanTransformArtifacts &result) {
+  static_cast<ConSanMoiResolvedState &>(result.moi_operating_point) =
+      static_cast<const ConSanMoiResolvedState &>(options);
   const auto transient_state = [](const MoiOptions &resolved) {
     return ConSanMoiTransientSgprState{
         .exec_save_sgpr = resolved.moi_exec_save_sgpr,
@@ -1480,7 +1482,6 @@ void freeze_moi_operating_point(const MoiOptions &options, ConSanTransformArtifa
     };
   };
   result.moi_operating_point.default_transient_sgprs = transient_state(options);
-  result.moi_operating_point.dispatch_id_vgpr = options.moi_dispatch_id_vgpr;
 }
 
 [[nodiscard]] bool
