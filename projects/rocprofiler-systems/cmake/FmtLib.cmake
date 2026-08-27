@@ -41,6 +41,8 @@ if(ROCPROFSYS_BUILD_FMT)
             PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_fmt_include_dirs}"
         )
     endif()
+
+    target_link_libraries(rocprofiler-systems-fmt INTERFACE fmt::fmt)
 else()
     message(STATUS "Using system fmt library")
     find_package(fmt REQUIRED)
@@ -61,4 +63,6 @@ else()
             PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_fmt_include_dirs}"
         )
     endif()
+
+    target_link_libraries(rocprofiler-systems-fmt INTERFACE fmt::fmt)
 endif()

@@ -8,10 +8,6 @@ if(ROCPROFSYS_BUILD_SPDLOG)
 
     include(FetchContent)
 
-    # spdlog's CMakeLists only calls find_package(fmt) when no "fmt::fmt" target
-    # already exists, so fmt must be made available before spdlog.
-    include(FmtLib)
-
     rocprofiler_systems_checkout_git_submodule(
         RELATIVE_PATH external/spdlog
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -49,7 +45,10 @@ if(ROCPROFSYS_BUILD_SPDLOG)
         )
     endif()
 
-    target_link_libraries(rocprofiler-systems-spdlog INTERFACE spdlog::spdlog)
+    target_link_libraries(
+        rocprofiler-systems-spdlog
+        INTERFACE spdlog::spdlog rocprofiler-systems::rocprofiler-systems-fmt
+    )
 else()
     message(STATUS "Using system spdlog library")
     find_package(spdlog REQUIRED)
@@ -74,5 +73,8 @@ else()
             PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_spdlog_include_dirs}"
         )
     endif()
-    target_link_libraries(rocprofiler-systems-spdlog INTERFACE spdlog::spdlog)
+    target_link_libraries(
+        rocprofiler-systems-spdlog
+        INTERFACE spdlog::spdlog rocprofiler-systems::rocprofiler-systems-fmt
+    )
 endif()
