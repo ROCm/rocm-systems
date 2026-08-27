@@ -71,6 +71,22 @@ EXPECTED_COUNTERS = (
 DIM_TOLERANCE = 0.05
 COUNTER_TOLERANCE = 0.10
 
+# Counters fixed by launch geometry and the instruction stream: replaying one dispatch against
+# restored inputs reproduces them bit-for-bit, so they are compared exactly. A relative band would
+# only hide structural loss -- these values are summed over every hardware instance, so a pass that
+# drops 1 of 32 instance records is off by 3%, well inside COUNTER_TOLERANCE. GRBM_* cycle counters
+# are absent on purpose: they track cache and memory-controller state the snapshot cannot restore,
+# so they do need a band if ever used as a common counter.
+EXACT_ACROSS_PASSES = frozenset(
+    {
+        "SQ_WAVES",
+        "SQ_INSTS_VALU",
+        "SQ_INSTS_SALU",
+        "SQ_INSTS_SMEM",
+        "SQ_INSTS_LDS",
+    }
+)
+
 
 def _within_tolerance(actual, expected):
     return abs(actual - expected) <= DIM_TOLERANCE * expected
@@ -79,6 +95,10 @@ def _within_tolerance(actual, expected):
 def _approx_equal(a, b, tol=COUNTER_TOLERANCE):
     scale = max(abs(a), abs(b), 1.0)
     return abs(a - b) <= tol * scale
+
+
+def _pass_tolerance(counter):
+    return 0.0 if counter in EXACT_ACROSS_PASSES else COUNTER_TOLERANCE
 
 
 def _sdk(json_data):
@@ -261,9 +281,15 @@ def test_common_counters_constant_across_passes(json_data, common_counters):
                 f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} missing in "
                 f"some passes: present in {len(values)}/{len(passes)}"
             )
-            assert _approx_equal(min(values), max(values)), (
+            # A counter stuck at zero is constant, so the spread check below cannot see it.
+            assert min(values) > 0, (
+                f"dispatch {dispatch_id} ({entry['kernel']}) common counter {counter} is not > 0 "
+                f"in every replay pass: {values}"
+            )
+            tolerance = _pass_tolerance(counter)
+            assert _approx_equal(min(values), max(values), tolerance), (
                 f"dispatch {dispatch_id} ({entry['kernel']}) counter {counter} varies across "
-                f"replay passes beyond {COUNTER_TOLERANCE:.0%}: {values}"
+                f"replay passes (allowed spread {tolerance:.0%}): {values}"
             )
 
 
