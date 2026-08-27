@@ -117,21 +117,6 @@ TEST(ConSanPipeline, StageRecordValidatesEnumsIdentityStatusAndContractPayload) 
   EXPECT_FALSE(malformed.well_formed());
 }
 
-TEST(ConSanPipeline, TransformIssueValidatesCategoryStageAndDiagnostic) {
-  ConSanTransformIssue issue{
-      .stage = ConSanPipelineStage::LegacyLowering,
-      .detail = "lowering failed",
-  };
-  EXPECT_TRUE(issue.well_formed());
-
-  ConSanTransformIssue malformed = issue;
-  malformed.detail.clear();
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = issue;
-  malformed.stage = ConSanPipelineStage::Count;
-  EXPECT_FALSE(malformed.well_formed());
-}
-
 TEST(ConSanPipeline, DefaultResultAndInvalidStageLookupFailClosed) {
   const TransformResult result;
   EXPECT_FALSE(result.well_formed());
@@ -360,7 +345,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       enabled_runtime_policy(), ConSanDebugOverrides{}, MutationRequest{},
       complete_runtime_capabilities(), BoundRuntimeResources{}, std::move(mechanism));
 
-  ASSERT_TRUE(published.well_formed()) << testing::PrintToString(published.issues);
+  ASSERT_TRUE(published.well_formed()) << testing::PrintToString(published.errors);
   EXPECT_EQ(published.replacement, (std::vector<uint8_t>{0x7f, 'E', 'L', 'F'}));
   ASSERT_EQ(published.fault_sites.size(), 1u);
   EXPECT_EQ(published.fault_sites.front().identity, "published-fault-site");
@@ -408,7 +393,7 @@ TEST(ConSanPipeline, InvalidConfigurationStopsBeforeLegacyLoweringWithTypedIssue
   EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->contract_issue,
             ConSanContractIssue::InvalidSampleStride);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_TRUE(result.issues.empty());
+  EXPECT_TRUE(result.errors.empty());
   EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
             ConSanPipelineStageStatus::Invalid);
 
@@ -431,7 +416,7 @@ TEST(ConSanPipeline, MissingRuntimeBackendStopsAtCapabilityBoundary) {
             ConSanPipelineStageStatus::Invalid);
   EXPECT_EQ(result.stage(ConSanPipelineStage::TargetAndRuntimeCapabilities)->contract_issue,
             ConSanContractIssue::MissingRuntimeBackend);
-  EXPECT_TRUE(result.issues.empty());
+  EXPECT_TRUE(result.errors.empty());
 }
 
 TEST(ConSanPipeline, InvalidCodeObjectRetainsOneIdentityAcrossEveryStage) {
@@ -451,7 +436,7 @@ TEST(ConSanPipeline, InvalidCodeObjectRetainsOneIdentityAcrossEveryStage) {
             ConSanPipelineStageStatus::Invalid);
   EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
             ConSanPipelineStageStatus::Invalid);
-  EXPECT_FALSE(result.issues.empty());
+  EXPECT_FALSE(result.errors.empty());
 }
 
 TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
@@ -467,8 +452,8 @@ TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
       transform_consan(bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
                        fail_closed, ConSanDebugOverrides{}, complete_runtime_capabilities(), {});
 
-  ASSERT_TRUE(open.well_formed()) << testing::PrintToString(open.issues);
-  ASSERT_TRUE(closed.well_formed()) << testing::PrintToString(closed.issues);
+  ASSERT_TRUE(open.well_formed()) << testing::PrintToString(open.errors);
+  ASSERT_TRUE(closed.well_formed()) << testing::PrintToString(closed.errors);
   EXPECT_EQ(open.code_object, closed.code_object);
   EXPECT_EQ(open.stages, closed.stages);
   EXPECT_EQ(open.program_inventory.code_object_id(), closed.program_inventory.code_object_id());
@@ -480,7 +465,7 @@ TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
   EXPECT_EQ(open.coverage_ledger, closed.coverage_ledger);
   EXPECT_EQ(open.replacement, closed.replacement);
   EXPECT_EQ(open.outcome, closed.outcome);
-  EXPECT_EQ(open.issues, closed.issues);
+  EXPECT_EQ(open.errors, closed.errors);
   EXPECT_EQ(open.warnings, closed.warnings);
   EXPECT_EQ(open.mutation, closed.mutation);
   EXPECT_EQ(open.install_action(/*fail_closed=*/false), ConSanInstallAction::LoadOriginal);
@@ -493,8 +478,8 @@ TEST(ConSanPipeline, EveryEnginePublishesItsTypedEvidenceContractBeforeBinding) 
     TransformResult result = transform_consan(
         bytes, request, TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
         complete_runtime_capabilities(), BoundRuntimeResources{});
-    ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
-    ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.issues);
+    ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.errors);
+    ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.errors);
     EXPECT_TRUE(std::holds_alternative<ExpectedEvidence>(*result.evidence_requirements));
     EXPECT_EQ(result.stage(ConSanPipelineStage::ProgramInventory)->status,
               ConSanPipelineStageStatus::Completed);
@@ -536,7 +521,7 @@ TEST(ConSanPipeline, MoiEvidenceCapacityComesDirectlyFromTypedRequestPolicyAndCa
           transform_consan(bytes, request, transform_policy, enabled_runtime_policy(),
                            ConSanDebugOverrides{}, capabilities, BoundRuntimeResources{});
 
-      ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.issues);
+      ASSERT_TRUE(result.evidence_requirements) << testing::PrintToString(result.errors);
       switch (engine) {
       case ConSanMoiEngine::RecordReplay:
         EXPECT_EQ(std::get<ConSanRecordReplayEvidenceRequirements>(*result.evidence_requirements),
@@ -579,7 +564,7 @@ TEST(ConSanPipeline, EmptyPlansNeedNoRuntimeBindingForAnyEngine) {
     TransformResult result = transform_consan(
         bytes, request, TransformPolicy{}, enabled_runtime_policy(), ConSanDebugOverrides{},
         complete_runtime_capabilities(), BoundRuntimeResources{});
-    ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
+    ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.evidence_requirements);
     EXPECT_FALSE(
         std::visit([](const auto &requirements) { return requirements.requires_binding(); },
@@ -608,7 +593,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
   TransformResult complete =
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), bound);
-  ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.issues);
+  ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.errors);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
             ConSanPipelineStageStatus::Completed);
 
@@ -617,7 +602,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
   TransformResult rejected =
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, missing_visibility, bound);
-  ASSERT_TRUE(rejected.well_formed()) << testing::PrintToString(rejected.issues);
+  ASSERT_TRUE(rejected.well_formed()) << testing::PrintToString(rejected.errors);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->status,
             ConSanPipelineStageStatus::Unsupported);
@@ -629,7 +614,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
   TransformResult rejected_size =
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), undersized);
-  ASSERT_TRUE(rejected_size.well_formed()) << testing::PrintToString(rejected_size.issues);
+  ASSERT_TRUE(rejected_size.well_formed()) << testing::PrintToString(rejected_size.errors);
   EXPECT_EQ(rejected_size.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
             ConSanContractIssue::InvalidResourceSize);
 
@@ -639,7 +624,7 @@ TEST(ConSanPipeline, ConcreteBindingChecksRuntimeFactsAndLifetimeScope) {
   TransformResult rejected_schema =
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), wrong_schema);
-  ASSERT_TRUE(rejected_schema.well_formed()) << testing::PrintToString(rejected_schema.issues);
+  ASSERT_TRUE(rejected_schema.well_formed()) << testing::PrintToString(rejected_schema.errors);
   EXPECT_EQ(rejected_schema.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
             ConSanContractIssue::InvalidResourceAddress);
 }
@@ -654,7 +639,7 @@ TEST(ConSanPipeline, SuperColliderBindingRequiresItsStickyMarkerAddress) {
   TransformResult complete =
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), marker);
-  ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.issues);
+  ASSERT_TRUE(complete.well_formed()) << testing::PrintToString(complete.errors);
   EXPECT_EQ(complete.stage(ConSanPipelineStage::RuntimeBinding)->status,
             ConSanPipelineStageStatus::Completed);
 
@@ -665,14 +650,14 @@ TEST(ConSanPipeline, SuperColliderBindingRequiresItsStickyMarkerAddress) {
   TransformResult rejected =
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), wrong_schema);
-  ASSERT_TRUE(rejected.well_formed()) << testing::PrintToString(rejected.issues);
+  ASSERT_TRUE(rejected.well_formed()) << testing::PrintToString(rejected.errors);
   EXPECT_EQ(rejected.stage(ConSanPipelineStage::RuntimeBinding)->contract_issue,
             ConSanContractIssue::InvalidResourceAddress);
 }
 
 TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   const TransformResult good = record_replay_inventory_result();
-  ASSERT_TRUE(good.well_formed()) << testing::PrintToString(good.issues);
+  ASSERT_TRUE(good.well_formed()) << testing::PrintToString(good.errors);
 
   TransformResult malformed = good;
   malformed.stages.pop_back();
@@ -699,7 +684,7 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
       .runtime_requirements.executable_binding = false;
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
-  malformed.issues.push_back({});
+  malformed.errors.emplace_back();
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   malformed.dispatch_requirements.kernels.push_back({});
@@ -752,7 +737,7 @@ TEST(ConSanPipeline, ProductionResultOwnsAllPublishedTransformArtifacts) {
 
   TransformResult split = transform_consan(bytes, request, transform_policy, runtime_policy, debug,
                                            capabilities, resources);
-  ASSERT_TRUE(split.well_formed()) << testing::PrintToString(split.issues);
+  ASSERT_TRUE(split.well_formed()) << testing::PrintToString(split.errors);
 
   EXPECT_TRUE(split.program_inventory.code_object_parsed());
   EXPECT_EQ(split.program_inventory.code_object_id(), split.code_object);
@@ -859,7 +844,7 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   TransformResult inventory = transform_consan_pristine_moi_inventory(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, {},
       /*preserve_extended_barrier_pairs=*/false);
-  ASSERT_TRUE(inventory.well_formed()) << testing::PrintToString(inventory.issues);
+  ASSERT_TRUE(inventory.well_formed()) << testing::PrintToString(inventory.errors);
   ASSERT_TRUE(inventory.evidence_requirements);
   const auto &requirements =
       std::get<ConSanRecordReplayEvidenceRequirements>(*inventory.evidence_requirements);
@@ -874,7 +859,7 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   const TransformResult direct = transform_consan(bytes, request, transform_policy, runtime_policy,
                                                   debug, capabilities, resources);
 
-  ASSERT_TRUE(retried.well_formed()) << testing::PrintToString(retried.issues);
+  ASSERT_TRUE(retried.well_formed()) << testing::PrintToString(retried.errors);
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(retried.install_action(false), ConSanInstallAction::LoadReplacement);
   EXPECT_EQ(retried.code_object, direct.code_object);
@@ -908,11 +893,11 @@ TEST(ConSanPipeline, MoiRetryRejectsAnOrdinaryResultWithoutPristineProvenance) {
       bytes, request, TransformPolicy{}, runtime_policy, ConSanDebugOverrides{}, MutationRequest{},
       capabilities, resources, std::move(ordinary));
 
-  ASSERT_TRUE(retried.well_formed()) << testing::PrintToString(retried.issues);
+  ASSERT_TRUE(retried.well_formed()) << testing::PrintToString(retried.errors);
   EXPECT_EQ(retried.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_TRUE(std::ranges::any_of(retried.issues, [](const ConSanTransformIssue &issue) {
-    return issue.detail.find("requires a pristine inventory result") != std::string::npos;
-  })) << testing::PrintToString(retried.issues);
+  EXPECT_TRUE(std::ranges::any_of(retried.errors, [](const std::string &error) {
+    return error.find("requires a pristine inventory result") != std::string::npos;
+  })) << testing::PrintToString(retried.errors);
 }
 
 TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) {
@@ -930,15 +915,15 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
                                                  debug, capabilities, resources);
   const TransformResult second = transform_consan(bytes, request, transform_policy, runtime_policy,
                                                   debug, capabilities, resources);
-  ASSERT_TRUE(first.well_formed()) << testing::PrintToString(first.issues);
-  ASSERT_TRUE(second.well_formed()) << testing::PrintToString(second.issues);
+  ASSERT_TRUE(first.well_formed()) << testing::PrintToString(first.errors);
+  ASSERT_TRUE(second.well_formed()) << testing::PrintToString(second.errors);
   EXPECT_EQ(first.code_object, second.code_object);
   EXPECT_EQ(first.stages, second.stages);
   EXPECT_EQ(first.observation_plan, second.observation_plan);
   EXPECT_EQ(first.evidence_requirements, second.evidence_requirements);
   EXPECT_EQ(first.outcome, second.outcome);
   EXPECT_EQ(first.replacement, second.replacement);
-  EXPECT_EQ(first.issues, second.issues);
+  EXPECT_EQ(first.errors, second.errors);
   EXPECT_EQ(first.warnings, second.warnings);
   EXPECT_EQ(first.mutation, second.mutation);
   EXPECT_EQ(first.dispatch_requirements, second.dispatch_requirements);
@@ -951,7 +936,7 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   mutation.fault_dry_run = true;
   TransformResult mutated = transform_consan_with_mutation(
       bytes, request, transform_policy, runtime_policy, debug, mutation, capabilities, resources);
-  ASSERT_TRUE(mutated.well_formed()) << testing::PrintToString(mutated.issues);
+  ASSERT_TRUE(mutated.well_formed()) << testing::PrintToString(mutated.errors);
   EXPECT_GT(mutated.mutation.fault.requested, 0u);
   EXPECT_NE(mutated.mutation, ConSanMutationOutcome{});
   EXPECT_FALSE(mutated.fault_sites.empty());
@@ -983,7 +968,7 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
 
   result.discard_replacement("runtime report allocation failed");
 
-  ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
+  ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.errors);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.dispatch_requirements.kernels.empty());

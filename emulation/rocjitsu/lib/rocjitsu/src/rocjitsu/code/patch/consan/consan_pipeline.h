@@ -157,24 +157,6 @@ struct ConSanPipelineStageRecord {
   bool operator==(const ConSanPipelineStageRecord &) const = default;
 };
 
-/// One machine-readable static-transform failure with optional prose context.
-///
-/// `stage` identifies the contract that owns the failure and `detail` preserves
-/// its diagnostic context. Configuration and capability failures do not use
-/// this type because their stage record owns the corresponding typed
-/// `ConSanContractIssue` directly.
-struct ConSanTransformIssue {
-  /// Pipeline contract that owns this failure.
-  ConSanPipelineStage stage = ConSanPipelineStage::Count;
-  /// Human-readable context that is never used to recover the category.
-  std::string detail;
-
-  /// Return whether category, stage, and diagnostic context are valid.
-  [[nodiscard]] bool well_formed() const;
-
-  bool operator==(const ConSanTransformIssue &) const = default;
-};
-
 /// Runtime dispatch facts required by the validated replacement of one kernel.
 ///
 /// A lowerer can increase the fixed private or group segment used by a kernel,
@@ -265,8 +247,6 @@ public:
   std::vector<ConSanPipelineStageRecord> stages;
   /// Address-free engine-specific report/marker contract when applicable.
   std::optional<ConSanEvidenceRequirements> evidence_requirements;
-  /// Machine-readable failures owned by static pipeline stages.
-  std::vector<ConSanTransformIssue> issues;
   /// Runtime dispatch contract derived once from validated lowering and typed
   /// semantic coverage, then bound to executable symbols by the HSA adapter.
   ConSanDispatchRequirements dispatch_requirements;

@@ -1099,12 +1099,14 @@ was selected.
 
 **Telemetry** is optional implementation measurement, such as chosen
 registers, patch counts, or cave sizes. It helps debugging but is not the
-behavioral contract. A **structured error** is a typed category plus
-machine-readable context.
+behavioral contract. A **typed contract failure** is a
+`ConSanContractIssue` stored by the pipeline stage that rejected its input;
+lowering and final-validation errors retain diagnostic text.
 
 `TransformResult` contains the validated replacement bytes when present,
 static original-to-instrumented mappings, resource/segment requirements,
-coverage ledger, typed transform status, and structured errors. Semantic
+coverage ledger, typed transform status, typed contract failures, and
+contextual lowering errors. Semantic
 inventory and debug telemetry are optional separately owned artifacts rather
 than the current roughly 600-line result structure shared by every caller.
 A transform result is static: it says what happened while rewriting, not
@@ -1117,9 +1119,10 @@ legacy lowering, final validation, and completion. Each stage records the same
 collision-aware pristine `ConSanCodeObjectId` and a typed status. `Deferred`
 means a valid address-free result awaits runtime binding; `NotApplicable`
 means the selected mode or result needs no value from that stage. Neither is
-silently presented as `Completed`. `ConSanTransformIssue` gives request and
-capability failures a `ConSanContractIssue` payload while retaining legacy or
-validation detail without asking control flow to parse it.
+silently presented as `Completed`. Request, capability, and binding failures
+live as the `ConSanContractIssue` of their owning stage, so control flow never
+parses diagnostic text. Lowering and final-validation diagnostics live once in
+the shared transform artifacts.
 
 `TransformResult` owns immutable inventory, observation plan, coverage,
 replacement bytes, status, diagnostics, mutation detail, resource plans, and
@@ -5173,6 +5176,32 @@ analysis completed.
   control-plane-only tranche; the complete serialized physical matrix remains
   reserved for the final gate. E2E validation remains outside this work.
 
+### Slice 5BR: share lowering errors without a projection type
+
+- **One error vector:** Fatal lowering and final-validation diagnostics now
+  live in `ConSanTransformArtifacts` beside the outcome and warnings they
+  qualify. `ConSanResult` and `TransformResult` no longer declare separate
+  error representations, and publication moves the complete artifact value
+  without rebuilding one wrapper per string.
+- **Typed failures stay typed:** Request, capability, and binding failures
+  remain the `ConSanContractIssue` of their owning stage. The shared string
+  vector is only for contextual mechanism failures, all of which arise inside
+  the lowering/final-validation boundary. Empty diagnostics remain invalid.
+- **Runtime and tests consume the owner:** The HSA coordinator logs the shared
+  error strings directly. Pipeline tests assert the same invalid-object,
+  retry-provenance, determinism, and fail-open/fail-closed behavior through
+  that value, including rejection of an empty diagnostic.
+- **Deletion accounting:** Implementation files add nine and delete 37
+  physical lines, a net deletion of 28. Tests add 31 and delete 46 lines, a
+  net deletion of fifteen. The per-error conversion loop and the entire
+  `ConSanTransformIssue` projection type are gone.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  physical gate for this representation-only tranche; the complete serialized
+  physical matrix remains reserved for the final gate. E2E validation remains
+  outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
@@ -5180,7 +5209,8 @@ analysis completed.
   perturbation composition explicit. Both return a split `TransformResult`
   with one immutable input identity, the complete ordered stage record,
   immutable inventory and policy artifacts, an engine-specific address-free
-  evidence variant, replacement bytes, typed issues, and static outcome.
+  evidence variant, replacement bytes, typed stage failures, contextual
+  lowering errors, and static outcome.
 - **Binding contract:** An unbound but complete report/marker requirement is
   explicitly `Deferred`. A concrete binding is accepted only when runtime
   capabilities satisfy the schema, lifetime scope matches, the engine-specific

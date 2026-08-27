@@ -338,9 +338,9 @@ Each `TransformResult` records every stage exactly once:
 A stage is `Completed`, `Deferred`, `NotApplicable`, `Unsupported`, or
 `Invalid`. The result carries the pristine image identity, inventory,
 observation plan, coverage ledger, optional evidence requirements, mutation
-sites and plans, resource plans, emitted patch inventory, structured issues,
-warnings, and validated replacement bytes. Runtime conflicts do not belong in
-this static result.
+sites and plans, resource plans, emitted patch inventory, typed stage failures,
+contextual lowering errors, warnings, and validated replacement bytes. Runtime
+conflicts do not belong in this static result.
 
 `TransformResult::install_action` derives loader behavior from the static
 outcome and fail-closed policy. The HSA coordinator consumes the result

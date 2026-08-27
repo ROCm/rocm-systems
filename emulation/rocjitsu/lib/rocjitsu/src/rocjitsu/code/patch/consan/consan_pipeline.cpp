@@ -197,8 +197,6 @@ bool ConSanPipelineStageRecord::well_formed() const {
          stage == ConSanPipelineStage::RuntimeBinding;
 }
 
-bool ConSanTransformIssue::well_formed() const { return valid_stage(stage) && !detail.empty(); }
-
 const ConSanPipelineStageRecord *TransformResult::stage(ConSanPipelineStage value) const {
   if (!valid_stage(value))
     return nullptr;
@@ -229,8 +227,7 @@ bool TransformResult::well_formed() const {
        !consan_evidence_requirements_well_formed(*evidence_requirements))) {
     return false;
   }
-  if (std::ranges::any_of(issues,
-                          [](const ConSanTransformIssue &issue) { return !issue.well_formed(); })) {
+  if (std::ranges::any_of(errors, &std::string::empty)) {
     return false;
   }
   switch (outcome) {
@@ -414,14 +411,6 @@ TransformResult TransformResult::publish_optional(
     result.dispatch_requirements = build_dispatch_requirements(
         result.program_inventory, result.coverage_ledger, result.patches);
   }
-  for (std::string &error : lowering.errors) {
-    result.issues.push_back({
-        .stage = ConSanPipelineStage::LegacyLowering,
-        .detail = std::move(error),
-    });
-  }
-  lowering.errors.clear();
-
   const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
   if (flavor == ConSanFlavor::None) {
     capability_stage.status = ConSanPipelineStageStatus::NotApplicable;

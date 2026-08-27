@@ -157,6 +157,10 @@ struct ConSanTransformArtifacts {
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   /// Non-fatal diagnostics retained from analysis and lowering.
   std::vector<std::string> warnings;
+  /// Fatal static-transform diagnostics emitted by lowering or final
+  /// validation. Typed request, capability, and binding failures live in their
+  /// pipeline stage record instead of being duplicated here.
+  std::vector<std::string> errors;
 };
 
 /// Mutable compatibility-lowering state that has not yet moved into focused
@@ -189,7 +193,6 @@ struct ConSanResult : ConSanTransformArtifacts {
   /// a runtime-allocated report buffer trims only the prior MOI-stage
   /// diagnostics while retaining parser and semantic-analysis warnings.
   size_t moi_stage_warning_begin = 0;
-  std::vector<std::string> errors;
 };
 
 /// Whether a semantic claim is at least as strong as the weakest confidence a

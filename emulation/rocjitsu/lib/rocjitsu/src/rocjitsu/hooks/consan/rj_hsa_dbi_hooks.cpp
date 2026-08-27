@@ -4144,15 +4144,15 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         transform_result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid ? "true"
                                                                                     : "false",
         rocjitsu::consan_transform_outcome_name(transform_result.outcome),
-        transform_result.issues.size(), transform_result.warnings.size(),
+        transform_result.errors.size(), transform_result.warnings.size(),
         transform_result.patches.size(),
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - patch_begin)
             .count());
     for (const std::string &warning : transform_result.warnings)
       log_message(kLogVerbose, "%s", warning.c_str());
-    if (!transform_result.issues.empty()) {
-      for (const rocjitsu::ConSanTransformIssue &issue : transform_result.issues)
-        std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s\n", issue.detail.c_str());
+    if (!transform_result.errors.empty()) {
+      for (const std::string &error : transform_result.errors)
+        std::fprintf(stderr, "[rocjitsu-dbi-hooks] %s\n", error.c_str());
       if (config->fail_closed)
         return reject_code_object_load(*config, HSA_STATUS_ERROR_INVALID_CODE_OBJECT,
                                        code_object_reader.handle, "transform-error",
