@@ -1088,18 +1088,24 @@ setup()
 }
 
 void
-postfork_child_release_samplers()
+postfork_child_release_samplers() noexcept
 {
     // release() rather than reset(): deliberately skips ~sampler_t() after fork().
     auto* _samplers = sampler_instances::get();
     if(!_samplers) return;
     for(auto& itr : *_samplers)
-        itr.release();
+        (void) itr.release();
 }
 
 std::set<int>
 shutdown()
 {
+    // Prefer the ID captured in thread_info: the thread-local backing get_id() may
+    // already have been destroyed when shutdown() runs from a thread-local destructor.
+    const auto& _info = thread_info::get();
+    const auto  _tid  = (_info && _info->index_data) ? _info->index_data->sequent_value
+                                                     : threading::get_id();
+
     if(is_child_process())
     {
         // Only this thread's sampler may be released here: shutdown() runs from the
@@ -1109,18 +1115,15 @@ shutdown()
         auto* _samplers = sampler_instances::get();
         if(_samplers)
         {
-            // get_id() returns -1 when the id manager is gone, and offset
-            // (rocprof-sys-internal) thread ids count downward, so the id can be
-            // negative. Bounds-check before at(), which throws -- and an exception
-            // escaping a thread destructor terminates the process.
-            const auto _tid = threading::get_id();
+            // Validate the signed thread ID before converting it and indexing sampler
+            // storage. This runs during thread teardown, so avoid throwing accessors.
             if(_tid >= 0 && static_cast<size_t>(_tid) < _samplers->size())
-                _samplers->at(static_cast<size_t>(_tid)).release();
+                (void) (*_samplers)[static_cast<size_t>(_tid)].release();
         }
         return std::set<int>{};
     }
 
-    auto _v = configure(false);
+    auto _v = configure(false, _tid);
     if(utility::get_thread_index() == 0) stop_duration_thread();
     return _v;
 }
