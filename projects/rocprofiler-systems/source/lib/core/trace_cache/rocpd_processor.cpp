@@ -305,15 +305,7 @@ rocpd_processor_t::handle(const in_time_sample& its)
     profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
     pmc_uid.name = its.track_name;
 
-    try
-    {
-        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
-    } catch(const std::runtime_error& e)
-    {
-        LOG_WARNING("In-time sample skipped: PMC info not registered for "
-                    "track_name={}: {}",
-                    its.track_name, e.what());
-    }
+    try_insert_pmc_event(pmc_data, pmc_uid, "In-time sample");
 }
 
 void
@@ -359,15 +351,7 @@ rocpd_processor_t::handle(const pmc_event_with_sample& pmc)
     pmc_uid.name     = pmc.pmc_info_name;
     pmc_uid.agent_id = make_agent_uid(agent_ref);
 
-    try
-    {
-        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
-    } catch(const std::runtime_error& e)
-    {
-        LOG_WARNING("PMC event skipped: PMC info not registered for "
-                    "pmc_info_name={}: {}",
-                    pmc.pmc_info_name, e.what());
-    }
+    try_insert_pmc_event(pmc_data, pmc_uid, "PMC event");
 }
 
 void
@@ -415,15 +399,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        try
-        {
-            m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
-        } catch(const std::runtime_error& e)
-        {
-            LOG_WARNING("GPU PMC sample skipped: PMC info not registered for "
-                        "pmc_name={}: {}",
-                        pmc_name, e.what());
-        }
+        try_insert_pmc_event(pmc_data, pmc_uid, "GPU PMC sample");
     };
 
     const auto& m       = gpu_pmc.metric_values;
@@ -614,15 +590,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& nic_sample)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        try
-        {
-            m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
-        } catch(const std::runtime_error& e)
-        {
-            LOG_WARNING("NIC PMC sample skipped: PMC info not registered for "
-                        "pmc_name={}: {}",
-                        pmc_name, e.what());
-        }
+        try_insert_pmc_event(pmc_data, pmc_uid, "NIC PMC sample");
     };
 
     const auto& mtrcs   = nic_sample.metric_values;
@@ -712,16 +680,7 @@ rocpd_processor_t::handle(
         pmc_uid.name     = info.pmc_info_name;
         pmc_uid.agent_id = agent_uid;
 
-        try
-        {
-            m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
-        } catch(const std::runtime_error& e)
-        {
-            LOG_WARNING("GPU perf-counter sample skipped: PMC info not registered for "
-                        "pmc_info_name={}: {}",
-                        info.pmc_info_name, e.what());
-            continue;
-        }
+        try_insert_pmc_event(pmc_data, pmc_uid, "GPU perf-counter sample");
     }
 }
 
@@ -813,15 +772,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& cpu_pmc_smpl)
         pmc_uid.name     = pmc_name;
         pmc_uid.agent_id = agent_uid;
 
-        try
-        {
-            m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
-        } catch(const std::runtime_error& e)
-        {
-            LOG_WARNING("CPU PMC sample skipped: PMC info not registered for "
-                        "pmc_name={}: {}",
-                        pmc_name, e.what());
-        }
+        try_insert_pmc_event(pmc_data, pmc_uid, "CPU PMC sample");
     };
 
     const auto& enabled_m = cpu_pmc_smpl.enabled_metric;
@@ -980,17 +931,12 @@ rocpd_processor_t::handle(const kfd_sample& kfd)
         pmc_uid.name     = kfd.pmc_info_name;
         pmc_uid.agent_id = make_agent_uid(agent_ref);
 
-        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
+        try_insert_pmc_event(pmc_data, pmc_uid, "KFD PMC event");
     } catch(const std::out_of_range& e)
     {
         LOG_WARNING("KFD PMC event skipped: agent lookup failed for device_id={}, "
                     "device_type={}: {}",
                     kfd.device_id, kfd.device_type, e.what());
-    } catch(const std::runtime_error& e)
-    {
-        LOG_WARNING("KFD PMC event skipped: PMC info not registered for "
-                    "pmc_info_name={}: {}",
-                    kfd.pmc_info_name, e.what());
     }
 }
 
@@ -1009,6 +955,38 @@ rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& m
 
     auto storage = std::make_unique<profiler_hub::storage_t>(m_db_output_path, uuid);
     m_writer     = std::make_unique<profiler_hub::writer_t>(std::move(storage));
+}
+
+void
+rocpd_processor_t::try_insert_pmc_event(
+    const profiler_hub::writer_types::pmc_event_data_t&     event_data,
+    const profiler_hub::writer_types::pmc_info_unique_id_t& unique_id,
+    std::string_view                                        context)
+{
+    try
+    {
+        m_writer->insert_pmc_event_data(event_data, unique_id);
+    } catch(const std::runtime_error& e)
+    {
+        ++m_dropped_pmc_events_count;
+
+        auto key = std::string{ unique_id.name};
+
+        // Build the key for the PMC info. Two agents missing the same PMC info will
+        // warn separately.
+        if(unique_id.agent_id.has_value())
+        {
+            const auto& agent_id = unique_id.agent_id.value();
+            key += fmt::format(" [{}:{}]", agent_id.agent_type.value_or("unknown"),
+                                agent_id.type_index);
+        }
+
+        if (m_unregistered_pmcs_already_warned.emplace(std::move(key)).second) {
+            LOG_WARNING("{} skipped: PMC info not registered for name={} - {}. "
+                    "Further samples for this PMC will be dropped without warning.",
+                    context, unique_id.name, e.what());
+        }
+    }
 }
 
 void
@@ -1040,7 +1018,22 @@ rocpd_processor_t::finalize_processing()
 
     m_output_registry.register_file(m_db_output_path, output_format::rocpd);
 
-    LOG_INFO("Rocpd processor finalized successfully");
+    if(m_dropped_pmc_events_count > 0)
+    {
+        // Sorted so the message is reproducible across runs.
+        auto counters = std::vector<std::string>{ m_unregistered_pmcs_already_warned.begin(),
+                                                  m_unregistered_pmcs_already_warned.end() };
+        std::sort(counters.begin(), counters.end());
+
+        LOG_WARNING("Rocpd processor finalized with {} PMC event(s) dropped across {} "
+                    "unregistered counter(s); {} is incomplete. Counters: {}",
+                    m_dropped_pmc_events_count, counters.size(), m_db_output_path,
+                    fmt::join(counters, ", "));
+    }
+    else
+    {
+        LOG_INFO("Rocpd processor finalized successfully");
+    }
 }
 
 void
