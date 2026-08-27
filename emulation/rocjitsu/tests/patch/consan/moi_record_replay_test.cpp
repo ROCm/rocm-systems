@@ -2446,7 +2446,7 @@ TEST(ConSanMoi, FirstLightProbeSpillsVictimWindowInAppendedCave) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
   });
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2523,7 +2523,7 @@ TEST(ConSanMoi, AutomaticPersistentStatePreservesStaticRecordReplaySpillWindow) 
   });
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_init_owner_epoch = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2564,7 +2564,7 @@ TEST(ConSanMoi, FirstLightProbeSupportsZeroToNonzeroDispatchScratch) {
   };
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2599,7 +2599,7 @@ TEST(ConSanMoi, Rdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
       text_words, "dynamic_spill", kRdna4Wave64AllVgprsGranulated, /*wave32=*/false,
       /*uses_dynamic_stack=*/true);
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2641,7 +2641,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySpillsDynamicStackAccessInBothWaveModes) {
         text_words, "dynamic_spill", kRdna4Wave64AllVgprsGranulated, wave32,
         /*uses_dynamic_stack=*/true);
     ConSanOptions options = moi_options();
-    options.force_vgpr_spill = true;
+    options.test_force_vgpr_spill = true;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2665,7 +2665,7 @@ TEST(ConSanMoi, Rdna4RecordReplayRejectsMixedStackOwnersWhenSharedHelperNeedsSpi
   append_kernel_metadata_note(bytes, "shared_owner_0", /*uses_dynamic_stack=*/true,
                               /*sgpr_count=*/0u);
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
   options.max_patches = 1;
@@ -2697,7 +2697,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
       make_cdna4_lds_code_object(text_words, "dynamic_spill", kCdna4Wave64AllVgprsGranulated,
                                  /*uses_dynamic_stack=*/true);
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -2747,7 +2747,7 @@ TEST(ConSanMoi, Cdna4DynamicStackRejectsRecordReplayScalarSpillWithoutBootstrap)
       make_cdna4_lds_code_object(text_words, "dynamic_spill", kCdna4Wave64AllVgprsGranulated,
                                  /*uses_dynamic_stack=*/true);
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.automatic_moi_record_replay_sgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
@@ -2774,7 +2774,7 @@ TEST(ConSanMoi, Cdna3RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
       make_cdna3_lds_code_object(text_words, "dynamic_spill", kCdna3Wave64AllVgprsGranulated,
                                  /*uses_dynamic_stack=*/true);
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -3250,7 +3250,7 @@ TEST(ConSanMoi, Cdna3PrivateEpochRecordReplayLoadsEntryOwner) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
   options.moi_init_owner_epoch = true;
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 8);
 
@@ -3329,7 +3329,7 @@ TEST(ConSanMoi, Gfx1250PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.moi_init_owner_epoch = true;
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 0, 8, 8);
 
@@ -3394,8 +3394,8 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerSpillsBeginAfterCapturedState) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.moi_init_owner_epoch = true;
-  options.force_private_epoch = true;
-  options.force_vgpr_spill = true;
+  options.test_force_private_epoch = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 0, 8, 8);
 
@@ -3471,7 +3471,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsDoNotOverlapCapturedState) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.moi_init_owner_epoch = true;
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
       consan_moi_report_buffer_min_bytes(kAccessCount, 0, 0, 0, 0, 1, 1);
@@ -3536,7 +3536,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerFallbackRetainsAtomicRecord) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.moi_init_owner_epoch = true;
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 0, 8, 8);
 
@@ -3579,7 +3579,7 @@ TEST(ConSanMoi, UnrelatedDynamicStackKernelDoesNotDisablePrivateRecordReplayStat
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
   options.moi_init_owner_epoch = true;
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   // The second kernel aliases this explicit scratch window with its guest
   // operands, producing an owned but unsupported resource plan.
   options.scratch_vgpr = 8u;
@@ -3629,7 +3629,7 @@ TEST(ConSanMoi, OwningDynamicStackKernelRejectsForcedPrivateRecordReplayState) {
       make_gfx1250_code_object(text_words, "owning_dynamic_stack", kRdna4Wave64AllVgprsGranulated,
                                /*wave32=*/true, /*uses_dynamic_stack=*/true);
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -3671,7 +3671,7 @@ TEST(ConSanMoi, Cdna3PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
   options.moi_init_owner_epoch = true;
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 0, 8, 8);
 
@@ -3967,7 +3967,7 @@ TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT, 1u);
   });
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -7299,7 +7299,7 @@ TEST(ConSanMoi, BarrierRecordForcedSpillUsesPlannedPrivateWindow) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions options = moi_options();
   options.moi_track_barriers = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
 
@@ -7330,7 +7330,7 @@ TEST(ConSanMoi, Rdna4DynamicStackBarrierRecordUsesSiteLocalSpillFrames) {
       /*wave32=*/false, /*uses_dynamic_stack=*/true);
   ConSanOptions options = moi_options();
   options.moi_track_barriers = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
 
@@ -7359,7 +7359,7 @@ TEST(ConSanMoi, Cdna4BarrierRecordForcedSpillUsesNativePrivateWindows) {
                                                                 kCdna4Wave64AllVgprsGranulated);
   ConSanOptions options = moi_options();
   options.moi_track_barriers = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 1);
 
@@ -7641,7 +7641,7 @@ TEST(ConSanMoi, Gfx1250HighSgprPressureSkipsArchitecturalAliasesForPersistentEpo
   options.moi_dynamic_access_records = true;
   options.moi_track_barriers = true;
   options.moi_init_owner_epoch = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(64, 64, 0, 0, 64);
 
@@ -8331,7 +8331,7 @@ TEST(ConSanMoi, Cdna4FullPressureUsesProvenHybridPersistentRegisterHoles) {
 
   ConSanOptions colliding_options = options;
   colliding_options.scratch_vgpr = 8u;
-  colliding_options.force_vgpr_spill = true;
+  colliding_options.test_force_vgpr_spill = true;
   const ConSanResult colliding = try_patch_consan(bytes, colliding_options);
   ASSERT_TRUE(consan_patch_succeeded(colliding)) << testing::PrintToString(colliding.errors);
   EXPECT_FALSE(colliding.modified);
@@ -8670,7 +8670,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
@@ -8719,7 +8719,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayRoutesWithoutDeadTransientScalarRegisters) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
@@ -8775,7 +8775,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessWithoutDeadTransientScalarRegist
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0u, 0u, 0u);
@@ -8851,7 +8851,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessThroughSelectedAnchorTails) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -8937,7 +8937,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRecursivelyRoutesInstructionReservoirs) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
@@ -9024,7 +9024,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierConsumesReservoirOmittedByAccessSelectio
       branch_only_kernel->entry_text_offset + kBarrierWord * sizeof(uint32_t);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2u, 0u, 0u, 0u, 1u);
@@ -9112,7 +9112,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierReturnRoutesThroughSelectedAccessAnchorT
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   // Leave alignment headroom so the barrier partition cannot reduce the ten
@@ -9225,7 +9225,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRelaySpineCrossesBarrierPrefixBeyondSoppReach) 
   const uint64_t original_text_size = original.text_sections().front()->size();
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -9310,7 +9310,7 @@ TEST(ConSanMoi, Cdna4RejectedRecordReplayBarrierDoesNotMutateItsOwnerDescriptor)
               sizeof(original_rejected_descriptor));
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8u, 0u, 0u, 0u, 8u);
@@ -9374,7 +9374,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRejectsFarAccessWithoutFirstHopBeforeReservingB
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
@@ -9427,7 +9427,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBorrowsEntryTupleToHalveFarRelayDemand) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
@@ -9496,7 +9496,7 @@ TEST(ConSanMoi, Cdna4RecordReplayDoesNotBorrowAcrossReconvergenceEntry) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u);
@@ -9542,7 +9542,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierBorrowsEntryTupleBeforeScalarProbe) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u, 1u);
@@ -9592,7 +9592,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierDoesNotBorrowAcrossFollowingFence) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size =
@@ -9642,7 +9642,7 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierDoesNotBorrowAcrossReconvergenceEntry) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1u, 0u, 0u, 0u, 1u);
@@ -9698,7 +9698,7 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesBarrierWithoutDeadTransientScalarRegister
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(kAccessCount, 0u, 0u, 0u, 1u);
@@ -10044,7 +10044,7 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
   options.moi_dynamic_access_records = true;
   options.moi_track_barriers = true;
   options.moi_init_owner_epoch = true;
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 8);
 
@@ -10898,7 +10898,7 @@ TEST(ConSanMoi, CdnaSparseAccessDenseSpillRetainsEveryAccessAcrossTargets) {
     text_words.push_back(build_s_endpgm(arch));
 
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-    options.force_vgpr_spill = true;
+    options.test_force_vgpr_spill = true;
     options.moi_init_owner_epoch = true;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(256u, 0u, 0u, 0u);
@@ -10966,8 +10966,8 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
     const uint64_t original_text_size = original.text_sections().front()->size();
 
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-    options.force_vgpr_spill = true;
-    options.force_private_epoch = true;
+    options.test_force_vgpr_spill = true;
+    options.test_force_private_epoch = true;
     options.moi_dispatch_id_sgpr = 88u;
     options.moi_init_owner_epoch = true;
     options.moi_report_buffer_address = 0x123456780000ull;
@@ -11111,7 +11111,7 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
   ASSERT_TRUE(layout_override);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_dispatch_id_sgpr = 88u;
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -11241,7 +11241,7 @@ TEST(ConSanMoi, Cdna4AccessHeavyRecordReplayPreservesReservedBarrierAndFenceRela
   text_words.back() = build_s_endpgm(kArch);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_init_owner_epoch = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   // Leave independent headroom for both record domains; the production
@@ -11736,7 +11736,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySavesSpillBeforeCompositeHighBankAddressCaptu
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8u, 0u, 0u, 0u);
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.max_patches = 1u;
 
   const ConSanResult result = try_patch_consan(
@@ -12387,7 +12387,7 @@ TEST(ConSanMoi, AtomicRecordForcedSpillUsesPlannedPrivateWindow) {
   const std::vector<uint8_t> bytes = make_rdna4_ordered_flat_atomic_code_object();
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -12433,7 +12433,7 @@ TEST(ConSanMoi, Rdna4DynamicStackAtomicRecordUsesSiteLocalSpillFrames) {
                               /*sgpr_count=*/0u);
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -12576,7 +12576,7 @@ TEST(ConSanMoi, Cdna4AtomicRecordForcedSpillUsesNativePrivateWindow) {
       text_words, "atomic_record_forced_spill", kCdna4Wave64AllVgprsGranulated);
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
@@ -12662,7 +12662,7 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
   });
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 

@@ -4990,6 +4990,27 @@ analysis completed.
   the latest physical-gfx950 gate, with all 593 tests passing; E2E validation
   remains outside this work.
 
+### Slice 5BK: delete renamed debug-control copies
+
+- **One debug representation in lowering:** Spill-tier and private-epoch test
+  selection now read the inherited `ConSanDebugOverrides::test_force_vgpr_spill`
+  and `test_force_private_epoch` fields directly. The temporary lowerer no
+  longer stores the same two caller inputs again under shorter names.
+- **Tests exercise the production vocabulary:** Focused mechanism tests now set
+  the typed debug fields that production hook parsing and typed construction
+  use. The whole-value construction assertion already proves both fields cross
+  the boundary unchanged, so two assertions of the deleted copies are removed.
+- **Deletion accounting:** Production adds eight and deletes sixteen physical
+  lines, a net deletion of eight; the changes outside the deleted members are
+  direct field-name substitutions. Tests add 109 and delete 111 lines, a net
+  deletion of two, almost entirely the same mechanical substitution.
+- **Checked-in gate:** The host gate passes all 1,512 runnable tests with the
+  two expected benchmark-object skips; all 172 HSA-hook and hook-lifecycle
+  tests pass; and all 2,908 simulator-device tests across `gfx942`, `gfx950`,
+  `gfx1100`, `gfx1201`, and `gfx1250` pass in 69.93 seconds. Slice 5BF remains
+  the latest physical-gfx950 gate, with all 593 tests passing; E2E validation
+  remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

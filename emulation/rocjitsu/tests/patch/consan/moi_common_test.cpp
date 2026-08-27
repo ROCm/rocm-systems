@@ -1206,7 +1206,7 @@ TEST(ConSanMoi, Cdna4DirectScalarStateReusesUnreferencedSharedOwnerAllocation) {
   ASSERT_FALSE(bytes.empty());
 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_runtime_sample_stride = 2u;
   options.moi_track_barriers = false;
   options.moi_track_atomics = true;
@@ -1241,7 +1241,7 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
   for (ConSanMoiEngine engine : {ConSanMoiEngine::Sampled, ConSanMoiEngine::RecordReplay}) {
     SCOPED_TRACE(testing::PrintToString(engine));
     ConSanOptions options = moi_options(engine);
-    options.force_vgpr_spill = true;
+    options.test_force_vgpr_spill = true;
     options.moi_runtime_sample_stride = 2u;
     options.moi_track_barriers = false;
     // Record/Replay's persistent access epoch exercises its scalar tail
@@ -1418,7 +1418,7 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
   ASSERT_FALSE(bytes.empty());
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_owner_vgpr = 10;
   options.moi_epoch_vgpr = 11;
   options.moi_report_buffer_address = 0x123456780000ull;
@@ -1568,7 +1568,7 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
   fixture.second_private_bytes = 20;
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -1613,7 +1613,7 @@ TEST(ConSanMoi, IndirectSharedHelperSpillUsesEveryRecoveredOwner) {
   fixture.use_indirect_calls = true;
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
@@ -1642,7 +1642,7 @@ TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
   fixture.unrelated_has_lds = true;
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
   ConSanOptions options = moi_options();
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.test_kernel_name_filter = "shared_lds_helper";
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
@@ -1711,7 +1711,7 @@ TEST(ConSanMoi, SharedPrivateOwnerSupportsMixedWaveSizesWithResidentWaveIdentity
     }
   }
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 

@@ -1309,7 +1309,7 @@ TEST(ConSanMoi, SharedHelperInlineAtomicSpillUsesAutomaticStateAcrossOwners) {
   ASSERT_FALSE(bytes.empty());
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_atomics = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -5062,7 +5062,7 @@ TEST(ConSanMoi, InlineAtomicPersistentDispatchIdCoversEveryAcquireReleaseCompari
   ASSERT_FALSE(bytes.empty());
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
   options.moi_inline_workgroup_shadow = false;
@@ -5153,7 +5153,7 @@ TEST(ConSanMoi, InlineAtomicLiteralDispatchIdCoversEveryAcquireReleaseComparison
   ASSERT_FALSE(bytes.empty());
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
   options.moi_inline_workgroup_shadow = false;
@@ -5242,7 +5242,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackSpillPreservesEverySharedOwnerFrame) {
                               /*has_dynamic_lds=*/false, kAdditionalOwners);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
   options.moi_inline_workgroup_shadow = false;
@@ -5310,7 +5310,7 @@ TEST(ConSanMoi, InlineAtomicDynamicStackRejectsExplicitExecWindowWithoutFrameSlo
                               /*has_dynamic_lds=*/false, kAdditionalOwners);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_track_atomics = true;
   options.moi_track_barriers = false;
   options.moi_inline_workgroup_shadow = false;

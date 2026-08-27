@@ -797,8 +797,8 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
                                  /*uses_dynamic_stack=*/false, /*workgroup_id_dimension_mask=*/0u,
                                  /*group_segment_fixed_size=*/4u);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
-  options.force_private_epoch = true;
+  options.test_force_vgpr_spill = true;
+  options.test_force_private_epoch = true;
   options.moi_inline_workgroup_shadow = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -927,8 +927,8 @@ TEST(ConSanMoi, Cdna4PrivateEpochProloguePreservesClobberedEntryAbiSgprs) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
-  options.force_private_epoch = true;
+  options.test_force_vgpr_spill = true;
+  options.test_force_private_epoch = true;
   options.moi_inline_workgroup_shadow = true;
   options.moi_exec_save_sgpr = 0u;
   options.moi_report_buffer_address = 0x100000000ull;
@@ -986,8 +986,8 @@ TEST(ConSanMoi, Cdna4PrivateEpochLongReturnDoesNotClobberEntryAbiSgprs) {
   });
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
-  options.force_private_epoch = true;
+  options.test_force_vgpr_spill = true;
+  options.test_force_private_epoch = true;
   options.moi_inline_workgroup_shadow = true;
   options.moi_exec_save_sgpr = 0u;
   options.moi_report_buffer_address = 0x100000000ull;
@@ -1173,7 +1173,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   ASSERT_NE(original_full_kernel, original.kernels().end());
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
   options.moi_inline_indirect_pc_sgpr = 48u;
   options.moi_inline_indirect_scc_sgpr = 50u;
@@ -1396,7 +1396,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   ASSERT_EQ(original.kernels().size(), 1u);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_exec_save_sgpr = 4u;
   options.moi_inline_indirect_pc_sgpr = 48u;
   options.moi_inline_indirect_scc_sgpr = 50u;
@@ -1592,7 +1592,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadUsesDisjointCompactSpillWindow) {
                                 /*vgpr_count=*/34u);
 
     ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-    options.force_vgpr_spill = true;
+    options.test_force_vgpr_spill = true;
     options.moi_owner_vgpr = 16u;
     options.moi_epoch_vgpr = 17u;
     options.moi_workgroup_key_vgpr = 33u;
@@ -1799,7 +1799,7 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsOverlappingDynamicStackAddress) {
                               /*private_segment_fixed_size=*/0u);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   // These persistent values split the 40-register allocation so no disjoint
   // 16-register spill window exists. Operand-overlap fallback deterministically
   // selects v0:v15 while leaving persistent state outside it.
@@ -1900,7 +1900,7 @@ TEST(ConSanMoi, CdnaInlineShadowAtomicTrackingFitsSpillBackedTransactionWindow) 
     });
 
     ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-    options.force_vgpr_spill = true;
+    options.test_force_vgpr_spill = true;
     // Both fallback shapes fit through guest overlap, while no disjoint
     // window exists. The compact 24-register recovery supersedes the initial
     // 25-register attempt and its nested overlap contributes to that result.
@@ -1986,7 +1986,7 @@ TEST(ConSanMoi, CdnaInlineShadowWideAccessReloadsAddressOutsideCellLoopState) {
     });
 
     ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-    options.force_vgpr_spill = true;
+    options.test_force_vgpr_spill = true;
     options.moi_owner_vgpr = 24u;
     options.moi_epoch_vgpr = 25u;
     options.moi_workgroup_key_vgpr = 26u;
@@ -2060,7 +2060,7 @@ TEST(ConSanMoi, CdnaInlineShadowKeepsDisjointClobberedAddressInPlace) {
     });
 
     ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-    options.force_vgpr_spill = true;
+    options.test_force_vgpr_spill = true;
     options.moi_owner_vgpr = 28u;
     options.moi_epoch_vgpr = 29u;
     options.moi_workgroup_key_vgpr = 30u;
@@ -2127,7 +2127,7 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsBothSpilledMaybeGroupAddressHalves) {
       make_cdna4_lds_code_object(text_words, "maybe_group_spill_overlap", /*vgpr_granulated=*/4u);
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_owner_vgpr = 24u;
   options.moi_epoch_vgpr = 25u;
   options.moi_workgroup_key_vgpr = 26u;
@@ -2181,7 +2181,7 @@ TEST(ConSanMoi, Cdna4ExternalInlineShadowRetainsPrivateWorkgroupKey) {
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "external_private_workgroup_key");
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4796,7 +4796,7 @@ TEST(ConSanMoi, InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   const std::vector<uint8_t> original_note = first_note_segment_bytes(bytes);
   ASSERT_FALSE(original_note.empty());
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4862,7 +4862,7 @@ TEST(ConSanMoi, Cdna4InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   const std::vector<uint8_t> original_note = first_note_segment_bytes(bytes);
   ASSERT_FALSE(original_note.empty());
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -4955,7 +4955,7 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
 
   const ConSanResult result = try_patch_consan(bytes, options);
 
@@ -4993,7 +4993,7 @@ TEST(ConSanMoi, InlineShadowSpillingWorksWithoutMetadata) {
   // ConSan.RejectsCodeObjectWithMalformedKernelMetadataNote.
   ASSERT_TRUE(first_note_segment_bytes(bytes).empty());
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -5060,7 +5060,7 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(
       text_words, "wave32_private_epoch", kRdna4Wave64AllVgprsGranulated, /*wave32=*/true);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -5112,7 +5112,7 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
 TEST(ConSanMoi, InlineShadowPrivateHwIdOwnerBiasesBeforeProbeValuRead) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_owner_source = ConSanMoiOwnerSource::HwId;
   options.moi_owner_sgpr = 20u;
   options.moi_report_buffer_address = 0x100000000ull;
@@ -5160,7 +5160,7 @@ TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesInitializedLocalMirror) {
                                  kRdna4Wave64AllVgprsGranulated, false, false, 0, 4352u);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_inline_workgroup_shadow = true;
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -5238,7 +5238,7 @@ TEST(ConSanMoi, InlineShadowDescriptorFullUsesPrivateEpochWithoutSpillOverlap) {
       text_words, "descriptor_full_private_epoch", kRdna4Wave64AllVgprsGranulated);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_barriers = true;
-  options.force_vgpr_spill = true;
+  options.test_force_vgpr_spill = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -8319,7 +8319,7 @@ TEST(ConSanMoi, SharedPrivateEpochCapturesFullKeyAcrossDescriptorCoordinateViews
                     1u);
   });
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
@@ -8373,7 +8373,7 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
   fixture.second_private_bytes = 20;
   const std::vector<uint8_t> bytes = make_rdna4_two_kernel_shared_helper_code_object(fixture);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
-  options.force_private_epoch = true;
+  options.test_force_private_epoch = true;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 

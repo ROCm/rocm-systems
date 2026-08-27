@@ -2937,7 +2937,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   request.architecture_limit =
       every_owner_cdna_accvgpr_boundary_is_allocation_tail ? kMaxVgprs : plan.ordinary_vgpr_limit;
   request.explicit_base = options.scratch_vgpr;
-  request.force_spill = options.force_vgpr_spill || require_spill;
+  request.force_spill = options.test_force_vgpr_spill || require_spill;
   request.forbidden = anchor_def_use.defs | anchor_def_use.uses;
   // Candidate decoding is the authoritative operand-width source for native
   // two-address LDS operations.  Some generic instruction def/use models only
@@ -6014,7 +6014,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           "below a CDNA AccVGPR boundary");
       return true;
     }
-    if (options.moi_engine == ConSanMoiEngine::RecordReplay && options.force_private_epoch &&
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay && options.test_force_private_epoch &&
         !has_dynamic_stack_owner) {
       options.moi_init_owner_epoch = true;
       options.automatic_moi_private_epoch = true;
@@ -6032,7 +6032,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
           "VGPR boundary for Sampled instrumentation");
       return true;
     }
-    if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.force_private_epoch) {
+    if (options.moi_engine == ConSanMoiEngine::RecordReplay && !options.test_force_private_epoch) {
       const uint16_t scalar_count = static_cast<uint16_t>(named_persistent_count);
       const MoiResourcePlanningState &scalar_state = planning_state;
       const std::vector<uint64_t> scalar_owners = moi_scalar_owner_descriptors(result);
@@ -6496,7 +6496,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       if (crosses_encoded_component_boundary &&
           (options.moi_engine == ConSanMoiEngine::InlineShadow ||
            options.moi_engine == ConSanMoiEngine::Sampled) &&
-          !options.force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
+          !options.test_force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
           try_assign_scalar_persistent_state()) {
         return true;
       }
@@ -6512,7 +6512,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         if (!crosses_encoded_component_boundary &&
             (options.moi_engine == ConSanMoiEngine::InlineShadow ||
              options.moi_engine == ConSanMoiEngine::Sampled) &&
-            !options.force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
+            !options.test_force_private_epoch && !component_needs_persistent_dispatch_vgprs &&
             try_assign_scalar_persistent_state()) {
           return true;
         }
@@ -6698,7 +6698,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
        (would_grow_descriptor && options.moi_engine != ConSanMoiEngine::InlineShadow));
   const bool rdna_needs_scalar_epoch =
       (arch == ROCJITSU_CODE_ARCH_RDNA3 || is_rdna4_family_arch(arch)) &&
-      !options.force_private_epoch &&
+      !options.test_force_private_epoch &&
       (options.moi_engine == ConSanMoiEngine::RecordReplay ||
        ((options.moi_engine == ConSanMoiEngine::Sampled ||
          options.moi_engine == ConSanMoiEngine::InlineShadow) &&
@@ -6816,7 +6816,7 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
         " owner; retaining the existing private-state fallback");
   }
   const bool needs_private_epoch = options.automatic_moi_private_epoch ||
-                                   options.force_private_epoch || persistent_end > kMaxVgprs ||
+                                   options.test_force_private_epoch || persistent_end > kMaxVgprs ||
                                    prefer_private_epoch;
   if (needs_private_epoch && !has_dynamic_stack_owner) {
     options.moi_init_owner_epoch = true;

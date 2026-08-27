@@ -739,9 +739,7 @@ struct ConSanOptions : ConSanRequest,
         TransformPolicy(transform_policy), flavor(request.flavor.value_or(ConSanFlavor::None)),
         collect_barrier_move_destinations(mutation.fault_move_barrier),
         moi_inline_workgroup_shadow(request.flavor == ConSanFlavor::Moi &&
-                                    request.moi_engine == ConSanMoiEngine::InlineShadow),
-        force_vgpr_spill(debug.test_force_vgpr_spill),
-        force_private_epoch(debug.test_force_private_epoch) {}
+                                    request.moi_engine == ConSanMoiEngine::InlineShadow) {}
 
   ConSanFlavor flavor = ConSanFlavor::None;
   /// Build the potentially expensive all-instruction destination inventory
@@ -758,12 +756,6 @@ struct ConSanOptions : ConSanRequest,
   /// shadow. The hook enables this for InlineShadow; direct patcher tests may
   /// leave it disabled while exercising the legacy global layout.
   bool moi_inline_workgroup_shadow = false;
-  /// Test-only control that exercises the spill tier even when a dead or
-  /// descriptor-growth VGPR window is available.
-  bool force_vgpr_spill = false;
-  /// Test-only control that exercises derived-owner/private-epoch state even
-  /// when a dedicated persistent VGPR pair is available.
-  bool force_private_epoch = false;
   /// Internal marker set after ConSan assigns persistent owner/epoch VGPRs.
   bool automatic_moi_persistent_vgprs = false;
   /// Internal per-owner assignments used when one CDNA4 code-object-wide

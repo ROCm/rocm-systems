@@ -787,8 +787,6 @@ TEST(ConSanOptionsConstructionTest, PreservesPolicyDebugAndRuntimeCapabilityFiel
   EXPECT_TRUE(options.probe_flat_trap);
   EXPECT_TRUE(options.abort_unmatched_barrier_wait);
   EXPECT_TRUE(options.moi_partition_mask_debug);
-  EXPECT_TRUE(options.force_vgpr_spill);
-  EXPECT_TRUE(options.force_private_epoch);
   EXPECT_EQ(options.test_kernel_name_filter, "kernel");
   EXPECT_EQ(options.scratch_vgpr, 1);
   EXPECT_EQ(options.moi_exec_save_sgpr, 2);
