@@ -57,13 +57,13 @@ def wait_until_api(T, TNAME):
         f"    int cmp, {T} val);\n"
         f"__device__ size_t rocshmem_{TNAME}_wait_until_any_vector(\n"
         f"    {T} *ivars, size_t nelems, const int* status,\n"
-        f"    int cmp, {T} *val);\n"
+        f"    int cmp, {T}* vals);\n"
         f"__device__ void rocshmem_{TNAME}_wait_until_all_vector(\n"
         f"    {T} *ivars, size_t nelems, const int* status,\n"
-        f"    int cmp, {T} *val);\n"
+        f"    int cmp, {T}* vals);\n"
         f"__device__ size_t rocshmem_{TNAME}_wait_until_some_vector(\n"
         f"    {T} *ivars, size_t nelems, size_t* indices, const int* status,\n"
-        f"    int cmp, {T} *val);\n"
+        f"    int cmp, {T}* vals);\n"
         f"__host__ void rocshmem_{TNAME}_wait_until(\n"
         f"    {T} *ivars, int cmp, {T} val);\n"
         f"__host__ size_t rocshmem_{TNAME}_wait_until_any(\n"
@@ -77,13 +77,13 @@ def wait_until_api(T, TNAME):
         f"    int cmp, {T} val);\n"
         f"__host__ size_t rocshmem_{TNAME}_wait_until_any_vector(\n"
         f"    {T} *ivars, size_t nelems, const int* status,\n"
-        f"    int cmp, {T} *val);\n"
+        f"    int cmp, {T}* vals);\n"
         f"__host__ void rocshmem_{TNAME}_wait_until_all_vector(\n"
         f"    {T} *ivars, size_t nelems, const int* status,\n"
-        f"    int cmp, {T} *val);\n"
+        f"    int cmp, {T}* vals);\n"
         f"__host__ size_t rocshmem_{TNAME}_wait_until_some_vector(\n"
         f"    {T} *ivars, size_t nelems, size_t* indices, const int* status,\n"
-        f"    int cmp, {T} *val);\n\n"
+        f"    int cmp, {T}* vals);\n\n"
     )
 
 
@@ -91,7 +91,7 @@ def generate_wait_until_api():
     expanded_code = """
 /**
  * @name SHMEM_WAIT_UNTIL
- * @brief Block the caller until the condition (* \p ptr \p cmps \p val) is
+ * @brief Block the caller until the condition (* \\p ptr \\p cmps \\p val) is
  * true.
  *
  * This function can be called from divergent control paths at per-thread
@@ -101,7 +101,7 @@ def generate_wait_until_api():
  *
  * @param[in] ivars Pointer to memory on the symmetric heap to wait for.
  * @param[in] cmp Operation for the comparison.
- * @param[in] val Value to compare the memory at \p ptr to.
+ * @param[in] val Value to compare the memory at \\p ptr to.
  *
  * @return void
  */\n"""
@@ -124,7 +124,7 @@ def generate_test_api():
     expanded_code = """
 /**
  * @name SHMEM_TEST
- * @brief test if the condition (* \p ptr \p cmps \p val) is
+ * @brief test if the condition (* \\p ptr \\p cmps \\p val) is
  * true.
  *
  * This function can be called from divergent control paths at per-thread
@@ -134,7 +134,7 @@ def generate_test_api():
  *
  * @param[in] ivars Pointer to memory on the symmetric heap to wait for.
  * @param[in] cmp Operation for the comparison.
- * @param[in] val Value to compare the memory at \p ptr to.
+ * @param[in] val Value to compare the memory at \\p ptr to.
  *
  * @return 1 if the evaluation is true else 0
  */\n"""
