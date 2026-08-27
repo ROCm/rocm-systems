@@ -22,6 +22,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -113,6 +114,11 @@ TEST_F(GroupEndInternalTest, NonBlockingGroupWithPendingJob_ReturnsInProgress) {
   EnterGroupWithOnePendingJob(/*blocking=*/0);
 
   EXPECT_EQ(ncclInProgress, ncclGroupEndInternal());
+
+  // The non-blocking path publishes ncclInProgress on the comm's async error;
+  // that is the state a caller polls on until the background job completes.
+  EXPECT_NE(asyncStates_.end(),
+            std::find(asyncStates_.begin(), asyncStates_.end(), ncclInProgress));
 }
 
 // The non-blocking path also publishes a group job on the communicator, which
