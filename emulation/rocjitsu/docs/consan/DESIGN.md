@@ -791,6 +791,17 @@ VCC/XNACK/FLAT_SCRATCH tail above that extent; on RDNA and gfx1250 the special
 registers have fixed indices and require no tail. SuperCollider and every MOI
 prologue/emission path use this one mutation rule.
 
+VGPR mutation consumes `ConSanDescriptorVgprGrowthRequest`. Its required count
+is the final one-past-the-end ordinary-VGPR extent; its maximum count states
+what the requesting emission path can address; and its optional accumulator
+proof is trusted kernel metadata, not a guess from liveness. The shared
+transaction applies gfx1250 selectable-bank capacity, direct 256-register
+limits on other targets, descriptor-field encodability, and CDNA accumulator
+partitioning. It can fill an intrinsically empty gap below `ACCUM_OFFSET`; it
+can move the boundary only when the existing allocation or trusted metadata
+proves there are no live AccVGPR values. Analysis, SuperCollider, and MOI no
+longer carry separate descriptor mutation algorithms.
+
 Inventory-shape decisions use the typed caller inputs even while the old
 lowerer remains mutable. In particular,
 `consan_requires_extended_barrier_pairs` receives `ConSanRequest`,

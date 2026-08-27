@@ -737,8 +737,12 @@ private:
     }
     KD descriptor{};
     std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
-    if (!grow_moi_descriptor_vgpr_allocation(descriptor, required_count, arch,
-                                             kernel->agpr_count == 0u)) {
+    if (!grow_descriptor_vgpr_allocation(
+            descriptor,
+            {.required_ordinary_count = required_count,
+             .maximum_ordinary_count = kMaxVgprs,
+             .accumulator_bank_is_proven_empty = kernel->agpr_count == 0u},
+            arch)) {
       errors.emplace_back("ConSan MOI could not satisfy planned descriptor VGPR allocation");
       return false;
     }

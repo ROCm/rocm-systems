@@ -60,6 +60,109 @@ descriptor_ordinary_vgpr_allocation_count(const rocr::llvm::amdhsa::kernel_descr
              : unified_count;
 }
 
+/// The complete policy input for growing one kernel descriptor's ordinary
+/// VGPR allocation.
+///
+/// A descriptor encodes one unified allocation, while ConSan consumers can
+/// have narrower addressing limits and CDNA descriptors can divide that
+/// allocation between ordinary VGPRs and AccVGPRs. Keeping all three facts in
+/// one value prevents an engine from silently treating an accumulator bank as
+/// ordinary scratch or growing beyond the register form it can emit.
+struct ConSanDescriptorVgprGrowthRequest {
+  /// One past the highest ordinary VGPR that the transformed kernel must be
+  /// able to address. This is the final extent, not the number of new VGPRs.
+  uint32_t required_ordinary_count = 0;
+
+  /// Largest ordinary-VGPR extent the requesting instrumentation path can
+  /// address. Bank-aware gfx1250 mechanics may use RocJitsu's full analysis
+  /// range; ordinary MOI operand forms currently limit themselves to 256.
+  uint32_t maximum_ordinary_count = 0;
+
+  /// Trusted metadata proves that an encoded CDNA accumulator partition has
+  /// no live AccVGPR values and can therefore move. A boundary above the
+  /// current unified allocation is intrinsically empty and needs no proof.
+  bool accumulator_bank_is_proven_empty = false;
+};
+
+/// Grow the descriptor's ordinary-VGPR extent without reclassifying live
+/// accumulator storage or exceeding either descriptor or caller limits.
+///
+/// On descriptor-partitioned CDNA, growth may fill an empty gap below
+/// ACCUM_OFFSET. It may move the boundary only when the old allocation proves
+/// the bank empty or the request carries independent trusted proof. Other
+/// targets update only the unified allocation field. Failure leaves both
+/// descriptor fields unchanged.
+[[nodiscard]] inline bool
+grow_descriptor_vgpr_allocation(rocr::llvm::amdhsa::kernel_descriptor_t &descriptor,
+                                const ConSanDescriptorVgprGrowthRequest &request,
+                                rj_code_arch_t arch) {
+  constexpr uint32_t kDescriptorAllocationGranules = 64u;
+  constexpr uint32_t kDirectOrdinaryVgprLimit = 256u;
+
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  const uint32_t granularity = descriptor_vgpr_granularity(descriptor, arch);
+  if (!profile || granularity == 0u || request.required_ordinary_count == 0u ||
+      request.maximum_ordinary_count == 0u)
+    return false;
+
+  const uint32_t target_ordinary_limit = profile->has_selectable_vgpr_bank
+                                             ? static_cast<uint32_t>(REGISTER_SET_MAX_VGPRS)
+                                             : kDirectOrdinaryVgprLimit;
+  const uint32_t maximum_ordinary_count =
+      std::min({request.maximum_ordinary_count, target_ordinary_limit,
+                kDescriptorAllocationGranules * granularity});
+  if (request.required_ordinary_count > maximum_ordinary_count)
+    return false;
+
+  const uint32_t ordinary_count = descriptor_ordinary_vgpr_allocation_count(descriptor, arch);
+  if (request.required_ordinary_count <= ordinary_count)
+    return true;
+
+  const uint32_t rounded_required =
+      (request.required_ordinary_count + granularity - 1u) / granularity * granularity;
+  if (rounded_required > maximum_ordinary_count)
+    return false;
+
+  const uint32_t unified_count = descriptor_vgpr_allocation_count(descriptor, arch);
+  if (profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned) {
+    const uint32_t encoded_accum_offset = AMDHSA_BITS_GET(
+        descriptor.compute_pgm_rsrc3, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
+    if (encoded_accum_offset != 0u) {
+      const uint32_t accumulator_granularity = profile->accumulator_offset_granularity;
+      const uint32_t accvgpr_base = (encoded_accum_offset + 1u) * accumulator_granularity;
+      if (rounded_required <= accvgpr_base) {
+        AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                        rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                        (rounded_required / granularity - 1u));
+        return true;
+      }
+
+      const bool accumulator_bank_is_empty =
+          unified_count <= accvgpr_base || request.accumulator_bank_is_proven_empty;
+      if (!accumulator_bank_is_empty)
+        return false;
+
+      const uint32_t new_unified_count = std::max(unified_count, rounded_required);
+      if (new_unified_count > maximum_ordinary_count ||
+          new_unified_count % accumulator_granularity != 0u ||
+          new_unified_count / accumulator_granularity > kDescriptorAllocationGranules)
+        return false;
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
+                      rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                      (new_unified_count / accumulator_granularity - 1u));
+      AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                      rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                      (new_unified_count / granularity - 1u));
+      return true;
+    }
+  }
+
+  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                  rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                  (rounded_required / granularity - 1u));
+  return true;
+}
+
 /// Decode the ordinary SGPR allocation available to ConSan scratch planning.
 /// The AMDHSA field can encode a rounded final granule beyond the addressable
 /// scalar operand file, so the returned count is clamped to RocJitsu's register

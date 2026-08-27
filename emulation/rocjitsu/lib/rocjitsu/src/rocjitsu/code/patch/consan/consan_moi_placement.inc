@@ -810,67 +810,6 @@ struct MoiSgprRange {
   return kernel_wavefront_size(arch, desc) == 32 ? 5 : 6;
 }
 
-[[nodiscard]] bool grow_moi_descriptor_vgpr_allocation(KD &desc, uint32_t required_count,
-                                                       rj_code_arch_t arch,
-                                                       bool proven_empty_accumulator_bank = false) {
-  if (required_count == 0 || required_count > kMaxVgprs)
-    return false;
-
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  if (profile && profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned) {
-    const uint32_t encoded_accum_offset =
-        AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-    if (encoded_accum_offset != 0u) {
-      const uint32_t accvgpr_base =
-          (encoded_accum_offset + 1u) * profile->accumulator_offset_granularity;
-      const uint32_t unified_count = descriptor_vgpr_allocation_count(desc, arch);
-      if (required_count <= unified_count)
-        return true;
-      const uint32_t granularity = descriptor_vgpr_granularity(desc, arch);
-      const uint32_t rounded_required = util::align_up(required_count, granularity);
-      if (rounded_required <= accvgpr_base) {
-        // ACCUM_OFFSET can name an empty ordinary/accumulator boundary above
-        // the currently allocated unified bank. Growing within that gap does
-        // not move or reinterpret any accumulator register, but the unified
-        // allocation field still has to be updated.
-        AMDHSA_BITS_SET(desc.compute_pgm_rsrc1,
-                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                        ((rounded_required / granularity) - 1u));
-        return true;
-      }
-
-      // Instrumentation may move only an empty accumulator boundary. Moving
-      // live accumulator storage would require relocating guest register
-      // contents and rewriting every accumulator operand.
-      if (unified_count > accvgpr_base && !proven_empty_accumulator_bank)
-        return false;
-      const uint32_t new_unified_count = std::max(unified_count, rounded_required);
-      const uint32_t new_accvgpr_base = new_unified_count;
-      if (new_accvgpr_base > kMaxVgprs ||
-          new_accvgpr_base % profile->accumulator_offset_granularity != 0u ||
-          new_unified_count / granularity > 64u)
-        return false;
-      AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
-                      ((new_accvgpr_base / profile->accumulator_offset_granularity) - 1u));
-      AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                      ((new_unified_count / granularity) - 1u));
-      return true;
-    }
-  }
-
-  if (required_count <= descriptor_vgpr_allocation_count(desc, arch))
-    return true;
-
-  const uint32_t granularity = std::max<uint32_t>(descriptor_vgpr_granularity(desc, arch), 1u);
-  const uint32_t rounded = ((required_count + granularity - 1u) / granularity) * granularity;
-  if (rounded > kMaxVgprs)
-    return false;
-  const uint32_t granulated = rounded / granularity - 1u;
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  granulated);
-  return true;
-}
-
 [[nodiscard]] bool grow_moi_kernel_descriptor_vgprs(CodeObjectPatcher &patcher,
                                                     std::span<const uint8_t> image,
                                                     const ConSanKernelInfo &kernel,
@@ -884,7 +823,12 @@ struct MoiSgprRange {
 
   KD desc{};
   std::memcpy(&desc, image.data() + kernel.descriptor_file_offset, sizeof(desc));
-  if (!grow_moi_descriptor_vgpr_allocation(desc, required_count, arch, kernel.agpr_count == 0u)) {
+  if (!grow_descriptor_vgpr_allocation(
+          desc,
+          {.required_ordinary_count = required_count,
+           .maximum_ordinary_count = kMaxVgprs,
+           .accumulator_bank_is_proven_empty = kernel.agpr_count == 0u},
+          arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation to " +
                         std::to_string(required_count) + " registers");
     return false;

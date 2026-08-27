@@ -31,34 +31,6 @@ read_descriptor_vgpr_allocation_count(std::span<const uint8_t> image,
   return descriptor_vgpr_allocation_count(desc, arch);
 }
 
-[[nodiscard]] bool grow_descriptor_vgpr_allocation(KD &desc, uint16_t required_count,
-                                                   rj_code_arch_t arch) {
-  if (required_count > REGISTER_SET_MAX_VGPRS)
-    return false;
-  const ConSanTargetProfile *profile = consan_target_profile(arch);
-  if (profile && profile->accumulator_model == ConSanAccumulatorModel::DescriptorPartitioned &&
-      required_count > descriptor_ordinary_vgpr_allocation_count(desc, arch)) {
-    const uint16_t unified_count = descriptor_vgpr_allocation_count(desc, arch);
-    const uint16_t ordinary_count = descriptor_ordinary_vgpr_allocation_count(desc, arch);
-    if (ordinary_count < unified_count)
-      return false;
-  }
-  if (required_count <= descriptor_vgpr_allocation_count(desc, arch))
-    return true;
-
-  const uint32_t wavefront_size = kernel_wavefront_size(arch, desc);
-  const uint32_t granularity =
-      std::max<uint32_t>(descriptor_vgpr_granularity_for_wavefront(arch, wavefront_size), 1u);
-  const uint32_t rounded =
-      ((std::max<uint32_t>(required_count, 1u) + granularity - 1u) / granularity) * granularity;
-  if (rounded > REGISTER_SET_MAX_VGPRS)
-    return false;
-  const uint32_t granulated = rounded / granularity - 1u;
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  granulated);
-  return true;
-}
-
 struct DescriptorVgprGrowth {
   uint64_t descriptor_file_offset = 0;
   uint16_t required_count = 0;
@@ -150,7 +122,10 @@ apply_descriptor_vgpr_growths_to_bytes(std::span<uint8_t> image,
     }
     KD desc{};
     std::memcpy(&desc, image.data() + descriptor_file_offset, sizeof(desc));
-    if (!grow_descriptor_vgpr_allocation(desc, required_count, arch)) {
+    if (!grow_descriptor_vgpr_allocation(desc,
+                                         {.required_ordinary_count = required_count,
+                                          .maximum_ordinary_count = REGISTER_SET_MAX_VGPRS},
+                                         arch)) {
       errors.emplace_back("ConSan LDS check/trap proof could not grow descriptor VGPR allocation");
       return false;
     }
@@ -173,7 +148,10 @@ apply_descriptor_vgpr_growths_to_patcher(CodeObjectPatcher &patcher,
     }
     KD desc{};
     std::memcpy(&desc, original_image.data() + descriptor_file_offset, sizeof(desc));
-    if (!grow_descriptor_vgpr_allocation(desc, required_count, arch)) {
+    if (!grow_descriptor_vgpr_allocation(desc,
+                                         {.required_ordinary_count = required_count,
+                                          .maximum_ordinary_count = REGISTER_SET_MAX_VGPRS},
+                                         arch)) {
       errors.emplace_back("ConSan LDS check/trap proof could not grow descriptor VGPR allocation");
       return false;
     }

@@ -6551,6 +6551,43 @@ for nominal line-count reductions.
   tests across the five supported targets, and the 26-case physical-gfx950
   cross-engine smoke. E2E validation remains outside this work.
 
+### Slice 5DN: make VGPR descriptor growth one typed transaction
+
+- **One mutation contract:** `ConSanDescriptorVgprGrowthRequest` states the
+  final ordinary-VGPR extent, the requesting instruction path's addressing
+  limit, and whether trusted metadata proves a CDNA accumulator bank empty.
+  `grow_descriptor_vgpr_allocation` applies that value once for shared
+  analysis, SuperCollider descriptor installation, MOI resource commits, and
+  MOI prologues. The analysis-local and MOI-local growth algorithms are
+  deleted.
+- **Architecture without engine forks:** The transaction derives wave
+  granularity from the shared descriptor facts, permits gfx1250 bank-aware
+  callers to address its selectable VGPR banks, limits direct ordinary operand
+  paths to 256 registers, and bounds every request by the six-bit descriptor
+  field. Descriptor-partitioned CDNA may fill an intrinsically empty gap below
+  `ACCUM_OFFSET`; it moves the boundary only when the existing allocation or
+  trusted kernel metadata proves the accumulator bank empty. Failure is
+  transactional across both descriptor fields.
+- **Type and contract coverage:** The request declaration documents each
+  field's unit, source, and proof semantics. Three focused VGPR tests cover
+  gfx1250 mandatory-Wave32 and cross-bank growth, caller and target limits,
+  invalid requests, live-accumulator rejection without mutation, trusted empty
+  movement, and intrinsic empty-gap fill/movement. Fourteen existing
+  SuperCollider, Record/Replay, Sampled, and Inline Shadow descriptor tests
+  cover the same mechanics through complete lowering. All 17 focused tests
+  pass.
+- **Accounting:** Across the five affected implementation files, physical
+  lines change from 16,601 to 16,634, nonblank lines from 15,925 to 15,953, and
+  estimated comment-excluded code lines from 14,761 to 14,772. This slice adds
+  129 and deletes 96 physical implementation lines, a net addition of 33 for
+  the documented typed policy. The complete descriptor series from Slice 5DJ
+  through this slice remains net-negative: 14 fewer physical lines, 17 fewer
+  nonblank lines, and 43 fewer estimated code lines, with all decode and growth
+  policy now singular.
+- **Batched gate:** The library and test binary compile and all 17 focused
+  component/integration tests pass. The broader checked-in gate is deferred to
+  the next deletion tranche. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

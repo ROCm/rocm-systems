@@ -1681,8 +1681,12 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
 
   KD desc{};
   std::memcpy(&desc, current_image.data() + kernel.descriptor_file_offset, sizeof(desc));
-  if (!grow_moi_descriptor_vgpr_allocation(desc, required_vgpr_count, arch,
-                                           kernel.agpr_count == 0u)) {
+  if (!grow_descriptor_vgpr_allocation(
+          desc,
+          {.required_ordinary_count = required_vgpr_count,
+           .maximum_ordinary_count = kMaxVgprs,
+           .accumulator_bank_is_proven_empty = kernel.agpr_count == 0u},
+          arch)) {
     errors.emplace_back("ConSan MOI could not grow descriptor VGPR allocation to " +
                         std::to_string(required_vgpr_count) + " registers");
     return false;

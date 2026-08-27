@@ -588,6 +588,12 @@ That contract accounts for CDNA3/CDNA4's descriptor-managed six-register
 VCC/XNACK/FLAT_SCRATCH tail, while RDNA and gfx1250 retain their fixed special
 register model. The two private growth policies and their divergent CDNA
 behavior are deleted.
+VGPR descriptor growth is consolidated as well. A typed request now carries
+the final ordinary-VGPR extent, the requesting instruction path's addressing
+limit, and any trusted proof that a CDNA accumulator bank is empty. One shared
+transaction handles ordinary growth, gfx1250's selectable banks, empty gaps
+below `ACCUM_OFFSET`, and safe boundary movement. The separate
+analysis/SuperCollider and MOI mutation implementations are gone.
 
 Synchronization inventory shape now comes directly from the typed request,
 debug, and mutation contract. The mutable `ConSanOptions` compatibility object
