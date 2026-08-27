@@ -64,7 +64,7 @@ static_assert(kV22902GinOff != kModernGinOff, "the type-pun this block exists fo
 // distinguishable from no store at all.
 constexpr unsigned char kPoison = 0xA5;
 
-class PropertiesFilter22902Test : public DevcommMicrotest {
+class DevcommPropsFilterV22902Microtest : public DevcommMicrotest {
  protected:
   alignas(alignof(struct ncclCommProperties)) unsigned char raw_[kPropsSize];
   unsigned char before_[kPropsSize];
@@ -93,7 +93,7 @@ class PropertiesFilter22902Test : public DevcommMicrotest {
 };
 
 // Arm: deviceApiSupport true AND lsa team spans the comm -> support survives.
-TEST_F(PropertiesFilter22902Test, LsaSpansComm_KeepsDeviceApiSupport) {
+TEST_F(DevcommPropsFilterV22902Microtest, LsaSpansComm_KeepsDeviceApiSupport) {
   ncclComm_t seen = nullptr;
   ScopedHook teamLsa(g_ncclTeamLsa, [&](ncclComm_t c) {
     seen = c;
@@ -115,7 +115,7 @@ TEST_F(PropertiesFilter22902Test, LsaSpansComm_KeepsDeviceApiSupport) {
 }
 
 // Arm: deviceApiSupport true but lsa team is a strict subset -> support cleared.
-TEST_F(PropertiesFilter22902Test, LsaSmallerThanComm_ClearsDeviceApiSupport) {
+TEST_F(DevcommPropsFilterV22902Microtest, LsaSmallerThanComm_ClearsDeviceApiSupport) {
   ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
     ncclTeam_t t{};
     t.nRanks = 4;
@@ -131,7 +131,7 @@ TEST_F(PropertiesFilter22902Test, LsaSmallerThanComm_ClearsDeviceApiSupport) {
 }
 
 // Arm: lsa team larger than the comm is still a mismatch (pins ==, not >=).
-TEST_F(PropertiesFilter22902Test, LsaLargerThanComm_ClearsDeviceApiSupport) {
+TEST_F(DevcommPropsFilterV22902Microtest, LsaLargerThanComm_ClearsDeviceApiSupport) {
   ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
     ncclTeam_t t{};
     t.nRanks = 16;
@@ -147,7 +147,7 @@ TEST_F(PropertiesFilter22902Test, LsaLargerThanComm_ClearsDeviceApiSupport) {
 }
 
 // Arm: deviceApiSupport already false short-circuits the && -- the team is never queried.
-TEST_F(PropertiesFilter22902Test, DeviceApiAlreadyFalse_ShortCircuitsTeamQuery) {
+TEST_F(DevcommPropsFilterV22902Microtest, DeviceApiAlreadyFalse_ShortCircuitsTeamQuery) {
   ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
     ncclTeam_t t{};
     t.nRanks = 8;  // would satisfy the right operand if it were ever evaluated
@@ -163,7 +163,7 @@ TEST_F(PropertiesFilter22902Test, DeviceApiAlreadyFalse_ShortCircuitsTeamQuery) 
 }
 
 // Arm: both operands false -> false, and still no team query.
-TEST_F(PropertiesFilter22902Test, BothOperandsFalse_StaysFalseWithoutTeamQuery) {
+TEST_F(DevcommPropsFilterV22902Microtest, BothOperandsFalse_StaysFalseWithoutTeamQuery) {
   ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
     ncclTeam_t t{};
     t.nRanks = 4;
@@ -180,7 +180,7 @@ TEST_F(PropertiesFilter22902Test, BothOperandsFalse_StaysFalseWithoutTeamQuery) 
 
 // Arm: the ginType store. It goes through the v22902 layout, so exactly one byte
 // at offset 34 is zeroed and the modern 4-byte ginType at 36 keeps its poison.
-TEST_F(PropertiesFilter22902Test, ZeroesGinTypeByteAtV22902OffsetOnly) {
+TEST_F(DevcommPropsFilterV22902Microtest, ZeroesGinTypeByteAtV22902OffsetOnly) {
   comm_->nRanks = 8;
   ArmProps(true);
 
@@ -195,7 +195,7 @@ TEST_F(PropertiesFilter22902Test, ZeroesGinTypeByteAtV22902OffsetOnly) {
 }
 
 // Same store, on the cleared-support arm: the ginType write is unconditional.
-TEST_F(PropertiesFilter22902Test, ZeroesGinTypeByteEvenWhenSupportCleared) {
+TEST_F(DevcommPropsFilterV22902Microtest, ZeroesGinTypeByteEvenWhenSupportCleared) {
   ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
     ncclTeam_t t{};
     t.nRanks = 2;
@@ -213,7 +213,7 @@ TEST_F(PropertiesFilter22902Test, ZeroesGinTypeByteEvenWhenSupportCleared) {
 }
 
 // The default seam models an lsa team spanning the comm, so support survives it.
-TEST_F(PropertiesFilter22902Test, DefaultTeamSeam_SpansComm) {
+TEST_F(DevcommPropsFilterV22902Microtest, DefaultTeamSeam_SpansComm) {
   comm_->nRanks = 8;
   comm_->rank = 5;
   ArmProps(true);
@@ -237,7 +237,7 @@ using RcclUnitTesting::LogHas;
 // value the block could legitimately compute.
 constexpr int kRailGinPoison = 0x5A5A;
 
-class ReqsFilterV22902Microtest : public DevcommMicrotest {
+class DevcommReqsFilterV22902Microtest : public DevcommMicrotest {
  protected:
   ncclDevCommRequirements_t reqs_{};
   // Backing storage for the resource-requirements linked list under test.
@@ -278,7 +278,7 @@ class ReqsFilterV22902Microtest : public DevcommMicrotest {
 };
 
 // Arm (a) trigger via ginForceEnable alone -> arm (b).
-TEST_F(ReqsFilterV22902Microtest, GinForceEnableAlone_Rejects) {
+TEST_F(DevcommReqsFilterV22902Microtest, GinForceEnableAlone_Rejects) {
   reqs_.ginForceEnable = true;
   reqs_.barrierCount = 7;
   reqs_.lsaBarrierCount = 3;
@@ -296,7 +296,7 @@ TEST_F(ReqsFilterV22902Microtest, GinForceEnableAlone_Rejects) {
 }
 
 // Arm (a) trigger via reqs->ginSignalCount alone.
-TEST_F(ReqsFilterV22902Microtest, GinSignalCountAlone_Rejects) {
+TEST_F(DevcommReqsFilterV22902Microtest, GinSignalCountAlone_Rejects) {
   reqs_.ginSignalCount = 2;
   reqs_.barrierCount = 7;
 
@@ -310,7 +310,7 @@ TEST_F(ReqsFilterV22902Microtest, GinSignalCountAlone_Rejects) {
 }
 
 // Arm (a) trigger via reqs->ginCounterCount alone.
-TEST_F(ReqsFilterV22902Microtest, GinCounterCountAlone_Rejects) {
+TEST_F(DevcommReqsFilterV22902Microtest, GinCounterCountAlone_Rejects) {
   reqs_.ginCounterCount = 5;
   reqs_.barrierCount = 7;
 
@@ -324,7 +324,7 @@ TEST_F(ReqsFilterV22902Microtest, GinCounterCountAlone_Rejects) {
 }
 
 // Arm (a) the WARN reports the caller's reqs->version, not the runtime version.
-TEST_F(ReqsFilterV22902Microtest, WarnReportsCallerVersion_NotRuntime) {
+TEST_F(DevcommReqsFilterV22902Microtest, WarnReportsCallerVersion_NotRuntime) {
   reqs_.version = NCCL_VERSION(2, 29, 3);
   reqs_.ginForceEnable = true;
 
@@ -337,7 +337,7 @@ TEST_F(ReqsFilterV22902Microtest, WarnReportsCallerVersion_NotRuntime) {
 }
 
 // Arm (a) empty list, all reqs counters zero -> falls through to arm (c).
-TEST_F(ReqsFilterV22902Microtest, NoGinAndNullList_TakesSuccessArm) {
+TEST_F(DevcommReqsFilterV22902Microtest, NoGinAndNullList_TakesSuccessArm) {
   reqs_.resourceRequirementsList = nullptr;
   reqs_.barrierCount = 7;
   reqs_.lsaBarrierCount = 3;
@@ -357,7 +357,7 @@ TEST_F(ReqsFilterV22902Microtest, NoGinAndNullList_TakesSuccessArm) {
 }
 
 // Arm (a) a four-node list where no node requests GIN -> arm (c), list untouched.
-TEST_F(ReqsFilterV22902Microtest, ListWithNoGinNode_TakesSuccessArm) {
+TEST_F(DevcommReqsFilterV22902Microtest, ListWithNoGinNode_TakesSuccessArm) {
   ChainResourceRequirements(4);
   for (auto& rr : rr_) {
     rr.bufferSize = 4096;  // non-GIN work, must not trip the detector
@@ -385,7 +385,7 @@ TEST_F(ReqsFilterV22902Microtest, ListWithNoGinNode_TakesSuccessArm) {
 
 // Arm (a) the third of four nodes requests GIN signals; the fourth is benign, so a
 // loop that failed to stop early would overwrite the flag back to false.
-TEST_F(ReqsFilterV22902Microtest, ThirdListNodeSignals_RejectsDespiteBenignTail) {
+TEST_F(DevcommReqsFilterV22902Microtest, ThirdListNodeSignals_RejectsDespiteBenignTail) {
   ChainResourceRequirements(4);
   rr_[2].ginSignalCount = 3;
 
@@ -399,7 +399,7 @@ TEST_F(ReqsFilterV22902Microtest, ThirdListNodeSignals_RejectsDespiteBenignTail)
 }
 
 // Arm (a) same shape, but the trigger is ginCounterCount on the second node.
-TEST_F(ReqsFilterV22902Microtest, SecondListNodeCounters_RejectsDespiteBenignTail) {
+TEST_F(DevcommReqsFilterV22902Microtest, SecondListNodeCounters_RejectsDespiteBenignTail) {
   ChainResourceRequirements(4);
   rr_[1].ginCounterCount = 6;
 
@@ -412,7 +412,7 @@ TEST_F(ReqsFilterV22902Microtest, SecondListNodeCounters_RejectsDespiteBenignTai
 }
 
 // Arm (a) only the last node requests GIN: the walk must reach the tail.
-TEST_F(ReqsFilterV22902Microtest, LastListNodeSignals_Rejects) {
+TEST_F(DevcommReqsFilterV22902Microtest, LastListNodeSignals_Rejects) {
   ChainResourceRequirements(4);
   rr_[3].ginSignalCount = 1;
 
@@ -424,7 +424,7 @@ TEST_F(ReqsFilterV22902Microtest, LastListNodeSignals_Rejects) {
 }
 
 // Arm (c) barrierCount > lsaBarrierCount: std::max picks barrierCount.
-TEST_F(ReqsFilterV22902Microtest, BarrierCountGreater_RaisesLsaBarrierCount) {
+TEST_F(DevcommReqsFilterV22902Microtest, BarrierCountGreater_RaisesLsaBarrierCount) {
   reqs_.barrierCount = 7;
   reqs_.lsaBarrierCount = 3;
 
@@ -435,7 +435,7 @@ TEST_F(ReqsFilterV22902Microtest, BarrierCountGreater_RaisesLsaBarrierCount) {
 }
 
 // Arm (c) lsaBarrierCount > barrierCount: std::max keeps lsaBarrierCount.
-TEST_F(ReqsFilterV22902Microtest, LsaBarrierCountGreater_IsPreserved) {
+TEST_F(DevcommReqsFilterV22902Microtest, LsaBarrierCountGreater_IsPreserved) {
   reqs_.barrierCount = 4;
   reqs_.lsaBarrierCount = 9;
 
@@ -446,7 +446,7 @@ TEST_F(ReqsFilterV22902Microtest, LsaBarrierCountGreater_IsPreserved) {
 }
 
 // Arm (c) equal counts: the merge is idempotent.
-TEST_F(ReqsFilterV22902Microtest, BarrierCountsEqual_KeepsValue) {
+TEST_F(DevcommReqsFilterV22902Microtest, BarrierCountsEqual_KeepsValue) {
   reqs_.barrierCount = 5;
   reqs_.lsaBarrierCount = 5;
 
@@ -457,7 +457,7 @@ TEST_F(ReqsFilterV22902Microtest, BarrierCountsEqual_KeepsValue) {
 }
 
 // Arm (c) barrierCount == 0: the if body is skipped but railGin is still zeroed.
-TEST_F(ReqsFilterV22902Microtest, ZeroBarrierCount_StillZeroesRailGinBarrierCount) {
+TEST_F(DevcommReqsFilterV22902Microtest, ZeroBarrierCount_StillZeroesRailGinBarrierCount) {
   reqs_.barrierCount = 0;
   reqs_.lsaBarrierCount = 6;
 
@@ -469,7 +469,7 @@ TEST_F(ReqsFilterV22902Microtest, ZeroBarrierCount_StillZeroesRailGinBarrierCoun
 
 // Arm (c) pins current behaviour for a negative barrierCount: `if (barrierCount)` is a
 // truthiness test, so the merge runs and std::max discards the negative.
-TEST_F(ReqsFilterV22902Microtest, NegativeBarrierCount_IsClearedAndDiscarded) {
+TEST_F(DevcommReqsFilterV22902Microtest, NegativeBarrierCount_IsClearedAndDiscarded) {
   reqs_.barrierCount = -3;
   reqs_.lsaBarrierCount = 2;
 
@@ -480,7 +480,7 @@ TEST_F(ReqsFilterV22902Microtest, NegativeBarrierCount_IsClearedAndDiscarded) {
 }
 
 // Arm (a) negative GIN counters are not a request: `> 0`, not `>= 0`.
-TEST_F(ReqsFilterV22902Microtest, NegativeGinCounts_DoNotRequestGin) {
+TEST_F(DevcommReqsFilterV22902Microtest, NegativeGinCounts_DoNotRequestGin) {
   reqs_.ginSignalCount = -1;
   reqs_.ginCounterCount = -1;
   ChainResourceRequirements(2);
@@ -688,7 +688,7 @@ long FirstDiff(void const* a, void const* b, std::size_t n) {
   return -1;
 }
 
-class CopyOldToNewV22902 : public DevcommMicrotest {
+class DevcommCopyOldToNewV22902Microtest : public DevcommMicrotest {
  protected:
   std::unique_ptr<struct ncclDevComm> dst_;
   std::unique_ptr<struct ncclDevComm_v22902> src_;
@@ -713,7 +713,7 @@ class CopyOldToNewV22902 : public DevcommMicrotest {
 };
 
 // Arm: the single straight-line body, running the real memcpy default of the seam.
-TEST_F(CopyOldToNewV22902, MovesLsaPrefixFromOldToNew_LeavesOldUntouched) {
+TEST_F(DevcommCopyOldToNewV22902Microtest, MovesLsaPrefixFromOldToNew_LeavesOldUntouched) {
   ASSERT_NE(-1, FirstDiff(dstBytes() + kNewRankOff, srcBefore_.data() + kOldRankOff, kLsaLen))
       << "poison and source coincide; the copy would be unobservable";
 
@@ -727,7 +727,7 @@ TEST_F(CopyOldToNewV22902, MovesLsaPrefixFromOldToNew_LeavesOldUntouched) {
 
 // Arm: same body, asserting the deliberate absence of a memset. The caller
 // (ncclDevCommDestroy) stamps magic/version before calling and must get them back.
-TEST_F(CopyOldToNewV22902, PreservesDestinationOutsideLsaPrefix) {
+TEST_F(DevcommCopyOldToNewV22902Microtest, PreservesDestinationOutsideLsaPrefix) {
   dst_->magic = NCCL_API_MAGIC;
   dst_->version = NCCL_VERSION_CODE;
 
@@ -741,7 +741,7 @@ TEST_F(CopyOldToNewV22902, PreservesDestinationOutsideLsaPrefix) {
 }
 
 // Arm: same body, pinning the exact copy length at both ends of the range.
-TEST_F(CopyOldToNewV22902, CopiesLastByteOfRange_NotTheByteAfterIt) {
+TEST_F(DevcommCopyOldToNewV22902Microtest, CopiesLastByteOfRange_NotTheByteAfterIt) {
   srcBytes()[kOldRankOff + kLsaLen - 1] = 0x5A;
   srcBytes()[kOldRankOff + kLsaLen] = 0x5B;
   dstBytes()[kNewRankOff + kLsaLen - 1] = 0xC3;
@@ -754,7 +754,7 @@ TEST_F(CopyOldToNewV22902, CopiesLastByteOfRange_NotTheByteAfterIt) {
 }
 
 // Arm: same body, observed at the seam -- exactly one call, destination argument first.
-TEST_F(CopyOldToNewV22902, InvokesCopyLsaDataExactlyOnce_DestinationFirst) {
+TEST_F(DevcommCopyOldToNewV22902Microtest, InvokesCopyLsaDataExactlyOnce_DestinationFirst) {
   void* seenDst = nullptr;
   void const* seenSrc = nullptr;
   ScopedHook copy(g_ncclDevCommCopyLsaData, [&](void* d, void const* s) {
@@ -775,7 +775,7 @@ TEST_F(CopyOldToNewV22902, InvokesCopyLsaDataExactlyOnce_DestinationFirst) {
 // Arm: the callback slots of both compat tables. This pins the wiring only; the actual "v22907
 // defers to v22902" fallback lives in ncclDevCommDestroy (src/dev_runtime.cc), which is not in
 // this binary, so a null devCommCopyOldToNew here is asserted but its consequence is not.
-TEST_F(CopyOldToNewV22902, CompatTables_WireTheV22902Callbacks_AndLeaveV22907CopyOldToNewNull) {
+TEST_F(DevcommCopyOldToNewV22902Microtest, CompatTables_WireTheV22902Callbacks_AndLeaveV22907CopyOldToNewNull) {
   EXPECT_EQ(&ncclDevCommCopyOldToNew_v22902, ncclDevCommCompat_v22902.devCommCopyOldToNew);
   EXPECT_EQ(nullptr, ncclDevCommCompat_v22907.devCommCopyOldToNew);
   EXPECT_EQ(ncclDevCommCompat_v22902.devCommCopyNewToOld, &ncclDevCommCopyNewToOld_v22902);
@@ -790,7 +790,7 @@ TEST_F(CopyOldToNewV22902, CompatTables_WireTheV22902Callbacks_AndLeaveV22907Cop
 // first-match-wins over devCommCompat[] (src/dev_runtime.cc), so widening v22902's range would
 // silently route 2.29.5-2.29.7 apps through the v22902 shims: memset of 200 bytes over a 224-byte
 // ncclDevComm_v22907, and abortFlag never copied. Nothing else in the suite pins these four fields.
-TEST_F(CopyOldToNewV22902, CompatTables_PinTheVersionRangesThatSelectEachShimSet) {
+TEST_F(DevcommCopyOldToNewV22902Microtest, CompatTables_PinTheVersionRangesThatSelectEachShimSet) {
   EXPECT_EQ(NCCL_VERSION(2, 29, 2), ncclDevCommCompat_v22902.minVersion);
   EXPECT_EQ(NCCL_VERSION(2, 29, 3), ncclDevCommCompat_v22902.maxVersion);
   EXPECT_EQ(NCCL_VERSION(2, 29, 5), ncclDevCommCompat_v22907.minVersion);
@@ -807,7 +807,7 @@ TEST_F(CopyOldToNewV22902, CompatTables_PinTheVersionRangesThatSelectEachShimSet
 
 // Pins a latent layout hazard, not desired behaviour: v22902's inlined resource window
 // is 8 bytes longer than the new one, so its tail lands in hybridWorldGinBarrier.
-TEST_F(CopyOldToNewV22902, PinsInlinedResourceWindowTailSpillIntoHybridWorldGinBarrier) {
+TEST_F(DevcommCopyOldToNewV22902Microtest, PinsInlinedResourceWindowTailSpillIntoHybridWorldGinBarrier) {
   constexpr std::size_t kOldInl = offsetof(struct ncclDevComm_v22902, resourceWindow_inlined);
   constexpr std::size_t kNewHybrid = offsetof(struct ncclDevComm, hybridWorldGinBarrier);
   ASSERT_EQ(sizeof(struct ncclWindow_vidmem_v22902),
