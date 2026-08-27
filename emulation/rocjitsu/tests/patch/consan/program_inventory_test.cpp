@@ -199,7 +199,6 @@ TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
   EXPECT_TRUE(site.complete());
   ConSanInventoryExclusion exclusion;
   exclusion.reason = ConSanInventoryExclusionReason::InvalidAccessWidth;
-  exclusion.detail = "test";
   site.exclusions.push_back(exclusion);
   EXPECT_FALSE(site.complete());
   EXPECT_EQ(site.exclusions.front(), exclusion);

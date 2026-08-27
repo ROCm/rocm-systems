@@ -149,14 +149,9 @@ static_assert(kConSanInventoryExclusionReasons.size() ==
               static_cast<size_t>(ConSanInventoryExclusionReason::Count));
 
 /// One machine-readable limitation attached to a normalized access site.
-///
-/// `detail` may explain the offending encoding for diagnostics, but control
-/// flow must use `reason`; prose is deliberately not a hidden policy channel.
 struct ConSanInventoryExclusion {
   /// Stable typed limitation.
   ConSanInventoryExclusionReason reason = ConSanInventoryExclusionReason::Count;
-  /// Optional human-readable detail with no semantic control-flow meaning.
-  std::string detail;
 
   bool operator==(const ConSanInventoryExclusion &) const = default;
 };
@@ -609,7 +604,6 @@ private:
       } else {
         result.exclusions.push_back({
             .reason = ConSanInventoryExclusionReason::RangeEncodingUnavailable,
-            .detail = "two-address LDS offsets could not be decoded",
         });
       }
     } else if (site.decoded_width_bits != 0 && site.decoded_width_bits % 8u == 0) {
@@ -626,25 +620,21 @@ private:
     if (site.kind == ConSanLdsAccessKind::Other) {
       site.exclusions.push_back({
           .reason = ConSanInventoryExclusionReason::NonAccessInstruction,
-          .detail = "decoded instruction is outside ConSan's access kinds",
       });
     }
     if (site.instruction_size == 0 || site.instruction_size % sizeof(uint32_t) != 0) {
       site.exclusions.push_back({
           .reason = ConSanInventoryExclusionReason::InvalidInstructionSize,
-          .detail = "decoded instruction size is not a nonzero dword multiple",
       });
     }
     if (site.decoded_width_bits == 0 || site.decoded_width_bits % 8u != 0) {
       site.exclusions.push_back({
           .reason = ConSanInventoryExclusionReason::InvalidAccessWidth,
-          .detail = "decoded access width is not a nonzero byte multiple",
       });
     }
     if (!address_operand_not_required && !site.operands.address_vgpr) {
       site.exclusions.push_back({
           .reason = ConSanInventoryExclusionReason::MissingAddressOperand,
-          .detail = "decoded access has no vector address operand",
       });
     }
   }
