@@ -1,24 +1,26 @@
 .. meta::
-   :description: ROCm Compute Profiler: using memory bandwidth analysis
-   :keywords: ROCm Compute Profiler, memory bandwidth, guided analysis,
-              bottleneck detection
+   :description: ROCm Compute Profiler: using Memory Bandwidth Analysis
+   :keywords: ROCm Compute Profiler, Memory Bandwidth Analysis,
+              guided analysis, bottleneck detection
 
-*********************************************************
-Using memory bandwidth analysis in ROCm Compute Profiler
-*********************************************************
+************************************************************
+Using Memory Bandwidth Analysis in ROCm Compute Profiler
+************************************************************
 
 .. warning::
 
-   Memory bandwidth analysis is an experimental feature. Enable it by
+   Memory Bandwidth Analysis is an experimental feature. Enable it by
    passing ``--experimental --membw-analysis`` in both ``profile`` and
    ``analyze`` modes. This feature is in its preliminary stages —
    guidance text will be refined in future releases. Behavior and
    command-line surface may change.
 
-Memory bandwidth analysis identifies bottlenecks in the GPU memory
-subsystem. It evaluates stall metrics collected from the L1 cache (GL1),
-L2 cache (GL2), and Efficiency Arbiter (EA) levels, then reports which
-components are under pressure and why.
+Memory Bandwidth Analysis identifies bottlenecks in the GPU memory
+subsystem. It evaluates stall metrics collected from the
+:doc:`L1 cache (GL1) </conceptual/cdna/vector-l1-cache>`,
+:doc:`L2 cache (GL2) </conceptual/cdna/l2-cache>`, and Efficiency
+Arbiter (EA) levels, then reports which components are under pressure
+and why.
 
 When bottlenecks are detected, the analysis overlays stall annotations
 on the memory chart and renders a guidance panel below it with
@@ -27,7 +29,7 @@ per-bottleneck details.
 Supported hardware
 ==================
 
-Memory bandwidth analysis is currently available for:
+Memory Bandwidth Analysis is currently available for:
 
 * AMD Instinct MI350 Series (gfx950)
 
@@ -40,8 +42,7 @@ stall and pressure metrics used by the analysis.
 
 .. code-block:: shell
 
-   $ rocprof-compute profile --experimental --membw-analysis \
-       -n my_workload -- ./my_app
+   $ rocprof-compute profile --experimental --membw-analysis -n my_workload -- ./my_app
 
 Block 30 counters are collected alongside the standard profiling
 counters. No other profiling options are needed.
@@ -54,22 +55,20 @@ detection and the guidance overlay:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze --experimental --membw-analysis \
-       -p workloads/my_workload/MI350/
+   $ rocprof-compute analyze --experimental --membw-analysis -p workloads/my_workload/MI350/
 
-To view only the memory chart and memory bandwidth analysis tables,
+To view only the memory chart and Memory Bandwidth Analysis tables,
 use the block filter:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze --experimental --membw-analysis \
-       -p workloads/my_workload/MI350/ -b 3 30
+   $ rocprof-compute analyze --experimental --membw-analysis -p workloads/my_workload/MI350/ -b 3 30
 
 Here, ``-b 3`` selects the memory chart and ``-b 30`` includes the
-memory bandwidth analysis tables.
+Memory Bandwidth Analysis tables.
 
-.. TODO: add screenshot of memory chart with stall annotations and
-   guidance panel
+.. image:: ../data/analyze/cli/membw_mem_chart.png
+   :alt: Memory chart with Memory Bandwidth Analysis annotations and guidance panel
 
 Reading the output
 ==================
@@ -84,7 +83,8 @@ panel, showing the metric label and its measured value. Panels with
 active stalls are highlighted with a red border, and a "Stall" entry
 is added to the chart legend.
 
-.. TODO: add screenshot of memory chart with stall annotations
+.. image:: ../data/analyze/cli/membw_stall_annotations.png
+   :alt: Stall annotations with red borders on affected cache panels
 
 Guidance panel
 --------------
@@ -99,7 +99,8 @@ one bottleneck:
 * **Impact**: a brief explanation of what this stall means for your
   workload
 
-.. TODO: add screenshot of guidance panel
+.. image:: ../data/analyze/cli/membw_guidance_panel.png
+   :alt: Guidance panel showing active bottlenecks with condition, measurement, and impact
 
 When no bottlenecks are found, a single status line is shown instead
 (for example, "Memory Bandwidth Analysis: No bottlenecks detected").
@@ -127,10 +128,10 @@ one path.
 
 .. note::
 
-   All membw metrics are stall-cycle ratios (for example,
-   ``100 * SUM(stall_cycles) / SUM(busy_cycles)``). These percentages
-   are not affected by the normalization mode shown in the memory
-   chart title (per_kernel, per_wave, etc.).
+   All Memory Bandwidth Analysis metrics are stall-cycle ratios (for
+   example, ``100 * SUM(stall_cycles) / SUM(busy_cycles)``). These
+   percentages are not affected by the normalization mode shown in the
+   memory chart title (per_kernel, per_wave, etc.).
 
 .. note::
 
@@ -144,9 +145,9 @@ Further resources
 For deeper analysis beyond the guided output:
 
 * **Block 30 raw metrics**: run ``-b 30`` to see the full set of
-  memory bandwidth metric tables (L1 cache, L2 bottleneck indicators,
-  EA indicators).
-* **Memory chart**: the :doc:`CLI analysis documentation <analyze/cli>`
+  Memory Bandwidth Analysis metric tables (L1 cache, L2 bottleneck
+  indicators, EA indicators).
+* **Memory chart**: the :doc:`CLI analysis documentation </how-to/analyze/cli>`
   covers the memory chart layout in detail.
 * **CDNA performance model**: the :doc:`L2 cache
   </conceptual/cdna/l2-cache>` and :doc:`Vector L1 cache
