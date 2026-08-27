@@ -66,9 +66,9 @@ Simulated with `OmniSoC_Base.detect_counters()` + `_allocate_perfmon_counter_fil
 
 **Validation recipe cost:** `--block 17` reduces passes from ~12–13 to **8** (~35–40% fewer re-runs vs full panel) while keeping L2/HBM counters.
 
-### 4.2 Does grouping policy reduce passes?
+### 4.2 Grouping policy typically increases passes
 
-**No — for full panel on gfx942, adding priority metrics increases passes.**
+On gfx942 full panel, adding `same_bucket_priority_metric_ids` **typically increases** pass count. Metric-aware coalesce may open **new buckets** when priority metric groups cannot fit existing ones — co-locating ratio partners trades off against **more kernel re-runs**.
 
 | Policy | Full-panel passes | Δ vs empty policy |
 |--------|-------------------|---------------------|
@@ -77,7 +77,7 @@ Simulated with `OmniSoC_Base.detect_counters()` + `_allocate_perfmon_counter_fil
 | `6.1.2` (Workgroup Manager Util.) | 17 | +5 |
 | All cap metrics (`17.2.1`, `6.1.2`, `5.1.0`, `15.4.0`) | 17 | +5 |
 
-Metric-aware coalesce opens **new buckets** when priority groups cannot fit existing ones. gfx1250 documents a case where priority **does not** increase passes — **arch- and counter-set-specific**.
+Do **not** expect grouping policy to reduce passes on full-panel gfx942 profiles. gfx1250 is a documented exception where priority metrics can steer packing **without** increasing pass count — behavior is **arch- and counter-set-specific**.
 
 ### 4.3 Does grouping policy co-locate ratio partners?
 
@@ -105,7 +105,7 @@ Simulated counter → pass bucket (full panel):
 |----------|--------|
 | Is grouping the most accurate fix? | **Yes**, when counters truly share a pass on the same dispatch |
 | Does empty gfx942 policy cause splitting? | **Yes** — partners land in different accum passes under default packing |
-| Does adding policy fix full-panel without cost? | **No** — simulated **+42% passes** for priority metrics on full panel |
+| Does adding policy increase passes? | **Typically yes** on gfx942 full panel — simulated **+42%** for priority metrics |
 | Does `--block 17` help HBM validation? | **Yes** — partners already co-locate; **8 passes** vs ~12–13 |
 | Does policy help block-only HBM? | **No extra benefit** in simulation (already co-located) |
 | Can policy fix WGM on full panel? | **Simulated co-location** with `6.1.2`, same pass-count penalty |
