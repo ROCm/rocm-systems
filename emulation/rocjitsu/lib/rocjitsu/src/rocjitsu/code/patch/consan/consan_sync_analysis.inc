@@ -254,7 +254,7 @@ void classify_atomic_sync_confidence(const ConSanAtomicSite &site, ConSanSyncEve
 template <typename Container>
 void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
                                       const Container &container, bool in_kernel,
-                                      std::vector<ConSanSyncEvent> &events) {
+                                      rj_code_arch_t arch, std::vector<ConSanSyncEvent> &events) {
   const size_t container_begin = events.size();
   const std::string_view fingerprint = code_object_id.fingerprint;
   const std::string container_kind = in_kernel ? "kernel" : "function";
@@ -436,13 +436,15 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
     event.mnemonic = site.mnemonic;
     if (site.raw_ioffset)
       event.static_byte_offset = *site.raw_ioffset;
-    // Pre-gfx12 FLAT atomics do not encode scope, and gfx1250 can omit it for
-    // a scalar-base group-FLAT form. Exact group-aperture provenance is the
-    // stronger architectural fact: communication through LDS is workgroup
-    // scoped regardless of the target-native spelling.
-    event.raw_scope = site.address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup
-                          ? std::optional<uint32_t>(1u)
-                          : site.raw_scope;
+    // Some target-native encodings omit a field whose semantic value follows
+    // from the address space. Publish that normalized fact in the graph once,
+    // so policy and every engine consume the same scope instead of repairing
+    // raw decoder output independently.
+    const bool implicit_workgroup_scope =
+        site.address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup ||
+        (site.mnemonic.starts_with("ds_") &&
+         consan_arch_supports_capability_form(arch, ConSanCapabilityForm::OrderedLdsAtomic));
+    event.raw_scope = implicit_workgroup_scope ? std::optional<uint32_t>(1u) : site.raw_scope;
     finish_event(event, "atomic");
   }
 
@@ -454,15 +456,15 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
 
 void build_sync_event_inventory(std::span<const uint8_t> bytes,
                                 SynchronizationInventoryBuildView inventory,
-                                const ConSanTransformArtifacts &result) {
+                                const ConSanTransformArtifacts &result, rj_code_arch_t arch) {
   const ConSanCodeObjectId code_object_id = make_consan_code_object_id(bytes);
   inventory.sync_events.clear();
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (!is_rocclr_runtime_kernel_name(kernel.name))
-      append_sync_events_for_container(code_object_id, kernel, true, inventory.sync_events);
+      append_sync_events_for_container(code_object_id, kernel, true, arch, inventory.sync_events);
   }
   for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_sync_events_for_container(code_object_id, function, false, inventory.sync_events);
+    append_sync_events_for_container(code_object_id, function, false, arch, inventory.sync_events);
 }
 
 [[nodiscard]] bool sync_event_semantics_equal(const ConSanSyncEvent &lhs,

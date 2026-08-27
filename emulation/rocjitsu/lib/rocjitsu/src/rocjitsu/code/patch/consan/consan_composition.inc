@@ -778,7 +778,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   SynchronizationInventoryBuildView synchronization_inventory = inventory_builder.synchronization();
   if (needs_semantic_inventory) {
     build_fault_site_inventory(code_object_bytes, arch, result);
-    build_sync_event_inventory(code_object_bytes, synchronization_inventory, result);
+    build_sync_event_inventory(code_object_bytes, synchronization_inventory, result, arch);
     if (options.flavor == ConSanFlavor::Moi &&
         !canonicalize_sync_events_by_physical_site(synchronization_inventory, result)) {
       result.program_inventory = inventory_builder.view();

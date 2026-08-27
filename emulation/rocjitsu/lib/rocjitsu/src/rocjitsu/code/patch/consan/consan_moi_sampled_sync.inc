@@ -1606,7 +1606,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   }
 
   struct Candidate {
-    AtomicRecordCandidate atomic;
+    MoiAtomicEvidenceSitePlan atomic;
     consan_detail::SampledAtomicSemantics semantics;
     uint64_t ordered_sequence_end_text_offset = 0;
     uint32_t selected_slot = 0;
@@ -1615,62 +1615,33 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     std::optional<uint32_t> release_selected_slot;
   };
   std::vector<Candidate> candidates;
-  const MoiSyncInventoryIndex sync_index(result);
-  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
-      result.program_inventory.arch(), ConSanCapabilityForm::OrderedLdsAtomic);
-  const auto append = [&](std::string_view name, bool in_kernel, std::optional<uint64_t> descriptor,
-                          const std::vector<ConSanAtomicSite> &sites) {
-    for (const ConSanAtomicSite &site : sites) {
-      const bool cas = consan_atomic_is_compare_exchange(site);
-      if (cas && !site.returns_old_value.value_or(false)) {
-        result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped " + std::string(name) +
-                                     ": compare-exchange-dynamic-outcome-unavailable");
-        continue;
-      }
-      const ConSanAtomicSite normalized =
-          normalize_atomic_record_site(site, allow_ordered_lds_atomic);
-      if (!is_first_light_atomic_record_candidate(normalized, allow_ordered_lds_atomic))
-        continue;
-      const auto event_kind = atomic_event_kind_for_site(sync_index, name, in_kernel, normalized);
-      if (!event_kind)
-        continue;
-      std::string reason;
-      const auto semantics = sampled_atomic_semantics_for_site(result, sync_index, name, in_kernel,
-                                                               normalized, reason);
-      if (!semantics) {
-        result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped " + std::string(name) +
-                                     ": " + reason);
-        continue;
-      }
-      const ConSanSyncEvent *event =
-          sync_index.event(ConSanSyncEventKind::Atomic, name, in_kernel, site.text_offset);
-      const ConSanSyncSequence *sequence =
-          event == nullptr ? nullptr : sync_index.sequence(event->identity);
-      if (descriptor && (event == nullptr || event->execution_owners.size() != 1u ||
-                         event->execution_owners.front().descriptor_file_offset != *descriptor))
-        descriptor.reset();
-      candidates.push_back(
-          {{(in_kernel ? "kernel:" : "function:") + std::string(name), normalized, descriptor,
-            *event_kind, /*uses_cluster_workgroup_id=*/false, /*is_rmw=*/true,
-            /*ordered_sequence_end_text_offset=*/0,
-            atomic_scalar_clause_for_site(sync_index, name, in_kernel, site)},
-           *semantics,
-           sequence == nullptr ? site.text_offset + site.size : sequence->end_text_offset,
-           0,
-           1,
-           false,
-           std::nullopt});
+  const SynchronizationInventoryView graph = result.program_inventory.sync();
+  for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
+    if (decision.reason != ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable)
+      continue;
+    for (const std::string &container_name : decision.source_containers) {
+      result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped " + container_name +
+                                   ": compare-exchange-dynamic-outcome-unavailable");
     }
-  };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    if (!is_rocclr_runtime_kernel_name(kernel.name))
-      append(kernel.name, true, kernel.descriptor_file_offset, kernel.atomic_sites);
   }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append(function.name, false, std::nullopt, function.atomic_sites);
-  std::vector<AtomicRecordCandidate> ordinary_candidates;
-  append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
-  for (AtomicRecordCandidate &atomic : ordinary_candidates) {
+  std::vector<MoiAtomicEvidenceSitePlan> admitted = build_moi_atomic_evidence_site_plans(
+      result, ConSanProbeIntentKind::SampledAtomicOrdering, result.errors);
+  if (!result.errors.empty())
+    return;
+  for (MoiAtomicEvidenceSitePlan &atomic : admitted) {
+    if (atomic.is_rmw) {
+      std::string reason;
+      const auto semantics = sampled_atomic_semantics_for_plan(graph, atomic, reason);
+      if (!semantics) {
+        result.errors.emplace_back("ConSan MOI admitted sampled atomic evidence is invalid: " +
+                                   reason);
+        return;
+      }
+      const uint64_t sequence_end = atomic.ordered_sequence_end_text_offset;
+      candidates.push_back(
+          {std::move(atomic), *semantics, sequence_end, 0, 1, false, std::nullopt});
+      continue;
+    }
     const auto role = sampled_atomic_role(atomic.event_kind, /*is_rmw=*/false);
     const auto scope =
         atomic.site.raw_scope ? sampled_atomic_scope(*atomic.site.raw_scope) : std::nullopt;
@@ -1706,37 +1677,6 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     const uint64_t sequence_end = atomic.ordered_sequence_end_text_offset;
     candidates.push_back({std::move(atomic), semantics, sequence_end, 0, 1, false, std::nullopt});
   }
-  if (!options.test_kernel_name_filter.empty()) {
-    std::erase_if(candidates, [&](const Candidate &candidate) {
-      return candidate.atomic.container_name.find(options.test_kernel_name_filter) ==
-             std::string::npos;
-    });
-  }
-  if (!consan_detail::canonicalize_physical_site_aliases(
-          candidates, result.errors, "ConSan MOI sampled atomic site",
-          [](const Candidate &candidate) { return candidate.atomic.site.file_offset; },
-          [](const Candidate &candidate) -> std::string_view {
-            return candidate.atomic.container_name;
-          },
-          [](const Candidate &lhs, const Candidate &rhs) {
-            return atomic_record_candidate_semantics_equal(lhs.atomic, rhs.atomic) &&
-                   lhs.semantics == rhs.semantics &&
-                   lhs.ordered_sequence_end_text_offset == rhs.ordered_sequence_end_text_offset;
-          },
-          [](Candidate &retained, const Candidate &) {
-            // The hint is nested here, so the common direct-member invalidator
-            // cannot be used.
-            retained.atomic.kernel_descriptor_file_offset.reset();
-          })) {
-    return;
-  }
-  std::erase_if(candidates, [&](const Candidate &candidate) {
-    return !plan_admits_atomic_insertion(result.observation_plan,
-                                         candidate.atomic.site.text_offset);
-  });
-  std::sort(candidates.begin(), candidates.end(), [](const Candidate &lhs, const Candidate &rhs) {
-    return lhs.atomic.site.text_offset < rhs.atomic.site.text_offset;
-  });
   if (candidates.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI sampled atomic sync found no qualified atomic sequence");

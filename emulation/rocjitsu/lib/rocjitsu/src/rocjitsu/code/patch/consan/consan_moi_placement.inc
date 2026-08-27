@@ -8,17 +8,10 @@ collect_moi_ordering_atomic_offsets(const ConSanTransformArtifacts &result, bool
   std::unordered_set<uint64_t> offsets;
   if (!track_atomics)
     return offsets;
-  const MoiSyncInventoryIndex sync_index(result);
-  const auto append_container = [&](const auto &container, bool in_kernel) {
-    for (const ConSanAtomicSite &site : container.atomic_sites) {
-      if (atomic_event_kind_for_site(sync_index, container.name, in_kernel, site))
-        offsets.insert(site.text_offset);
-    }
-  };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    append_container(kernel, true);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_container(function, false);
+  for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
+    if (decision.kind == ConSanSiteDecisionKind::Admitted)
+      offsets.insert(decision.semantic_site.physical.original_text_offset);
+  }
   return offsets;
 }
 

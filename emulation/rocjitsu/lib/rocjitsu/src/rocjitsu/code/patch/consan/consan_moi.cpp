@@ -445,6 +445,7 @@ using consan_detail::is_supported_moi_flat_access_mnemonic;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::moi_workgroup_shadow_initialization_lanes;
 using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
+using consan_detail::MoiAtomicEvidenceSitePlan;
 using consan_detail::MoiEntryScalarBackup;
 using consan_detail::MoiOwnerEpochPrologueEmissionPlan;
 using consan_detail::MoiPrivateEpochPrologueEmissionPlan;
@@ -629,142 +630,6 @@ bool consan_detail::append_workgroup_source_value(std::vector<uint32_t> &words,
   return true;
 }
 
-struct MoiSyncSiteKey {
-  ConSanSyncEventKind kind = ConSanSyncEventKind::Fence;
-  std::string_view container_name;
-  bool in_kernel = true;
-  uint64_t text_offset = 0;
-
-  bool operator==(const MoiSyncSiteKey &) const = default;
-};
-
-struct MoiSyncSiteKeyHash {
-  size_t operator()(const MoiSyncSiteKey &key) const {
-    size_t hash = std::hash<std::string_view>{}(key.container_name);
-    hash ^= std::hash<uint64_t>{}(key.text_offset) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
-    hash ^= static_cast<size_t>(key.kind) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
-    hash ^= static_cast<size_t>(key.in_kernel) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
-    return hash;
-  }
-};
-
-struct MoiPhysicalSyncSiteKey {
-  ConSanSyncEventKind kind = ConSanSyncEventKind::Fence;
-  uint64_t text_offset = 0;
-
-  bool operator==(const MoiPhysicalSyncSiteKey &) const = default;
-};
-
-struct MoiPhysicalSyncSiteKeyHash {
-  size_t operator()(const MoiPhysicalSyncSiteKey &key) const {
-    size_t hash = std::hash<uint64_t>{}(key.text_offset);
-    hash ^= static_cast<size_t>(key.kind) + 0x9e3779b9u + (hash << 6u) + (hash >> 2u);
-    return hash;
-  }
-};
-
-/// Immutable, transform-local lookup over ConSan's synchronization inventory.
-///
-/// Null entries preserve the public helpers' fail-closed uniqueness contract:
-/// duplicate site or sequence membership never silently selects one match.
-class MoiSyncInventoryIndex {
-public:
-  explicit MoiSyncInventoryIndex(const ConSanTransformArtifacts &result) {
-    const SynchronizationInventoryView sync = result.program_inventory.sync();
-    events_by_identity_.reserve(sync.sync_events.size());
-    events_by_site_.reserve(sync.sync_events.size());
-    events_by_physical_site_.reserve(sync.sync_events.size());
-    for (const ConSanSyncEvent &event : sync.sync_events) {
-      insert_unique(events_by_identity_, std::string_view(event.identity), &event);
-      insert_unique(
-          events_by_site_,
-          MoiSyncSiteKey{event.kind, event.container_name, event.in_kernel, event.text_offset},
-          &event);
-      insert_unique(events_by_physical_site_, MoiPhysicalSyncSiteKey{event.kind, event.text_offset},
-                    &event);
-    }
-
-    size_t member_count = 0;
-    for (const ConSanSyncSequence &sequence : sync.sync_sequences)
-      member_count += sequence.member_event_identities.size();
-    sequences_by_event_identity_.reserve(member_count);
-    for (const ConSanSyncSequence &sequence : sync.sync_sequences) {
-      for (const std::string &identity : sequence.member_event_identities)
-        insert_unique(sequences_by_event_identity_, std::string_view(identity), &sequence);
-    }
-  }
-
-  [[nodiscard]] const ConSanSyncEvent *event(std::string_view identity) const {
-    return find(events_by_identity_, identity);
-  }
-
-  [[nodiscard]] const ConSanSyncEvent *event(ConSanSyncEventKind kind,
-                                             std::string_view container_name, bool in_kernel,
-                                             uint64_t text_offset) const {
-    const ConSanSyncEvent *exact =
-        find(events_by_site_, MoiSyncSiteKey{kind, container_name, in_kernel, text_offset});
-    return exact != nullptr
-               ? exact
-               : find(events_by_physical_site_, MoiPhysicalSyncSiteKey{kind, text_offset});
-  }
-
-  [[nodiscard]] const ConSanSyncSequence *sequence(std::string_view event_identity) const {
-    return find(sequences_by_event_identity_, event_identity);
-  }
-
-private:
-  template <typename Map, typename Key, typename Value>
-  static void insert_unique(Map &map, Key key, Value value) {
-    const auto [entry, inserted] = map.emplace(std::move(key), value);
-    if (!inserted)
-      entry->second = nullptr;
-  }
-
-  template <typename Map, typename Key>
-  [[nodiscard]] static typename Map::mapped_type find(const Map &map, const Key &key) {
-    const auto entry = map.find(key);
-    return entry == map.end() ? nullptr : entry->second;
-  }
-
-  std::unordered_map<std::string_view, const ConSanSyncEvent *> events_by_identity_;
-  std::unordered_map<MoiSyncSiteKey, const ConSanSyncEvent *, MoiSyncSiteKeyHash> events_by_site_;
-  std::unordered_map<MoiPhysicalSyncSiteKey, const ConSanSyncEvent *, MoiPhysicalSyncSiteKeyHash>
-      events_by_physical_site_;
-  std::unordered_map<std::string_view, const ConSanSyncSequence *> sequences_by_event_identity_;
-};
-
-/// Resolve one normalized atomic site to the MOI ordering event qualified by
-/// the shared synchronization inventory. Unknown, ambiguous, insufficiently
-/// confident, and sequentially-consistent roles remain unsupported rather
-/// than being guessed independently by access and synchronization lowerers.
-[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
-                           bool in_kernel, const ConSanAtomicSite &site) {
-  const ConSanSyncEvent *event =
-      sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
-  if (event == nullptr)
-    return std::nullopt;
-  const ConSanSyncSequence *sequence = sync_index.sequence(event->identity);
-  if (sequence == nullptr ||
-      !consan_sync_confidence_meets(sequence->memory_role_confidence,
-                                    ConSanSemanticConfidence::Conservative)) {
-    return std::nullopt;
-  }
-  switch (sequence->memory_role) {
-  case ConSanSyncMemoryRole::Release:
-    return ConSanMoiAtomicEventKind::Release;
-  case ConSanSyncMemoryRole::Acquire:
-    return ConSanMoiAtomicEventKind::Acquire;
-  case ConSanSyncMemoryRole::AcquireRelease:
-    return ConSanMoiAtomicEventKind::AcquireRelease;
-  case ConSanSyncMemoryRole::Unknown:
-  case ConSanSyncMemoryRole::None:
-  case ConSanSyncMemoryRole::SequentiallyConsistent:
-    return std::nullopt;
-  }
-  return std::nullopt;
-}
-
 [[nodiscard]] std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
                                                         const ConSanTransformArtifacts &result) {
   return result.modified() ? std::span<const uint8_t>(result.replacement) : original;
@@ -936,19 +801,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
        effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
        (supported_barrier_members > kCompactRecordReplayBarrierMemberLimit ||
         has_stranded_record_replay_barrier));
-  const MoiSyncInventoryIndex sync_index(result);
-  std::vector<AtomicRecordCandidate> operational_ordinary_atomics;
-  append_ordered_ordinary_atomic_candidates(result, sync_index, operational_ordinary_atomics);
-  const bool has_operational_atomic_or_fence =
-      !collect_moi_ordering_atomic_offsets(result, effective_options.moi_track_atomics).empty() ||
-      !operational_ordinary_atomics.empty() ||
-      std::ranges::any_of(result.program_inventory.sync().moi_fence_candidates,
-                          &ConSanMoiFenceCandidate::eligible);
   const bool atomic_or_fence_relevant =
-      effective_options.moi_track_atomics &&
-      (effective_options.moi_engine == ConSanMoiEngine::RecordReplay
-           ? has_operational_atomic_or_fence
-           : has_supported_atomic_or_fence);
+      effective_options.moi_track_atomics && has_supported_atomic_or_fence;
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
       effective_options.moi_track_atomics && !atomic_or_fence_relevant) {
     // Atomic-token tracking enlarges every Inline access probe even though its

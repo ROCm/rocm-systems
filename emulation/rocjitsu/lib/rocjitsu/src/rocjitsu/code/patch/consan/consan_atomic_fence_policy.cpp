@@ -213,18 +213,6 @@ template <typename Container>
   return result;
 }
 
-[[nodiscard]] ConSanAtomicSite normalize_native_site(const ConSanAtomicSite &site,
-                                                     const ProgramInventory &inventory) {
-  ConSanAtomicSite result = site;
-  if (result.address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup ||
-      (result.mnemonic.starts_with("ds_") &&
-       consan_arch_supports_capability_form(inventory.arch(),
-                                            ConSanCapabilityForm::OrderedLdsAtomic))) {
-    result.raw_scope = 1u;
-  }
-  return result;
-}
-
 [[nodiscard]] std::optional<ConSanCapabilityForm>
 atomic_capability_form(const ConSanSyncEvent &event) {
   if (event.kind == ConSanSyncEventKind::OrdinaryMemory)
@@ -349,16 +337,12 @@ classify_cdna5_buffer_ordinary_encoding(const ConSanAtomicSite &site, rj_code_ar
       ordinary ? find_ordinary_site(inventory, event) : nullptr;
   if ((ordinary && ordinary_site == nullptr) || (!ordinary && native == nullptr))
     return ConSanAtomicPolicyReason::MissingOperands;
-  ConSanAtomicSite site = ordinary ? normalize_ordinary_site(*ordinary_site)
-                                   : normalize_native_site(*native, inventory);
+  ConSanAtomicSite site = ordinary ? normalize_ordinary_site(*ordinary_site) : *native;
 
-  // Synchronization analysis may prove a stronger semantic scope than the
-  // raw instruction bits. In particular, CDNA5 group-aperture FLAT loads use
-  // raw scope zero while an exact adjacent zero-wait proves workgroup acquire.
-  // Lowering already consumes the sequence scope; policy must classify the
-  // same normalized contract.
-  if (ordinary)
-    site.raw_scope = sequence.raw_scope;
+  // Synchronization analysis owns normalized semantic scope. It may preserve
+  // an encoded value or derive a stronger fact from address-space provenance
+  // and sequence association; policy always classifies that single contract.
+  site.raw_scope = sequence.raw_scope;
 
   // CDNA5 buffer ordinary communication is a Record/Replay-only address form.
   // Its associated fence owns the after-operation evidence, while the common

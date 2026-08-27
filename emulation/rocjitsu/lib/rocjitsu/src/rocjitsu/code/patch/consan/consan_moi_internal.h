@@ -588,6 +588,65 @@ struct MoiWorkitemOwnerDerivationRequest {
   bool operator==(const MoiWorkitemOwnerDerivationRequest &) const = default;
 };
 
+/// Immutable handoff from synchronization evidence policy to MOI atomic
+/// resource planning and emission.
+///
+/// The observation plan owns why this operation must be observed. This value
+/// joins that decision to the sole normalized synchronization sequence and to
+/// the operand-rich guest instruction needed by native lowering. A target
+/// emitter may consume the copied `site` operands, but it must not rediscover
+/// release/acquire meaning from instruction bits or choose a different
+/// evidence intent. Language-level atomic load/store sequences use the same
+/// contract with `is_rmw == false`; their complete ordered suffix is retained
+/// in `ordered_sequence_end_text_offset`.
+struct MoiAtomicEvidenceSitePlan {
+  /// Authoritative original-program event selected by evidence policy.
+  SemanticSiteId semantic_site;
+
+  /// Stable identity of the normalized sequence that establishes ordering.
+  ConSanSynchronizationAssociationId association;
+
+  /// Before-guest intent that preserves the effective communication address.
+  ConSanProbeIntentId address_capture_intent;
+
+  /// Engine-specific after-guest evidence intent implemented by this plan.
+  ConSanProbeIntentId evidence_intent;
+
+  /// Diagnostic container spelling, including `kernel:` or `function:`.
+  std::string container_name;
+
+  /// Decoded operands and encoding fields required to relocate the guest and
+  /// materialize its address. Semantic ordering does not come from this copy.
+  ConSanAtomicSite site;
+
+  /// Unique dispatchable owner descriptor, when graph ownership proved one.
+  std::optional<uint64_t> kernel_descriptor_file_offset;
+
+  /// Normalized release/acquire role selected from the shared sequence.
+  ConSanMoiAtomicEventKind event_kind = ConSanMoiAtomicEventKind::Release;
+
+  /// Whether kernel identity includes the cluster workgroup coordinate.
+  bool uses_cluster_workgroup_id = false;
+
+  /// True for a native RMW/CAS and false for an ordered ordinary load/store.
+  bool is_rmw = true;
+
+  /// End of the complete ordered guest sequence in original text coordinates.
+  uint64_t ordered_sequence_end_text_offset = 0;
+
+  /// Scalar scheduling hint that must be neutralized before inserting control
+  /// flow around the guest operation.
+  std::optional<uint64_t> scalar_clause_text_offset;
+
+  /// Verify the cross-stage identities and basic guest-range invariants.
+  [[nodiscard]] bool is_well_formed() const {
+    return semantic_site.valid() && association.valid() && address_capture_intent.valid() &&
+           evidence_intent.valid() && address_capture_intent != evidence_intent &&
+           !container_name.empty() && site.size != 0u && site.width_bits != 0u &&
+           ordered_sequence_end_text_offset >= site.text_offset + site.size;
+  }
+};
+
 /// Append the target sequence that derives one planned workitem owner.
 ///
 /// A private-state source is reloaded and waited for before the shift; a live

@@ -157,6 +157,60 @@ struct SynchronizationInventoryView {
     return event == sync_events.end() ? nullptr : &*event;
   }
 
+  /// Resolve one physical synchronization site without rebuilding an
+  /// engine-private event index.
+  ///
+  /// Container identity is preferred because it distinguishes independently
+  /// decoded functions that happen to use the same text-relative offset. A
+  /// canonicalized physical event may retain a different representative
+  /// container after equivalent symbol aliases are merged, so the query falls
+  /// back to a unique kind/offset match. Either ambiguous match fails closed.
+  [[nodiscard]] const ConSanSyncEvent *find_unique_event(ConSanSyncEventKind kind,
+                                                         std::string_view container_name,
+                                                         bool in_kernel,
+                                                         uint64_t text_offset) const {
+    const ConSanSyncEvent *exact = nullptr;
+    const ConSanSyncEvent *physical = nullptr;
+    bool physical_is_ambiguous = false;
+    for (const ConSanSyncEvent &event : sync_events) {
+      if (event.kind != kind || event.text_offset != text_offset)
+        continue;
+      if (physical != nullptr)
+        physical_is_ambiguous = true;
+      else
+        physical = &event;
+      if (event.container_name != container_name || event.in_kernel != in_kernel)
+        continue;
+      if (exact != nullptr)
+        return nullptr;
+      exact = &event;
+    }
+    if (exact != nullptr)
+      return exact;
+    return physical_is_ambiguous ? nullptr : physical;
+  }
+
+  /// Find the unique logical sequence containing a typed event identity.
+  ///
+  /// Typed membership is the authoritative graph edge. Absence and ambiguous
+  /// membership both return null so evidence policy cannot silently select one
+  /// of several contradictory causal interpretations.
+  [[nodiscard]] const ConSanSyncSequence *
+  find_unique_sequence_containing(const SemanticSiteId &event_identity) const {
+    SemanticSiteId member_identity = event_identity;
+    member_identity.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+    const ConSanSyncSequence *match = nullptr;
+    for (const ConSanSyncSequence &sequence : sync_sequences) {
+      if (std::ranges::find(sequence.member_semantic_ids, member_identity) ==
+          sequence.member_semantic_ids.end())
+        continue;
+      if (match != nullptr)
+        return nullptr;
+      match = &sequence;
+    }
+    return match;
+  }
+
   /// Find the unique logical sequence containing a decoded event name.
   /// Absence and ambiguous membership both return null so callers cannot
   /// silently choose one of several contradictory ordering interpretations.
@@ -166,6 +220,19 @@ struct SynchronizationInventoryView {
     for (const ConSanSyncSequence &sequence : sync_sequences) {
       if (std::ranges::find(sequence.member_event_identities, event_identity) ==
           sequence.member_event_identities.end())
+        continue;
+      if (match != nullptr)
+        return nullptr;
+      match = &sequence;
+    }
+    return match;
+  }
+
+  /// Resolve one unique synchronization sequence by its stable graph identity.
+  [[nodiscard]] const ConSanSyncSequence *find_unique_sequence(std::string_view identity) const {
+    const ConSanSyncSequence *match = nullptr;
+    for (const ConSanSyncSequence &sequence : sync_sequences) {
+      if (sequence.identity != identity)
         continue;
       if (match != nullptr)
         return nullptr;

@@ -185,7 +185,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
                                                 kMoiLocalIndirectIslandWords);
   std::vector<ConSanPatchInfo> patches;
   for (const PlannedFenceRecord &planned : selected) {
-    AtomicRecordCandidate scalar_clause_candidate;
+    MoiAtomicEvidenceSitePlan scalar_clause_candidate;
     scalar_clause_candidate.site = planned.candidate.communication_site;
     scalar_clause_candidate.scalar_clause_text_offset = planned.candidate.scalar_clause_text_offset;
     if (!neutralize_atomic_scalar_clause(new_text, scalar_clause_candidate, arch, patches,
@@ -541,7 +541,6 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
                                            const ConSanTransformArtifacts &result,
                                            std::vector<std::string> &errors,
                                            std::vector<ConSanCandidateResourcePlan> &plans) {
-  const MoiSyncInventoryIndex sync_index(result);
   if (options.moi_track_barriers) {
     std::vector<BarrierRecordCandidate> candidates;
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
@@ -593,40 +592,24 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
     }
   }
   if (options.moi_track_atomics) {
-    std::vector<AtomicRecordCandidate> candidates;
-    if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
-      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-        append_inline_atomic_candidates(kernel, sync_index, candidates);
-      for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-        append_inline_atomic_candidates(function, sync_index, candidates);
-      candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
-                                      [&](const auto &candidate) {
-                                        return classify_consan_moi_inline_atomic_support(
-                                                   candidate.site, candidate.event_kind, state.arch,
-                                                   candidate.is_rmw) !=
-                                               ConSanMoiInlineAtomicSupport::Supported;
-                                      }),
-                       candidates.end());
-    } else {
-      for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-        append_atomic_record_candidates(kernel, result, sync_index, candidates);
-      for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-        append_atomic_record_candidates(function, result, sync_index, candidates);
+    ConSanProbeIntentKind evidence_kind = ConSanProbeIntentKind::Count;
+    switch (options.moi_engine) {
+    case ConSanMoiEngine::RecordReplay:
+      evidence_kind = ConSanProbeIntentKind::AtomicRecord;
+      break;
+    case ConSanMoiEngine::Sampled:
+      evidence_kind = ConSanProbeIntentKind::SampledAtomicOrdering;
+      break;
+    case ConSanMoiEngine::InlineShadow:
+      evidence_kind = ConSanProbeIntentKind::ExactAtomicOrdering;
+      break;
     }
-    std::vector<AtomicRecordCandidate> ordinary_candidates;
-    append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
-    std::ranges::copy_if(ordinary_candidates, std::back_inserter(candidates),
-                         [&](const AtomicRecordCandidate &candidate) {
-                           return options.moi_engine != ConSanMoiEngine::RecordReplay ||
-                                  !ordinary_atomic_candidate_is_covered_by_eligible_fence(
-                                      result, candidate);
-                         });
-    apply_test_container_filter(candidates, options);
-    if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, errors))
+    std::vector<MoiAtomicEvidenceSitePlan> candidates =
+        build_moi_atomic_evidence_site_plans(result, evidence_kind, errors);
+    if (!errors.empty())
       return;
-    retain_admitted_atomic_record_candidates(result.observation_plan, candidates);
     for (size_t index = 0; index < candidates.size(); ++index) {
-      const AtomicRecordCandidate &candidate = candidates[index];
+      const MoiAtomicEvidenceSitePlan &candidate = candidates[index];
       const uint16_t scratch_count = options.moi_engine == ConSanMoiEngine::Sampled
                                          ? sampled_atomic_scratch_count()
                                      : options.moi_engine == ConSanMoiEngine::InlineShadow

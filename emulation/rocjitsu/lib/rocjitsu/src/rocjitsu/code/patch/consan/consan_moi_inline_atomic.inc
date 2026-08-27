@@ -29,19 +29,10 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   if (!validate_inline_atomic_exec_save_sgpr(options, result.warnings))
     return;
 
-  std::vector<AtomicRecordCandidate> candidates;
-  const MoiSyncInventoryIndex sync_index(result);
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    append_inline_atomic_candidates(kernel, sync_index, candidates);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_inline_atomic_candidates(function, sync_index, candidates);
-  std::vector<AtomicRecordCandidate> ordinary_candidates;
-  append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
-  std::ranges::copy(ordinary_candidates, std::back_inserter(candidates));
-  apply_test_container_filter(candidates, options);
-  if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result.errors))
+  std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
+      result, ConSanProbeIntentKind::ExactAtomicOrdering, result.errors);
+  if (!result.errors.empty())
     return;
-  retain_admitted_atomic_record_candidates(result.observation_plan, candidates);
   candidates.erase(
       std::remove_if(candidates.begin(), candidates.end(),
                      [&](const auto &candidate) {
@@ -74,7 +65,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
   }
   struct PlannedInlineAtomic : MoiPlannedProbeResources {
-    AtomicRecordCandidate candidate;
+    MoiAtomicEvidenceSitePlan candidate;
     ConSanMoiAtomicAddressPlan address_plan;
     uint32_t relocated_guest_size = 0;
     std::vector<uint32_t> trailing_guest_words;
@@ -88,7 +79,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
     if (planned_candidates.size() == options.max_patches)
       break;
-    const AtomicRecordCandidate &candidate = candidates[candidate_index];
+    const MoiAtomicEvidenceSitePlan &candidate = candidates[candidate_index];
     const ConSanAtomicSite &site = candidate.site;
     uint32_t relocated_guest_size = site.size;
     std::vector<uint32_t> trailing_guest_words;
@@ -175,7 +166,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           (site.addr_vgpr ? std::to_string(*site.addr_vgpr) : std::string("missing")));
       continue;
     }
-    AtomicRecordCandidate planned_candidate = candidate;
+    MoiAtomicEvidenceSitePlan planned_candidate = candidate;
     if (!planned_candidate.kernel_descriptor_file_offset) {
       planned_candidate.kernel_descriptor_file_offset =
           common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
@@ -712,7 +703,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (routed_by_dense_relay[planned_index])
       continue;
     const PlannedInlineAtomic &planned = planned_candidates[planned_index];
-    const AtomicRecordCandidate &candidate = planned.candidate;
+    const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;
     const ConSanAtomicSite &site = candidate.site;
 
     const uint64_t cave_text_offset = placement_planner.appended_end();
@@ -825,7 +816,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_atomic_record_cave_words(
-    std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t atomic_record_capacity,
@@ -1330,7 +1321,7 @@ sampled_atomic_role(ConSanMoiAtomicEventKind kind, bool is_rmw) {
 
 [[nodiscard]] bool append_sampled_atomic_guest(std::vector<uint32_t> &words,
                                                std::span<const uint8_t> bytes,
-                                               const AtomicRecordCandidate &candidate,
+                                               const MoiAtomicEvidenceSitePlan &candidate,
                                                rj_code_arch_t arch,
                                                uint32_t *guest_instruction_offset) {
   if (guest_instruction_offset)
@@ -1443,7 +1434,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
 [[nodiscard]] bool append_sampled_atomic_prelude(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
-    const AtomicRecordCandidate &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiAtomicEvidenceSitePlan &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
     const MoiOptions &options, const VgprSpillSequence *spill,
     const InlineSgprSpillSequence *scalar_spill, const MoiPrivateEpochLayout *private_layout,
     rj_code_arch_t arch, uint16_t saved_address, bool defer_guest, SampledAtomicPreludeState &state,
@@ -1553,7 +1544,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_pending_acquire_cave_words(
-    std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,
@@ -1850,7 +1841,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_sampled_atomic_sync_cave_words(
-    std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch, uint32_t selected_slot,

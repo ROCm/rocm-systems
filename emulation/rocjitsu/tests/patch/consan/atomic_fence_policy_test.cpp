@@ -410,7 +410,7 @@ TEST(ConSanAtomicFencePolicy, OrderedLdsAtomicIsTargetGatedToGfx1250) {
             ConSanCapabilityDisposition::Supported);
 }
 
-TEST(ConSanAtomicFencePolicy, Gfx1250OrderedLdsDerivesItsImplicitWorkgroupScope) {
+TEST(ConSanAtomicFencePolicy, Gfx1250OrderedLdsRequiresGraphNormalizedWorkgroupScope) {
   constexpr AtomicPolicyTarget gfx1250{ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250};
   std::vector events{make_atomic_event(32, ConSanSyncRmwOutcome::ReturnsOldValue,
                                        ConSanSyncAddressSource::LdsVector, "ds_add_u32")};
@@ -424,7 +424,10 @@ TEST(ConSanAtomicFencePolicy, Gfx1250OrderedLdsDerivesItsImplicitWorkgroupScope)
                              gfx1250),
       atomic_request(ConSanCapabilityEngine::RecordReplay));
   ASSERT_TRUE(policy.valid());
-  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Admitted);
+  ASSERT_EQ(policy.plan.atomic_site_decisions.size(), 1u);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().kind, ConSanSiteDecisionKind::Unsupported);
+  EXPECT_EQ(policy.plan.atomic_site_decisions.front().reason,
+            ConSanAtomicPolicyReason::MissingScope);
 }
 
 TEST(ConSanAtomicFencePolicy, Gfx1250OrdinaryAcquireUsesItsDerivedWorkgroupScope) {
@@ -579,6 +582,10 @@ TEST(ConSanAtomicFencePolicy, EncodingAndOperandFailuresRemainPolicyNotLoweringF
     SCOPED_TRACE(name);
     std::vector events{make_atomic_event()};
     std::vector sequences{make_atomic_sequence(events.front())};
+    if (expected == ConSanAtomicPolicyReason::MissingScope) {
+      events.front().raw_scope.reset();
+      sequences.front().raw_scope.reset();
+    }
     ConSanAtomicSite site = make_global_atomic_site();
     mutate(site);
     const ConSanAtomicFencePolicyResult policy = plan_consan_atomic_fence_observation(

@@ -1,93 +1,8 @@
-struct AtomicRecordCandidate {
-  std::string container_name;
-  ConSanAtomicSite site;
-  std::optional<uint64_t> kernel_descriptor_file_offset;
-  ConSanMoiAtomicEventKind event_kind = ConSanMoiAtomicEventKind::Release;
-  bool uses_cluster_workgroup_id = false;
-  // Language-level atomic loads and stores can lower to an ordinary memory
-  // instruction followed by an ordering cache operation. Keep that semantic
-  // distinction explicit: their communication range participates in the
-  // atomic synchronization model, but there is no RMW outcome.
-  bool is_rmw = true;
-  // End of the complete ordered sequence in canonical .text coordinates.
-  // RMW instructions normally end at site.text_offset + site.size; an
-  // ordinary acquire includes its wait/cache suffix.
-  uint64_t ordered_sequence_end_text_offset = 0;
-  /// Scalar scheduling hint covering site, if analysis proved one. Any engine
-  /// that replaces site with control flow must turn the hint into an s_nop.
-  std::optional<uint64_t> scalar_clause_text_offset;
-};
-
-[[nodiscard]] bool atomic_record_candidate_semantics_equal(const AtomicRecordCandidate &lhs,
-                                                           const AtomicRecordCandidate &rhs) {
-  const ConSanAtomicSite &left = lhs.site;
-  const ConSanAtomicSite &right = rhs.site;
-  const bool lhs_in_kernel = lhs.container_name.starts_with("kernel:");
-  const bool rhs_in_kernel = rhs.container_name.starts_with("kernel:");
-  return lhs_in_kernel == rhs_in_kernel && lhs.event_kind == rhs.event_kind &&
-         lhs.uses_cluster_workgroup_id == rhs.uses_cluster_workgroup_id &&
-         lhs.is_rmw == rhs.is_rmw &&
-         lhs.ordered_sequence_end_text_offset == rhs.ordered_sequence_end_text_offset &&
-         lhs.scalar_clause_text_offset == rhs.scalar_clause_text_offset &&
-         std::tie(left.address_space_hint, left.text_offset, left.file_offset, left.size,
-                  left.width_bits, left.dst_vgpr, left.addr_vgpr, left.data_vgpr, left.saddr_sgpr,
-                  left.raw_op, left.raw_addr, left.raw_data0, left.raw_data1, left.raw_vdst,
-                  left.raw_saddr, left.raw_scale_offset, left.raw_vaddr, left.raw_vsrc,
-                  left.raw_vdata, left.raw_rsrc, left.raw_soffset, left.raw_offen, left.raw_idxen,
-                  left.raw_ioffset, left.raw_scope, left.raw_th, left.returns_old_value,
-                  left.mnemonic) ==
-             std::tie(right.address_space_hint, right.text_offset, right.file_offset, right.size,
-                      right.width_bits, right.dst_vgpr, right.addr_vgpr, right.data_vgpr,
-                      right.saddr_sgpr, right.raw_op, right.raw_addr, right.raw_data0,
-                      right.raw_data1, right.raw_vdst, right.raw_saddr, right.raw_scale_offset,
-                      right.raw_vaddr, right.raw_vsrc, right.raw_vdata, right.raw_rsrc,
-                      right.raw_soffset, right.raw_offen, right.raw_idxen, right.raw_ioffset,
-                      right.raw_scope, right.raw_th, right.returns_old_value, right.mnemonic);
-}
-
-[[nodiscard]] bool canonicalize_atomic_record_candidates_by_physical_site(
-    std::vector<AtomicRecordCandidate> &candidates, std::vector<std::string> &errors) {
-  return consan_detail::canonicalize_physical_site_aliases(
-      candidates, errors, "ConSan MOI atomic site",
-      [](const AtomicRecordCandidate &candidate) { return candidate.site.file_offset; },
-      [](const AtomicRecordCandidate &candidate) -> std::string_view {
-        return candidate.container_name;
-      },
-      atomic_record_candidate_semantics_equal,
-      consan_detail::invalidate_physical_site_single_owner_hint);
-}
-
-[[nodiscard]] bool plan_admits_atomic_insertion(const ConSanObservationPlan &plan,
-                                                uint64_t text_offset) {
-  const auto decision =
-      std::ranges::find_if(plan.atomic_site_decisions, [&](const ConSanAtomicSiteDecision &site) {
-        return site.semantic_site.physical.original_text_offset == text_offset;
-      });
-  return decision != plan.atomic_site_decisions.end() &&
-         decision->kind == ConSanSiteDecisionKind::Admitted;
-}
-
-/// Temporary operand-rich lowering adapter. Pure policy is authoritative for
-/// semantic admission; legacy candidate discovery may only narrow that set.
-void retain_admitted_atomic_record_candidates(const ConSanObservationPlan &plan,
-                                              std::vector<AtomicRecordCandidate> &candidates) {
-  std::erase_if(candidates, [&](const AtomicRecordCandidate &candidate) {
-    return !plan_admits_atomic_insertion(plan, candidate.site.text_offset);
-  });
-}
-
 [[nodiscard]] std::optional<consan_detail::SampledAtomicSemantics>
-sampled_atomic_semantics_for_site(const ConSanTransformArtifacts &result,
-                                  const MoiSyncInventoryIndex &sync_index,
-                                  std::string_view container_name, bool in_kernel,
-                                  const ConSanAtomicSite &site, std::string &unsupported_reason) {
-  const ConSanSyncEvent *event =
-      sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
-  if (event == nullptr) {
-    unsupported_reason = "missing-shared-sync-event";
-    return std::nullopt;
-  }
-  const ConSanSyncSequence *sequence = sync_index.sequence(event->identity);
+sampled_atomic_semantics_for_plan(const SynchronizationInventoryView &graph,
+                                  const MoiAtomicEvidenceSitePlan &plan,
+                                  std::string &unsupported_reason) {
+  const ConSanSyncSequence *sequence = graph.find_unique_sequence(plan.association.value);
   if (sequence == nullptr ||
       !consan_sync_confidence_meets(sequence->confidence, ConSanSemanticConfidence::Conservative) ||
       !consan_sync_confidence_meets(sequence->memory_role_confidence,
@@ -113,16 +28,7 @@ sampled_atomic_semantics_for_site(const ConSanTransformArtifacts &result,
     unsupported_reason = "unsupported-qualified-memory-role";
     return std::nullopt;
   }
-  // LDS visibility is inherently workgroup-scoped. gfx1250 DS encodings do
-  // not carry the raw scope field used by FLAT/GLOBAL atomics, so derive that
-  // semantic only after the shared sequence analysis has qualified the DS
-  // instruction as an ordering event.
-  const std::optional<uint32_t> semantic_scope =
-      sequence->raw_scope ? sequence->raw_scope
-                          : (result.program_inventory.arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
-                                     site.mnemonic.starts_with("ds_")
-                                 ? std::optional<uint32_t>(1u)
-                                 : std::nullopt);
+  const std::optional<uint32_t> semantic_scope = sequence->raw_scope;
   if (!semantic_scope) {
     unsupported_reason = "missing-qualified-scope";
     return std::nullopt;
@@ -158,7 +64,8 @@ sampled_atomic_semantics_for_site(const ConSanTransformArtifacts &result,
     semantics.outcome = ConSanMoiSampledSyncOutcome::RmwReturnsOld;
     break;
   case ConSanSyncRmwOutcome::CompareExchange:
-    if (!site.returns_old_value.value_or(false) || !site.data_vgpr || !site.dst_vgpr) {
+    if (!plan.site.returns_old_value.value_or(false) || !plan.site.data_vgpr ||
+        !plan.site.dst_vgpr) {
       unsupported_reason = "compare-exchange-dynamic-outcome-unavailable";
       return std::nullopt;
     }
@@ -383,118 +290,6 @@ void append_fence_record_candidates(const ConSanTransformArtifacts &result,
   }
 }
 
-// Normalize a qualified language-level atomic load/store sequence into the
-// same address-bearing input shape used by the MOI engines. This does not
-// reclassify the decoded instruction as an ISA atomic: is_rmw remains false,
-// and the complete ordered suffix remains part of the candidate contract.
-void append_ordered_ordinary_atomic_candidates(const ConSanTransformArtifacts &result,
-                                               const MoiSyncInventoryIndex &sync_index,
-                                               std::vector<AtomicRecordCandidate> &candidates) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
-  for (const ConSanSyncSequence &sequence : sync.sync_sequences) {
-    if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
-        !consan_sync_confidence_meets(sequence.confidence,
-                                      ConSanSemanticConfidence::Conservative) ||
-        !consan_sync_confidence_meets(sequence.memory_role_confidence,
-                                      ConSanSemanticConfidence::Conservative)) {
-      continue;
-    }
-
-    std::optional<ConSanMoiAtomicEventKind> event_kind;
-    switch (sequence.memory_role) {
-    case ConSanSyncMemoryRole::Release:
-      event_kind = ConSanMoiAtomicEventKind::Release;
-      break;
-    case ConSanSyncMemoryRole::Acquire:
-      event_kind = ConSanMoiAtomicEventKind::Acquire;
-      break;
-    case ConSanSyncMemoryRole::Unknown:
-    case ConSanSyncMemoryRole::None:
-    case ConSanSyncMemoryRole::AcquireRelease:
-    case ConSanSyncMemoryRole::SequentiallyConsistent:
-      break;
-    }
-    if (!event_kind)
-      continue;
-
-    const ConSanSyncEvent *communication = nullptr;
-    for (const std::string &identity : sequence.member_event_identities) {
-      const ConSanSyncEvent *event = sync_index.event(identity);
-      if (event == nullptr || event->kind != ConSanSyncEventKind::OrdinaryMemory)
-        continue;
-      if (communication != nullptr) {
-        communication = nullptr;
-        break;
-      }
-      communication = event;
-    }
-    if (communication == nullptr || communication->execution_owners.empty() ||
-        communication->container_name != sequence.container_name ||
-        communication->in_kernel != sequence.in_kernel) {
-      continue;
-    }
-
-    const auto append_from = [&](const auto &container,
-                                 std::optional<uint64_t> descriptor_file_offset) {
-      const auto site =
-          std::ranges::find(container.ordinary_memory_sites, communication->text_offset,
-                            &ConSanOrdinaryMemorySite::text_offset);
-      if (site == container.ordinary_memory_sites.end() ||
-          std::ranges::count(container.ordinary_memory_sites, communication->text_offset,
-                             &ConSanOrdinaryMemorySite::text_offset) != 1 ||
-          (site->support_reason != ConSanOrdinaryMemorySupportReason::Supported &&
-           site->support_reason !=
-               ConSanOrdinaryMemorySupportReason::SupportedSynchronizationOnly)) {
-        return;
-      }
-      if (descriptor_file_offset &&
-          (communication->execution_owners.size() != 1u ||
-           communication->execution_owners.front().descriptor_file_offset !=
-               *descriptor_file_offset)) {
-        descriptor_file_offset.reset();
-      }
-      AtomicRecordCandidate candidate;
-      candidate.container_name =
-          (communication->in_kernel ? "kernel:" : "function:") + communication->container_name;
-      candidate.site = normalize_ordinary_fence_communication(*site);
-      candidate.site.raw_scope = sequence.raw_scope;
-      candidate.kernel_descriptor_file_offset = descriptor_file_offset;
-      candidate.event_kind = *event_kind;
-      candidate.is_rmw = false;
-      candidate.ordered_sequence_end_text_offset = sequence.end_text_offset;
-      candidate.scalar_clause_text_offset = sequence.scalar_clause_text_offset;
-      if constexpr (std::is_same_v<std::remove_cvref_t<decltype(container)>, ConSanKernelInfo>)
-        candidate.uses_cluster_workgroup_id = container.uses_cluster_workgroup_id;
-      candidates.push_back(std::move(candidate));
-    };
-    if (communication->in_kernel) {
-      const ConSanKernelInfo *kernel =
-          result.program_inventory.find_kernel_by_name(communication->container_name);
-      if (kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name))
-        append_from(*kernel, kernel->descriptor_file_offset);
-    } else {
-      const ConSanFunctionInfo *function =
-          result.program_inventory.find_function_by_name(communication->container_name);
-      if (function != nullptr)
-        append_from(*function, std::nullopt);
-    }
-  }
-}
-
-[[nodiscard]] bool
-ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanTransformArtifacts &result,
-                                                       const AtomicRecordCandidate &candidate) {
-  const SynchronizationInventoryView sync = result.program_inventory.sync();
-  return std::ranges::any_of(sync.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
-    if (!fence.eligible())
-      return false;
-    const ConSanSyncEvent *communication =
-        fence.communication_event ? sync.find_event(*fence.communication_event) : nullptr;
-    return communication != nullptr && communication->kind == ConSanSyncEventKind::OrdinaryMemory &&
-           communication->file_offset == candidate.site.file_offset;
-  });
-}
-
 [[nodiscard]] uint16_t inline_atomic_scratch_count(const ConSanAtomicSite &site,
                                                    rj_code_arch_t arch) {
   if (site.mnemonic.starts_with("buffer_") || site.mnemonic.starts_with("ds_"))
@@ -539,135 +334,151 @@ ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanTransformArti
   return consan_uses_gfx9_cdna_encoding(arch) ? 28u : 26u;
 }
 
-[[nodiscard]] bool is_first_light_atomic_record_candidate(const ConSanAtomicSite &site,
-                                                          bool allow_ordered_lds_atomic = false) {
-  const bool is_ordered_lds_atomic = allow_ordered_lds_atomic && site.mnemonic.starts_with("ds_");
-  if (!site.mnemonic.starts_with("flat_atomic") && !site.mnemonic.starts_with("global_atomic") &&
-      !is_ordered_lds_atomic)
-    return false;
-  if (!site.addr_vgpr || !site.data_vgpr || *site.addr_vgpr >= 255)
-    return false;
-  // Wave-scope atomics cannot communicate between the distinct owners that
-  // ConSan's MOI engines model. Keep them in the discovered inventory, but do
-  // not count them as supported lowering candidates.
-  if (!site.raw_scope || *site.raw_scope < 1u || *site.raw_scope > 3u)
-    return false;
-  const bool cas = consan_atomic_is_compare_exchange(site);
-  if (cas && !site.returns_old_value.value_or(false))
-    return false;
-  return true;
-}
-
-[[nodiscard]] ConSanAtomicSite normalize_atomic_record_site(const ConSanAtomicSite &site,
-                                                            bool allow_ordered_lds_atomic) {
-  ConSanAtomicSite normalized = site;
-  // LDS visibility is inherently workgroup-scoped. Its instruction encoding
-  // has no explicit scope field, so supply the semantic scope only after the
-  // surrounding sequence has qualified this site as an ordering event.
-  if (allow_ordered_lds_atomic && normalized.mnemonic.starts_with("ds_") && !normalized.raw_scope)
-    normalized.raw_scope = 1u;
-  if (normalized.address_space_hint == ConSanAtomicAddressSpaceHint::FlatGroup)
-    normalized.raw_scope = 1u;
-  return normalized;
-}
-
-[[nodiscard]] std::optional<uint64_t>
-atomic_scalar_clause_for_site(const MoiSyncInventoryIndex &sync_index,
-                              std::string_view container_name, bool in_kernel,
-                              const ConSanAtomicSite &site) {
-  const ConSanSyncEvent *event =
-      sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
-  if (event == nullptr)
+[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
+moi_atomic_event_kind(ConSanSyncMemoryRole role) {
+  switch (role) {
+  case ConSanSyncMemoryRole::Release:
+    return ConSanMoiAtomicEventKind::Release;
+  case ConSanSyncMemoryRole::Acquire:
+    return ConSanMoiAtomicEventKind::Acquire;
+  case ConSanSyncMemoryRole::AcquireRelease:
+    return ConSanMoiAtomicEventKind::AcquireRelease;
+  case ConSanSyncMemoryRole::Unknown:
+  case ConSanSyncMemoryRole::None:
+  case ConSanSyncMemoryRole::SequentiallyConsistent:
     return std::nullopt;
-  const ConSanSyncSequence *sequence = sync_index.sequence(event->identity);
-  return sequence == nullptr ? std::nullopt : sequence->scalar_clause_text_offset;
+  }
+  return std::nullopt;
 }
 
-void append_atomic_record_candidates(const ConSanKernelInfo &kernel,
-                                     const ConSanTransformArtifacts &result,
-                                     const MoiSyncInventoryIndex &sync_index,
-                                     std::vector<AtomicRecordCandidate> &candidates) {
-  if (is_rocclr_runtime_kernel_name(kernel.name))
-    return;
-  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
-      result.program_inventory.arch(), ConSanCapabilityForm::OrderedLdsAtomic);
-  for (const ConSanAtomicSite &site : kernel.atomic_sites) {
-    const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
-    const ConSanAtomicSite normalized =
-        normalize_atomic_record_site(site, allow_ordered_lds_atomic);
-    if (is_first_light_atomic_record_candidate(normalized, allow_ordered_lds_atomic) &&
-        event_kind) {
-      std::optional<uint64_t> descriptor_file_offset = kernel.descriptor_file_offset;
-      const ConSanSyncEvent *event =
-          sync_index.event(ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
-      if (event == nullptr || event->execution_owners.size() != 1u ||
-          event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
-        descriptor_file_offset.reset();
-      candidates.push_back({"kernel:" + kernel.name, normalized, descriptor_file_offset,
-                            *event_kind, kernel.uses_cluster_workgroup_id,
-                            /*is_rmw=*/true, /*ordered_sequence_end_text_offset=*/0,
-                            atomic_scalar_clause_for_site(sync_index, kernel.name, true, site)});
+/// Project admitted atomic evidence directly into the common MOI lowering
+/// contract.
+///
+/// This is the sole join between synchronization inventory, flavor policy,
+/// and operand-rich guest decode. It intentionally starts from admitted
+/// decisions rather than rediscovering candidates and filtering them after
+/// the fact. Record/Replay ordinary sequences owned by a fence have no
+/// `AtomicRecord` intent and therefore do not enter the atomic-record path;
+/// Sampled and InlineShadow select their own explicit evidence intent kinds.
+[[nodiscard]] std::vector<MoiAtomicEvidenceSitePlan>
+build_moi_atomic_evidence_site_plans(const ConSanTransformArtifacts &result,
+                                     ConSanProbeIntentKind evidence_kind,
+                                     std::vector<std::string> &errors) {
+  std::vector<MoiAtomicEvidenceSitePlan> plans;
+  const SynchronizationInventoryView graph = result.program_inventory.sync();
+  const ConSanObservationPlan &observation = result.observation_plan;
+
+  for (const ConSanAtomicSiteDecision &decision : observation.atomic_site_decisions) {
+    if (decision.kind != ConSanSiteDecisionKind::Admitted)
+      continue;
+
+    ConSanProbeIntentId address_capture;
+    ConSanProbeIntentId evidence;
+    for (ConSanProbeIntentId id : decision.intent_ids) {
+      const ConSanProbeIntent *intent = observation.intent(id);
+      if (intent == nullptr)
+        continue;
+      if (intent->kind == ConSanProbeIntentKind::AtomicAddressCapture)
+        address_capture = id;
+      if (intent->kind == evidence_kind)
+        evidence = id;
     }
-  }
-}
-
-void append_atomic_record_candidates(const ConSanFunctionInfo &function,
-                                     const ConSanTransformArtifacts &result,
-                                     const MoiSyncInventoryIndex &sync_index,
-                                     std::vector<AtomicRecordCandidate> &candidates) {
-  const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(
-      result.program_inventory.arch(), ConSanCapabilityForm::OrderedLdsAtomic);
-  for (const ConSanAtomicSite &site : function.atomic_sites) {
-    const auto event_kind = atomic_event_kind_for_site(sync_index, function.name, false, site);
-    const ConSanAtomicSite normalized =
-        normalize_atomic_record_site(site, allow_ordered_lds_atomic);
-    if (is_first_light_atomic_record_candidate(normalized, allow_ordered_lds_atomic) && event_kind)
-      candidates.push_back({"function:" + function.name, normalized, std::nullopt, *event_kind,
-                            /*uses_cluster_workgroup_id=*/false, /*is_rmw=*/true,
-                            /*ordered_sequence_end_text_offset=*/0,
-                            atomic_scalar_clause_for_site(sync_index, function.name, false, site)});
-  }
-}
-
-void append_inline_atomic_candidates(const ConSanKernelInfo &kernel,
-                                     const MoiSyncInventoryIndex &sync_index,
-                                     std::vector<AtomicRecordCandidate> &candidates) {
-  if (is_rocclr_runtime_kernel_name(kernel.name))
-    return;
-  for (const ConSanAtomicSite &site : kernel.atomic_sites) {
-    const auto event_kind = atomic_event_kind_for_site(sync_index, kernel.name, true, site);
-    if (event_kind) {
-      const ConSanAtomicSite normalized = normalize_atomic_record_site(site, false);
-      std::optional<uint64_t> descriptor_file_offset = kernel.descriptor_file_offset;
-      const ConSanSyncEvent *event =
-          sync_index.event(ConSanSyncEventKind::Atomic, kernel.name, true, site.text_offset);
-      if (event == nullptr || event->execution_owners.size() != 1u ||
-          event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
-        descriptor_file_offset.reset();
-      candidates.push_back({"kernel:" + kernel.name, normalized, descriptor_file_offset,
-                            *event_kind, kernel.uses_cluster_workgroup_id,
-                            /*is_rmw=*/true, /*ordered_sequence_end_text_offset=*/0,
-                            atomic_scalar_clause_for_site(sync_index, kernel.name, true, site)});
+    if (!evidence.valid())
+      continue;
+    if (!address_capture.valid() || !decision.association) {
+      errors.emplace_back("ConSan MOI admitted atomic evidence lost its capture or association");
+      return {};
     }
-  }
-}
 
-void append_inline_atomic_candidates(const ConSanFunctionInfo &function,
-                                     const MoiSyncInventoryIndex &sync_index,
-                                     std::vector<AtomicRecordCandidate> &candidates) {
-  for (const ConSanAtomicSite &site : function.atomic_sites) {
-    const auto event_kind = atomic_event_kind_for_site(sync_index, function.name, false, site);
-    if (event_kind)
-      candidates.push_back({"function:" + function.name, normalize_atomic_record_site(site, false),
-                            std::nullopt, *event_kind,
-                            /*uses_cluster_workgroup_id=*/false, /*is_rmw=*/true,
-                            /*ordered_sequence_end_text_offset=*/0,
-                            atomic_scalar_clause_for_site(sync_index, function.name, false, site)});
+    const ConSanSyncEvent *event = graph.find_event(decision.semantic_site);
+    const ConSanSyncSequence *sequence = graph.find_unique_sequence(decision.association->value);
+    if (event == nullptr || sequence == nullptr ||
+        graph.find_unique_sequence_containing(event->semantic_id) != sequence ||
+        (event->kind != ConSanSyncEventKind::Atomic &&
+         event->kind != ConSanSyncEventKind::OrdinaryMemory)) {
+      errors.emplace_back("ConSan MOI admitted atomic evidence lost its synchronization graph");
+      return {};
+    }
+    const auto event_kind = moi_atomic_event_kind(sequence->memory_role);
+    if (!event_kind) {
+      errors.emplace_back("ConSan MOI admitted atomic evidence has no supported ordering role");
+      return {};
+    }
+
+    MoiAtomicEvidenceSitePlan plan;
+    plan.semantic_site = decision.semantic_site;
+    plan.association = *decision.association;
+    plan.address_capture_intent = address_capture;
+    plan.evidence_intent = evidence;
+    plan.event_kind = *event_kind;
+    plan.is_rmw = event->kind == ConSanSyncEventKind::Atomic;
+    plan.ordered_sequence_end_text_offset = sequence->end_text_offset;
+    plan.scalar_clause_text_offset = sequence->scalar_clause_text_offset;
+
+    const auto complete_from = [&](const auto &container,
+                                   std::optional<uint64_t> descriptor_file_offset) -> bool {
+      if (event->kind == ConSanSyncEventKind::Atomic) {
+        const auto site = std::ranges::find(container.atomic_sites, event->text_offset,
+                                            &ConSanAtomicSite::text_offset);
+        if (site == container.atomic_sites.end() ||
+            std::ranges::count(container.atomic_sites, event->text_offset,
+                               &ConSanAtomicSite::text_offset) != 1u) {
+          return false;
+        }
+        plan.site = *site;
+      } else {
+        const auto site = std::ranges::find(container.ordinary_memory_sites, event->text_offset,
+                                            &ConSanOrdinaryMemorySite::text_offset);
+        if (site == container.ordinary_memory_sites.end() ||
+            std::ranges::count(container.ordinary_memory_sites, event->text_offset,
+                               &ConSanOrdinaryMemorySite::text_offset) != 1u) {
+          return false;
+        }
+        plan.site = normalize_ordinary_fence_communication(*site);
+      }
+      if (sequence->raw_scope)
+        plan.site.raw_scope = sequence->raw_scope;
+      if (descriptor_file_offset &&
+          (event->execution_owners.size() != 1u ||
+           event->execution_owners.front().descriptor_file_offset != *descriptor_file_offset)) {
+        descriptor_file_offset.reset();
+      }
+      plan.kernel_descriptor_file_offset = descriptor_file_offset;
+      plan.container_name = (event->in_kernel ? "kernel:" : "function:") + container.name;
+      if constexpr (std::is_same_v<std::remove_cvref_t<decltype(container)>, ConSanKernelInfo>)
+        plan.uses_cluster_workgroup_id = container.uses_cluster_workgroup_id;
+      return true;
+    };
+
+    bool completed = false;
+    if (event->in_kernel) {
+      const ConSanKernelInfo *kernel =
+          result.program_inventory.find_kernel_by_name(event->container_name);
+      if (kernel == nullptr && event->execution_owners.size() == 1u) {
+        kernel = result.program_inventory.find_kernel_by_descriptor(
+            event->execution_owners.front().descriptor_file_offset);
+      }
+      completed = kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name) &&
+                  complete_from(*kernel, kernel->descriptor_file_offset);
+    } else {
+      const ConSanFunctionInfo *function =
+          result.program_inventory.find_function_by_name(event->container_name);
+      completed = function != nullptr && complete_from(*function, std::nullopt);
+    }
+    if (!completed || !plan.is_well_formed()) {
+      errors.emplace_back("ConSan MOI admitted atomic evidence lost its decoded lowering site");
+      return {};
+    }
+    plans.push_back(std::move(plan));
   }
+
+  std::ranges::sort(plans, {},
+                    [](const MoiAtomicEvidenceSitePlan &plan) { return plan.site.text_offset; });
+  return plans;
 }
 
 [[nodiscard]] bool neutralize_atomic_scalar_clause(std::vector<uint8_t> &text,
-                                                   const AtomicRecordCandidate &candidate,
+                                                   const MoiAtomicEvidenceSitePlan &candidate,
                                                    rj_code_arch_t arch,
                                                    std::vector<ConSanPatchInfo> &patches,
                                                    std::vector<std::string> &errors) {
@@ -2536,7 +2347,7 @@ append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgro
 
 [[nodiscard]] bool append_inline_versioned_release_transaction(
     std::vector<uint32_t> &words, std::span<const uint8_t> bytes,
-    const AtomicRecordCandidate &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
+    const MoiAtomicEvidenceSitePlan &candidate, const ConSanMoiAtomicAddressPlan &address_plan,
     const ConSanMoiWorkgroupSources &workgroup_sources, const MoiOptions &options,
     rj_code_arch_t arch, uint64_t release_table_base, uint32_t release_capacity,
     uint64_t snapshot_table_base, uint32_t snapshot_capacity, uint64_t token_table_base,
@@ -3213,7 +3024,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_inline_atomic_ordering_cave_words(
-    std::span<const uint8_t> bytes, const AtomicRecordCandidate &candidate,
+    std::span<const uint8_t> bytes, const MoiAtomicEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &input_options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     const MoiPrivateEpochLayout *private_layout, rj_code_arch_t arch,

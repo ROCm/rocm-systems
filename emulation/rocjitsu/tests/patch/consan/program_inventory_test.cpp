@@ -354,6 +354,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
       .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 16},
       .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
   };
+  event.text_offset = 16;
   build.sync_events.push_back(event);
   ConSanSyncSequence sequence;
   sequence.identity = "sequence";
@@ -388,8 +389,14 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_EQ(view.find_event(event.semantic_id), &view.sync_events.front());
   EXPECT_EQ(view.find_event("event"), &view.sync_events.front());
   EXPECT_EQ(view.find_event("missing"), nullptr);
+  EXPECT_EQ(view.find_unique_event(ConSanSyncEventKind::Fence, "", true, 16),
+            &view.sync_events.front());
+  EXPECT_EQ(view.find_unique_event(ConSanSyncEventKind::Atomic, "", true, 16), nullptr);
+  EXPECT_EQ(view.find_unique_sequence_containing(event.semantic_id), &view.sync_sequences.front());
   EXPECT_EQ(view.find_unique_sequence_containing("event"), &view.sync_sequences.front());
   EXPECT_EQ(view.find_unique_sequence_containing("missing"), nullptr);
+  EXPECT_EQ(view.find_unique_sequence("sequence"), &view.sync_sequences.front());
+  EXPECT_EQ(view.find_unique_sequence("missing"), nullptr);
   SemanticSiteId absent_event = event.semantic_id;
   ++absent_event.physical.original_text_offset;
   EXPECT_EQ(view.find_event(absent_event), nullptr);
@@ -405,6 +412,52 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_EQ(moved.program_inventory.sync().barrier_lifecycle_groups.front().identity, "lifecycle");
   EXPECT_EQ(moved.program_inventory.sync().moi_fence_candidates.front().fence_event,
             event.semantic_id);
+}
+
+TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
+  const std::array<uint8_t, 8> bytes = {};
+  ProgramInventoryBuilder builder(bytes);
+  SynchronizationInventoryBuildView build = builder.synchronization();
+
+  ConSanSyncEvent first;
+  first.kind = ConSanSyncEventKind::Atomic;
+  first.identity = "first";
+  first.container_name = "first-container";
+  first.text_offset = 12;
+  first.semantic_id = {
+      .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 12},
+      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+  };
+  ConSanSyncEvent alias = first;
+  alias.identity = "alias";
+  alias.container_name = "alias-container";
+  build.sync_events = {first, alias};
+
+  SemanticSiteId member = first.semantic_id;
+  member.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+  ConSanSyncSequence sequence;
+  sequence.identity = "sequence";
+  sequence.member_semantic_ids = {member};
+  sequence.member_event_identities = {first.identity};
+  ConSanSyncSequence ambiguous_sequence = sequence;
+  ambiguous_sequence.identity = "ambiguous-sequence";
+  build.sync_sequences = {sequence, ambiguous_sequence};
+
+  const ProgramInventory inventory = builder.view();
+  const SynchronizationInventoryView graph = inventory.sync();
+  EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, "first-container", true, 12),
+            &graph.sync_events[0]);
+  EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, "alias-container", true, 12),
+            &graph.sync_events[1]);
+  EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, "unknown-container", true, 12),
+            nullptr);
+  EXPECT_EQ(graph.find_unique_sequence_containing(first.semantic_id), nullptr);
+  EXPECT_EQ(graph.find_unique_sequence_containing("first"), nullptr);
+  EXPECT_EQ(graph.find_unique_sequence("sequence"), &graph.sync_sequences[0]);
+
+  ProgramInventoryBuilder duplicate_sequence(builder.view());
+  duplicate_sequence.synchronization().sync_sequences[1].identity = "sequence";
+  EXPECT_EQ(duplicate_sequence.view().sync().find_unique_sequence("sequence"), nullptr);
 }
 
 TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) {
@@ -517,6 +570,37 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
     return member_id.valid() &&
            member_id.domain == ConSanSemanticSiteDomain::SynchronizationSequenceMember;
   }));
+}
+
+TEST(ConSanProgramInventory, Gfx1250OrderedLdsGraphOwnsImplicitWorkgroupScope) {
+  const std::array<uint32_t, 7> text_words = {
+      0x360202ffu, 0x000000ffu, // release wait setup
+      0xbf94ffffu,              // s_barrier_wait -1
+      0xbfc10000u,              // release ordering completion
+      0xd8000000u, 0x00001210u, // ds_add_u32 v0, v18, no return
+      0xbfb00000u,              // s_endpgm
+  };
+  ConSanOptions options;
+  options.flavor = ConSanFlavor::SuperCollider;
+  options.fault_dry_run = true;
+  const ConSanTransformArtifacts result =
+      test_lower_consan(make_gfx1250_code_object(text_words, "ordered_lds_graph_scope"), options);
+
+  ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
+  ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
+  ASSERT_EQ(result.program_inventory.kernels().front().atomic_sites.size(), 1u);
+  EXPECT_FALSE(result.program_inventory.kernels().front().atomic_sites.front().raw_scope);
+
+  const SynchronizationInventoryView graph = result.program_inventory.sync();
+  const auto event =
+      std::ranges::find(graph.sync_events, ConSanSyncEventKind::Atomic, &ConSanSyncEvent::kind);
+  ASSERT_NE(event, graph.sync_events.end());
+  ASSERT_TRUE(event->raw_scope);
+  EXPECT_EQ(*event->raw_scope, 1u);
+  const ConSanSyncSequence *sequence = graph.find_unique_sequence_containing(event->semantic_id);
+  ASSERT_NE(sequence, nullptr);
+  ASSERT_TRUE(sequence->raw_scope);
+  EXPECT_EQ(*sequence->raw_scope, 1u);
 }
 
 TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutPolicy) {

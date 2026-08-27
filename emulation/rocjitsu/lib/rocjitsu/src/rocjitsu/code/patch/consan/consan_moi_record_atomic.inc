@@ -26,42 +26,19 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     result.warnings.emplace_back("ConSan MOI atomic record patch has no atomic record capacity");
     return;
   }
-  std::vector<AtomicRecordCandidate> candidates;
-  const MoiSyncInventoryIndex sync_index(result);
-  auto retain_unavailable_cas = [&](std::string_view container_name, bool in_kernel,
-                                    const std::vector<ConSanAtomicSite> &sites) {
-    for (const ConSanAtomicSite &site : sites) {
-      const bool cas = consan_atomic_is_compare_exchange(site);
-      if (!cas || site.returns_old_value.value_or(false) ||
-          !atomic_event_kind_for_site(sync_index, container_name, in_kernel, site))
-        continue;
+  for (const ConSanAtomicSiteDecision &decision : result.observation_plan.atomic_site_decisions) {
+    if (decision.reason != ConSanAtomicPolicyReason::CompareExchangeOutcomeUnavailable)
+      continue;
+    for (const std::string &container_name : decision.source_containers) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch skipped compare-exchange-outcome-unavailable in " +
-          std::string(container_name));
+          container_name);
     }
-  };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    retain_unavailable_cas(kernel.name, true, kernel.atomic_sites);
-    append_atomic_record_candidates(kernel, result, sync_index, candidates);
   }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
-    retain_unavailable_cas(function.name, false, function.atomic_sites);
-    append_atomic_record_candidates(function, result, sync_index, candidates);
-  }
-  std::vector<AtomicRecordCandidate> ordinary_candidates;
-  append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
-  std::ranges::copy_if(ordinary_candidates, std::back_inserter(candidates),
-                       [&](const AtomicRecordCandidate &candidate) {
-                         return !ordinary_atomic_candidate_is_covered_by_eligible_fence(result,
-                                                                                        candidate);
-                       });
-  apply_test_container_filter(candidates, options);
-  if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result.errors))
+  std::vector<MoiAtomicEvidenceSitePlan> candidates = build_moi_atomic_evidence_site_plans(
+      result, ConSanProbeIntentKind::AtomicRecord, result.errors);
+  if (!result.errors.empty())
     return;
-  retain_admitted_atomic_record_candidates(result.observation_plan, candidates);
-  std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
-    return lhs.site.text_offset < rhs.site.text_offset;
-  });
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI atomic record patch found no supported flat atomics");
     return;
@@ -76,7 +53,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     return;
   }
   struct PlannedAtomicRecord : MoiPlannedRecordEvent {
-    AtomicRecordCandidate candidate;
+    MoiAtomicEvidenceSitePlan candidate;
     ConSanMoiAtomicAddressPlan address_plan;
   };
   std::vector<PlannedAtomicRecord> selected_candidates;
@@ -87,7 +64,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
   MoiDescriptorSgprRequirements scalar_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
-    const AtomicRecordCandidate &candidate = candidates[candidate_index];
+    const MoiAtomicEvidenceSitePlan &candidate = candidates[candidate_index];
     if (selected_candidates.size() == max_candidates)
       break;
     const ConSanAtomicSite &site = candidate.site;
@@ -148,7 +125,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
           std::string(consan_moi_atomic_address_support_name(address_plan.support)));
       continue;
     }
-    AtomicRecordCandidate planned_candidate = candidate;
+    MoiAtomicEvidenceSitePlan planned_candidate = candidate;
     if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
@@ -200,7 +177,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
   }
   uint32_t record_index = 0;
   for (const PlannedAtomicRecord &planned : selected_candidates) {
-    const AtomicRecordCandidate &candidate = planned.candidate;
+    const MoiAtomicEvidenceSitePlan &candidate = planned.candidate;
     const ConSanAtomicSite &site = candidate.site;
     const auto composed_access_patch = std::ranges::find_if(result.patches, [&](const auto &patch) {
       return (patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
