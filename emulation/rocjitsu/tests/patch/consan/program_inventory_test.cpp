@@ -773,8 +773,9 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
     EXPECT_EQ(site.operands.destination_vgpr, decoded_site->dst_vgpr);
     EXPECT_EQ(site.operands.address_vgpr, decoded_site->addr_vgpr);
     EXPECT_EQ(site.operands.data_vgpr, decoded_site->data_vgpr);
-    EXPECT_EQ(site.execution_owner_descriptor_file_offsets,
-              decoded_site->owner_descriptor_file_offsets);
+    EXPECT_EQ(
+        site.execution_owner_descriptor_file_offsets,
+        (std::vector<uint64_t>{result.program_inventory.kernels().front().descriptor_file_offset}));
   }
 }
 

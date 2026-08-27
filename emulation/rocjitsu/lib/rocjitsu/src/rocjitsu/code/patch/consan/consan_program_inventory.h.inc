@@ -399,6 +399,16 @@ public:
   [[nodiscard]] std::vector<ConSanTextSection> &text_sections() { return storage_->text_sections; }
   [[nodiscard]] std::vector<ConSanKernelInfo> &kernels() { return storage_->kernels; }
   [[nodiscard]] std::vector<ConSanFunctionInfo> &functions() { return storage_->functions; }
+  /// Return the normalized access facts while the inventory is being built.
+  ///
+  /// Access decoding creates these records before control-flow analysis.
+  /// Later analysis stages may enrich fields such as execution ownership, but
+  /// must not change a site's physical identity or decoded instruction facts.
+  /// This mutable capability stays on the builder so published
+  /// `ProgramInventory` views remain read-only.
+  [[nodiscard]] std::vector<ConSanAccessInventorySite> &access_sites() {
+    return storage_->access_sites;
+  }
   /// Return the analysis-only capability for synchronization-derived facts.
   [[nodiscard]] SynchronizationInventoryBuildView synchronization() {
     return {

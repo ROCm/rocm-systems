@@ -3687,8 +3687,7 @@ intersect_execution_owners(std::span<const ConSanExecutionOwner> lhs,
 void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &decoder,
                                rj_code_arch_t arch, const ConSanOptions &options,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
-                               std::span<ConSanKernelInfo> kernels,
-                               std::span<ConSanFunctionInfo> functions,
+                               std::span<ConSanAccessInventorySite> access_sites,
                                SynchronizationInventoryBuildView inventory, ConSanResult &result) {
   std::vector<uint64_t> leaders;
   std::vector<uint64_t> kernel_entries;
@@ -3767,28 +3766,14 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
     destination.execution_owners =
         execution_owners_for_offset(owners_by_block, block_index, destination.text_offset);
   }
-  const auto annotate_memory_sites = [&](auto &containers) {
-    for (auto &container : containers) {
-      for (ConSanLdsSite &site : container.lds_sites) {
-        const auto owners =
-            execution_owners_for_offset(owners_by_block, block_index, site.text_offset);
-        site.owner_descriptor_file_offsets.clear();
-        site.owner_descriptor_file_offsets.reserve(owners.size());
-        for (const ConSanExecutionOwner &owner : owners)
-          site.owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
-      }
-      for (ConSanFlatSite &site : container.flat_sites) {
-        const auto owners =
-            execution_owners_for_offset(owners_by_block, block_index, site.text_offset);
-        site.owner_descriptor_file_offsets.clear();
-        site.owner_descriptor_file_offsets.reserve(owners.size());
-        for (const ConSanExecutionOwner &owner : owners)
-          site.owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
-      }
-    }
-  };
-  annotate_memory_sites(kernels);
-  annotate_memory_sites(functions);
+  for (ConSanAccessInventorySite &site : access_sites) {
+    const auto owners = execution_owners_for_offset(owners_by_block, block_index,
+                                                    site.physical_id.original_text_offset);
+    site.execution_owner_descriptor_file_offsets.clear();
+    site.execution_owner_descriptor_file_offsets.reserve(owners.size());
+    for (const ConSanExecutionOwner &owner : owners)
+      site.execution_owner_descriptor_file_offsets.push_back(owner.descriptor_file_offset);
+  }
 
   // A large aggregate code object can contain hundreds of thousands of sync
   // events and sequences. Looking up every sequence member with a linear scan

@@ -219,10 +219,13 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
-  ASSERT_EQ(result.program_inventory.functions().front().flat_sites.size(), 1u);
-  const ConSanFlatSite site = result.program_inventory.functions().front().flat_sites.front();
-  ASSERT_EQ(site.owner_descriptor_file_offsets.size(), 1u);
-  EXPECT_EQ(site.owner_descriptor_file_offsets.front(),
+  const auto access = std::ranges::find_if(
+      result.program_inventory.access_sites(), [](const ConSanAccessInventorySite &site) {
+        return site.container.kind == ConSanProgramContainerKind::Function;
+      });
+  ASSERT_NE(access, result.program_inventory.access_sites().end());
+  ASSERT_EQ(access->execution_owner_descriptor_file_offsets.size(), 1u);
+  EXPECT_EQ(access->execution_owner_descriptor_file_offsets.front(),
             result.program_inventory.kernels().front().descriptor_file_offset);
 }
 
@@ -248,10 +251,13 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
-  ASSERT_EQ(result.program_inventory.functions().front().flat_sites.size(), 1u);
-  const ConSanFlatSite site = result.program_inventory.functions().front().flat_sites.front();
-  ASSERT_EQ(site.owner_descriptor_file_offsets.size(), 1u);
-  EXPECT_EQ(site.owner_descriptor_file_offsets.front(),
+  const auto access = std::ranges::find_if(
+      result.program_inventory.access_sites(), [](const ConSanAccessInventorySite &site) {
+        return site.container.kind == ConSanProgramContainerKind::Function;
+      });
+  ASSERT_NE(access, result.program_inventory.access_sites().end());
+  ASSERT_EQ(access->execution_owner_descriptor_file_offsets.size(), 1u);
+  EXPECT_EQ(access->execution_owner_descriptor_file_offsets.front(),
             result.program_inventory.kernels().front().descriptor_file_offset);
 }
 

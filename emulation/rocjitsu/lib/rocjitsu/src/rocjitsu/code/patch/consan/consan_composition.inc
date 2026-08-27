@@ -809,8 +809,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       build_barrier_move_destination_inventory(*code_object, sync_blocks, sync_events, arch,
                                                synchronization_inventory.sync_sequences, result);
     annotate_execution_owners(*code_object, *decoder, arch, options, &sync_blocks,
-                              inventory_builder.kernels(), inventory_builder.functions(),
-                              synchronization_inventory, result);
+                              inventory_builder.access_sites(), synchronization_inventory, result);
     associate_ordinary_release_sync_sequences(sync_blocks, arch, sync_events,
                                               synchronization_inventory);
     associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch,
@@ -821,18 +820,18 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     result.program_inventory = inventory_builder.view();
     build_perturbation_candidate_inventory(result);
     annotate_fault_sites_with_sync_sequences(result);
-  } else if (std::ranges::any_of(
-                 result.program_inventory.functions(), [](const ConSanFunctionInfo &function) {
-                   return !function.lds_sites.empty() || !function.flat_sites.empty();
-                 })) {
+  } else if (std::ranges::any_of(result.program_inventory.access_sites(),
+                                 [](const ConSanAccessInventorySite &site) {
+                                   return site.container.kind ==
+                                          ConSanProgramContainerKind::Function;
+                                 })) {
     // SuperCollider's ordinary clean transform does not consume synchronization
     // semantics. Shared-function memory sites still need kernel ownership,
     // while kernel-local sites carry their descriptor directly.
     annotate_execution_owners(*code_object, *decoder, arch, options, nullptr,
-                              inventory_builder.kernels(), inventory_builder.functions(),
-                              synchronization_inventory, result);
+                              inventory_builder.access_sites(), synchronization_inventory, result);
   }
-  publish_access_inventory();
+  result.program_inventory = inventory_builder.view();
   if (options.fault_dry_run) {
     build_fault_mutation_plan(options, arch, result);
     build_perturbation_plan(options, result, carried_plans);

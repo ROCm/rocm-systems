@@ -4255,6 +4255,39 @@ analysis completed.
   Slice 5AC completed the periodic physical-gfx950 gate. E2E validation remains
   outside this work.
 
+### Slice 5AK: enrich execution ownership in normalized inventory
+
+- **One enrichment target:** Control-flow analysis now writes execution-owner
+  descriptors directly to `ConSanAccessInventorySite`. It no longer mutates
+  the prototype LDS and FLAT container records and then asks the inventory
+  builder to copy the same facts back into the normalized representation.
+- **One normalized lifecycle:** Access decoding and normalization happen once,
+  before synchronization and ownership analysis. Later stages enrich that
+  stable inventory in place through a builder-only mutable capability; every
+  published `ProgramInventory` view remains read-only. The duplicate final
+  clear, allocation, container walk, instruction-range decode, and rebuild are
+  deleted.
+- **Shared-function trigger:** Ordinary SuperCollider requests ownership
+  analysis by asking whether normalized access inventory contains a
+  function-attributed site. The decision no longer depends on the prototype
+  container vectors that its lowerers have already stopped consuming.
+- **Contract coverage:** Direct-call and wide-literal indirect-call tests now
+  assert owner recovery through normalized function accesses. Real-code-object
+  inventory coverage requires every normalized kernel access to carry the
+  owning kernel descriptor rather than comparing against a mutable prototype
+  field. The builder-only normalization test still independently covers value
+  preservation before the obsolete source field is deleted.
+- **Deletion result:** Production source is six physical lines smaller. The
+  two-container owner mutation loop and a complete second inventory rebuild
+  are gone; the new mutable accessor is confined to construction and documents
+  the only permitted post-decode enrichment.
+- **Completed checked-in gate:** Focused inventory and shared-function
+  ownership tests pass. The complete host gate passes 1,510 tests with the two
+  expected benchmark-object skips; all 194 HSA-hook tests pass; and all 2,908
+  simulator-device tests across the five supported targets pass in 64.55
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
