@@ -513,6 +513,7 @@ class gfx12_cntx_prim {
   // Indicate the different TT messages/tokens that should be enabled/logged
   // Indicate the different TT tokens that specify register operations to be logged
   static uint32_t sqtt_token_mask_on_value(bool exclude_wait) {
+    (void)exclude_wait;  // superseded: EXCLUDE_BARRIER_WAIT is now forced on (see below).
     uint32_t sq_thread_trace_token_mask{0};
     sq_thread_trace_token_mask =
         // REG_DETAIL_ALL=1 logs EVERY register write in full detail, flooding the token
@@ -527,7 +528,20 @@ class gfx12_cntx_prim {
                             SQ_TT_TOKEN_MASK_GFXUDEC_BIT | SQ_TT_TOKEN_MASK_CONTEXT_BIT |
                             SQ_TT_TOKEN_MASK_COMP_BIT)) |
 #if GFX12_VARIANT <= GFX12_VARIANT_1201
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, EXCLUDE_BARRIER_WAIT, exclude_wait ? 1 : 0) |
+        // EXCLUDE_BARRIER_WAIT MUST be 1, unconditionally, exactly as PAL does
+        // (gfx12PerfExperiment.cpp GetSqttTokenMask: "Thread tracing of barrier completion
+        // events may cause a functional error where a shader instruction is lost.  Thread trace
+        // barrier must be disabled via EXCLUDE_BARRIER_WAIT = 1.").  aqlprofile previously gated
+        // this on `exclude_wait` (= xcc_number_ > 1), so on single-XCC gfx1201 it was left 0 ->
+        // barrier-completion tracing ON -> the HW drops a shader instruction token -> the
+        // VARIABLE-LENGTH SQTT token stream desyncs.  A lost instruction shifts every subsequent
+        // token read by the missing token's width, so the next WaveStart is decoded mid-stream:
+        // its thread_count field reads a bogus value in the reserved [65,94] gap (observed 66/68/
+        // 69) instead of 127, RGP classifies it wave64, and the wave32/wave64 mismatch kill gate
+        // (rgp_wavefront_processor.cpp) drops the wave -> "0 wavefronts analyzed".  Force it on.
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, EXCLUDE_BARRIER_WAIT, 1) |
+        // BOP_EVENTS_TOKEN_INCLUDE=1 to match PAL (bottom-of-pipe event tokens included).
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, BOP_EVENTS_TOKEN_INCLUDE, 1) |
 #endif
         // TOKEN_EXCLUDE=0: log every token class for a detailed capture.  In particular the
         // VMEMEXEC and ALUEXEC (SQTT "Issue") tokens MUST be present - RGP's instruction-timing
@@ -621,7 +635,19 @@ class gfx12_cntx_prim {
 
   static uint32_t sqtt_zero_size_value() { return 0; }
 
-  // Thread trace ctrl register value
+  // Thread trace ctrl register value.
+  //
+  // Field values match PAL's gfx12 WriteStartThreadTraces (gfx12PerfExperiment.cpp:1172-1186)
+  // exactly.  The register field SHIFTS already matched HW; these are the VALUE alignments that
+  // PAL's known-good RGP capture uses and that aqlprofile had diverged on:
+  //   - AUTO_FLUSH_MODE: PAL=0.  On gfx1x the AutoFlushMode polarity is inverted, so a "1" here
+  //     turns periodic auto-flush ON, which injects flush tokens into the SQTT stream mid-capture.
+  //     Those extra tokens desync RGP's WaveStart/WaveEnd token-length tracking (observed
+  //     WaveStart != WaveEnd, and ~2/3 of WaveStart tokens decoding with a bogus thread_count of
+  //     66/68/69 in the reserved [65,94] gap -> mis-classified as wave64 -> RGP mode-mismatch kill
+  //     gate -> "0 wavefronts analyzed").  Match PAL: leave auto-flush OFF.
+  //   - LOWATER_OFFSET: PAL=SqttLoWaterOffsetValue=4 (aqlprofile had 3).
+  //   - GL1X_PREFETCH_PAGE: PAL leaves 0 (aqlprofile had 13).
   static uint32_t sqtt_ctrl_value(bool on, bool double_buffer) {
     uint32_t sq_thread_trace_ctrl{0};
     sq_thread_trace_ctrl =
@@ -631,9 +657,8 @@ class gfx12_cntx_prim {
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, DRAW_EVENT_EN, 1) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, SPI_STALL_EN, 1) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, SQ_STALL_EN, 1) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, LOWATER_OFFSET, 3) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, GL1X_PREFETCH_PAGE, 13) |
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 1) |
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, LOWATER_OFFSET, 4) |
+        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 0) |
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, DOUBLE_BUFFER, double_buffer ? 1 : 0);
     return sq_thread_trace_ctrl;
   }
