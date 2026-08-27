@@ -83,19 +83,24 @@ than a general XML patch:
   encoding's `<EncodingIdentifiers>` list are accepted. An additions document
   cannot replace or delete base definitions, identifier masks, microcode
   formats, encoding conditions, operand types, or data formats.
-- Added instructions must reference encodings and operand types already
-  defined by the base XML.
+- Added instructions must reference encodings, encoding conditions, operand
+  types, and operand fields already defined by the applicable base encoding
+  layout. Established implied-literal operands are validated against their
+  parent layout and literal-extension contract.
 - An identifier addition names its encoding and expected opcode. Its radix and
   width must match the base encoding; its fixed bits must match an existing
   identifier layout; and its decoded opcode must equal the declared opcode.
   Duplicate and colliding decode slots are rejected. Each identifier must be
   owned by an added instruction. An implied-literal identifier must have the
   same instruction owner and opcode in its parent encoding.
-- Additions document IDs and instruction names must be unique. Encoding/opcode
-  ownership collisions between different instructions, repeated instruction
-  forms, out-of-range opcodes, missing references, unknown root data, and base
-  architecture/schema mismatches are errors. Repetition of one instruction's
-  slot under distinct MR-ISA encoding conditions is allowed.
+- Additions document IDs and instruction names must be valid and unique.
+  Encoding/opcode ownership collisions between different instructions,
+  repeated instruction forms, multiple active forms that generate the same C++
+  instruction symbol, out-of-range opcodes, missing references, unknown root
+  data, and base architecture/schema mismatches are errors. Repetition of one
+  instruction's slot under distinct base-established MR-ISA encoding conditions
+  is allowed only when profile filtering leaves at most one generated form
+  active.
 - Every input document and contained addition validates before the parser-owned
   tree is changed. Validated identifiers are merged before normal
   encoding/decode-table parsing, then instructions are appended in deterministic

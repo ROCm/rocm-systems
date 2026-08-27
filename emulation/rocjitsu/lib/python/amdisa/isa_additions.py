@@ -39,6 +39,10 @@ _ADDITIONS_ATTRIBUTES = {
     ADDITIONS_BASE_SCHEMA_ATTR,
 }
 _ID_PATTERN = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z')
+_INSTRUCTION_NAME_PATTERN = re.compile(r'[A-Za-z][A-Za-z0-9_]*\Z')
+# These operands name extension words that the generator patches explicitly;
+# they are intentionally absent from the implied-literal form's parent bitmap.
+_IMPLIED_LITERAL_OPERAND_FIELDS = frozenset({'literal', 'literal64', 'simm32'})
 
 
 class IsaAdditionError(ValueError):
@@ -47,7 +51,7 @@ class IsaAdditionError(ValueError):
 
 @dataclass(frozen=True)
 class _EncodingDefinition:
-    """Base-owned encoding information needed to validate identifier additions."""
+    """Base-owned encoding information needed to validate ISA additions."""
 
     name: str
     identifiers_node: elem_tree.Element
@@ -62,6 +66,8 @@ class _EncodingDefinition:
     base_encoding_values: frozenset[int]
     identifier_texts: frozenset[str]
     decoded_opcodes: frozenset[int]
+    condition_ids: dict[str, frozenset[str]]
+    operand_field_names: frozenset[str]
     parent_name: str | None
     is_implied_literal: bool
 
@@ -412,17 +418,19 @@ def _binary_text(node: elem_tree.Element, bit_width: int, context: str) -> str:
     return value
 
 
-def _field_widths(
+def _field_info(
     encoding: elem_tree.Element, profile: IsaProfile, context: str
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, frozenset[str]]:
     enc_name = _required_text(encoding, xs.ENCODING_NAME, context)
     renames = profile.field_renames(enc_name.upper())
     enc_field_bits: int | None = None
     op_field_bits = 0
     opm_field_bits = 0
+    field_names: set[str] = set()
     for field in encoding.findall(f'./{xs.UCODE_FMT}/{xs.BITMAP}/{xs.FIELD}'):
         field_name = _required_text(field, xs.FIELD_NAME, context).lower()
         field_name = renames.get(field_name, field_name)
+        field_names.add(field_name)
         ranges = sorted(
             field.findall(f'{xs.BIT_LAYOUT}/{xs.RANGE}'),
             key=lambda node: int(node.attrib.get('Order', 0)),
@@ -442,7 +450,45 @@ def _field_widths(
                 opm_field_bits = width
     if enc_field_bits is None:
         raise IsaAdditionError(f'{context}: microcode format has no encoding field')
-    return enc_field_bits, op_field_bits, opm_field_bits
+    return enc_field_bits, op_field_bits, opm_field_bits, frozenset(field_names)
+
+
+def _condition_ids(
+    encoding: elem_tree.Element, context: str
+) -> dict[str, frozenset[str]]:
+    conditions: dict[str, set[str]] = {}
+    for condition in encoding.findall(f'./{xs.ENCODING_CONDS}/{xs.ENCODING_COND}'):
+        name = _required_text(condition, xs.COND_NAME, context)
+        condition_id = condition.findtext('ConditionId')
+        ids = conditions.setdefault(name, set())
+        if condition_id is not None and condition_id.strip():
+            ids.add(condition_id.strip())
+    return {name: frozenset(ids) for name, ids in conditions.items()}
+
+
+def _applicable_condition_ids(
+    encoding: _EncodingDefinition,
+    encodings: Mapping[str, _EncodingDefinition],
+) -> dict[str, frozenset[str]]:
+    """Return conditions accepted for an encoding by the parser's inheritance."""
+
+    applicable: dict[str, set[str]] = {
+        name: set(ids) for name, ids in encoding.condition_ids.items()
+    }
+
+    def include(conditions: Mapping[str, frozenset[str]]) -> None:
+        for name, ids in conditions.items():
+            applicable.setdefault(name, set()).update(ids)
+
+    if encoding.parent_name is not None:
+        parent = encodings.get(encoding.parent_name)
+        if parent is not None:
+            include(parent.condition_ids)
+    else:
+        for child in encodings.values():
+            if child.parent_name == encoding.name:
+                include(child.condition_ids)
+    return {name: frozenset(ids) for name, ids in applicable.items()}
 
 
 def _layout_signature(text: str, opcode_slice: tuple[int, int]) -> str:
@@ -524,9 +570,10 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
             raise IsaAdditionError(
                 f'base encoding {name!r}: missing <{xs.ENCODING_IDENTIFERS}>'
             )
-        enc_bits, op_bits, opm_bits = _field_widths(
+        enc_bits, op_bits, opm_bits, own_field_names = _field_info(
             encoding, profile, f'base encoding {name!r}'
         )
+        condition_ids = _condition_ids(encoding, f'base encoding {name!r}')
         try:
             encoding_slice, opcode_slice, dont_care_bits = (
                 parse_encoding_identifier_mask(
@@ -559,6 +606,7 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
 
         parent_name: str | None = None
         is_implied_literal = False
+        operand_field_names = own_field_names
         if profile.is_alt_encoding(name):
             parent_name = profile.derive_parent_enc_name(name)
             parent = encoding_definitions.get(parent_name)
@@ -566,15 +614,13 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
                 raise IsaAdditionError(
                     f'base encoding {name!r}: parent {parent_name!r} must appear first'
                 )
-            condition_names = [
-                (_required_text(condition, xs.COND_NAME, f'base encoding {name!r}'), '')
-                for condition in encoding.findall(
-                    f'./{xs.ENCODING_CONDS}/{xs.ENCODING_COND}'
-                )
-            ]
+            condition_names = [(condition_name, '') for condition_name in condition_ids]
             is_implied_literal = profile.is_implied_literal_encoding(
                 name, condition_names, bit_width, parent.bit_width
             )
+            operand_field_names = parent.operand_field_names
+            if not is_implied_literal:
+                operand_field_names |= own_field_names
 
         encoding_definitions[name] = _EncodingDefinition(
             name=name,
@@ -590,6 +636,8 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
             base_encoding_values=frozenset(encoding_values),
             identifier_texts=frozenset(texts),
             decoded_opcodes=frozenset(decoded_opcodes),
+            condition_ids=condition_ids,
+            operand_field_names=operand_field_names,
             parent_name=parent_name,
             is_implied_literal=is_implied_literal,
         )
@@ -628,6 +676,18 @@ def _base_definitions(root: elem_tree.Element, profile: IsaProfile) -> tuple[
                 xs.ENCODING_COND,
                 f'base instruction {name}/{enc_name}',
             )
+            if encoding_definition is not None:
+                # Some older vendor XMLs reference compatibility conditions from
+                # instructions without declaring them under EncodingConditions.
+                # Treat those base-established spellings as authoritative while
+                # still rejecting novel addition-only typos.
+                ids = set(encoding_definition.condition_ids.get(condition, ()))
+                condition_node = encoding.find(xs.ENCODING_COND)
+                assert condition_node is not None
+                condition_id = condition_node.attrib.get('Id')
+                if condition_id is not None:
+                    ids.add(condition_id)
+                encoding_definition.condition_ids[condition] = frozenset(ids)
             if encoding_definition is None or profile.skip_inst_encoding(
                 enc_name, condition
             ):
@@ -793,6 +853,11 @@ def _validate_instruction_addition(
     context = f'{path}: additions document {addition_id!r}'
     _validate_instruction_structure(instruction, f'{context}: <{xs.INST}>')
     name = _required_text(instruction, xs.INST_NAME, context)
+    if not _INSTRUCTION_NAME_PATTERN.fullmatch(name):
+        raise IsaAdditionError(
+            f'{context}: invalid instruction name {name!r}; use ASCII letters, '
+            'digits, and underscores, starting with a letter'
+        )
     if name in instruction_names:
         raise IsaAdditionError(f'{context}: instruction {name!r} already exists')
 
@@ -804,6 +869,7 @@ def _validate_instruction_addition(
 
     forms_in_order: list[tuple[str, int, str]] = []
     forms: set[tuple[str, int, str]] = set()
+    active_instruction_forms: dict[str, tuple[str, int, str]] = {}
     for encoding in instruction_encodings:
         if encoding.tag != xs.INST_ENCODING:
             raise IsaAdditionError(
@@ -852,6 +918,30 @@ def _validate_instruction_addition(
             xs.ENCODING_COND,
             f'{context}: instruction {name!r}/{enc_name}',
         )
+        encoding_definition = encodings.get(enc_name)
+        if encoding_definition is not None:
+            applicable_conditions = _applicable_condition_ids(
+                encoding_definition, encodings
+            )
+            if condition not in applicable_conditions:
+                raise IsaAdditionError(
+                    f'{context}: instruction {name!r}/{enc_name} references '
+                    f'unknown encoding condition {condition!r}'
+                )
+            condition_node = encoding.find(xs.ENCODING_COND)
+            assert condition_node is not None
+            condition_id = condition_node.attrib.get('Id')
+            declared_ids = applicable_conditions[condition]
+            if (
+                condition_id is not None
+                and declared_ids
+                and condition_id not in declared_ids
+            ):
+                expected = ', '.join(sorted(declared_ids))
+                raise IsaAdditionError(
+                    f'{context}: instruction {name!r}/{enc_name} condition '
+                    f'{condition!r} has Id {condition_id!r}, expected {expected}'
+                )
         form = (enc_name, opcode, condition)
         if form in forms:
             raise IsaAdditionError(
@@ -861,19 +951,30 @@ def _validate_instruction_addition(
         forms.add(form)
         forms_in_order.append(form)
 
-        encoding_definition = encodings.get(enc_name)
         if encoding_definition is not None and not profile.skip_inst_encoding(
             enc_name, condition
         ):
             is_implied_literal = encoding_definition.is_implied_literal
+            instruction_symbol = format_instruction_name(
+                name,
+                enc_name,
+                is_implied_literal_enc=is_implied_literal,
+            )
+            previous_form = active_instruction_forms.get(instruction_symbol)
+            if previous_form is not None:
+                previous_encoding, previous_opcode, previous_condition = previous_form
+                raise IsaAdditionError(
+                    f'{context}: instruction {name!r} has multiple active forms '
+                    f'for generated instruction symbol {instruction_symbol!r}: '
+                    f'{previous_encoding!r} opcode {previous_opcode} condition '
+                    f'{previous_condition!r}, and {enc_name!r} opcode {opcode} '
+                    f'condition {condition!r}'
+                )
+            active_instruction_forms[instruction_symbol] = form
             generated_symbols = (
                 (
                     'instruction',
-                    format_instruction_name(
-                        name,
-                        enc_name,
-                        is_implied_literal_enc=is_implied_literal,
-                    ),
+                    instruction_symbol,
                     instruction_symbol_owners,
                 ),
                 (
@@ -903,15 +1004,35 @@ def _validate_instruction_addition(
                 f'<{xs.OPERANDS}>'
             )
         for operand in operands:
+            operand_context = f'{context}: instruction {name!r}/{enc_name} operand'
             op_type = _required_text(
                 operand,
                 xs.OPERAND_TYPE,
-                f'{context}: instruction {name!r}/{enc_name} operand',
+                operand_context,
             )
             if op_type not in operand_types:
                 raise IsaAdditionError(
                     f'{context}: instruction {name!r}/{enc_name} references '
                     f'unknown operand type {op_type!r}'
+                )
+            field_node = operand.find(xs.FIELD_NAME)
+            if field_node is None or encoding_definition is None:
+                continue
+            field_name = _required_text(operand, xs.FIELD_NAME, operand_context)
+            normalized_field_name = profile.normalize_operand_field_name(
+                enc_name, field_name.lower()
+            )
+            is_implied_literal_field = (
+                encoding_definition.is_implied_literal
+                and normalized_field_name in _IMPLIED_LITERAL_OPERAND_FIELDS
+            )
+            if (
+                normalized_field_name not in encoding_definition.operand_field_names
+                and not is_implied_literal_field
+            ):
+                raise IsaAdditionError(
+                    f'{context}: instruction {name!r}/{enc_name} references '
+                    f'unknown operand field {field_name!r}'
                 )
 
     addition = deepcopy(instruction)

@@ -38,6 +38,16 @@ _BASE_XML = '''\
           <EncodingIdentifier Radix="2">10100000010000000000000000000000</EncodingIdentifier>
           <EncodingIdentifier Radix="2">10100000010000000000000000000001</EncodingIdentifier>
         </EncodingIdentifiers>
+        <EncodingConditions>
+          <EncodingCondition>
+            <ConditionName>default</ConditionName>
+            <ConditionId>0</ConditionId>
+          </EncodingCondition>
+          <EncodingCondition>
+            <ConditionName>alternate</ConditionName>
+            <ConditionId>1</ConditionId>
+          </EncodingCondition>
+        </EncodingConditions>
         <MicrocodeFormat>
           <BitMap>
             <Field>
@@ -396,6 +406,17 @@ def test_instruction_name_collision_after_codegen_normalization_is_rejected(tmp_
         apply_isa_additions(_base_root(), [str(addition)], _PROFILE)
 
 
+def test_invalid_instruction_name_is_rejected_before_merge(tmp_path):
+    root = _base_root()
+    before = elem_tree.tostring(root)
+    addition = _write_additions(tmp_path, _instruction('BAD-NAME', opcode=2))
+
+    with pytest.raises(IsaAdditionError, match=r"invalid instruction name 'BAD-NAME'"):
+        apply_isa_additions(root, [str(addition)], _PROFILE)
+
+    assert elem_tree.tostring(root) == before
+
+
 def test_opcode_constant_name_collision_after_normalization_is_rejected(tmp_path):
     root = _base_root()
     root.find('./ISA/Instructions/Instruction/InstructionName').text = 'S_GETPC_B64'
@@ -445,7 +466,7 @@ def test_incomplete_or_unknown_instruction_structure_is_rejected_before_merge(
     assert elem_tree.tostring(root) == before
 
 
-def test_same_instruction_may_repeat_slot_for_encoding_conditions(tmp_path):
+def test_same_instruction_may_repeat_slot_when_only_one_condition_is_active(tmp_path):
     instructions = _instruction().replace(
         '  </InstructionEncodings>',
         '''\
@@ -471,6 +492,34 @@ def test_same_instruction_may_repeat_slot_for_encoding_conditions(tmp_path):
 
     added = root.findall('./ISA/Instructions/Instruction')[-1]
     assert len(added.findall('./InstructionEncodings/InstructionEncoding')) == 2
+
+
+def test_unknown_encoding_condition_is_rejected_before_merge(tmp_path):
+    root = _base_root()
+    before = elem_tree.tostring(root)
+    instruction = _instruction().replace(
+        '<EncodingCondition>default</EncodingCondition>',
+        '<EncodingCondition>defualt</EncodingCondition>',
+    )
+    addition = _write_additions(tmp_path, instruction)
+
+    with pytest.raises(IsaAdditionError, match=r"unknown encoding condition 'defualt'"):
+        apply_isa_additions(root, [str(addition)], _PROFILE)
+
+    assert elem_tree.tostring(root) == before
+
+
+def test_encoding_condition_id_must_match_declared_condition(tmp_path):
+    instruction = _instruction().replace(
+        '<EncodingCondition>default</EncodingCondition>',
+        '<EncodingCondition Id="99">default</EncodingCondition>',
+    )
+    addition = _write_additions(tmp_path, instruction)
+
+    with pytest.raises(
+        IsaAdditionError, match=r"condition 'default' has Id '99', expected 0"
+    ):
+        apply_isa_additions(_base_root(), [str(addition)], _PROFILE)
 
 
 def test_same_instruction_cannot_repeat_slot_for_same_encoding_condition(tmp_path):
@@ -988,6 +1037,74 @@ def _write_cdna5_clone_additions(
     path = tmp_path / 'cdna5-test.xml'
     elem_tree.ElementTree(addition_root).write(path, encoding='unicode')
     return path
+
+
+def test_cdna5_distinct_active_conditions_cannot_generate_the_same_class(tmp_path):
+    base_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / 'amdgpu_isa_cdna5.xml'
+    )
+    addition = _write_cdna5_clone_additions(tmp_path, base_xml)
+    tree = elem_tree.parse(addition)
+    encodings = tree.find('./InstructionAdditions/Instruction/InstructionEncodings')
+    primary = next(
+        encoding
+        for encoding in encodings
+        if encoding.findtext('EncodingName') == 'ENC_SOP1'
+    )
+    duplicate = deepcopy(primary)
+    condition = duplicate.find('EncodingCondition')
+    condition.text = 'default'
+    condition.set('Id', '0')
+    encodings.append(duplicate)
+    tree.write(addition, encoding='unicode')
+    root = elem_tree.parse(base_xml).getroot()
+    before = elem_tree.tostring(root)
+
+    with pytest.raises(
+        IsaAdditionError,
+        match=r"multiple active forms.*symbol 'SAdditionTestB32Sop1'",
+    ):
+        apply_isa_additions(root, [str(addition)], Cdna5Profile())
+
+    assert elem_tree.tostring(root) == before
+
+
+def test_cdna5_unknown_operand_field_is_rejected_before_merge(tmp_path):
+    base_xml = (
+        Path(__file__).resolve().parents[6]
+        / 'shared'
+        / 'machine-readable-isa'
+        / 'isa'
+        / 'amdgpu_isa_cdna5.xml'
+    )
+    addition = _write_cdna5_clone_additions(tmp_path, base_xml)
+    tree = elem_tree.parse(addition)
+    primary = next(
+        encoding
+        for encoding in tree.findall(
+            './InstructionAdditions/Instruction/InstructionEncodings/'
+            'InstructionEncoding'
+        )
+        if encoding.findtext('EncodingName') == 'ENC_SOP1'
+    )
+    destination = next(
+        field
+        for field in primary.findall('./Operands/Operand/FieldName')
+        if field.text == 'SDST'
+    )
+    destination.text = 'BOGUS'
+    tree.write(addition, encoding='unicode')
+    root = elem_tree.parse(base_xml).getroot()
+    before = elem_tree.tostring(root)
+
+    with pytest.raises(IsaAdditionError, match=r"unknown operand field 'BOGUS'"):
+        apply_isa_additions(root, [str(addition)], Cdna5Profile())
+
+    assert elem_tree.tostring(root) == before
 
 
 def test_cdna5_normalized_instruction_name_collision_is_rejected(tmp_path):
