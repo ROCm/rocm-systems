@@ -297,7 +297,6 @@ retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifac
                                                        code_object_bytes.size());
   try {
     ConSanTransformArtifacts inventory = std::move(inventory_artifacts);
-    options.patched_image_growth_input_bytes = code_object_bytes.size();
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
     if (inventory.observation_plan.engine !=
@@ -385,7 +384,6 @@ complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSa
                                                        code_object_bytes.size());
   try {
     ConSanOptions effective_options = options;
-    effective_options.patched_image_growth_input_bytes = code_object_bytes.size();
     ConSanTransformArtifacts result = try_patch_consan_impl(
         code_object_bytes, effective_options, {}, std::nullopt, inspected_perturbation);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, effective_options, result);

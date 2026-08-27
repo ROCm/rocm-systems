@@ -35,10 +35,17 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
 [[nodiscard]] inline bool replace_consan_text(CodeObjectPatcher &patcher,
                                               std::span<const uint8_t> new_text,
                                               const ConSanOptions &options,
-                                              std::string_view operation, ConSanTransformArtifacts &result) {
+                                              std::string_view operation,
+                                              ConSanTransformArtifacts &result) {
   const size_t current_image_bytes = patcher.image_bytes().size();
-  const size_t input_image_bytes =
-      options.patched_image_growth_input_bytes.value_or(current_image_bytes);
+  const ConSanCodeObjectId &input_id = result.program_inventory.code_object_id();
+  if (!input_id.valid()) {
+    result.errors.emplace_back("ConSan " + std::string(operation) +
+                               " has no pristine image identity for patched-image growth "
+                               "accounting");
+    return false;
+  }
+  const size_t input_image_bytes = static_cast<size_t>(input_id.byte_size);
   const auto budget = consan_patched_image_growth_budget(options.patched_image_growth_limit,
                                                          input_image_bytes, current_image_bytes);
   const std::string policy = consan_patched_image_growth_policy_description(

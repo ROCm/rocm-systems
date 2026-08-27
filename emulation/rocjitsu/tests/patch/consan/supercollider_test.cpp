@@ -473,8 +473,8 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
   ASSERT_TRUE(probe.is_valid());
   CodeObjectPatcher probe_patcher(probe);
   ConSanOptions probe_options;
-  probe_options.patched_image_growth_input_bytes = fixture.bytes.size();
   ConSanTransformArtifacts probe_result;
+  probe_result.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
   ASSERT_TRUE(
       replace_consan_text(probe_patcher, second_stage_text, probe_options, "probe", probe_result));
   const size_t second_stage_growth =
@@ -489,10 +489,10 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
   ConSanOptions options;
   options.patched_image_growth_limit.kind = ConSanPatchedImageGrowthLimitKind::InputPercent;
   options.patched_image_growth_limit.input_percent = static_cast<uint32_t>(admitting_percent - 1u);
-  options.patched_image_growth_input_bytes = fixture.bytes.size();
   const size_t rejecting_limit = *consan_patched_image_growth_limit_bytes(
       options.patched_image_growth_limit, fixture.bytes.size());
   ConSanTransformArtifacts result;
+  result.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
   EXPECT_FALSE(replace_consan_text(patcher, second_stage_text, options, "second stage", result));
   const std::string expected =
       "ConSan second stage rejected patched-image file growth: required total " +
@@ -501,6 +501,24 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
       ", original-input-image-bytes=" + std::to_string(fixture.bytes.size()) + ")";
   EXPECT_NE(std::ranges::find(result.errors, expected), result.errors.end())
       << testing::PrintToString(result.errors);
+}
+
+TEST(ConSan, GrowthPolicyRequiresPristineImageIdentity) {
+  GrowthPolicyFixture fixture = make_growth_policy_fixture();
+  AmdGpuCodeObject code_object(fixture.bytes.data(), fixture.bytes.size());
+  ASSERT_TRUE(code_object.is_valid());
+  CodeObjectPatcher patcher(code_object);
+  std::vector<uint8_t> replacement(patcher.text_bytes().begin(), patcher.text_bytes().end());
+  replacement.resize(replacement.size() + sizeof(uint32_t));
+  ConSanOptions options;
+  ConSanTransformArtifacts result;
+
+  EXPECT_FALSE(replace_consan_text(patcher, replacement, options, "missing identity", result));
+  EXPECT_NE(std::ranges::find(result.errors,
+                              "ConSan missing identity has no pristine image identity for "
+                              "patched-image growth accounting"),
+            result.errors.end());
+  EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), fixture.bytes));
 }
 
 TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
@@ -519,8 +537,8 @@ TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
   CodeObjectPatcher patcher(code_object);
   std::vector<uint8_t> malformed_text(code_object.text_sections().front()->size() + 1u);
   ConSanOptions default_options;
-  default_options.patched_image_growth_input_bytes = fixture.bytes.size();
   ConSanTransformArtifacts malformed;
+  malformed.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
   EXPECT_FALSE(replace_consan_text(patcher, malformed_text, default_options,
                                    "test malformed replacement", malformed));
   const std::string expected_malformed =
@@ -547,8 +565,8 @@ TEST(ConSan, ReplacementDiagnosticsReportAllocationAndExactResolvedGrowth) {
               code_object.text_sections().front()->size());
   ConSanOptions options;
   options.patched_image_growth_limit.absolute_bytes = std::numeric_limits<uint64_t>::max();
-  options.patched_image_growth_input_bytes = fixture.bytes.size();
   ConSanTransformArtifacts result;
+  result.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
 
   EXPECT_FALSE(
       replace_consan_text(patcher, replacement, options, "test allocation replacement", result));
@@ -576,8 +594,8 @@ TEST(ConSan, ReplacementDiagnosticsReportLateMalformedInputAndExactResolvedGrowt
   std::memcpy(replacement.data(), code_object.text_sections().front()->data(),
               code_object.text_sections().front()->size());
   ConSanOptions options;
-  options.patched_image_growth_input_bytes = fixture.bytes.size();
   ConSanTransformArtifacts result;
+  result.program_inventory = ProgramInventoryBuilder(fixture.bytes).view();
 
   EXPECT_FALSE(replace_consan_text(patcher, replacement, options, "test late malformed replacement",
                                    result));

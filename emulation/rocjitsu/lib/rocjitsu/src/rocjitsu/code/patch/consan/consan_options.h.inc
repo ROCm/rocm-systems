@@ -832,9 +832,6 @@ struct ConSanOptions : ConSanRequest,
   /// SGPRs or RDNA TTMPs are copied into this VGPR at entry because they are
   /// not stable after arbitrary guest code.
   std::optional<uint16_t> moi_workgroup_key_vgpr;
-  /// Internal immutable baseline set by the public transform entry point and
-  /// retained by every staged composition pass.
-  std::optional<size_t> patched_image_growth_input_bytes;
 };
 
 [[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
