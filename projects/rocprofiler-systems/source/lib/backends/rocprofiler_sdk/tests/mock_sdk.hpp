@@ -180,23 +180,23 @@ struct name_info_impl
 template <typename ValueT = std::string_view>
 struct name_info
 {
-    using value_type = name_info_impl<ValueT>;
+    using value_type   = name_info_impl<ValueT>;
+    using support_type = value_type::support_type;
 
     void emplace(int idx, const char* name)
     {
         auto& entry = (*this)[static_cast<std::size_t>(idx)];
         entry.value = idx;
-        entry.name  = typename value_type::support_type{}(name);
+        entry.name  = support_type{}(name);
     }
     void emplace(int idx, int opidx, const char* name)
     {
         auto& entry = (*this)[static_cast<std::size_t>(idx)];
         if(static_cast<std::size_t>(opidx) >= entry.operations.size())
         {
-            entry.operations.resize(opidx + 1,
-                                    typename value_type::support_type::default_value());
+            entry.operations.resize(opidx + 1, support_type::default_value());
         }
-        entry.operations.at(opidx) = typename value_type::support_type{}(name);
+        entry.operations.at(opidx) = support_type{}(name);
     }
 
     [[nodiscard]] decltype(auto) size() const { return impl.size(); }

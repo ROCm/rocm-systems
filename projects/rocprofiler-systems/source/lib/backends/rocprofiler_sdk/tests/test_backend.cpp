@@ -738,6 +738,19 @@ TEST_F(backend_test, get_buffer_tracing_names_caches_after_first_call)
     EXPECT_EQ(first[2].name, "MEMORY_COPY");
 }
 
+TEST_F(backend_test, name_info_emplace_operation_overload_fills_gap_with_default_value)
+{
+    auto table = name_info<>{};
+    table.emplace(1, 0, "OP_A");
+    table.emplace(1, 2, "OP_C");
+
+    const auto& operations = table[1].operations;
+    ASSERT_EQ(operations.size(), 3u);
+    EXPECT_EQ(operations.at(0), "OP_A");
+    EXPECT_EQ(operations.at(1), std::string_view{});
+    EXPECT_EQ(operations.at(2), "OP_C");
+}
+
 TEST_F(backend_test, check_version_compatibility_accepts_matching_runtime_version)
 {
     // mock_sdk::compile_time_version == 10100u -> 1.1.0
