@@ -755,36 +755,33 @@ __device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp
                                            int nDsts, void** dstPtrs, IntBytes nElts) {
 #if TDM_SUPPORTED
   if (!ncclShmem.comm.tdmSimpleEnable) return false;
-
+  // TDM copy is only supported for simple cases without multimem, accumulation, or pipelining
   if (MultimemSrcs || MultimemDsts || useAcc || Pipeline) {
-    printf("TDM copy not supported due to MultimemSrcs, MultimemDsts, useAcc, or Pipeline\n");
     return false;
   }
   if (PreOpSrcs && !Apply_PreOp<RedFn, 1>::IsIdentity) {
-    printf("TDM copy not supported due to PreOpSrcs and non-identity PreOp\n");
     return false;
   }
+  // Check if the number of sources and destinations is supported for TDM copy
   if (nSrcs != 1 || (nDsts != 1 && nDsts != 2) || postOp) {
-    printf("TDM copy not supported due to nSrcs = (%d), nDsts = (%d), or postOp = (%d)\n", nSrcs, nDsts, postOp);
     return false;
   }
+  // Check if the number of bytes is above the minimum threshold for TDM copy
   size_t bytes = (size_t)nElts * sizeof(T);
   if (bytes < (size_t)ncclShmem.comm.tdmSimpleMinBytes) {
-    // printf("TDM copy not supported due to bytes < tdmSimpleMinBytes\n");
     return false;
   }
 
   const void* src = srcPtrs[0];
   for (int dst = 0; dst < nDsts; dst++) {
     if (dstPtrs[dst] == nullptr || ((uintptr_t)dstPtrs[dst] & (RCCL_TDM_ALIGN - 1))) {
-      printf("TDM copy not supported due to unaligned or null dst[%d]\n", dst);
       return false;
     }
   }
 
   int base = threadIdx.x - thread;
+  // Base and thread count is a multiple of the warp size
   if ((base | nThreads) & (WARP_SIZE - 1)) {
-    printf("TDM copy not supported due to unaligned base or nThreads\n");
     return false;
   }
   uint32_t w0 = base / WARP_SIZE, w1 = w0 + nThreads / WARP_SIZE;
