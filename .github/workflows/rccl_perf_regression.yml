@@ -115,8 +115,11 @@ jobs:
             # waiting for/running its detect step. Templating the shared prod
             # config file in place (the old behavior) would let one PR's build
             # clobber another PR's in-flight detect config -- give every run
-            # its own copy instead.
-            RUN_CONFIG="${RCCL_CI_ROOT}/configs/ci_detect_run_${{ github.run_id }}.json"
+            # its own copy instead. configs/ is not writable by the
+            # runner user, so copy into a dir we can create on the
+            # world-writable RCCL_CI_ROOT share.
+            mkdir -p "${RCCL_CI_ROOT}/run-configs"
+            RUN_CONFIG="${RCCL_CI_ROOT}/run-configs/ci_detect_run_${{ github.run_id }}.json"
             cp "${_CONFIG}" "${RUN_CONFIG}"
             # Set the output before sbatch runs (not after) so the cleanup-on-
             # failure step below can still find this path if sbatch fails.
@@ -160,7 +163,7 @@ jobs:
           _CONFIG: ${{ steps.resolve.outputs.config_json }}
         run: |
           case "${_CONFIG}" in
-            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+            "${RCCL_CI_ROOT}"/run-configs/ci_detect_run_*.json|"${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
           esac
 
   detect:
@@ -227,7 +230,7 @@ jobs:
           _CONFIG: ${{ needs.build.outputs.config_json }}
         run: |
           case "${_CONFIG}" in
-            "${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
+            "${RCCL_CI_ROOT}"/run-configs/ci_detect_run_*.json|"${RCCL_CI_ROOT}"/configs/ci_detect_run_*.json) rm -f "${_CONFIG}" ;;
           esac
 
       - name: Gate on detector verdict
