@@ -218,7 +218,10 @@ log_timing(const char* label, const snap_restore_timing_t& t)
 // snap() includes inventory scan and module-variable discovery in addition to DMA; restore()
 // is dominated by host->device copies and matches the Figure 5 restore term.
 void
-run_bandwidth_test(size_t ballast_bytes, const char* label)
+run_bandwidth_test(size_t      ballast_bytes,
+                   const char* label,
+                   int         warmup_iterations  = 1,
+                   int         measure_iterations = 3)
 {
     const auto agent = gpu_agent();
     ASSERT_NE(agent.handle, 0U);
@@ -231,13 +234,13 @@ run_bandwidth_test(size_t ballast_bytes, const char* label)
     sync_ok();
 
     // Warmup: prime caches and allocator state before timed iterations.
+    for(int w = 0; w < warmup_iterations; ++w)
     {
         const auto warmup = measure_snap_restore_once(agent, buffer, n_elems);
         ASSERT_GT(warmup.footprint_bytes, 0U) << "snap/restore warmup failed";
     }
 
-    constexpr int kIterations = 3;
-    const auto    timing      = measure_snap_restore_mean(agent, buffer, n_elems, kIterations);
+    const auto timing = measure_snap_restore_mean(agent, buffer, n_elems, measure_iterations);
     ASSERT_GT(timing.footprint_bytes, 0U) << "snap/restore measurement failed";
     log_timing(label, timing);
 
@@ -269,7 +272,9 @@ run_bandwidth_test(size_t ballast_bytes, const char* label)
 TEST(kernel_replay_snapshot, snap_bandwidth_meets_floor_with_8mb_ballast)
 {
     if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
-    run_bandwidth_test(8U * 1024U * 1024U, "ballast_8mb");
+    // Small footprint: restore is sub-ms so one noisy sample skews the mean; extra warmup
+    // and iterations absorb CI GPU contention (see kernel_replay_performance.md).
+    run_bandwidth_test(8U * 1024U * 1024U, "ballast_8mb", 3, 5);
 }
 
 TEST(kernel_replay_snapshot, snap_bandwidth_meets_floor_with_32mb_ballast)
