@@ -953,7 +953,7 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
 
   // CDNA5 VGLOBAL direct-to-LDS instructions carry the LDS byte destination
   // in an ordinary VGPR. Preserve it before relocating the guest instruction.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (consan_uses_gfx12_cdna_execution(arch)) {
     if (!candidate.operands.address_vgpr || *candidate.operands.address_vgpr >= 256u ||
         result_vgpr >= 256u)
       return false;
@@ -1116,8 +1116,8 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
   // SRC0, SRC1, SRC2, and DST. Native LDS addresses are SRC0, so a nonzero
   // SRC0 bank must be copied while that bank is still selected. The appended
   // probe subsequently selects bank zero for its own scratch registers.
-  return arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.origin != ConSanAccessOrigin::Flat &&
-         candidate.operands.address_vgpr &&
+  return consan_arch_has_selectable_vgpr_bank(arch) &&
+         candidate.origin != ConSanAccessOrigin::Flat && candidate.operands.address_vgpr &&
          (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0x3u) != 0u;
 }
 
@@ -1163,8 +1163,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
     const MoiOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   return options.moi_engine == ConSanMoiEngine::Sampled &&
          candidate.origin == ConSanAccessOrigin::NativeLds &&
-         (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-          consan_uses_gfx9_cdna_encoding(arch)) &&
+         (consan_arch_is_rdna(arch) || consan_uses_gfx9_cdna_encoding(arch)) &&
          !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
 }
 
@@ -1178,7 +1177,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
           ? DynamicStackBorrowedSgprSpillSequence::kScalarReservoirCount
           : 0u;
   const uint16_t two_address_replay_count =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      consan_uses_gfx12_cdna_execution(arch) &&
               two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
           ? 1u
           : 0u;
@@ -1213,7 +1212,7 @@ moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidat
                                                     rj_code_arch_t arch) {
   const uint16_t base_scratch_count = options.moi_sampled_check ? 7u : 5u;
   const uint16_t two_address_replay_count =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      consan_uses_gfx12_cdna_execution(arch) &&
               two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
           ? 1u
           : 0u;
@@ -1799,7 +1798,7 @@ struct MoiOwnerRegisterReferenceSummary {
                  moi_access_requires_high_bank_address_capture(candidate, arch)
              ? 1u
              : 0u) +
-        (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        (consan_uses_gfx12_cdna_execution(arch) &&
                  two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u
              ? 1u
              : 0u));
@@ -2352,13 +2351,13 @@ moi_inline_dense_router_scalar_abi(const MoiOptions &options, rj_code_arch_t arc
   if (options.automatic_moi_inline_sgpr_spill) {
     if (!options.moi_inline_dispatch_key_sgpr)
       return std::nullopt;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && !options.moi_inline_call_return_sgpr)
+    if (consan_arch_has_s_call_i64(arch) && !options.moi_inline_call_return_sgpr)
       return std::nullopt;
     return MoiInlineDenseRouterScalarAbi{
         .indirect_jump = *indirect_jump,
         .dispatch_key_sgpr = *options.moi_inline_dispatch_key_sgpr,
         .call_return_sgpr =
-            arch == ROCJITSU_CODE_ARCH_CDNA5 ? options.moi_inline_call_return_sgpr : std::nullopt,
+            consan_arch_has_s_call_i64(arch) ? options.moi_inline_call_return_sgpr : std::nullopt,
     };
   }
 
@@ -2370,9 +2369,9 @@ moi_inline_dense_router_scalar_abi(const MoiOptions &options, rj_code_arch_t arc
       // GFX1250 derives its key from the scalar-call return PC. CDNA3/4 and
       // RDNA4 use an explicit key in the otherwise-unused return pair's low
       // half.
-      .dispatch_key_sgpr = arch == ROCJITSU_CODE_ARCH_CDNA5 ? indirect_jump->pc_sgpr
+      .dispatch_key_sgpr = consan_arch_has_s_call_i64(arch) ? indirect_jump->pc_sgpr
                                                             : static_cast<uint16_t>(base + 28u),
-      .call_return_sgpr = arch == ROCJITSU_CODE_ARCH_CDNA5
+      .call_return_sgpr = consan_arch_has_s_call_i64(arch)
                               ? std::optional<uint16_t>(static_cast<uint16_t>(base + 28u))
                               : std::nullopt,
   };
@@ -2624,7 +2623,7 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
     // incoming bank mode.  Relocating a high-bank WMMA sequence therefore
     // silently changes its operands.  Keep host relocation in the low bank
     // until the host-body ABI explicitly carries and restores this state.
-    if (resource_state.arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (consan_arch_has_selectable_vgpr_bank(resource_state.arch)) {
       const std::optional<uint16_t> mode =
           consan_gfx1250_vgpr_msb_mode_at(text, /*text_file_offset=*/0u, owner_begin, host_offset);
       if (!mode || *mode != 0u)
@@ -2654,7 +2653,7 @@ collect_moi_dense_relay_host_candidates(const MoiResourcePlanningState &resource
     }
     if (displaced_words.size() != host_word_count)
       return std::nullopt;
-    if (resource_state.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+    if (consan_arch_has_selectable_vgpr_bank(resource_state.arch) &&
         std::ranges::any_of(displaced_words,
                             [](uint32_t word) { return (word & 0xffff0000u) == 0xbf860000u; })) {
       // Moving the transition would also remove it from the original CFG.
@@ -3309,7 +3308,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const MoiOptions &option
     });
   }
   const bool guest_replay_needs_disjoint_address_scratch =
-      access_candidate != nullptr && state.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      access_candidate != nullptr && consan_arch_has_selectable_vgpr_bank(state.arch) &&
       two_address_native_lds_offset_scale(access_candidate->mnemonic).value_or(0u) > 8u;
   const bool supports_access_operand_overlap_spill =
       (options.moi_engine == ConSanMoiEngine::InlineShadow &&
@@ -3965,7 +3964,7 @@ moi_dynamic_stack_exec_save_sgpr_count(ConSanMoiEngine engine) {
       return 8u;
     if (options.moi_dynamic_stack_spill)
       return moi_dynamic_stack_exec_save_sgpr_count(options.moi_engine).value_or(0u);
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    if (consan_uses_gfx12_cdna_execution(arch))
       return 8u;
     return options.moi_track_atomics ? 8u : 7u;
   }
@@ -5493,7 +5492,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   const rj_code_arch_t arch = state.arch;
   const bool has_inline_dispatch_consumer =
       options.moi_engine == ConSanMoiEngine::InlineShadow &&
-      !(arch == ROCJITSU_CODE_ARCH_CDNA5 && !options.moi_track_atomics) &&
+      !(consan_uses_gfx12_cdna_execution(arch) && !options.moi_track_atomics) &&
       std::ranges::any_of(result.resource_plans, [](const ConSanCandidateResourcePlan &plan) {
         return !plan.owner_descriptor_file_offsets.empty() &&
                (plan.site_kind == ConSanResourceSiteKind::Access ||
@@ -5502,7 +5501,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   const bool needs_dispatch_id =
       has_inline_dispatch_consumer || options.moi_engine == ConSanMoiEngine::RecordReplay ||
       (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_runtime_sample_stride > 1u &&
-       arch != ROCJITSU_CODE_ARCH_CDNA5);
+       !consan_uses_gfx12_cdna_execution(arch));
   if (!needs_dispatch_id || !options.moi_report_buffer_address || options.moi_dispatch_id_sgpr ||
       options.moi_dispatch_id_vgpr) {
     return false;
@@ -5530,7 +5529,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
   // kernel that references the complete VGPR file has no such pair, however.
   // In that capacity case, continue into the same complete-owner SGPR proof
   // used by gfx12 instead of rejecting an otherwise instrumentable kernel.
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (consan_uses_gfx11_encoding(arch)) {
     const bool lacks_persistent_dispatch_vgpr_pair =
         std::ranges::any_of(scalar_contexts.contexts, [](const MoiKernelResourceContext *context) {
           const uint32_t safe_base = context->has_indirect_vgpr_access
@@ -5633,7 +5632,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     }
   }
 
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (consan_arch_is_rdna(arch)) {
     // A dynamic-stack kernel can allocate the full ordinary scalar file while
     // leaving a lower pair completely untouched. Dispatch identity crosses
     // arbitrary guest code, so site-local liveness is not sufficient: require
@@ -5692,7 +5691,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
     }
   }
 
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || options.moi_engine == ConSanMoiEngine::Sampled) {
+  if (consan_uses_gfx12_rdna_execution(arch) || options.moi_engine == ConSanMoiEngine::Sampled) {
     // Automatic banked Record/Replay can capture the preload into persistent
     // descriptor-grown VGPRs during the later owner-state placement pass.
     // Sampled instead records the stable reader identity literal when no
@@ -6201,7 +6200,7 @@ configure_automatic_moi_dispatch_id_sgprs(MoiOptions &options, ConSanTransformAr
                                           static_cast<uint32_t>(needs_workgroup_key) +
                                           record_replay_workgroup_count + dispatch_id_count;
   const uint32_t persistent_count =
-      options.moi_engine == ConSanMoiEngine::InlineShadow && arch == ROCJITSU_CODE_ARCH_CDNA5
+      options.moi_engine == ConSanMoiEngine::InlineShadow && consan_uses_gfx12_cdna_execution(arch)
           ? std::max<uint32_t>(named_persistent_count, 5u)
           : named_persistent_count;
   const uint32_t persistent_end = persistent_base + persistent_count;

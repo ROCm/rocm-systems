@@ -361,6 +361,8 @@ TEST(ConSanCapabilityContract, TargetProfileLookupIsTotalUniqueAndRejectsUnsuppo
     EXPECT_TRUE(consan_is_capability_arch(expected.arch));
     EXPECT_EQ(consan_arch_is_cdna(expected.arch),
               expected.architecture_family == ConSanArchitectureFamily::Cdna);
+    EXPECT_EQ(consan_arch_is_rdna(expected.arch),
+              expected.architecture_family == ConSanArchitectureFamily::Rdna);
     EXPECT_EQ(consan_arch_supports_kernarg_preload_overflow_recovery(expected.arch),
               expected.supports_kernarg_preload_overflow_recovery);
     for (size_t other = index + 1; other < kConSanTargetProfiles.size(); ++other) {
@@ -500,6 +502,12 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
               expected.encoding_family == ConSanEncodingFamily::Gfx11);
     EXPECT_EQ(consan_uses_gfx12_encoding(expected.arch),
               expected.encoding_family == ConSanEncodingFamily::Gfx12);
+    EXPECT_EQ(consan_uses_gfx12_cdna_execution(expected.arch),
+              expected.encoding_family == ConSanEncodingFamily::Gfx12 &&
+                  expected.architecture_family == ConSanArchitectureFamily::Cdna);
+    EXPECT_EQ(consan_uses_gfx12_rdna_execution(expected.arch),
+              expected.encoding_family == ConSanEncodingFamily::Gfx12 &&
+                  expected.architecture_family == ConSanArchitectureFamily::Rdna);
     EXPECT_EQ(consan_uses_gfx11_or_gfx12_encoding(expected.arch),
               expected.encoding_family == ConSanEncodingFamily::Gfx11 ||
                   expected.encoding_family == ConSanEncodingFamily::Gfx12);
@@ -520,7 +528,11 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
   EXPECT_FALSE(consan_uses_gfx9_cdna_encoding(unsupported));
   EXPECT_FALSE(consan_uses_gfx11_encoding(unsupported));
   EXPECT_FALSE(consan_uses_gfx12_encoding(unsupported));
+  EXPECT_FALSE(consan_uses_gfx12_cdna_execution(unsupported));
+  EXPECT_FALSE(consan_uses_gfx12_rdna_execution(unsupported));
   EXPECT_FALSE(consan_uses_gfx11_or_gfx12_encoding(unsupported));
+  EXPECT_FALSE(consan_arch_is_cdna(unsupported));
+  EXPECT_FALSE(consan_arch_is_rdna(unsupported));
   EXPECT_FALSE(consan_arch_has_s_call_i64(unsupported));
   EXPECT_FALSE(consan_arch_has_s_call_b64(unsupported));
   EXPECT_FALSE(consan_arch_has_cluster_facilities(unsupported));

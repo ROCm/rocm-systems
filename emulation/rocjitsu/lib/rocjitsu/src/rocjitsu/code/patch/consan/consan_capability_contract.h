@@ -589,6 +589,15 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
   return profile && profile->architecture_family == ConSanArchitectureFamily::Cdna;
 }
 
+/// Return whether an admitted target uses the graphics-oriented RDNA
+/// execution architecture. Callers use this target fact for execution-model
+/// choices that apply across encoding generations; they must not enumerate the
+/// currently supported RDNA products.
+[[nodiscard]] constexpr bool consan_arch_is_rdna(rj_code_arch_t arch) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && profile->architecture_family == ConSanArchitectureFamily::Rdna;
+}
+
 /// Return whether a target can recover system-SGPR payload that overflows the
 /// descriptor's ordinary preload window. Entry-prologue lowering uses this
 /// capability instead of naming the current targets that implement it.
@@ -668,6 +677,25 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
 [[nodiscard]] constexpr bool consan_uses_gfx12_encoding(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->encoding_family == ConSanEncodingFamily::Gfx12;
+}
+
+/// Return whether a target combines GFX12 instruction encodings with CDNA
+/// execution facilities. This operating point currently describes gfx1250,
+/// but the predicate intentionally names the architectural facts that lowering
+/// needs so a future product with the same combination follows the same path.
+[[nodiscard]] constexpr bool consan_uses_gfx12_cdna_execution(rj_code_arch_t arch) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && profile->encoding_family == ConSanEncodingFamily::Gfx12 &&
+         profile->architecture_family == ConSanArchitectureFamily::Cdna;
+}
+
+/// Return whether a target combines GFX12 instruction encodings with RDNA
+/// execution facilities. This keeps encoding decisions distinct from CDNA's
+/// different preload, register-bank, and persistent-state contracts.
+[[nodiscard]] constexpr bool consan_uses_gfx12_rdna_execution(rj_code_arch_t arch) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && profile->encoding_family == ConSanEncodingFamily::Gfx12 &&
+         profile->architecture_family == ConSanArchitectureFamily::Rdna;
 }
 
 [[nodiscard]] constexpr bool consan_uses_gfx11_encoding(rj_code_arch_t arch) {
