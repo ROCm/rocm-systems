@@ -178,23 +178,25 @@ extern bool IbCastUseInline;
 /*
  * imm_data layout — default (non-BY_ID) scheme (32-bit):
  *
- *   31       24 23  22                           0
- *  +----------+----+-----------------------------+
- *  |  reqIdx  | SD |       size (23 bits)        |
- *  | (8 bits) |    |                             |
- *  +----------+----+-----------------------------+
+ *   31       24 23   22   21                      0
+ *  +----------+----+----+-------------------------+
+ *  |  reqIdx  | SD | SG |     size (22 bits)      |
+ *  | (8 bits) |    |    |                         |
+ *  +----------+----+----+-------------------------+
  *
  *  reqIdx : receiver-side request index
  *  SD     : split-data flag (set when data spans >1 QPs)
+ *  SG     : segmented flag (completion sizes were written separately)
  *  size   : transfer size in bytes
  */
 #define WR_IMM_RX_REQ_IDX_BITS  8
 #define WR_IMM_RX_REQ_IDX_BIT_POS 24
 #define WR_IMM_RX_REQ_IDX_MASK  (((1u << WR_IMM_RX_REQ_IDX_BITS) - 1) << WR_IMM_RX_REQ_IDX_BIT_POS)
-#define WR_IMM_SIZE_BITS        23
+#define WR_IMM_SIZE_BITS        22
 #define WR_IMM_SIZE_BIT_POS       0
 #define WR_IMM_SIZE_MASK        (((1u << WR_IMM_SIZE_BITS) - 1) << WR_IMM_SIZE_BIT_POS)
-#define WR_IMM_SPLIT_DATA_FLAG  (1u << WR_IMM_SIZE_BITS)
+#define WR_IMM_SEGMENTED_FLAG   (1u << WR_IMM_SIZE_BITS)
+#define WR_IMM_SPLIT_DATA_FLAG  (1u << (WR_IMM_SIZE_BITS + 1))
 
 /*
  * imm_data layout — BY_ID scheme (32-bit, QP sharing enabled):
@@ -207,6 +209,7 @@ extern bool IbCastUseInline;
  *
  *  reqId  : receiver-side request index (NET_IB_MAX_REQUESTS <= 256)
  *  commId : receiver commId for routing completions to the right comm
+ *  Mutually exclusive with the BY_INDEX size/flag encoding above.
  */
 #define WR_IMM_BYID_REQ_ID_BITS   8
 #define WR_IMM_BYID_REQ_ID_BIT_POS  0
@@ -397,6 +400,9 @@ struct ncclIbRequest {
       // resolve the per-segment local lkey. NULL/single-segment handles use
       // lkeys[] directly on the fast path.
       struct ncclIbMrHandle* mh;
+      // At most one segmented multi-recv group is active per communicator so
+      // its worst-case WR chain cannot overrun the data QP send queue.
+      bool segmented;
       // Tracks whether data was transmitted on a QP for this request.
       bool sentData[NCCL_IB_MAX_QPS];
     } send;
@@ -453,11 +459,6 @@ struct alignas(32) ncclIbSendFifoCtsInline {
   char padding[8];
 } __attribute__((packed));
 
-// Connect-time capability: peer registered a side table immediately after the
-// 64-byte CTS FIFO. Mixed nSegments<=1 traffic stays bit-compatible with stock
-// CAST; nSegments>1 requires this bit. Same value as classic net_ib.
-#define NCCL_IB_CAP_MULTISEG 0x1u
-
 // Receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx must
 // equal the CTS slot's idx so a later single-segment reuse of the same CTS
 // index ignores a stale side slot.
@@ -473,6 +474,9 @@ struct alignas(64) ncclIbSegLayout {
 // request's chunk may be split at every local and remote segment boundary it
 // spans. Single-segment sends use exactly one WR per request.
 #define NCCL_IB_MAX_WRS_PER_SEND (NCCL_NET_IB_MAX_RECVS * 2 * NCCL_IB_MAX_SEGMENTS)
+// Reserve the legacy two-WQE budget for every request plus one worst-case
+// segmented group. The data path admits only one such group at a time.
+#define NCCL_IB_MAX_SEND_WRS (2 * NET_IB_MAX_REQUESTS + NCCL_IB_MAX_WRS_PER_SEND + 1)
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
