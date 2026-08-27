@@ -342,6 +342,48 @@ struct ConSanAtomicSite {
          site.mnemonic.find("cmpxchg") != std::string::npos;
 }
 
+/// Kind of original program container through which an instruction was
+/// decoded.
+///
+/// Multiple symbols can alias the same physical instruction. The container is
+/// therefore attribution and ownership evidence, not part of
+/// `PhysicalSiteId` and not permission to instrument the instruction twice.
+enum class ConSanProgramContainerKind : uint8_t {
+  /// A dispatchable kernel descriptor and its executable text range.
+  Kernel,
+  /// A non-kernel function symbol, commonly a helper reached by one or more
+  /// kernels.
+  Function,
+  /// One past the last kind. This is an iteration bound and never a valid
+  /// container reference.
+  Count,
+};
+
+/// Attribution reference from a semantic site to the symbol range through
+/// which it was decoded.
+///
+/// Kernel descriptor identity is optional because function aliases do not own
+/// a descriptor. Execution owners are kept separately: a shared function can
+/// be decoded through one symbol yet execute for several kernel descriptors.
+struct ConSanProgramContainerRef {
+  /// Whether the symbol is a dispatchable kernel or a helper function.
+  ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
+  /// Symbol name retained for diagnostics and temporary legacy lookup.
+  std::string name;
+  /// Original executable-text entry offset of the symbol range.
+  uint64_t entry_text_offset = 0;
+  /// Descriptor file offset for a kernel; absent for a function.
+  std::optional<uint64_t> kernel_descriptor_file_offset;
+  /// Whether this container's code observes the gfx1250 cluster workgroup ID.
+  bool uses_gfx1250_cluster_workgroup_id = false;
+
+  /// Return whether this attribution record names a dispatchable kernel. The
+  /// result is derived from `kind`, so no parallel boolean can disagree.
+  [[nodiscard]] bool is_kernel() const { return kind == ConSanProgramContainerKind::Kernel; }
+
+  bool operator==(const ConSanProgramContainerRef &) const = default;
+};
+
 /// Instruction family from which one normalized access fact originated.
 ///
 /// This is decoder provenance, not engine applicability. `DirectToLds` names
@@ -425,9 +467,7 @@ struct ConSanMoiAccessRange {
 };
 
 struct ConSanMoiCandidate {
-  std::string container_name;
-  bool in_kernel = true;
-  uint64_t container_entry_text_offset = 0;
+  ConSanProgramContainerRef container;
   std::optional<uint16_t> gfx1250_vgpr_msb_mode;
   ConSanAccessOrigin origin = ConSanAccessOrigin::NativeLds;
   ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
@@ -438,7 +478,6 @@ struct ConSanMoiCandidate {
   uint32_t width_bits = 0;
   ConSanAccessOperandFacts operands;
   std::optional<uint64_t> kernel_descriptor_file_offset;
-  bool uses_gfx1250_cluster_workgroup_id = false;
   std::string mnemonic;
   /// Normalized ranges copied from the admitted `ProgramInventory` site.
   /// Lowering must not reopen pristine bytes to classify or decode them.

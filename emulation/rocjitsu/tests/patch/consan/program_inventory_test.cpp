@@ -76,9 +76,6 @@ exclusion_reasons(const ConSanAccessInventorySite &site) {
 TEST(ConSanProgramInventory, EnumContractsAreExhaustiveNamedAndRejectInvalidValues) {
   expect_complete_enum_contract(kConSanSemanticSiteDomains, ConSanSemanticSiteDomain::Count,
                                 consan_semantic_site_domain_name, "invalid-semantic-site-domain");
-  expect_complete_enum_contract(kConSanProgramContainerKinds, ConSanProgramContainerKind::Count,
-                                consan_program_container_kind_name,
-                                "invalid-program-container-kind");
   expect_complete_enum_contract(kConSanAccessOrigins, ConSanAccessOrigin::Count,
                                 consan_access_origin_name, "invalid-access-origin");
   expect_complete_enum_contract(kConSanAccessAddressSpaces, ConSanAccessAddressSpace::Count,
@@ -153,10 +150,12 @@ TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
   container.entry_text_offset = 64;
   container.kernel_descriptor_file_offset = 128;
   container.uses_gfx1250_cluster_workgroup_id = true;
+  EXPECT_TRUE(container.is_kernel());
   EXPECT_EQ(container, container);
   ConSanProgramContainerRef function = container;
   function.kind = ConSanProgramContainerKind::Function;
   function.kernel_descriptor_file_offset.reset();
+  EXPECT_FALSE(function.is_kernel());
   EXPECT_NE(container, function);
 
   ConSanAccessOperandFacts operands;

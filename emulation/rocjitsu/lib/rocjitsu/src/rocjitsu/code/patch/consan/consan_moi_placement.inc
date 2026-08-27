@@ -3628,7 +3628,7 @@ void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidate
     return;
   std::erase_if(candidates, [&](const ConSanMoiCandidate *candidate) {
     return candidate == nullptr ||
-           candidate->container_name.find(options.test_kernel_name_filter) == std::string::npos;
+           candidate->container.name.find(options.test_kernel_name_filter) == std::string::npos;
   });
 }
 
@@ -4977,8 +4977,8 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
     const bool needs_dense_router =
         ordinary_access_count >= 8u ||
         std::ranges::any_of(result.moi_candidates, [](const ConSanMoiCandidate &candidate) {
-          return !candidate.in_kernel && (candidate.kind == ConSanLdsAccessKind::Read ||
-                                          candidate.kind == ConSanLdsAccessKind::Write);
+          return !candidate.container.is_kernel() && (candidate.kind == ConSanLdsAccessKind::Read ||
+                                                      candidate.kind == ConSanLdsAccessKind::Write);
         });
     uint32_t initialized_end = 0;
     for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {

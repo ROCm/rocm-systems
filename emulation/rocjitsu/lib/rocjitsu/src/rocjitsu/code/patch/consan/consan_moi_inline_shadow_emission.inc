@@ -2754,7 +2754,7 @@
     words.insert(words.end(), accounting_words.begin(), accounting_words.end());
     words.push_back(*restore_valid_exec);
   }
-  if (candidate.in_kernel && candidate.origin == ConSanAccessOrigin::Flat &&
+  if (candidate.container.is_kernel() && candidate.origin == ConSanAccessOrigin::Flat &&
       candidate.flat_address_space_hint != ConSanFlatAddressSpaceHint::Group) {
     // Likely provenance deliberately admits flat sites whose static dataflow
     // cannot prove one aperture. Resolve that uncertainty with the same high

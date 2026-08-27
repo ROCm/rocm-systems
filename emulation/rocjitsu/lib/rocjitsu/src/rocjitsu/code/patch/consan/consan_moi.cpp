@@ -531,13 +531,13 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     return result;
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     for (ConSanMoiCandidate &candidate : result.moi_candidates) {
-      if (candidate.text_offset < candidate.container_entry_text_offset ||
+      if (candidate.text_offset < candidate.container.entry_text_offset ||
           candidate.file_offset < candidate.text_offset)
         continue;
       const uint64_t text_file_offset = candidate.file_offset - candidate.text_offset;
       candidate.gfx1250_vgpr_msb_mode =
           gfx1250_vgpr_msb_mode_at(code_object_bytes, text_file_offset,
-                                   candidate.container_entry_text_offset, candidate.file_offset);
+                                   candidate.container.entry_text_offset, candidate.file_offset);
     }
   }
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&

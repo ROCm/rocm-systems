@@ -5160,7 +5160,8 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
   candidate.access_ranges.push_back({.static_byte_offset = 0u, .byte_count = sizeof(uint32_t)});
   candidate.file_offset = 0u;
   candidate.text_offset = 0u;
-  candidate.container_name = "auto_report_access";
+  candidate.container.kind = rocjitsu::ConSanProgramContainerKind::Kernel;
+  candidate.container.name = "auto_report_access";
   candidate.mnemonic = "ds_store_b32";
   result.moi_candidates.push_back(std::move(candidate));
   install_test_access_coverage(result, 1u, rocjitsu::ConSanSiteDecisionKind::Admitted,

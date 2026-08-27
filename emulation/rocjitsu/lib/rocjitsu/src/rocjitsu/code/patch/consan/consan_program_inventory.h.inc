@@ -1,68 +1,6 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// Kind of original program container through which an instruction was
-/// decoded.
-///
-/// Multiple symbols can alias the same physical instruction. The container is
-/// therefore attribution and ownership evidence, not part of
-/// `PhysicalSiteId` and not permission to instrument the instruction twice.
-enum class ConSanProgramContainerKind : uint8_t {
-  /// A dispatchable kernel descriptor and its executable text range.
-  Kernel,
-  /// A non-kernel function symbol, commonly a helper reached by one or more
-  /// kernels.
-  Function,
-  /// One past the last kind. This is an iteration bound and never a valid
-  /// container reference.
-  Count,
-};
-
-/// Complete iterable set of original-program container kinds.
-inline constexpr std::array<ConSanProgramContainerKind, 2> kConSanProgramContainerKinds = {
-    ConSanProgramContainerKind::Kernel,
-    ConSanProgramContainerKind::Function,
-};
-
-/// Return the stable diagnostic spelling of an original-program container
-/// kind. Invalid values never default to kernel or function attribution.
-[[nodiscard]] constexpr std::string_view
-consan_program_container_kind_name(ConSanProgramContainerKind kind) {
-  switch (kind) {
-  case ConSanProgramContainerKind::Kernel:
-    return "kernel";
-  case ConSanProgramContainerKind::Function:
-    return "function";
-  case ConSanProgramContainerKind::Count:
-    break;
-  }
-  return "invalid-program-container-kind";
-}
-
-static_assert(kConSanProgramContainerKinds.size() ==
-              static_cast<size_t>(ConSanProgramContainerKind::Count));
-
-/// Attribution reference from a semantic site to the symbol range through
-/// which it was decoded.
-///
-/// Kernel descriptor identity is optional because function aliases do not own
-/// a descriptor. Execution owners are kept separately: a shared function can
-/// be decoded through one symbol yet execute for several kernel descriptors.
-struct ConSanProgramContainerRef {
-  /// Whether the symbol is a dispatchable kernel or a helper function.
-  ConSanProgramContainerKind kind = ConSanProgramContainerKind::Count;
-  /// Symbol name retained for diagnostics and temporary legacy lookup.
-  std::string name;
-  /// Original executable-text entry offset of the symbol range.
-  uint64_t entry_text_offset = 0;
-  /// Descriptor file offset for a kernel; absent for a function.
-  std::optional<uint64_t> kernel_descriptor_file_offset;
-  /// Whether this container's code observes the gfx1250 cluster workgroup ID.
-  bool uses_gfx1250_cluster_workgroup_id = false;
-
-  bool operator==(const ConSanProgramContainerRef &) const = default;
-};
-
 /// Normalized address-space fact relevant to ConSan access policy.
 ///
 /// The inventory distinguishes group memory, definitely non-group memory, and

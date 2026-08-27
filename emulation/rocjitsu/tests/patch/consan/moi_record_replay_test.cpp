@@ -73,8 +73,8 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   ASSERT_EQ(result.moi_candidates.size(), 2u);
   EXPECT_EQ(result.moi_candidates[0].origin, ConSanAccessOrigin::NativeLds);
   EXPECT_EQ(result.moi_candidates[0].kind, ConSanLdsAccessKind::Write);
-  EXPECT_TRUE(result.moi_candidates[0].in_kernel);
-  EXPECT_EQ(result.moi_candidates[0].container_name, "lds_probe");
+  EXPECT_EQ(result.moi_candidates[0].container.kind, ConSanProgramContainerKind::Kernel);
+  EXPECT_EQ(result.moi_candidates[0].container.name, "lds_probe");
   EXPECT_EQ(result.moi_candidates[0].mnemonic, "ds_store_b32");
   EXPECT_EQ(result.moi_candidates[0].text_offset, 0u);
   EXPECT_EQ(result.moi_candidates[0].file_offset, 0x100u);
@@ -207,7 +207,7 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().container_name, "shared_owner_0");
+  EXPECT_EQ(result.moi_candidates.front().container.name, "shared_owner_0");
   EXPECT_FALSE(result.moi_candidates.front().kernel_descriptor_file_offset);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncEventKind::Barrier);
@@ -1979,7 +1979,7 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
   ASSERT_NE(first_kernel, result.program_inventory.kernels().end());
   EXPECT_TRUE(first_kernel->code_size_inferred_from_zero);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().container_name, "lds_probe");
+  EXPECT_EQ(result.moi_candidates.front().container.name, "lds_probe");
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_b16");
   EXPECT_EQ(result.moi_candidates.front().text_offset, 0u);
   ASSERT_EQ(result.resource_plans.size(), 1u);

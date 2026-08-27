@@ -143,7 +143,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   }
   const bool has_cluster_workgroup_id =
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
-        return candidate->uses_gfx1250_cluster_workgroup_id;
+        return candidate->container.uses_gfx1250_cluster_workgroup_id;
       });
   const uint64_t runtime_gate_island_words = moi_runtime_workgroup_gate_reserved_words(
       static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)),
@@ -177,7 +177,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       access_relay_words + (has_branch_only_scalar_assignment ? 2u : 0u);
   const bool has_unreachable_function_candidate =
       std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
-        return !candidate->in_kernel &&
+        return !candidate->container.is_kernel() &&
                !compute_sopp_branch_simm16(candidate->text_offset, original_text_size);
       });
   const bool use_indirect_appended =
@@ -261,7 +261,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::map<std::pair<bool, std::string>, std::vector<const ConSanMoiCandidate *>> owner_groups;
     for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
       const ConSanMoiCandidate *candidate = candidates[candidate_index];
-      owner_groups[{candidate->in_kernel, candidate->container_name}].push_back(candidate);
+      owner_groups[{candidate->container.is_kernel(), candidate->container.name}].push_back(
+          candidate);
     }
     constexpr uint64_t kMaxCommonRelayAnchorSpan =
         static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -

@@ -3971,6 +3971,39 @@ analysis completed.
   representation cutover preserves the selected access set and emitted bytes.
   E2E validation remains outside this work.
 
+### Slice 5AB: consume normalized program-container identity
+
+- **One attribution record, not four parallel fields:** Every normalized
+  access already names the `ConSanProgramContainerRef` through which it was
+  decoded. The temporary MOI candidate now retains that typed record directly
+  instead of separately copying a name, kernel/function boolean, entry offset,
+  and gfx1250 cluster-ID-use flag. The independently selected execution-owner
+  descriptor remains a lowering decision because a shared helper may execute
+  for more than one kernel.
+- **Typed kernel identity:** `ConSanProgramContainerRef::is_kernel()` derives
+  dispatchability from the enum and is the sole boolean query used by access
+  planning. Its kernel and function results have focused unit coverage; no
+  stored boolean can disagree with the normalized kind.
+- **Completed incidental deletion:** The container-kind iterable table and
+  formatter had no production consumer; only their own mechanism test called
+  them. They are deleted rather than moved with the real type. Ownership
+  grouping, name filtering, entry-state lookup, shared-helper routing, and
+  cluster-aware runtime gates all consume the normalized container record.
+- **Contract coverage:** Host tests assert kernel and function attribution on
+  the normalized record. Existing paired device contracts exercise shared
+  helpers, cross-kernel dispatch identity, multi-owner routing, and gfx1250
+  cluster workgroup identity across every applicable engine and target.
+- **Deletion result:** Production source is 19 physical lines smaller. Test
+  source adds three net lines for the typed kernel/function query and updated
+  normalized-record assertions. No compatibility accessor, copied boolean, or
+  second container schema was introduced.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 74.25
+  seconds. The complete physical-gfx950 gate was exercised in Slice 5X; this
+  attribution cutover preserves selected sites and emitted bytes. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

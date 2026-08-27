@@ -1105,8 +1105,8 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
   EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
-  EXPECT_FALSE(candidate.in_kernel);
-  EXPECT_EQ(candidate.container_name, "lds_helper");
+  EXPECT_EQ(candidate.container.kind, ConSanProgramContainerKind::Function);
+  EXPECT_EQ(candidate.container.name, "lds_helper");
   EXPECT_EQ(candidate.mnemonic, "flat_load_b32");
   EXPECT_EQ(candidate.text_offset, 24u);
   EXPECT_EQ(candidate.file_offset, 0x118u);
@@ -1137,8 +1137,8 @@ TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
   ASSERT_EQ(result.program_inventory.kernels().size(), 3u);
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_FALSE(result.moi_candidates.front().in_kernel);
-  EXPECT_EQ(result.moi_candidates.front().container_name, "shared_lds_helper");
+  EXPECT_EQ(result.moi_candidates.front().container.kind, ConSanProgramContainerKind::Function);
+  EXPECT_EQ(result.moi_candidates.front().container.name, "shared_lds_helper");
   ASSERT_EQ(result.resource_plans.size(), 1u);
   const ConSanCandidateResourcePlan &plan = result.resource_plans.front();
   ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
@@ -2262,7 +2262,7 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
       const auto site = std::ranges::find_if(
           result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &access) {
             return access.physical_id.original_text_offset == candidate.text_offset &&
-                   access.container.name == candidate.container_name;
+                   access.container.name == candidate.container.name;
           });
       ASSERT_NE(site, result.program_inventory.access_sites().end());
       ASSERT_EQ(candidate.access_ranges.size(), site->ranges.size());

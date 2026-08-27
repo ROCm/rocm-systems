@@ -337,7 +337,8 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
 
   std::set<std::pair<bool, std::string_view>> candidate_owners;
   for (const ConSanMoiCandidate &candidate : retried.moi_candidates)
-    candidate_owners.emplace(candidate.in_kernel, candidate.container_name);
+    candidate_owners.emplace(candidate.container.kind == ConSanProgramContainerKind::Kernel,
+                             candidate.container.name);
 
   std::cout << "report_retry_benchmark bytes=" << bytes.size() << " inventory_ms=" << inventory_ms
             << " fresh_live_ms=" << fresh_ms << " retry_ms=" << retry_ms

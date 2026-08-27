@@ -253,7 +253,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id.has_value() ||
       options.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id.has_value() ||
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
-        return candidate->uses_gfx1250_cluster_workgroup_id;
+        return candidate->container.uses_gfx1250_cluster_workgroup_id;
       });
   const uint64_t sampled_access_island_words = moi_runtime_workgroup_gate_reserved_words(
       static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)),
@@ -273,8 +273,10 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       arch == ROCJITSU_CODE_ARCH_CDNA5 ? 20u : (needs_large_explicit_key_relay ? 20u : 10u);
   const uint64_t access_relay_words =
       std::max(ordinary_access_relay_words, access_island_word_count);
-  const bool has_function_candidate = std::ranges::any_of(
-      candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
+  const bool has_function_candidate =
+      std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
+        return !candidate->container.is_kernel();
+      });
   const bool has_spill_backed_scalar_assignment = std::ranges::any_of(
       options.moi_transient_sgpr_assignments, &ConSanMoiTransientSgprAssignment::spill_backed);
   const bool has_branch_only_scalar_assignment =
@@ -336,7 +338,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     std::map<std::pair<bool, std::string>, std::vector<const ConSanMoiCandidate *>> owner_groups;
     for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
       const ConSanMoiCandidate *candidate = candidates[candidate_index];
-      owner_groups[{candidate->in_kernel, candidate->container_name}].push_back(candidate);
+      owner_groups[{candidate->container.is_kernel(), candidate->container.name}].push_back(
+          candidate);
     }
     constexpr uint64_t kMaxCommonRelayAnchorSpan =
         static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -

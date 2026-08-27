@@ -171,8 +171,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   // the final terminator. Keep RDNA4's compact spacing: its explicit-key
   // groups do not carry the gfx1250 call-return and adjustment sequences.
   const uint64_t access_relay_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 28u : 20u;
-  const bool has_function_candidate = std::ranges::any_of(
-      candidates, [](const ConSanMoiCandidate *candidate) { return !candidate->in_kernel; });
+  const bool has_function_candidate =
+      std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
+        return !candidate->container.is_kernel();
+      });
   std::unordered_set<uint64_t> dynamic_lds_descriptors;
   for (const AmdGpuKernelInfo &kernel : code_object.kernels()) {
     if (kernel.has_dynamic_lds)
@@ -288,7 +290,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     std::map<std::pair<bool, std::string>, std::vector<const ConSanMoiCandidate *>> owner_groups;
     for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
       const ConSanMoiCandidate *candidate = candidates[candidate_index];
-      owner_groups[{candidate->in_kernel, candidate->container_name}].push_back(candidate);
+      owner_groups[{candidate->container.is_kernel(), candidate->container.name}].push_back(
+          candidate);
     }
     constexpr uint64_t kMaxCommonRelayAnchorSpan =
         static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
@@ -647,7 +650,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     if (options.moi_inline_workgroup_shadow && !requires_wave_partitioned_exact_shadow &&
         !has_unspilled_component_override && !spill_backed_scalar_state) {
       uint16_t next_compact_token = 0u;
-      if (candidate.in_kernel && candidate.kernel_descriptor_file_offset) {
+      if (candidate.container.is_kernel() && candidate.kernel_descriptor_file_offset) {
         uint16_t &next = next_compact_token_by_descriptor[*candidate.kernel_descriptor_file_offset];
         if (next == 0u)
           next = 1u;
@@ -2594,7 +2597,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   }
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors,
-      candidate.uses_gfx1250_cluster_workgroup_id);
+      candidate.container.uses_gfx1250_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;
 

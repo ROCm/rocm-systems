@@ -360,9 +360,7 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
 /// address space, confidence, or logical ranges.
 [[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanAccessInventorySite &access) {
   ConSanMoiCandidate candidate;
-  candidate.container_name = access.container.name;
-  candidate.in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
-  candidate.container_entry_text_offset = access.container.entry_text_offset;
+  candidate.container = access.container;
   candidate.origin = access.origin;
   candidate.kind = access.kind;
   candidate.flat_address_space_hint = access.flat_address_space_hint;
@@ -375,7 +373,6 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
     candidate.kernel_descriptor_file_offset =
         access.execution_owner_descriptor_file_offsets.front();
   }
-  candidate.uses_gfx1250_cluster_workgroup_id = access.container.uses_gfx1250_cluster_workgroup_id;
   candidate.mnemonic = access.mnemonic;
   for (const ConSanAccessRange &range : access.ranges) {
     if (access.origin == ConSanAccessOrigin::Flat) {
