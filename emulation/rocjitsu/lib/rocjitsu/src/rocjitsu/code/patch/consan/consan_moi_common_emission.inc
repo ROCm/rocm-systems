@@ -2672,6 +2672,9 @@ template <typename PlannedPatch>
   if (group.empty() || group.front()->candidate == nullptr || !group.front()->entry_island_offset) {
     return fail("received an incomplete dense access route");
   }
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return fail("has no target profile");
 
   const bool inline_shadow_route = group_options.moi_engine == ConSanMoiEngine::InlineShadow;
   uint16_t pc_sgpr = 0u;
@@ -2797,16 +2800,8 @@ template <typename PlannedPatch>
       words.push_back(*restore);
       return true;
     }
-    const uint16_t bitcmp_opcode =
-        arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::kSBitcmp1B32Sopc : cdna4::kSBitcmp1B32Sopc;
-    const auto normalize = instrumentation::build_s_cselect_b32(
-        key_sgpr, scalar_positive_inline_u32(1), scalar_positive_inline_u32(0), arch);
-    if (!normalize)
-      return false;
-    words.push_back(
-        build_sopc_encoding(arch, bitcmp_opcode, key_sgpr, scalar_positive_inline_u32(0)));
-    words.push_back(*normalize);
-    return true;
+    return consan_detail::append_restore_moi_scc_from_route_key(words, {.encoded_sgpr = key_sgpr},
+                                                                *target);
   };
   if (entry_host != entry_hosts.end()) {
     if (arch == ROCJITSU_CODE_ARCH_CDNA5) {

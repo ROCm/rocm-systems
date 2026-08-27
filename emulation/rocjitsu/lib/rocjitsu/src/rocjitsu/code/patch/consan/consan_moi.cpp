@@ -22,6 +22,8 @@
 #include "rocjitsu/code/patch/instrumentation_builder.h"
 #include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -210,6 +212,32 @@ bool consan_detail::append_restore_moi_special_state(std::vector<uint32_t> &word
     return false;
   words.push_back(*restore_vcc);
   words.push_back(*restore_scc);
+  return true;
+}
+
+bool consan_detail::append_restore_moi_scc_from_route_key(
+    std::vector<uint32_t> &words, const MoiEncodedSccRestoreRequest &request,
+    const ConSanTargetProfile &target) {
+  uint16_t bit_test_opcode = 0u;
+  switch (target.encoding_family) {
+  case ConSanEncodingFamily::Gfx9Cdna3:
+    bit_test_opcode = cdna3::kSBitcmp1B32Sopc;
+    break;
+  case ConSanEncodingFamily::Gfx9Cdna4:
+    bit_test_opcode = cdna4::kSBitcmp1B32Sopc;
+    break;
+  case ConSanEncodingFamily::Gfx11:
+  case ConSanEncodingFamily::Gfx12:
+    return false;
+  }
+  const auto normalize =
+      instrumentation::build_s_cselect_b32(request.encoded_sgpr, scalar_positive_inline_u32(1),
+                                           scalar_positive_inline_u32(0), target.arch);
+  if (!normalize)
+    return false;
+  words.push_back(build_sopc_encoding(target.arch, bit_test_opcode, request.encoded_sgpr,
+                                      scalar_positive_inline_u32(0)));
+  words.push_back(*normalize);
   return true;
 }
 

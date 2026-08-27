@@ -183,6 +183,28 @@ struct MoiSpecialStateSgprs {
                                                     const MoiSpecialStateSgprs &registers,
                                                     const ConSanTargetProfile &target);
 
+/// Semantic request to restore SCC from bit zero of a scalar route key.
+///
+/// Dense routers may pack the caller's boolean SCC value into the otherwise
+/// aligned low bit of a route key. `encoded_sgpr` names that key; the target
+/// operation owns the generation-specific bit-test opcode and normalizes the
+/// resulting SCC back through a scalar conditional select. The request does
+/// not expose those encoding details to routing policy.
+struct MoiEncodedSccRestoreRequest {
+  uint16_t encoded_sgpr = 0;
+
+  bool operator==(const MoiEncodedSccRestoreRequest &) const = default;
+};
+
+/// Append the target sequence that restores SCC from an encoded route key.
+///
+/// Only target profiles with the qualified gfx9 CDNA bit-test forms are
+/// admitted. Unsupported targets or invalid register assignments return false
+/// without changing `words`.
+[[nodiscard]] bool append_restore_moi_scc_from_route_key(std::vector<uint32_t> &words,
+                                                         const MoiEncodedSccRestoreRequest &request,
+                                                         const ConSanTargetProfile &target);
+
 /// Canonical set of occupied half-open ranges in pristine executable text.
 ///
 /// Dense relay placement must reject original instructions already owned by
