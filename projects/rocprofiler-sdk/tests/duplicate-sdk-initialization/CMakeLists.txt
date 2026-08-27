@@ -10,14 +10,24 @@ target_sources(rocprofiler-sdk-duplicate-initialization-test PRIVATE main.cpp)
 target_link_libraries(
     rocprofiler-sdk-duplicate-initialization-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers ${CMAKE_DL_LIBS})
-add_dependencies(rocprofiler-sdk-duplicate-initialization-test
-                 rocprofiler-sdk-shared-library
-                 rocprofiler-sdk-test-duplicate-shared-library)
+
+if(TARGET rocprofiler-sdk-test-duplicate-shared-library)
+    set(_duplicate_sdk "$<TARGET_FILE:rocprofiler-sdk-test-duplicate-shared-library>")
+    add_dependencies(rocprofiler-sdk-duplicate-initialization-test
+                     rocprofiler-sdk-shared-library
+                     rocprofiler-sdk-test-duplicate-shared-library)
+else()
+    set(_duplicate_sdk
+        "${ROCPROFILER_SDK_TESTS_SOURCE_DIR}/duplicate-sdk/librocprofiler-sdk.so")
+    if(NOT EXISTS "${_duplicate_sdk}")
+        message(FATAL_ERROR "Missing installed duplicate rocprofiler-sdk: ${_duplicate_sdk}")
+    endif()
+endif()
 
 rocprofiler_add_integration_execute_test(
     duplicate-sdk-initialization
     TARGET rocprofiler-sdk-duplicate-initialization-test
-    ARGS "$<TARGET_FILE:rocprofiler-sdk-test-duplicate-shared-library>"
+    ARGS "${_duplicate_sdk}"
     PRELOAD "$<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>"
     ENVIRONMENT "ROCPROFILER_LIBRARY_CTOR=1"
     TIMEOUT 30

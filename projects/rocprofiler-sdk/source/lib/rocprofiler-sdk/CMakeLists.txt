@@ -130,7 +130,7 @@ install(
 # ----------------------------------------------------------------------------------------#
 
 if(ROCPROFILER_BUILD_TESTS)
-    add_library(rocprofiler-sdk-test-duplicate-shared-library EXCLUDE_FROM_ALL SHARED)
+    add_library(rocprofiler-sdk-test-duplicate-shared-library SHARED)
 
     target_sources(
         rocprofiler-sdk-test-duplicate-shared-library
@@ -153,6 +153,12 @@ if(ROCPROFILER_BUILD_TESTS)
                    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/duplicate-sdk"
                    BUILD_RPATH "\$ORIGIN"
                    DEFINE_SYMBOL rocprofiler_EXPORTS)
+
+    install(
+        TARGETS rocprofiler-sdk-test-duplicate-shared-library
+        LIBRARY DESTINATION
+                ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/duplicate-sdk
+        COMPONENT tests)
 endif()
 
 # ----------------------------------------------------------------------------------------#

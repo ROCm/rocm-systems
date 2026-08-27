@@ -111,11 +111,8 @@ add_subdirectory(late-start-tracing)
 # multiple anytime tool configuration validation tests
 add_subdirectory(multi-tool-test)
 
-# duplicate rocprofiler-sdk initialization validation test. The test-only duplicate shared
-# library is only available when the tests are built as part of the rocprofiler-sdk source tree.
-if(TARGET rocprofiler-sdk-test-duplicate-shared-library)
-    add_subdirectory(duplicate-sdk-initialization)
-endif()
+# duplicate rocprofiler-sdk initialization validation test
+add_subdirectory(duplicate-sdk-initialization)
 
 # anytime tool configuration (force_configure) validation tests
 add_subdirectory(anytime-tool-config)
