@@ -231,8 +231,8 @@ if(BUILD_TESTS)
   endforeach()
 
   # ---------------------------------------------------------------------------
-  # rccl-UnitTestsMicroWrap: host-only microtests for src/rccl_wrap.cc (JIRA:
-  # TBD). Same #include-the-unit-under-test model as rccl-UnitTestsMicroInit,
+  # rccl-UnitTestsMicroWrap: host-only microtests for src/rccl_wrap.cc
+  # (AICOMRCCL-2195). Same #include-the-unit-under-test model as rccl-UnitTestsMicroInit,
   # single binary (no HIP_*_UNCACHED_MEMORY-style split needed -- rccl_wrap.cc
   # has no such preprocessor arm). Its own dedicated fail-loud stub floor
   # (fakes/wrap_stubs.cc) rather than reusing nccl_stubs.cc/bootstrap_stubs.cc/

@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/rccl_wrap.cc (JIRA: TBD).
+// Host-only microtests for src/rccl_wrap.cc (AICOMRCCL-2195).
 //
 // Like init-test.cc / p2p-test.cc, this TU #includes the hipified
 // unit-under-test source directly (via WRAP_CC_PATH) so its helpers become

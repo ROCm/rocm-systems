@@ -58,7 +58,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   the two together is a duplicate-symbol error. Currently covers a first,
   low-dependency batch of helpers (no `RCCL_PARAM`, no `getenv`, no DDA/CE/
   symmetric-kernel machinery); see the header comment in `wrap-test.cc` for
-  scope and what's deferred to a later rung. See `test_categories_micro_wrap.yaml`.
+  scope and what's deferred to a future batch. See `test_categories_micro_wrap.yaml`.
 
 Everything below (seams, fakes, coverage) applies to all three; the concrete
 examples use `p2p.cc`.
