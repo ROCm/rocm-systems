@@ -457,8 +457,8 @@ struct HwQueueState {
   bool fanout_replica = false;
 
   /// @brief Append an entry, maintaining accepted_entries.
-  /// @details The single ordered push site, so the acceptance count cannot drift
-  /// from the deque. Callers already hold the CP's queue mutex.
+  /// @details The single ordered push site, so the acceptance count tracks the number
+  /// of pushed entries. Callers already hold the CP's queue mutex.
   void push_entry(DispatchEntry entry) {
     if (accepted_entries < first_accepted_entry_kinds.size())
       first_accepted_entry_kinds[accepted_entries] = entry.kind;
