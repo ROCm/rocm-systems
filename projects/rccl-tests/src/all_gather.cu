@@ -362,9 +362,10 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
     double sec = devUs * 1.0e-6;
     double algBw = (double)totalBytes / 1.0e9 / sec;
     double busBw = algBw * ((double)(nRanksGlobal - 1) / (double)nRanksGlobal);
-    printf("#[ag-devtime] size %12zu B  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
-           totalBytes, gridCtas, loop, skip, devUs, algBw, busBw);
-    fflush(stdout);
+    const char* tierName = gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "SDMA";
+    snprintf(args->devtimeAugmentLine, sizeof(args->devtimeAugmentLine),
+             "#[ag-devtime] size %12zu B  tier %-4s  ctas %2d  loop %2d skip %2d  devtime %10.2f us  algbw %8.2f GB/s  busbw %8.2f GB/s\n",
+             totalBytes, tierName, gridCtas, loop, skip, devUs, algBw, busBw);
   }
   return testSuccess;
 }
