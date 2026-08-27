@@ -899,7 +899,8 @@ hsa_status_t XdnaDriver::ImportMemoryHandle(const core::Agent& agent, core::Driv
     // A drm_file holds at most one GEM handle per object, so importing an allocation this
     // driver already owns hands back the owner's own handle instead of creating one, and
     // releasing that in DestroyMemoryHandle would destroy the allocation.
-    handle->owns_allocation = source->owner != this;
+    handle->owns_allocation =
+        (source->owner != this) || (source->handle != static_cast<uint64_t>(import_params.handle));
 
     // Establish the size from the dma-buf.
     struct stat dmabuf_stat = {};
