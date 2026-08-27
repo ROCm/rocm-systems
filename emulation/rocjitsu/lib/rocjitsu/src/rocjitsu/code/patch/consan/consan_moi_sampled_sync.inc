@@ -811,7 +811,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
       ConSanOptions owner_options = options;
       const std::array<uint64_t, 1> owner_descriptor = {owner.descriptor_file_offset};
-      if (!apply_moi_persistent_vgpr_assignment(owner_options, result.moi_register_allocation,
+      if (!apply_moi_persistent_vgpr_assignment(owner_options, result.moi_operating_point,
                                                 owner_descriptor)) {
         owner_lowering_failure = "missing owner-local persistent assignment";
         break;
@@ -983,9 +983,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       barrier_plan_by_offset.emplace(site.text_offset, resource_plan_index);
     }
     ConSanOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              plan.owner_descriptor_file_offsets) ||
-        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
+        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
                                               plan.owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled barrier lost its owner-local persistent or transient assignment");
@@ -1002,7 +1002,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       result.resource_plans[resource_plan_index] = plan;
     }
     const auto resources = resolve_moi_scratch_plan(plan, candidate_options,
-                                                    result.moi_register_allocation, scratch_count);
+                                                    result.moi_operating_point, scratch_count);
     if (!resources)
       continue;
     candidate_options.scratch_vgpr = resources->base;
@@ -1053,7 +1053,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       candidate_options.moi_record_replay_workgroup_private_offsets =
           planned.private_layout->record_replay_workgroup_offsets;
     }
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync lost its transient scalar assignment");
@@ -1063,7 +1063,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
       candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
     } else if (!apply_moi_persistent_vgpr_assignment(
-                   candidate_options, result.moi_register_allocation,
+                   candidate_options, result.moi_operating_point,
                    planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled barrier sync lost its persistent VGPR assignment");
@@ -1242,7 +1242,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       std::ranges::sort(group_owners);
       group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
       ConSanOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_register_allocation,
+      if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                group_owners)) {
         result.warnings.emplace_back("ConSan MOI sampled barrier sync skipped dense relay in " +
                                      std::string(container_name) +
@@ -1346,7 +1346,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           candidate_options.moi_record_replay_workgroup_private_offsets =
               planned.private_layout->record_replay_workgroup_offsets;
         }
-        if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+        if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                                  planned.resources.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI sampled dense barrier lost its transient scalar assignment");
@@ -1356,7 +1356,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
           candidate_options.moi_owner_vgpr = static_cast<uint16_t>(planned.resources.base + 7u);
           candidate_options.moi_epoch_vgpr = static_cast<uint16_t>(planned.resources.base + 8u);
         } else if (!apply_moi_persistent_vgpr_assignment(
-                       candidate_options, result.moi_register_allocation,
+                       candidate_options, result.moi_operating_point,
                        planned.resources.owner_descriptor_file_offsets)) {
           result.errors.emplace_back(
               "ConSan MOI sampled dense barrier lost its persistent VGPR assignment");
@@ -2101,7 +2101,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     if (!existing)
       result.resource_plans.push_back(plan);
     const auto resources =
-        resolve_moi_scratch_plan(plan, options, result.moi_register_allocation, scratch_count);
+        resolve_moi_scratch_plan(plan, options, result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back("ConSan MOI sampled atomic sync has no " +
                                    std::to_string(scratch_count) + "-VGPR resource plan in " +
@@ -2109,7 +2109,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       continue;
     }
     ConSanOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync lost its owner-local transient scalar assignment");
@@ -2209,7 +2209,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
           planned.private_layout->record_replay_workgroup_offsets;
     }
     if (resolved_options == nullptr &&
-        !apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+        !apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled atomic sync lost its transient scalar assignment");
@@ -2221,7 +2221,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       candidate_options.moi_epoch_vgpr =
           static_cast<uint16_t>(planned.resources.base + SampledAtomicScratchLayout::kEpoch);
     } else if (!apply_moi_persistent_vgpr_assignment(
-                   candidate_options, result.moi_register_allocation,
+                   candidate_options, result.moi_operating_point,
                    planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI sampled atomic sync lost its persistent VGPR assignment");
@@ -2356,7 +2356,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       std::ranges::sort(group_owners);
       group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
       ConSanOptions group_options = options;
-      if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_register_allocation,
+      if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                group_owners)) {
         result.warnings.emplace_back("ConSan MOI sampled atomic sync skipped dense relay in " +
                                      container +
@@ -2809,7 +2809,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       }
     }
     ConSanOptions route_options = options;
-    if (!apply_moi_transient_sgpr_assignment(route_options, result.moi_register_allocation,
+    if (!apply_moi_transient_sgpr_assignment(route_options, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI sampled atomic sync lost its ordinary-route scalar assignment");

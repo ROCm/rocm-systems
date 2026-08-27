@@ -337,7 +337,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanTransformArtifacts result;
-  result.moi_register_allocation.owner_transient_sgprs.assign(initial_owner_transient_sgprs.begin(),
+  result.moi_operating_point.owner_transient_sgprs.assign(initial_owner_transient_sgprs.begin(),
                                                               initial_owner_transient_sgprs.end());
   ConSanPerturbationPlanningState local_perturbation;
   ConSanPerturbationPlanningState &perturbation =

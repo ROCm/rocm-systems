@@ -95,7 +95,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
       result.resource_plans.push_back(plan);
     }
     const auto resources =
-        resolve_moi_scratch_plan(plan, options, result.moi_register_allocation, scratch_count);
+        resolve_moi_scratch_plan(plan, options, result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back("ConSan MOI fence record patch has no usable resource plan");
       continue;
@@ -154,7 +154,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
     if (!record_event)
       continue;
     ConSanOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_register_allocation,
+    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point,
                                        *record_event)) {
       result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
       return;
@@ -233,7 +233,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
   for (const PlannedFenceRecord &planned : selected) {
     const uint64_t cave_text_offset = placement_planner.appended_end();
     ConSanOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_register_allocation,
+    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point,
                                        planned)) {
       result.errors.emplace_back("ConSan MOI fence record patch lost a planned assignment");
       return;
@@ -585,7 +585,7 @@ void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
           state, site_options, ConSanResourceSiteKind::Barrier, index, candidate.site.text_offset,
           candidate.kernel_descriptor_file_offset, scratch_count);
       ConSanOptions owner_options = site_options;
-      if (apply_moi_persistent_vgpr_assignment(owner_options, result.moi_register_allocation,
+      if (apply_moi_persistent_vgpr_assignment(owner_options, result.moi_operating_point,
                                                plan.owner_descriptor_file_offsets)) {
         const uint16_t owner_scratch_count = scratch_count_for(owner_options);
         if (owner_scratch_count != scratch_count) {

@@ -725,7 +725,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   const ConSanOptions exec_planning_base = effective_options;
   const std::vector<ConSanMoiTransientSgprAssignment> exec_planning_base_assignments =
-      result.moi_register_allocation.owner_transient_sgprs;
+      result.moi_operating_point.owner_transient_sgprs;
   const size_t warnings_before_exec_planning = result.warnings.size();
   bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
       effective_options, result, resource_planning_state, moi_candidates);
@@ -736,7 +736,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // stack registers, scalar width, and any architecture-specific scratch
     // demand participate in the same resource proof.
     effective_options = exec_planning_base;
-    result.moi_register_allocation.owner_transient_sgprs = exec_planning_base_assignments;
+    result.moi_operating_point.owner_transient_sgprs = exec_planning_base_assignments;
     effective_options.moi_dynamic_stack_spill = true;
     result.warnings.resize(warnings_before_exec_planning);
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
@@ -751,11 +751,11 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // dispatch override rejects the transform. Unsupported results use this
   // typed partial plan to explain which safe registers had already been
   // established without exposing mutable search options.
-  freeze_moi_register_allocation(effective_options, result);
+  freeze_moi_operating_point(effective_options, result);
   if (configure_moi_dispatch_id_overrides(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   if (result.outcome != ConSanTransformOutcome::Unsupported)
-    freeze_moi_register_allocation(effective_options, result);
+    freeze_moi_operating_point(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
@@ -770,7 +770,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state,
                                                prologue_scratch_assignments))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
-  freeze_moi_register_allocation(effective_options, result);
+  freeze_moi_operating_point(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_vgprs(effective_options, result)) {
     finalize_moi_site_lowering_outcomes(result);
@@ -868,7 +868,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     effective_options.moi_record_replay_workgroup_vgprs = {};
     effective_options.moi_persistent_sgprs.record_replay_workgroup = {};
     effective_options.moi_dispatch_id_vgpr.reset();
-    result.moi_register_allocation.owner_persistent_vgprs.clear();
+    result.moi_operating_point.owner_persistent_vgprs.clear();
     result.warnings.emplace_back(
         "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
         "failed placement");
@@ -900,7 +900,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options,
                                          prologue_scratch_assignments, arch, result);
   if (result.errors.empty())
-    freeze_moi_register_allocation(effective_options, result);
+    freeze_moi_operating_point(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
     finalize_moi_site_lowering_outcomes(result);
     return result;

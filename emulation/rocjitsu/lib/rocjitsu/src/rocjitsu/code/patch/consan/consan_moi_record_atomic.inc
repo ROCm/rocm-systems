@@ -132,7 +132,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     if (!existing_plan)
       result.resource_plans.push_back(plan);
     const auto resources =
-        resolve_moi_scratch_plan(plan, options, result.moi_register_allocation, scratch_count);
+        resolve_moi_scratch_plan(plan, options, result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI atomic record patch has no usable resource plan in " +
@@ -173,7 +173,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     note_moi_probe_private_requirements(private_requirements, planned);
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     ConSanOptions candidate_options = options;
-    if (bind_moi_record_event_options(candidate_options, result.moi_register_allocation, planned)) {
+    if (bind_moi_record_event_options(candidate_options, result.moi_operating_point, planned)) {
       note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
     }
   }
@@ -211,7 +211,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = physical_anchor_offset + site.size;
     ConSanOptions candidate_options = options;
-    if (!bind_moi_record_event_options(candidate_options, result.moi_register_allocation,
+    if (!bind_moi_record_event_options(candidate_options, result.moi_operating_point,
                                        planned)) {
       result.errors.emplace_back("ConSan MOI atomic record patch lost a planned assignment");
       return;

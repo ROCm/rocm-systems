@@ -4642,7 +4642,7 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
   // Reinterpret the already-emitted capture pair as the fixed +12:+13 reload
   // window used by a private-dispatch body, without changing the instruction
   // semantics under test.
-  auto &allocation = with_component_assignment.moi_register_allocation;
+  auto &allocation = with_component_assignment.moi_operating_point;
   allocation.default_transient_sgprs.exec_save_sgpr =
       static_cast<uint16_t>(*test_moi_dispatch_id_sgpr(result) - 12u);
   const auto fixed_assignment =
@@ -4662,7 +4662,7 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
   // code-object-wide private-dispatch reload from final validation.
   ConSanTransformArtifacts with_unrelated_assignment = with_component_assignment;
   auto &unrelated_assignments =
-      with_unrelated_assignment.moi_register_allocation.owner_transient_sgprs;
+      with_unrelated_assignment.moi_operating_point.owner_transient_sgprs;
   std::erase_if(unrelated_assignments, [&](const ConSanMoiTransientSgprAssignment &assignment) {
     return assignment.descriptor_file_offset == fixed->descriptor_file_offset;
   });

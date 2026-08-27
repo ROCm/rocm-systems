@@ -1340,7 +1340,7 @@ struct MoiKernelResourceContext {
 };
 
 [[nodiscard]] const ConSanMoiPersistentVgprAssignment *
-find_moi_persistent_vgpr_assignment(const ConSanMoiRegisterAllocation &allocation,
+find_moi_persistent_vgpr_assignment(const ConSanMoiOperatingPoint &allocation,
                                     uint64_t descriptor_offset) {
   const auto assignment =
       std::ranges::find(allocation.owner_persistent_vgprs, descriptor_offset,
@@ -1349,7 +1349,7 @@ find_moi_persistent_vgpr_assignment(const ConSanMoiRegisterAllocation &allocatio
 }
 
 [[nodiscard]] const ConSanMoiTransientSgprAssignment *
-find_moi_transient_sgpr_assignment(const ConSanMoiRegisterAllocation &allocation,
+find_moi_transient_sgpr_assignment(const ConSanMoiOperatingPoint &allocation,
                                    uint64_t descriptor_offset) {
   const auto assignment =
       std::ranges::find(allocation.owner_transient_sgprs, descriptor_offset,
@@ -1369,7 +1369,7 @@ automatic_moi_scalar_spill_needs_dynamic_stack_planning(const ConSanOptions &opt
         result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
     return kernel != nullptr && kernel->uses_dynamic_stack.value_or(false);
   };
-  if (std::ranges::any_of(result.moi_register_allocation.owner_transient_sgprs,
+  if (std::ranges::any_of(result.moi_operating_point.owner_transient_sgprs,
                           [&](const ConSanMoiTransientSgprAssignment &assignment) {
                             return assignment.spill_backed &&
                                    owner_uses_dynamic_stack(assignment.descriptor_file_offset);
@@ -1390,7 +1390,7 @@ automatic_moi_scalar_spill_needs_dynamic_stack_planning(const ConSanOptions &opt
 /// same assignment or keep the code-object-wide fallback.
 [[nodiscard]] bool
 apply_moi_transient_sgpr_assignment(ConSanOptions &options,
-                                    const ConSanMoiRegisterAllocation &allocation,
+                                    const ConSanMoiOperatingPoint &allocation,
                                     std::span<const uint64_t> owner_descriptor_offsets) {
   const ConSanMoiTransientSgprAssignment *selected = nullptr;
   bool saw_unassigned_owner = false;
@@ -1459,7 +1459,7 @@ apply_moi_transient_sgpr_assignment(ConSanOptions &options,
 /// Freeze the code-object-wide portion of the final register allocation before
 /// the transform leaves lowering. Per-owner assignments are already built in
 /// the typed allocation and must not be copied from mutable lowerer options.
-void freeze_moi_register_allocation(const ConSanOptions &options,
+void freeze_moi_operating_point(const ConSanOptions &options,
                                     ConSanTransformArtifacts &result) {
   const auto transient_state = [](const ConSanOptions &resolved) {
     return ConSanMoiTransientSgprState{
@@ -1481,12 +1481,12 @@ void freeze_moi_register_allocation(const ConSanOptions &options,
         .dynamic_stack_borrowed_sgpr = resolved.moi_inline_dynamic_stack_borrowed_sgpr,
     };
   };
-  result.moi_register_allocation.default_transient_sgprs = transient_state(options);
-  result.moi_register_allocation.dispatch_id_vgpr = options.moi_dispatch_id_vgpr;
+  result.moi_operating_point.default_transient_sgprs = transient_state(options);
+  result.moi_operating_point.dispatch_id_vgpr = options.moi_dispatch_id_vgpr;
 }
 
 [[nodiscard]] bool
-moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiRegisterAllocation &allocation,
+moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiOperatingPoint &allocation,
                                              std::span<const uint64_t> owner_descriptor_offsets) {
   return !owner_descriptor_offsets.empty() &&
          std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
@@ -1497,7 +1497,7 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiRegisterAllocation &
 }
 
 [[nodiscard]] bool moi_transient_sgpr_assignment_uses_borrowed_record_replay_entry(
-    const ConSanOptions &options, const ConSanMoiRegisterAllocation &allocation,
+    const ConSanOptions &options, const ConSanMoiOperatingPoint &allocation,
     std::span<const uint64_t> owner_descriptor_offsets) {
   return options.moi_engine == ConSanMoiEngine::RecordReplay && !owner_descriptor_offsets.empty() &&
          std::ranges::all_of(owner_descriptor_offsets, [&](uint64_t descriptor_offset) {
@@ -1511,7 +1511,7 @@ moi_transient_sgpr_assignment_is_branch_only(const ConSanMoiRegisterAllocation &
 
 [[nodiscard]] bool
 apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
-                                     const ConSanMoiRegisterAllocation &allocation,
+                                     const ConSanMoiOperatingPoint &allocation,
                                      std::span<const uint64_t> owner_descriptor_offsets) {
   if (allocation.owner_persistent_vgprs.empty()) {
     return options.moi_owner_vgpr.has_value() || options.moi_persistent_sgprs.complete() ||
@@ -1571,7 +1571,7 @@ apply_moi_persistent_vgpr_assignment(ConSanOptions &options,
 /// no owner-local VGPR assignment.
 [[nodiscard]] bool
 apply_record_replay_entry_workgroup_assignment(ConSanOptions &options,
-                                               const ConSanMoiRegisterAllocation &allocation,
+                                               const ConSanMoiOperatingPoint &allocation,
                                                std::span<const uint64_t> owner_descriptor_offsets) {
   if (!record_replay_entry_workgroup_capture_is_unambiguous(options))
     return false;
@@ -1831,7 +1831,7 @@ struct MoiResourcePlanningState {
   /// Register allocation selected by this lowering attempt. The referenced
   /// result subobject is stable for the lifetime of the planning context even
   /// while placement appends owner-local assignments to its vector.
-  const ConSanMoiRegisterAllocation &register_allocation;
+  const ConSanMoiOperatingPoint &register_allocation;
   /// Bytes unavailable to this lowering attempt. The initial entries come
   /// from the immutable staged-image inventory; MOI may append reservations
   /// for deferred prologue anchors without mutating that inventory.
@@ -1847,7 +1847,7 @@ struct MoiResourcePlanningState {
 
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
                            const ConSanTransformArtifacts &result)
-      : bytes(input), arch(arch), register_allocation(result.moi_register_allocation),
+      : bytes(input), arch(arch), register_allocation(result.moi_operating_point),
         reserved_ranges(result.program_inventory.preapplied_mutation().reserved_ranges),
         code_object(input.data(), input.size()), decoder(Decoder::create(arch)) {
     if (!code_object.is_valid() || !decoder)
@@ -2752,7 +2752,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
                                             const ConSanMoiCandidate &candidate) {
   const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
   return plan != nullptr && !plan->owner_descriptor_file_offsets.empty() &&
-         moi_transient_sgpr_assignment_is_branch_only(result.moi_register_allocation,
+         moi_transient_sgpr_assignment_is_branch_only(result.moi_operating_point,
                                                       plan->owner_descriptor_file_offsets);
 }
 
@@ -2855,7 +2855,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
                                  : resource_plan_for_candidate(result, *group.candidates.front());
     ConSanOptions group_options = options;
     if (group_resource != nullptr)
-      (void)apply_moi_transient_sgpr_assignment(group_options, result.moi_register_allocation,
+      (void)apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                 group_resource->owner_descriptor_file_offsets);
 
     uint32_t entry_island_words = kMoiInlineShadowIndirectIslandWords;
@@ -2865,7 +2865,7 @@ moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &resu
     } else {
       if (group_resource != nullptr &&
           moi_transient_sgpr_assignment_is_branch_only(
-              result.moi_register_allocation, group_resource->owner_descriptor_file_offsets)) {
+              result.moi_operating_point, group_resource->owner_descriptor_file_offsets)) {
         continue;
       }
       entry_island_words = moi_record_replay_entry_island_words(
@@ -3818,7 +3818,7 @@ private:
 
 [[nodiscard]] std::optional<ResolvedMoiScratchPlan>
 resolve_moi_scratch_plan(const ConSanCandidateResourcePlan &plan, const ConSanOptions &options,
-                         const ConSanMoiRegisterAllocation &allocation, uint16_t expected_count) {
+                         const ConSanMoiOperatingPoint &allocation, uint16_t expected_count) {
   if (plan.scratch_vgpr && plan.scratch_vgpr_count == expected_count &&
       (plan.source == ConSanRegisterAllocationSource::Explicit ||
        plan.source == ConSanRegisterAllocationSource::LivenessDead ||
@@ -3887,7 +3887,7 @@ resolve_moi_scratch(const ConSanTransformArtifacts &result, const ConSanMoiCandi
                     const ConSanOptions &options, uint16_t expected_count) {
   const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
   return plan == nullptr ? std::nullopt
-                         : resolve_moi_scratch_plan(*plan, options, result.moi_register_allocation,
+                         : resolve_moi_scratch_plan(*plan, options, result.moi_operating_point,
                                                     expected_count);
 }
 
@@ -4051,7 +4051,7 @@ static_assert(moi_ordinary_sgpr_limit(ROCJITSU_CODE_ARCH_CDNA5) == 106u);
 
 [[nodiscard]] bool
 moi_sgpr_range_overlaps_transient_state(const ConSanOptions &options,
-                                        const ConSanMoiRegisterAllocation &allocation,
+                                        const ConSanMoiOperatingPoint &allocation,
                                         uint16_t base, uint16_t width, rj_code_arch_t arch) {
   const auto overlaps = [&](std::optional<uint16_t> state_base, uint16_t state_width = 1u) {
     return state_base && range_overlaps(base, width, *state_base, state_width);
@@ -4245,7 +4245,7 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
     ConSanOptions &options, ConSanTransformArtifacts &result,
     const MoiResourcePlanningState &planning_state, bool dispatch_only = false) {
   std::vector<ConSanMoiTransientSgprAssignment> &owner_transient_sgprs =
-      result.moi_register_allocation.owner_transient_sgprs;
+      result.moi_operating_point.owner_transient_sgprs;
   const std::span<const uint8_t> bytes = planning_state.bytes;
   const rj_code_arch_t arch = planning_state.arch;
   const bool component_local_sampled =
@@ -5119,7 +5119,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanTransformA
         }
         return true;
       }
-      result.moi_register_allocation.owner_transient_sgprs.clear();
+      result.moi_operating_point.owner_transient_sgprs.clear();
       options.moi_exec_save_sgpr.reset();
       options.automatic_moi_partial_exec_save_sgprs = false;
       options.moi_exec_save_sgprs_persistent = false;
@@ -5533,7 +5533,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
 
   const auto qualify_owner_local_assignments = [&](uint16_t dispatch_base) {
     for (ConSanMoiTransientSgprAssignment &assignment :
-         result.moi_register_allocation.owner_transient_sgprs) {
+         result.moi_operating_point.owner_transient_sgprs) {
       const std::array owner = {assignment.descriptor_file_offset};
       const auto contexts = resolve_moi_scalar_owner_contexts(state, owner);
       assignment.dispatch_id_sgpr = contexts && moi_scalar_contexts_admit_reserved_window(
@@ -5747,7 +5747,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   // Sampled instead retains the independently proven EXEC window and overrides
   // only a conflicting dispatch pair with its literal identity representation.
   std::vector<ConSanMoiTransientSgprAssignment> &owner_transient_sgprs =
-      result.moi_register_allocation.owner_transient_sgprs;
+      result.moi_operating_point.owner_transient_sgprs;
   const auto prior_assignments = owner_transient_sgprs;
   const bool prior_partial_exec = options.automatic_moi_partial_exec_save_sgprs;
   owner_transient_sgprs.clear();
@@ -6342,7 +6342,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
       ConSanOptions scalar_options = options;
       const bool scalar_state_valid =
           resolved_contexts.has_value() &&
-          apply_moi_transient_sgpr_assignment(scalar_options, result.moi_register_allocation,
+          apply_moi_transient_sgpr_assignment(scalar_options, result.moi_operating_point,
                                               scalar_owners);
       bool every_owner_resolved = scalar_state_valid;
       MoiOwnerRegisterReferenceSummary scalar_references =
@@ -6385,7 +6385,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
             return true;
           }
         }
-        if (moi_sgpr_range_overlaps_transient_state(scalar_options, result.moi_register_allocation,
+        if (moi_sgpr_range_overlaps_transient_state(scalar_options, result.moi_operating_point,
                                                     base, scalar_count, arch)) {
           return true;
         }
@@ -6456,7 +6456,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
             }
           }
           if (moi_sgpr_range_overlaps_transient_state(scalar_options,
-                                                      result.moi_register_allocation, base,
+                                                      result.moi_operating_point, base,
                                                       kWorkgroupScalarCount, arch) ||
               persistent_sgpr_range_overlaps_reserved_ordinary_range(base, kWorkgroupScalarCount,
                                                                      arch)) {
@@ -6646,7 +6646,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
       const uint32_t first = resolved_contexts->tail_floor;
       const uint16_t scalar_limit = moi_ordinary_sgpr_limit(arch);
       const auto unavailable = [&](uint16_t base) {
-        if (moi_sgpr_range_overlaps_transient_state(options, result.moi_register_allocation, base,
+        if (moi_sgpr_range_overlaps_transient_state(options, result.moi_operating_point, base,
                                                     scalar_count, arch) ||
             moi_sgpr_range_overlaps_dynamic_stack_state(base, scalar_count)) {
           return true;
@@ -6660,7 +6660,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
         // A prior disconnected component may already have accumulated a VGPR
         // tuple. Commit the scalar transition only after entry scratch has
         // been proven for the complete union.
-        result.moi_register_allocation.owner_persistent_vgprs.clear();
+        result.moi_operating_point.owner_persistent_vgprs.clear();
         assign_scalar_persistent_state(static_cast<uint16_t>(base));
         options.moi_init_owner_epoch = true;
         prologue_scratch_assignments = std::move(*prologue_scratch);
@@ -6685,8 +6685,8 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
       bool resolved_every_component_context = true;
       ConSanOptions component_options = options;
       const bool component_transient_state_resolved =
-          result.moi_register_allocation.owner_transient_sgprs.empty() ||
-          apply_moi_transient_sgpr_assignment(component_options, result.moi_register_allocation,
+          result.moi_operating_point.owner_transient_sgprs.empty() ||
+          apply_moi_transient_sgpr_assignment(component_options, result.moi_operating_point,
                                               component);
       const bool component_needs_persistent_dispatch_vgprs =
           (needs_persistent_dispatch_vgprs || options.automatic_moi_private_dispatch_id) &&
@@ -6824,14 +6824,14 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
           assignment.dispatch_id_vgpr = next;
           next = static_cast<uint16_t>(next + 2u);
         }
-        result.moi_register_allocation.owner_persistent_vgprs.push_back(assignment);
+        result.moi_operating_point.owner_persistent_vgprs.push_back(assignment);
       }
     }
     options.moi_init_owner_epoch = true;
     options.automatic_moi_persistent_vgprs =
-        !result.moi_register_allocation.owner_persistent_vgprs.empty();
+        !result.moi_operating_point.owner_persistent_vgprs.empty();
     const bool assigned_persistent_dispatch_vgprs =
-        std::ranges::any_of(result.moi_register_allocation.owner_persistent_vgprs,
+        std::ranges::any_of(result.moi_operating_point.owner_persistent_vgprs,
                             [](const ConSanMoiPersistentVgprAssignment &assignment) {
                               return assignment.dispatch_id_vgpr.has_value();
                             });
@@ -6984,7 +6984,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
         scalar_references = std::move(*complete);
     }
     const auto overlaps_reserved_state = [&](uint16_t base) {
-      return moi_sgpr_range_overlaps_transient_state(options, result.moi_register_allocation, base,
+      return moi_sgpr_range_overlaps_transient_state(options, result.moi_operating_point, base,
                                                      scalar_count, arch) ||
              (has_dynamic_stack_owner &&
               (range_overlaps(base, scalar_count, kDynamicStackTopSgpr, 1u) ||

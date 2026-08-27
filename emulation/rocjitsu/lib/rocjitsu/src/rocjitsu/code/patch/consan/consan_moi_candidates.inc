@@ -177,7 +177,7 @@ record_replay_entry_workgroup_capture_is_unambiguous(const ConSanOptions &option
 /// or consumes it. The resolved scalar option fields describe the selected
 /// tuple; the typed allocation states whether that tuple is owner-local.
 void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const ConSanOptions &options,
-                                    const ConSanMoiRegisterAllocation &allocation) {
+                                    const ConSanMoiOperatingPoint &allocation) {
   patch.persistent_owner_vgpr = options.moi_owner_vgpr;
   patch.persistent_epoch_vgpr = options.moi_epoch_vgpr;
   patch.persistent_workgroup_key_vgpr = options.moi_workgroup_key_vgpr;

@@ -151,7 +151,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     if (!existing_plan)
       result.resource_plans.push_back(plan);
     const auto resources =
-        resolve_moi_scratch_plan(plan, options, result.moi_register_allocation, scratch_count);
+        resolve_moi_scratch_plan(plan, options, result.moi_operating_point, scratch_count);
     if (!resources) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch has no usable resource plan in " +
@@ -184,14 +184,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     }
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = resources->base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch found no common transient SGPR assignment");
       continue;
     }
-    if (!result.moi_register_allocation.owner_persistent_vgprs.empty() &&
-        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!result.moi_operating_point.owner_persistent_vgprs.empty() &&
+        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
                                               resources->owner_descriptor_file_offsets)) {
       result.warnings.emplace_back(
           "ConSan MOI inline atomic patch found no common persistent VGPR assignment");
@@ -254,14 +254,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     note_moi_probe_private_requirements(private_requirements, planned);
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     ConSanOptions candidate_options = options;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI inline atomic patch lost its planned transient SGPR assignment");
       return;
     }
-    if (!result.moi_register_allocation.owner_persistent_vgprs.empty() &&
-        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!result.moi_operating_point.owner_persistent_vgprs.empty() &&
+        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
                                               planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI inline atomic patch lost its planned persistent VGPR assignment");
@@ -390,14 +390,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
         std::ranges::sort(group_owners);
         group_owners.erase(std::ranges::unique(group_owners).begin(), group_owners.end());
         ConSanOptions group_options = options;
-        if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_register_allocation,
+        if (!apply_moi_transient_sgpr_assignment(group_options, result.moi_operating_point,
                                                  group_owners)) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic dense relay owners have no common scalar assignment");
           continue;
         }
-        if (!result.moi_register_allocation.owner_persistent_vgprs.empty() &&
-            !apply_moi_persistent_vgpr_assignment(group_options, result.moi_register_allocation,
+        if (!result.moi_operating_point.owner_persistent_vgprs.empty() &&
+            !apply_moi_persistent_vgpr_assignment(group_options, result.moi_operating_point,
                                                   group_owners)) {
           result.warnings.emplace_back(
               "ConSan MOI inline atomic dense relay owners have no common persistent VGPR "
@@ -699,7 +699,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           info.trampoline_size = static_cast<uint32_t>(body.words.size() * sizeof(uint32_t));
           info.relocated_guest_instruction_offset = body.offset + body.guest_instruction_offset;
           note_moi_probe_patch_info(info, planned);
-          note_moi_persistent_vgpr_state(info, group_options, result.moi_register_allocation);
+          note_moi_persistent_vgpr_state(info, group_options, result.moi_operating_point);
           info.persistent_sgpr_state = group_options.moi_persistent_sgprs;
           patches.push_back(std::move(info));
           routed_by_dense_relay[body.planned_index] = true;
@@ -719,14 +719,14 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     const uint64_t return_text_offset = site.text_offset + planned.relocated_guest_size;
     ConSanOptions candidate_options = options;
     candidate_options.scratch_vgpr = planned.resources.base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!apply_moi_transient_sgpr_assignment(candidate_options, result.moi_operating_point,
                                              planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI inline atomic patch lost its transient SGPR assignment");
       return;
     }
-    if (!result.moi_register_allocation.owner_persistent_vgprs.empty() &&
-        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_register_allocation,
+    if (!result.moi_operating_point.owner_persistent_vgprs.empty() &&
+        !apply_moi_persistent_vgpr_assignment(candidate_options, result.moi_operating_point,
                                               planned.resources.owner_descriptor_file_offsets)) {
       result.errors.emplace_back(
           "ConSan MOI inline atomic patch lost its persistent VGPR assignment");
@@ -807,7 +807,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     info.trampoline_size = static_cast<uint32_t>(cave_words->size() * sizeof(uint32_t));
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     note_moi_probe_patch_info(info, planned);
-    note_moi_persistent_vgpr_state(info, candidate_options, result.moi_register_allocation);
+    note_moi_persistent_vgpr_state(info, candidate_options, result.moi_operating_point);
     info.persistent_sgpr_state = candidate_options.moi_persistent_sgprs;
     patches.push_back(info);
   }

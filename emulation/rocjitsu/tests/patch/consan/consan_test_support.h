@@ -185,7 +185,7 @@ test_moi_persistent_sgpr_state(const ConSanTransformArtifacts &result) {
 /// placement and consumed by entry prologues and instrumented sites.
 [[nodiscard]] const std::vector<ConSanMoiPersistentVgprAssignment> &
 test_moi_persistent_vgpr_assignments(const ConSanTransformArtifacts &result) {
-  return result.moi_register_allocation.owner_persistent_vgprs;
+  return result.moi_operating_point.owner_persistent_vgprs;
 }
 
 /// Return the code-object-wide vector-persistent ABI recorded by an emitted
@@ -227,27 +227,27 @@ test_moi_record_replay_workgroup_vgprs(const ConSanTransformArtifacts &result) {
 /// allocation. Owner-local overrides are exposed separately below.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_exec_save_sgpr(const ConSanTransformArtifacts &result) {
-  return result.moi_register_allocation.default_transient_sgprs.exec_save_sgpr;
+  return result.moi_operating_point.default_transient_sgprs.exec_save_sgpr;
 }
 
 /// Return the code-object-wide scalar dispatch-ID pair selected by allocation,
 /// excluding owner-local scalar overrides.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_dispatch_id_sgpr(const ConSanTransformArtifacts &result) {
-  return result.moi_register_allocation.default_transient_sgprs.dispatch_id_sgpr;
+  return result.moi_operating_point.default_transient_sgprs.dispatch_id_sgpr;
 }
 
 /// Return the code-object-wide vector dispatch-ID pair selected by allocation,
 /// excluding per-owner persistent VGPR tuples.
 [[nodiscard]] std::optional<uint16_t>
 test_moi_dispatch_id_vgpr(const ConSanTransformArtifacts &result) {
-  return result.moi_register_allocation.dispatch_id_vgpr;
+  return result.moi_operating_point.dispatch_id_vgpr;
 }
 
 /// Return the owner-component scalar overrides frozen after placement.
 [[nodiscard]] std::vector<ConSanMoiTransientSgprAssignment>
 test_moi_transient_sgpr_assignments(const ConSanTransformArtifacts &result) {
-  return result.moi_register_allocation.owner_transient_sgprs;
+  return result.moi_operating_point.owner_transient_sgprs;
 }
 
 /// Return the scalar contract selected for one owner component, or no value

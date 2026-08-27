@@ -178,9 +178,9 @@ struct ConSanTransformArtifacts {
   ConSanMutationOutcome mutation;
   /// Resource alternatives considered by lowering.
   std::vector<ConSanCandidateResourcePlan> resource_plans;
-  /// Final MOI register allocation consumed by emitted mechanisms and final
+  /// Accepted MOI operating point consumed by emitted mechanisms and final
   /// semantic validation. Non-MOI transforms leave this value empty.
-  ConSanMoiRegisterAllocation moi_register_allocation;
+  ConSanMoiOperatingPoint moi_operating_point;
   /// Validated byte-level changes emitted by lowering.
   std::vector<ConSanPatchInfo> patches;
   /// Complete validated code-object replacement, or empty when none is installable.

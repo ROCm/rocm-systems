@@ -1869,8 +1869,8 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       continue;
     ConSanOptions kernel_options = options;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
-    if (!result.moi_register_allocation.owner_transient_sgprs.empty() &&
-        !apply_moi_transient_sgpr_assignment(kernel_options, result.moi_register_allocation,
+    if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
+        !apply_moi_transient_sgpr_assignment(kernel_options, result.moi_operating_point,
                                              kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI private-epoch prologue has no transient scalar assignment for kernel '" +
@@ -2338,11 +2338,11 @@ void try_apply_owner_epoch_prologue_patch(
   }
   if (options.automatic_moi_private_epoch) {
     try_apply_private_epoch_prologue_patch(options, arch, result);
-    if (!result.errors.empty() || result.moi_register_allocation.owner_persistent_vgprs.empty())
+    if (!result.errors.empty() || result.moi_operating_point.owner_persistent_vgprs.empty())
       return;
   }
   if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) &&
-      result.moi_register_allocation.owner_persistent_vgprs.empty() &&
+      result.moi_operating_point.owner_persistent_vgprs.empty() &&
       (!options.moi_persistent_sgprs.owner || !options.moi_persistent_sgprs.epoch)) {
     result.errors.emplace_back(
         "ConSan MOI owner/epoch prologue requires RJ_CONSAN_MOI_OWNER_VGPR and "
@@ -2434,7 +2434,7 @@ void try_apply_owner_epoch_prologue_patch(
     active.text_file_offset = active_kernel->text_file_offset;
     ConSanOptions kernel_options = options;
     const std::array<uint64_t, 1> kernel_owner = {kernel.descriptor_file_offset};
-    if (!apply_moi_persistent_vgpr_assignment(kernel_options, result.moi_register_allocation,
+    if (!apply_moi_persistent_vgpr_assignment(kernel_options, result.moi_operating_point,
                                               kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI owner/epoch prologue has no persistent assignment for kernel '" +
@@ -2446,8 +2446,8 @@ void try_apply_owner_epoch_prologue_patch(
     // for owner components with a persistent VGPR tuple.
     if (kernel_options.automatic_moi_private_epoch)
       continue;
-    if (!result.moi_register_allocation.owner_transient_sgprs.empty() &&
-        !apply_moi_transient_sgpr_assignment(kernel_options, result.moi_register_allocation,
+    if (!result.moi_operating_point.owner_transient_sgprs.empty() &&
+        !apply_moi_transient_sgpr_assignment(kernel_options, result.moi_operating_point,
                                              kernel_owner)) {
       result.errors.emplace_back(
           "ConSan MOI owner/epoch prologue has no transient scalar assignment for kernel '" +
@@ -3137,7 +3137,7 @@ void try_apply_owner_epoch_prologue_patch(
     info.entry_prologue_chained_trampoline_offset = composed_entry_trampoline_offset;
     info.dispatch_id_primary_prologue_offset = dispatch_id_primary_prologue_offset;
     info.dispatch_id_secondary_prologue_offset = dispatch_id_secondary_prologue_offset;
-    note_moi_persistent_vgpr_state(info, kernel_options, result.moi_register_allocation);
+    note_moi_persistent_vgpr_state(info, kernel_options, result.moi_operating_point);
     info.persistent_sgpr_state = kernel_options.moi_persistent_sgprs;
     info.required_sgpr_count = item.required_sgpr_count;
     if (item.entry_scalar_backup) {
