@@ -1475,7 +1475,7 @@ class Common:
             lines.append(f"\t              AMDSMI API Accepted {code:>2s}, {name}")
         print("\n".join(lines), flush=True)
 
-    def _check_amdgpu_driver(self):
+    def check_amdgpu_driver(self):
         """Returns true if amdgpu is found in the list of initialized modules"""
         amd_gpu_status_file = pathlib.Path("/sys/module/amdgpu/initstate")
         if amd_gpu_status_file.exists():
@@ -1577,7 +1577,7 @@ class Common:
         # Using INIT_AMD_APUS when both GPU and CPU drivers are present is wrong on discrete-GPU
         # servers — use OR-combined flags instead, exactly as the CLI does.
         init_flag = 0
-        if self._check_amdgpu_driver():
+        if self.check_amdgpu_driver():
             init_flag |= amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS
         if self._check_amd_hsmp_driver():
             init_flag |= amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS
