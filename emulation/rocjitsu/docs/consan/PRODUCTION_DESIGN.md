@@ -5096,6 +5096,31 @@ analysis completed.
   serialized physical matrix remains reserved for the final gate. E2E
   validation remains outside this work.
 
+### Slice 5BO: keep runtime dispatch identity out of static output
+
+- **Input remains input:** The runtime-provided MOI report dispatch identity
+  is no longer copied into mutable `ConSanResult`. Lowering still reads the
+  value from `BoundRuntimeResources`; final validation now receives the same
+  expected value explicitly instead of recovering a caller input from the
+  transform's output record.
+- **Negative contract coverage:** The literal-dispatch full-pressure test now
+  validates the completed replacement with the original dispatch identity and
+  proves that changing only the expected identity makes final validation
+  reject the image. Two assertions that merely checked the deleted copy are
+  removed.
+- **Deletion accounting:** Implementation files add 31 and delete seventeen
+  physical lines, a net addition of fourteen. The slice deletes the duplicate
+  field and its assignment; the additional lines make the dependency explicit
+  through ordinary, retry, and mutation-composition finalization paths rather
+  than hiding it in mutable output state. Tests add six and delete two lines.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in 69.32
+  seconds. Slice 5BM's 26-case physical-gfx950 cross-engine smoke remains the
+  physical gate for this tranche; the complete serialized physical matrix
+  remains reserved for the final gate. E2E validation remains outside this
+  work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

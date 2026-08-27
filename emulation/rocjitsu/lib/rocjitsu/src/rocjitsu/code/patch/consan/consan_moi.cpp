@@ -505,7 +505,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_transient_sgpr_assignments.clear();
   result.resolved_moi_dispatch_id_sgpr.reset();
   result.resolved_moi_dispatch_id_vgpr.reset();
-  result.moi_report_dispatch_id = effective_options.moi_report_dispatch_id;
   result.modified = false;
   result.replacement.clear();
   result.moi_candidates.clear();

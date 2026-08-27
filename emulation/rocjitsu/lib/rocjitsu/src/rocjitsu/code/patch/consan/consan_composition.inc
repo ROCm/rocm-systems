@@ -38,6 +38,7 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
 
 [[nodiscard]] ConSanResult finalize_consan_result(ConSanResult result,
                                                   std::span<const uint8_t> original_bytes,
+                                                  uint64_t expected_moi_report_dispatch_id = 0,
                                                   bool validating_carried_composite_stage = false);
 
 template <typename Site>
@@ -437,7 +438,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
       const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
       apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result);
-      fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes);
+      fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
+                                            fault_options.moi_report_dispatch_id);
     }
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;
@@ -506,7 +508,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
     ConSanResult instrument_result = finalize_consan_result(
         try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried),
-        mutation_stage.image, /*validating_carried_composite_stage=*/!instrument_carried.empty());
+        mutation_stage.image, instrument_options.moi_report_dispatch_id,
+        /*validating_carried_composite_stage=*/!instrument_carried.empty());
     const major_image_ownership::ScopedOwner instrument_result_owner(
         major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
     // Resource ownership is a logical kernel identity, but instrumentation of

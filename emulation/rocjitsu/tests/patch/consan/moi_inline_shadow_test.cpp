@@ -3189,7 +3189,6 @@ TEST(ConSanMoi, Gfx1250InlineGlobalShadowUsesLiteralDispatchIdAtFullScalarPressu
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
-  EXPECT_EQ(result.moi_report_dispatch_id, options.moi_report_dispatch_id);
   const auto exact_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
@@ -3197,6 +3196,12 @@ TEST(ConSanMoi, Gfx1250InlineGlobalShadowUsesLiteralDispatchIdAtFullScalarPressu
   EXPECT_NE(exact_patch, result.patches.end());
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result, options.moi_report_dispatch_id).empty());
+  const std::vector<std::string> wrong_dispatch_errors =
+      validate_consan_modified_elf(bytes, result, options.moi_report_dispatch_id ^ 1u);
+  EXPECT_TRUE(std::ranges::any_of(wrong_dispatch_errors, [](const std::string &error) {
+    return error.find("versioned exact-shadow publication semantics") != std::string::npos;
+  }));
 }
 
 TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
@@ -3238,7 +3243,6 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
     // code, so preserve runtime dispatch identity instead of falling back to
     // the configured literal merely because the live scalar set is sparse.
     EXPECT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-    EXPECT_EQ(result.moi_report_dispatch_id, options.moi_report_dispatch_id);
     EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
       return patch.anchor_offset == access_word * sizeof(uint32_t) &&
              (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||

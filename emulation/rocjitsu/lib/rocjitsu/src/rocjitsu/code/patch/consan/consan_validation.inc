@@ -3212,7 +3212,8 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
 
 [[nodiscard]] std::vector<std::string>
 validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
-                                       const ConSanResult &result) {
+                                       const ConSanResult &result,
+                                       uint64_t expected_moi_report_dispatch_id) {
   std::vector<std::string> errors;
   const auto is_exact_patch = [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
@@ -3539,11 +3540,11 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
           vector_source_vgpr(static_cast<uint16_t>(*expected_dispatch_vgpr + 1u)), arch));
     } else {
       const auto low = instrumentation::build_v_mov_b32_literal(
-          static_cast<uint16_t>(scratch + 2u), static_cast<uint32_t>(result.moi_report_dispatch_id),
-          arch);
+          static_cast<uint16_t>(scratch + 2u),
+          static_cast<uint32_t>(expected_moi_report_dispatch_id), arch);
       const auto high = instrumentation::build_v_mov_b32_literal(
           static_cast<uint16_t>(scratch + 3u),
-          static_cast<uint32_t>(result.moi_report_dispatch_id >> 32u), arch);
+          static_cast<uint32_t>(expected_moi_report_dispatch_id >> 32u), arch);
       if (!low || !high) {
         errors.emplace_back(
             "ConSan final validation could not encode literal dispatch-ID expectations");
@@ -4425,6 +4426,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
 
 [[nodiscard]] std::vector<std::string>
 validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanResult &result,
+                          uint64_t expected_moi_report_dispatch_id,
                           bool validating_carried_composite_stage = false) {
   const major_image_ownership::ScopedPhase validation_phase(
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
@@ -4533,7 +4535,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   errors.insert(errors.end(), std::make_move_iterator(dispatch_errors.begin()),
                 std::make_move_iterator(dispatch_errors.end()));
   std::vector<std::string> exact_shadow_errors =
-      validate_inline_exact_shadow_semantics(replacement, result);
+      validate_inline_exact_shadow_semantics(replacement, result, expected_moi_report_dispatch_id);
   errors.insert(errors.end(), std::make_move_iterator(exact_shadow_errors.begin()),
                 std::make_move_iterator(exact_shadow_errors.end()));
   std::vector<std::string> release_transaction_errors =
@@ -4545,6 +4547,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
 
 [[nodiscard]] ConSanResult finalize_consan_result(ConSanResult result,
                                                   std::span<const uint8_t> original_bytes,
+                                                  uint64_t expected_moi_report_dispatch_id,
                                                   bool validating_carried_composite_stage) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
@@ -4587,7 +4590,8 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       result.mutation.applied_fault_logical_identity.reset();
     } else {
       std::vector<std::string> validation_errors =
-          validate_final_consan_elf(original_bytes, result, validating_carried_composite_stage);
+          validate_final_consan_elf(original_bytes, result, expected_moi_report_dispatch_id,
+                                    validating_carried_composite_stage);
       result.errors.insert(result.errors.end(), std::make_move_iterator(validation_errors.begin()),
                            std::make_move_iterator(validation_errors.end()));
       if (result.errors.empty()) {
@@ -4616,6 +4620,8 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
 } // namespace
 
 std::vector<std::string> validate_consan_modified_elf(std::span<const uint8_t> original_bytes,
-                                                      const ConSanResult &modified_result) {
-  return validate_final_consan_elf(original_bytes, modified_result);
+                                                      const ConSanResult &modified_result,
+                                                      uint64_t expected_moi_report_dispatch_id) {
+  return validate_final_consan_elf(original_bytes, modified_result,
+                                   expected_moi_report_dispatch_id);
 }
