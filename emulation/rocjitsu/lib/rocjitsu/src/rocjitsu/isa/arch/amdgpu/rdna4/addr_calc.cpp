@@ -49,7 +49,6 @@ void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
   d.wf_size = wf.wf_size();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  d.cu_path = wf.cu().full_path();
 }
 
 } // namespace

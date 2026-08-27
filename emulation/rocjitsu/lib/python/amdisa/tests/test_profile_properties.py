@@ -14,7 +14,12 @@ from amdisa.codegen._generator import (
     _SourceImplUnit,
 )
 from amdisa.codegen.config import CodegenConfig
-from amdisa.__main__ import _detect_profile
+from amdisa.__main__ import (
+    _apply_codegen_identity,
+    _codegen_config,
+    _detect_profile,
+    _parse_isa_arg,
+)
 from amdisa.gpuisa import InstEncoding, Instruction, MicrocodeField
 from amdisa.isa_properties_codegen import emit_isa_properties
 from amdisa.isa_profile import (
@@ -24,12 +29,14 @@ from amdisa.isa_profile import (
     CdnaProfile,
     Cdna5Profile,
     DppOpcodeRule,
+    MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
     Rdna2Profile,
     Rdna3Profile,
     Rdna3_5Profile,
     Rdna4Profile,
+    SwmmacLayout,
 )
 
 
@@ -121,6 +128,24 @@ def test_descriptor_vgpr_count_granule(profile, expected_wave32, expected_wave64
 )
 def test_amdgpu_profiles_split_execution_sources(profile):
     assert profile.split_execution_sources
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), False),
+        (CdnaProfile(), False),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Cdna5Profile(), True),
+    ],
+)
+def test_uses_vgpr_msb_indexing(profile, expected):
+    assert profile.uses_vgpr_msb_indexing is expected
 
 
 @pytest.mark.parametrize(
@@ -230,6 +255,26 @@ def test_legacy_dpp_prohibition_tables(profile, opcode):
 
 @pytest.mark.parametrize(
     'profile',
+    [
+        CdnaProfile(),
+        Cdna1Profile(),
+        Cdna2Profile(),
+        Rdna1Profile(),
+        Rdna2Profile(),
+        Rdna3Profile(),
+        Rdna3_5Profile(),
+        Rdna4Profile(),
+    ],
+)
+def test_public_snapshot_literal_field_normalizes_to_simm32(profile):
+    assert profile.field_renames('VOP2_INST_LITERAL')['literal'] == 'simm32'
+    assert (
+        profile.normalize_operand_field_name('VOP2_INST_LITERAL', 'literal') == 'simm32'
+    )
+
+
+@pytest.mark.parametrize(
+    'profile',
     [Cdna1Profile(), Cdna2Profile(), CdnaProfile(), Rdna1Profile(), Rdna2Profile()],
 )
 @pytest.mark.parametrize('opcode', ['V_MOV_B64', 'V_CMP_EQ_U32', 'V_SWAPREL_B32'])
@@ -307,6 +352,23 @@ def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
 )
 def test_dpp_opcode_rules(profile, encoding, opcode, expected):
     assert profile.dpp_opcode_rule(encoding, opcode) is expected
+
+
+@pytest.mark.parametrize(
+    'profile',
+    [
+        CdnaProfile(),
+        Cdna1Profile(),
+        Cdna2Profile(),
+        Rdna1Profile(),
+        Rdna2Profile(),
+        Rdna3Profile(),
+        Rdna3_5Profile(),
+        Rdna4Profile(),
+    ],
+)
+def test_public_snapshot_profiles_support_schema_1_1_1(profile):
+    assert '1.1.1' in profile.supported_versions
 
 
 def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
@@ -421,6 +483,21 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     ) in output
 
 
+def test_isa_properties_codegen_uses_source_arch_for_custom_identity(tmp_path):
+    specs = [
+        (
+            'gfx1250',
+            SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile()),
+            None,
+        )
+    ]
+
+    output = emit_isa_properties(str(tmp_path), specs).read_text()
+
+    assert 'case ROCJITSU_CODE_ARCH_CDNA5:' in output
+    assert '.max_addressable_vgprs_per_wf = 1024,' in output
+
+
 def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
     profiles = [
         ('cdna1', Cdna1Profile()),
@@ -445,6 +522,23 @@ def test_checked_in_isa_properties_matches_all_profiles(tmp_path):
     ).read_text()
 
     assert generated == checked_in
+
+
+def test_public_literal_type_preserves_legacy_extension_identity():
+    assert (
+        Cdna1Profile().normalize_operand_type('ENC_VOP2', 'literal', 'OPR_SIMM16')
+        == 'OPR_SIMM32'
+    )
+    assert (
+        Cdna5Profile().normalize_operand_type('ENC_VOP2', 'literal', 'OPR_SIMM16')
+        == 'OPR_SIMM16'
+    )
+
+
+def test_selector_case_normalization_is_schema_specific():
+    assert Cdna1Profile().lowercase_operand_selector_names is True
+    assert Rdna4Profile().lowercase_operand_selector_names is True
+    assert Cdna5Profile().lowercase_operand_selector_names is False
 
 
 def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
@@ -616,6 +710,9 @@ class TestCdnaProfile:
     def test_has_wmma_false(self):
         assert self.p.has_wmma is False
 
+    def test_swmmac_layout_none(self):
+        assert self.p.swmmac_layout is SwmmacLayout.NONE
+
     def test_has_vopd_false(self):
         assert self.p.has_vopd is False
 
@@ -636,8 +733,14 @@ class TestCdnaProfile:
         renames = self.p.field_renames('ENC_VOP3P')
         assert renames.get('pad_14') == 'op_sel_hi_2'
 
-    def test_field_renames_other_enc_empty(self):
-        assert self.p.field_renames('ENC_VOP2') == {}
+    def test_field_renames_literal(self):
+        assert self.p.field_renames('ENC_VOP2') == {'literal': 'simm32'}
+
+    def test_literal_operand_uses_normalized_field_name(self):
+        assert (
+            self.p.normalize_operand_field_name('VOP2_INST_LITERAL', 'literal')
+            == 'simm32'
+        )
 
     def test_compound_mfma_is_not_a_family_default(self):
         assert self.p.mfma_scale_vop3px2_specs == ()
@@ -754,6 +857,9 @@ class TestRdna3Profile:
     def test_has_wmma(self):
         assert self.p.has_wmma is True
 
+    def test_swmmac_layout_none(self):
+        assert self.p.swmmac_layout is SwmmacLayout.NONE
+
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
@@ -763,6 +869,11 @@ class TestRdna3Profile:
     def test_vopd_slot_opcodes(self):
         assert self.p.vopd_x_slot_opcodes == frozenset(range(14))
         assert self.p.vopd_y_slot_opcodes == frozenset((*range(14), 16, 17, 18))
+
+    def test_sop1_base_condition_imports_as_default(self):
+        cond = 'Nothas_lit_0_Nothas_lit_1'
+        assert self.p.normalize_encoding_condition('ENC_SOP1', cond) == 'default'
+        assert self.p.skip_inst_encoding('ENC_SOP1', cond) is False
 
     def test_operand_read64_zero_extends_simm32_literal(self, tmp_path):
         generator = CodeGenerator(
@@ -808,11 +919,19 @@ class TestRdna4Profile:
     def test_has_wmma(self):
         assert self.p.has_wmma is True
 
+    def test_swmmac_layout(self):
+        assert self.p.swmmac_layout is SwmmacLayout.RUNTIME_WAVE
+
     def test_has_vopd(self):
         assert self.p.has_vopd is True
 
     def test_has_vopd3_false(self):
         assert self.p.has_vopd3 is False
+
+    def test_sop1_base_condition_imports_as_default(self):
+        cond = 'Nothas_lit_0_Nothas_lit_1'
+        assert self.p.normalize_encoding_condition('ENC_SOP1', cond) == 'default'
+        assert self.p.skip_inst_encoding('ENC_SOP1', cond) is False
 
 
 class TestCdna5Profile:
@@ -824,6 +943,12 @@ class TestCdna5Profile:
 
     def test_wave_size_max(self):
         assert self.p.wave_size_max == 32
+
+    def test_swmmac_layout(self):
+        assert self.p.swmmac_layout is SwmmacLayout.FIXED_WAVE
+
+    def test_matrix_layout(self):
+        assert self.p.matrix_layout is MatrixLayout.WMMA_SPLIT_K
 
     def test_has_vopd3(self):
         assert self.p.has_vopd3 is True
@@ -847,6 +972,12 @@ class TestCdna5Profile:
 
     def test_field_renames_literal(self):
         assert self.p.field_renames('ENC_SOP1').get('literal') == 'simm32'
+
+    def test_literal_operand_keeps_gfx1250_identity(self):
+        assert (
+            self.p.normalize_operand_field_name('VOP2_INST_LITERAL', 'literal')
+            == 'literal'
+        )
 
     def test_sop1_base_condition_imports_as_default(self):
         cond = '!has_lit64_0&!has_lit64_1&!has_lit_0&!has_lit_1'
@@ -1016,10 +1147,112 @@ class TestCdna5Profile:
                 chunk_overhead=0,
             )
 
-    def test_detect_profile_uses_filename_override(self, tmp_path):
+    def test_detect_profile_uses_public_cdna5_architecture(self, tmp_path):
+        xml = tmp_path / 'amdgpu_isa_cdna5.xml'
+        xml.write_text(
+            '<Spec><ISA><Architecture><ArchitectureName>AMD CDNA 5</ArchitectureName>'
+            '</Architecture></ISA></Spec>'
+        )
+        assert _detect_profile(str(xml)) == 'cdna5'
+
+    def test_parse_single_isa_arg_with_profile(self):
+        assert _parse_isa_arg('cdna5:/tmp/isa.xml') == (
+            'cdna5',
+            '/tmp/isa.xml',
+            'cdna5',
+        )
+
+    def test_parse_single_isa_arg_without_profile(self, tmp_path):
+        xml = tmp_path / 'amdgpu_isa_cdna5.xml'
+        xml.write_text(
+            '<Spec><ISA><Architecture><ArchitectureName>AMD CDNA 5</ArchitectureName>'
+            '</Architecture></ISA></Spec>'
+        )
+        assert _parse_isa_arg(str(xml)) == (None, str(xml), 'cdna5')
+
+    @pytest.mark.parametrize('name', ['rdna3.5', 'rdna3_5'])
+    def test_parse_single_isa_arg_accepts_rdna3_5_aliases(self, name):
+        assert _parse_isa_arg(f'{name}:/tmp/isa.xml') == (
+            name,
+            '/tmp/isa.xml',
+            'rdna3.5',
+        )
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            '',
+            '1250gfx',
+            'gfx-1250',
+            'gfx@1250',
+            'nested/gfx1250',
+            r'nested\gfx1250',
+            '/tmp/escaped',
+        ],
+    )
+    def test_parse_single_isa_arg_rejects_invalid_codegen_identity(
+        self, name, tmp_path
+    ):
         xml = tmp_path / 'amdgpu_isa_gfx1250.xml'
         xml.write_text('<Spec />')
-        assert _detect_profile(str(xml)) == 'cdna5'
+
+        with pytest.raises(ValueError, match='invalid ISA name'):
+            _parse_isa_arg(f'{name}:{xml}')
+
+    def test_explicit_name_controls_codegen_identity(self):
+        spec = SimpleNamespace(
+            arch_name='cdna5',
+            generated_dir_name='cdna5',
+            cpp_namespace='cdna5',
+        )
+
+        _apply_codegen_identity(spec, 'gfx1250')
+
+        assert spec.arch_name == 'cdna5'
+        assert spec.generated_dir_name == 'gfx1250'
+        assert spec.cpp_namespace == 'gfx1250'
+
+    def test_codegen_include_paths_keep_handwritten_base_independent(self):
+        config = _codegen_config(
+            'lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated',
+            include_root='lib/rocjitsu/src',
+        )
+
+        assert config.include_base == 'rocjitsu/isa/arch/amdgpu'
+        assert (
+            config.generated_include_base == 'rocjitsu/isa/arch/amdgpu/custom/generated'
+        )
+        assert (
+            config.shared_generated_include_base
+            == 'rocjitsu/isa/arch/amdgpu/custom/generated'
+        )
+
+    def test_codegen_include_paths_allow_independent_handwritten_base(self):
+        config = CodegenConfig.for_output(
+            '/tmp/generated',
+            handwritten_include_base='custom/amdgpu',
+        )
+
+        assert config.include_base == 'custom/amdgpu'
+        assert config.generated_include_base == '/tmp/generated'
+
+    def test_regeneration_helper_uses_stable_generated_include_prefix(self):
+        rocjitsu = Path(__file__).resolve().parents[4]
+        source_root = rocjitsu / 'lib' / 'rocjitsu' / 'src'
+        isa_output = source_root / 'rocjitsu' / 'isa' / 'arch' / 'amdgpu' / 'generated'
+
+        helper = (rocjitsu / 'scripts' / 'generate-amdisa.sh').read_text()
+        assert '--include-root "$rocjitsu/lib/rocjitsu/src"' in helper
+
+        config = _codegen_config(str(isa_output), include_root=str(source_root))
+        assert config.generated_include_base == 'rocjitsu/isa/arch/amdgpu/generated'
+
+    def test_explicit_codegen_prefix_remains_independent_of_output(self):
+        config = CodegenConfig(generated_include_base='stable/generated')
+
+        assert config.generated_include('rdna4', 'vop3.h') == (
+            'stable/generated/rdna4/vop3.h'
+        )
 
     def test_test_encoding_uses_primary_decode_key(self):
         generator = object.__new__(CodeGenerator)
