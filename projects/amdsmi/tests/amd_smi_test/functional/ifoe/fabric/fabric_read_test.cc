@@ -9,8 +9,8 @@
 #include <iostream>
 
 #include "amd_smi/amdsmi.h"
+#include "api_test_framework.h"
 #include "test_common.h"
-#include "unit/unit_test_framework.h"
 
 // Category mask covering all telemetry categories
 static constexpr uint32_t kAllCategories =

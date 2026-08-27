@@ -23,10 +23,10 @@
 #include <cstring>
 #include <string>
 
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
-using amdsmi::unittest::kInvalidHandle;
-using amdsmi::unittest::kVerbose;
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
 
 // System/topology exposes only getters. These tests verify getters return an
 // acceptable status and are stable (deterministic) across repeated reads.
@@ -35,7 +35,7 @@ TEST_F(SystemFunctionalReadOnly, LibVersion_NullOutput) {
   DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "version=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_lib_version(nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
 }
 
 // Library version must be identical across repeated reads.
@@ -77,7 +77,7 @@ TEST_F(SystemFunctionalReadOnly, SocketHandles_Stable) {
 // Processor type must be identical across repeated reads for each GPU.
 TEST_F(SystemFunctionalReadOnly, ProcessorType_Stable) {
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_get_processor_type");
+  amdsmi::test::StatusCollector col("amdsmi_get_processor_type");
   for (size_t i = 0; i < gpus().size(); ++i) {
     amdsmi_processor_type_t t1 = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
     amdsmi_processor_type_t t2 = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
@@ -87,9 +87,9 @@ TEST_F(SystemFunctionalReadOnly, ProcessorType_Stable) {
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, e1, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     col.Record("gpu=" + std::to_string(i), e1,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(e1, AMDSMI_STATUS_SUCCESS,
-                                                          AMDSMI_STATUS_NOT_SUPPORTED,
-                                                          AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+               ::amdsmi::test::AmdsmiStatusIsExpected(e1, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
     if (e1 == AMDSMI_STATUS_SUCCESS && e2 == AMDSMI_STATUS_SUCCESS) {
       EXPECT_EQ(t1, t2) << "gpu=" << i << " processor type not stable";
     }

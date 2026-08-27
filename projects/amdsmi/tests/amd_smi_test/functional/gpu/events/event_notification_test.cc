@@ -24,10 +24,10 @@
 #include <string>
 #include <vector>
 
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
-using amdsmi::unittest::kInvalidHandle;
-using amdsmi::unittest::kVerbose;
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
 
 // Event notification workflow: amdsmi_init_gpu_event_notification /
 // amdsmi_set_gpu_event_notification_mask / amdsmi_get_gpu_event_notification /
@@ -68,7 +68,7 @@ TEST_F(GpuFunctionalReadWrite, GetEventNotification_NullCount) {
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "num_elem=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_gpu_event_notification(0, nullptr, data);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
 }
 
 TEST_F(GpuFunctionalReadWrite, StopEventNotification_InvalidHandle) {
@@ -87,9 +87,19 @@ TEST_F(GpuFunctionalReadWrite, EventNotification_Workflow) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
 
-  amdsmi::unittest::StatusCollector col("amdsmi_gpu_event_notification");
+  amdsmi::test::StatusCollector col("amdsmi_gpu_event_notification");
   const uint64_t mask = AllEventsMask();
   std::vector<size_t> inited;
+
+  // The mask is write-only, so the observable state is whether the setter is
+  // taken at all: it is refused until init has opened the per-device event fd.
+  for (size_t i = 0; i < gpus().size(); ++i) {
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask",
+                       "gpu=" + std::to_string(i) + " before init", kVerbose);
+    amdsmi_status_t err = amdsmi_set_gpu_event_notification_mask(gpus()[i], mask);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_NOT_INIT);
+    EXPECT_NE(err, AMDSMI_STATUS_SUCCESS) << "gpu=" << i << " took an event mask before init";
+  }
 
   for (size_t i = 0; i < gpus().size(); ++i) {
     DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu=" + std::to_string(i), kVerbose);
@@ -97,9 +107,9 @@ TEST_F(GpuFunctionalReadWrite, EventNotification_Workflow) {
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     col.Record("init gpu=" + std::to_string(i), err,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                          AMDSMI_STATUS_NOT_SUPPORTED,
-                                                          AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+               ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
     if (err != AMDSMI_STATUS_SUCCESS) continue;  // no init -> nothing to set/stop
     inited.push_back(i);
 
@@ -109,9 +119,10 @@ TEST_F(GpuFunctionalReadWrite, EventNotification_Workflow) {
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, serr, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     col.Record("set_mask gpu=" + std::to_string(i), serr,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(serr, AMDSMI_STATUS_SUCCESS,
-                                                          AMDSMI_STATUS_NOT_SUPPORTED,
-                                                          AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+               ::amdsmi::test::AmdsmiStatusIsExpected(serr, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    EXPECT_EQ(serr, AMDSMI_STATUS_SUCCESS) << "gpu=" << i << " refused the mask after init";
   }
 
   // Collect any pending events (short timeout; usually none fire during the test).
@@ -126,7 +137,7 @@ TEST_F(GpuFunctionalReadWrite, EventNotification_Workflow) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     col.Record(
         "get_notification", gerr,
-        ::amdsmi::unittest::AmdsmiStatusIsExpected(
+        ::amdsmi::test::AmdsmiStatusIsExpected(
             gerr, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_DATA, AMDSMI_STATUS_INSUFFICIENT_SIZE,
             AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
     if (gerr == AMDSMI_STATUS_SUCCESS || gerr == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
@@ -147,9 +158,15 @@ TEST_F(GpuFunctionalReadWrite, EventNotification_Workflow) {
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     col.Record("stop gpu=" + std::to_string(i), err,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                          AMDSMI_STATUS_NOT_SUPPORTED,
-                                                          AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+               ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    if (err != AMDSMI_STATUS_SUCCESS) continue;
+
+    // Stop released the event fd, so the mask must be refused again.
+    amdsmi_status_t serr = amdsmi_set_gpu_event_notification_mask(gpus()[i], mask);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, serr, AMDSMI_STATUS_NOT_INIT);
+    EXPECT_NE(serr, AMDSMI_STATUS_SUCCESS) << "gpu=" << i << " kept taking masks after stop";
   }
 
   col.ExpectNoFailures();

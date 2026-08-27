@@ -23,10 +23,10 @@
 #include <cstring>
 #include <string>
 
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
-using amdsmi::unittest::kInvalidHandle;
-using amdsmi::unittest::kVerbose;
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
 
 namespace {
 
@@ -63,7 +63,7 @@ TEST_F(GpuFunctionalReadWrite, SetMemoryPartition_InvalidHandle) {
 TEST_F(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_set_gpu_memory_partition");
+  amdsmi::test::StatusCollector col("amdsmi_set_gpu_memory_partition");
   for (size_t i = 0; i < gpus().size(); ++i) {
     char buf[64];
     memset(buf, 0, sizeof(buf));
@@ -85,7 +85,7 @@ TEST_F(GpuFunctionalReadWrite, MemoryPartition_SetVerifyRestore) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
                           AMDSMI_STATUS_NO_PERM);
     col.Record("gpu=" + std::to_string(i), err,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(
+               ::amdsmi::test::AmdsmiStatusIsExpected(
                    err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                    AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM));
 
@@ -126,7 +126,7 @@ TEST_F(GpuFunctionalReadWrite, SetComputePartition_InvalidHandle) {
 TEST_F(GpuFunctionalReadWrite, ComputePartition_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_set_gpu_compute_partition");
+  amdsmi::test::StatusCollector col("amdsmi_set_gpu_compute_partition");
   for (size_t i = 0; i < gpus().size(); ++i) {
     char buf[64];
     memset(buf, 0, sizeof(buf));
@@ -148,7 +148,7 @@ TEST_F(GpuFunctionalReadWrite, ComputePartition_SetVerifyRestore) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
                           AMDSMI_STATUS_NO_PERM);
     col.Record("gpu=" + std::to_string(i), err,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(
+               ::amdsmi::test::AmdsmiStatusIsExpected(
                    err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                    AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM));
 

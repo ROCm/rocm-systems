@@ -23,11 +23,11 @@
 #include <cstring>
 #include <string>
 
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
-using amdsmi::unittest::IsUntestableHere;
-using amdsmi::unittest::kInvalidHandle;
-using amdsmi::unittest::kVerbose;
+using amdsmi::test::IsUntestableHere;
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
 
 // amdsmi_get_gpu_perf_level / amdsmi_set_gpu_perf_level.
 // ---- invalid parameters first ----
@@ -44,7 +44,7 @@ TEST_F(GpuFunctionalReadWrite, SetPerfLevel_InvalidHandle) {
 TEST_F(GpuFunctionalReadWrite, PerfLevel_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
-  amdsmi::unittest::StatusCollector col("amdsmi_set_gpu_perf_level");
+  amdsmi::test::StatusCollector col("amdsmi_set_gpu_perf_level");
   for (size_t i = 0; i < gpus().size(); ++i) {
     amdsmi_dev_perf_level_t initial;
     if (amdsmi_get_gpu_perf_level(gpus()[i], &initial) != AMDSMI_STATUS_SUCCESS) continue;
@@ -59,7 +59,7 @@ TEST_F(GpuFunctionalReadWrite, PerfLevel_SetVerifyRestore) {
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
                           AMDSMI_STATUS_NO_PERM);
     col.Record("gpu=" + std::to_string(i), err,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(
+               ::amdsmi::test::AmdsmiStatusIsExpected(
                    err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
                    AMDSMI_STATUS_NOT_YET_IMPLEMENTED, AMDSMI_STATUS_NO_PERM));
 

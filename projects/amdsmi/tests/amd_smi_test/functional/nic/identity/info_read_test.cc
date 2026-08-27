@@ -23,10 +23,10 @@
 #include <cstring>
 #include <string>
 
-#include "unit/unit_test_framework.h"
+#include "api_test_framework.h"
 
-using amdsmi::unittest::kInvalidHandle;
-using amdsmi::unittest::kVerbose;
+using amdsmi::test::kInvalidHandle;
+using amdsmi::test::kVerbose;
 
 // NIC exposes only getters. These tests verify each getter returns an
 // acceptable status and is stable (same status) across repeated reads.
@@ -46,13 +46,13 @@ TEST_F(NicFunctionalReadOnly, AsicInfo_NullOutput) {
   DISPLAY_AMDSMI_API("amdsmi_get_nic_asic_info", "nic=0 out=nullptr", kVerbose);
   amdsmi_status_t err = amdsmi_get_nic_asic_info(nics()[0], nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
 }
 
 // Getter stability: BDF must be identical across two reads.
 TEST_F(NicFunctionalReadOnly, DeviceBdf_Stable) {
   if (nics().empty()) GTEST_SKIP() << "No NIC devices";
-  amdsmi::unittest::StatusCollector col("amdsmi_get_nic_device_bdf");
+  amdsmi::test::StatusCollector col("amdsmi_get_nic_device_bdf");
   for (size_t i = 0; i < nics().size(); ++i) {
     amdsmi_bdf_t a, b;
     memset(&a, 0, sizeof(a));
@@ -63,9 +63,9 @@ TEST_F(NicFunctionalReadOnly, DeviceBdf_Stable) {
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, e1, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
     col.Record("nic=" + std::to_string(i), e1,
-               ::amdsmi::unittest::AmdsmiStatusIsExpected(e1, AMDSMI_STATUS_SUCCESS,
-                                                          AMDSMI_STATUS_NOT_SUPPORTED,
-                                                          AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+               ::amdsmi::test::AmdsmiStatusIsExpected(e1, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
     EXPECT_EQ(e1, e2) << "nic=" << i << " getter status not stable";
     if (e1 == AMDSMI_STATUS_SUCCESS) {
       EXPECT_EQ(a.as_uint, b.as_uint) << "nic=" << i << " BDF not stable across reads";
