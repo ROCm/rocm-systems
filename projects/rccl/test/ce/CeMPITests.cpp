@@ -39,6 +39,7 @@ constexpr int    kMinRanks4       = 4;
 constexpr int    kMinRanks8       = 8;
 constexpr int    kStressIters     = 20;     // back-to-back iterations for stress test
 constexpr int    kInterleavedIters = 10;    // iterations for CE+SM interleaved stress test
+constexpr int    kScaleOutIters   = 3;      // repeated RMA sequence reuse in hierarchical tests
 } // namespace CeMPITestConstants
 
 using namespace CeMPITestConstants;
@@ -121,6 +122,40 @@ protected:
                    " (driver or env-var prerequisites not met)";
             TEST_INFO("%s: assertion passed — SM fallback path (CE not available/configured)",
                       context);
+        }
+    }
+
+    bool isScaleOutTopology() const
+    {
+        MPI_Comm localComm = MPI_COMM_NULL;
+        if(MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0,
+                               MPI_INFO_NULL, &localComm) != MPI_SUCCESS)
+            return false;
+
+        int worldSize = 0;
+        int localSize = 0;
+        int minLocalSize = 0;
+        int maxLocalSize = 0;
+        MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+        MPI_Comm_size(localComm, &localSize);
+        MPI_Allreduce(&localSize, &minLocalSize, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(&localSize, &maxLocalSize, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        MPI_Comm_free(&localComm);
+
+        return worldSize > maxLocalSize && minLocalSize >= 2;
+    }
+
+    void assertHierarchicalCEPathTaken(int rank, const char* context)
+    {
+        if(!isCeExpected())
+            return;
+
+        const std::string log = readAllLogs();
+        if(rank == 0)
+        {
+            EXPECT_NE(log.find("[Hierarchical CE]"), std::string::npos)
+                << context
+                << ": hierarchical CE selection marker absent from rank 0 log";
         }
     }
 
@@ -269,10 +304,13 @@ protected:
 class CeMPI_AllGather : public CeMPITest
 {
 protected:
-    void runAllGather(int minRanks, size_t count, const char* testId)
+    void runAllGather(int minRanks, size_t count, const char* testId,
+                      bool requireScaleOut = false)
     {
         if(!validateTestPrerequisites(minRanks))
             GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
+        if(requireScaleOut && !isScaleOutTopology())
+            GTEST_SKIP() << "Need at least 2 nodes and 2 MPI ranks per node";
 
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
@@ -284,17 +322,33 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(count * sizeof(float), sendSym));
         ASSERT_EQ(ncclSuccess, allocSymBuf(count * nRanks * sizeof(float), recvSym));
 
-        fillRankScalar(sendSym.ptr, count, rank);
+        const int iterations = requireScaleOut ? kScaleOutIters : 1;
+        for(int iter = 0; iter < iterations; ++iter)
+        {
+            const int epoch = iter * nRanks;
+            ASSERT_EQ(
+                hipSuccess,
+                initializeBufferWithPattern<float>(
+                    sendSym.ptr, count,
+                    [rank, epoch](size_t) { return static_cast<float>(epoch + rank + 1); }));
 
-        ASSERT_EQ(ncclSuccess,
-                  ncclAllGather(sendSym.ptr, recvSym.ptr, count, ncclFloat32,
-                                getActiveCommunicator(), getActiveStream()));
-        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            ASSERT_EQ(ncclSuccess,
+                      ncclAllGather(sendSym.ptr, recvSym.ptr, count, ncclFloat32,
+                                    getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-        ASSERT_TRUE(verifyBlockPattern(recvSym.ptr, count * nRanks, count))
-            << "Rank " << rank << ": AllGather data verification failed";
+            ASSERT_TRUE(verifyBufferData<float>(
+                recvSym.ptr, count * nRanks,
+                [count, epoch](size_t i) {
+                    return static_cast<float>(epoch + i / count + 1);
+                }))
+                << "Rank " << rank << ": AllGather data verification failed at iteration "
+                << iter;
+        }
 
         assertCEPathTaken(testId);
+        if(requireScaleOut)
+            assertHierarchicalCEPathTaken(rank, testId);
         // numOps = nRanks (one copy per rank including self); chunkBytes = count * sizeof(float)
         assertCEBatchPath(ceExpectIntraBatchSync(nRanks, count * sizeof(float)), testId);
     }
@@ -308,6 +362,11 @@ TEST_F(CeMPI_AllGather, FourRanks)   { runAllGather(kMinRanks4, kMediumCount, "C
 TEST_F(CeMPI_AllGather, EightRanks)  { runAllGather(kMinRanks8, kMediumCount, "CeMPI_AllGather/EightRanks"); }
 // CE-MPI-AG-04: Edge case — single element per rank.
 TEST_F(CeMPI_AllGather, SingleElement) { runAllGather(kMinRanks2, 1,          "CeMPI_AllGather/SingleElement"); }
+// CE-MPI-AG-05: Multi-node RMA proxy + intra-node CE path.
+TEST_F(CeMPI_AllGather, MultiNodeHierarchical)
+{
+    runAllGather(kMinRanks4, kSmallCount, "CeMPI_AllGather/MultiNodeHierarchical", true);
+}
 
 // ===========================================================================
 // CeMPI_AlltoAll – ncclAlltoAll CE correctness + log verification
@@ -317,10 +376,13 @@ class CeMPI_AlltoAll : public CeMPITest
 {
 protected:
     // count is per-rank-per-destination; total send/recv buffer = count * nRanks.
-    void runAlltoAll(int minRanks, size_t count, const char* testId)
+    void runAlltoAll(int minRanks, size_t count, const char* testId,
+                     bool requireScaleOut = false)
     {
         if(!validateTestPrerequisites(minRanks))
             GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
+        if(requireScaleOut && !isScaleOutTopology())
+            GTEST_SKIP() << "Need at least 2 nodes and 2 MPI ranks per node";
 
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
 
@@ -334,17 +396,33 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(totalElem * sizeof(float), sendSym));
         ASSERT_EQ(ncclSuccess, allocSymBuf(totalElem * sizeof(float), recvSym));
 
-        fillRankScalar(sendSym.ptr, totalElem, rank);
+        const int iterations = requireScaleOut ? kScaleOutIters : 1;
+        for(int iter = 0; iter < iterations; ++iter)
+        {
+            const int epoch = iter * nRanks;
+            ASSERT_EQ(
+                hipSuccess,
+                initializeBufferWithPattern<float>(
+                    sendSym.ptr, totalElem,
+                    [rank, epoch](size_t) { return static_cast<float>(epoch + rank + 1); }));
 
-        ASSERT_EQ(ncclSuccess,
-                  ncclAlltoAll(sendSym.ptr, recvSym.ptr, count, ncclFloat32,
-                               getActiveCommunicator(), getActiveStream()));
-        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            ASSERT_EQ(ncclSuccess,
+                      ncclAlltoAll(sendSym.ptr, recvSym.ptr, count, ncclFloat32,
+                                   getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-        ASSERT_TRUE(verifyBlockPattern(recvSym.ptr, totalElem, count))
-            << "Rank " << rank << ": AlltoAll data verification failed";
+            ASSERT_TRUE(verifyBufferData<float>(
+                recvSym.ptr, totalElem,
+                [count, epoch](size_t i) {
+                    return static_cast<float>(epoch + i / count + 1);
+                }))
+                << "Rank " << rank << ": AlltoAll data verification failed at iteration "
+                << iter;
+        }
 
         assertCEPathTaken(testId);
+        if(requireScaleOut)
+            assertHierarchicalCEPathTaken(rank, testId);
         // numOps = nRanks (one per destination rank); chunkBytes = count * sizeof(float)
         assertCEBatchPath(ceExpectIntraBatchSync(nRanks, count * sizeof(float)), testId);
     }
@@ -358,6 +436,11 @@ TEST_F(CeMPI_AlltoAll, FourRanks)  { runAlltoAll(kMinRanks4, kMediumCount, "CeMP
 TEST_F(CeMPI_AlltoAll, EightRanks) { runAlltoAll(kMinRanks8, kMediumCount, "CeMPI_AlltoAll/EightRanks"); }
 // CE-MPI-A2A-04: Odd rank count (3) — non-power-of-two op layout vs 2/4/8 ranks.
 TEST_F(CeMPI_AlltoAll, ThreeRanks) { runAlltoAll(3,          kSmallCount,  "CeMPI_AlltoAll/ThreeRanks"); }
+// CE-MPI-A2A-05: Multi-node RMA proxy + intra-node CE path.
+TEST_F(CeMPI_AlltoAll, MultiNodeHierarchical)
+{
+    runAlltoAll(kMinRanks4, kSmallCount, "CeMPI_AlltoAll/MultiNodeHierarchical", true);
+}
 
 // ===========================================================================
 // CeMPI_Scatter – ncclScatter CE correctness + log verification
