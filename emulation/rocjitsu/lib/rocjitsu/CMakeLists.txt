@@ -30,8 +30,8 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# Vendored DRM/amdgpu UAPI headers. Keep their standard libdrm include layout
-# and propagate it through targets whose headers expose KFD or DRM ABI types.
+# Vendored DRM/amdgpu UAPI headers. kfd_ioctl.h includes <libdrm/drm.h>, so
+# attach this target privately at the HSA include chokepoints.
 add_library(rocjitsu_drm_headers INTERFACE)
 target_include_directories(
     rocjitsu_drm_headers
