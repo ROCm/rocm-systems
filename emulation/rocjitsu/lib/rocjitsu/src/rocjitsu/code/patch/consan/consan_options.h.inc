@@ -811,8 +811,6 @@ struct ConSanOptions : ConSanRequest,
   /// unrelated tail function merely because that FUNC covers the cave bytes.
   std::vector<ConSanPreappliedCodeRange> preapplied_code_ranges;
   std::vector<ConSanPreappliedReservedRange> preapplied_reserved_ranges;
-  /// Internal recursion guard: faults have already been applied to this ELF.
-  bool faults_preapplied = false;
   /// Scalar state kept outside a spill-backed Inline transient window.
   std::optional<uint16_t> moi_inline_indirect_pc_sgpr;
   std::optional<uint16_t> moi_inline_call_return_sgpr;

@@ -5853,6 +5853,30 @@ analysis completed.
   all 2,908 simulator-device tests across the five targets pass. E2E
   validation remains outside this deletion work.
 
+### Slice 5CQ: delete recursive fault application
+
+- **One analysis, one exact mutation:** Fault planning already produces an
+  exact mutation plan and complete pristine semantic inventory. Both ordinary
+  and fault/perturbation composition now apply that plan directly to an
+  independently owned artifact instead of recursively invoking the complete
+  ConSan lowerer to rediscover and apply the same mutation.
+- **Preserved composition proof:** A selected perturbation still retains the
+  pristine inventory while its stable site, sequence, and owner identities are
+  translated across the mutation. Fault-only transforms move the inventory
+  directly; composite transforms retain a second owned view only for this
+  explicit proof, not for another decode or analysis pass.
+- **Completed deletion:** The mutable `faults_preapplied` recursion guard and
+  all of its planning, mutation, instrumentation, and late-retry assignments
+  are gone. The special recursive fault-application branch is gone as well.
+- **Accounting:** Implementation files add 15 and delete 24 physical lines
+  after formatting, a net deletion of nine, while also removing one full
+  decode/analyze/finalize pass from composite fault execution.
+- **Checked-in gate:** All 114 applicable focused fault, perturbation, and
+  composition host tests pass, as do all 1,531 ConSan host tests, all 172
+  HSA-hook tests, and all 2,878 currently generated simulator-device tests
+  across `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`. E2E
+  validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

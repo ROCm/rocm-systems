@@ -345,7 +345,6 @@ retry_patch_consan_moi_from_inventory(ConSanTransformArtifacts inventory_artifac
       return finalize_consan_result(std::move(inventory), code_object_bytes);
     }
     if (has_late_fault) {
-      options.faults_preapplied = false;
       // A pristine report-sizing inventory deliberately excludes the live
       // mutation. Rebuild for the rare late-fault path instead of coupling
       // the retained inventory to every mutation-specific analysis choice.

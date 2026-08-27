@@ -432,6 +432,15 @@ runtime binding reuses the immutable inventory without carrying a parallel
 mutation-specific inventory shape. Ordinary and completed transforms retain
 no hidden raw result.
 
+Fault/perturbation composition also reuses that immutable semantic work. The
+fault planner produces an exact plan against the pristine inventory; the
+mutation stage applies that plan directly to an independently owned artifact
+and validates the changed image. When a perturbation is also selected, the
+pristine inventory remains live only long enough to translate its stable site
+and owner identity across the fault patch. ConSan does not recursively decode
+and analyze the pristine image merely to apply an already-selected mutation,
+and mutable lowerer options contain no recursion marker.
+
 ## Runtime component and lifecycle
 
 The HSA hook is a coordinator around the transformation core:

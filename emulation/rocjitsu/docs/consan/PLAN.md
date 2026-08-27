@@ -435,6 +435,11 @@ from pristine bytes instead of requiring a specially shaped retained
 inventory. The one-consumer retry configuration and the pristine inventory's
 runtime-binding parameter are also gone; a retry constructs one fully bound
 lowerer state, while an address-bearing pristine inventory is unrepresentable.
+Fault mutation now applies directly to its already-planned pristine inventory,
+including in fault/perturbation composition; the recursive second analysis and
+its mutable `faults_preapplied` guard are gone. Perturbation composition retains
+the pristine semantic view only while translating its selected plan across the
+mutation.
 The next high-payoff seam is the raw mutable-options lowerer and its duplicated
 per-engine planning state, not another result adapter.
 

@@ -371,10 +371,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
         "ConSan atomic fault/perturbation composition requires the SC2D composite proof");
     return result;
   }
-  if (has_fault && !options.fault_dry_run && !options.faults_preapplied) {
+  if (has_fault && !options.fault_dry_run) {
     ConSanOptions planning_options = options;
     planning_options.fault_dry_run = true;
-    planning_options.faults_preapplied = false;
     if (!has_perturbation)
       planning_options.fault_require_exactly_one = false;
     ConSanTransformArtifacts pristine_mutation_plan;
@@ -421,24 +420,20 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     // ordinary-user malformed-wait abort.
     fault_options.abort_unmatched_barrier_wait = false;
     fault_options.sc_perturb_kind = ConSanPerturbationKind::None;
-    fault_options.faults_preapplied = true;
-    ConSanTransformArtifacts fault_result;
-    if (has_perturbation) {
-      fault_result = lower_consan(code_object_bytes, fault_options);
-    } else {
-      // Planning already built the complete pristine semantic inventory.
-      // Reuse it to apply the selected mutation instead of decoding and
-      // analyzing a large code object a second time. Final validation below
-      // still re-derives mutation semantics from pristine executable bytes,
-      // and the instrumentation stage independently analyzes the mutated
-      // image.
-      fault_result = std::move(pristine_mutation_plan);
-      AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
-      const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
-      apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result);
-      fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
-                                            fault_options.moi_report_dispatch_id);
-    }
+    // Planning already built the complete pristine semantic inventory. Reuse
+    // it to apply the selected mutation instead of decoding and analyzing the
+    // code object a second time. This is equally valid when a perturbation was
+    // selected: its carried plan is retained separately and translated across
+    // the mutation below. Final validation still re-derives mutation semantics
+    // from pristine executable bytes, and the instrumentation stage
+    // independently analyzes the mutated image.
+    ConSanTransformArtifacts fault_result =
+        has_perturbation ? pristine_mutation_plan : std::move(pristine_mutation_plan);
+    AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
+    const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
+    apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result);
+    fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
+                                          fault_options.moi_report_dispatch_id);
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;
     ConSanFaultTransformStage mutation_stage = take_modified_stage(fault_result);
@@ -462,7 +457,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     // Cardinality was enforced on the mutation stage. The subsequent
     // instrumentation-only pass has no mutation of its own to count.
     instrument_options.fault_require_exactly_one = false;
-    instrument_options.faults_preapplied = true;
     instrument_options.abort_unmatched_barrier_wait = false;
     for (const ConSanPatchInfo &patch : mutation_stage.patches) {
       if (patch.original_size != 0) {
