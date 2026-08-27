@@ -3240,12 +3240,12 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
 }
 
 void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOptions &options,
+                               std::span<const ConSanMoiCandidate> candidates,
                                ConSanResult &result) {
   result.resource_plans.clear();
-  result.resource_plans.reserve(result.moi_candidates.size());
-  for (size_t candidate_index = 0; candidate_index < result.moi_candidates.size();
-       ++candidate_index) {
-    const ConSanMoiCandidate &candidate = result.moi_candidates[candidate_index];
+  result.resource_plans.reserve(candidates.size());
+  for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+    const ConSanMoiCandidate &candidate = candidates[candidate_index];
     ConSanOptions site_options = options;
     uint16_t scratch_count = moi_access_scratch_vgpr_count(site_options, candidate, state.arch);
     ConSanCandidateResourcePlan plan = plan_moi_resource_site(
@@ -3499,22 +3499,11 @@ find_moi_borrowed_entry_backup_vgpr(MoiResourcePlanningState &state,
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
 resource_plan_for_candidate(const ConSanResult &result, const ConSanMoiCandidate &candidate) {
-  if (result.moi_candidates.empty())
-    return nullptr;
-  const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(result.moi_candidates.data());
-  const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(&candidate);
-  if (address < begin)
-    return nullptr;
-  const std::uintptr_t byte_offset = address - begin;
-  if (byte_offset % sizeof(ConSanMoiCandidate) != 0u)
-    return nullptr;
-  const size_t index = static_cast<size_t>(byte_offset / sizeof(ConSanMoiCandidate));
-  if (index >= result.resource_plans.size() || index >= result.moi_candidates.size() ||
-      &result.moi_candidates[index] != &candidate ||
-      result.resource_plans[index].candidate_index != index) {
-    return nullptr;
-  }
-  return &result.resource_plans[index];
+  const auto plan = std::ranges::find_if(result.resource_plans, [&](const auto &candidate_plan) {
+    return candidate_plan.site_kind == ConSanResourceSiteKind::Access &&
+           candidate_plan.text_offset == candidate.anchor();
+  });
+  return plan == result.resource_plans.end() ? nullptr : &*plan;
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
@@ -4737,7 +4726,8 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
 
 [[nodiscard]] bool
 configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &result,
-                                        const MoiResourcePlanningState &planning_state) {
+                                        const MoiResourcePlanningState &planning_state,
+                                        std::span<const ConSanMoiCandidate> candidates) {
   const std::span<const uint8_t> bytes = planning_state.bytes;
   const rj_code_arch_t arch = planning_state.arch;
   if (options.moi_exec_save_sgpr)
@@ -5036,13 +5026,13 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   if (is_rdna4_family_arch(arch) && options.moi_engine == ConSanMoiEngine::InlineShadow &&
       options.moi_inline_access_present && state.valid && saw_site) {
     const size_t ordinary_access_count =
-        std::ranges::count_if(result.moi_candidates, [](const ConSanMoiCandidate &candidate) {
+        std::ranges::count_if(candidates, [](const ConSanMoiCandidate &candidate) {
           return candidate.kind == ConSanLdsAccessKind::Read ||
                  candidate.kind == ConSanLdsAccessKind::Write;
         });
     const bool needs_dense_router =
         ordinary_access_count >= 8u ||
-        std::ranges::any_of(result.moi_candidates, [](const ConSanMoiCandidate &candidate) {
+        std::ranges::any_of(candidates, [](const ConSanMoiCandidate &candidate) {
           return !candidate.container.is_kernel() && (candidate.kind == ConSanLdsAccessKind::Read ||
                                                       candidate.kind == ConSanLdsAccessKind::Write);
         });

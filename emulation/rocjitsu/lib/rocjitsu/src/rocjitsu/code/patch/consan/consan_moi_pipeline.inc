@@ -941,8 +941,9 @@ void finalize_moi_site_lowering_outcomes(ConSanTransformArtifacts &result) {
 }
 
 void rebuild_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOptions &options,
+                                std::span<const ConSanMoiCandidate> candidates,
                                 ConSanResult &result) {
-  append_moi_resource_plans(state, options, result);
+  append_moi_resource_plans(state, options, candidates, result);
   append_moi_operational_resource_plans(state, options, result);
   if ((state.arch == ROCJITSU_CODE_ARCH_CDNA5 || state.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
        state.arch == ROCJITSU_CODE_ARCH_CDNA4) &&

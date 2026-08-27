@@ -200,7 +200,6 @@ struct ConSanResult : ConSanTransformArtifacts {
   std::optional<uint16_t> resolved_moi_dispatch_id_vgpr;
   std::vector<ConSanPerturbationCandidate> perturbation_candidates;
   std::vector<ConSanPerturbationPlan> perturbation_plans;
-  std::vector<ConSanMoiCandidate> moi_candidates;
 };
 
 /// Whether a semantic claim is at least as strong as the weakest confidence a

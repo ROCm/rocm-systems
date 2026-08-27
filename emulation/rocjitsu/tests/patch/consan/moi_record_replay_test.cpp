@@ -70,22 +70,22 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
   EXPECT_EQ(kernel.stats.lds_write_count, 1u);
   ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
-  ASSERT_EQ(result.moi_candidates.size(), 2u);
-  EXPECT_EQ(result.moi_candidates[0].origin, ConSanAccessOrigin::NativeLds);
-  EXPECT_EQ(result.moi_candidates[0].kind, ConSanLdsAccessKind::Write);
-  EXPECT_EQ(result.moi_candidates[0].container.kind, ConSanProgramContainerKind::Kernel);
-  EXPECT_EQ(result.moi_candidates[0].container.name, "lds_probe");
-  EXPECT_EQ(result.moi_candidates[0].mnemonic, "ds_store_b32");
-  EXPECT_EQ(result.moi_candidates[0].anchor(), 0u);
-  EXPECT_EQ(result.moi_candidates[0].file_offset, 0x100u);
-  ASSERT_TRUE(result.moi_candidates[0].operands.address_vgpr);
-  EXPECT_EQ(*result.moi_candidates[0].operands.address_vgpr, 0u);
-  ASSERT_TRUE(result.moi_candidates[0].operands.data_vgpr);
-  EXPECT_EQ(*result.moi_candidates[0].operands.data_vgpr, 0u);
-  EXPECT_EQ(result.moi_candidates[1].kind, ConSanLdsAccessKind::Read);
-  EXPECT_EQ(result.moi_candidates[1].mnemonic, "ds_load_b32");
-  ASSERT_TRUE(result.moi_candidates[1].operands.destination_vgpr);
-  EXPECT_EQ(*result.moi_candidates[1].operands.destination_vgpr, 0u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
+  EXPECT_EQ(test_admitted_accesses(result)[0].origin, ConSanAccessOrigin::NativeLds);
+  EXPECT_EQ(test_admitted_accesses(result)[0].kind, ConSanLdsAccessKind::Write);
+  EXPECT_EQ(test_admitted_accesses(result)[0].container.kind, ConSanProgramContainerKind::Kernel);
+  EXPECT_EQ(test_admitted_accesses(result)[0].container.name, "lds_probe");
+  EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic, "ds_store_b32");
+  EXPECT_EQ(test_admitted_accesses(result)[0].physical_id.original_text_offset, 0u);
+  EXPECT_EQ(test_admitted_accesses(result)[0].file_offset, 0x100u);
+  ASSERT_TRUE(test_admitted_accesses(result)[0].operands.address_vgpr);
+  EXPECT_EQ(*test_admitted_accesses(result)[0].operands.address_vgpr, 0u);
+  ASSERT_TRUE(test_admitted_accesses(result)[0].operands.data_vgpr);
+  EXPECT_EQ(*test_admitted_accesses(result)[0].operands.data_vgpr, 0u);
+  EXPECT_EQ(test_admitted_accesses(result)[1].kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic, "ds_load_b32");
+  ASSERT_TRUE(test_admitted_accesses(result)[1].operands.destination_vgpr);
+  EXPECT_EQ(*test_admitted_accesses(result)[1].operands.destination_vgpr, 0u);
   ASSERT_EQ(result.resource_plans.size(), 2u);
   for (size_t plan_index = 0; plan_index < result.resource_plans.size(); ++plan_index) {
     const ConSanCandidateResourcePlan &plan = result.resource_plans[plan_index];
@@ -206,9 +206,9 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().container.name, "shared_owner_0");
-  EXPECT_FALSE(result.moi_candidates.front().kernel_descriptor_file_offset);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().container.name, "shared_owner_0");
+  EXPECT_NE(test_admitted_accesses(result).front().execution_owner_descriptor_file_offsets.size(), 1u);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncEventKind::Barrier);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
@@ -1942,9 +1942,9 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfFinalZeroSizedSymbol) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_TRUE(result.program_inventory.kernels().front().code_size_inferred_from_zero);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_b16");
-  EXPECT_EQ(result.moi_candidates.front().anchor(), 0u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_store_b16");
+  EXPECT_EQ(test_admitted_accesses(result).front().physical_id.original_text_offset, 0u);
   EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
@@ -1974,10 +1974,10 @@ TEST(ConSanMoi, RecordReplayExcludesUnreachableTailOfBoundedZeroSizedSymbol) {
       std::ranges::find(result.program_inventory.kernels(), "lds_probe", &ConSanKernelInfo::name);
   ASSERT_NE(first_kernel, result.program_inventory.kernels().end());
   EXPECT_TRUE(first_kernel->code_size_inferred_from_zero);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().container.name, "lds_probe");
-  EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_b16");
-  EXPECT_EQ(result.moi_candidates.front().anchor(), 0u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().container.name, "lds_probe");
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_store_b16");
+  EXPECT_EQ(test_admitted_accesses(result).front().physical_id.original_text_offset, 0u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::None);
 }
@@ -1997,9 +1997,9 @@ TEST(ConSanMoi, RecordReplayDoesNotPruneExplicitSizedUnreachableTail) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_FALSE(result.program_inventory.kernels().front().code_size_inferred_from_zero);
-  ASSERT_EQ(result.moi_candidates.size(), 2u);
-  EXPECT_EQ(result.moi_candidates[0].mnemonic, "ds_store_b16");
-  EXPECT_EQ(result.moi_candidates[1].mnemonic, "ds_load_b32");
+  ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
+  EXPECT_EQ(test_admitted_accesses(result)[0].mnemonic, "ds_store_b16");
+  EXPECT_EQ(test_admitted_accesses(result)[1].mnemonic, "ds_load_b32");
   ASSERT_EQ(result.resource_plans.size(), 2u);
   EXPECT_EQ(result.resource_plans[0].reason, ConSanRegisterPlanReason::None);
   EXPECT_EQ(result.resource_plans[1].reason, ConSanRegisterPlanReason::MissingOwner);
@@ -2982,9 +2982,9 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::NativeLds);
-  EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Write);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().origin, ConSanAccessOrigin::NativeLds);
+  EXPECT_EQ(test_admitted_accesses(result).front().kind, ConSanLdsAccessKind::Write);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore ||
@@ -3044,9 +3044,9 @@ TEST(ConSanMoi, Cdna4RecordReplayNormalizesTransposeAndTwoAddressLdsRanges) {
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-    ASSERT_EQ(result.moi_candidates.size(), 1u);
-    EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
-    EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);
+    ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+    EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, expected_mnemonic);
+    EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, expected_width_bits);
     EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
     const ConSanMoiAutoReportInventory inventory =
@@ -3106,18 +3106,19 @@ TEST(ConSanMoi, Cdna4RecordReplaySupportsSubwordNativeLdsSites) {
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-    ASSERT_EQ(result.moi_candidates.size(), 1u);
-    EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
-    EXPECT_EQ(result.moi_candidates.front().kind, expected_kind);
-    EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);
-    ASSERT_TRUE(result.moi_candidates.front().operands.address_vgpr);
-    EXPECT_EQ(*result.moi_candidates.front().operands.address_vgpr, expected_addr_vgpr);
+    ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+    EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, expected_mnemonic);
+    EXPECT_EQ(test_admitted_accesses(result).front().kind, expected_kind);
+    EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, expected_width_bits);
+    ASSERT_TRUE(test_admitted_accesses(result).front().operands.address_vgpr);
+    EXPECT_EQ(*test_admitted_accesses(result).front().operands.address_vgpr, expected_addr_vgpr);
     if (expected_kind == ConSanLdsAccessKind::Read) {
-      ASSERT_TRUE(result.moi_candidates.front().operands.destination_vgpr);
-      EXPECT_EQ(*result.moi_candidates.front().operands.destination_vgpr, expected_value_vgpr);
+      ASSERT_TRUE(test_admitted_accesses(result).front().operands.destination_vgpr);
+      EXPECT_EQ(*test_admitted_accesses(result).front().operands.destination_vgpr,
+                expected_value_vgpr);
     } else {
-      ASSERT_TRUE(result.moi_candidates.front().operands.data_vgpr);
-      EXPECT_EQ(*result.moi_candidates.front().operands.data_vgpr, expected_value_vgpr);
+      ASSERT_TRUE(test_admitted_accesses(result).front().operands.data_vgpr);
+      EXPECT_EQ(*test_admitted_accesses(result).front().operands.data_vgpr, expected_value_vgpr);
     }
     EXPECT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
     EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
@@ -4916,8 +4917,8 @@ TEST(ConSanMoi, FirstLightProbeLowersTwoAddressNativeLdsSitesToTwoRecords) {
   const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_2addr_b32");
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_store_2addr_b32");
   EXPECT_TRUE(result.modified());
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
@@ -6423,7 +6424,8 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
   const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            patch.original_size == 0u &&
-           patch.anchor_offset == result.moi_candidates.front().anchor() &&
+           patch.anchor_offset ==
+               test_admitted_accesses(result).front().physical_id.original_text_offset &&
            patch.trampoline_size != 0u;
   });
   ASSERT_NE(dispatcher, result.patches.end());
@@ -6739,11 +6741,11 @@ TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  ASSERT_TRUE(result.moi_candidates.front().operands.data_vgpr);
-  EXPECT_EQ(*result.moi_candidates.front().operands.data_vgpr, 29u);
-  ASSERT_TRUE(result.moi_candidates.front().operands.second_data_vgpr);
-  EXPECT_EQ(*result.moi_candidates.front().operands.second_data_vgpr, 38u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  ASSERT_TRUE(test_admitted_accesses(result).front().operands.data_vgpr);
+  EXPECT_EQ(*test_admitted_accesses(result).front().operands.data_vgpr, 29u);
+  ASSERT_TRUE(test_admitted_accesses(result).front().operands.second_data_vgpr);
+  EXPECT_EQ(*test_admitted_accesses(result).front().operands.second_data_vgpr, 38u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore ||
            patch.kind == ConSanPatchKind::InlineMoiAccessRecordStore;
@@ -6834,13 +6836,13 @@ TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
-  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(test_admitted_accesses(result).front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
-  EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Read);
-  EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_b32");
-  EXPECT_EQ(result.moi_candidates.front().anchor(), 28u);
+  EXPECT_EQ(test_admitted_accesses(result).front().kind, ConSanLdsAccessKind::Read);
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "flat_load_b32");
+  EXPECT_EQ(test_admitted_accesses(result).front().physical_id.original_text_offset, 28u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).kind,
             ConSanPatchKind::InlineMoiAccessRecordStore);
@@ -10279,11 +10281,11 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
-  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(test_admitted_accesses(result).front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
-  EXPECT_EQ(result.moi_candidates.front().operands.raw_ioffset, 16);
+  EXPECT_EQ(test_admitted_accesses(result).front().operands.raw_ioffset, 16);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -11618,9 +11620,9 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.moi_candidates.size(), kAccessCount);
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates)
-    EXPECT_EQ(candidate.gfx1250_vgpr_msb_mode, kGuestVgprMsbMode);
+  ASSERT_EQ(test_admitted_accesses(result).size(), kAccessCount);
+  for (const ConSanAccessInventorySite &candidate : test_admitted_accesses(result))
+    EXPECT_EQ(test_gfx1250_vgpr_msb_mode(bytes, candidate), kGuestVgprMsbMode);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -11678,14 +11680,16 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   options.moi_track_atomics = false;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(
-      make_gfx1250_code_object(text_words, "gfx1250_record_replay_high_bank_address"), options);
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_record_replay_high_bank_address");
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().gfx1250_vgpr_msb_mode, kGuestVgprMsbMode);
+  EXPECT_EQ(test_gfx1250_vgpr_msb_mode(bytes, test_admitted_accesses(result).front()),
+            kGuestVgprMsbMode);
   EXPECT_EQ(result.resource_plans.front().scratch_vgpr_count, 7u);
   const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
   ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
@@ -11743,15 +11747,16 @@ TEST(ConSanMoi, Gfx1250RecordReplaySavesSpillBeforeCompositeHighBankAddressCaptu
   options.test_force_vgpr_spill = true;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(
-      make_gfx1250_code_object(text_words, "gfx1250_record_replay_composite_high_bank_address"),
-      options);
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_record_replay_composite_high_bank_address");
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().gfx1250_vgpr_msb_mode, kGuestVgprMsbMode);
+  EXPECT_EQ(test_gfx1250_vgpr_msb_mode(bytes, test_admitted_accesses(result).front()),
+            kGuestVgprMsbMode);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
   ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
@@ -11812,13 +11817,13 @@ TEST(ConSanMoi, Gfx1250DenseAccessesIgnorePreviousGuestVgprMsbMode) {
   text_words.push_back(0x00000000u); // ds_store_b32 v0, v0
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5));
 
-  const ConSanResult result =
-      test_lower_consan(make_gfx1250_code_object(text_words, "gfx1250_previous_vgpr_msb_mode"),
-                        moi_options(ConSanMoiEngine::RecordReplay));
+  const std::vector<uint8_t> bytes =
+      make_gfx1250_code_object(text_words, "gfx1250_previous_vgpr_msb_mode");
+  const ConSanResult result = test_lower_consan(bytes, moi_options(ConSanMoiEngine::RecordReplay));
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().gfx1250_vgpr_msb_mode, 0u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_gfx1250_vgpr_msb_mode(bytes, test_admitted_accesses(result).front()), 0u);
 }
 
 TEST(ConSanMoi, AtomicRecordUsesLocalIndirectIslandForFarAppendedHelper) {

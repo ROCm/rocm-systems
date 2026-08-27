@@ -36,6 +36,7 @@ RJ_DIAGNOSTIC_POP
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -130,6 +131,45 @@ test_moi_persistent_sgpr_state(const ConSanTransformArtifacts &result) {
   });
   return consumer == result.patches.end() ? ConSanMoiPersistentSgprState{}
                                           : consumer->persistent_sgpr_state;
+}
+
+/// Reconstruct the admitted access projection from the durable inventory and
+/// observation plan. Production keeps the same projection only for the
+/// lifetime of lowering; tests call this helper when they specifically need
+/// to verify that policy selected the expected normalized access facts.
+[[nodiscard]] std::vector<ConSanAccessInventorySite>
+test_admitted_accesses(const ConSanTransformArtifacts &result) {
+  std::vector<ConSanAccessInventorySite> candidates;
+  std::unordered_set<uint64_t> admitted_offsets;
+  for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
+    if (intent.kind != ConSanProbeIntentKind::AccessRecord &&
+        intent.kind != ConSanProbeIntentKind::SampledAccess &&
+        intent.kind != ConSanProbeIntentKind::ExactShadowAccess) {
+      continue;
+    }
+    const auto access = std::ranges::find_if(result.program_inventory.access_sites(),
+                                             [&](const ConSanAccessInventorySite &candidate) {
+                                               return candidate.physical_id == intent.physical_site;
+                                             });
+    if (access == result.program_inventory.access_sites().end() ||
+        !admitted_offsets.insert(access->physical_id.original_text_offset).second) {
+      continue;
+    }
+    candidates.push_back(*access);
+  }
+  return candidates;
+}
+
+/// Add the gfx1250 execution-mode fact that current lowerers derive directly
+/// from pristine code bytes immediately before emission.
+[[nodiscard]] std::optional<uint16_t>
+test_gfx1250_vgpr_msb_mode(std::span<const uint8_t> bytes,
+                           const ConSanAccessInventorySite &access) {
+  const uint64_t anchor = access.physical_id.original_text_offset;
+  if (anchor < access.container.entry_text_offset || access.file_offset < anchor)
+    return std::nullopt;
+  return consan_gfx1250_vgpr_msb_mode_at(bytes, access.file_offset - anchor,
+                                         access.container.entry_text_offset, access.file_offset);
 }
 
 [[nodiscard]] constexpr bool is_consan_access_intent(ConSanProbeIntentKind kind) {
@@ -2855,9 +2895,9 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().kind, expected_kind);
-  EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().kind, expected_kind);
+  EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, expected_width_bits);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineMoiAccessRecordStore);
   expect_bounded_static_record_replay_probe_size(result.patches.front().original_size);

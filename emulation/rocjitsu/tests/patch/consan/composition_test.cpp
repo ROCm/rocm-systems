@@ -752,12 +752,13 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
     return patch.phase == ConSanPatchPhase::Instrumentation &&
            patch.kind == ConSanPatchKind::TrampolineMoiInlineEpochBarrier;
   }));
+  const std::vector<ConSanAccessInventorySite> candidates = test_admitted_accesses(result);
   const auto post_return_candidate =
-      std::ranges::find_if(result.moi_candidates, [](const ConSanMoiCandidate &candidate) {
-        return candidate.anchor() == 24u;
+      std::ranges::find_if(candidates, [](const ConSanAccessInventorySite &candidate) {
+        return candidate.physical_id.original_text_offset == 24u;
       });
-  ASSERT_NE(post_return_candidate, result.moi_candidates.end());
-  EXPECT_TRUE(post_return_candidate->kernel_descriptor_file_offset.has_value());
+  ASSERT_NE(post_return_candidate, candidates.end());
+  EXPECT_EQ(post_return_candidate->execution_owner_descriptor_file_offsets.size(), 1u);
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());

@@ -5672,6 +5672,32 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CJ: make admitted access candidates a local lowering projection
+
+- **Temporary state has lexical ownership:** The admitted MOI access vector is
+  now built after policy and owned by the one `try_patch_consan_moi` attempt.
+  Placement and the three access engines receive a read-only span only for the
+  calls that consume it; the vector is no longer retained in `ConSanResult`.
+- **Stable resource identity replaces pointer arithmetic:** Access resource
+  plans are resolved by their typed site kind and unique original-text anchor.
+  The deleted implementation derived a candidate index by subtracting raw
+  object addresses from a result-owned vector, unnecessarily coupling plan
+  lookup to that vector's allocation and lifetime.
+- **Tests assert durable contracts:** Candidate-oriented tests now reconstruct
+  the admitted set from immutable access inventory plus observation-plan
+  intents, and inspect normalized inventory records rather than a lowering
+  scratch type. The few tests of gfx1250 VGPR-bank mode derive that fact from
+  the pristine bytes exactly as lowering does. Dedicated adapter tests remain
+  only where candidate-only lowering behavior itself is the unit under test.
+- **Deletion accounting:** Implementation files add 96 and delete 101 physical
+  lines, a net deletion of five. More importantly, the result loses another
+  mutable vector and production references to `ConSanResult` fall from 79 to
+  76 while all candidate consumers now expose their actual dependency.
+- **Checked-in gate:** All 1,530 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -3273,7 +3273,8 @@ TEST(ConSanMoi, Gfx1250SampledSpillBackedDenseDispatcherMatchesCapturedCallKey) 
   const auto dispatcher = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
            patch.original_size == 0u &&
-           patch.anchor_offset == result.moi_candidates.front().anchor();
+           patch.anchor_offset ==
+               test_admitted_accesses(result).front().physical_id.original_text_offset;
   });
   ASSERT_NE(dispatcher, result.patches.end());
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -7931,7 +7932,7 @@ TEST(ConSanMoi, Rdna4SampledPatchesDenseCompatibleAliasedOwnersWithFullHardwareG
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_EQ(result.moi_candidates.size(), kSiteCount);
+  EXPECT_EQ(test_admitted_accesses(result).size(), kSiteCount);
   const auto is_access_patch = [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiSampledWatchpointStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiSampledWatchpointStore;

@@ -164,8 +164,8 @@ TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) 
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors);
-    ASSERT_EQ(result.moi_candidates.size(), 1u);
-    const ConSanMoiCandidate &candidate = result.moi_candidates.front();
+    ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+    const ConSanAccessInventorySite candidate = test_admitted_accesses(result).front();
     EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
     EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
     EXPECT_EQ(candidate.operands.raw_saddr, 14u);

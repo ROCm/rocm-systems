@@ -70,6 +70,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &res
 
 void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                   std::span<const ConSanMoiCandidate> admitted,
                                    ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
@@ -101,7 +102,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     result.warnings.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return;
   }
-  std::vector<const ConSanMoiCandidate *> candidates = find_inline_shadow_access_candidates(result);
+  std::vector<const ConSanMoiCandidate *> candidates =
+      find_inline_shadow_access_candidates(admitted);
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->anchor() < rhs->anchor();

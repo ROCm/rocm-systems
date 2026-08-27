@@ -2000,8 +2000,8 @@ TEST(ConSanMoi, CdnaInlineShadowWideAccessReloadsAddressOutsideCellLoopState) {
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    ASSERT_EQ(result.moi_candidates.size(), 1u);
-    EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, 128u);
+    ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+    EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, 128u);
     ASSERT_EQ(result.resource_plans.size(), 1u);
     EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
     EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 0u);
@@ -2141,9 +2141,9 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsBothSpilledMaybeGroupAddressHalves) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
-  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(test_admitted_accesses(result).front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::MaybeGroup);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
@@ -2847,8 +2847,8 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, 128u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, 128u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -2967,8 +2967,8 @@ TEST(ConSanMoi, InlineWorkgroupShadowPublishesVisibleEvidenceOncePerAccess) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_load_2addr_b64");
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_load_2addr_b64");
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -3157,8 +3157,8 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowValidatesAtomicAccessCandidate) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Atomic);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().kind, ConSanLdsAccessKind::Atomic);
   const auto exact_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
@@ -4155,8 +4155,8 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().mnemonic, "ds_store_2addr_b64");
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, "ds_store_2addr_b64");
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
   });
@@ -4248,7 +4248,7 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
   const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified()) << "candidates=" << result.moi_candidates.size()
+  ASSERT_TRUE(result.modified()) << "candidates=" << test_admitted_accesses(result).size()
                                  << " plans=" << result.resource_plans.size()
                                  << " patches=" << result.patches.size()
                                  << " warnings=" << testing::PrintToString(result.warnings);
@@ -4750,19 +4750,20 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
   ASSERT_NE(persistent, result.resolved_moi_persistent_vgpr_assignments.end())
       << testing::PrintToString(result.warnings);
   EXPECT_TRUE(persistent->dispatch_id_vgpr);
+  const std::vector<ConSanAccessInventorySite> candidates = test_admitted_accesses(result);
   const auto full_access_candidate =
-      std::ranges::find_if(result.moi_candidates, [](const ConSanMoiCandidate &candidate) {
+      std::ranges::find_if(candidates, [](const ConSanAccessInventorySite &candidate) {
         return candidate.container.name == "lds_helper";
       });
-  ASSERT_NE(full_access_candidate, result.moi_candidates.end());
+  ASSERT_NE(full_access_candidate, candidates.end());
   const ConSanIntentCoverageEntry *full_access_site =
-      consan_access_coverage_at(result, full_access_candidate->anchor());
+      consan_access_coverage_at(result, full_access_candidate->physical_id.original_text_offset);
   ASSERT_NE(full_access_site, nullptr);
   EXPECT_EQ(full_access_site->lowering, ConSanLoweringOutcomeKind::Instrumented)
       << full_access_site->detail;
   const auto full_access_plan =
       std::ranges::find_if(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
-        return plan.text_offset == full_access_candidate->anchor() &&
+        return plan.text_offset == full_access_candidate->physical_id.original_text_offset &&
                plan.site_kind == ConSanResourceSiteKind::Access;
       });
   ASSERT_NE(full_access_plan, result.resource_plans.end());
@@ -5357,10 +5358,10 @@ TEST(ConSanMoi, InlineShadowProbePublishesMultiCellNativeLdsStore) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified()) << "errors=" << result.errors.size()
                                  << " warnings=" << result.warnings.size()
-                                 << " candidates=" << result.moi_candidates.size()
+                                 << " candidates=" << test_admitted_accesses(result).size()
                                  << " warnings=" << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, 128u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, 128u);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiExactShadowStore);
 
@@ -5417,9 +5418,9 @@ TEST(ConSanMoi, InlineShadowProbeCoversNativeWidthAndTwoAddressFamilies) {
 
         ASSERT_TRUE(consan_patch_succeeded(result));
         ASSERT_TRUE(result.modified());
-        ASSERT_EQ(result.moi_candidates.size(), 1u);
-        EXPECT_EQ(result.moi_candidates.front().mnemonic, expected_mnemonic);
-        EXPECT_EQ(result.moi_candidates.front().decoded_width_bits, expected_width_bits);
+        ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+        EXPECT_EQ(test_admitted_accesses(result).front().mnemonic, expected_mnemonic);
+        EXPECT_EQ(test_admitted_accesses(result).front().decoded_width_bits, expected_width_bits);
 
         AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
         ASSERT_TRUE(patched.is_valid());
@@ -5490,7 +5491,7 @@ TEST(ConSanMoi, InlineShadowSubwordObjectPublishesIndependentByteSlots) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 2u);
+  ASSERT_EQ(test_admitted_accesses(result).size(), 2u);
   EXPECT_TRUE(std::ranges::all_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.workgroup_shadow_size == 0u;
   }));
@@ -6458,9 +6459,9 @@ TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowReservesRelocatedHostArm) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.moi_candidates.size(), kAccessCount);
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates)
-    EXPECT_GT(candidate.size(), sizeof(uint32_t));
+  ASSERT_EQ(test_admitted_accesses(result).size(), kAccessCount);
+  for (const ConSanAccessInventorySite &candidate : test_admitted_accesses(result))
+    EXPECT_GT(candidate.instruction_size, sizeof(uint32_t));
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             kAccessCount);
@@ -8385,7 +8386,7 @@ TEST(ConSanMoi, SharedInlineShadowUsesOnePrivateEpochLayoutForEveryOwner) {
   const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
-  ASSERT_TRUE(result.modified()) << "candidates=" << result.moi_candidates.size()
+  ASSERT_TRUE(result.modified()) << "candidates=" << test_admitted_accesses(result).size()
                                  << " plans=" << result.resource_plans.size()
                                  << " patches=" << result.patches.size()
                                  << " warnings=" << testing::PrintToString(result.warnings);
@@ -8937,9 +8938,9 @@ TEST(ConSanMoi, InlineShadowPublishesStronglyClassifiedFlatLdsCell) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
-  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+  ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
+  EXPECT_EQ(test_admitted_accesses(result).front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(test_admitted_accesses(result).front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
   const auto access_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);

@@ -6,6 +6,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                const ConSanOptions &options, rj_code_arch_t arch,
                                                MoiResourcePlanningState &resource_state,
                                                MoiRecordReplayAccessOutput &access_output,
+                                               std::span<const ConSanMoiCandidate> admitted,
                                                ConSanResult &result) {
   if (!options.moi_report_buffer_address)
     return;
@@ -52,7 +53,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     return;
   }
   std::vector<const ConSanMoiCandidate *> candidates =
-      find_first_light_access_record_candidates(result);
+      find_first_light_access_record_candidates(admitted);
   apply_test_kernel_filter(candidates, options);
   std::ranges::sort(candidates, [](const ConSanMoiCandidate *lhs, const ConSanMoiCandidate *rhs) {
     return lhs->anchor() < rhs->anchor();

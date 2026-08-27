@@ -506,7 +506,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_dispatch_id_sgpr.reset();
   result.resolved_moi_dispatch_id_vgpr.reset();
   result.replacement.clear();
-  result.moi_candidates.clear();
   result.resource_plans.clear();
   result.patches.clear();
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow &&
@@ -524,11 +523,12 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
                                               effective_options, ordered_sync_sites, result)) {
     return result;
   }
-  append_moi_candidates(result.program_inventory, result.observation_plan, result);
+  std::vector<ConSanMoiCandidate> moi_candidates =
+      build_moi_candidates(result.program_inventory, result.observation_plan, result.errors);
   if (!result.errors.empty())
     return result;
   if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-    for (ConSanMoiCandidate &candidate : result.moi_candidates) {
+    for (ConSanMoiCandidate &candidate : moi_candidates) {
       if (candidate.anchor() < candidate.container.entry_text_offset ||
           candidate.file_offset < candidate.anchor())
         continue;
@@ -539,7 +539,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     }
   }
   if (effective_options.moi_engine == ConSanMoiEngine::Sampled &&
-      effective_options.moi_track_atomics && result.moi_candidates.empty()) {
+      effective_options.moi_track_atomics && moi_candidates.empty()) {
     // Sampled atomics publish ordering only into a selected LDS watchpoint's
     // causal window. In an access-free code object there is no consumer for
     // that metadata, so treating standalone runtime atomics as required
@@ -656,9 +656,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   }
   const bool explicit_persistent_state =
       effective_options.moi_owner_vgpr || effective_options.moi_epoch_vgpr;
-  if (effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
-      result.moi_candidates.empty() && !explicit_persistent_state && !has_supported_barrier &&
-      !atomic_or_fence_relevant) {
+  if (effective_options.moi_engine == ConSanMoiEngine::RecordReplay && moi_candidates.empty() &&
+      !explicit_persistent_state && !has_supported_barrier && !atomic_or_fence_relevant) {
     // Do not synthesize persistent state for an inventory-only object.
     // Standalone barrier, atomic, and fence records still require an exact
     // entry-captured workgroup tuple, so only the true no-consumer case can
@@ -672,7 +671,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   bool inline_atomic_without_access = false;
   if (effective_options.moi_engine == ConSanMoiEngine::InlineShadow) {
     std::vector<const ConSanMoiCandidate *> inline_access_candidates =
-        find_inline_shadow_access_candidates(result);
+        find_inline_shadow_access_candidates(moi_candidates);
     apply_test_kernel_filter(inline_access_candidates, effective_options);
     effective_options.moi_inline_access_present = !inline_access_candidates.empty();
     inline_atomic_without_access = inline_access_candidates.empty() &&
@@ -694,7 +693,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   // of rebuilding the full instruction graph for every option refinement.
   MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, effective_options,
                                                    result);
-  rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+  rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   effective_options.moi_dynamic_stack_spill =
       moi_supports_dynamic_stack_spill(arch, effective_options.moi_engine) &&
       std::ranges::any_of(result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -707,21 +706,21 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
         });
       });
   if (configure_automatic_moi_owner_sgpr(effective_options, result, resource_planning_state))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   // Dispatch identity is persistent across every instrumented site, whereas
   // the larger EXEC/VCC/SCC save window is needed only while a probe runs and
   // can use CFG-proven dead registers. Reserve the persistent pair first so a
   // high referenced SGPR does not let the transient window consume the last
   // fresh registers and make dispatch identity spuriously impossible.
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   const ConSanOptions exec_planning_base = effective_options;
   const std::optional<uint16_t> resolved_exec_before = result.resolved_moi_exec_save_sgpr;
   const std::vector<ConSanMoiTransientSgprAssignment> resolved_transient_before =
       result.resolved_moi_transient_sgpr_assignments;
   const size_t warnings_before_exec_planning = result.warnings.size();
-  bool exec_planning_changed =
-      configure_automatic_moi_exec_save_sgprs(effective_options, result, resource_planning_state);
+  bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
+      effective_options, result, resource_planning_state, moi_candidates);
   if (!effective_options.moi_dynamic_stack_spill &&
       automatic_moi_scalar_spill_needs_dynamic_stack_planning(effective_options, result)) {
     // Scalar spilling is selected only after the first transient-window
@@ -733,16 +732,16 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     result.resolved_moi_exec_save_sgpr = resolved_exec_before;
     result.resolved_moi_transient_sgpr_assignments = resolved_transient_before;
     result.warnings.resize(warnings_before_exec_planning);
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
-    exec_planning_changed =
-        configure_automatic_moi_exec_save_sgprs(effective_options, result, resource_planning_state);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
+    exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
+        effective_options, result, resource_planning_state, moi_candidates);
   }
   if (exec_planning_changed)
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   if (configure_inline_moi_owner_sgpr(effective_options, result))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   if (configure_moi_dispatch_id_overrides(effective_options, result, resource_planning_state))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_sgprs(effective_options, result, arch) ||
       !validate_moi_ordinary_scalar_state(effective_options, result, arch)) {
@@ -754,7 +753,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   // atomics. A code object containing only rejected sync sites remains
   // access-only instrumentation.
   if (configure_automatic_moi_persistent_vgprs(effective_options, result, resource_planning_state))
-    rebuild_moi_resource_plans(resource_planning_state, effective_options, result);
+    rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported ||
       !validate_moi_dispatch_id_vgprs(effective_options, result)) {
     finalize_moi_site_lowering_outcomes(result);
@@ -830,21 +829,21 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   }
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
     try_apply_direct_sampled_watchpoint_patch(code_object_bytes, effective_options, arch,
-                                              resource_planning_state, result);
+                                              resource_planning_state, moi_candidates, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
     try_apply_sampled_atomic_sync_patch(code_object_bytes, effective_options, arch,
                                         resource_planning_state, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::Sampled)
     try_apply_sampled_barrier_sync_patch(code_object_bytes, effective_options, arch,
-                                         resource_planning_state, result);
+                                         resource_planning_state, moi_candidates, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::InlineShadow)
     try_apply_inline_shadow_patch(code_object_bytes, effective_options, arch,
-                                  resource_planning_state, result);
+                                  resource_planning_state, moi_candidates, result);
   MoiRecordReplayAccessOutput record_replay_access_output;
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
     try_apply_first_light_access_record_patch(code_object_bytes, effective_options, arch,
                                               resource_planning_state, record_replay_access_output,
-                                              result);
+                                              moi_candidates, result);
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !explicit_persistent_state &&
       std::ranges::none_of(result.patches,

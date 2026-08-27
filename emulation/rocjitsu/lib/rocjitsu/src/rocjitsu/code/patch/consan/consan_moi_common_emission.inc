@@ -258,12 +258,11 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
   return common;
 }
 
-[[nodiscard]] std::optional<MoiPrivateEpochLayout>
-build_moi_private_epoch_layout(const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
-                               rj_code_arch_t arch, std::vector<std::string> &warnings,
-                               bool include_owner = false, bool include_workgroup_key = false,
-                               bool include_record_replay_workgroup = false,
-                               bool include_dispatch_id = false) {
+[[nodiscard]] std::optional<MoiPrivateEpochLayout> build_moi_private_epoch_layout(
+    const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
+    rj_code_arch_t arch, std::vector<std::string> &warnings, bool include_owner = false,
+    bool include_workgroup_key = false, bool include_record_replay_workgroup = false,
+    bool include_dispatch_id = false) {
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI private epoch requires an owning kernel descriptor");
     return std::nullopt;
@@ -400,9 +399,10 @@ build_moi_private_epoch_layout(const ConSanTransformArtifacts &result, const Res
 }
 
 [[nodiscard]] std::optional<VgprSpillSequence>
-build_moi_spill_sequence(const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
-                         const ConSanOptions &options, MoiSpillManagers &managers,
-                         rj_code_arch_t arch, std::vector<std::string> &warnings,
+build_moi_spill_sequence(const ConSanTransformArtifacts &result,
+                         const ResolvedMoiScratchPlan &resources, const ConSanOptions &options,
+                         MoiSpillManagers &managers, rj_code_arch_t arch,
+                         std::vector<std::string> &warnings,
                          std::optional<uint32_t> private_layout_base = std::nullopt) {
   if (resources.owner_descriptor_file_offsets.empty()) {
     warnings.emplace_back("ConSan MOI spill requires an owning kernel descriptor");
@@ -546,7 +546,8 @@ build_moi_spill_sequence(const ConSanTransformArtifacts &result, const ResolvedM
 // each descriptor requirement lookup constant-time.
 class MoiActiveKernelResolver {
 public:
-  MoiActiveKernelResolver(const ConSanTransformArtifacts &result, const AmdGpuCodeObject &code_object) {
+  MoiActiveKernelResolver(const ConSanTransformArtifacts &result,
+                          const AmdGpuCodeObject &code_object) {
     result_kernels_by_descriptor_.reserve(result.program_inventory.kernels().size());
     for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
       result_kernels_by_descriptor_.emplace(kernel.descriptor_file_offset, &kernel);
@@ -570,11 +571,10 @@ private:
   std::unordered_map<std::string_view, const AmdGpuKernelInfo *> active_kernels_by_name_;
 };
 
-[[nodiscard]] bool
-apply_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
-                              std::span<const uint8_t> image, const ConSanTransformArtifacts &result,
-                              const MoiDescriptorVgprRequirements &requirements,
-                              rj_code_arch_t arch, std::vector<std::string> &errors) {
+[[nodiscard]] bool apply_descriptor_requirements(
+    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> image,
+    const ConSanTransformArtifacts &result, const MoiDescriptorVgprRequirements &requirements,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
   const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_count] : requirements) {
     const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
@@ -595,11 +595,10 @@ apply_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCodeObject
   return true;
 }
 
-[[nodiscard]] bool
-apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object,
-                                    std::span<const uint8_t> image, const ConSanTransformArtifacts &result,
-                                    const MoiDescriptorPrivateRequirements &requirements,
-                                    std::vector<std::string> &errors) {
+[[nodiscard]] bool apply_spill_descriptor_requirements(
+    CodeObjectPatcher &patcher, const AmdGpuCodeObject &code_object, std::span<const uint8_t> image,
+    const ConSanTransformArtifacts &result, const MoiDescriptorPrivateRequirements &requirements,
+    std::vector<std::string> &errors) {
   (void)image;
   const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_private_bytes] : requirements) {
@@ -638,8 +637,9 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
 }
 
 [[nodiscard]] bool apply_sgpr_descriptor_requirements(
-    CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result, const AmdGpuCodeObject &code_object,
-    const MoiDescriptorSgprRequirements &requirements, std::vector<std::string> &errors) {
+    CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result,
+    const AmdGpuCodeObject &code_object, const MoiDescriptorSgprRequirements &requirements,
+    std::vector<std::string> &errors) {
   const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_count] : requirements) {
     const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
@@ -675,9 +675,9 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
 }
 
 [[nodiscard]] bool apply_lds_descriptor_requirements(
-    CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result, const AmdGpuCodeObject &code_object,
-    const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
-    rj_code_arch_t arch, std::vector<std::string> &errors) {
+    CodeObjectPatcher &patcher, const ConSanTransformArtifacts &result,
+    const AmdGpuCodeObject &code_object, const MoiDescriptorLdsRequirements &requirements,
+    const ConSanOptions &options, rj_code_arch_t arch, std::vector<std::string> &errors) {
   const MoiActiveKernelResolver kernel_resolver(result, code_object);
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     const ConSanKernelInfo *kernel = kernel_resolver.result_kernel(descriptor_offset);
@@ -741,10 +741,9 @@ apply_spill_descriptor_requirements(CodeObjectPatcher &patcher, const AmdGpuCode
   return true;
 }
 
-[[nodiscard]] bool
-apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
-                                   const MoiDescriptorSgprRequirements &requirements,
-                                   std::vector<std::string> &errors) {
+[[nodiscard]] bool apply_sgpr_descriptor_requirements(
+    std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
+    const MoiDescriptorSgprRequirements &requirements, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_count] : requirements) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
       errors.emplace_back("ConSan MOI scalar-plan descriptor exceeds ELF bytes");
@@ -766,11 +765,10 @@ apply_sgpr_descriptor_requirements(std::vector<uint8_t> &image, const ConSanTran
   return true;
 }
 
-[[nodiscard]] bool
-apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
-                                  const MoiDescriptorLdsRequirements &requirements,
-                                  const ConSanOptions &options, rj_code_arch_t arch,
-                                  std::vector<std::string> &errors) {
+[[nodiscard]] bool apply_lds_descriptor_requirements(
+    std::vector<uint8_t> &image, const ConSanTransformArtifacts &result,
+    const MoiDescriptorLdsRequirements &requirements, const ConSanOptions &options,
+    rj_code_arch_t arch, std::vector<std::string> &errors) {
   for (const auto &[descriptor_offset, required_bytes] : requirements) {
     if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset ||
         result.program_inventory.find_kernel_by_descriptor(descriptor_offset) == nullptr) {
@@ -2647,9 +2645,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanTrans
 }
 
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
-find_inline_shadow_access_candidates(const ConSanResult &result) {
+find_inline_shadow_access_candidates(std::span<const ConSanMoiCandidate> admitted) {
   std::vector<const ConSanMoiCandidate *> candidates;
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
+  for (const ConSanMoiCandidate &candidate : admitted) {
     if (is_inline_shadow_access_candidate(candidate))
       candidates.push_back(&candidate);
   }

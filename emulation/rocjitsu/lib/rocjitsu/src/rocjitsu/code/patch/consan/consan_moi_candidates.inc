@@ -367,8 +367,10 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
 /// Project admitted access intents into the temporary operand shape consumed
 /// by current lowerers. Policy is the sole candidate selector; this adapter
 /// copies the matching normalized facts and cannot reclassify a site.
-void append_moi_candidates(const ProgramInventory &inventory, const ConSanObservationPlan &plan,
-                           ConSanResult &result) {
+[[nodiscard]] std::vector<ConSanMoiCandidate>
+build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationPlan &plan,
+                     std::vector<std::string> &errors) {
+  std::vector<ConSanMoiCandidate> candidates;
   std::unordered_set<uint64_t> admitted_offsets;
   for (const ConSanProbeIntent &intent : plan.probe_intents) {
     if (intent.kind != ConSanProbeIntentKind::AccessRecord &&
@@ -380,12 +382,13 @@ void append_moi_candidates(const ProgramInventory &inventory, const ConSanObserv
       return candidate.physical_id == intent.physical_site;
     });
     if (access == inventory.access_sites().end()) {
-      result.errors.emplace_back("ConSan MOI access intent lost its inventory site");
-      return;
+      errors.emplace_back("ConSan MOI access intent lost its inventory site");
+      return {};
     }
     if (admitted_offsets.insert(access->physical_id.original_text_offset).second)
-      result.moi_candidates.push_back(make_moi_candidate(*access));
+      candidates.push_back(make_moi_candidate(*access));
   }
+  return candidates;
 }
 
 /// Run pure access and synchronization policies, initialize the production
@@ -528,12 +531,12 @@ void append_moi_candidates(const ProgramInventory &inventory, const ConSanObserv
 }
 
 [[nodiscard]] std::vector<const ConSanMoiCandidate *>
-find_first_light_access_record_candidates(const ConSanResult &result) {
-  std::vector<const ConSanMoiCandidate *> candidates;
-  candidates.reserve(result.moi_candidates.size());
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates)
-    candidates.push_back(&candidate);
-  return candidates;
+find_first_light_access_record_candidates(std::span<const ConSanMoiCandidate> admitted) {
+  std::vector<const ConSanMoiCandidate *> selected;
+  selected.reserve(admitted.size());
+  for (const ConSanMoiCandidate &candidate : admitted)
+    selected.push_back(&candidate);
+  return selected;
 }
 
 [[nodiscard]] bool append_store_u32_literal(std::vector<uint32_t> &words, uint64_t address,

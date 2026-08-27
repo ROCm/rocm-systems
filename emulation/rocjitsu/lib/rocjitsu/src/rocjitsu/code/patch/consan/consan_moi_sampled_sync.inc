@@ -670,6 +670,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
 void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                           const ConSanOptions &options, rj_code_arch_t arch,
                                           MoiResourcePlanningState &resource_state,
+                                          std::span<const ConSanMoiCandidate> admitted,
                                           ConSanResult &result) {
   if (!options.moi_track_barriers || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
@@ -688,8 +689,8 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
   std::vector<SelectedWindow> selected_windows;
   selected_windows.reserve(result.patches.size());
   std::unordered_map<uint64_t, const ConSanMoiCandidate *> access_by_offset;
-  access_by_offset.reserve(result.moi_candidates.size());
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
+  access_by_offset.reserve(admitted.size());
+  for (const ConSanMoiCandidate &candidate : admitted) {
     if (candidate.kind == ConSanLdsAccessKind::Read || candidate.kind == ConSanLdsAccessKind::Write)
       access_by_offset.try_emplace(candidate.anchor(), &candidate);
   }
