@@ -32,6 +32,7 @@ struct ExpectedTargetProfile {
   ConSanWorkgroupIdentitySource workgroup_identity;
   ConSanWaitCounterFamily wait_counter_family;
   ConSanDirectCallForm direct_call_form;
+  ConSanCodeTransportModel code_transport;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   bool supports_wave32;
@@ -71,6 +72,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .workgroup_shadow_clear =
             {
@@ -112,6 +114,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .workgroup_shadow_clear =
             {
@@ -153,6 +156,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx11,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
             {
@@ -194,6 +198,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
             {
@@ -235,6 +240,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallI64,
+        .code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
             {
@@ -279,6 +285,7 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.workgroup_identity, expected.workgroup_identity);
   EXPECT_EQ(actual.wait_counter_family, expected.wait_counter_family);
   EXPECT_EQ(actual.direct_call_form, expected.direct_call_form);
+  EXPECT_EQ(actual.code_transport, expected.code_transport);
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
   EXPECT_EQ(actual.workgroup_shadow_clear, expected.workgroup_shadow_clear);
   EXPECT_EQ(actual.supports_wave32, expected.supports_wave32);
@@ -382,6 +389,9 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   });
   expect_invalid("unsupported workgroup-shadow clear lane limit",
                  [](auto &profiles) { profiles[0].workgroup_shadow_clear.maximum_lanes = 48u; });
+  expect_invalid("unknown post-instrumentation transport model", [](auto &profiles) {
+    profiles[0].code_transport = static_cast<ConSanCodeTransportModel>(255u);
+  });
   expect_invalid("two-address relocation split on a non-gfx12 encoding", [](auto &profiles) {
     profiles[0].requires_split_two_address_lds_relocation = true;
   });
@@ -578,6 +588,8 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
               expected.direct_call_form == ConSanDirectCallForm::SCallI64);
     EXPECT_EQ(consan_arch_has_s_call_b64(expected.arch),
               expected.direct_call_form == ConSanDirectCallForm::SCallB64);
+    EXPECT_EQ(consan_arch_uses_per_kernel_owner_translation(expected.arch),
+              expected.code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation);
     EXPECT_EQ(consan_arch_has_cluster_facilities(expected.arch), expected.has_cluster_facilities);
     EXPECT_EQ(consan_arch_has_selectable_vgpr_bank(expected.arch),
               expected.has_selectable_vgpr_bank);
@@ -598,6 +610,7 @@ TEST(ConSanCapabilityContract, DerivedArchitecturePredicatesProjectOnlyTheirType
   EXPECT_FALSE(consan_arch_is_rdna(unsupported));
   EXPECT_FALSE(consan_arch_has_s_call_i64(unsupported));
   EXPECT_FALSE(consan_arch_has_s_call_b64(unsupported));
+  EXPECT_FALSE(consan_arch_uses_per_kernel_owner_translation(unsupported));
   EXPECT_FALSE(consan_arch_has_cluster_facilities(unsupported));
   EXPECT_FALSE(consan_arch_has_selectable_vgpr_bank(unsupported));
   EXPECT_FALSE(consan_arch_has_descriptor_partitioned_accumulators(unsupported));

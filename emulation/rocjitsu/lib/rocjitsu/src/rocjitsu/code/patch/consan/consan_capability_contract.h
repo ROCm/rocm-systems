@@ -170,6 +170,25 @@ enum class ConSanDirectCallForm : uint8_t {
   SCallI64,
 };
 
+/// Describes what may happen to patched code before the target executes it.
+///
+/// `DirectCodeObject` means the byte layout emitted by RocJitsu is the layout
+/// seen by every kernel. `PerKernelOwnerTranslation` means a later translation
+/// step may clone or move generated regions independently for each owning
+/// kernel while also translating that kernel's descriptor entry. In the
+/// latter model, a branch between generated regions is safe only when its
+/// route is preserved within one kernel owner's translated image; descriptor
+/// redirection remains safe because the translated descriptor and destination
+/// move together.
+///
+/// This is a transport fact, not an ISA-family label. It belongs in the target
+/// profile so prologue placement does not infer post-instrumentation behavior
+/// from a product name such as gfx1250.
+enum class ConSanCodeTransportModel : uint8_t {
+  DirectCodeObject,
+  PerKernelOwnerTranslation,
+};
+
 /// Selects the widest LDS store shape that a target's parallel workgroup-
 /// shadow clear operation may use.
 ///
@@ -271,6 +290,7 @@ struct ConSanTargetProfile {
       ConSanWorkgroupIdentitySource::DescriptorSystemSgprs;
   ConSanWaitCounterFamily wait_counter_family = ConSanWaitCounterFamily::Gfx9;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
+  ConSanCodeTransportModel code_transport = ConSanCodeTransportModel::DirectCodeObject;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
   ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
 
@@ -364,6 +384,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .workgroup_shadow_clear =
             {
@@ -405,6 +426,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .workgroup_shadow_clear =
             {
@@ -446,6 +468,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx11,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
             {
@@ -487,6 +510,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .code_transport = ConSanCodeTransportModel::DirectCodeObject,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
             {
@@ -528,6 +552,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallI64,
+        .code_transport = ConSanCodeTransportModel::PerKernelOwnerTranslation,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .workgroup_shadow_clear =
             {
@@ -645,6 +670,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
             32u ||
         static_cast<uint8_t>(profile.workgroup_shadow_clear.encoding) >
             static_cast<uint8_t>(ConSanWorkgroupShadowClearEncoding::PackedB128) ||
+        static_cast<uint8_t>(profile.code_transport) >
+            static_cast<uint8_t>(ConSanCodeTransportModel::PerKernelOwnerTranslation) ||
         (profile.workgroup_shadow_clear.maximum_lanes != 32u &&
          profile.workgroup_shadow_clear.maximum_lanes != 64u) ||
         (profile.semantic_form_mask & static_cast<uint16_t>(~all_form_bits)) != 0u ||
@@ -825,6 +852,15 @@ consan_normalize_address_free_private_size(rj_code_arch_t arch, uint32_t request
 [[nodiscard]] constexpr bool consan_arch_has_s_call_b64(rj_code_arch_t arch) {
   const ConSanTargetProfile *profile = consan_target_profile(arch);
   return profile && profile->direct_call_form == ConSanDirectCallForm::SCallB64;
+}
+
+/// Return whether post-instrumentation translation may independently relocate
+/// generated regions for each kernel owner. Placement uses this fact when it
+/// must choose between a shared raw branch and an owner-local route whose
+/// meaning survives translation.
+[[nodiscard]] constexpr bool consan_arch_uses_per_kernel_owner_translation(rj_code_arch_t arch) {
+  const ConSanTargetProfile *profile = consan_target_profile(arch);
+  return profile && profile->code_transport == ConSanCodeTransportModel::PerKernelOwnerTranslation;
 }
 
 [[nodiscard]] constexpr bool consan_arch_has_cluster_facilities(rj_code_arch_t arch) {

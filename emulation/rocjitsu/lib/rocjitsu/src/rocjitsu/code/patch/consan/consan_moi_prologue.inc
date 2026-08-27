@@ -2886,7 +2886,7 @@ void try_apply_owner_epoch_prologue_patch(
       entry_island_offset = entry_islands.claim_reachable_for_owner(kernel.entry_text_offset,
                                                                     kernel.entry_text_offset);
       if (!entry_island_offset) {
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5 && !requires_in_place_entry &&
+        if (consan_arch_uses_per_kernel_owner_translation(arch) && !requires_in_place_entry &&
             !chains_existing_entry_trampoline) {
           // B0-to-A0 translation can move an appended prologue independently
           // of a hardware-entry indirect jump. Leave the entry intact and let
@@ -2964,7 +2964,7 @@ void try_apply_owner_epoch_prologue_patch(
     }
     const uint64_t final_prologue_return_target = prologue_return_target;
     std::optional<uint64_t> prologue_return_relay;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && !item.has_kernarg_preload &&
+    if (consan_arch_uses_per_kernel_owner_translation(arch) && !item.has_kernarg_preload &&
         !compute_sopp_branch_simm16(prologue_text_offset, prologue_return_target)) {
       const std::array relay_anchors = {prologue_text_offset, prologue_return_target};
       prologue_return_relay = entry_islands.claim_word_reachable_from_all_for_owner(
