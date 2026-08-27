@@ -808,9 +808,7 @@ validate_consan_configuration(const ConSanRequest &request, const TransformPolic
 /// the current mutable lowering structure.
 ///
 /// The adapter always returns a fresh `ConSanOptions`; it never accepts or
-/// mutates a caller-owned legacy value. Its field inventory is public to tests
-/// so adding another projection is a reviewed migration event rather than an
-/// invisible expansion of the compatibility surface.
+/// mutates a caller-owned legacy value.
 class LegacyOptionsAdapter {
 public:
   [[nodiscard]] static ConSanOptions
@@ -922,26 +920,5 @@ public:
     options.moi_report_dispatch_id = resources.moi_report_dispatch_id;
     options.moi_max_workgroup_lds_bytes = capabilities.max_workgroup_lds_bytes;
     return options;
-  }
-
-  /// Names every legacy field written by `adapt`, grouped by its new owner.
-  /// The names are a reviewable deletion inventory, not a serialization ABI.
-  [[nodiscard]] static constexpr auto projected_field_names() {
-    return std::to_array<std::string_view>({
-        "request.flavor->flavor",
-        "request.moi_engine->moi_engine",
-        "request.moi_owner_source->moi_owner_source",
-        "request.flat_provenance_mode->flat_provenance_mode",
-        "request/debug.probe_lds_check_trap->probe_lds_check_trap",
-        "request/debug.probe_flat_check_trap->probe_flat_check_trap",
-        "request.moi_* policy and sampling->moi_* policy and sampling",
-        "request.delay/report values->delay/report values",
-        "transform_policy.*->growth, patch, and planning-work limits",
-        "debug probe controls->legacy probe controls",
-        "debug allocation controls->legacy test/resource overrides",
-        "mutation.*->legacy fault and perturbation controls",
-        "resources.*->legacy report binding fields",
-        "capabilities.max_workgroup_lds_bytes->moi_max_workgroup_lds_bytes",
-    });
   }
 };

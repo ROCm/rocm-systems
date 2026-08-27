@@ -4658,6 +4658,31 @@ analysis completed.
   the latest periodic physical-gfx950 gate; E2E validation remains outside this
   work.
 
+### Slice 5AX: delete the descriptive legacy-projection inventory
+
+- **One executable projection:** `LegacyOptionsAdapter::adapt` is the only
+  authoritative typed-request-to-prototype projection. The removed
+  `projected_field_names` array was a second, manually maintained prose summary
+  of that function. Production never read it, and its test could prove only
+  that fourteen arbitrary strings were nonempty and unique—not that the
+  adapter projected the right fields or that a new field was reviewed.
+- **Behavioral coverage retained:** The adapter tests still construct every
+  configuration family, verify the projected values and derived Inline Shadow
+  mode, cover every mutation and bound-resource family, and prove that each
+  adaptation returns a fresh value without mutating typed inputs. The adapter
+  source and these executable assertions are the deletion inventory until the
+  compatibility projection itself disappears.
+- **Deletion accounting:** Production adds one comment line and deletes 24
+  physical lines, a net deletion of 23 lines. Tests add one renamed test line
+  and delete nine mechanism-only lines, a net deletion of eight lines. No
+  replacement table or metadata API is introduced.
+- **Checked-in gate:** All five focused adapter tests pass. The host gate passes
+  all 1,508 runnable tests with the two expected benchmark-object skips; all
+  172 HSA-hook and hook-lifecycle tests pass; and all 2,908 simulator-device
+  tests across `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250` pass in
+  73.83 seconds. Slice 5AS remains the latest periodic physical-gfx950 gate;
+  E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

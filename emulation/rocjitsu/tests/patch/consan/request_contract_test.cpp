@@ -895,7 +895,7 @@ TEST(LegacyOptionsAdapterTest, ProjectsEveryMutationAndBoundResourceFamily) {
   EXPECT_EQ(options.moi_report_dispatch_id, 11u);
 }
 
-TEST(LegacyOptionsAdapterTest, ProducesFreshValuesAndHasAUniqueReviewedFieldInventory) {
+TEST(LegacyOptionsAdapterTest, ProducesFreshValues) {
   const ConSanRequest request = valid_moi_request(ConSanMoiEngine::RecordReplay);
   ConSanOptions first = LegacyOptionsAdapter::adapt(
       request, TransformPolicy{}, ConSanDebugOverrides{}, MutationRequest{},
@@ -906,14 +906,6 @@ TEST(LegacyOptionsAdapterTest, ProducesFreshValuesAndHasAUniqueReviewedFieldInve
   first.moi_sample_stride = 99;
   EXPECT_EQ(second.moi_sample_stride, 1u);
   EXPECT_EQ(request.moi_sample_stride, 1u);
-
-  constexpr auto fields = LegacyOptionsAdapter::projected_field_names();
-  EXPECT_EQ(fields.size(), 14u);
-  std::unordered_set<std::string_view> unique;
-  for (const std::string_view field : fields) {
-    EXPECT_FALSE(field.empty());
-    EXPECT_TRUE(unique.insert(field).second) << field;
-  }
 }
 
 } // namespace
