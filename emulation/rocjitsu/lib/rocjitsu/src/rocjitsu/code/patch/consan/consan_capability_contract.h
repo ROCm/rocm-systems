@@ -264,6 +264,12 @@ struct ConSanTargetProfile {
   bool has_cluster_facilities = false;
   bool has_selectable_vgpr_bank = false;
   bool requires_even_vgpr_tuples = false;
+  /// True when one encoded two-address LDS instruction must be split into two
+  /// single-address instructions after relocation changes its address base.
+  /// Targets whose encoding can replay the original instruction leave this
+  /// false. This is an exact relocation constraint, not a general statement
+  /// about whether the target supports two-address LDS operations.
+  bool requires_split_two_address_lds_relocation = false;
   uint16_t semantic_form_mask = 0;
 };
 
@@ -347,6 +353,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = true,
+        .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
     },
     {
@@ -382,6 +389,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = true,
+        .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
     },
     {
@@ -417,6 +425,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = false,
+        .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
     },
     {
@@ -452,6 +461,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = false,
+        .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
     },
     {
@@ -487,6 +497,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .has_cluster_facilities = true,
         .has_selectable_vgpr_bank = true,
         .requires_even_vgpr_tuples = true,
+        .requires_split_two_address_lds_relocation = true,
         .semantic_form_mask = kConSanGfx1250SemanticFormMask,
     },
 }};
@@ -577,6 +588,8 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
         profile.semantic_form_mask == 0u ||
         (profile.has_selectable_vgpr_bank !=
          (profile.accumulator_model == ConSanAccumulatorModel::SelectableVgprBank)) ||
+        (profile.requires_split_two_address_lds_relocation &&
+         profile.encoding_family != ConSanEncodingFamily::Gfx12) ||
         (profile.has_cluster_facilities &&
          (profile.semantic_form_mask &
           consan_capability_form_bit(ConSanCapabilityForm::ClusterBarrier)) == 0u)) {

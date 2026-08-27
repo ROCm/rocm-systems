@@ -91,6 +91,99 @@ bool consan_detail::append_moi_resident_wave_owner(std::vector<uint32_t> &words,
   return true;
 }
 
+bool consan_detail::moi_guest_access_relocation_requires_adjusted_address(
+    const ConSanMoiCandidate &candidate, const ConSanTargetProfile &target) {
+  return target.requires_split_two_address_lds_relocation &&
+         two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+}
+
+std::optional<std::vector<uint32_t>> consan_detail::build_moi_relocated_guest_access_words(
+    const MoiGuestAccessRelocationRequest &request, std::vector<std::string> &errors) {
+  if (request.candidate == nullptr || request.target == nullptr) {
+    errors.emplace_back("ConSan MOI guest relocation requires a candidate and target profile");
+    return std::nullopt;
+  }
+  const ConSanMoiCandidate &candidate = *request.candidate;
+  const ConSanTargetProfile &target = *request.target;
+  const auto copy_original = [&]() -> std::optional<std::vector<uint32_t>> {
+    if (candidate.size() == 0u || candidate.size() % sizeof(uint32_t) != 0u ||
+        candidate.file_offset > request.image.size() ||
+        candidate.size() > request.image.size() - candidate.file_offset) {
+      errors.emplace_back("ConSan MOI relocated guest access exceeds the code object");
+      return std::nullopt;
+    }
+    std::vector<uint32_t> words(candidate.size() / sizeof(uint32_t));
+    std::memcpy(words.data(), request.image.data() + candidate.file_offset, candidate.size());
+    return words;
+  };
+
+  const auto two_address_scale = two_address_native_lds_offset_scale(candidate.mnemonic);
+  if (!target.requires_split_two_address_lds_relocation || !two_address_scale)
+    return copy_original();
+
+  const auto &ranges = candidate.ranges;
+  const uint16_t element_dwords = static_cast<uint16_t>(candidate.width_bits() / 32u);
+  if (ranges.size() != 2u ||
+      (candidate.kind != ConSanLdsAccessKind::Read &&
+       candidate.kind != ConSanLdsAccessKind::Write) ||
+      (element_dwords != 1u && element_dwords != 2u) || request.replay_address_vgpr > 255u) {
+    errors.emplace_back("ConSan MOI could not normalize a split two-address guest access");
+    return std::nullopt;
+  }
+
+  const bool load = candidate.kind == ConSanLdsAccessKind::Read;
+  const std::optional<uint16_t> first_data_vgpr =
+      load ? candidate.operands.destination_vgpr : candidate.operands.data_vgpr;
+  const std::optional<uint16_t> second_data_vgpr =
+      load && first_data_vgpr
+          ? std::optional<uint16_t>(static_cast<uint16_t>(*first_data_vgpr + element_dwords))
+          : candidate.operands.second_data_vgpr;
+  if (!first_data_vgpr || !second_data_vgpr || *first_data_vgpr > 255u ||
+      *second_data_vgpr > 255u ||
+      (element_dwords == 2u && (*first_data_vgpr > 254u || *second_data_vgpr > 254u))) {
+    errors.emplace_back("ConSan MOI split two-address guest access has invalid data operands");
+    return std::nullopt;
+  }
+
+  const uint16_t op = load ? (element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
+                           : (element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
+  std::vector<uint32_t> words;
+  const auto append_access = [&](const ConSanAccessRange &range, uint16_t data_vgpr) {
+    uint16_t address_vgpr = request.replay_address_vgpr;
+    uint16_t immediate = 0u;
+    if (candidate.lowering_offset(range) > UINT16_MAX) {
+      if (!request.adjusted_address_vgpr || *request.adjusted_address_vgpr > 255u)
+        return false;
+      const auto adjust = instrumentation::build_v_add_u32_literal(
+          *request.adjusted_address_vgpr, *request.adjusted_address_vgpr,
+          candidate.lowering_offset(range), request.replay_address_vgpr, target.arch);
+      if (!adjust)
+        return false;
+      words.insert(words.end(), adjust->begin(), adjust->end());
+      address_vgpr = *request.adjusted_address_vgpr;
+    } else {
+      immediate = static_cast<uint16_t>(candidate.lowering_offset(range));
+    }
+    cdna5::VdsBuilderFields fields{
+        .offset0 = static_cast<uint8_t>(immediate),
+        .offset1 = static_cast<uint8_t>(immediate >> 8u),
+        .addr = static_cast<uint8_t>(address_vgpr),
+    };
+    if (load)
+      fields.vdst = static_cast<uint8_t>(data_vgpr);
+    else
+      fields.data0 = static_cast<uint8_t>(data_vgpr);
+    const auto access = cdna5::build_vds(op, fields);
+    words.insert(words.end(), access.begin(), access.end());
+    return true;
+  };
+  if (!append_access(ranges[0], *first_data_vgpr) || !append_access(ranges[1], *second_data_vgpr)) {
+    errors.emplace_back("ConSan MOI could not split a two-address guest access");
+    return std::nullopt;
+  }
+  return words;
+}
+
 bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
                                                   uint64_t field_address, uint32_t stride_bytes,
                                                   uint16_t address_vgpr, uint16_t slot_vgpr,
@@ -185,8 +278,10 @@ uint16_t consan_detail::scalar_owner_tail_floor(const ScalarOwnerContextSummary 
 
 namespace {
 
+using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::is_single_range_native_lds_mnemonic;
 using consan_detail::is_supported_moi_flat_access_mnemonic;
+using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::two_address_native_lds_offset_scale;
 
 [[nodiscard]] std::optional<uint16_t>

@@ -3232,16 +3232,24 @@
       return std::nullopt;
     }
   }
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
+    errors.emplace_back("ConSan MOI inline-shadow probe has no target profile");
+    return std::nullopt;
+  }
   const bool reserve_two_address_replay_scratch =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+      moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   const uint16_t guest_address_vgpr =
       capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
   const auto guest_words = build_moi_relocated_guest_access_words(
-      bytes, candidate, arch, guest_address_vgpr,
-      reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
-                                               *options.scratch_vgpr + scratch_count - 1u))
-                                         : std::nullopt,
+      {.image = bytes,
+       .candidate = &candidate,
+       .target = target,
+       .replay_address_vgpr = guest_address_vgpr,
+       .adjusted_address_vgpr = reserve_two_address_replay_scratch
+                                    ? std::optional<uint16_t>(static_cast<uint16_t>(
+                                          *options.scratch_vgpr + scratch_count - 1u))
+                                    : std::nullopt},
       errors);
   if (!guest_words)
     return std::nullopt;

@@ -762,89 +762,6 @@ private:
   return sequence.emit_all(mov_offset, add_offset);
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_moi_relocated_guest_access_words(
-    std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, rj_code_arch_t arch,
-    uint16_t replay_address_vgpr, std::optional<uint16_t> adjusted_address_vgpr,
-    std::vector<std::string> &errors) {
-  const auto copy_original = [&]() -> std::optional<std::vector<uint32_t>> {
-    if (candidate.size() == 0u || candidate.size() % sizeof(uint32_t) != 0u ||
-        candidate.file_offset > bytes.size() ||
-        candidate.size() > bytes.size() - candidate.file_offset) {
-      errors.emplace_back("ConSan MOI relocated guest access exceeds the code object");
-      return std::nullopt;
-    }
-    std::vector<uint32_t> words(candidate.size() / sizeof(uint32_t));
-    std::memcpy(words.data(), bytes.data() + candidate.file_offset, candidate.size());
-    return words;
-  };
-
-  const auto two_address_scale = two_address_native_lds_offset_scale(candidate.mnemonic);
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !two_address_scale)
-    return copy_original();
-
-  const auto &ranges = candidate.ranges;
-  const uint16_t element_dwords = static_cast<uint16_t>(candidate.width_bits() / 32u);
-  if (ranges.size() != 2u ||
-      (candidate.kind != ConSanLdsAccessKind::Read &&
-       candidate.kind != ConSanLdsAccessKind::Write) ||
-      (element_dwords != 1u && element_dwords != 2u) || replay_address_vgpr > 255u) {
-    errors.emplace_back("ConSan MOI could not normalize a gfx1250 two-address guest access");
-    return std::nullopt;
-  }
-
-  const bool load = candidate.kind == ConSanLdsAccessKind::Read;
-  const std::optional<uint16_t> first_data_vgpr =
-      load ? candidate.operands.destination_vgpr : candidate.operands.data_vgpr;
-  const std::optional<uint16_t> second_data_vgpr =
-      load && first_data_vgpr
-          ? std::optional<uint16_t>(static_cast<uint16_t>(*first_data_vgpr + element_dwords))
-          : candidate.operands.second_data_vgpr;
-  if (!first_data_vgpr || !second_data_vgpr || *first_data_vgpr > 255u ||
-      *second_data_vgpr > 255u ||
-      (element_dwords == 2u && (*first_data_vgpr > 254u || *second_data_vgpr > 254u))) {
-    errors.emplace_back("ConSan MOI gfx1250 two-address guest access has invalid data operands");
-    return std::nullopt;
-  }
-
-  const uint16_t op = load ? (element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
-                           : (element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
-  std::vector<uint32_t> words;
-  const auto append_access = [&](const ConSanAccessRange &range, uint16_t data_vgpr) {
-    uint16_t address_vgpr = replay_address_vgpr;
-    uint16_t immediate = 0u;
-    if (candidate.lowering_offset(range) > UINT16_MAX) {
-      if (!adjusted_address_vgpr || *adjusted_address_vgpr > 255u)
-        return false;
-      const auto adjust = instrumentation::build_v_add_u32_literal(
-          *adjusted_address_vgpr, *adjusted_address_vgpr, candidate.lowering_offset(range),
-          replay_address_vgpr, arch);
-      if (!adjust)
-        return false;
-      words.insert(words.end(), adjust->begin(), adjust->end());
-      address_vgpr = *adjusted_address_vgpr;
-    } else {
-      immediate = static_cast<uint16_t>(candidate.lowering_offset(range));
-    }
-    cdna5::VdsBuilderFields fields{
-        .offset0 = static_cast<uint8_t>(immediate),
-        .offset1 = static_cast<uint8_t>(immediate >> 8u),
-        .addr = static_cast<uint8_t>(address_vgpr),
-    };
-    if (load)
-      fields.vdst = static_cast<uint8_t>(data_vgpr);
-    else
-      fields.data0 = static_cast<uint8_t>(data_vgpr);
-    const auto access = cdna5::build_vds(op, fields);
-    words.insert(words.end(), access.begin(), access.end());
-    return true;
-  };
-  if (!append_access(ranges[0], *first_data_vgpr) || !append_access(ranges[1], *second_data_vgpr)) {
-    errors.emplace_back("ConSan MOI could not split a gfx1250 two-address guest access");
-    return std::nullopt;
-  }
-  return words;
-}
-
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_first_light_access_record_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate, const MoiOptions &options,
     rj_code_arch_t arch, uint32_t record_index, uint32_t record_count, uint32_t logical_range_index,
@@ -861,6 +778,9 @@ private:
     errors.emplace_back("ConSan MOI first-light probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr)
+    return fail("ConSan MOI first-light probe has no target profile");
   const bool automatic_banked_capture = record_replay_uses_automatic_banked_capture(
       options, layout.record_replay_dispatch_token_capacity);
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
@@ -872,8 +792,7 @@ private:
       moi_access_requires_high_bank_address_capture(candidate, arch);
   const bool save_clobbered_address = load_clobbers_address || capture_high_bank_address;
   const bool reserve_two_address_replay_scratch =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+      moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   const uint16_t address_scratch_count = static_cast<uint16_t>(
       (materialize_flat_address ? gfx12_flat_access_address_scratch_count(candidate, arch)
                                 : (save_clobbered_address ? 1u : 0u)) +
@@ -1056,10 +975,14 @@ private:
     const uint16_t guest_address_vgpr =
         capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
     const auto guest_words = build_moi_relocated_guest_access_words(
-        bytes, candidate, arch, guest_address_vgpr,
-        reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
-                                                 *options.scratch_vgpr + scratch_count - 1u))
-                                           : std::nullopt,
+        {.image = bytes,
+         .candidate = &candidate,
+         .target = target,
+         .replay_address_vgpr = guest_address_vgpr,
+         .adjusted_address_vgpr = reserve_two_address_replay_scratch
+                                      ? std::optional<uint16_t>(static_cast<uint16_t>(
+                                            *options.scratch_vgpr + scratch_count - 1u))
+                                      : std::nullopt},
         errors);
     if (!guest_words)
       return false;

@@ -55,6 +55,7 @@ struct ExpectedTargetProfile {
   bool has_cluster_facilities;
   bool has_selectable_vgpr_bank;
   bool requires_even_vgpr_tuples;
+  bool requires_split_two_address_lds_relocation;
   uint16_t semantic_form_mask;
 };
 
@@ -92,6 +93,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = true,
+        .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
     },
     {
@@ -127,6 +129,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = true,
+        .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCdnaSemanticFormMask,
     },
     {
@@ -162,6 +165,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = false,
+        .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
     },
     {
@@ -197,6 +201,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = false,
         .has_selectable_vgpr_bank = false,
         .requires_even_vgpr_tuples = false,
+        .requires_split_two_address_lds_relocation = false,
         .semantic_form_mask = kConSanCommonSemanticFormMask,
     },
     {
@@ -232,6 +237,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .has_cluster_facilities = true,
         .has_selectable_vgpr_bank = true,
         .requires_even_vgpr_tuples = true,
+        .requires_split_two_address_lds_relocation = true,
         .semantic_form_mask = kConSanGfx1250SemanticFormMask,
     },
 }};
@@ -274,6 +280,8 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.has_cluster_facilities, expected.has_cluster_facilities);
   EXPECT_EQ(actual.has_selectable_vgpr_bank, expected.has_selectable_vgpr_bank);
   EXPECT_EQ(actual.requires_even_vgpr_tuples, expected.requires_even_vgpr_tuples);
+  EXPECT_EQ(actual.requires_split_two_address_lds_relocation,
+            expected.requires_split_two_address_lds_relocation);
   EXPECT_EQ(actual.semantic_form_mask, expected.semantic_form_mask);
 }
 
@@ -340,6 +348,9 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
   expect_invalid("resident-wave identity extends past its HWREG", [](auto &profiles) {
     profiles[0].resident_wave_identity.bit_offset = 31u;
     profiles[0].resident_wave_identity.bit_width = 2u;
+  });
+  expect_invalid("two-address relocation split on a non-gfx12 encoding", [](auto &profiles) {
+    profiles[0].requires_split_two_address_lds_relocation = true;
   });
   expect_invalid("semantic form bit outside the enum", [](auto &profiles) {
     profiles[0].semantic_form_mask = static_cast<uint16_t>(

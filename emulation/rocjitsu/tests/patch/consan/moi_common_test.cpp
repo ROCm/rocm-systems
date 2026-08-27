@@ -825,11 +825,62 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadUsesNormalizedRangesAndSafeScratch) {
   }
   EXPECT_EQ(candidate.lowering_offset(candidate.ranges[0]), 3u * 256u);
   EXPECT_EQ(candidate.lowering_offset(candidate.ranges[1]), 5u * 256u);
+
+  const ConSanTargetProfile *gfx1250 = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(gfx1250, nullptr);
+  EXPECT_TRUE(
+      consan_detail::moi_guest_access_relocation_requires_adjusted_address(candidate, *gfx1250));
+  std::vector<std::string> relocation_errors;
+  const auto relocated =
+      consan_detail::build_moi_relocated_guest_access_words({.image = bytes,
+                                                             .candidate = &candidate,
+                                                             .target = gfx1250,
+                                                             .replay_address_vgpr = 20u,
+                                                             .adjusted_address_vgpr = std::nullopt},
+                                                            relocation_errors);
+  ASSERT_TRUE(relocated) << testing::PrintToString(relocation_errors);
+  const auto first = cdna5::build_vds(cdna5::kDsLoadB32Vds,
+                                      {.offset0 = 0u, .offset1 = 3u, .addr = 20u, .vdst = 1u});
+  const auto second = cdna5::build_vds(cdna5::kDsLoadB32Vds,
+                                       {.offset0 = 0u, .offset1 = 5u, .addr = 20u, .vdst = 2u});
+  const std::vector<uint32_t> expected_relocation = {first[0], first[1], second[0], second[1]};
+  EXPECT_EQ(*relocated, expected_relocation);
+
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    if (target.requires_split_two_address_lds_relocation)
+      continue;
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    EXPECT_FALSE(
+        consan_detail::moi_guest_access_relocation_requires_adjusted_address(candidate, target));
+    relocation_errors.clear();
+    const auto copied = consan_detail::build_moi_relocated_guest_access_words(
+        {.image = bytes,
+         .candidate = &candidate,
+         .target = &target,
+         .replay_address_vgpr = 20u,
+         .adjusted_address_vgpr = std::nullopt},
+        relocation_errors);
+    ASSERT_TRUE(copied) << testing::PrintToString(relocation_errors);
+    EXPECT_EQ(*copied, (std::vector<uint32_t>{load[0], load[1]}));
+  }
   ASSERT_EQ(result.resource_plans.size(), 1u);
   ASSERT_TRUE(result.resource_plans.front().scratch_vgpr);
   EXPECT_GE(*result.resource_plans.front().scratch_vgpr, 3u);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
+}
+
+TEST(ConSanMoi, GuestAccessRelocationRejectsIncompleteTypedRequest) {
+  std::vector<std::string> errors;
+  EXPECT_FALSE(
+      consan_detail::build_moi_relocated_guest_access_words({.image = {},
+                                                             .candidate = nullptr,
+                                                             .target = nullptr,
+                                                             .replay_address_vgpr = 0u,
+                                                             .adjusted_address_vgpr = std::nullopt},
+                                                            errors));
+  ASSERT_EQ(errors.size(), 1u);
+  EXPECT_EQ(errors.front(), "ConSan MOI guest relocation requires a candidate and target profile");
 }
 
 struct NativeB96Access {

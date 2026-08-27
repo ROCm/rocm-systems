@@ -1913,6 +1913,11 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     errors.emplace_back("ConSan MOI sampled probe requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
   }
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
+    errors.emplace_back("ConSan MOI sampled probe has no target profile");
+    return std::nullopt;
+  }
   if (pending_acquire_owner_bank_count == 0u ||
       !std::has_single_bit(pending_acquire_owner_bank_count) ||
       pending_acquire_owner_bank_count > kConSanMoiSampledPendingAcquireOwnerBankCount) {
@@ -1931,8 +1936,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
       (spill_backed_operand_recovery ? sampled_spill_backed_scratch_count(options, candidate, arch)
                                      : direct_sampled_scratch_count(options, candidate, arch)));
   const bool reserve_two_address_replay_scratch =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+      moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   if (static_cast<uint32_t>(*options.scratch_vgpr) + scratch_count > kMaxVgprs) {
     errors.emplace_back("ConSan MOI sampled probe exceeds the VGPR file");
     return std::nullopt;
@@ -2097,10 +2101,14 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     const uint16_t guest_address_vgpr =
         capture_high_bank_address ? *candidate.operands.address_vgpr : *lds_byte_offset_vgpr;
     const auto guest_words = build_moi_relocated_guest_access_words(
-        bytes, candidate, arch, guest_address_vgpr,
-        reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
-                                                 *options.scratch_vgpr + scratch_count - 1u))
-                                           : std::nullopt,
+        {.image = bytes,
+         .candidate = &candidate,
+         .target = target,
+         .replay_address_vgpr = guest_address_vgpr,
+         .adjusted_address_vgpr = reserve_two_address_replay_scratch
+                                      ? std::optional<uint16_t>(static_cast<uint16_t>(
+                                            *options.scratch_vgpr + scratch_count - 1u))
+                                      : std::nullopt},
         errors);
     if (!guest_words)
       return std::nullopt;
@@ -2650,6 +2658,11 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
     return std::nullopt;
   }
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
+    errors.emplace_back("ConSan MOI sampled probe has no target profile");
+    return std::nullopt;
+  }
 
   std::vector<uint32_t> words;
   const bool select_guest_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch) &&
@@ -2682,8 +2695,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
       (spill_backed_operand_recovery ? sampled_spill_backed_scratch_count(options, candidate, arch)
                                      : direct_sampled_scratch_count(options, candidate, arch)));
   const bool reserve_two_address_replay_scratch =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
+      moi_guest_access_relocation_requires_adjusted_address(candidate, *target);
   if (capture_high_bank_address) {
     if (!options.scratch_vgpr) {
       errors.emplace_back("ConSan MOI sampled high-bank LDS address requires scratch VGPRs");
@@ -2726,10 +2738,14 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const MoiOptions 
     const uint16_t replay_address_vgpr =
         preserved_lds_byte_offset_vgpr.value_or(*candidate.operands.address_vgpr);
     const auto guest_words = build_moi_relocated_guest_access_words(
-        bytes, candidate, arch, replay_address_vgpr,
-        reserve_two_address_replay_scratch ? std::optional<uint16_t>(static_cast<uint16_t>(
-                                                 *options.scratch_vgpr + scratch_count - 1u))
-                                           : std::nullopt,
+        {.image = bytes,
+         .candidate = &candidate,
+         .target = target,
+         .replay_address_vgpr = replay_address_vgpr,
+         .adjusted_address_vgpr = reserve_two_address_replay_scratch
+                                      ? std::optional<uint16_t>(static_cast<uint16_t>(
+                                            *options.scratch_vgpr + scratch_count - 1u))
+                                      : std::nullopt},
         errors);
     if (!guest_words)
       return std::nullopt;

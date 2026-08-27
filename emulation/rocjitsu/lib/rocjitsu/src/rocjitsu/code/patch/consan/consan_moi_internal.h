@@ -113,6 +113,42 @@ struct MoiResidentWaveOwnerRequest {
                                                   const MoiResidentWaveOwnerRequest &request,
                                                   const ConSanTargetProfile &target);
 
+/// Complete semantic request to replay one displaced guest LDS access.
+///
+/// `image` is the pristine code-object image from which an unchanged guest
+/// instruction can be copied. `candidate` supplies the normalized access
+/// semantics and original file range. `target` binds the request to the
+/// selected architectural contract. `replay_address_vgpr` is the address base
+/// that is valid at the relocation site; `adjusted_address_vgpr` is optional
+/// scratch reserved by planning for a split address whose static offset does
+/// not fit the target instruction. No engine policy or report state belongs in
+/// this request.
+struct MoiGuestAccessRelocationRequest {
+  std::span<const uint8_t> image;
+  const ConSanMoiCandidate *candidate = nullptr;
+  const ConSanTargetProfile *target = nullptr;
+  uint16_t replay_address_vgpr = 0;
+  std::optional<uint16_t> adjusted_address_vgpr;
+};
+
+/// Return whether relocation of this candidate requires an extra address
+/// VGPR. The answer is shared by resource planning and target emission so they
+/// cannot disagree about the split-instruction scratch contract.
+[[nodiscard]] bool
+moi_guest_access_relocation_requires_adjusted_address(const ConSanMoiCandidate &candidate,
+                                                      const ConSanTargetProfile &target);
+
+/// Build the target instruction words that replay one displaced guest access.
+///
+/// Ordinary targets copy the pristine instruction exactly. A target whose
+/// profile requires a two-address split receives semantically equivalent
+/// single-address instructions using the request's replay address. Malformed
+/// input returns no words and appends a diagnostic; the pristine image is
+/// never modified.
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_moi_relocated_guest_access_words(const MoiGuestAccessRelocationRequest &request,
+                                       std::vector<std::string> &errors);
+
 /// Canonical set of occupied half-open ranges in pristine executable text.
 ///
 /// Dense relay placement must reject original instructions already owned by
