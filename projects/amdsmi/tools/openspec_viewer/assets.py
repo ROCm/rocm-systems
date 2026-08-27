@@ -191,39 +191,61 @@ h2.sec .key{order:9;display:flex;gap:5px}
 .empty{border:1px dashed var(--line);border-radius:10px;padding:20px 24px;
   color:var(--dim);font-size:13.5px;max-width:80ch;background:
   repeating-linear-gradient(135deg,transparent 0 9px,var(--line-2) 9px 10px)}
-.empty b{color:var(--fg)}
 .empty code{font-family:var(--mono);font-size:12.4px;color:var(--fg)}
 
-/* ---- schematic: natural size, scrolled, never scaled down ---- */
-.mapwrap,.flowwrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-  padding:6px 0 0;box-shadow:var(--shadow);overflow-x:auto}
+/* ---- diagrams: natural size, scrolled, never scaled down ---- */
+.mapwrap,.flowwrap,.dlvwrap{background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;padding:6px 0 0;box-shadow:var(--shadow);overflow-x:auto}
 .flowwrap{margin:0 0 18px;padding:10px 0 0}
-.map,.flow{display:block;margin:0 auto;font-family:var(--mono)}
-.map .nlabel,.flow .nlabel{font-size:12px;fill:var(--fg);letter-spacing:-.01em}
-.map .nbox,.flow .nbox{fill:var(--raise);stroke:var(--line);stroke-width:1;rx:5}
+.dlvwrap{padding:10px 0 0}
+.map,.flow,.dlv{display:block;margin:0 auto;font-family:var(--mono)}
+.map .nlabel,.flow .nlabel,.dlv .nlabel{font-size:12px;fill:var(--fg);letter-spacing:-.01em}
+.map .nbox,.flow .nbox,.dlv .nbox{fill:var(--raise);stroke:var(--line);stroke-width:1;rx:5}
 .map a:hover .nbox,.map a:focus .nbox,
-.flow a:hover .nbox,.flow a:focus .nbox{fill:var(--cap-bg);stroke:var(--cap)}
-.map a:focus,.flow a:focus{outline:none}
-.map a:focus-visible .nbox,.flow a:focus-visible .nbox{stroke:var(--cap);stroke-width:2}
-.map .ntab,.flow .ntab{fill:var(--cap);opacity:.55}
-.map a:hover .ntab,.flow a:hover .ntab{opacity:1}
-.map .edge,.flow .edge{color:var(--faint)}
-.map .wire,.flow .wire{stroke:currentColor;fill:none;stroke-width:1.4;stroke-linejoin:round}
-.map .head,.flow .head{fill:currentColor;stroke:none}
-.map.act .edge,.flow.act .edge{opacity:.1}
-.map.act .edge.out,.flow.act .edge.out{opacity:1;color:var(--when)}
-.map.act .edge.in,.flow.act .edge.in{opacity:1;color:var(--cap)}
+.flow a:hover .nbox,.flow a:focus .nbox,
+.dlv a:hover .nbox,.dlv a:focus .nbox{fill:var(--cap-bg);stroke:var(--cap)}
+.map a:focus,.flow a:focus,.dlv a:focus{outline:none}
+.map a:focus-visible .nbox,.flow a:focus-visible .nbox,
+.dlv a:focus-visible .nbox{stroke:var(--cap);stroke-width:2}
+.map .ntab,.flow .ntab,.dlv .ntab{fill:var(--cap);opacity:.55}
+.map a:hover .ntab,.flow a:hover .ntab,.dlv a:hover .ntab{opacity:1}
+.map .edge,.flow .edge,.dlv .edge{color:var(--faint)}
+.map .wire,.flow .wire,.dlv .wire{stroke:currentColor;fill:none;stroke-width:1.4;
+  stroke-linejoin:round}
+.map .head,.flow .head,.dlv .head{fill:currentColor;stroke:none}
+.map.act .edge,.flow.act .edge,.dlv.act .edge{opacity:.1}
+.map.act .edge.out,.flow.act .edge.out,.dlv.act .edge.out{opacity:1;color:var(--when)}
+.map.act .edge.in,.flow.act .edge.in,.dlv.act .edge.in{opacity:1;color:var(--cap)}
 .map.act .edge.out .wire,.map.act .edge.in .wire,
-.flow.act .edge.out .wire,.flow.act .edge.in .wire{stroke-width:2}
-.map.act a,.flow.act a{opacity:.34}
-.map.act a.lit,.map.act a.self,.flow.act a.lit,.flow.act a.self{opacity:1}
-.map.act a.self .nbox,.flow.act a.self .nbox{stroke:var(--cap);stroke-width:1.6;fill:var(--cap-bg)}
+.flow.act .edge.out .wire,.flow.act .edge.in .wire,
+.dlv.act .edge.out .wire,.dlv.act .edge.in .wire{stroke-width:2}
+.map.act a,.flow.act a,.dlv.act a{opacity:.34}
+.map.act a.lit,.map.act a.self,.flow.act a.lit,.flow.act a.self,
+.dlv.act a.lit,.dlv.act a.self{opacity:1}
+.map.act a.self .nbox,.flow.act a.self .nbox,
+.dlv.act a.self .nbox{stroke:var(--cap);stroke-width:1.6;fill:var(--cap-bg)}
+/* held focus: a click parks the highlight, so the rest goes further down than
+   it does on hover and the held node keeps a ring while you read elsewhere */
+.map.held a,.flow.held a,.dlv.held a{opacity:.16}
+.map.held .edge,.flow.held .edge,.dlv.held .edge{opacity:.06}
+.map.held a.lit,.flow.held a.lit,.dlv.held a.lit{opacity:1}
+.map.held a.self .nbox,.flow.held a.self .nbox,.dlv.held a.self .nbox{stroke-width:2.4}
+.map.held a.self .ntab,.flow.held a.self .ntab,.dlv.held a.self .ntab{opacity:1}
+.map.held a.held .nbox,.flow.held a.held .nbox,.dlv.held a.held .nbox{stroke:var(--cap);
+  stroke-width:2.4;fill:var(--cap-bg)}
+.map.held a.held,.flow.held a.held,.dlv.held a.held{opacity:1}
 .maplegend,.flowlegend{display:flex;flex-wrap:wrap;gap:6px 20px;padding:12px 18px 14px;
   font-family:var(--mono);font-size:10.5px;color:var(--faint);
   letter-spacing:.04em;border-top:1px solid var(--line-2);margin-top:4px}
 .maplegend span,.flowlegend span{display:inline-flex;align-items:center;gap:6px}
 .maplegend i,.flowlegend i{width:15px;height:2px;display:inline-block;background:currentColor}
 .maplegend .o{color:var(--when)} .maplegend .i{color:var(--cap)}
+.maplegend .now{color:var(--cap)}
+/* ---- delivery: stage bands behind a left-to-right flow ---- */
+.dlv .stage{fill:var(--raise);stroke:none}
+.dlv .stagelab{font-size:9px;fill:var(--faint);letter-spacing:.16em;text-transform:uppercase}
+.dlv .nnote{font-size:9.5px;fill:var(--faint);letter-spacing:0}
+.dlv .elabel{font-size:9.5px;fill:var(--dim);letter-spacing:0}
 
 /* ---- change flow: proposals on top, the capabilities they land on below ----
    node kinds carry the same vocabulary as the requirement rails, so a dashed
@@ -837,17 +859,30 @@ function run(){
   });
 }
 var t; input.addEventListener('input',function(){clearTimeout(t);t=setTimeout(run,90);});
+
+/* every diagram that can park a highlight registers a release here */
+var release=[];
 doc.addEventListener('keydown',function(e){
   if(e.key==='/'&&doc.activeElement!==input){e.preventDefault();input.focus();input.select();}
-  else if(e.key==='Escape'){ if(input.value){input.value='';run();} input.blur(); }
+  else if(e.key==='Escape'){
+    release.forEach(function(f){f();});
+    if(input.value){input.value='';run();}
+    input.blur();
+  }
 });
 
-/* ---------- diagrams: light up a node's incoming and outgoing traces ---------- */
-qa('svg.map, svg.flow').forEach(function(map){
+/* ---------- diagrams: light up a node's incoming and outgoing traces ----------
+   Hover previews; on the reference diagram a click parks that preview so you
+   can read the page with one capability's wires still lit. */
+qa('svg.map, svg.flow, svg.dlv').forEach(function(map){
   var edges=qa('.edge, .fedge',map), nodes=qa('[data-node],[data-cap]',map);
-  /* the flow diagram keys edges by node key (cap:<id>), the schematic by id */
+  /* the flow diagram keys edges by node key (cap:<id>), the others by id */
   var keyOf=function(n){return n.dataset.node||n.dataset.cap;};
+  var holds=map.classList.contains('map');
+  var held=null;
   var setF=function(id){
+    map.classList.toggle('held',held!==null);
+    nodes.forEach(function(n){n.classList.toggle('held',held!==null&&keyOf(n)===held);});
     if(!id){
       map.classList.remove('act');
       edges.forEach(function(e){e.classList.remove('in','out');});
@@ -867,11 +902,21 @@ qa('svg.map, svg.flow').forEach(function(map){
       n.classList.toggle('self',keyOf(n)===id);
     });
   };
+  if(holds)release.push(function(){ if(held!==null){held=null;setF(null);} });
   nodes.forEach(function(n){
     n.addEventListener('mouseenter',function(){setF(keyOf(n));});
     n.addEventListener('focus',function(){setF(keyOf(n));});
-    n.addEventListener('mouseleave',function(){setF(null);});
-    n.addEventListener('blur',function(){setF(null);});
+    n.addEventListener('mouseleave',function(){setF(held);});
+    n.addEventListener('blur',function(){setF(held);});
+    if(!holds)return;
+    n.addEventListener('click',function(e){
+      /* keyboard Enter (detail 0) and a double click both follow the link */
+      if(e.detail===0||e.detail>1){held=null;setF(null);return;}
+      e.preventDefault(); e.stopPropagation();
+      var k=keyOf(n);
+      held=held===k?null:k;
+      setF(k);
+    });
   });
 });
 

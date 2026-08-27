@@ -1,9 +1,9 @@
 """Assemble the self-contained HTML page from a parsed :class:`Site`.
 
 One page holds one or more projects. Each project contributes a pane with its
-own masthead, capability index, reference schematic, capabilities and changes;
-a switcher in the rail picks which pane is on screen. A site of one project
-renders without any switcher chrome at all.
+own masthead, capability list, reference diagram, specs and changes; a switcher
+in the rail picks which pane is on screen. A site of one project renders
+without any switcher chrome at all.
 
 Two things carry meaning through colour here, and only two:
 
@@ -21,12 +21,21 @@ Nothing else is coloured.
 from __future__ import annotations
 
 import html
+import json
 import re
 from datetime import datetime, timezone
-from typing import Dict, List, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from .assets import CSS, JS
-from .graph import Graph, flow_legend, graph_prefix, svg_flow, svg_graph
+from .graph import (
+    Graph,
+    capability_groups,
+    flow_legend,
+    graph_prefix,
+    svg_delivery,
+    svg_flow,
+    svg_graph,
+)
 from .markdown import Inline, render_md
 from .model import (
     RE_FENCE,
@@ -472,16 +481,33 @@ def render_change_index(changes: Sequence[Change], A: Anchors) -> str:
 def render_context(context: str, root: str) -> str:
     if not context.strip():
         return (
-            '<div class="empty"><b>No project context.</b> '
-            "This corpus ships no <code>context:</code> block in "
-            "<code>openspec/config.yaml</code>. That block is the first thing a "
-            "reviewer and an AI assistant both read \u2014 tech stack, conventions, "
-            "the domain the specs below assume. Add one and it appears here.</div>"
+            '<div class="empty"><code>openspec/config.yaml</code> has no '
+            "<code>context:</code> block.</div>"
         )
     body = E(context)
     body = re.sub(r"`([^`\n]+)`", r"<b>\1</b>", body)
     _ = root
     return f'<div class="ctx"><pre>{body}</pre></div>'
+
+
+def render_delivery(doc: Dict[str, Any], anchors: Dict[str, str], sec_id: str) -> str:
+    """The hand-written build-and-delivery diagram, titled by the file itself."""
+    svg = svg_delivery(doc, anchors)
+    if not svg:
+        return ""
+    title = str(doc.get("title") or "build and delivery")
+    subtitle = str(doc.get("subtitle") or "")
+    legend = (
+        '<div class="maplegend">'
+        "<span>a node links to the capability that specifies it</span>"
+        "<span>hand-written, not derived from the specs</span></div>"
+    )
+    return (
+        f'<section class="block oview" id="{sec_id}">'
+        f'<h2 class="sec">{E(title)}'
+        f"{f'<em>{E(subtitle)}</em>' if subtitle else ''}</h2>"
+        f'<div class="dlvwrap">{svg}{legend}</div></section>'
+    )
 
 
 def _prime_anchors(project: Project, A: Anchors, multi: bool) -> None:
@@ -532,6 +558,22 @@ def _flow_anchors(gmap: Dict[str, str]) -> Dict[str, str]:
     return out
 
 
+def load_delivery(project: Project) -> Optional[Dict[str, Any]]:
+    """``<root>/diagrams/delivery.json``, or ``None`` when the corpus has none.
+
+    :class:`Project` has no field for this document, so it is read here. A
+    malformed file raises rather than disappearing: only its absence is
+    ordinary.
+    """
+    path = project.root / "diagrams" / "delivery.json"
+    if not path.is_file():
+        return None
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict) or not doc.get("nodes"):
+        return None
+    return doc
+
+
 def _cap_refs(cap: Capability, known: Set[str]) -> List[str]:
     refs = list(getattr(cap, "refs", None) or [])
     if not refs:
@@ -547,7 +589,7 @@ def render_project(
     changes = project.changes
     multi = site.multi
     pre = f"{project.slug}--" if multi else ""
-    anchors = {c.cid: A.of(c) for c in caps}  # this project only: the schematic
+    anchors = {c.cid: A.of(c) for c in caps}  # this project only: the reference diagram
     inline = Inline(gmap)  # every project: a reference may cross a pane
 
     known = set(anchors)
@@ -561,14 +603,21 @@ def render_project(
     # -- overview -----------------------------------------------------------
     blocks: List[str] = []
     blocks.append(
-        f'<section class="block oview" id="{pre}ctx"><h2 class="sec">project context</h2>'
+        f'<section class="block oview" id="{pre}ctx"><h2 class="sec">context</h2>'
         f"{render_context(project.context, str(project.root))}</section>"
     )
 
-    # a schematic of unconnected boxes says nothing the index does not, and
+    # packaging is what this corpus is mostly about, so the delivery diagram
+    # sits directly under the context, above the reference diagram
+    delivery = load_delivery(project)
+    if delivery:
+        blocks.append(render_delivery(delivery, gmap, f"{pre}dlv"))
+
+    # a diagram of unconnected boxes says nothing the list does not, and
     # Graph() currently raises KeyError on an edgeless node set (reported to B)
     if caps and edges:
-        graph = Graph([c.cid for c in caps], edges)
+        cids = [c.cid for c in caps]
+        graph = Graph(cids, edges, groups=capability_groups(project.context, cids))
         titles = {
             c.cid: f"{c.cid} - {len(c.requirements)} requirements, "
             f"{c.scenario_count} scenarios, referenced by {len(in_refs[c.cid])}"
@@ -578,13 +627,14 @@ def render_project(
         legend = (
             '<div class="maplegend">'
             f"<span>{E(prefix) + '*' if prefix else 'capability'} = capability</span>"
-            '<span class="o"><i></i>references (hover a node)</span>'
+            '<span class="o"><i></i>references</span>'
             '<span class="i"><i></i>referenced by</span>'
-            "<span>arrow points at the capability being relied on</span></div>"
+            "<span>arrow points at the referenced capability</span>"
+            "<span>click holds a node, double-click opens it, Esc releases</span></div>"
         )
         blocks.append(
             f'<section class="block oview" id="{pre}map">'
-            '<h2 class="sec">reference schematic</h2>'
+            '<h2 class="sec">capability references</h2>'
             f'<div class="mapwrap">{svg_graph(graph, anchors, titles)}{legend}</div>'
             "</section>"
         )
@@ -600,14 +650,14 @@ def render_project(
         )
         blocks.append(
             f'<section class="block oview" id="{pre}idx">'
-            f'<h2 class="sec">capability index <em>{len(caps)}</em></h2>'
+            f'<h2 class="sec">capabilities <em>{len(caps)}</em></h2>'
             f'<div class="idx">{idx}</div></section>'
         )
 
     if changes:
         blocks.append(
             f'<section class="block oview" id="{pre}cidx">'
-            f'<h2 class="sec">change index <em>{len(changes)}</em>'
+            f'<h2 class="sec">changes <em>{len(changes)}</em>'
             f'<span class="key">{delta_key()}</span></h2>'
             f"{render_change_index(changes, A)}</section>"
         )
@@ -617,15 +667,16 @@ def render_project(
         if flow:
             blocks.append(
                 f'<section class="block oview" id="{pre}flow">'
-                '<h2 class="sec">change flow</h2>'
+                '<h2 class="sec">changes and capabilities</h2>'
                 f'<div class="flowwrap">{flow}{flow_legend()}</div></section>'
             )
 
-    blocks.append('<div class="nores">Nothing on this page matches that text.</div>')
+    blocks.append('<div class="nores">No matches.</div>')
 
     if caps:
         blocks.append(
-            '<section class="block" id="%scaps"><h2 class="sec">capabilities</h2></section>' % pre
+            '<section class="block" id="%scaps"><h2 class="sec">capability specs</h2></section>'
+            % pre
         )
         blocks.append(
             "".join(
@@ -636,7 +687,7 @@ def render_project(
     if changes:
         blocks.append(
             f'<section class="block chg-lead" id="{pre}changes">'
-            '<h2 class="sec">open changes</h2></section>'
+            '<h2 class="sec">change proposals</h2></section>'
         )
         blocks.append("".join(render_change(c, inline, A, gmap, site) for c in changes))
 
@@ -651,20 +702,28 @@ def render_project(
     )
 
     # -- rail ---------------------------------------------------------------
-    over = [f'<a href="#{pre}ctx"><span class="nm">project context</span></a>']
+    over = [f'<a href="#{pre}ctx"><span class="nm">context</span></a>']
+    if delivery:
+        over.append(
+            f'<a href="#{pre}dlv"><span class="nm">'
+            f"{E(str(delivery.get('title') or 'build and delivery').lower())}</span></a>"
+        )
     if caps and edges:
-        over.append(f'<a href="#{pre}map"><span class="nm">reference schematic</span></a>')
+        over.append(f'<a href="#{pre}map"><span class="nm">capability references</span></a>')
     if caps:
         over.append(
-            f'<a href="#{pre}idx"><span class="nm">capability index</span>'
+            f'<a href="#{pre}idx"><span class="nm">capabilities</span>'
             f'<span class="ct">{len(caps)}</span></a>'
         )
     if changes:
         over.append(
-            f'<a href="#{pre}cidx"><span class="nm">change index</span>'
+            f'<a href="#{pre}cidx"><span class="nm">changes</span>'
             f'<span class="ct">{len(changes)}</span></a>'
         )
-        over.append(f'<a href="#{pre}flow"><span class="nm">change flow</span></a>')
+        if flow:  # svg_flow returns "" when there is nothing to draw
+            over.append(
+                f'<a href="#{pre}flow"><span class="nm">changes and capabilities</span></a>'
+            )
     rail = [f"<h2>overview</h2><nav>{''.join(over)}</nav>"]
     if caps:
         rail.append(
@@ -693,11 +752,12 @@ def render_project(
 
 
 def _kind_of(project: Project) -> str:
+    """The openspec subdirectories this corpus actually has."""
     if project.capabilities and project.changes:
-        return "capabilities and open changes"
+        return "specs and changes"
     if project.changes:
-        return "change proposals"
-    return "capability specifications"
+        return "changes"
+    return "specs"
 
 
 def delta_key() -> str:
@@ -728,7 +788,7 @@ def render_stats(project: Project, n_edges: int) -> Tuple[str, str]:
         num(project.requirement_count, "requirements")
         num(project.scenario_count, "scenarios")
         if n_edges:
-            num(n_edges, "cross references")
+            num(n_edges, "references")
     if changes:
         counts: Dict[str, int] = {}
         n_delta_req = n_delta_scn = 0
@@ -738,13 +798,13 @@ def render_stats(project: Project, n_edges: int) -> Tuple[str, str]:
             for cap in chg.deltas:
                 n_delta_req += len(cap.requirements)
                 n_delta_scn += cap.scenario_count
-        num(len(changes), "open changes")
+        num(len(changes), "changes")
         num(sum(len(c.deltas) for c in changes), "delta specs")
         num(n_delta_req, "delta requirements")
         if not caps:
             num(n_delta_scn, "scenarios")
         if counts:
-            gauge("by kind", delta_ledger(counts))
+            gauge("delta kinds", delta_ledger(counts))
         done = sum(c.task_done_count for c in changes)
         total = sum(c.task_count for c in changes)
         if total:
@@ -845,12 +905,12 @@ def render(site: Site) -> str:
 </head><body{' class="multi"' if multi else ""}>
 <div class="shell">
 <aside class="rail">
-  <a class="brand" href="{home}"><b>openspec</b><span>specification viewer</span></a>
+  <a class="brand" href="{home}"><b>openspec</b><span>viewer</span></a>
   {switch}
   <div class="search">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/>
       <path d="M20 20l-4-4"/></svg>
-    <input id="q" type="search" placeholder="filter everything" aria-label="Filter specs"
+    <input id="q" type="search" placeholder="search" aria-label="Search this page"
       autocomplete="off" spellcheck="false"><kbd>/</kbd>
   </div>
   <div class="hits" id="hits" role="status" aria-live="polite"></div>
@@ -858,7 +918,7 @@ def render(site: Site) -> str:
   <summary>contents</summary>
   {"".join(rails)}
   </details>
-  <div class="railtail"><button class="tbtn" id="theme" type="button">invert</button></div>
+  <div class="railtail"><button class="tbtn" id="theme" type="button">light / dark</button></div>
 </aside>
 <main>{"".join(panes)}</main>
 </div>

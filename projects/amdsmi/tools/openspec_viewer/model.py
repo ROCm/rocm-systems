@@ -523,7 +523,11 @@ def project_slug(root: Path) -> str:
 
 def load_project(root: Path) -> Project:
     root = Path(root).expanduser().resolve()
-    caps = [parse_spec(p, p.parent.name) for p in sorted((root / "specs").glob("*/spec.md"))]
+    specs = root / "specs"
+    caps = [
+        parse_spec(p, "/".join(p.parent.relative_to(specs).parts))
+        for p in sorted(specs.rglob("spec.md"))
+    ]
     changes = [
         parse_change(d)
         for d in sorted((root / "changes").glob("*"))

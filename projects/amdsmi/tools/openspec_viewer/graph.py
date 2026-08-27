@@ -1,6 +1,6 @@
-"""Layered graph layout and SVG emission, computed here rather than by JS.
+"""Graph layout and SVG emission, computed here rather than by JS.
 
-Two diagrams live here and share one layout engine:
+Three diagrams live here.  Two share one layout engine:
 
 ``svg_graph``
     the capability *reference* schematic - who relies on whom.
@@ -10,8 +10,23 @@ Two diagrams live here and share one layout engine:
 
 The engine is Sugiyama-shaped: break cycles, assign layers, optionally
 compress the layer count, order within layers to reduce crossings, place,
-then route orthogonally.  Everything is hand-emitted SVG; no marker
-elements, no JS is needed to draw.
+then route orthogonally.
+
+The third does not use it:
+
+``svg_delivery``
+    a left-to-right staged flow read from a hand-authored document.  Its
+    columns are *given* - the author assigned every node to a stage - so
+    there is nothing to layer, and forcing it through the vertical engine
+    would throw away the one piece of structure that matters.
+
+Everything is hand-emitted SVG; no marker elements, no JS is needed to draw.
+
+A dense cross-reference graph has no readable global drawing: when most of
+the corpus sits in one strongly connected component, every node is a hub and
+no layout untangles it.  ``svg_graph`` therefore answers a smaller question -
+*what does this one capability rely on, and who relies on it* - by shipping a
+calm default state plus the attributes a focus mode needs.
 """
 
 from __future__ import annotations
@@ -51,8 +66,11 @@ FLAT_STEP = 9.0
 LANE_STEP = 9.0
 #: width divided by height we aim for when compressing the layer count
 ASPECT = 1.55
-#: width the diagram tries to stay inside so labels are not sliced off
-FIT_W = 940.0
+#: width the diagram has to stay inside: the content column at the narrowest
+#: window the page is designed for.  Overflow is not a cosmetic problem - the
+#: wrapper scrolls, the scrollbar is easy to miss, and a reader concludes the
+#: part they can see is the whole graph.
+FIT_W = 916.0
 
 
 @dataclass
@@ -90,6 +108,7 @@ class Graph:
         compress: bool = True,
         labels: Optional[Mapping[str, str]] = None,
         extra_w: Optional[Mapping[str, float]] = None,
+        groups: Optional[Mapping[str, str]] = None,
     ):
         self.ids = list(dict.fromkeys(ids))
         known = set(self.ids)
@@ -97,6 +116,12 @@ class Graph:
         self.labels: Dict[str, str] = dict(labels) if labels else _short_labels(self.ids)
         self.labels = {i: _clip(self.labels.get(i) or i) for i in self.ids}
         self._extra_w = dict(extra_w or {})
+        self.groups: Dict[str, str] = {k: v for k, v in (groups or {}).items() if k in known and v}
+        self.group_ix: Dict[str, int] = {}
+        for cid in self.ids:  # index by first appearance, so it is stable
+            g = self.groups.get(cid)
+            if g and g not in self.group_ix:
+                self.group_ix[g] = len(self.group_ix)
         self.nodes: Dict[str, GNode] = {}
         self.layers: List[List[str]] = []
         self.chains: Dict[Tuple[str, str], List[str]] = {}
@@ -149,12 +174,18 @@ class Graph:
             self._place()
             self._plan_y(spans, flats, nlayers)
             self._route(spans, flats, set(back), bidir)
-            # a diagram wider than the column gets its labels sliced off by
-            # the browser, so overflow is expensive - but not so expensive
-            # that a narrow, tall, tangled version wins
-            tangle = self._crossings(self.layers, self.nbr_dn) + self._flat_span(self.layers, flats)
+            # overflow is close to disqualifying.  A taller, more tangled
+            # drawing that fits still shows every node; a tidier one that
+            # does not fit hides some of them behind a scrollbar, and this
+            # graph is a thicket either way - the reader is going to pick a
+            # node and follow its two hops, not trace the whole picture.
+            tangle = (
+                self._crossings(self.layers, self.nbr_dn)
+                + self._flat_span(self.layers, flats)
+                + 2 * self._gmix(self.layers)
+            )
             score = (
-                3.0 * max(0.0, self.width - FIT_W) + self.width + 1.3 * self.height + 7.0 * tangle
+                25.0 * max(0.0, self.width - FIT_W) + self.width + 1.3 * self.height + 7.0 * tangle
             )
             if best is None or score < best[0]:
                 best = (score, self._snapshot())
@@ -374,11 +405,13 @@ class Graph:
         self.nbr_up, self.nbr_dn = nbr_up, nbr_dn
 
         deg = {k: len(nbr_up[k]) + len(nbr_dn[k]) for k in self.nodes}
+        gix = self._gix
         starts = (
             seed,
             [la[::-1] for la in seed],
             [sorted(la, key=lambda k: (-deg[k], k)) for la in seed],
             [sorted(la, key=lambda k: (deg[k], k)) for la in seed],
+            [sorted(la, key=lambda k: (gix(k), -deg[k], k)) for la in seed],
         )
         best: Optional[List[List[str]]] = None
         best_x = -1
@@ -402,7 +435,11 @@ class Graph:
                     )
                 self._transpose(layers, nbr_up, nbr_dn)
             self._polish(layers, nbr_up, nbr_dn, flats)
-            score = self._crossings(layers, nbr_dn) + self._flat_span(layers, flats)
+            score = (
+                self._crossings(layers, nbr_dn)
+                + self._flat_span(layers, flats)
+                + 2 * self._gmix(layers)
+            )
             if best is None or score < best_x:
                 best, best_x = layers, score
         self.layers = best if best is not None else seed
@@ -444,6 +481,27 @@ class Graph:
                         layer[i], layer[i + 1] = a, b
             if not moved:
                 return
+
+    def _gix(self, key: str) -> int:
+        """Sort index of a node's group; ungrouped and dummies sort last."""
+        return self.group_ix.get(self.groups.get(key, ""), len(self.group_ix))
+
+    def _gmix(self, layers: Sequence[Sequence[str]]) -> int:
+        """Adjacent pairs in a row from different groups.
+
+        Grouping is authored data, not something inferred from the wires, so
+        it is worth as much as a crossing: two capabilities in the same
+        family sitting next to each other says something a reader can use,
+        and the wire between them gets shorter as a bonus.
+        """
+        if not self.group_ix:
+            return 0
+        return sum(
+            1
+            for layer in layers
+            for a, b in zip(layer, layer[1:])
+            if not self.nodes[a].dummy and not self.nodes[b].dummy and self._gix(a) != self._gix(b)
+        )
 
     @staticmethod
     def _flat_span(layers: Sequence[Sequence[str]], flats: Sequence[Tuple[str, str]]) -> int:
@@ -800,6 +858,56 @@ def _short_labels(ids: Sequence[str]) -> Dict[str, str]:
     return {i: ("".join(p[n:]) or i) for i, p in zip(ids, parts)}
 
 
+#: "Delivery, ten capabilities:" - a paragraph that names a family and then
+#: lists it.  Deliberately narrow: this must not fire on ordinary prose.
+_GROUP_HEAD = re.compile(r"^([A-Z][A-Za-z][A-Za-z ]{1,22}?),\s+[\w-]+\s+capabilit(?:y|ies)\s*:")
+
+
+def capability_groups(context: str, ids: Sequence[str]) -> Dict[str, str]:
+    """Read a capability grouping out of the project's authored context.
+
+    The families in this corpus are not a guess and not something to infer
+    from the wires - ``config.yaml`` states them, in the same paragraph that
+    gives their sizes::
+
+        Delivery, ten capabilities: amdsmi-build-configuration (...),
+        amdsmi-install-layout (...), amdsmi-python-* (loader, wheel, ...)
+
+        Behavior, five capabilities: amdsmi-c-api-abi (...), amdsmi-cli (...)
+
+    So this reads them rather than hard-coding a list that would rot the
+    moment a capability moved.  Ids may be named exactly or by an
+    ``amdsmi-python-*`` prefix glob, and an exact mention always beats a
+    glob - which is the whole reason ``amdsmi-python-api`` lands in Behavior
+    even though ``amdsmi-python-*`` appears under Delivery.
+
+    Returns ``{}`` for a corpus whose context says nothing of the kind, and
+    ``{}`` rather than a partial answer if only one family is found: one
+    group is not a grouping.
+    """
+    ids = list(ids)
+    if not context or not ids:
+        return {}
+    exact: Dict[str, str] = {}
+    globbed: Dict[str, str] = {}
+    for para in re.split(r"\n\s*\n", context):
+        head = _GROUP_HEAD.match(" ".join(para.split()))
+        if not head:
+            continue
+        name = head.group(1).strip()
+        for token in re.findall(r"[a-z0-9][\w./-]*\*?", para):
+            if token.endswith("*"):
+                stem = token[:-1]
+                for cid in ids:
+                    if cid.startswith(stem) and cid != stem:
+                        globbed.setdefault(cid, name)
+            elif token in ids:
+                exact[token] = name
+    out = dict(globbed)
+    out.update(exact)
+    return out if len(set(out.values())) > 1 else {}
+
+
 def graph_prefix(ids: Sequence[str]) -> str:
     labels = _short_labels(ids)
     for i in ids:
@@ -912,14 +1020,67 @@ def _tag(x: float, y: float, w: float, h: float, cut: float = 9.0, r: float = 4.
 # --------------------------------------------------------------------------
 
 
+#: styling the schematic needs in order to have a *default* state at all.
+#: Class-level, so the stylesheet overrides any of it with one more class.
+MAP_STYLE = (
+    "<style>"
+    # the calm default: the wires are texture, the nodes are the content
+    "svg.map.calm .mapedges{opacity:.42}"
+    "svg.map.calm .wire{stroke-width:1}"
+    # ...until a node is picked, when the two hops that matter come back to
+    # full strength and everything else drops away
+    "svg.map.calm.act .mapedges,svg.map.calm.held .mapedges{opacity:1}"
+    "svg.map .ndegbg{fill:var(--panel);stroke:var(--line)}"
+    "svg.map .ndegn{font-size:9px;fill:var(--faint);letter-spacing:0}"
+    "svg.map .hub .ndegbg{stroke:var(--cap);stroke-opacity:.7}"
+    "svg.map .hub .ndegn{fill:var(--cap)}"
+    "svg.map a:hover .ndegbg,svg.map .self .ndegbg{fill:var(--cap-bg);stroke:var(--cap)}"
+    "svg.map a:hover .ndegn,svg.map .self .ndegn{fill:var(--cap)}"
+    "</style>"
+)
+
+
 def svg_graph(graph: Graph, anchors: Mapping[str, str], titles: Mapping[str, str]) -> str:
-    """Emit the ``A references B`` schematic. Arrow points at the dependency."""
+    """Emit the ``A references B`` schematic. Arrow points at the dependency.
+
+    A spec set that cross-references itself densely has no readable global
+    drawing.  This one is fifteen capabilities and forty-three edges with
+    twelve of them in a single strongly connected component: every node is a
+    hub, so every layout of it is a hairball and no amount of routing work
+    changes that.  The diagram therefore answers a smaller question.
+
+    The default state is deliberately quiet - thin wires at low contrast,
+    so the picture reads as *this set is densely interconnected* rather than
+    inviting anyone to trace a line.  What it does offer without a click is
+    the degree of every node, so a reader can see which capabilities are
+    load bearing before touching anything.  Picking a node (hover, keyboard
+    focus, or a click to park it) is what makes it precise: its incoming and
+    outgoing wires come to full strength and the rest fades, which turns the
+    hairball into the two-hop diagram that was actually wanted.
+
+    Emitted for that: ``data-cap``, ``data-in``, ``data-out``, ``data-deg``
+    and ``data-group`` on every node, ``data-from`` / ``data-to`` /
+    ``data-bi`` on every wire, and ``.mapedges`` / ``.mapnodes`` layers.
+    """
     if not graph.ids:
         return ""
     w, h = round(graph.width), round(graph.height)
+    indeg = {cid: 0 for cid in graph.ids}
+    outdeg = {cid: 0 for cid in graph.ids}
+    for u, v in graph.edges:
+        outdeg[u] += 1
+        indeg[v] += 1
+    deg = {cid: indeg[cid] + outdeg[cid] for cid in graph.ids}
+    # "hub" is relative to this corpus: no fixed threshold survives a set of
+    # five capabilities and a set of fifty
+    top = sorted(deg.values(), reverse=True)
+    cut = top[max(0, len(top) // 4 - 1)] if top else 0
     out = [
-        f'<svg class="map" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
-        f'role="img" aria-label="Capability reference graph">'
+        f'<svg class="map calm" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
+        f'role="img" aria-label="Capability reference graph" '
+        f'data-nodes="{len(graph.ids)}" data-edges="{len(graph.edges)}">',
+        MAP_STYLE,
+        '<g class="mapedges">',
     ]
     for e in graph.paths:
         attrs = f'data-from="{esc_attr(e.a)}" data-to="{esc_attr(e.b)}"'
@@ -932,19 +1093,43 @@ def svg_graph(graph: Graph, anchors: Mapping[str, str], titles: Mapping[str, str
         if e.bidir and len(e.pts) > 1:
             out.append(f'<path class="head" d="{_arrow(e.pts[1], e.pts[0])}"/>')
         out.append("</g>")
+    out.append('</g><g class="mapnodes">')
     for cid in graph.ids:
         n = graph.nodes[cid]
         x, y = n.x - n.w / 2, graph._y(n.layer)
         href = anchors.get(cid)
-        open_t = f'<a href="#{href}" data-cap="{esc_attr(cid)}">' if href else "<g>"
+        group = graph.groups.get(cid, "")
+        cls = "n" + (" hub" if deg[cid] >= cut and deg[cid] else "")
+        if group:
+            cls += f" g{graph.group_ix.get(group, 0)}"
+        attrs = (
+            f'class="{cls}" data-cap="{esc_attr(cid)}" data-in="{indeg[cid]}" '
+            f'data-out="{outdeg[cid]}" data-deg="{deg[cid]}"'
+        )
+        if group:
+            attrs += f' data-group="{esc_attr(group)}"'
+        open_t = f'<a href="#{href}" {attrs}>' if href else f"<g {attrs}>"
+        badge = ""
+        if deg[cid]:
+            # a notification-style badge on the corner rather than anything
+            # inside the box: the box is sized for its label, and covering
+            # half a capability id to report a number is a bad trade
+            bx, by = x + n.w - 3.0, y + 2.0
+            badge = (
+                f'<circle class="ndegbg" cx="{bx:.1f}" cy="{by:.1f}" r="8"/>'
+                f'<text class="ndegn" x="{bx:.1f}" y="{by + 3.2:.1f}" '
+                f'text-anchor="middle">{deg[cid]}</text>'
+            )
         out.append(
             f"{open_t}<title>{E(titles.get(cid, cid))}</title>"
             f'<rect class="nbox" x="{x:.1f}" y="{y:.1f}" width="{n.w:.1f}" '
             f'height="{graph.node_h:.0f}"/>'
             f'<rect class="ntab" x="{x:.1f}" y="{y:.1f}" width="{n.w:.1f}" height="2.5" rx="1.2"/>'
             + _lines_svg(n.lines, n.x, y + graph.node_h / 2 + 4.4, "nlabel")
+            + badge
             + ("</a>" if href else "</g>")
         )
+    out.append("</g>")
     out.append("</svg>")
     return "".join(out)
 
@@ -1339,3 +1524,773 @@ def flow_legend() -> str:
         f'<span class="{cls}"><i></i>{E(text)}</span>' for cls, text in FLOW_LEGEND_ITEMS
     )
     return f'<div class="flowlegend">{cells}</div>'
+
+
+# --------------------------------------------------------------------------
+# diagram 3: delivery flow - a hand-authored staged document
+# --------------------------------------------------------------------------
+#
+# The reference schematic and the change flow are both *derived*: they show
+# what the corpus says about itself.  Neither can answer "how does this thing
+# reach a user", because a cross reference is not a production step - a
+# capability that mentions another is not built from it.  That story has to
+# be written down, and ``diagrams/delivery.json`` writes it down: ordered
+# stages, a node per artifact carrying the capability that specifies it, and
+# an edge per production step.
+#
+# The stage of every node is given, so there is no layering pass here and the
+# vertical engine above is not used.  Two stages' worth of freedom are left:
+# the order inside a column, and where the wires run.  One wrinkle - the
+# author may put an edge *inside* a stage (three artifacts aggregate into one
+# installable tree, all four of them "Artifact") - so a stage is split into
+# as many sub-columns as its internal edges need, and the stage header spans
+# them.  Dropping those edges instead would lose the aggregation, which is
+# the most load-bearing step in the whole picture.
+
+#: outer margin
+D_PAD = 10.0
+#: vertical space between two boxes in the same column
+D_ROW_GAP = 20.0
+#: narrowest gap between two columns; widened for labels and wire lanes
+D_GAP_MIN = 28.0
+#: narrowest a column may be, so a one-word column still reads as a column
+D_COL_MIN = 97.0
+#: lines a node label may use, and lines an edge label may use
+D_LABEL_LINES = 2
+D_ELAB_LINES = 3
+#: node label line height and advance width.  Wider than ``CHAR_W`` on
+#: purpose: a box whose text overflows by half a glyph reads as broken
+#: rather than as tight, so the estimate errs generous here.
+D_LINE = 15.0
+D_CHAR = 7.4
+#: small-text line height and advance width (edge labels, stage heads)
+D_SMALL_LINE = 12.0
+D_SMALL_CH = 6.2
+#: height of the stage header strip above the first row
+D_HEAD_H = 26.0
+#: box padding
+D_BOX_TOP = 8.0
+D_BOX_BOT = 8.0
+D_BOX_SIDE = 10.0
+#: how far a wire runs straight out of a box before it may turn
+D_STUB = 10.0
+#: horizontal distance between two wires sharing one inter-column gap
+D_LANE = 10.0
+#: advance width of the capability chip along the bottom of a box (10px mono)
+D_SPEC_CH = 6.1
+#: room reserved at the bottom right of a box for the channel number
+D_NUM_W = 12.0
+#: the diagram tries to stay inside this, which is the content column at the
+#: narrowest window the page is designed for.  Overflowing is not a cosmetic
+#: problem here: the last stage is the whole point of the picture, and a
+#: reader who cannot see it concludes the four columns they can see are the
+#: whole story.
+D_FIT = 916.0
+
+#: one dash pattern per delivery channel, cycled.  Deliberately not one hue
+#: per channel: this page spends its five hues on meanings already and a
+#: sixth would read as "some kind of requirement" to anyone scanning fast.
+D_LANE_DASH: Sequence[str] = ("", "7 3", "2 3", "10 3 2 3", "1 3")
+
+
+@dataclass
+class _DNode:
+    key: str
+    stage: int  # index into the declared stages
+    col: int = 0  # flattened column, a stage may occupy several
+    label: Sequence[str] = ()
+    chip: Sequence[str] = ()
+    raw_label: str = ""
+    raw_note: str = ""
+    spec: str = ""
+    w: float = 0.0
+    h: float = 0.0
+    x: float = 0.0  # left edge
+    y: float = 0.0  # top edge
+    lane: int = -1  # delivery channel this node belongs to, -1 upstream of any
+
+    @property
+    def cx(self) -> float:
+        return self.x + self.w / 2
+
+    @property
+    def cy(self) -> float:
+        return self.y + self.h / 2
+
+
+@dataclass(eq=False)
+class _DEdge:
+    a: str
+    b: str
+    label: Sequence[str] = ()
+    spec: str = ""
+    lane: int = -1
+    gap: int = 0  # inter-column gap the vertical run sits in
+    pts: List[Tuple[float, float]] = field(default_factory=list)
+    lx: float = 0.0  # label centre
+    ly: float = 0.0
+    lw: float = 0.0
+
+
+#: a word too long for its column breaks at a path-ish separator.  Not at a
+#: hyphen: ``site-packages`` and ``rocm-sdk-core`` are single names, and
+#: splitting them reads as damage rather than as a line break.
+_D_BREAK = re.compile(r"[^._/]*[._/]|[^._/]+")
+
+
+def _wrap_words(text: str, width: int) -> List[str]:
+    """Greedy word wrap that can also break inside an over-long token.
+
+    ``libamd_smi.so.MAJOR`` is one word of nineteen characters, and a column
+    sized for it is half again as wide as one sized for everything else in
+    the same stage, so it breaks at its own punctuation instead.
+    """
+    out: List[str] = []
+    cur = ""
+    for word in text.split():
+        for piece in [word] if len(word) <= width else (_D_BREAK.findall(word) or [word]):
+            joint = "" if (not cur or cur.endswith(("-", "/", ".", "_"))) else " "
+            cand = cur + joint + piece if cur else piece
+            if cur and len(cand) > width:
+                out.append(cur)
+                cur = piece
+            else:
+                cur = cand
+    if cur:
+        out.append(cur)
+    return out or [""]
+
+
+def _wrap_fit(text: str, lines: int) -> List[str]:
+    """Narrowest wrap of ``text`` that still fits within ``lines`` lines.
+
+    Authored text is never clipped or elided in this diagram, so the only
+    lever on a column's width is where the lines break.  Wrapping greedily
+    at a fixed width sizes every column for whichever label happens to be
+    longest; searching for the narrowest width that still fits gives the
+    *demand* each label makes, and a column is then as wide as the largest
+    demand in it.
+
+    This is only the measurement.  Laying the label out again at the width
+    the column actually got is what stops a short label being split for no
+    reason - ``/opt/rocm`` demands five characters but is never drawn on two
+    lines, because it fits on one in the column it ends up in.
+    """
+    text = " ".join(text.split())
+    if not text:
+        return [""]
+    for width in range(2, len(text) + 1):
+        got = _wrap_words(text, width)
+        if len(got) <= lines:
+            return got
+    return [text]
+
+
+@dataclass
+class _Deliv:
+    """The authored document, validated and laid out."""
+
+    stages: List[Tuple[str, str]] = field(default_factory=list)
+    nodes: Dict[str, _DNode] = field(default_factory=dict)
+    order: List[str] = field(default_factory=list)
+    edges: List[_DEdge] = field(default_factory=list)
+    cols: List[List[str]] = field(default_factory=list)
+    #: flattened column index -> declared stage index
+    col_stage: List[int] = field(default_factory=list)
+    colw: List[float] = field(default_factory=list)
+    colx: List[float] = field(default_factory=list)
+    gaps: List[float] = field(default_factory=list)
+    lanes: int = 0
+    width: float = 0.0
+    height: float = 0.0
+
+
+def _deliv_read(doc: Mapping[str, object]) -> "Optional[_Deliv]":
+    """Validate and normalise the authored document.
+
+    Everything optional is optional: a node needs an id and a known stage, an
+    edge needs two ends that exist.  Anything else is dropped rather than
+    raised on - this file is content, and content drifts.
+    """
+    raw_stages, raw_nodes = doc.get("stages"), doc.get("nodes")
+    if not isinstance(raw_stages, list) or not isinstance(raw_nodes, list):
+        return None
+    stages = [
+        (str(s["id"]), str(s.get("label") or s["id"]))
+        for s in raw_stages
+        if isinstance(s, dict) and s.get("id")
+    ]
+    if not stages:
+        return None
+    sidx = {sid: i for i, (sid, _) in enumerate(stages)}
+
+    nodes: Dict[str, _DNode] = {}
+    order: List[str] = []
+    for n in raw_nodes:
+        if not isinstance(n, dict):
+            continue
+        key, stage = str(n.get("id") or ""), str(n.get("stage") or "")
+        if not key or key in nodes or stage not in sidx:
+            continue
+        nodes[key] = _DNode(
+            key=key,
+            stage=sidx[stage],
+            label=_wrap_fit(str(n.get("label") or key), D_LABEL_LINES),
+            raw_label=" ".join(str(n.get("label") or key).split()),
+            raw_note=str(n.get("note") or ""),
+            spec=str(n.get("spec") or ""),
+        )
+        order.append(key)
+    if not nodes:
+        return None
+
+    pairs: List[Tuple[str, str, Sequence[str], str]] = []
+    seen: Set[Tuple[str, str]] = set()
+    raw_edges = doc.get("edges")
+    for e in raw_edges if isinstance(raw_edges, list) else []:
+        if not isinstance(e, dict):
+            continue
+        a, b = str(e.get("from") or ""), str(e.get("to") or "")
+        if a not in nodes or b not in nodes or a == b or (a, b) in seen:
+            continue
+        if nodes[b].stage < nodes[a].stage:  # a staged flow only runs forward
+            continue
+        seen.add((a, b))
+        text = str(e.get("label") or "")
+        pairs.append(
+            (a, b, _wrap_fit(text, D_ELAB_LINES) if text else (), str(e.get("spec") or ""))
+        )
+
+    _deliv_columns(stages, nodes, order, [(a, b) for a, b, _, _ in pairs])
+    d = _Deliv(stages=stages, nodes=nodes, order=order)
+    d.edges = [
+        _DEdge(a, b, label, spec) for a, b, label, spec in pairs if nodes[b].col > nodes[a].col
+    ]
+    ncols = max(n.col for n in nodes.values()) + 1
+    d.cols = [[k for k in order if nodes[k].col == c] for c in range(ncols)]
+    d.col_stage = [nodes[col[0]].stage for col in d.cols]
+    return d
+
+
+def _deliv_columns(
+    stages: Sequence[Tuple[str, str]],
+    nodes: Dict[str, _DNode],
+    order: Sequence[str],
+    pairs: Sequence[Tuple[str, str]],
+) -> None:
+    """Split each stage into sub-columns so its internal edges still run right.
+
+    Longest-path over the edges that stay inside one stage.  A cycle inside a
+    stage cannot be ranked at all, so the relaxation is bounded and whatever
+    ranks it lands on are used as they are; the arcs that then point backwards
+    are dropped by the caller, and the picture stays honest either way.
+
+    Only the ranks that something actually sits on become columns, so a
+    saturated cycle cannot leave an empty column behind.
+    """
+    rank = {k: 0 for k in order}
+    for si in range(len(stages)):
+        inside = [(a, b) for a, b in pairs if nodes[a].stage == si == nodes[b].stage]
+        for _ in range(len(order)):
+            moved = False
+            for a, b in inside:
+                if rank[b] < rank[a] + 1:
+                    rank[b] = rank[a] + 1
+                    moved = True
+            if not moved:
+                break
+    used = sorted({(nodes[k].stage, rank[k]) for k in order})
+    col = {cell: i for i, cell in enumerate(used)}
+    for k in order:
+        nodes[k].col = col[(nodes[k].stage, rank[k])]
+
+
+def _deliv_lanes(d: _Deliv) -> None:
+    """Number the delivery channels and mark everything downstream of one.
+
+    A *channel* is a node in the stage before the last: the last stage is
+    where things land, so the one before it is the last point at which a
+    route is still a choice.  Everything reachable from a channel inherits
+    its number, which is what makes "this one channel lands in two places"
+    something you see rather than something you trace.
+    """
+    if len(d.stages) < 2:
+        return
+    roots = [k for k in d.order if d.nodes[k].stage == len(d.stages) - 2]
+    if not roots:
+        return
+    succ: Dict[str, List[str]] = {}
+    for e in d.edges:
+        succ.setdefault(e.a, []).append(e.b)
+    for lane, root in enumerate(roots):
+        stack = [root]
+        while stack:
+            k = stack.pop()
+            if d.nodes[k].lane >= 0:
+                continue
+            d.nodes[k].lane = lane
+            stack.extend(succ.get(k, ()))
+    for e in d.edges:
+        e.lane = d.nodes[e.a].lane if d.nodes[e.a].lane >= 0 else d.nodes[e.b].lane
+    d.lanes = len(roots)
+
+
+def _deliv_order(d: _Deliv) -> None:
+    """Barycentre sweeps inside each column; the columns themselves never move."""
+    pred: Dict[str, List[str]] = {}
+    succ: Dict[str, List[str]] = {}
+    for e in d.edges:
+        succ.setdefault(e.a, []).append(e.b)
+        pred.setdefault(e.b, []).append(e.a)
+
+    def sweep(i: int, ref: Mapping[str, List[str]], other: Sequence[str]) -> None:
+        pos = {k: j for j, k in enumerate(other)}
+        base = {k: j for j, k in enumerate(d.cols[i])}
+        d.cols[i].sort(
+            key=lambda k: (_mean([pos[p] for p in ref.get(k, ()) if p in pos], base[k]), base[k])
+        )
+
+    for _ in range(5):
+        for i in range(1, len(d.cols)):
+            sweep(i, pred, d.cols[i - 1])
+        for i in range(len(d.cols) - 2, -1, -1):
+            sweep(i, succ, d.cols[i + 1])
+
+
+def _deliv_size(d: _Deliv) -> None:
+    """Column widths from the labels alone; the notes are not drawn in the box.
+
+    A note is a full sentence, and a sentence squeezed into a box eleven
+    characters wide is three ellipses and no information.  They live in the
+    tooltip and, spelled out in full, in the legend under the diagram.
+    """
+    d.colw = []
+    for col in d.cols:
+        chars = max((max(len(x) for x in d.nodes[k].label) for k in col), default=0)
+        for k in col:  # re-wrap to the width the column actually got
+            d.nodes[k].label = _wrap_words(d.nodes[k].raw_label, chars)
+            d.nodes[k].chip = _wrap(_spec_chip(d.nodes[k].spec)) if d.nodes[k].spec else ()
+        # the chip is a capability id, so it wraps at its own hyphens; the
+        # column has to hold whichever of the two is wider
+        numbered = any(d.nodes[k].lane >= 0 for k in col) and d.lanes > 1
+        chip = max(
+            (max(len(x) for x in d.nodes[k].chip) for k in col if d.nodes[k].chip), default=0
+        )
+        d.colw.append(
+            max(
+                D_COL_MIN,
+                chars * D_CHAR + D_BOX_SIDE * 2,
+                chip * D_SPEC_CH + D_BOX_SIDE * 2 + (D_NUM_W if numbered else 0.0),
+            )
+        )
+    for ci, col in enumerate(d.cols):
+        for k in col:
+            n = d.nodes[k]
+            n.w = d.colw[ci]
+            numbered = n.lane >= 0 and d.lanes > 1
+            n.h = (
+                D_BOX_TOP
+                + len(n.label) * D_LINE
+                + (5.0 + len(n.chip) * D_SMALL_LINE if n.chip else 0.0)
+                # the digit shares the chip's row, or gets one to itself: it
+                # is painted last, so anything it lands on top of loses a
+                # character, and a label is the one thing that must not
+                + (D_SMALL_LINE if numbered and not n.chip else 0.0)
+                + D_BOX_BOT
+            )
+
+
+def _deliv_y(d: _Deliv) -> None:
+    """Stack each column, centre the columns, then pull nodes toward their mates."""
+    tall = max(
+        (sum(d.nodes[k].h for k in col) + D_ROW_GAP * max(0, len(col) - 1) for col in d.cols),
+        default=0.0,
+    )
+    top = D_PAD + D_HEAD_H
+    for col in d.cols:
+        run = sum(d.nodes[k].h for k in col) + D_ROW_GAP * max(0, len(col) - 1)
+        y = top + (tall - run) / 2
+        for k in col:
+            d.nodes[k].y = y
+            y += d.nodes[k].h + D_ROW_GAP
+
+    pred: Dict[str, List[str]] = {}
+    succ: Dict[str, List[str]] = {}
+    for e in d.edges:
+        succ.setdefault(e.a, []).append(e.b)
+        pred.setdefault(e.b, []).append(e.a)
+    for n in range(8):  # straighten wires without reordering or overlapping
+        down = n % 2 == 0
+        rng = range(1, len(d.cols)) if down else range(len(d.cols) - 2, -1, -1)
+        ref = pred if down else succ
+        for ci in rng:
+            col = d.cols[ci]
+            want = [
+                _mean([d.nodes[m].cy for m in ref.get(k, ())], d.nodes[k].cy) - d.nodes[k].h / 2
+                for k in col
+            ]
+            floor = top
+            for i, k in enumerate(col):
+                d.nodes[k].y = max(want[i], floor)
+                floor = d.nodes[k].y + d.nodes[k].h + D_ROW_GAP
+            ceil = top + tall
+            for i in range(len(col) - 1, -1, -1):
+                node = d.nodes[col[i]]
+                node.y = min(node.y, ceil - node.h)
+                ceil = node.y - D_ROW_GAP
+            floor = top
+            for k in col:
+                d.nodes[k].y = max(d.nodes[k].y, floor)
+                floor = d.nodes[k].y + d.nodes[k].h + D_ROW_GAP
+    d.height = top + tall + D_PAD
+
+
+def _deliv_x(d: _Deliv, lanes_in: Mapping[int, int]) -> None:
+    """Size every gap for the labels and wire lanes it carries, then place columns."""
+    # the floor is what a gap needs for its edge labels: a label narrower
+    # than its gap can always be centred clear of both columns, and one
+    # wider than its gap cannot, so this is what keeps text off the boxes
+    floor = [D_GAP_MIN] * max(0, len(d.cols) - 1)
+    for e in d.edges:
+        g = d.nodes[e.b].col - 1
+        if e.label and 0 <= g < len(floor):
+            floor[g] = max(floor[g], max(len(x) for x in e.label) * D_SMALL_CH + 14.0)
+    d.gaps = list(floor)
+    for g, count in lanes_in.items():  # room for the wires is negotiable
+        if 0 <= g < len(d.gaps):
+            d.gaps[g] = max(d.gaps[g], D_STUB * 2 + max(0, count - 1) * D_LANE + 8.0)
+    # a diagram wider than the content column hides its last stage behind a
+    # scrollbar nobody notices, so the slack in the gaps is spent on fitting
+    # before it is spent on breathing room
+    over = sum(d.colw) + sum(d.gaps) + D_PAD * 2 - D_FIT
+    slack = sum(g - f for g, f in zip(d.gaps, floor))
+    if over > 0 and slack > 0:
+        take = min(1.0, over / slack)
+        d.gaps = [g - (g - f) * take for g, f in zip(d.gaps, floor)]
+    d.colx, x = [], D_PAD
+    for ci, w in enumerate(d.colw):
+        d.colx.append(x)
+        x += w + (d.gaps[ci] if ci < len(d.gaps) else 0.0)
+    d.width = x + D_PAD
+    for ci, col in enumerate(d.cols):
+        for k in col:
+            d.nodes[k].x = d.colx[ci]
+
+
+def _deliv_hits(d: _Deliv, y: float, xa: float, xb: float, skip: Tuple[str, str]) -> int:
+    """Boxes a horizontal run at ``y`` would pass through."""
+    lo, hi = _range(xa, xb)
+    return sum(
+        1
+        for k, n in d.nodes.items()
+        if k not in skip and n.y - 4 < y < n.y + n.h + 4 and n.x < hi - 3 and n.x + n.w > lo + 3
+    )
+
+
+def _deliv_pick(d: _Deliv) -> None:
+    """Choose the gap each wire turns in: the one that runs over fewest boxes.
+
+    Most edges span a single gap and have no choice.  The ones that skip a
+    column - a Python module that becomes a wheel without passing through the
+    installable tree - do, and picking badly draws a line straight through an
+    unrelated box.
+    """
+    for e in d.edges:
+        src, dst = d.nodes[e.a], d.nodes[e.b]
+        lo, hi = src.col, dst.col - 1
+        if hi <= lo or not d.colx:
+            e.gap = lo
+            continue
+        best, score = lo, None
+        for g in range(lo, hi + 1):
+            vx = d.colx[g] + d.colw[g] + d.gaps[g] / 2
+            cost = _deliv_hits(d, src.cy, src.x + src.w, vx, (e.a, e.b)) * 10
+            cost += _deliv_hits(d, dst.cy, vx, dst.x, (e.a, e.b)) * 10
+            cost += (hi - g) * 0.5  # all else equal, turn late: fan-in merges
+            if score is None or cost < score:
+                best, score = g, cost
+        e.gap = best
+
+
+def _deliv_route(d: _Deliv) -> Dict[int, int]:
+    """One orthogonal dogleg per wire, each with its own vertical in the gap.
+
+    Wires whose vertical spans do not overlap share a lane, so a fan-out of
+    three does not become three lines a pixel apart.
+    """
+    by_gap: Dict[int, List[_DEdge]] = {}
+    for e in d.edges:
+        by_gap.setdefault(e.gap, []).append(e)
+    counts: Dict[int, int] = {}
+    for g, group in by_gap.items():
+        span = {
+            e: _range(d.nodes[e.a].cy, d.nodes[e.b].cy)
+            for e in group
+            if abs(d.nodes[e.a].cy - d.nodes[e.b].cy) > 1.0
+        }
+        idx = _lanes(sorted(span, key=lambda e: span[e][1] - span[e][0]), lambda e: span[e], 6.0)
+        counts[g] = max(idx.values(), default=-1) + 1
+        if not d.colx:
+            continue
+        room = d.gaps[g] - D_STUB * 2
+        step = min(D_LANE, room / counts[g]) if counts[g] else 0.0
+        left = d.colx[g] + d.colw[g] + D_STUB
+        mid = left + max(0.0, (room - step * max(0, counts[g] - 1)) / 2)
+        for e in group:
+            src, dst = d.nodes[e.a], d.nodes[e.b]
+            x0, y0, x1, y1 = src.x + src.w, src.cy, dst.x, dst.cy
+            if e in idx:
+                vx = min(max(mid + idx[e] * step, x0 + D_STUB), x1 - D_STUB)
+                e.pts = [(x0, y0), (vx, y0), (vx, y1), (x1, y1)]
+            else:
+                e.pts = [(x0, y0), (x1, y1)]
+            e.lw = (max(len(x) for x in e.label) if e.label else 0) * D_SMALL_CH
+            lg = dst.col - 1  # the label rides the run into its target
+            if 0 <= lg < len(d.gaps):
+                # centre it in that gap, then clamp so its background box
+                # cannot reach either column; the gap floor guarantees room
+                lo = d.colx[lg] + d.colw[lg]
+                half = e.lw / 2 + 6
+                e.lx = min(max(lo + d.gaps[lg] / 2, lo + half), lo + d.gaps[lg] - half)
+            else:
+                e.lx = x1 - e.lw / 2 - 8
+            e.ly = y1 - 6.0
+    return counts
+
+
+def _deliv_layout(doc: Mapping[str, object]) -> "Optional[_Deliv]":
+    d = _deliv_read(doc)
+    if d is None or not d.cols:
+        return None
+    _deliv_lanes(d)
+    _deliv_order(d)
+    _deliv_size(d)
+    _deliv_y(d)
+    counts: Dict[int, int] = {}
+    for _ in range(3):  # gap width depends on the lanes, which depend on x
+        _deliv_x(d, counts)
+        _deliv_pick(d)
+        counts = _deliv_route(d)
+    return d
+
+
+def _deliv_style(lanes: int) -> str:
+    """Defaults, so the diagram is legible before anybody styles it.
+
+    Class-level rather than id-level: the stylesheet beats any of this with
+    one extra class.
+    """
+    css = [
+        "svg.dlv .caplink{font-size:10px;fill:var(--cap);opacity:.85}",
+        "svg.dlv .dsep{stroke:var(--line-2);fill:none}",
+        "svg.dlv .elabelbg{fill:var(--panel)}",
+        "svg.dlv .lanerail{stroke:var(--faint);stroke-width:2.4;fill:none;opacity:.7}",
+        "svg.dlv .lanen{font-size:10px;fill:var(--faint)}",
+        "svg.dlv .dedges{opacity:.85}",
+        "svg.dlv.act .dedges{opacity:1}",
+        "svg.dlv a:hover .lanerail,svg.dlv .self .lanerail{stroke:var(--cap);opacity:1}",
+        "svg.dlv a:hover .lanen,svg.dlv .self .lanen{fill:var(--cap)}",
+    ]
+    for i in range(lanes):
+        dash = D_LANE_DASH[i % len(D_LANE_DASH)]
+        if dash:
+            css.append(f"svg.dlv .ln{i} .wire{{stroke-dasharray:{dash}}}")
+    return "<style>" + "".join(css) + "</style>"
+
+
+def svg_delivery(
+    doc: Mapping[str, object],
+    anchors: Mapping[str, str],
+    *,
+    label: str = "Build and delivery diagram",
+) -> str:
+    """Emit the staged delivery flow, or ``""`` when there is nothing to draw.
+
+    ``doc`` is ``diagrams/delivery.json`` already parsed; ``anchors`` maps a
+    capability id to its html anchor, so every node can link to the
+    capability that specifies it.  A corpus without the file never calls
+    this, and a malformed one gets an empty string rather than a traceback.
+    """
+    d = _deliv_layout(doc)
+    if d is None:
+        return ""
+    w, h = round(d.width), round(d.height)
+    out = [
+        f'<svg class="dlv" viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
+        f'role="img" aria-label="{esc_attr(label)}" data-lanes="{d.lanes}">',
+        _deliv_style(d.lanes),
+        '<g class="dstages">',
+    ]
+    for si, (sid, slabel) in enumerate(d.stages):
+        cols = [c for c, s in enumerate(d.col_stage) if s == si]
+        if not cols:
+            continue
+        x0 = d.colx[cols[0]] - 8
+        x1 = d.colx[cols[-1]] + d.colw[cols[-1]] + 8
+        band = (
+            f'<rect class="stage" x="{x0:.1f}" y="{D_PAD + 14:.1f}" opacity=".55" '
+            f'width="{x1 - x0:.1f}" height="{d.height - D_PAD * 2 - 14:.1f}" rx="8"/>'
+            if si % 2
+            else ""
+        )
+        out.append(
+            f'<g class="dstagehead" data-stage="{esc_attr(sid)}">{band}'
+            f'<text class="stagelab" x="{(x0 + x1) / 2:.1f}" y="{D_PAD + 8:.1f}" '
+            f'text-anchor="middle">{E(slabel.upper())}</text></g>'
+        )
+    out.append('</g><g class="dedges">')
+    for e in d.edges:
+        cls = "edge" + (f" ln{e.lane}" if e.lane >= 0 else "")
+        attrs = f'data-from="{esc_attr(e.a)}" data-to="{esc_attr(e.b)}"'
+        if e.lane >= 0:
+            attrs += f' data-lane="{e.lane}"'
+        if e.spec:
+            attrs += f' data-spec="{esc_attr(e.spec)}"'
+        step = " ".join(e.label) if e.label else "\u2192"
+        tip = f"{' '.join(d.nodes[e.a].label)} \u2192 {' '.join(d.nodes[e.b].label)}"
+        if e.label:
+            tip += f" ({step})"
+        if e.spec:
+            tip += f"\nspecified by {e.spec}"
+        out.append(
+            f'<g class="{cls}" {attrs}><title>{E(tip)}</title>'
+            f'<path class="wire" d="{_ortho(e.pts, 7.0)}" fill="none"/>'
+            f'<path class="head" d="{_arrow_r(e.pts[-1])}"/></g>'
+        )
+    out.append('</g><g class="dlabels">')
+    for e in d.edges:
+        if not e.label:
+            continue
+        top = e.ly - (len(e.label) - 1) * D_SMALL_LINE
+        out.append(
+            f'<rect class="elabelbg" x="{e.lx - e.lw / 2 - 4:.1f}" '
+            f'y="{top - 10:.1f}" width="{e.lw + 8:.1f}" '
+            f'height="{len(e.label) * D_SMALL_LINE + 4:.1f}" rx="3"/>'
+        )
+        for i, line in enumerate(e.label):
+            out.append(
+                f'<text class="elabel" x="{e.lx:.1f}" y="{top + i * D_SMALL_LINE:.1f}" '
+                f'text-anchor="middle">{E(line)}</text>'
+            )
+    out.append('</g><g class="dnodes">')
+    for key in d.order:
+        out.append(_deliv_node(d, d.nodes[key], anchors))
+    out.append("</g></svg>")
+    return "".join(out)
+
+
+def _deliv_node(d: _Deliv, n: _DNode, anchors: Mapping[str, str]) -> str:
+    href = anchors.get(n.spec) if n.spec else None
+    attrs = (
+        f'class="dnode" data-node="{esc_attr(n.key)}" data-stage="{esc_attr(d.stages[n.stage][0])}"'
+    )
+    if n.spec:
+        attrs += f' data-spec="{esc_attr(n.spec)}" data-cap="{esc_attr(n.spec)}"'
+    if n.lane >= 0:
+        attrs += f' data-lane="{n.lane}"'
+    tip = " \u2014 ".join(x for x in (" ".join(n.label), n.raw_note) if x)
+    if n.spec:
+        tip += f"\nspecified by {n.spec}"
+    body = [
+        f'<a href="#{href}" {attrs}>' if href else f"<g {attrs}>",
+        f"<title>{E(tip)}</title>",
+        f'<rect class="nbox" x="{n.x:.1f}" y="{n.y:.1f}" width="{n.w:.1f}" height="{n.h:.1f}"/>',
+    ]
+    if n.spec:  # the same accent the schematic uses for "this box is a link"
+        body.append(
+            f'<rect class="ntab" x="{n.x:.1f}" y="{n.y:.1f}" '
+            f'width="{n.w:.1f}" height="2.5" rx="1.2"/>'
+        )
+    if n.lane >= 0 and d.lanes > 1:
+        # the wire into this box is dashed per channel; the box wears the
+        # same dash down its left edge, so the family is legible standing
+        # still.  It costs no width - it sits inside the box padding.
+        dash = D_LANE_DASH[n.lane % len(D_LANE_DASH)]
+        body.append(
+            f'<path class="lanerail" d="M{n.x + 3:.1f},{n.y + 6:.1f} '
+            f'V{n.y + n.h - 6:.1f}"' + (f' stroke-dasharray="{dash}"' if dash else "") + "/>"
+        )
+    y = n.y + D_BOX_TOP + 11.0
+    for line in n.label:
+        body.append(f'<text class="nlabel" x="{n.x + D_BOX_SIDE:.1f}" y="{y:.1f}">{E(line)}</text>')
+        y += D_LINE
+    if n.chip:
+        y += 3.0
+        body.append(
+            f'<path class="dsep" d="M{n.x + D_BOX_SIDE:.1f},{y - 9:.1f} '
+            f'H{n.x + n.w - D_BOX_SIDE:.1f}"/>'
+        )
+        for line in n.chip:
+            body.append(
+                f'<text class="caplink" x="{n.x + D_BOX_SIDE:.1f}" y="{y + 3:.1f}">{E(line)}</text>'
+            )
+            y += D_SMALL_LINE
+    if n.lane >= 0 and d.lanes > 1:
+        # bottom right, clear of the label: a digit over the label was the
+        # one place in this diagram where text was actually being covered
+        body.append(
+            f'<text class="lanen" x="{n.x + n.w - 5:.1f}" '
+            f'y="{n.y + n.h - D_BOX_BOT + 1:.1f}" text-anchor="end">{n.lane + 1}</text>'
+        )
+    body.append("</a>" if href else "</g>")
+    return "".join(body)
+
+
+def _spec_chip(spec: str) -> str:
+    """Tail of a capability id: ``amdsmi-python-wheel`` -> ``python-wheel``."""
+    tail = spec.rsplit("/", 1)[-1]
+    head, _, rest = tail.partition("-")
+    return rest if rest and len(head) > 2 else tail
+
+
+def _arrow_r(tip: Tuple[float, float], s: float = 4.4) -> str:
+    """Filled triangle pointing right; this diagram only ever arrives leftward."""
+    x, y = tip
+    return f"M{x:.1f},{y:.1f} L{x - s * 1.8:.1f},{y - s:.1f} L{x - s * 1.8:.1f},{y + s:.1f} Z"
+
+
+def delivery_legend(doc: Mapping[str, object], anchors: Mapping[str, str] = {}) -> str:
+    """One entry per delivery channel: its number, its name, where it lands.
+
+    This is where the authored ``note`` text goes.  A note is a full
+    sentence - *the only channel that puts amdsmi on the default sys.path* -
+    and a sentence does not fit in a box eleven characters wide; squeezing
+    it in produced an ellipsis on half the nodes and told the reader
+    nothing.  Prose belongs in prose, where it wraps by itself, so the boxes
+    carry names and this carries the meaning.
+
+    The channel count is read off the document rather than asserted, so it
+    stays true if the author adds a fifth.
+    """
+    d = _deliv_layout(doc)
+    if d is None or d.lanes < 1:
+        return ""
+    last = len(d.stages) - 1
+    lands: Dict[int, List[str]] = {}
+    for key in d.order:
+        n = d.nodes[key]
+        if n.stage == last and n.lane >= 0:
+            lands.setdefault(n.lane, []).append(key)
+    rows = "".join(
+        f'<li class="ln{i}"><b>{i + 1}</b>{_deliv_entry(d, root, anchors)}'
+        f'<ul class="dland">'
+        + "".join(f"<li>{_deliv_entry(d, k, anchors)}</li>" for k in lands.get(i, ()))
+        + "</ul></li>"
+        for i, root in enumerate(k for k in d.order if d.nodes[k].stage == last - 1)
+    )
+    note = str(doc.get("note") or "")
+    tail = f'<p class="dnoteline">{E(note)}</p>' if note else ""
+    return f'<div class="dlvlegend"><ol class="dchan">{rows}</ol>{tail}</div>'
+
+
+def _deliv_entry(d: _Deliv, key: str, anchors: Mapping[str, str]) -> str:
+    """A node's name, its note, and a link to the capability specifying it."""
+    n = d.nodes[key]
+    name = E(n.raw_label)
+    href = anchors.get(n.spec) if n.spec else None
+    out = f'<span class="nm">{name}</span>'
+    if href:
+        out = f'<a class="nm" href="#{href}">{name}</a>'
+    if n.raw_note:
+        out += f'<span class="dn">{E(n.raw_note)}</span>'
+    return out
