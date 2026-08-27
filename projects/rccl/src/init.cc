@@ -1506,7 +1506,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     if (comm->peerInfo[i].hostHash != comm->peerInfo[rank].hostHash) nNodes++;
     if (!comm->peerInfo[i].cuMemSupport) comm->cuMemSupport = 0;
-    if (comm->peerInfo[i].mloPart != -1) comm->hasMloPart = true;
+    if (comm->peerInfo[i].mloPart > 0) comm->hasMloPart = true;
     for (int j = 0; j < i; j++) {
       // NVML device is agnostic to MloPart being used. With MloPart, each partition has a different GPU UUID.
       comm->hasMultiRankNvml = (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
