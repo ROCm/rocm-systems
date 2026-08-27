@@ -39,7 +39,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   append_ordered_ordinary_atomic_candidates(result, sync_index, ordinary_candidates);
   std::ranges::copy(ordinary_candidates, std::back_inserter(candidates));
   apply_test_container_filter(candidates, options);
-  if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
+  if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result.errors))
     return;
   retain_admitted_atomic_record_candidates(result.observation_plan, candidates);
   candidates.erase(

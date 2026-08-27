@@ -46,9 +46,9 @@ struct AtomicRecordCandidate {
 }
 
 [[nodiscard]] bool canonicalize_atomic_record_candidates_by_physical_site(
-    std::vector<AtomicRecordCandidate> &candidates, ConSanTransformArtifacts &result) {
+    std::vector<AtomicRecordCandidate> &candidates, std::vector<std::string> &errors) {
   return consan_detail::canonicalize_physical_site_aliases(
-      candidates, result.errors, "ConSan MOI atomic site",
+      candidates, errors, "ConSan MOI atomic site",
       [](const AtomicRecordCandidate &candidate) { return candidate.site.file_offset; },
       [](const AtomicRecordCandidate &candidate) -> std::string_view {
         return candidate.container_name;

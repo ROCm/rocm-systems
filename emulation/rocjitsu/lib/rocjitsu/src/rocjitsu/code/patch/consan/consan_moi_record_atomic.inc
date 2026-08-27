@@ -56,7 +56,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
                                                                                         candidate);
                        });
   apply_test_container_filter(candidates, options);
-  if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result))
+  if (!canonicalize_atomic_record_candidates_by_physical_site(candidates, result.errors))
     return;
   retain_admitted_atomic_record_candidates(result.observation_plan, candidates);
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {

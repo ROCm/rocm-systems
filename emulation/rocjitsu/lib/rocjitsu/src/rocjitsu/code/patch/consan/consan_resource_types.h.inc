@@ -74,6 +74,26 @@ struct ConSanCandidateResourcePlan {
   std::vector<ConSanResourcePlanAlternative> alternatives;
 };
 
+/// Complete, unpublished output of one MOI resource-planning attempt.
+///
+/// `plans` contains every access and synchronization-site allocation derived
+/// for one operating point. `errors` contains structural failures discovered
+/// while canonicalizing those admitted sites. The planner builds both fields
+/// privately and returns them together, allowing its caller to replace the
+/// prior plan set and append diagnostics in one explicit publication step.
+/// This prevents a retry from exposing a partial vector or mutating transform
+/// diagnostics while it is still evaluating a candidate operating point.
+struct ConSanMoiResourcePlanningResult {
+  /// Resource alternatives and selected allocation for every planned site.
+  std::vector<ConSanCandidateResourcePlan> plans;
+  /// Fatal structural diagnostics produced while deriving this plan set.
+  std::vector<std::string> errors;
+
+  /// Whether planning completed without a structural diagnostic. Individual
+  /// sites may still carry a typed Unsupported allocation in a successful set.
+  [[nodiscard]] bool success() const { return errors.empty(); }
+};
+
 /// Aggregate telemetry derived from completed resource plans and emitted
 /// patches. Its counters describe planner outcomes and the spill storage used
 /// by emitted mechanics. This type owns no transform state; construct it with

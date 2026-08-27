@@ -31,9 +31,9 @@ struct BarrierRecordCandidate {
 }
 
 [[nodiscard]] bool canonicalize_barrier_record_candidates_by_physical_site(
-    std::vector<BarrierRecordCandidate> &candidates, ConSanTransformArtifacts &result) {
+    std::vector<BarrierRecordCandidate> &candidates, std::vector<std::string> &errors) {
   return consan_detail::canonicalize_physical_site_aliases(
-      candidates, result.errors, "ConSan MOI barrier site",
+      candidates, errors, "ConSan MOI barrier site",
       [](const BarrierRecordCandidate &candidate) { return candidate.site.file_offset; },
       [](const BarrierRecordCandidate &candidate) -> std::string_view {
         return candidate.container_name;
@@ -975,7 +975,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     });
   }
   apply_test_container_filter(candidates, options);
-  if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
+  if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result.errors))
     return;
   retain_admitted_barrier_record_candidates(result.observation_plan, candidates);
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
@@ -2400,7 +2400,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_barrier_epoch_candidates(function, candidates);
   apply_test_container_filter(candidates, options);
-  if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result))
+  if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result.errors))
     return;
   retain_admitted_barrier_record_candidates(result.observation_plan, candidates);
   std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {

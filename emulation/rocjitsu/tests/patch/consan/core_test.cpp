@@ -188,6 +188,19 @@ TEST(ConSan, MoiOptionsSeedsSelectedRegistersWithoutMutatingCallerInput) {
   EXPECT_EQ(fresh_attempt.moi_epoch_vgpr, 5u);
 }
 
+TEST(ConSan, MoiResourcePlanningResultSeparatesStructuralFailureFromUnsupportedSites) {
+  ConSanMoiResourcePlanningResult planning;
+  ConSanCandidateResourcePlan unsupported;
+  unsupported.source = ConSanRegisterAllocationSource::Unsupported;
+  unsupported.reason = ConSanRegisterPlanReason::NoLegalWindow;
+  planning.plans.push_back(unsupported);
+  EXPECT_TRUE(planning.success());
+
+  planning.errors.emplace_back("inconsistent physical alias");
+  EXPECT_FALSE(planning.success());
+  EXPECT_EQ(planning.plans.size(), 1u);
+}
+
 TEST(ConSan, MoiPersistentScalarStateRequiresTheOwnerEpochPair) {
   ConSanMoiPersistentSgprState state;
   EXPECT_FALSE(state.complete());
