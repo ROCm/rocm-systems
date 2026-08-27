@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """DME <-> AMDSMI integration CI helpers.
 
 These helpers replace the inline bash logic that previously lived in

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-# Copyright (C) Advanced Micro Devices. All rights reserved.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
 """Lay out the GPU Agent build tree against an installed AMDSMI.
 
 GPU Agent's Makefile hard-codes ``ABS_DIR`` to a fixed absolute path, and
