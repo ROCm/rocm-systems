@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "nccl.h"
+#include "nccl_fakes.h"  // g_loadParam
 #include "os.h"
 
 struct ncclAsyncJob;
@@ -35,7 +36,14 @@ ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
   return g_initChannelResult;
 }
 
-ncclResult_t ncclCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
+// Controllable (was hardcoded success). This is commFree's FIRST NCCLCHECK, so it doubles as the
+// "commFree entered" marker for commCleanup's ordering oracle and as the only knob that fails commFree.
+extern std::vector<std::string> g_cleanupCallOrder;
+extern ncclResult_t g_ncclCeFinalizeResult;
+ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
+  g_cleanupCallOrder.push_back("commFree");
+  return g_ncclCeFinalizeResult;
+}
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) { ::abort(); }
@@ -88,8 +96,12 @@ ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
 }
 // Must be non-empty and multi-token: ncclInit() strstr()s the strtok_r() of this, and strtok_r("") returns NULL.
 // Also not "1" and not the Hyper-V BIOS string, so numa_balancing / bios_version stay on their benign arms.
+extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
+extern int g_ncclOsTopoGetStrFromSysCalls;
 ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen)
 {
+    ++g_ncclOsTopoGetStrFromSysCalls;
+    if (g_ncclOsTopoGetStrFromSysResult != ncclSuccess) return g_ncclOsTopoGetStrFromSysResult;
     if (strValue && maxLen > 0) {
         std::snprintf(strValue, maxLen, "Linux version 6.8.0-microtest");
     }
@@ -106,7 +118,15 @@ ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) { return ncclSuccess; }
 ncclResult_t ncclSymkFinalize(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
-ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) { ::abort(); }
+// Controllable (was fail-loud). Records the comm it was handed: commCleanup forwards its own argument,
+// and without the recorder passing anything else (or nullptr) would be invisible.
+extern ncclResult_t g_ncclTunerPluginUnloadResult;
+extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
+ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
+  g_cleanupCallOrder.push_back("tunerUnload");
+  g_ncclTunerPluginUnloadLastComm = comm;
+  return g_ncclTunerPluginUnloadResult;
+}
 ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) { ::abort(); }
 // Controllable (was fail-loud). Records gfxarch: :1577 forwards comm->archName into it and stores the
 // result in comm->topo->tuning, so without the recorder `IndexForArch(archName)` -> `IndexForArch("")` is invisible.
@@ -120,7 +140,8 @@ bool rcclUseAinic() { ::abort(); }
 
 ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob*, ncclResult_t(*)(struct ncclAsyncJob*), void(*)(struct ncclAsyncJob*), void(*)(void*), struct ncclComm*) { ::abort(); }
-int64_t ncclParamGraphStreamOrdering() { return 0; }
+// Was hardcoded to 0, which forced config.graphStreamOrdering on every envConfigOverride call and hid the field.
+int64_t ncclParamGraphStreamOrdering() { return g_loadParam("GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT); }
 int64_t rcclParamHierarchicalAllGather() { ::abort(); }
 int64_t rcclParamPxnOptQpUsage() { ::abort(); }
 namespace latency_profiler { ncclResult_t collTraceInit(struct ncclComm*) { ::abort(); } ncclResult_t collTraceDestroy(struct ncclComm*) { ::abort(); } }

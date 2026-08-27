@@ -120,7 +120,14 @@ Recorder& Recorder::instance() {
 }
 void Recorder::record(const char*) {}
 void Recorder::record(ncclComm_t*, int, const int*) {}
-ncclResult_t Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclComm_t, int) { return ncclSuccess; }
+ncclResult_t Recorder::record(rcclCall_t call, int rank, int nranks, ncclUniqueId* id, ncclComm_t, int) {
+  ++g_recorderIdCalls;
+  g_recorderLastIdCall = static_cast<int>(call);
+  g_recorderLastId = id;
+  g_recorderLastRank = rank;
+  g_recorderLastNranks = nranks;
+  return g_recorderRecordResult;
+}
 ncclResult_t Recorder::record(rcclCall_t, ncclComm_t) { return ncclSuccess; }
 void Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclConfig_t*, ncclComm_t) {}
 }  // namespace rccl
@@ -201,7 +208,8 @@ ncclResult_t bootstrapNetInit() { return g_bootstrapNetInitFail ? ncclSystemErro
 void initEnv() {}
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 void initNvtxRegisteredEnums() {}
-ncclResult_t ncclEnvPluginInit(void) { return ncclSuccess; }
+ncclResult_t g_ncclEnvPluginInitResult = ncclSuccess;
+ncclResult_t ncclEnvPluginInit(void) { return g_ncclEnvPluginInitResult; }
 bool ncclIommuPassthroughOk(const char*) { return true; }
 // ncclInit() strtok_r()s the /proc version read, so it must have >= 3 whitespace tokens.
 ncclResult_t ncclTopoGetStrFromSys(const char* /*path*/, const char* fileName, char* strValue) {
@@ -230,6 +238,14 @@ ncclResult_t g_bcastGrowHandleResult      = ncclSuccess;
 uint64_t g_bootstrapHandleMagic           = 0xB007ULL;
 int g_bcastGrowHandleCalls                = 0;
 bool g_bcastGrowHandleIsRoot              = false;
+int g_bootstrapGetUniqueIdCalls           = 0;
+
+ncclResult_t g_recorderRecordResult       = ncclSuccess;
+int g_recorderIdCalls                     = 0;
+int g_recorderLastIdCall                  = -1;
+ncclUniqueId* g_recorderLastId            = nullptr;
+int g_recorderLastRank                    = -12345;
+int g_recorderLastNranks                  = -12345;
 
 ncclResult_t g_initChannelResult        = ncclSuccess;
 int g_initChannelLastId                 = -1;
@@ -246,6 +262,8 @@ int g_ncclOsCpuCountCalls                = 0;
 std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
 ncclResult_t g_ncclOsSetAffinityResult   = ncclSuccess;
 std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
+ncclResult_t g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
+int g_ncclOsTopoGetStrFromSysCalls       = 0;
 ncclResult_t g_ncclMnnvlCheckResult      = ncclSuccess;
 int g_ncclMnnvlCheckCalls                = 0;
 // Non-zero default level: p2pLevel != 0 is what :1506 needs for the MNNVL auto scope to be reachable at all.
@@ -304,6 +322,12 @@ extern "C" ncclResult_t ncclMemManagerInit(struct ncclComm*) { return g_ncclMemM
 
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_ncclStrongStreamResult; }
 
+// commCleanup ordering oracle; the fakes that append to it live in nccl_stubs.cc. See init_fakes.h.
+std::vector<std::string> g_cleanupCallOrder;
+ncclResult_t g_ncclCeFinalizeResult = ncclSuccess;
+ncclResult_t g_ncclTunerPluginUnloadResult = ncclSuccess;
+struct ncclComm* g_ncclTunerPluginUnloadLastComm = nullptr;
+
 void InstallCommAllocSuccess() {
   g_ncclNetInitResult = ncclSuccess;
   g_ncclGinInitResult = ncclSuccess;
@@ -346,6 +370,17 @@ void ResetInitFakes() {
   g_bootstrapHandleMagic = 0xB007ULL;
   g_bcastGrowHandleCalls = 0;
   g_bcastGrowHandleIsRoot = false;
+  ResetBootstrapHandleTemplate();
+  g_bootstrapGetUniqueIdCalls = 0;
+  g_ncclEnvPluginInitResult = ncclSuccess;
+  g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
+  g_ncclOsTopoGetStrFromSysCalls = 0;
+  g_recorderRecordResult = ncclSuccess;
+  g_recorderIdCalls = 0;
+  g_recorderLastIdCall = -1;
+  g_recorderLastId = nullptr;
+  g_recorderLastRank = -12345;
+  g_recorderLastNranks = -12345;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
   g_gethostnameFail = false;
   g_dladdrFail = false;
@@ -386,4 +421,8 @@ void ResetInitFakes() {
   g_ncclTopoDumpGraphsNgraphs = -1;
   g_ncclTopoDumpGraphsArray.clear();
   g_ncclTopoComputeP2pChannelsPerPeerResult = ncclTimeout;
+  g_cleanupCallOrder.clear();
+  g_ncclCeFinalizeResult = ncclSuccess;
+  g_ncclTunerPluginUnloadResult = ncclSuccess;
+  g_ncclTunerPluginUnloadLastComm = nullptr;
 }
