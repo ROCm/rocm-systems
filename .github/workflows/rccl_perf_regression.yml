@@ -56,13 +56,30 @@ on:
       - '!projects/rccl/LICENSE*'
       - '!projects/rccl/**/CODEOWNERS'
       - '.github/workflows/rccl_perf_regression.yml'
-  # Allow manual dispatch for testing the pipeline before the workflow is on develop.
-  # Inputs mirror what a PR run would supply; omit them to use the defaults
-  # (A=A detect: ref == cand == current built lib, expects 0 regressions).
+  # Allow manual dispatch for exercising the pipeline without a PR.
+  #
+  # DO NOT dispatch with the defaults expecting a verdict. ci_detect_prod.json
+  # is a detect-mode config whose reference and candidate both resolve to
+  # builds/_fixed/lib, so the detector's identical-sides guard correctly refuses
+  # it: the run would compare a build against itself and report a guaranteed,
+  # meaningless PASS. You get ~26min on four nodes and an untrustworthy report.
+  # (The note that used to sit here promised exactly that A=A run. It predates
+  # the guard.)
+  #
+  # To smoke the pipeline end to end, pass a control_mode=true config -- it is
+  # the supported way to ask for A==A, and it yields usable run-to-run noise
+  # data instead of a non-answer:
+  #
+  #   config=/it-share/rccl-ci/configs/ci_control_prod8.json
+  #
+  # That file is ci_detect_prod.json with control_mode flipped and nothing else
+  # changed, so it exercises the production matrix rather than a drifted
+  # sibling. Verified on 2026-08-27, run 33112770514: 8/8 groups scored,
+  # trustworthy, 0 regressions, 184 comparison keys, ~26min.
   workflow_dispatch:
     inputs:
       config:
-        description: 'Config JSON path on TW cluster'
+        description: 'Config JSON path on TW cluster (use a control_mode=true config; see note above)'
         required: false
         default: '/it-share/rccl-ci/configs/ci_detect_prod.json'
       build_rccl:
