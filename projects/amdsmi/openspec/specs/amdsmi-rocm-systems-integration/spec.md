@@ -108,6 +108,11 @@ package time:
 | `CPACK_DEBIAN_PACKAGE_RELEASE` / `CPACK_RPM_PACKAGE_RELEASE` | package release field | `local` |
 | `ROCM_BUILD_ID` | build identifier in the internal version string | `local-build-0` |
 
+Only these come from outside. The three leading version components are not
+settable from the command line at all; the configure-time rule that recomputes
+them from the header, shadowing any `-D` switch, is
+[amdsmi-build-configuration].
+
 #### Scenario: A locally built package is visibly non-release
 
 - **WHEN** a developer or a CI gate builds packages without the release
@@ -179,6 +184,9 @@ every packaging invariant these specifications describe:
 | Python versions | loader contract across CPython 3.6 – 3.14, no GPU |
 | SLES packaging | the `pythonXY` RPM interpreter dependency form and the packaged module path, no GPU |
 | Upgrade / downgrade | deb and rpm install → upgrade → downgrade round trip, plus the tests-component removal check, no GPU |
+
+The option combinations each of these workflows configures, and the parts of
+the option surface none of them reaches, are [amdsmi-build-configuration].
 
 #### Scenario: Most packaging coverage needs no GPU
 

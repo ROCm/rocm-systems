@@ -72,8 +72,17 @@ For AMD SMI this yields:
 
 - **WHEN** the `dev` component is computed
 - **THEN** it effectively receives only the `include/**` trees (the public
-  `amd_smi` and vendored `e_smi` headers), because `lib/**` already consumed the
-  package config and the archives
+  `amd_smi` headers, the vendored `e_smi` headers, and the two Go shim
+  headers), because `lib/**` already consumed the package config and the
+  archives
+
+#### Scenario: The Go shim rides along in lib and dev
+
+- **WHEN** the `lib` and `dev` claims are applied to the stage tree
+- **THEN** they also sweep up `libgoamdsmi_shim64.so*` and the Go shim headers,
+  because the build produces them unconditionally and both claims are
+  path-based — nothing in the descriptor mentions Go, yet every TheRock-derived
+  channel ships the binding; see [amdsmi-language-bindings]
 
 #### Scenario: An empty run entry would swallow the later components
 

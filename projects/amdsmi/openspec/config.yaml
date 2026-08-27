@@ -35,19 +35,22 @@ context: |
   with CMAKE_INSTALL_PREFIX=<stage> and NEVER sets DESTDIR -- so AMD SMI's
   site-packages install is skipped by design there.
 
-  The current behavior is captured in openspec/specs/ across thirteen
+  The current behavior is captured in openspec/specs/ across fifteen
   capabilities, in two groups.
 
-  Delivery, nine capabilities: amdsmi-install-layout (the prefix-relative tree
-  every channel inherits), amdsmi-python-* (loader, wheel, system package),
-  amdsmi-therock-* (subproject, artifact), and amdsmi-rocm-* (pip distribution,
-  OS packages, monorepo/CI/versioning).
+  Delivery, ten capabilities: amdsmi-build-configuration (the configure-time
+  option surface, what configure derives rather than accepts, and the installed
+  CMake package), amdsmi-install-layout (the prefix-relative tree every channel
+  inherits), amdsmi-python-* (loader, wheel, system package), amdsmi-therock-*
+  (subproject, artifact), and amdsmi-rocm-* (pip distribution, OS packages,
+  monorepo/CI/versioning).
 
-  Behavior, four capabilities: amdsmi-c-api-abi (the exported surface, the
+  Behavior, five capabilities: amdsmi-c-api-abi (the exported surface, the
   status codes, the sentinels, the init lifecycle), amdsmi-device-discovery
   (what is enumerated, from which kernel interface, and how it degrades),
-  amdsmi-python-api (what a caller who writes "import amdsmi" may rely on), and
-  amdsmi-cli (the subcommand surface, the output formats, the exit codes).
+  amdsmi-python-api (what a caller who writes "import amdsmi" may rely on),
+  amdsmi-cli (the subcommand surface, the output formats, the exit codes), and
+  amdsmi-language-bindings (the Go shim and the Rust crate).
 
   Read the relevant capability before proposing a change; a delta usually
   belongs to exactly one of them. A capability states a contract, not an

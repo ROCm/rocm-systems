@@ -17,13 +17,15 @@ openspec validate --all --strict # structure gate, must be clean
 
 ## What is in here
 
-Thirteen capabilities, ~120 requirements, ~330 scenarios.
+Fifteen capabilities, ~140 requirements, ~390 scenarios.
 
-**Delivery** — how AMD SMI reaches a user. Four channels ship the same tree in
-four different shapes, and most packaging bugs come from conflating them.
+**Delivery** — how AMD SMI is configured, built and reaches a user. Four
+channels ship the same tree in four different shapes, and most packaging bugs
+come from conflating them.
 
 | Capability | Owns |
 | ---------- | ---- |
+| `amdsmi-build-configuration` | The configure-time option surface: defaults, rejected combinations, what configure derives rather than accepts, and the installed CMake package |
 | `amdsmi-install-layout` | The prefix-relative `bin` → `libexec` → `share` → `lib` tree every channel inherits |
 | `amdsmi-python-loader` | How a Python process finds the module and the native library, in every channel |
 | `amdsmi-python-wheel` | The standalone `pip install amdsmi` wheel and its SONAME-isolated library |
@@ -42,6 +44,7 @@ four different shapes, and most packaging bugs come from conflating them.
 | `amdsmi-device-discovery` | What is enumerated, from which kernel interface, how identity is assigned, how it degrades |
 | `amdsmi-python-api` | What a caller who writes `import amdsmi` may rely on: exceptions, return shapes, handles |
 | `amdsmi-cli` | The `amd-smi` subcommand surface, output formats, device selection, exit codes |
+| `amdsmi-language-bindings` | What the Go shim and the Rust crate expose of the C surface, how they track it, and what is not verified |
 
 Capabilities cross-reference each other by bare id in brackets, for example
 [amdsmi-python-loader]. One fact lives in exactly one capability; the others

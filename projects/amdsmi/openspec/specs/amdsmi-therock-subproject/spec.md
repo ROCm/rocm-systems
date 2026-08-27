@@ -60,8 +60,10 @@ is enabled and the host is not Windows. The `CORE_AMDSMI` feature SHALL declare
 
 TheRock SHALL pass only `CMAKE_VERBOSE_MAKEFILE` (as `OFF`) and `BUILD_TESTS` to
 the AMD SMI subproject. All other AMD SMI options SHALL take their in-project
-defaults. The subproject SHALL be compiled with TheRock's own `amd-llvm`
-toolchain rather than the host compiler.
+defaults; what those defaults produce, and the full option set TheRock leaves
+untouched, are inventoried in [amdsmi-build-configuration]. The subproject SHALL
+be compiled with TheRock's own `amd-llvm` toolchain rather than the host
+compiler.
 
 #### Scenario: No wheel is produced by a TheRock build
 

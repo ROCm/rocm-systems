@@ -23,7 +23,9 @@ module's own contract is [amdsmi-python-api] and the CLI's is [amdsmi-cli].
 Library resolution is specified in [amdsmi-python-loader]; the additional
 site-packages copy that accompanies this tree in the deb/rpm is in
 [amdsmi-python-system-package]; artifact capture of the tree is in
-[amdsmi-therock-artifact].
+[amdsmi-therock-artifact]; and the configure-time variables that place the
+tree, along with the ROCm-prefix defaults they take, are
+[amdsmi-build-configuration].
 
 ## Requirements
 
@@ -38,6 +40,12 @@ Every build SHALL install, under the ROCm prefix:
 | `<root>/share/amd_smi/tests/`, `<root>/share/amd_smi/example/` | the test tree (when tests are enabled) and the example sources |
 | `<root>/libexec/amdsmi_cli/` | the CLI modules, including `amdsmi_cli.py` |
 | `<root>/bin/amd-smi` | a relative symlink to `../libexec/amdsmi_cli/amdsmi_cli.py` |
+
+The same tree additionally carries `<root>/lib/libgoamdsmi_shim64.so*` and the
+Go shim headers `<root>/include/goamdsmi.h` and
+`<root>/include/amdsmi_go_shim.h` in any channel that installs the whole build
+rather than a selected component set. Which channels those are, and why the
+shim is absent from the rest, is [amdsmi-language-bindings].
 
 #### Scenario: The module resolves the library by relative path
 

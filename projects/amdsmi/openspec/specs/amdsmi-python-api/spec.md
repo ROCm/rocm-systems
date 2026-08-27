@@ -398,7 +398,9 @@ be driven either by configuring with `BUILD_WRAPPER=ON` or by
 `tools/update_wrapper.sh`, which runs the same CMake path inside a container
 image tagged by its Dockerfile hash so two developers produce the same file.
 Regeneration is incompatible with `BUILD_PYTHON_WHEEL=ON`, as specified in
-[amdsmi-python-wheel].
+[amdsmi-python-wheel]. The Rust bindings carry the same never-hand-edit rule
+under a different generator and a different regeneration trigger; see
+[amdsmi-language-bindings].
 
 Regeneration SHALL guarantee that every struct layout, union, enum constant,
 `argtypes` and `restype` matches the header the native library was built from,

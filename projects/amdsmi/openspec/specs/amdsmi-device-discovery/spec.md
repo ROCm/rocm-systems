@@ -305,6 +305,9 @@ SONAME-renamed vendored copy under `lib/rocm_sysdeps`; the packaging
 consequences of that are specified in [amdsmi-install-layout]. This capability
 requires only that the search list stay ordered from most specific to most
 general, so a host-provided `libdrm_amdgpu` is preferred over a vendored one.
+The configure-time step that captures the first candidate's SONAME from the
+build host, and the fatal error raised when it cannot be read, are
+[amdsmi-build-configuration].
 
 #### Scenario: A vendored ROCm tree resolves its renamed library
 

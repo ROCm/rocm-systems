@@ -27,11 +27,13 @@ than redefining them.
 Deliberately excluded: how the library decides what hardware exists and what
 each device is called ([amdsmi-device-discovery]); how the statuses and
 sentinels defined here become Python exceptions and `"N/A"` values
-([amdsmi-python-api]) and CLI output ([amdsmi-cli]); where the built library
-and header are placed ([amdsmi-install-layout]); how a Python process finds and
-opens the library ([amdsmi-python-loader]); and the wheel's separately-named
-private copy ([amdsmi-python-wheel]). Those capabilities consume the SONAME,
-the exported surface, and the signalling conventions defined here.
+([amdsmi-python-api]) and CLI output ([amdsmi-cli]); what the Go shim and the
+Rust crate expose of this surface, and how each translates the same statuses
+and sentinels ([amdsmi-language-bindings]); where the built library and header
+are placed ([amdsmi-install-layout]); how a Python process finds and opens the
+library ([amdsmi-python-loader]); and the wheel's separately-named private copy
+([amdsmi-python-wheel]). Those capabilities consume the SONAME, the exported
+surface, and the signalling conventions defined here.
 
 ## Requirements
 
@@ -54,6 +56,11 @@ and derive from them, without a second authored copy:
 API change that does not alter the header. Configure SHALL rewrite a mirror of
 these constants that has fallen behind the header rather than let the two
 diverge silently.
+
+How configure extracts the macros and turns them into the CPack package
+version, the installed CMake package version file, and the wheel version — and
+why a `-D` switch cannot override any of them — is
+[amdsmi-build-configuration].
 
 #### Scenario: A major bump obsoletes every linked consumer
 
@@ -446,6 +453,9 @@ it as an interface definition through the exported CMake target. A consumer
 that needs the CPU API SHALL define the macro itself, matching the
 configuration of the library it links against.
 
+The option's own configure-time contract — its per-architecture default and the
+pinned ESMI source it gates — is [amdsmi-build-configuration].
+
 #### Scenario: A C consumer cannot see an API the library exports
 
 - **WHEN** a downstream project links the installed x86_64 library and includes
@@ -455,12 +465,16 @@ configuration of the library it links against.
   link — and the failure looks like a missing feature rather than a
   configuration mismatch
 
-#### Scenario: Binding generators plumb the macro explicitly
+#### Scenario: Only one of the two binding generators plumbs the macro
 
-- **WHEN** the Python or Rust wrapper is regenerated
-- **THEN** the generator passes the same `ENABLE_ESMI_LIB` setting the library
-  was built with, so the generated binding's surface matches the built
-  library's surface; a hand-written C consumer receives no such assistance
+- **WHEN** the Python wrapper and the Rust FFI module are each regenerated
+- **THEN** `py-interface` passes the build's own `ENABLE_ESMI_LIB` setting
+  through to the generator's clang arguments, while `rust-interface/build.rs`
+  gives `bindgen` no such argument — so the Python wrapper tracks the
+  configuration the library was built with, and the committed Rust bindings
+  declare exactly the header's 178 unconditional functions and none of the 68
+  the conditional block adds, on every architecture and at every setting of the
+  option; what that costs a Rust caller is [amdsmi-language-bindings]
 
 ### Requirement: ABI Break Detection Is Advisory, Not A Gate
 
@@ -494,4 +508,3 @@ merge.
 - **THEN** the comparison runs with no project build configuration, so a large
   part of the surface the shipped x86_64 library actually exports is not
   evaluated
-
