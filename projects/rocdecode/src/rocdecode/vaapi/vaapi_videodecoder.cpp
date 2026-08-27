@@ -561,8 +561,25 @@ rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
 
     // Wait for copy to complete.
     d3d12_fence_value_++;
-    d3d12_copy_queue_->Signal(d3d12_fence_, d3d12_fence_value_);
-    if (d3d12_fence_->GetCompletedValue() < d3d12_fence_value_) {
+    HRESULT signal_hr = d3d12_copy_queue_->Signal(d3d12_fence_, d3d12_fence_value_);
+    if (FAILED(signal_hr)) {
+        CriticalLog(g_rocdec_logger, "ID3D12CommandQueue::Signal failed, HRESULT=0x" +
+                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(signal_hr));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+    uint64_t completed = d3d12_fence_->GetCompletedValue();
+    // On device removal (TDR/hang), GetCompletedValue() returns UINT64_MAX, which would
+    // otherwise satisfy the completion check and let the copy be treated as done — returning
+    // silently corrupt frame data. Detect that explicitly and fail instead. (Full TDR recovery
+    // and a finite-timeout wait are deferred; see follow-up.)
+    if (completed == UINT64_MAX) {
+        CriticalLog(g_rocdec_logger, "D3D12 device removed during staging copy, reason HRESULT=0x" +
+                    ([](HRESULT h) { std::ostringstream o; o << std::hex << static_cast<uint32_t>(h); return o.str(); })(d3d12_device_->GetDeviceRemovedReason()));
+        FunctionExitLog(g_rocdec_logger);
+        return ROCDEC_RUNTIME_ERROR;
+    }
+    if (completed < d3d12_fence_value_) {
         d3d12_fence_->SetEventOnCompletion(d3d12_fence_value_, d3d12_fence_event_);
         WaitForSingleObject(d3d12_fence_event_, INFINITE);
     }
