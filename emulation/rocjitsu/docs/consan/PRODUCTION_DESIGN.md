@@ -5514,6 +5514,33 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CD: share dense access route emission
+
+- **One route emitter:** Record/Replay and Sampled access groups now call
+  `emit_moi_dense_recording_access_group` for entry-island construction,
+  optional relocated-entry-host routing, dispatcher comparisons and targets,
+  SCC restoration, dispatcher telemetry, host entry rewriting, and original
+  call-anchor rewriting. Evidence construction and engine admission remain
+  separate because they express different sanitizer semantics.
+- **Policy is explicit, not copied:** The only intentional route difference is
+  whether equal spill-backed PC and call-return assignments form a collapsed
+  route on explicit-key targets. Record/Replay and Sampled pass that decision
+  explicitly to the common mechanism. The old owner-local emission copies and
+  an unreachable PC-key subtraction branch are deleted rather than retained
+  behind wrappers.
+- **Focused route coverage:** Existing tests exercise both instantiations on
+  RDNA4, CDNA4, and CDNA5, including explicit and call-return keys, relocated
+  hosts, capacity partitioning, spill-backed scalar layouts, call-key capture,
+  SCC preservation, and large kernels.
+- **Deletion accounting:** Implementation files add 271 and delete 562
+  physical lines, a net deletion of 291. No tests are added because the
+  existing focused matrix already directly exercises every shared-route branch
+  and both engine policy inputs.
+- **Checked-in gate:** All 1,528 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

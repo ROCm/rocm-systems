@@ -339,6 +339,15 @@ range contracts but retains a specialized cached host search because it must
 also exclude qualified multi-instruction ordering sequences in very large
 generated objects.
 
+Record/Replay and Sampled access groups also share
+`emit_moi_dense_recording_access_group`, the route-emission mechanism that
+materializes the entry island, optional relocated entry host, dispatcher arms,
+SCC-preserving transfers, and original call anchors. The engines continue to
+own admission and their evidence bodies. Their one route-level policy
+difference—whether equal spill-backed PC and call-return assignments form a
+collapsed route on an explicit-key target—is an explicit input to the shared
+emitter rather than a duplicated lowering body.
+
 Most of this mechanism is currently reached through `lower_consan` inside
 `TransformResult` construction. That implementation is the sole place allowed
 to adapt typed inputs back to one fresh `ConSanOptions`, and it returns only
