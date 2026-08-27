@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "lib/common/mpl.hpp"
 #include "lib/common/stringize_arg.hpp"
 #include "lib/rocprofiler-sdk/hipfile/details/format.hpp"
 
@@ -30,6 +31,7 @@
 
 #include <sstream>
 #include <type_traits>
+#include <utility>
 
 namespace rocprofiler
 {
@@ -37,6 +39,17 @@ namespace hipfile
 {
 namespace utils
 {
+template <typename Tp, typename = void>
+struct is_streamable : std::false_type
+{};
+
+template <typename Tp>
+struct is_streamable<
+    Tp,
+    std::void_t<decltype(std::declval<std::stringstream&>() << std::declval<const Tp&>())>>
+: std::true_type
+{};
+
 template <typename Tp>
 auto
 stringize_impl(const Tp& _v)
@@ -47,11 +60,17 @@ stringize_impl(const Tp& _v)
     {
         return fmt::format("{}", _v);
     }
-    else
+    else if constexpr(is_streamable<value_type>::value)
     {
         auto _ss = std::stringstream{};
         _ss << _v;
         return _ss.str();
+    }
+    else
+    {
+        static_assert(common::mpl::assert_false<Tp>::value,
+                      "Provide fmt::formatter template specialization for this type in "
+                      "source/lib/rocprofiler-sdk/hipfile/details/format.hpp");
     }
 }
 
