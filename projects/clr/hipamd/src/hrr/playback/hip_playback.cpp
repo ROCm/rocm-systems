@@ -875,13 +875,21 @@ static void decode_kernel_args(
                 memcpy(&lo, prev_half.data, 4);
                 memcpy(&hi, data, 4);
                 const uint64_t rec = (static_cast<uint64_t>(hi) << 32) | lo;
-                // Same guards the embedded-pointer rescan uses: a genuine device
-                // address carries a full 48 bits, so a tiny low half means two
-                // ordinary scalars that happen to sit next to each other.
-                void* live = (rec >= 0x10000ULL &&
-                              (rec & 0xFFFFFFFFULL) >= 0x10000ULL)
-                                 ? ctx.translate_ptr(rec)
-                                 : nullptr;
+                // A pointer split across two scalars is still a pointer, so it
+                // takes the same steps as the other two forms: the shared shape
+                // guard, then the bypassed-segment materialisation, then the
+                // region check. A pair that resolves nowhere stays two untouched
+                // scalars — the conservative outcome, and there is no sentinel
+                // to tell apart here.
+                void* live = nullptr;
+                if (va_shaped(rec)) {
+                    live = ctx.translate_ptr(rec);
+                    if (!live && ctx.regions_enabled)
+                        live = ctx.regions.materialize_for(ctx, rec);
+                    if (live)
+                        live = hrr_region_check_ptr(ctx, rls, kernel_name,
+                                                    prev_half.idx, rec, live);
+                }
                 if (live) {
                     const uint64_t lv = reinterpret_cast<uint64_t>(live);
                     const uint32_t l32 = static_cast<uint32_t>(lv);
