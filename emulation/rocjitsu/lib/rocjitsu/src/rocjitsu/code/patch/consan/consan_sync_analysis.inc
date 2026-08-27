@@ -2851,7 +2851,8 @@ struct CarriedPerturbationPlan {
 };
 
 void build_perturbation_plan(const ConSanOptions &options,
-                             ConSanPerturbationPlanningState &planning, ConSanResult &result,
+                             ConSanPerturbationPlanningState &planning,
+                             ConSanTransformArtifacts &result,
                              std::span<const CarriedPerturbationPlan> carried_plans = {}) {
   result.mutation.perturbation.requested =
       options.sc_perturb_kind == ConSanPerturbationKind::None ? 0u : options.sc_perturb_max;
@@ -3001,7 +3002,7 @@ void build_perturbation_plan(const ConSanOptions &options,
 void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                     const ConSanOptions &options,
                                     const ConSanPerturbationPlanningState &planning,
-                                    ConSanResult &result) {
+                                    ConSanTransformArtifacts &result) {
   if (planning.plans.empty())
     return;
   if (code_object.text_sections().size() != 1u) {

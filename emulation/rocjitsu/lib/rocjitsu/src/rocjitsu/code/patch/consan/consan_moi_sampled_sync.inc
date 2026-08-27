@@ -671,7 +671,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
                                           const ConSanOptions &options, rj_code_arch_t arch,
                                           MoiResourcePlanningState &resource_state,
                                           std::span<const ConSanMoiCandidate> admitted,
-                                          ConSanResult &result) {
+                                          ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
   if (!options.moi_report_buffer_address || !consan_is_capability_arch(arch)) {
@@ -1637,7 +1637,7 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
 void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
                                          const ConSanOptions &options, rj_code_arch_t arch,
                                          MoiResourcePlanningState &resource_state,
-                                         ConSanResult &result) {
+                                         ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::Sampled)
     return;
   if (!options.moi_report_buffer_address || !consan_is_capability_arch(arch)) {

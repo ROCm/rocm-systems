@@ -92,7 +92,7 @@ TEST(ConSanMoi, WorkgroupSourceRequiresExactlyOneOperandKind) {
 }
 
 TEST(ConSanMoi, FullWorkgroupPayloadRequirementUsesMoiPatchSemantics) {
-  ConSanResult result;
+  ConSanTransformArtifacts result;
   result.observation_plan.engine = ConSanCapabilityEngine::RecordReplay;
   ConSanPatchInfo patch;
   patch.owner_descriptor_file_offsets.push_back(64u);
@@ -665,15 +665,15 @@ TEST(ConSanMoi, Cdna4HeterogeneousOwnersKeepUsableComponentAcrossMoiEngines) {
                                            ? kInlineShadowFullLdsReportBufferSize
                                            : 64u * 1024u * 1024u;
 
-      const ConSanResult result = test_lower_consan(bytes, options);
+      const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-      ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-      EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 96u);
-      EXPECT_LT(*result.resolved_moi_exec_save_sgpr, 96u);
+      ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
+      ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+      EXPECT_EQ(*test_moi_dispatch_id_sgpr(result), 96u);
+      EXPECT_LT(*test_moi_exec_save_sgpr(result), 96u);
 
       const ConSanIntentCoverageEntry *low = consan_access_coverage_at(result, 0u);
       const ConSanIntentCoverageEntry *high = consan_access_coverage_at(result, kHighPressureEntry);
@@ -709,7 +709,7 @@ TEST(ConSanMoi, Gfx1250Wave32DescriptorUsesSixteenVgprGranules) {
       make_gfx1250_code_object(text_words, "lds_probe", /*vgpr_granulated=*/4);
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.resource_plans.size(), 1u);
@@ -724,7 +724,7 @@ TEST(ConSanMoi, Cdna3Wave64DescriptorUsesEightVgprGranules) {
       make_cdna3_lds_code_object(text_words, "lds_probe", /*vgpr_granulated=*/3);
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.resource_plans.size(), 1u);
@@ -741,7 +741,7 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadUsesNormalizedRangesAndSafeScratch) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -792,7 +792,7 @@ void expect_moi_engines_admit_native_b96_accesses(
                                            ? kInlineShadowFullLdsReportBufferSize
                                            : 64u * 1024u * 1024u;
 
-      const ConSanResult result = test_lower_consan(bytes, options);
+      const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -820,7 +820,7 @@ void expect_moi_engines_admit_native_b96_accesses(
                       static_cast<uint16_t>(*access_patch->scratch_vgpr + 2u), arch)));
       } else if (engine == ConSanMoiEngine::InlineShadow) {
         const uint16_t loop_counter_vgpr = consan_detail::inline_shadow_loop_counter_vgpr(
-            *access_patch->scratch_vgpr, result.resolved_moi_exec_save_sgpr.has_value(),
+            *access_patch->scratch_vgpr, test_moi_exec_save_sgpr(result).has_value(),
             options.moi_track_atomics);
         const auto resource_plan = std::ranges::find_if(
             result.resource_plans, [&](const ConSanCandidateResourcePlan &plan) {
@@ -896,7 +896,7 @@ TEST(ConSanMoi, Gfx1250RelaxedLdsAtomicIsAccessButNotSynchronization) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
@@ -944,7 +944,7 @@ TEST(ConSanMoi, Cdna4HistogramLdsAtomicsAreAccessesButNotSynchronization) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(5, 0, 0, 0, 0, 1, 1);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -980,7 +980,7 @@ TEST(ConSanMoi, UnassociatedFenceIsNotApplicableOnEverySupportedTarget) {
     ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
     options.moi_track_atomics = true;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
@@ -1002,7 +1002,7 @@ TEST(ConSanMoi, Cdna4UnassociatedFenceIsNotApplicable) {
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
   options.moi_track_atomics = true;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 1u);
@@ -1073,7 +1073,7 @@ TEST(ConSanMoi, InventoriesHiddenDynamicLdsArgument) {
                               /*sgpr_count=*/0u, std::nullopt, std::nullopt,
                               /*has_dynamic_lds=*/true);
 
-  const ConSanResult result = test_lower_consan(bytes, moi_options());
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, moi_options());
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -1216,7 +1216,7 @@ TEST(ConSanMoi, Cdna4DirectScalarStateReusesUnreferencedSharedOwnerAllocation) {
   options.moi_report_buffer_size = direct_sampled_report_bytes(2);
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1255,15 +1255,15 @@ TEST(ConSanMoi, Cdna4ScalarStateClearsEverySharedOwnerAllocation) {
         engine == ConSanMoiEngine::Sampled ? direct_sampled_report_bytes(2) : 64u * 1024u * 1024u;
     options.max_patches = 1u;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
-    ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-    ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-    EXPECT_GE(*result.resolved_moi_dispatch_id_sgpr, 80u);
-    EXPECT_GE(*result.resolved_moi_exec_save_sgpr, 80u);
+    ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
+    ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+    EXPECT_GE(*test_moi_dispatch_id_sgpr(result), 80u);
+    EXPECT_GE(*test_moi_exec_save_sgpr(result), 80u);
     for (const ConSanMoiTransientSgprAssignment &assignment :
-         result.resolved_moi_transient_sgpr_assignments) {
+         test_moi_transient_sgpr_assignments(result)) {
       EXPECT_GE(assignment.exec_save_sgpr, 80u);
       if (assignment.dispatch_id_sgpr) {
         EXPECT_GE(*assignment.dispatch_id_sgpr, 80u);
@@ -1349,22 +1349,22 @@ TEST(ConSanMoi, Cdna4SharedInlineExecSaveAvoidsEveryOwnerPhysicalVcc) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_NE(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.resource_plans.front().owner_descriptor_file_offsets.size(), 2u);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   // The highest original VCC ends at s43, so the wide window must start at or
   // above s44.
-  EXPECT_GE(*result.resolved_moi_exec_save_sgpr, 44u);
+  EXPECT_GE(*test_moi_exec_save_sgpr(result), 44u);
   constexpr std::array<uint16_t, 2> kOriginalVccBases = {26u, 42u};
   for (uint16_t vcc_base : kOriginalVccBases) {
-    EXPECT_FALSE(sgpr_ranges_overlap(*result.resolved_moi_dispatch_id_sgpr, 2u, vcc_base, 2u));
-    EXPECT_FALSE(sgpr_ranges_overlap(*result.resolved_moi_exec_save_sgpr,
+    EXPECT_FALSE(sgpr_ranges_overlap(*test_moi_dispatch_id_sgpr(result), 2u, vcc_base, 2u));
+    EXPECT_FALSE(sgpr_ranges_overlap(*test_moi_exec_save_sgpr(result),
                                      kConSanMoiInlineExecSaveSgprCount, vcc_base, 2u));
   }
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -1398,7 +1398,7 @@ TEST(ConSanMoi, SharedHelperAtomicUsesCommonOwnerResourcePlan) {
   EXPECT_TRUE(test_moi_owner_vgpr(result));
   EXPECT_TRUE(test_moi_epoch_vgpr(result));
   EXPECT_TRUE(test_moi_record_replay_workgroup_vgprs(result).complete());
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const auto atomic_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAtomicRecord;
   });
@@ -1841,7 +1841,7 @@ TEST(ConSanMoi, DispatchPreloadDescriptorPermutationsUseExactAmdhsaPrefix) {
     ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(result.errors.empty())
         << "mask=" << mask << " " << (result.errors.empty() ? "" : result.errors.front());
@@ -1906,7 +1906,7 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified());
@@ -1991,7 +1991,7 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified());
@@ -2014,11 +2014,11 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
             4u);
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);
   const auto owner_init =
-      build_s_getreg_b32(*result.resolved_moi_exec_save_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_getreg_b32(*test_moi_exec_save_sgpr(result), *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(owner_init);
   EXPECT_NE(std::ranges::find(prologue_words, *owner_init), prologue_words.end());
 }
@@ -2050,7 +2050,7 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2060,9 +2060,9 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
       prologues.push_back(&patch);
   }
   ASSERT_EQ(prologues.size(), 2u);
-  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-  EXPECT_EQ(prologues[0]->dispatch_id_capture_sgpr, result.resolved_moi_dispatch_id_sgpr);
-  EXPECT_EQ(prologues[1]->dispatch_id_capture_sgpr, result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
+  EXPECT_EQ(prologues[0]->dispatch_id_capture_sgpr, test_moi_dispatch_id_sgpr(result));
+  EXPECT_EQ(prologues[1]->dispatch_id_capture_sgpr, test_moi_dispatch_id_sgpr(result));
   std::array<uint16_t, 2> sources = {prologues[0]->dispatch_id_source_sgpr,
                                      prologues[1]->dispatch_id_source_sgpr};
   std::ranges::sort(sources);
@@ -2102,7 +2102,7 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 15u);
     AMDHSA_BITS_SET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1u);
   });
-  const ConSanResult rejected = test_lower_consan(rejected_bytes, options);
+  const ConSanTransformArtifacts rejected = test_lower_consan(rejected_bytes, options);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(rejected.modified());
   EXPECT_TRUE(rejected.replacement.empty());
@@ -2120,7 +2120,7 @@ TEST(ConSanMoi, DispatchPreloadUnsupportedLayoutsRollbackTransactionally) {
     return test_lower_consan(bytes, options);
   };
 
-  const ConSanResult user_limit = run([](KD &descriptor) {
+  const ConSanTransformArtifacts user_limit = run([](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1u);
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
@@ -2141,7 +2141,7 @@ TEST(ConSanMoi, DispatchPreloadUnsupportedLayoutsRollbackTransactionally) {
   EXPECT_TRUE(user_limit.replacement.empty());
   EXPECT_TRUE(user_limit.patches.empty());
 
-  const ConSanResult malformed_prefix = run([](KD &descriptor) {
+  const ConSanTransformArtifacts malformed_prefix = run([](KD &descriptor) {
     AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 1u);
     AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2u);
@@ -2151,7 +2151,7 @@ TEST(ConSanMoi, DispatchPreloadUnsupportedLayoutsRollbackTransactionally) {
   EXPECT_TRUE(malformed_prefix.replacement.empty());
   EXPECT_TRUE(malformed_prefix.patches.empty());
 
-  const ConSanResult invalid_pair = run([](KD &) {}, 105u);
+  const ConSanTransformArtifacts invalid_pair = run([](KD &) {}, 105u);
   EXPECT_EQ(invalid_pair.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(invalid_pair.modified());
   EXPECT_TRUE(invalid_pair.replacement.empty());
@@ -2170,12 +2170,12 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  const ConSanResult valid = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
   ASSERT_TRUE(valid.errors.empty()) << (valid.errors.empty() ? "" : valid.errors.front());
   ASSERT_TRUE(valid.modified());
   EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());
 
-  ConSanResult descriptor_corruption = valid;
+  ConSanTransformArtifacts descriptor_corruption = valid;
   AmdGpuCodeObject descriptor_object(descriptor_corruption.replacement.data(),
                                      descriptor_corruption.replacement.size());
   ASSERT_TRUE(descriptor_object.is_valid());
@@ -2189,7 +2189,7 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
               sizeof(descriptor));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, descriptor_corruption).empty());
 
-  ConSanResult capture_corruption = valid;
+  ConSanTransformArtifacts capture_corruption = valid;
   const auto prologue =
       std::ranges::find_if(capture_corruption.patches, [](const ConSanPatchInfo &patch) {
         return patch.dispatch_id_capture_sgpr.has_value();
@@ -2257,7 +2257,7 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
   for (ConSanMoiEngine engine :
        {ConSanMoiEngine::RecordReplay, ConSanMoiEngine::Sampled, ConSanMoiEngine::InlineShadow}) {
     SCOPED_TRACE(consan_moi_engine_name(engine));
-    const ConSanResult result = test_lower_consan(bytes, moi_options(engine));
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, moi_options(engine));
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
 
     std::set<uint64_t> intended_offsets;
@@ -2335,7 +2335,7 @@ TEST(ConSanMoi, InventoryUsesSemanticArchNotDisplayTarget) {
   options.moi_track_barriers = false;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = 64u * 1024u * 1024u;
-  ConSanResult result = test_lower_consan(bytes, options);
+  ConSanTransformArtifacts result = test_lower_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX1201);
   ASSERT_EQ(result.program_inventory.arch(), ROCJITSU_CODE_ARCH_RDNA4);
@@ -2455,7 +2455,7 @@ TEST(ConSanMoi, UnsupportedOnlyAccessRemainsApplicableInPreFilterLedger) {
     SCOPED_TRACE(consan_moi_engine_name(engine));
     ConSanOptions options = moi_options();
     options.moi_engine = engine;
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     EXPECT_TRUE(test_admitted_accesses(result).empty());
@@ -2476,7 +2476,7 @@ TEST(ConSanMoi, MixedAccessLedgerRetainsSupportedAndUnsupportedFinalCodeSites) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions options = moi_options();
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.observation_plan.site_decisions.size(), 2u);
@@ -2499,7 +2499,7 @@ TEST(ConSanMoi, AutoReportInventoryCountsAdmittedLogicalRangesBeforeAllocation) 
     options.moi_engine = engine;
     options.max_patches = 1u << 20u;
     options.moi_runtime_sample_stride = engine == ConSanMoiEngine::Sampled ? 256u : 1u;
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     const ConSanMoiAutoReportInventory inventory =
@@ -2534,7 +2534,7 @@ TEST(ConSanMoi, InlineAutoReportBudgetsDiagnosticsAcrossDispatchBanks) {
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.max_patches = 1u << 20u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
@@ -2561,7 +2561,7 @@ TEST(ConSanMoi, Gfx1250AutoReportUsesRuntimeApertureForDescriptorOpaqueLds) {
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.max_workgroup_lds_bytes = kRuntimeLdsBytes;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
@@ -2587,7 +2587,7 @@ TEST(ConSanMoi, Gfx1250AutoReportCoversFullApertureForDynamicLds) {
                               /*has_dynamic_lds=*/true);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2619,7 +2619,7 @@ TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
       make_rdna4_code_object_with_local_function(kernel_words, function_words);
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
@@ -2725,7 +2725,7 @@ TEST(ConSanMoi, Cdna4OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   options.moi_owner_vgpr = 10;
   options.moi_epoch_vgpr = 11;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3075,7 +3075,7 @@ TEST(ConSanMoi, AutomaticPersistentProloguesOnlyTargetEmittedProbeOwners) {
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(8, 0, 0, 0, 1);
   options.max_patches = 1;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3134,7 +3134,7 @@ TEST(ConSanMoi, AutomaticScalarPersistentStatePreservesGuestVgprAllocation) {
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 1);
   options.max_patches = 1;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);

@@ -319,7 +319,7 @@ decode_relocatable_entry_instruction(std::span<const uint8_t> text, uint64_t off
 using OrderedOrdinarySyncSiteKey = std::tuple<bool, std::string, uint64_t>;
 
 [[nodiscard]] std::set<OrderedOrdinarySyncSiteKey>
-ordered_ordinary_sync_site_keys(const ConSanResult &result) {
+ordered_ordinary_sync_site_keys(const ConSanTransformArtifacts &result) {
   std::unordered_map<std::string_view, const ConSanSyncEvent *> events;
   events.reserve(result.program_inventory.sync().sync_events.size());
   for (const ConSanSyncEvent &event : result.program_inventory.sync().sync_events)
@@ -410,7 +410,8 @@ build_moi_candidates(const ProgramInventory &inventory, const ConSanObservationP
 /// account of excluded and admitted sites.
 [[nodiscard]] bool initialize_moi_access_observation_plan(
     const ProgramInventory &inventory, ConSanFlatProvenanceMode mode, const ConSanOptions &options,
-    const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites, ConSanResult &result) {
+    const std::set<OrderedOrdinarySyncSiteKey> &ordered_sync_sites,
+    ConSanTransformArtifacts &result) {
   std::vector<PhysicalSiteId> synchronization_sites;
   for (const ConSanAccessInventorySite &access : inventory.access_sites()) {
     const bool in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;

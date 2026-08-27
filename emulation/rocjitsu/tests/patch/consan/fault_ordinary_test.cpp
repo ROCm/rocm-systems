@@ -30,9 +30,9 @@ TEST(ConSan, FaultInventoryDecodesStableOrdinaryRdna4LoadStoreSites) {
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
 
-  const ConSanResult first = test_lower_consan(bytes, options);
-  const ConSanResult second = test_lower_consan(bytes, options);
-  const auto ordinary = [](const ConSanResult &result) {
+  const ConSanTransformArtifacts first = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts second = test_lower_consan(bytes, options);
+  const auto ordinary = [](const ConSanTransformArtifacts &result) {
     std::vector<const ConSanFaultSite *> sites;
     for (const ConSanFaultSite &site : result.fault_sites) {
       if (site.kind == ConSanFaultSiteKind::OrdinaryMemory)
@@ -111,7 +111,7 @@ TEST(ConSan, FaultInventoryRetainsMalformedOrdinaryMemoryAsTypedUnsupported) {
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   const auto site = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &item) {
     return item.kind == ConSanFaultSiteKind::OrdinaryMemory;
@@ -137,7 +137,7 @@ TEST(ConSan, FaultInventoryDecodesGfx1250VglobalMemoryForSynchronization) {
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   const auto site = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &item) {
     return item.kind == ConSanFaultSiteKind::OrdinaryMemory;
@@ -163,7 +163,7 @@ TEST(ConSan, FaultInventoryDecodesGfx1250BufferMemoryForSynchronization) {
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
 
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words, "gfx1250_buffer_sync"), options);
   std::vector<const ConSanFaultSite *> sites;
   for (const ConSanFaultSite &site : result.fault_sites) {
@@ -192,7 +192,7 @@ TEST(ConSan, FaultInventoryCarriesDirectOwnersForOrdinaryMemoryInSharedHelper) {
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   const auto site = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &item) {
     return item.kind == ConSanFaultSiteKind::OrdinaryMemory &&
@@ -219,7 +219,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryAcquireLoadCacheSequence) {
   };
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_rdna4_lds_code_object(text_words, "ordinary_acquire"), options);
 
   const auto load = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &site) {
@@ -246,7 +246,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryAcquireLoadCacheSequence) {
 TEST(ConSan, AssociatesRetainedOrdinaryLoadSelfLoopExitAcquireSequence) {
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_rdna4_flag_self_loop_acquire_code_object(), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
@@ -280,7 +280,7 @@ TEST(ConSan, AssociatesGfx1250BufferPollLoopWithBoundedAddressSetup) {
   };
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_gfx1250_code_object(text_words, "gfx1250_buffer_poll"), options);
 
   const auto load = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &site) {
@@ -309,7 +309,7 @@ TEST(ConSan, AssociatesGeneratedGfx1250BufferPollLoopShape) {
   };
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_generated_buffer_poll"), options);
 
   const auto load = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &site) {
@@ -340,7 +340,7 @@ TEST(ConSan, OrdinaryAcquireAssociationFailsClosedOnInexactShapes) {
   const auto acquire_count = [](std::span<const uint32_t> words) {
     ConSanOptions options = moi_options();
     options.fault_dry_run = true;
-    const ConSanResult result =
+    const ConSanTransformArtifacts result =
         test_lower_consan(make_rdna4_lds_code_object(words, "inexact_acquire"), options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const ConSanSyncSequence &sequence) {
@@ -443,7 +443,7 @@ TEST(ConSan, AssociatesExactSameBlockOrdinaryReleaseStoreCacheSequence) {
   };
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_rdna4_lds_code_object(text_words, "ordinary_release"), options);
 
   const auto store = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &site) {
@@ -473,7 +473,7 @@ TEST(ConSan, OrdinaryReleaseAssociationFailsClosedOnInexactShapes) {
   const auto release_count = [](std::span<const uint32_t> words) {
     ConSanOptions options = moi_options();
     options.fault_dry_run = true;
-    const ConSanResult result =
+    const ConSanTransformArtifacts result =
         test_lower_consan(make_rdna4_lds_code_object(words, "inexact_release"), options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const ConSanSyncSequence &sequence) {
@@ -534,7 +534,7 @@ TEST(ConSan, AssociatesExactScopedOrdinaryReleaseWaitTail) {
   };
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_rdna4_lds_code_object(text_words, "scoped_ordinary_release"), options);
 
   const auto store = std::ranges::find_if(result.fault_sites, [](const ConSanFaultSite &site) {
@@ -561,7 +561,7 @@ TEST(ConSan, ScopedOrdinaryReleaseWaitTailFailsClosedOnInexactShapes) {
   const auto release_count = [](std::span<const uint32_t> words) {
     ConSanOptions options = moi_options();
     options.fault_dry_run = true;
-    const ConSanResult result =
+    const ConSanTransformArtifacts result =
         test_lower_consan(make_rdna4_lds_code_object(words, "scoped_release_reject"), options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const ConSanSyncSequence &sequence) {
@@ -646,7 +646,7 @@ TEST(ConSan, OrdinaryAcquireFaultDryRunExportsStableExactAddressOrderAndScopePla
   const std::vector<uint8_t> bytes = make_rdna4_ordinary_acquire_code_object();
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
+  const ConSanTransformArtifacts inventory = test_lower_consan(bytes, inventory_options);
   const auto load = std::ranges::find_if(inventory.fault_sites, [](const ConSanFaultSite &site) {
     return site.semantic_role == "ordinary-acquire-load";
   });
@@ -659,7 +659,7 @@ TEST(ConSan, OrdinaryAcquireFaultDryRunExportsStableExactAddressOrderAndScopePla
   options.fault_ordinary_wrong_address = true;
   options.fault_ordinary_weaken_order = true;
   options.fault_ordinary_weaken_scope = true;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.fault_plans.size(), 3u);
   EXPECT_EQ(result.fault_plans[0].kind, ConSanFaultMutationKind::OrdinaryWrongAddress);
@@ -683,7 +683,7 @@ TEST(ConSan, OrdinaryAcquireWeakenOrderRemovesOnlyGlobalInvAndPreservesLoadWait)
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_ordinary_weaken_order = true;
   options.fault_require_exactly_one = true;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
@@ -712,7 +712,7 @@ TEST(ConSan, OrdinaryAcquireWrongAddressChangesOnlyAlignedSignedIoffset) {
   options.fault_ordinary_wrong_address = true;
   options.fault_ordinary_address_delta = 4u;
   options.fault_require_exactly_one = true;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
@@ -738,7 +738,7 @@ TEST(ConSan, OrdinaryAcquireWrongAddressRejectsInvalidDeltaAndIoffsetOverflow) {
     options.flavor = ConSanFlavor::SuperCollider;
     options.fault_ordinary_wrong_address = true;
     options.fault_ordinary_address_delta = delta;
-    const ConSanResult result =
+    const ConSanTransformArtifacts result =
         test_lower_consan(make_rdna4_ordinary_acquire_code_object(), options);
     EXPECT_FALSE(result.modified());
     EXPECT_FALSE(result.errors.empty());
@@ -748,7 +748,7 @@ TEST(ConSan, OrdinaryAcquireWrongAddressRejectsInvalidDeltaAndIoffsetOverflow) {
   overflow.flavor = ConSanFlavor::SuperCollider;
   overflow.fault_ordinary_wrong_address = true;
   overflow.fault_ordinary_address_delta = 4u;
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_rdna4_ordinary_acquire_code_object(2u, true, false, 0x7ffffc), overflow);
   EXPECT_FALSE(result.modified());
   EXPECT_FALSE(result.errors.empty());
@@ -760,7 +760,7 @@ TEST(ConSan, OrdinaryAcquireWeakenScopeChangesOnlyDeviceScopeBits) {
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_ordinary_weaken_scope = true;
   options.fault_require_exactly_one = true;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
@@ -785,7 +785,7 @@ TEST(ConSan, OrdinaryAcquireOrderAndScopeComposeAsTwoExactTransactionalMutations
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_ordinary_weaken_order = true;
   options.fault_ordinary_weaken_scope = true;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
@@ -813,11 +813,11 @@ TEST(ConSan, OrdinaryAcquireFaultRejectsStoreNoBoundaryAlreadyWaveAndWrongIdenti
        {make_rdna4_ordinary_acquire_code_object(2u, true, true),
         make_rdna4_ordinary_acquire_code_object(2u, false, false),
         make_rdna4_ordinary_acquire_code_object(0u, true, false)}) {
-    const ConSanResult result = rejected(bytes);
+    const ConSanTransformArtifacts result = rejected(bytes);
     EXPECT_FALSE(result.modified());
     EXPECT_EQ(result.mutation.fault.applied, 0u);
   }
-  const ConSanResult wrong =
+  const ConSanTransformArtifacts wrong =
       rejected(make_rdna4_ordinary_acquire_code_object(), "not-an-exact-site");
   EXPECT_FALSE(wrong.modified());
   EXPECT_EQ(wrong.mutation.fault.applied, 0u);
@@ -828,11 +828,11 @@ TEST(ConSan, FinalValidationRejectsCorruptedOrdinaryScopeMutation) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_ordinary_weaken_scope = true;
-  const ConSanResult valid = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(valid.patches.size(), 1u);
 
-  ConSanResult corrupted = valid;
+  ConSanTransformArtifacts corrupted = valid;
   const size_t word1_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                    valid.patches.front().anchor_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
@@ -858,7 +858,7 @@ TEST(ConSan, LargeSyncInventoryAnnotatesEverySequenceOwner) {
 
   ConSanOptions options = moi_options();
   options.fault_dry_run = true;
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_rdna4_lds_code_object(text_words, "large_sync_inventory"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));

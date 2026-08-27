@@ -238,14 +238,14 @@ TEST(ConSanProgramInventory, ImmutableViewsRetainFactsAcrossCopyMoveAndBuilderLi
     builder.functions().push_back(std::move(function));
     builder.publish_decoded_accesses(bytes);
 
-    ConSanResult result;
+    ConSanTransformArtifacts result;
     result.program_inventory = builder.view();
     return result;
   };
 
-  ConSanResult result = make_result();
-  ConSanResult copied = result;
-  ConSanResult moved = std::move(copied);
+  ConSanTransformArtifacts result = make_result();
+  ConSanTransformArtifacts copied = result;
+  ConSanTransformArtifacts moved = std::move(copied);
   EXPECT_FALSE(result.program_inventory.empty());
   EXPECT_TRUE(moved.program_inventory.code_object_parsed());
   EXPECT_TRUE(moved.program_inventory.kernel_metadata_trustworthy());
@@ -313,7 +313,7 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   static_assert(
       std::same_as<decltype(std::declval<const ProgramInventory &>().sync().moi_fence_candidates),
                    std::span<const ConSanMoiFenceCandidate>>);
-  static_assert(!std::is_base_of_v<SynchronizationInventoryView, ConSanResult>);
+  static_assert(!std::is_base_of_v<SynchronizationInventoryView, ConSanTransformArtifacts>);
 
   ProgramInventory empty;
   EXPECT_TRUE(empty.sync().empty());
@@ -375,10 +375,10 @@ TEST(ConSanProgramInventory, SynchronizationViewIsConstCompleteAndLifetimeSafe) 
   EXPECT_TRUE(view.sync_sequences.front().member_semantic_ids.front().valid());
   EXPECT_TRUE(view.moi_fence_candidates.front().eligible());
 
-  ConSanResult result;
+  ConSanTransformArtifacts result;
   result.program_inventory = published;
-  ConSanResult copied = result;
-  ConSanResult moved = std::move(copied);
+  ConSanTransformArtifacts copied = result;
+  ConSanTransformArtifacts moved = std::move(copied);
   EXPECT_EQ(moved.program_inventory.sync().sync_events.front().identity, "event");
   EXPECT_EQ(moved.program_inventory.sync().sync_sequences.front().identity, "sequence");
   EXPECT_EQ(moved.program_inventory.sync().barrier_lifecycle_groups.front().identity, "lifecycle");
@@ -464,7 +464,7 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_dry_run = true;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_FALSE(result.program_inventory.sync().sync_events.empty());
@@ -828,7 +828,7 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = ConSanMoiEngine::RecordReplay;
   options.fault_dry_run = true;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));

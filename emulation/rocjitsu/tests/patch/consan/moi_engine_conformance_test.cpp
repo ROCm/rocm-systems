@@ -81,7 +81,7 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100NativeLdsAccess) {
   const MoiEngineConformanceCase &test_case = GetParam();
   for (bool wave32 : std::array{false, true}) {
     SCOPED_TRACE(wave32 ? "wave32" : "wave64");
-    const ConSanResult result =
+    const ConSanTransformArtifacts result =
         test_lower_consan(make_rdna3_lds_code_object(text_words, "gfx1100_native_lds",
                                                      kRdna4Wave64AllVgprsGranulated, wave32,
                                                      /*uses_dynamic_stack=*/false,
@@ -117,7 +117,7 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100SingletonWorkgroupBarrier) {
                                             : ConSanPatchKind::TrampolineMoiBarrierRecord;
   for (bool wave32 : std::array{false, true}) {
     SCOPED_TRACE(wave32 ? "wave32" : "wave64");
-    const ConSanResult result =
+    const ConSanTransformArtifacts result =
         test_lower_consan(make_rdna3_lds_code_object(text_words, "gfx1100_workgroup_barrier",
                                                      kRdna4Wave64AllVgprsGranulated, wave32,
                                                      /*uses_dynamic_stack=*/false,
@@ -157,7 +157,7 @@ TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) 
             ? make_rdna4_lds_code_object(text_words, "gfx1201_scalar_vector_group_flat")
             : make_gfx1250_code_object(text_words, "gfx1250_scalar_vector_group_flat");
 
-    const ConSanResult result =
+    const ConSanTransformArtifacts result =
         test_lower_consan(bytes, conformance_options(test_case, /*access_count=*/1u));
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -323,7 +323,7 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
     options.moi_epoch_vgpr = 81;
     options.moi_exec_save_sgpr = 60;
   }
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_sparse_stranded_accesses"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);

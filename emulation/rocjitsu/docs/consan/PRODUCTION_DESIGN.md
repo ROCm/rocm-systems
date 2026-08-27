@@ -5774,6 +5774,31 @@ analysis completed.
   all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
   `gfx1201`, and `gfx1250` pass. E2E validation remains outside this work.
 
+### Slice 5CN: delete the compatibility result
+
+- **One transform artifact:** The empty `ConSanResult` subclass is deleted.
+  Production lowering, validation, composition, fuzzing, and mechanism tests
+  now pass `ConSanTransformArtifacts` directly; no wrapper can acquire another
+  parallel result field later.
+- **Patch-local scalar contract:** Every emitted patch records the complete
+  transient SGPR state and dispatch VGPR that its generated instructions use.
+  Final validation reads that exact record rather than reconstructing a
+  code-object-wide or owner-indexed choice from mutable result mirrors.
+- **Planning state remains temporary:** Global and owner-local register
+  selections still live in the mutable internal options only while placement
+  and emission need them. Tests that examine placement policy reconstruct a
+  reporting view from emitted patches; ordinary transform consumers see only
+  the durable artifact contract.
+- **Deletion accounting:** Implementation files add 220 and delete 257
+  physical lines after formatting, a net deletion of 37. The change deletes the final four
+  register mirrors, their reset/snapshot/publication plumbing, and all
+  production references to the compatibility type. Test declarations move to
+  the real artifact type and retain focused placement coverage.
+- **Checked-in gate:** All 1,531 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The 26-case physical-gfx950 cross-engine
+  smoke also passes; E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
@@ -5855,9 +5880,9 @@ analysis completed.
   runtime allocation, or trust policy.
 - **Honest deviations from the end-state diagrams:** The HSA adapter consumes
   `TransformResult` directly and automatic allocation retry is typed at that
-  boundary, but that retry still reconstructs private `ConSanResult` working
-  state because its lowerer has not yet been split. The logical pipeline stages
-  still wrap a monolithic lowerer rather than distinct parser, resource,
+  boundary. The compatibility result wrapper is gone, but the logical pipeline
+  stages still wrap a monolithic artifact-producing lowerer rather than
+  distinct parser, resource,
   emitter, and finalizer calls. `consan.h` still exposes prototype data
   structures used by mechanism helpers even though it exposes no transform
   function. These are bounded migration seams, not claims that the end state
@@ -5867,7 +5892,7 @@ The remaining lowerer responsibilities are explicit:
 
 | Area | Responsibility still inside the legacy boundary | Next deletion boundary |
 | --- | --- | --- |
-| Shared decode and inventory | ELF parsing, decoded events, CFG/liveness attachment, owner discovery, and compatibility telemetry in `ConSanResult` | Return `ProgramInventory` directly from a standalone inventory component, then remove its mutable duplicate |
+| Shared decode and inventory | ELF parsing, decoded events, CFG/liveness attachment, owner discovery, and artifact telemetry in one lowerer | Return `ProgramInventory` directly from a standalone inventory component |
 | SuperCollider | Check/trap probe selection, register/resource choices, relays, sticky-marker lowering, and patch telemetry | Lower typed access intents and an optional bound marker through shared resource and emitter interfaces |
 | Record/Replay | Access/synchronization probe bodies, pristine-inventory retry, replay ABI lowering, and applied-patch telemetry | Migrate first to the DBI-compatible host-processing path using typed evidence and runtime bindings |
 | Sampled | Causal-window helpers, sampling-specific device state, synchronization helpers, and ABI lowering | Reuse shared intent/resource stages; retain only the engine's sampling and evidence semantics |
@@ -5880,8 +5905,8 @@ The remaining lowerer responsibilities are explicit:
   shared resource planning from engine-specific evidence semantics, beginning
   with Record/Replay because it is the near-term DBI client. Third isolate
   placement/emission and transactional finalization. At each boundary, delete
-  the corresponding `ConSanOptions`/`ConSanResult` fields and extend the focused
-  type tests before proceeding.
+  the corresponding derived `ConSanOptions` state and monolithic lowering code,
+  and extend the focused type tests before proceeding.
 
 The first deletion in that order is complete: `ProgramInventory` is now the
 only owner of target identity, semantic architecture, metadata trust,

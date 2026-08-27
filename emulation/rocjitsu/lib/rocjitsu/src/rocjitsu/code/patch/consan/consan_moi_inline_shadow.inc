@@ -71,7 +71,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &res
 void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    std::span<const ConSanMoiCandidate> admitted,
-                                   ConSanResult &result) {
+                                   ConSanTransformArtifacts &result) {
   if (!options.moi_report_buffer_address)
     return;
   if (!consan_is_capability_arch(arch)) {

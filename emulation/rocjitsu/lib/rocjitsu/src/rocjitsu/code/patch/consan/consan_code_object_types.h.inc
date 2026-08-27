@@ -610,6 +610,13 @@ struct ConSanPatchInfo {
   /// synchronization patches consume this exact ABI; other patch kinds leave
   /// the aggregate empty.
   ConSanMoiPersistentSgprState persistent_sgpr_state;
+  /// Exact transient scalar ABI consumed by this emitted patch after applying
+  /// any owner-component override. This is empty for mechanisms that consume
+  /// no transient scalar state.
+  ConSanMoiTransientSgprState transient_sgpr_state;
+  /// Persistent dispatch-ID VGPR pair consumed by this patch, when vector
+  /// state rather than transient scalar or private state supplies identity.
+  std::optional<uint16_t> moi_dispatch_id_vgpr;
   /// Entry-local VGPR whose lanes preserve a runtime-selected transient SGPR
   /// window while persistent vector state is initialized. The register is
   /// dead again before any displaced guest instruction executes.

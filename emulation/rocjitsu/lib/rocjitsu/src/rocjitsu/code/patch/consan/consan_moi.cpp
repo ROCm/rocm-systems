@@ -483,8 +483,10 @@ bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_
          two_address_native_lds_offset_scale(mnemonic).has_value();
 }
 
-ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &options,
-                                  std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch) {
+ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
+                                              const ConSanOptions &options,
+                                              std::span<const uint8_t> code_object_bytes,
+                                              rj_code_arch_t arch) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   ConSanOptions effective_options = options;
@@ -496,10 +498,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   }
   result.outcome =
       result.errors.empty() ? ConSanTransformOutcome::Unchanged : ConSanTransformOutcome::Invalid;
-  result.resolved_moi_exec_save_sgpr.reset();
-  result.resolved_moi_transient_sgpr_assignments.clear();
-  result.resolved_moi_dispatch_id_sgpr.reset();
-  result.resolved_moi_dispatch_id_vgpr.reset();
   result.replacement.clear();
   result.resource_plans.clear();
   result.patches.clear();
@@ -710,9 +708,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   const ConSanOptions exec_planning_base = effective_options;
-  const std::optional<uint16_t> resolved_exec_before = result.resolved_moi_exec_save_sgpr;
-  const std::vector<ConSanMoiTransientSgprAssignment> resolved_transient_before =
-      result.resolved_moi_transient_sgpr_assignments;
   const size_t warnings_before_exec_planning = result.warnings.size();
   bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
       effective_options, result, resource_planning_state, moi_candidates);
@@ -724,8 +719,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
     // demand participate in the same resource proof.
     effective_options = exec_planning_base;
     effective_options.moi_dynamic_stack_spill = true;
-    result.resolved_moi_exec_save_sgpr = resolved_exec_before;
-    result.resolved_moi_transient_sgpr_assignments = resolved_transient_before;
     result.warnings.resize(warnings_before_exec_planning);
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
     exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
@@ -779,12 +772,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
       })) {
     result.warnings.emplace_back("ConSan MOI spill does not support a dynamic-stack owning kernel");
   }
-  if (!result.resolved_moi_exec_save_sgpr)
-    result.resolved_moi_exec_save_sgpr = effective_options.moi_exec_save_sgpr;
-  if (!result.resolved_moi_dispatch_id_sgpr)
-    result.resolved_moi_dispatch_id_sgpr = effective_options.moi_dispatch_id_sgpr;
-  if (!result.resolved_moi_dispatch_id_vgpr)
-    result.resolved_moi_dispatch_id_vgpr = effective_options.moi_dispatch_id_vgpr;
   if (effective_options.moi_report_buffer_address &&
       effective_options.moi_report_buffer_size < sizeof(ConSanMoiReportHeader)) {
     result.warnings.emplace_back("ConSan MOI report buffer is smaller than the report ABI header");
@@ -875,6 +862,8 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.errors.empty() && !owner_epoch_prologue_applied_early &&
       (!prologue_needs_consumer || result.modified()))
     try_apply_owner_epoch_prologue_patch(code_object_bytes, effective_options, arch, result);
+  if (result.errors.empty())
+    note_moi_patch_register_contracts(effective_options, result);
   if (result.outcome == ConSanTransformOutcome::Unsupported || !result.errors.empty()) {
     finalize_moi_site_lowering_outcomes(result);
     return result;

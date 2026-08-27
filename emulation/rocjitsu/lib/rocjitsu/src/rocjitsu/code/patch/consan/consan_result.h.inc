@@ -207,21 +207,6 @@ struct ConSanTransformArtifacts {
   }
 };
 
-/// Mutable compatibility-lowering state that has not yet moved into focused
-/// planning and emission components.
-///
-/// The inherited transform artifacts are the sole semantic output consumed by
-/// the production pipeline. Members declared here exist only while current
-/// lowering selects registers, builds engine-private candidates, owns a
-/// replacement-image construction state, and accumulates failures. They must
-/// not be projected to a second public representation.
-struct ConSanResult : ConSanTransformArtifacts {
-  std::optional<uint16_t> resolved_moi_exec_save_sgpr;
-  std::vector<ConSanMoiTransientSgprAssignment> resolved_moi_transient_sgpr_assignments;
-  std::optional<uint16_t> resolved_moi_dispatch_id_sgpr;
-  std::optional<uint16_t> resolved_moi_dispatch_id_vgpr;
-};
-
 /// Whether a semantic claim is at least as strong as the weakest confidence a
 /// consumer explicitly accepts.
 [[nodiscard]] constexpr bool
@@ -259,5 +244,5 @@ consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource source);
 /// tests.
 [[nodiscard]] std::vector<std::string>
 validate_consan_modified_elf(std::span<const uint8_t> original_bytes,
-                             const ConSanResult &modified_result,
+                             const ConSanTransformArtifacts &modified_result,
                              uint64_t expected_moi_report_dispatch_id = 0);

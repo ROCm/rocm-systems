@@ -113,12 +113,12 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
       8, static_cast<uint32_t>(exact_shadow_base), ROCJITSU_CODE_ARCH_RDNA4);
   const auto mov_address_hi = build_v_mov_b32_e64_literal(
       9, static_cast<uint32_t>(exact_shadow_base >> 32u), ROCJITSU_CODE_ARCH_RDNA4);
-  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
   const uint32_t dispatch_bank_stride =
       (layout.exact_shadow_entry_capacity / layout.inline_exact_dispatch_bank_count) *
       sizeof(ConSanMoiInlineExactShadowSlot);
   const uint32_t copy_dispatch_id =
-      build_v_mov_b32_e32(12, *result.resolved_moi_dispatch_id_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+      build_v_mov_b32_e32(12, *test_moi_dispatch_id_sgpr(result), ROCJITSU_CODE_ARCH_RDNA4);
   constexpr uint32_t kGenerationLowBits = 32u - consan_moi_exact_shadow::generation_shift;
   constexpr uint32_t kGenerationHighBits =
       consan_moi_exact_shadow::generation_bits - kGenerationLowBits;
@@ -259,8 +259,8 @@ TEST(ConSanMoi, InlineShadowProbePublishesNativeLdsStoreToExactShadow) {
   EXPECT_TRUE(contains_subsequence(
       text_words,
       std::array<uint32_t, 2>{
-          build_v_mov_b32_e32(10, *result.resolved_moi_dispatch_id_sgpr, ROCJITSU_CODE_ARCH_RDNA4),
-          build_v_mov_b32_e32(11, *result.resolved_moi_dispatch_id_sgpr + 1u,
+          build_v_mov_b32_e32(10, *test_moi_dispatch_id_sgpr(result), ROCJITSU_CODE_ARCH_RDNA4),
+          build_v_mov_b32_e32(11, *test_moi_dispatch_id_sgpr(result) + 1u,
                               ROCJITSU_CODE_ARCH_RDNA4)}));
 }
 
@@ -280,7 +280,7 @@ TEST(ConSanMoi, Cdna4InlineShadowProbeEmitsNativeTransactions) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -356,7 +356,7 @@ TEST(ConSanMoi, CdnaInlineShadowMovesOnlyAnEmptyAccumulatorBoundaryForScratchGro
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -423,7 +423,7 @@ TEST(ConSanMoi, CdnaInlineShadowGrowsUnifiedAllocationInsideEmptyAccumulatorGap)
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -497,7 +497,7 @@ TEST(ConSanMoi, CdnaInlineShadowUsesTrustedMetadataToMoveRoundedEmptyAccumulator
       options.moi_report_buffer_address = 0x100000000ull;
       options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-      const ConSanResult result = test_lower_consan(bytes, options);
+      const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(result.program_inventory.kernel_metadata_trustworthy());
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -577,7 +577,7 @@ TEST(ConSanMoi, Cdna4InlineShadowRecoversFullWindowKernargPreloadTail) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -638,7 +638,7 @@ TEST(ConSanMoi, Cdna3InlineShadowRecoversFullWindowKernargPreloadTail) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -707,7 +707,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -720,7 +720,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPreservesDsWorkgroupKeyFromKernelEntry) {
   ASSERT_NE(prologue, result.patches.end());
   EXPECT_FALSE(prologue->workgroup_shadow_lazy_initialization);
   EXPECT_EQ(prologue->workgroup_shadow_validity_size, 0u);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> prologue_words =
@@ -772,16 +772,16 @@ TEST(ConSanMoi, Cdna4InlineShadowAvoidsOriginalPhysicalVccPair) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   // Growing to 80 SGPRs moves VCC to s74:s75, so s72:s73 is a safe dispatch
   // pair. The large transient window remains inside the original allocation.
-  EXPECT_EQ(*result.resolved_moi_dispatch_id_sgpr, 72u);
-  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 2u);
+  EXPECT_EQ(*test_moi_dispatch_id_sgpr(result), 72u);
+  EXPECT_EQ(*test_moi_exec_save_sgpr(result), 2u);
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
@@ -804,7 +804,7 @@ TEST(ConSanMoi, Cdna4InlineShadowForcedSpillRotatesLocalExchangeTuple) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
   major_image_ownership::ScopedMeasurement measurement;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
   const major_image_ownership::Measurement observed = measurement.snapshot();
 
   ASSERT_TRUE(consan_patch_succeeded(result));
@@ -934,7 +934,7 @@ TEST(ConSanMoi, Cdna4PrivateEpochProloguePreservesClobberedEntryAbiSgprs) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -993,7 +993,7 @@ TEST(ConSanMoi, Cdna4PrivateEpochLongReturnDoesNotClobberEntryAbiSgprs) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1054,7 +1054,7 @@ TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
@@ -1200,7 +1200,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
   options.moi_track_atomics = true;
   options.max_patches = 16u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "warnings=" << testing::PrintToString(result.warnings)
@@ -1208,7 +1208,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_FALSE(test_moi_dispatch_id_sgpr(result));
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("owner-private hardware dispatch-ID state") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
@@ -1216,10 +1216,9 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
       std::ranges::find(result.program_inventory.kernels(), "full_pressure_private_dispatch",
                         &ConSanKernelInfo::name);
   ASSERT_NE(full_kernel, result.program_inventory.kernels().end());
-  const auto full_assignment = std::ranges::find(
-      result.resolved_moi_transient_sgpr_assignments, full_kernel->descriptor_file_offset,
-      &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-  ASSERT_NE(full_assignment, result.resolved_moi_transient_sgpr_assignments.end());
+  const auto full_assignment =
+      test_moi_transient_sgpr_assignment(result, full_kernel->descriptor_file_offset);
+  ASSERT_TRUE(full_assignment);
   EXPECT_FALSE(full_assignment->dispatch_id_sgpr);
   ASSERT_TRUE(full_assignment->indirect_pc_sgpr);
 
@@ -1315,7 +1314,7 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesDispatchIdPrivatelyForFullPressureOwner
             full_access->persistent_dispatch_id_private_offset);
   EXPECT_EQ(atomic_patch->persistent_private_state_end, full_access->persistent_private_state_end);
 
-  ConSanResult invalid = result;
+  ConSanTransformArtifacts invalid = result;
   const auto invalid_access =
       std::ranges::find_if(invalid.patches, [&](const ConSanPatchInfo &patch) {
         return is_access(patch) && owns(patch, full_kernel->descriptor_file_offset);
@@ -1423,7 +1422,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   options.moi_track_atomics = true;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "warnings=" << testing::PrintToString(result.warnings)
@@ -1431,8 +1430,8 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_TRUE(result.resolved_moi_dispatch_id_vgpr);
-  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(test_moi_dispatch_id_vgpr(result));
+  EXPECT_FALSE(test_moi_dispatch_id_sgpr(result));
 
   const auto atomic_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiInlineAtomicOrdering, &ConSanPatchInfo::kind);
@@ -1441,7 +1440,7 @@ TEST(ConSanMoi, Cdna4InlineShadowKeepsDispatchIdInVgprsForDynamicStackOwner) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  EXPECT_EQ(prologue->dispatch_id_capture_vgpr, result.resolved_moi_dispatch_id_vgpr);
+  EXPECT_EQ(prologue->dispatch_id_capture_vgpr, test_moi_dispatch_id_vgpr(result));
 }
 
 TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
@@ -1488,7 +1487,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadFitsBelowAccumulatorBoundary) {
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
@@ -1602,7 +1601,7 @@ TEST(ConSanMoi, CdnaInlineShadowClobberingLoadUsesDisjointCompactSpillWindow) {
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
@@ -1687,7 +1686,7 @@ TEST(ConSanMoi, CdnaInlineEntryOwnerBackupReusesOrdinaryVgprBelowAccumulatorBoun
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
@@ -1745,7 +1744,7 @@ TEST(ConSanMoi, Cdna4InlineShadowRecordsEveryRejectedFallbackAttempt) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.resource_plans.size(), 1u);
@@ -1811,7 +1810,7 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsOverlappingDynamicStackAddress) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1913,7 +1912,7 @@ TEST(ConSanMoi, CdnaInlineShadowAtomicTrackingFitsSpillBackedTransactionWindow) 
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1996,7 +1995,7 @@ TEST(ConSanMoi, CdnaInlineShadowWideAccessReloadsAddressOutsideCellLoopState) {
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2070,7 +2069,7 @@ TEST(ConSanMoi, CdnaInlineShadowKeepsDisjointClobberedAddressInPlace) {
     options.moi_report_buffer_address = 0x100000000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2137,7 +2136,7 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsBothSpilledMaybeGroupAddressHalves) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2185,7 +2184,7 @@ TEST(ConSanMoi, Cdna4ExternalInlineShadowRetainsPrivateWorkgroupKey) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2464,15 +2463,15 @@ TEST(ConSanMoi, Rdna4AccessOnlyInlineShadowUsesInitializedWorkgroupLocalLdsMirro
   // own earlier restoration target.
   const auto execz = build_s_cbranch_execz(0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(execz);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const auto save_original_exec =
-      build_s_mov_b64(static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr +
+      build_s_mov_b64(static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) +
                                             kConSanMoiInlineOriginalExecSaveOffset),
                       /*exec=*/126u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_exec =
-      build_s_mov_b64(/*sdst=*/126u, *result.resolved_moi_exec_save_sgpr, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_mov_b64(/*sdst=*/126u, *test_moi_exec_save_sgpr(result), ROCJITSU_CODE_ARCH_RDNA4);
   const auto restore_bounded_exec = build_s_mov_b64(
-      /*sdst=*/126u, static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 16u),
+      /*sdst=*/126u, static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 16u),
       ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(save_original_exec);
   ASSERT_TRUE(restore_exec);
@@ -2557,7 +2556,7 @@ TEST(ConSanMoi, InvalidWorkitemDimensionsFailClosed) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified());
@@ -2595,7 +2594,7 @@ TEST(ConSanMoi, Rdna4AtomicTrackingUsesInitializedWorkgroupLocalLdsMirror) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 16;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2629,16 +2628,16 @@ TEST(ConSanMoi, Rdna4AtomicTrackingUsesInitializedWorkgroupLocalLdsMirror) {
                        *build_s_barrier_wait_all(ROCJITSU_CODE_ARCH_RDNA4)),
             1);
 
-  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
   ASSERT_TRUE(access->scratch_vgpr);
   const std::vector<uint32_t> access_words =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
   const uint16_t generation_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 5u);
   const auto mix_dispatch_low =
-      ib::build_v_xor_b32(generation_vgpr, *result.resolved_moi_dispatch_id_sgpr, generation_vgpr,
+      ib::build_v_xor_b32(generation_vgpr, *test_moi_dispatch_id_sgpr(result), generation_vgpr,
                           ROCJITSU_CODE_ARCH_RDNA4);
   const auto mix_dispatch_high = ib::build_v_xor_b32(
-      generation_vgpr, static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr + 1u),
+      generation_vgpr, static_cast<uint16_t>(*test_moi_dispatch_id_sgpr(result) + 1u),
       generation_vgpr, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(mix_dispatch_low);
   ASSERT_TRUE(mix_dispatch_high);
@@ -2660,7 +2659,7 @@ TEST(ConSanMoi, Rdna4InlineShadowEagerlyClearsExactMirrorWhenValidityBitmapDoesN
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2709,7 +2708,7 @@ TEST(ConSanMoi, Rdna4BarrierTrackingUsesInitializedWorkgroupLocalLdsMirror) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 16;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2762,7 +2761,7 @@ TEST(ConSanMoi, InlineShadowFallsBackToExternalMirrorWhenLocalMirrorDoesNotFit) 
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2802,7 +2801,7 @@ TEST(ConSanMoi, InlineShadowUsesExternalMirrorForDynamicLdsKernel) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2843,7 +2842,7 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2876,9 +2875,9 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
   EXPECT_EQ(count_subsequence(body, *local_exchange), 1u);
   const auto exec_loop_encoding = build_s_cbranch_execnz(0, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(exec_loop_encoding);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const auto masked_predicate =
-      build_s_and_saveexec_b64(static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 14u),
+      build_s_and_saveexec_b64(static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 14u),
                                /*vcc=*/106, ROCJITSU_CODE_ARCH_RDNA4);
   const uint16_t loop_counter_vgpr =
       consan_detail::inline_shadow_loop_counter_vgpr(scratch, /*has_exec_save=*/true,
@@ -2931,7 +2930,7 @@ TEST(ConSanMoi, InlineShadowLoopsOverEveryWideWorkgroupLocalCellCompactly) {
       << "wide lazy shadow requires one readiness poll and one publication loop";
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty());
 
-  ConSanResult broken_loop = result;
+  ConSanTransformArtifacts broken_loop = result;
   const size_t loop_byte_offset =
       static_cast<size_t>(std::distance(body.begin(), loop_branch)) * sizeof(uint32_t);
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
@@ -2963,7 +2962,7 @@ TEST(ConSanMoi, InlineWorkgroupShadowPublishesVisibleEvidenceOncePerAccess) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3026,12 +3025,12 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  const uint16_t evidence_latch = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 24u);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+  const uint16_t evidence_latch = static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 24u);
   const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
   });
@@ -3060,7 +3059,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   const auto add_shadow_base = ib::build_v_add_u32_literal(
       initializer_address, /*validity base=*/13080u, initializer_offset, ROCJITSU_CODE_ARCH_CDNA5);
   const auto advance_row = ib::build_v_add_u32(
-      initializer_address, static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 4u),
+      initializer_address, static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 4u),
       initializer_address, ROCJITSU_CODE_ARCH_CDNA5);
   const auto select_x_zero = ib::build_v_cmp_eq_u32_vcc(
       scalar_positive_inline_u32(0u), /*workitem_id_x=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
@@ -3070,7 +3069,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowCachesEvidenceInFreshScalarState) {
   const auto store_wide = ib::build_ds_store_b128(initializer_address, *test_moi_epoch_vgpr(result),
                                                   0u, ROCJITSU_CODE_ARCH_CDNA5);
   const auto count_lanes =
-      ib::build_s_bcnt1_i32_b64(static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 4u),
+      ib::build_s_bcnt1_i32_b64(static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 4u),
                                 /*exec=*/126u, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(extract_x);
   ASSERT_TRUE(select_initialization_x_lanes);
@@ -3152,7 +3151,7 @@ TEST(ConSanMoi, Gfx1250InlineWorkgroupShadowValidatesAtomicAccessCandidate) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3183,12 +3182,12 @@ TEST(ConSanMoi, Gfx1250InlineGlobalShadowUsesLiteralDispatchIdAtFullScalarPressu
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 16u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_FALSE(test_moi_dispatch_id_sgpr(result));
   const auto exact_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
            patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
@@ -3234,7 +3233,7 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
     options.max_patches = 16u;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3242,7 +3241,7 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
     // Complete owner coverage proves that this pair is absent from guest
     // code, so preserve runtime dispatch identity instead of falling back to
     // the configured literal merely because the live scalar set is sparse.
-    EXPECT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+    EXPECT_TRUE(test_moi_dispatch_id_sgpr(result));
     EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
       return patch.anchor_offset == access_word * sizeof(uint32_t) &&
              (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
@@ -3264,8 +3263,7 @@ TEST(ConSanMoi, Rdna4InlineGlobalShadowSpillsFullScalarPressure) {
       AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
       ASSERT_TRUE(patched.is_valid());
       expect_lane_backed_scalar_spill(result, patched, *shadow_patch,
-                                      *result.resolved_moi_exec_save_sgpr,
-                                      ROCJITSU_CODE_ARCH_RDNA4);
+                                      *test_moi_exec_save_sgpr(result), ROCJITSU_CODE_ARCH_RDNA4);
     }
   }
 }
@@ -3293,15 +3291,15 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
       << testing::PrintToString(result.warnings);
-  const ConSanMoiTransientSgprAssignment &assignment =
-      result.resolved_moi_transient_sgpr_assignments.front();
+  const ConSanMoiTransientSgprAssignment assignment =
+      test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.branch_only_scalar_spill);
   ASSERT_TRUE(assignment.dynamic_stack_borrowed_sgpr);
@@ -3364,7 +3362,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   };
   EXPECT_TRUE(contains_subsequence(prologue_words, final_restore));
 
-  ConSanResult corrupted = result;
+  ConSanTransformArtifacts corrupted = result;
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const uint64_t backup_body_offset =
       prologue->dispatch_id_primary_prologue_offset.value_or(prologue->trampoline_offset);
@@ -3375,7 +3373,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
     return error.find("invalid entry scalar backup save") != std::string::npos;
   })) << testing::PrintToString(validation_errors);
 
-  ConSanResult invalid_resources = result;
+  ConSanTransformArtifacts invalid_resources = result;
   const auto invalid_prologue =
       std::ranges::find(invalid_resources.patches,
                         ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -3418,15 +3416,15 @@ void check_inline_branch_only_fixed_stack_preserves_entry_scalar_inputs(rj_code_
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
       << testing::PrintToString(result.warnings);
-  const ConSanMoiTransientSgprAssignment &assignment =
-      result.resolved_moi_transient_sgpr_assignments.front();
+  const ConSanMoiTransientSgprAssignment assignment =
+      test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
   ASSERT_TRUE(assignment.branch_only_scalar_spill);
   EXPECT_FALSE(assignment.dynamic_stack_borrowed_sgpr);
@@ -3525,15 +3523,15 @@ void check_inline_fixed_stack_prefers_branch_only_over_available_scalar_router(
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
       << testing::PrintToString(result.warnings);
-  const ConSanMoiTransientSgprAssignment &assignment =
-      result.resolved_moi_transient_sgpr_assignments.front();
+  const ConSanMoiTransientSgprAssignment assignment =
+      test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
   EXPECT_FALSE(assignment.indirect_pc_sgpr);
@@ -3583,12 +3581,12 @@ TEST(ConSanMoi, Rdna4InlineUnknownStackDoesNotSelectFixedStackBranchOnlySpill) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   EXPECT_FALSE(result.program_inventory.kernels().front().uses_dynamic_stack.has_value());
-  EXPECT_FALSE(std::ranges::any_of(result.resolved_moi_transient_sgpr_assignments,
+  EXPECT_FALSE(std::ranges::any_of(test_moi_transient_sgpr_assignments(result),
                                    &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill))
       << testing::PrintToString(result.warnings);
   EXPECT_FALSE(std::ranges::any_of(result.patches, &ConSanPatchInfo::branch_only_continuation))
@@ -3633,7 +3631,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3664,7 +3662,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {
            candidate != patch->branch_only_return_relay_offsets.front();
   });
   ASSERT_NE(unused_relay, relay_candidates.end());
-  ConSanResult unused = result;
+  ConSanTransformArtifacts unused = result;
   ConSanPatchInfo unused_info;
   unused_info.kind = ConSanPatchKind::TrampolineNopBranchRelay;
   unused_info.anchor_offset = *unused_relay;
@@ -3678,8 +3676,8 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughIsolatedNopWords) {
   })) << testing::PrintToString(unused_errors);
 }
 
-ConSanResult run_rdna4_branch_only_instruction_reservoir(uint32_t filler,
-                                                         std::string_view kernel_name) {
+ConSanTransformArtifacts run_rdna4_branch_only_instruction_reservoir(uint32_t filler,
+                                                                     std::string_view kernel_name) {
   constexpr size_t kTextWords = 45'000u;
   constexpr size_t kAccessWord = 7u;
   constexpr size_t kScalarUseWord = 40'000u;
@@ -3702,7 +3700,7 @@ ConSanResult run_rdna4_branch_only_instruction_reservoir(uint32_t filler,
 }
 
 TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRelocatesInstructionReservoirs) {
-  const ConSanResult relocated = run_rdna4_branch_only_instruction_reservoir(
+  const ConSanTransformArtifacts relocated = run_rdna4_branch_only_instruction_reservoir(
       build_s_mov_b32(/*sdst=*/105u, /*ssrc0=*/105u, ROCJITSU_CODE_ARCH_RDNA4),
       "branch_only_instruction_reservoir");
   ASSERT_TRUE(consan_patch_succeeded(relocated)) << testing::PrintToString(relocated.errors);
@@ -3752,13 +3750,13 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill);
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
+  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().branch_only_scalar_spill);
   EXPECT_EQ(std::ranges::count_if(result.patches,
                                   [](const ConSanPatchInfo &patch) {
                                     return patch.kind ==
@@ -3772,7 +3770,7 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
 TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackFailsClosedWithoutAdmissibleReservoir) {
   // s_delay_alu is intentionally excluded from donor discovery, leaving no
   // instruction run that the router may safely relocate.
-  const ConSanResult rejected = run_rdna4_branch_only_instruction_reservoir(
+  const ConSanTransformArtifacts rejected = run_rdna4_branch_only_instruction_reservoir(
       build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4),
       "branch_only_without_admissible_reservoir");
   EXPECT_TRUE(rejected.errors.empty()) << testing::PrintToString(rejected.errors);
@@ -3813,7 +3811,7 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRoutesThroughSelectedAnchorTails) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3862,7 +3860,7 @@ TEST(ConSanMoi, Gfx1250InlineOddShadowSlotCountClearsOnlyItsValidityState) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3912,7 +3910,7 @@ TEST(ConSanMoi, Gfx1250InlineLargeLocalMirrorUsesFullExactCellsAndValidityState)
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3978,7 +3976,7 @@ TEST(ConSanMoi, Gfx1250LargeFullLocalMirrorUsesDisjointTwoBitValidityState) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4034,7 +4032,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4060,8 +4058,8 @@ TEST(ConSanMoi, Gfx1250FullExactShadowValidatesAtomicTokenWithWorkgroupKey) {
     copies_workgroup_key |= std::ranges::find(body, copy) != body.end();
   }
   EXPECT_TRUE(copies_workgroup_key);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  const uint16_t exec_base = *result.resolved_moi_exec_save_sgpr;
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+  const uint16_t exec_base = *test_moi_exec_save_sgpr(result);
   const uint16_t original_exec =
       static_cast<uint16_t>(exec_base + kConSanMoiInlineOriginalExecSaveOffset);
   const auto save_original =
@@ -4104,7 +4102,7 @@ TEST(ConSanMoi, Gfx1250FullLocalShadowValidatesAtomicTokenWithPersistentWorkgrou
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4149,7 +4147,7 @@ TEST(ConSanMoi, Gfx1250FullExactShadowCoversEveryWideAccessCell) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4206,7 +4204,7 @@ TEST(ConSanMoi, InlineShadowSplitsLargeGfx1250TwoAddressGuestAccess) {
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4288,8 +4286,8 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesPersistentOwnerEpochVgprs) {
 
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  const uint16_t owner_sgpr = *result.resolved_moi_exec_save_sgpr;
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+  const uint16_t owner_sgpr = *test_moi_exec_save_sgpr(result);
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);
   const auto owner_init = build_s_getreg_b32(owner_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
@@ -4326,7 +4324,7 @@ TEST(ConSanMoi, InlineShadowRejectsExplicitWorkitemOwnerSource) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(result.modified());
@@ -4355,7 +4353,7 @@ TEST(ConSanMoi, InlineShadowEntryPrologueRelocatesCompleteScalarClause) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4420,7 +4418,7 @@ TEST(ConSanMoi, InlineShadowGrowsPersistentVgprsInsteadOfReloadingHotOwnerState)
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4449,7 +4447,7 @@ TEST(ConSanMoi, InlineShadowGrowsPersistentVgprsForDynamicStackOwner) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4520,7 +4518,7 @@ TEST(ConSanMoi, Cdna4InlineShadowMovesEmptyAccumulatorBoundaryForDynamicStackSta
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "warnings=" << testing::PrintToString(result.warnings)
@@ -4582,7 +4580,7 @@ TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   const auto analyzed_dynamic =
       std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
@@ -4627,9 +4625,7 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
   AmdGpuCodeObject original(bytes.data(), bytes.size());
   ASSERT_TRUE(original.is_valid());
   const auto fixed = std::ranges::find(original.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
-  const auto dynamic = std::ranges::find(original.kernels(), "lds_helper", &AmdGpuKernelInfo::name);
   ASSERT_NE(fixed, original.kernels().end());
-  ASSERT_NE(dynamic, original.kernels().end());
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_track_barriers = true;
@@ -4638,12 +4634,12 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const auto fixed_access = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &patch) {
     return (patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
             patch.kind == ConSanPatchKind::TrampolineMoiExactShadowStore) &&
@@ -4651,9 +4647,9 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
                patch.owner_descriptor_file_offsets.end();
   });
   ASSERT_NE(fixed_access, result.patches.end()) << testing::PrintToString(result.patches);
-  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
-  ASSERT_GE(*result.resolved_moi_dispatch_id_sgpr, 12u);
-  ConSanResult with_component_assignment = result;
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
+  ASSERT_GE(*test_moi_dispatch_id_sgpr(result), 12u);
+  ConSanTransformArtifacts with_component_assignment = result;
   const auto private_reload =
       std::ranges::find_if(with_component_assignment.patches, [&](const ConSanPatchInfo &patch) {
         return patch.kind == fixed_access->kind &&
@@ -4661,55 +4657,14 @@ TEST(ConSanMoi, Cdna4InlineValidatorResolvesDerivedPrivateDispatchReloadsPerOwne
       });
   ASSERT_NE(private_reload, with_component_assignment.patches.end());
   private_reload->persistent_dispatch_id_private_offset = 0u;
-  // The already-emitted capture names the original dispatch pair. Reinterpret
-  // that same pair as the fixed +12:+13 reload window used by a private-
-  // dispatch body, without changing the instruction semantics under test.
-  with_component_assignment.resolved_moi_exec_save_sgpr =
-      static_cast<uint16_t>(*result.resolved_moi_dispatch_id_sgpr - 12u);
-  const auto fixed_assignment = std::ranges::find(
-      with_component_assignment.resolved_moi_transient_sgpr_assignments,
-      fixed->descriptor_file_offset, &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-  ASSERT_NE(fixed_assignment,
-            with_component_assignment.resolved_moi_transient_sgpr_assignments.end());
-  fixed_assignment->exec_save_sgpr = *with_component_assignment.resolved_moi_exec_save_sgpr;
-  fixed_assignment->spill_backed = false;
-  fixed_assignment->indirect_pc_sgpr.reset();
+  // Validation consumes the exact register contract stamped on this patch;
+  // another owner's scalar placement cannot redirect the lookup.
+  ASSERT_TRUE(private_reload->transient_sgpr_state.dispatch_id_sgpr);
   const std::vector<std::string> component_validation_errors =
       validate_consan_modified_elf(bytes, with_component_assignment);
   EXPECT_TRUE(std::ranges::none_of(component_validation_errors, [](const std::string &error) {
     return error.find("versioned exact-shadow publication semantics") != std::string::npos;
   })) << testing::PrintToString(component_validation_errors);
-
-  // A heterogeneous object can instead have component-local scalar state
-  // only elsewhere while this owner continues to use the code-object-wide
-  // window. Such an unrelated assignment must not hide this body's
-  // s[EXEC+12:EXEC+13] private-dispatch reload from final validation.
-  ConSanResult with_unrelated_assignment = with_component_assignment;
-  std::erase_if(with_unrelated_assignment.resolved_moi_transient_sgpr_assignments,
-                [&](const ConSanMoiTransientSgprAssignment &assignment) {
-                  return assignment.descriptor_file_offset == fixed->descriptor_file_offset;
-                });
-  if (with_unrelated_assignment.resolved_moi_transient_sgpr_assignments.empty()) {
-    with_unrelated_assignment.resolved_moi_transient_sgpr_assignments.push_back(
-        {.descriptor_file_offset = dynamic->descriptor_file_offset,
-         .exec_save_sgpr = *result.resolved_moi_exec_save_sgpr,
-         .owner_sgpr = std::nullopt,
-         .dispatch_id_sgpr = std::nullopt,
-         .spill_backed = false,
-         .indirect_pc_sgpr = std::nullopt,
-         .indirect_scc_sgpr = std::nullopt,
-         .dispatch_key_sgpr = std::nullopt,
-         .call_return_sgpr = std::nullopt,
-         .visible_evidence_sgpr = std::nullopt,
-         .branch_only_scalar_spill = false,
-         .dynamic_stack_borrowed_sgpr = std::nullopt});
-  }
-  ASSERT_FALSE(with_unrelated_assignment.resolved_moi_transient_sgpr_assignments.empty());
-  const std::vector<std::string> validation_errors =
-      validate_consan_modified_elf(bytes, with_unrelated_assignment);
-  EXPECT_TRUE(std::ranges::none_of(validation_errors, [](const std::string &error) {
-    return error.find("versioned exact-shadow publication semantics") != std::string::npos;
-  })) << testing::PrintToString(validation_errors);
 }
 
 TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgprs) {
@@ -4729,17 +4684,16 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  const auto transient = std::ranges::find(
-      result.resolved_moi_transient_sgpr_assignments, full_pressure->descriptor_file_offset,
-      &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-  ASSERT_NE(transient, result.resolved_moi_transient_sgpr_assignments.end());
+  const auto transient =
+      test_moi_transient_sgpr_assignment(result, full_pressure->descriptor_file_offset);
+  ASSERT_TRUE(transient);
   EXPECT_FALSE(transient->dispatch_id_sgpr);
   const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
   const auto persistent =
@@ -4803,11 +4757,11 @@ TEST(ConSanMoi, InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
@@ -4833,8 +4787,7 @@ TEST(ConSanMoi, InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
   ASSERT_GE(cave_words.size(), 4u);
-  const uint16_t saved_frame_sgpr =
-      static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 24u);
+  const uint16_t saved_frame_sgpr = static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 24u);
   const std::array frame_setup = {
       build_s_mov_b32(saved_frame_sgpr, /*frame base=*/33, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_mov_b32(/*frame base=*/33, /*stack top=*/32, ROCJITSU_CODE_ARCH_RDNA4),
@@ -4869,14 +4822,14 @@ TEST(ConSanMoi, Cdna4InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " errors=" << testing::PrintToString(result.errors);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
@@ -4899,8 +4852,7 @@ TEST(ConSanMoi, Cdna4InlineShadowSpillsThroughSiteLocalDynamicStackFrame) {
   EXPECT_EQ(first_note_segment_bytes(result.replacement), original_note);
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
-  const uint16_t saved_frame_sgpr =
-      static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 24u);
+  const uint16_t saved_frame_sgpr = static_cast<uint16_t>(*test_moi_exec_save_sgpr(result) + 24u);
   const auto store = build_cdna4_scratch_store_b32_saddr(
       *patch->scratch_vgpr, /*frame base=*/33, /*byte_offset=*/0, ROCJITSU_CODE_ARCH_CDNA4);
   const auto load = build_cdna4_scratch_load_b32_saddr(*patch->scratch_vgpr, /*frame base=*/33,
@@ -4960,7 +4912,7 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
   options.moi_track_atomics = false;
   options.test_force_vgpr_spill = true;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "warnings=" << testing::PrintToString(result.warnings)
@@ -5000,7 +4952,7 @@ TEST(ConSanMoi, InlineShadowSpillingWorksWithoutMetadata) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5022,8 +4974,8 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesHwIdOwnerAndSpecialStateSgprs)
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified());
-  EXPECT_EQ(result.resolved_moi_dispatch_id_sgpr, 20);
-  EXPECT_EQ(result.resolved_moi_exec_save_sgpr, 22);
+  EXPECT_EQ(test_moi_dispatch_id_sgpr(result), 20);
+  EXPECT_EQ(test_moi_exec_save_sgpr(result), 22);
 
   const auto prologue = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue;
@@ -5036,9 +4988,9 @@ TEST(ConSanMoi, InlineShadowAutomaticallyAllocatesHwIdOwnerAndSpecialStateSgprs)
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
   const auto get_hw_id =
-      build_s_getreg_b32(*result.resolved_moi_exec_save_sgpr, *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
+      build_s_getreg_b32(*test_moi_exec_save_sgpr(result), *hwreg, ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(get_hw_id);
   EXPECT_TRUE(std::find(prologue_words.begin(), prologue_words.end(), *get_hw_id) !=
               prologue_words.end());
@@ -5077,8 +5029,8 @@ TEST(ConSanMoi, InlineShadowPrivateEpochUsesDimensionIndependentResidentWaveOwne
   ASSERT_NE(access, result.patches.end());
   ASSERT_EQ(access->scratch_vgpr, 1);
   EXPECT_FALSE(access->persistent_owner_private_offset);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  const uint16_t owner_sgpr = *result.resolved_moi_exec_save_sgpr;
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+  const uint16_t owner_sgpr = *test_moi_exec_save_sgpr(result);
 
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
@@ -5121,7 +5073,7 @@ TEST(ConSanMoi, InlineShadowPrivateHwIdOwnerBiasesBeforeProbeValuRead) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5167,7 +5119,7 @@ TEST(ConSanMoi, Rdna4InlinePrivateEpochUsesInitializedLocalMirror) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5484,7 +5436,7 @@ TEST(ConSanMoi, InlineShadowSubwordObjectPublishesIndependentByteSlots) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6155,7 +6107,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPackedTokenOwnerPreservesClobberedLoadAddress) 
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result))
       << "warnings=" << testing::PrintToString(result.warnings)
@@ -6223,7 +6175,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowDefersLoadBeforeAnchorIslandContinuation) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6260,7 +6212,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowPreservesGuestVgprBankForDeferredLoad) {
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 1;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6303,7 +6255,7 @@ TEST(ConSanMoi, Gfx1250InlineShadowCapturesHighBankLdsAddressBeforeScratchUse) {
   options.moi_track_atomics = false;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_inline_high_bank_address"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -6359,7 +6311,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6406,7 +6358,7 @@ TEST(ConSanMoi, Gfx1250DenseCallReturnRejectsArchitecturalAliases) {
     // s_call_i64 return in either pair corrupts architectural state rather
     // than an ordinary guest register.
     options.moi_inline_call_return_sgpr = call_return;
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     EXPECT_FALSE(result.modified());
     EXPECT_TRUE(result.replacement.empty());
@@ -6450,7 +6402,7 @@ TEST(ConSanMoi, Gfx1250TwoSiteDenseInlineShadowReservesRelocatedHostArm) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_two_site_dense_inline_shadow"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -6495,7 +6447,7 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesShareExplicitKeyRelay) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_rdna4_lds_code_object(text_words, "rdna4_dense_inline_shadow"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -6573,7 +6525,7 @@ TEST(ConSanMoi, Cdna4FarInlineShadowAccessesShareExplicitKeyRelay) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_cdna4_lds_code_object(text_words, "cdna4_far_inline_shadow"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -6681,7 +6633,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowAccessPreservesSccWhenKeyAliasesSave) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6782,7 +6734,7 @@ TEST(ConSanMoi, Cdna4DenseInlineShadowRouteRestoresGuestSccBeforeAccessBody) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_cdna4_lds_code_object(text_words, "cdna4_dense_inline_live_scc"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -6850,7 +6802,7 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowAccessesUseCalledFunctionHost) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_rdna4_code_object_with_local_function(kernel_words, function_words, tail_words),
       options);
 
@@ -6890,7 +6842,7 @@ TEST(ConSanMoi, Rdna4LargeInlineShadowCompositionUsesGeneralDenseRouting) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_rdna4_lds_code_object(text_words, "rdna4_large_inline_shadow"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -6922,7 +6874,7 @@ TEST(ConSanMoi, AutomaticTransientPlanningScalesAcrossIndependentKernels) {
   // stress test.
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_rdna4_many_kernel_lds_code_object(kKernelCount, kAccessesPerKernel), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -6954,7 +6906,7 @@ TEST(ConSanMoi, AutomaticTransientEmissionScalesAcrossLargeKernel) {
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_rdna4_lds_code_object(text_words, "rdna4_large_automatic_inline_shadow"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -7000,7 +6952,7 @@ TEST(ConSanMoi, Rdna4FarAccessAndAdjacentBarrierUseIndependentDenseRoutes) {
   options.moi_track_atomics = false;
   options.max_patches = 256;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_rdna4_lds_code_object(text_words, "rdna4_far_access_adjacent_barrier"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -7050,7 +7002,7 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsAccessInsideItsPrefix) {
 
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "cdna4_far_entry_prefix_access");
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7072,7 +7024,7 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsAccessInsideItsPrefix) {
   EXPECT_EQ(prologue->original_size, 7u * sizeof(uint32_t));
   EXPECT_EQ(prologue->entry_prologue_chained_trampoline_offset, access_patch->trampoline_offset);
 
-  ConSanResult missing_composition = result;
+  ConSanTransformArtifacts missing_composition = result;
   const auto missing_prologue =
       std::ranges::find(missing_composition.patches,
                         ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
@@ -7112,7 +7064,7 @@ TEST(ConSanMoi, Cdna4FarEntryRelayChainsIndirectIslandInsideItsPrefix) {
 
   const std::vector<uint8_t> bytes =
       make_cdna4_lds_code_object(text_words, "cdna4_far_entry_prefix_island");
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7158,7 +7110,7 @@ TEST(ConSanMoi, Cdna4FarInlineShadowBarrierUsesDenseRoute) {
   options.moi_track_atomics = false;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_cdna4_lds_code_object(text_words, "cdna4_far_inline_barrier"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -7205,7 +7157,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersUseSpillBackedRouter) {
   options.moi_track_atomics = false;
   options.max_patches = 64;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7267,16 +7219,16 @@ TEST(ConSanMoi, Gfx1250BranchOnlyInlineShadowFarBarrierDoesNotAbortObject) {
   options.moi_track_atomics = false;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_branch_only_far_inline_barrier",
                                kRdna4Wave64AllVgprsGranulated, /*wave32=*/true,
                                /*uses_dynamic_stack=*/false),
       options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
       << testing::PrintToString(result.warnings);
-  EXPECT_TRUE(result.resolved_moi_transient_sgpr_assignments.front().branch_only_scalar_spill);
+  EXPECT_TRUE(test_moi_transient_sgpr_assignments(result).front().branch_only_scalar_spill);
   EXPECT_NE(std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                               &ConSanPatchInfo::kind),
             result.patches.end());
@@ -7324,7 +7276,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarrierReusesAccessDispatcherWhenItFits)
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount + 1u;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_dense_barrier_reuses_access_dispatcher"),
       options);
 
@@ -7379,7 +7331,7 @@ TEST(ConSanMoi, Rdna4DenseInlineShadowBarriersUseRelocatedRouter) {
   options.moi_track_atomics = false;
   options.max_patches = 64;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_rdna4_lds_code_object(text_words, "rdna4_dense_inline_shadow_barriers"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -7437,7 +7389,7 @@ TEST(ConSanMoi, Gfx1250DenseBarrierFallsBackWhenAccessDispatcherReservationIsFul
   options.moi_track_atomics = false;
   options.max_patches = kAccessCount + kBarrierCount;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_dense_barrier_reuse_fallback"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -7474,7 +7426,7 @@ TEST(ConSanMoi, Rdna4SharedHelperBarrierUsesCommonPrivateEpochState) {
   options.moi_track_atomics = false;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7528,7 +7480,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowBarriersPartitionRelayWindowsAcrossLarge
   options.moi_track_atomics = false;
   options.max_patches = 4u * kBarriersPerWindow;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7567,7 +7519,7 @@ TEST(ConSanMoi, Gfx1250InlineBarrierEstablishesLowBankBeforeAdjacentGuestTransit
   options.moi_track_barriers = true;
   options.moi_track_atomics = false;
 
-  const ConSanResult result = test_lower_consan(
+  const ConSanTransformArtifacts result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_inline_adjacent_vgpr_bank"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -7627,18 +7579,18 @@ TEST(ConSanMoi, Gfx1250InlineUsesComponentLocalScalarSpillForMixedPressureOwners
   options.moi_track_atomics = false;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  EXPECT_FALSE(*result.resolved_moi_exec_save_sgpr < 106u &&
-               102u < *result.resolved_moi_exec_save_sgpr + kConSanMoiInlineExecSaveSgprCount)
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+  EXPECT_FALSE(*test_moi_exec_save_sgpr(result) < 106u &&
+               102u < *test_moi_exec_save_sgpr(result) + kConSanMoiInlineExecSaveSgprCount)
       << "automatic global scalar state must not alias gfx1250 architectural pairs";
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
       << testing::PrintToString(result.warnings);
-  const ConSanMoiTransientSgprAssignment &assignment =
-      result.resolved_moi_transient_sgpr_assignments.front();
+  const ConSanMoiTransientSgprAssignment assignment =
+      test_moi_transient_sgpr_assignments(result).front();
   EXPECT_TRUE(assignment.spill_backed);
   EXPECT_TRUE(assignment.branch_only_scalar_spill);
   EXPECT_FALSE(assignment.visible_evidence_sgpr);
@@ -7730,26 +7682,20 @@ TEST(ConSanMoi, Cdna4InlinePrefersOwnerWideFreshWindowToObjectWideSiteDeadWindow
   options.moi_track_atomics = false;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
-  EXPECT_EQ(*result.resolved_moi_exec_save_sgpr, 68u) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.resolved_moi_dispatch_id_sgpr, 64u) << testing::PrintToString(result.warnings);
+  ASSERT_TRUE(test_moi_exec_save_sgpr(result));
+  EXPECT_EQ(*test_moi_exec_save_sgpr(result), 68u) << testing::PrintToString(result.warnings);
+  EXPECT_EQ(test_moi_dispatch_id_sgpr(result), 64u) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("liveness-dead EXEC-save SGPRs") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
-  const auto assignment = std::ranges::find(
-      result.resolved_moi_transient_sgpr_assignments, high->descriptor_file_offset,
-      &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-  ASSERT_NE(assignment, result.resolved_moi_transient_sgpr_assignments.end())
-      << testing::PrintToString(result.warnings);
+  const auto assignment = test_moi_transient_sgpr_assignment(result, high->descriptor_file_offset);
+  ASSERT_TRUE(assignment) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(assignment->spill_backed);
-  EXPECT_EQ(std::ranges::find(result.resolved_moi_transient_sgpr_assignments,
-                              low->descriptor_file_offset,
-                              &ConSanMoiTransientSgprAssignment::descriptor_file_offset),
-            result.resolved_moi_transient_sgpr_assignments.end());
+  EXPECT_FALSE(test_moi_transient_sgpr_assignment(result, low->descriptor_file_offset));
   const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
   const auto high_persistent =
       std::ranges::find(persistent_assignments, high->descriptor_file_offset,
@@ -7826,18 +7772,18 @@ TEST(ConSanMoi, Cdna4InlineUsesComponentLocalScalarSpillOutsidePreloadsAndPhysic
   options.moi_track_atomics = false;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u)
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u)
       << testing::PrintToString(result.warnings);
-  const ConSanMoiTransientSgprAssignment &assignment =
-      result.resolved_moi_transient_sgpr_assignments.front();
+  const ConSanMoiTransientSgprAssignment assignment =
+      test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
-  ASSERT_TRUE(result.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(result));
   ASSERT_TRUE(assignment.dispatch_id_sgpr);
-  EXPECT_EQ(assignment.dispatch_id_sgpr, result.resolved_moi_dispatch_id_sgpr);
+  EXPECT_EQ(assignment.dispatch_id_sgpr, test_moi_dispatch_id_sgpr(result));
   ASSERT_TRUE(assignment.visible_evidence_sgpr);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
   ASSERT_TRUE(assignment.indirect_scc_sgpr);
@@ -7930,7 +7876,7 @@ TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
   options.moi_track_atomics = false;
   options.max_patches = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7942,9 +7888,9 @@ TEST(ConSanMoi, Cdna4InlineSpillsMixedVgprSourcesThroughDynamicStackFrames) {
     return plan.site_kind == ConSanResourceSiteKind::Access &&
            plan.source == ConSanRegisterAllocationSource::LivenessDead;
   }));
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
-  const ConSanMoiTransientSgprAssignment &assignment =
-      result.resolved_moi_transient_sgpr_assignments.front();
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
+  const ConSanMoiTransientSgprAssignment assignment =
+      test_moi_transient_sgpr_assignments(result).front();
   ASSERT_TRUE(assignment.spill_backed);
   EXPECT_FALSE(assignment.visible_evidence_sgpr);
   ASSERT_TRUE(assignment.indirect_pc_sgpr);
@@ -8044,9 +7990,9 @@ TEST(ConSanMoi, Cdna4InlineExcludesOnlyOwnerWithoutSpillRouter) {
   options.moi_track_atomics = false;
   options.max_patches = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
-  ASSERT_EQ(result.resolved_moi_transient_sgpr_assignments.size(), 1u);
+  ASSERT_EQ(test_moi_transient_sgpr_assignments(result).size(), 1u);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("admitted full-pressure owners with component-local scalar state") !=
            std::string::npos;
@@ -8077,7 +8023,7 @@ TEST(ConSanMoi, InlineShadowPreservesTwoAddressLoadAddressAliasedBySecondResult)
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -8290,7 +8236,7 @@ TEST(ConSanMoi, SharedInlineShadowCapturesFullKeyAcrossDescriptorCoordinateViews
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -8327,7 +8273,7 @@ TEST(ConSanMoi, SharedPrivateEpochCapturesFullKeyAcrossDescriptorCoordinateViews
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -8770,10 +8716,10 @@ TEST(ConSanMoi, FinalValidationPinsVersionedExactShadowPublication) {
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
-  const ConSanResult valid = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts valid = test_lower_consan(bytes, options);
   ASSERT_TRUE(valid.errors.empty()) << (valid.errors.empty() ? "" : valid.errors.front());
   ASSERT_TRUE(valid.modified());
-  ASSERT_TRUE(valid.resolved_moi_dispatch_id_sgpr);
+  ASSERT_TRUE(test_moi_dispatch_id_sgpr(valid));
   ASSERT_FALSE(valid.program_inventory.text_sections().empty());
   const auto patch = std::ranges::find_if(valid.patches, [](const ConSanPatchInfo &item) {
     return item.kind == ConSanPatchKind::TrampolineMoiExactShadowStore;
@@ -8796,7 +8742,7 @@ TEST(ConSanMoi, FinalValidationPinsVersionedExactShadowPublication) {
       std::search(body.begin(), body.end(), version_cas->begin(), version_cas->end());
   ASSERT_NE(cas_position, body.end());
 
-  ConSanResult wrong_atomic = valid;
+  ConSanTransformArtifacts wrong_atomic = valid;
   const auto atomic_add = build_flat_atomic_add_u32_vaddr_vsrc_vdst(
       scratch, static_cast<uint16_t>(scratch + 14u), static_cast<uint16_t>(scratch + 14u),
       /*return_old_value=*/true, /*scope=*/2, ROCJITSU_CODE_ARCH_RDNA4);
@@ -8811,14 +8757,14 @@ TEST(ConSanMoi, FinalValidationPinsVersionedExactShadowPublication) {
   }));
 
   const uint32_t capture_low =
-      build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *valid.resolved_moi_dispatch_id_sgpr,
+      build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *test_moi_dispatch_id_sgpr(valid),
                           ROCJITSU_CODE_ARCH_RDNA4);
   const auto capture_position = std::find(body.begin(), body.end(), capture_low);
   ASSERT_NE(capture_position, body.end());
-  ConSanResult wrong_dispatch = valid;
+  ConSanTransformArtifacts wrong_dispatch = valid;
   const uint32_t wrong_capture = build_v_mov_b32_e32(
       static_cast<uint16_t>(scratch + 2u),
-      static_cast<uint16_t>(*valid.resolved_moi_dispatch_id_sgpr + 2u), ROCJITSU_CODE_ARCH_RDNA4);
+      static_cast<uint16_t>(*test_moi_dispatch_id_sgpr(valid) + 2u), ROCJITSU_CODE_ARCH_RDNA4);
   const size_t capture_byte_offset =
       static_cast<size_t>(std::distance(body.begin(), capture_position)) * sizeof(uint32_t);
   std::memcpy(wrong_dispatch.replacement.data() + body_file_offset + capture_byte_offset,
@@ -8978,7 +8924,8 @@ TEST(ConSanMoi, InlineBarrierOnlyObjectPatchesBarrierWithoutEntryPrologue) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanTransformArtifacts result =
+      test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -9032,7 +8979,7 @@ TEST(ConSanMoi, InlineBarrierOnlySharedOwnerSkipsUnobservedEntryPrologue) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);

@@ -202,8 +202,9 @@ The inventory is also the sole owner of the parsed target, semantic
 architecture, kernel-metadata trust state, malformed-note count, and the fact
 that architecture-dependent classification began. Its code-object identity is
 the sole owner of the pristine byte count and fingerprint as well.
-`ConSanResult` no longer duplicates those facts, so retry, policy, lowering,
-and the runtime coordinator cannot observe inconsistent identities.
+`ConSanTransformArtifacts` references that inventory rather than duplicating
+those facts, so retry, policy, lowering, and the runtime coordinator cannot
+observe inconsistent identities.
 
 Container and synchronization lookup is part of the immutable inventory
 contract as well. `ProgramInventory` resolves kernel descriptors and exact
@@ -625,9 +626,12 @@ fully dismantled. The current state is:
 - target profiles and target instruction builders are explicit and tested;
 - the HSA hook enters the typed pipeline for ordinary and mutation transforms;
   but
+- the compatibility `ConSanResult` wrapper is gone; the lowerer returns
+  `ConSanTransformArtifacts` directly, with every emitted patch carrying its
+  exact persistent and transient register contract; but
 - shared decode/inventory construction, resource planning, per-engine native
-  lowering, placement, and some lifecycle presentation still project through
-  the compatibility `ConSanResult` mechanism record.
+  lowering, placement, and some lifecycle presentation remain monolithic
+  implementation responsibilities behind that artifact boundary.
 
 The next extraction order follows dependency direction:
 

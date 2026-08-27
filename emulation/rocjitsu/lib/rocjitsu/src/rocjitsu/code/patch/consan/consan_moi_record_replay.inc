@@ -7,7 +7,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                                                MoiResourcePlanningState &resource_state,
                                                MoiRecordReplayAccessOutput &access_output,
                                                std::span<const ConSanMoiCandidate> admitted,
-                                               ConSanResult &result) {
+                                               ConSanTransformArtifacts &result) {
   if (!options.moi_report_buffer_address)
     return;
   if (!consan_is_capability_arch(arch)) {

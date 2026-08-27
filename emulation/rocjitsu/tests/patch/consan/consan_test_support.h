@@ -52,10 +52,10 @@ namespace rocjitsu {
 
 /// Explicitly test-only access to compatibility-lowering working state. No
 /// production header declares this symbol.
-[[nodiscard]] ConSanResult
+[[nodiscard]] ConSanTransformArtifacts
 complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                          ConSanPerturbationPlanningState *inspected_perturbation = nullptr);
-[[nodiscard]] inline ConSanResult
+[[nodiscard]] inline ConSanTransformArtifacts
 test_lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                   ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
@@ -200,6 +200,91 @@ test_moi_record_replay_workgroup_vgprs(const ConSanTransformArtifacts &result) {
                           : patch->persistent_record_replay_workgroup_vgprs;
 }
 
+/// Return the code-object-wide transient EXEC-save base recorded by an
+/// emitted patch. Owner-local overrides are exposed separately through the
+/// reconstructed assignment matrix below.
+[[nodiscard]] std::optional<uint16_t>
+test_moi_exec_save_sgpr(const ConSanTransformArtifacts &result) {
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return !candidate.transient_sgpr_state.owner_local &&
+           candidate.transient_sgpr_state.exec_save_sgpr;
+  });
+  return patch == result.patches.end() ? std::nullopt : patch->transient_sgpr_state.exec_save_sgpr;
+}
+
+/// Return the code-object-wide scalar dispatch-ID pair recorded by an emitted
+/// patch, excluding owner-local scalar overrides.
+[[nodiscard]] std::optional<uint16_t>
+test_moi_dispatch_id_sgpr(const ConSanTransformArtifacts &result) {
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return !candidate.transient_sgpr_state.owner_local &&
+           candidate.transient_sgpr_state.dispatch_id_sgpr;
+  });
+  return patch == result.patches.end() ? std::nullopt
+                                       : patch->transient_sgpr_state.dispatch_id_sgpr;
+}
+
+/// Return the code-object-wide vector dispatch-ID pair recorded by an emitted
+/// patch, excluding per-owner persistent VGPR tuples.
+[[nodiscard]] std::optional<uint16_t>
+test_moi_dispatch_id_vgpr(const ConSanTransformArtifacts &result) {
+  const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &candidate) {
+    return !candidate.persistent_vgpr_state_owner_local && candidate.moi_dispatch_id_vgpr;
+  });
+  return patch == result.patches.end() ? std::nullopt : patch->moi_dispatch_id_vgpr;
+}
+
+/// Reconstruct owner-component scalar overrides from the exact ABI stamped on
+/// emitted patches. Duplicate consumers of the same owner collapse to one
+/// assignment and must agree because lowering rejected any shared site whose
+/// owners lacked one common ABI.
+[[nodiscard]] std::vector<ConSanMoiTransientSgprAssignment>
+test_moi_transient_sgpr_assignments(const ConSanTransformArtifacts &result) {
+  std::vector<ConSanMoiTransientSgprAssignment> assignments;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    const ConSanMoiTransientSgprState &state = patch.transient_sgpr_state;
+    if (!state.owner_local || !state.exec_save_sgpr)
+      continue;
+    for (uint64_t owner : patch.owner_descriptor_file_offsets) {
+      if (std::ranges::find(assignments, owner,
+                            &ConSanMoiTransientSgprAssignment::descriptor_file_offset) !=
+          assignments.end()) {
+        continue;
+      }
+      assignments.push_back({.descriptor_file_offset = owner,
+                             .exec_save_sgpr = *state.exec_save_sgpr,
+                             .owner_sgpr = state.owner_sgpr,
+                             .dispatch_id_sgpr = state.dispatch_id_sgpr,
+                             .spill_backed = state.spill_backed,
+                             .indirect_pc_sgpr = state.indirect_pc_sgpr,
+                             .indirect_scc_sgpr = state.indirect_scc_sgpr,
+                             .dispatch_key_sgpr = state.dispatch_key_sgpr,
+                             .call_return_sgpr = state.call_return_sgpr,
+                             .visible_evidence_sgpr = state.visible_evidence_sgpr,
+                             .branch_only_scalar_spill = state.branch_only_scalar_spill,
+                             .dynamic_stack_borrowed_sgpr = state.dynamic_stack_borrowed_sgpr});
+    }
+  }
+  std::ranges::sort(assignments, {}, &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+  return assignments;
+}
+
+/// Return the scalar contract reconstructed for one owner component, or no
+/// value when no emitted patch belonging to that owner uses a local override.
+/// Returning the assignment by value keeps test inspection independent of the
+/// lifetime of the reconstructed assignment matrix.
+[[nodiscard]] std::optional<ConSanMoiTransientSgprAssignment>
+test_moi_transient_sgpr_assignment(const ConSanTransformArtifacts &result,
+                                   uint64_t descriptor_file_offset) {
+  const auto assignments = test_moi_transient_sgpr_assignments(result);
+  const auto assignment =
+      std::ranges::find(assignments, descriptor_file_offset,
+                        &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
+  return assignment == assignments.end()
+             ? std::nullopt
+             : std::optional<ConSanMoiTransientSgprAssignment>(*assignment);
+}
+
 /// Reconstruct the admitted access projection from the durable inventory and
 /// observation plan. Production keeps the same projection only for the
 /// lifetime of lowering; tests call this helper when they specifically need
@@ -246,21 +331,22 @@ test_gfx1250_vgpr_msb_mode(std::span<const uint8_t> bytes,
          kind == ConSanProbeIntentKind::ExactShadowAccess;
 }
 
-[[nodiscard]] size_t consan_access_decision_count(const ConSanResult &result,
+[[nodiscard]] size_t consan_access_decision_count(const ConSanTransformArtifacts &result,
                                                   ConSanSiteDecisionKind kind) {
   return std::ranges::count(result.observation_plan.site_decisions, kind,
                             &ConSanSiteDecision::kind);
 }
 
-[[nodiscard]] size_t consan_applicable_access_decision_count(const ConSanResult &result) {
+[[nodiscard]] size_t
+consan_applicable_access_decision_count(const ConSanTransformArtifacts &result) {
   return std::ranges::count_if(result.observation_plan.site_decisions,
                                [](const ConSanSiteDecision &decision) {
                                  return decision.kind != ConSanSiteDecisionKind::NotApplicable;
                                });
 }
 
-[[nodiscard]] const ConSanSiteDecision *consan_access_decision_at(const ConSanResult &result,
-                                                                  uint64_t text_offset) {
+[[nodiscard]] const ConSanSiteDecision *
+consan_access_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
       result.observation_plan.site_decisions, [&](const ConSanSiteDecision &candidate) {
         return candidate.semantic_site.physical.original_text_offset == text_offset;
@@ -269,7 +355,8 @@ test_gfx1250_vgpr_msb_mode(std::span<const uint8_t> bytes,
 }
 
 [[nodiscard]] const ConSanSiteDecision *
-consan_access_decision_at_file_offset(const ConSanResult &result, uint64_t file_offset) {
+consan_access_decision_at_file_offset(const ConSanTransformArtifacts &result,
+                                      uint64_t file_offset) {
   const auto access = std::ranges::find(result.program_inventory.access_sites(), file_offset,
                                         &ConSanAccessInventorySite::file_offset);
   if (access == result.program_inventory.access_sites().end())
@@ -277,8 +364,8 @@ consan_access_decision_at_file_offset(const ConSanResult &result, uint64_t file_
   return consan_access_decision_at(result, access->physical_id.original_text_offset);
 }
 
-[[nodiscard]] const ConSanIntentCoverageEntry *consan_access_coverage_at(const ConSanResult &result,
-                                                                         uint64_t text_offset) {
+[[nodiscard]] const ConSanIntentCoverageEntry *
+consan_access_coverage_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto entry =
       std::ranges::find_if(result.coverage_ledger.intent_entries(), [&](const auto &candidate) {
         return is_consan_access_intent(candidate.intent.kind) &&
@@ -287,7 +374,7 @@ consan_access_decision_at_file_offset(const ConSanResult &result, uint64_t file_
   return entry == result.coverage_ledger.intent_entries().end() ? nullptr : &*entry;
 }
 
-[[nodiscard]] size_t consan_access_lowering_count(const ConSanResult &result,
+[[nodiscard]] size_t consan_access_lowering_count(const ConSanTransformArtifacts &result,
                                                   ConSanLoweringOutcomeKind outcome) {
   return std::ranges::count_if(result.coverage_ledger.intent_entries(), [&](const auto &entry) {
     return is_consan_access_intent(entry.intent.kind) && entry.lowering == outcome;
@@ -295,7 +382,7 @@ consan_access_decision_at_file_offset(const ConSanResult &result, uint64_t file_
 }
 
 [[nodiscard]] const ConSanBarrierSiteDecision *
-consan_barrier_decision_at(const ConSanResult &result, uint64_t text_offset) {
+consan_barrier_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
       result.observation_plan.barrier_site_decisions,
       [&](const ConSanBarrierSiteDecision &candidate) {
@@ -304,8 +391,8 @@ consan_barrier_decision_at(const ConSanResult &result, uint64_t text_offset) {
   return decision == result.observation_plan.barrier_site_decisions.end() ? nullptr : &*decision;
 }
 
-[[nodiscard]] const ConSanAtomicSiteDecision *consan_atomic_decision_at(const ConSanResult &result,
-                                                                        uint64_t text_offset) {
+[[nodiscard]] const ConSanAtomicSiteDecision *
+consan_atomic_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
       result.observation_plan.atomic_site_decisions,
       [&](const ConSanAtomicSiteDecision &candidate) {
@@ -314,8 +401,8 @@ consan_barrier_decision_at(const ConSanResult &result, uint64_t text_offset) {
   return decision == result.observation_plan.atomic_site_decisions.end() ? nullptr : &*decision;
 }
 
-[[nodiscard]] const ConSanFenceSiteDecision *consan_fence_decision_at(const ConSanResult &result,
-                                                                      uint64_t text_offset) {
+[[nodiscard]] const ConSanFenceSiteDecision *
+consan_fence_decision_at(const ConSanTransformArtifacts &result, uint64_t text_offset) {
   const auto decision = std::ranges::find_if(
       result.observation_plan.fence_site_decisions, [&](const ConSanFenceSiteDecision &candidate) {
         return candidate.semantic_site.physical.original_text_offset == text_offset;
@@ -324,7 +411,7 @@ consan_barrier_decision_at(const ConSanResult &result, uint64_t text_offset) {
 }
 
 template <typename Decision>
-[[nodiscard]] bool consan_decision_has_lowering(const ConSanResult &result,
+[[nodiscard]] bool consan_decision_has_lowering(const ConSanTransformArtifacts &result,
                                                 const Decision &decision,
                                                 ConSanLoweringOutcomeKind outcome) {
   if (decision.kind != ConSanSiteDecisionKind::Admitted || decision.intent_ids.empty())
@@ -357,7 +444,7 @@ template <typename Decisions>
 }
 
 template <typename Decisions>
-[[nodiscard]] size_t consan_decision_lowering_count(const ConSanResult &result,
+[[nodiscard]] size_t consan_decision_lowering_count(const ConSanTransformArtifacts &result,
                                                     const Decisions &decisions,
                                                     ConSanLoweringOutcomeKind outcome) {
   return std::ranges::count_if(decisions, [&](const auto &decision) {
@@ -366,7 +453,7 @@ template <typename Decisions>
 }
 
 template <size_t WordCount>
-std::array<uint32_t, WordCount> patched_words_at_file_offset(const ConSanResult &result,
+std::array<uint32_t, WordCount> patched_words_at_file_offset(const ConSanTransformArtifacts &result,
                                                              size_t file_offset) {
   std::array<uint32_t, WordCount> words{};
   constexpr size_t byte_count = WordCount * sizeof(uint32_t);
@@ -379,8 +466,8 @@ std::array<uint32_t, WordCount> patched_words_at_file_offset(const ConSanResult 
   return words;
 }
 
-std::vector<uint32_t> patched_words_at_file_offset(const ConSanResult &result, size_t file_offset,
-                                                   size_t byte_count) {
+std::vector<uint32_t> patched_words_at_file_offset(const ConSanTransformArtifacts &result,
+                                                   size_t file_offset, size_t byte_count) {
   if (byte_count % sizeof(uint32_t) != 0 || file_offset > result.replacement.size() ||
       byte_count > result.replacement.size() - file_offset) {
     ADD_FAILURE() << "patched word range is unaligned or exceeds the emitted ELF image";
@@ -414,14 +501,14 @@ ConSanOptions moi_options(ConSanMoiEngine engine = ConSanMoiEngine::RecordReplay
   return options;
 }
 
-size_t non_entry_prologue_patch_count(const ConSanResult &result) {
+size_t non_entry_prologue_patch_count(const ConSanTransformArtifacts &result) {
   return std::ranges::count_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind != ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
            patch.kind != ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
   });
 }
 
-const ConSanPatchInfo &only_non_entry_prologue_patch(const ConSanResult &result) {
+const ConSanPatchInfo &only_non_entry_prologue_patch(const ConSanTransformArtifacts &result) {
   const auto patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &item) {
     return item.kind != ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
            item.kind != ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
@@ -436,9 +523,9 @@ const ConSanPatchInfo &only_non_entry_prologue_patch(const ConSanResult &result)
 
 /// Derive resource telemetry from the authoritative plan and patch collections
 /// for tests that exercise the complete transform pipeline. Production does
-/// not cache this view in `ConSanResult`, so tests cannot accidentally assert
+/// not cache this view in `ConSanTransformArtifacts`, so tests cannot accidentally assert
 /// against stale duplicated state either.
-ConSanResourcePlanSummary test_resource_plan_summary(const ConSanResult &result) {
+ConSanResourcePlanSummary test_resource_plan_summary(const ConSanTransformArtifacts &result) {
   return summarize_consan_resource_plans(result.resource_plans, result.patches);
 }
 
@@ -614,9 +701,9 @@ bool contains_subsequence(std::span<const uint32_t> haystack, std::span<const ui
          haystack.end();
 }
 
-void expect_lane_backed_scalar_spill(const ConSanResult &result, const AmdGpuCodeObject &patched,
-                                     const ConSanPatchInfo &patch, uint16_t scalar_base,
-                                     rj_code_arch_t arch) {
+void expect_lane_backed_scalar_spill(const ConSanTransformArtifacts &result,
+                                     const AmdGpuCodeObject &patched, const ConSanPatchInfo &patch,
+                                     uint16_t scalar_base, rj_code_arch_t arch) {
   ASSERT_TRUE(patch.scratch_vgpr);
   const auto plan = std::ranges::find_if(
       result.resource_plans, [&](const ConSanCandidateResourcePlan &candidate) {
@@ -1805,7 +1892,8 @@ std::vector<uint8_t> make_two_kernel_shared_helper_code_object(
     };
   } else if (options.helper_has_ordinary_memory) {
     helper = {
-        0xEE050004u, 7u | (2u << 18u) | (1u << 20u),
+        0xEE050004u,
+        7u | (2u << 18u) | (1u << 20u),
         10u | (0xfffff0u << 8u), // global_load_b32 v7, v10, s[4:5] offset:-16
     };
   } else if (options.helper_has_ordered_atomic) {
@@ -2085,7 +2173,8 @@ std::vector<uint8_t> make_rdna4_two_kernel_aliased_ordered_atomic_code_object() 
       0x00000000u, // ds_store_b32 v0, v0
   };
   const std::array<uint32_t, 3> release = {
-      0xEE0B0000u, 0x00000000u,
+      0xEE0B0000u,
+      0x00000000u,
       0x00000000u, // global_wb
   };
   const size_t minimum_word_count =
@@ -2378,7 +2467,8 @@ std::vector<uint8_t> make_rdna4_flat_memory_code_object() {
 
 std::vector<uint8_t> make_rdna4_global_atomic_code_object() {
   const std::array<uint32_t, 4> text_words = {
-      0xEE158004u, 0x00980000u,
+      0xEE158004u,
+      0x00980000u,
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5] th:return scope:device
       0xBFB00000u, // s_endpgm
   };
@@ -2438,7 +2528,9 @@ std::vector<uint8_t> make_rdna4_ordered_global_cas_code_object(bool return_old_v
 std::vector<uint8_t> make_rdna4_buffer_atomic_code_object() {
   // buffer_atomic_add_u32 v1, v2, s[4:7], 0 th:return scope:device
   const std::array<uint32_t, 4> text_words = {
-      0xC40D4000u, 1u | (4u << 9u) | (2u << 18u) | (1u << 20u), 2u,
+      0xC40D4000u,
+      1u | (4u << 9u) | (2u << 18u) | (1u << 20u),
+      2u,
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words, "buffer_atomic_probe");
@@ -2469,7 +2561,9 @@ std::vector<uint8_t> make_rdna4_flat_atomic_code_object() {
   if (!atomic)
     return {};
   const std::array<uint32_t, 4> text_words = {
-      (*atomic)[0], (*atomic)[1], (*atomic)[2],
+      (*atomic)[0],
+      (*atomic)[1],
+      (*atomic)[2],
       0xBFB00000u, // s_endpgm
   };
   return make_rdna4_lds_code_object(text_words);

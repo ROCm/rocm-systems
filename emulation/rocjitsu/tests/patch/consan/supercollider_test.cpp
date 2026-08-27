@@ -15,7 +15,7 @@ namespace {
 struct GrowthPolicyFixture {
   std::vector<uint8_t> bytes;
   ConSanOptions options;
-  ConSanResult baseline;
+  ConSanTransformArtifacts baseline;
 };
 
 [[nodiscard]] std::vector<uint8_t>
@@ -152,7 +152,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughVerifiedNopRelays) {
   options.scratch_vgpr = 5u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -194,7 +194,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   options.scratch_vgpr = 5u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -214,7 +214,7 @@ TEST(ConSan, FlatCheckTrapRoutesFarBodyThroughDirectInstructionReservoir) {
   EXPECT_TRUE(std::ranges::any_of(body->branch_only_entry_relay_offsets, inside_reservoir));
   EXPECT_TRUE(std::ranges::any_of(body->branch_only_return_relay_offsets, inside_reservoir));
 
-  ConSanResult malformed = result;
+  ConSanTransformArtifacts malformed = result;
   const auto malformed_reservoir =
       std::ranges::find_if(malformed.patches, [](const ConSanPatchInfo &patch) {
         return patch.kind == ConSanPatchKind::TrampolineBranchRelayReservoir &&
@@ -262,7 +262,7 @@ TEST(ConSan, FlatDirectReservoirLosingRetryRollsBackTransaction) {
   options.scratch_vgpr = 5u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified()) << testing::PrintToString(result.warnings);
@@ -301,7 +301,7 @@ TEST(ConSan, FlatDirectReservoirRetryRoutesBothCandidates) {
   options.scratch_vgpr = 5u;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -335,7 +335,7 @@ TEST(ConSan, FlatCheckTrapReusesDirectAnchorTailForFarBranchRoutes) {
   options.scratch_vgpr = 5u;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -392,7 +392,7 @@ TEST(ConSan, FlatCheckTrapReportsPartialSelectionReason) {
   options.delay_var_ssrc = 0u;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -420,7 +420,7 @@ TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
       static_cast<uint32_t>(admitting_percent - 1u);
   const size_t rejecting_limit = *consan_patched_image_growth_limit_bytes(
       fixture.options.patched_image_growth_limit, fixture.bytes.size());
-  const ConSanResult rejected = test_lower_consan(fixture.bytes, fixture.options);
+  const ConSanTransformArtifacts rejected = test_lower_consan(fixture.bytes, fixture.options);
   const std::string expected =
       "ConSan flat check/trap proof rejected patched-image file growth: "
       "required total " +
@@ -433,7 +433,7 @@ TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
 
   fixture.options.patched_image_growth_limit.input_percent =
       static_cast<uint32_t>(admitting_percent);
-  const ConSanResult admitted = test_lower_consan(fixture.bytes, fixture.options);
+  const ConSanTransformArtifacts admitted = test_lower_consan(fixture.bytes, fixture.options);
   ASSERT_TRUE(consan_patch_succeeded(admitted)) << testing::PrintToString(admitted.errors);
   EXPECT_EQ(admitted.replacement, fixture.baseline.replacement);
 }
@@ -446,7 +446,7 @@ TEST(ConSan, AbsoluteGrowthLimitReportsExactRejection) {
   ASSERT_GT(required_growth, 0u);
   fixture.options.patched_image_growth_limit.absolute_bytes = required_growth - 1u;
 
-  const ConSanResult rejected = test_lower_consan(fixture.bytes, fixture.options);
+  const ConSanTransformArtifacts rejected = test_lower_consan(fixture.bytes, fixture.options);
   const std::string expected =
       "ConSan flat check/trap proof rejected patched-image file growth: "
       "required total " +
@@ -474,7 +474,7 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
   CodeObjectPatcher probe_patcher(probe);
   ConSanOptions probe_options;
   probe_options.patched_image_growth_input_bytes = fixture.bytes.size();
-  ConSanResult probe_result;
+  ConSanTransformArtifacts probe_result;
   ASSERT_TRUE(
       replace_consan_text(probe_patcher, second_stage_text, probe_options, "probe", probe_result));
   const size_t second_stage_growth =
@@ -492,7 +492,7 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
   options.patched_image_growth_input_bytes = fixture.bytes.size();
   const size_t rejecting_limit = *consan_patched_image_growth_limit_bytes(
       options.patched_image_growth_limit, fixture.bytes.size());
-  ConSanResult result;
+  ConSanTransformArtifacts result;
   EXPECT_FALSE(replace_consan_text(patcher, second_stage_text, options, "second stage", result));
   const std::string expected =
       "ConSan second stage rejected patched-image file growth: required total " +
@@ -507,7 +507,7 @@ TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
   GrowthPolicyFixture fixture = make_growth_policy_fixture();
   fixture.options.patched_image_growth_limit.kind =
       static_cast<ConSanPatchedImageGrowthLimitKind>(255u);
-  const ConSanResult invalid = test_lower_consan(fixture.bytes, fixture.options);
+  const ConSanTransformArtifacts invalid = test_lower_consan(fixture.bytes, fixture.options);
   EXPECT_NE(std::ranges::find(invalid.errors,
                               "ConSan flat check/trap proof has an invalid patched-image growth "
                               "policy (invalid-kind=255)"),
@@ -520,7 +520,7 @@ TEST(ConSan, InvalidGrowthPolicyAndNonPolicyReplacementFailureStayDistinct) {
   std::vector<uint8_t> malformed_text(code_object.text_sections().front()->size() + 1u);
   ConSanOptions default_options;
   default_options.patched_image_growth_input_bytes = fixture.bytes.size();
-  ConSanResult malformed;
+  ConSanTransformArtifacts malformed;
   EXPECT_FALSE(replace_consan_text(patcher, malformed_text, default_options,
                                    "test malformed replacement", malformed));
   const std::string expected_malformed =
@@ -548,7 +548,7 @@ TEST(ConSan, ReplacementDiagnosticsReportAllocationAndExactResolvedGrowth) {
   ConSanOptions options;
   options.patched_image_growth_limit.absolute_bytes = std::numeric_limits<uint64_t>::max();
   options.patched_image_growth_input_bytes = fixture.bytes.size();
-  ConSanResult result;
+  ConSanTransformArtifacts result;
 
   EXPECT_FALSE(
       replace_consan_text(patcher, replacement, options, "test allocation replacement", result));
@@ -577,7 +577,7 @@ TEST(ConSan, ReplacementDiagnosticsReportLateMalformedInputAndExactResolvedGrowt
               code_object.text_sections().front()->size());
   ConSanOptions options;
   options.patched_image_growth_input_bytes = fixture.bytes.size();
-  ConSanResult result;
+  ConSanTransformArtifacts result;
 
   EXPECT_FALSE(replace_consan_text(patcher, replacement, options, "test late malformed replacement",
                                    result));
@@ -944,7 +944,7 @@ TEST(ConSan, CombinedCheckTrapCanPatchNativeLdsAndFlatInSameCodeObject) {
 
   options.max_patches = 1u;
   options.max_patches_is_expert_limit = true;
-  const ConSanResult limited = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts limited = test_lower_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(limited)) << testing::PrintToString(limited.errors);
   ASSERT_EQ(consan_access_decision_count(limited, ConSanSiteDecisionKind::Admitted), 2u);
   EXPECT_EQ(consan_access_lowering_count(limited, ConSanLoweringOutcomeKind::ResourceRejected), 0u);
@@ -996,7 +996,7 @@ TEST(ConSan, CombinedCheckTrapIgnoresMetadataOnlyIslandAnchor) {
   options.scratch_vgpr = 5;
   options.max_patches = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1024,14 +1024,33 @@ TEST(ConSan, FlatCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
       0x00000000u, // v_mov_b32_e64 v0, s0
       0xD5810001u,
       0x00000001u, // v_mov_b32_e64 v1, s1
-      0xEC05007Cu, 0x00000002u,
+      0xEC05007Cu,
+      0x00000002u,
       0x00000000u, // flat_load_b32 v2, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xEC05007Cu, 0x00000006u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xEC05007Cu,
+      0x00000006u,
       0x00000000u, // flat_load_b32
                    // v6, v[0:1]
-      0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u, 0xBF800000u,
-      0xBF800000u, 0xBF800000u, 0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
+      0xBF800000u,
       0xBFB00000u, // s_endpgm
   };
   const std::vector<uint8_t> bytes =
@@ -1085,7 +1104,7 @@ TEST(ConSan, FlatCheckTrapCoverageKeepsUnownedFunctionSiteUnsupported) {
   options.probe_flat_check_trap = true;
   options.scratch_vgpr = 5u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -1124,7 +1143,7 @@ TEST(ConSan, FlatCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
   options.delay_nops = 1u;
   options.test_kernel_name_filter = "lds_probe";
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1153,7 +1172,7 @@ TEST(ConSan, FlatCheckTrapKernelFilterMatchesSharedFunctionOwner) {
   options.max_patches = 1u;
   options.test_kernel_name_filter = "shared_owner_0";
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1192,7 +1211,7 @@ TEST(ConSan, FlatCoverageLedgerFailsClosedOnInconsistentPhysicalSiteAliases) {
   options.probe_flat_check_trap = true;
   options.scratch_vgpr = 5u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified());
@@ -1228,7 +1247,7 @@ TEST(ConSan, FlatCoverageLedgerIgnoresInconsistentNonGroupAliasesInStrictMode) {
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.scratch_vgpr = 5u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -1262,7 +1281,7 @@ TEST(ConSan, FlatCoverageRequiresSiteMembershipInEveryOwnerCfg) {
   options.probe_flat_check_trap = true;
   options.scratch_vgpr = 5u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -1321,7 +1340,7 @@ TEST(ConSan, FlatCheckTrapPatchesAliasedKernelSiteOnceForEveryOwner) {
   options.scratch_vgpr = 5u;
   options.delay_nops = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1602,7 +1621,7 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsLiveVccSavePairThroughVgprsInBothWav
     options.scratch_vgpr = 3u;
     options.max_patches = 1u;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1737,7 +1756,7 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsSimultaneouslyLiveRegisterFilesInBot
     options.delay_var_ssrc = 0u;
     options.max_patches = 1u;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1809,7 +1828,7 @@ TEST(ConSan, Rdna4FullRegisterFlatDynamicStackSpillBorrowsAllocatedScalarState) 
   options.delay_var_ssrc = 0u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1852,7 +1871,7 @@ TEST(ConSan, Rdna4FullVgprFlatDynamicStackSpillPreservesDeadScalarState) {
   options.delay_var_ssrc = 0u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1895,7 +1914,7 @@ TEST(ConSan, Gfx1250FullRegisterFlatDynamicStackSpillPreservesAbiStateInBothWave
     options.delay_var_ssrc = 0u;
     options.max_patches = 1u;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -1962,7 +1981,7 @@ TEST(ConSan, Gfx1250FullRegisterFlatPrivateCapacityFailureIsAccounted) {
   options.delay_var_ssrc = 0u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -1992,7 +2011,7 @@ TEST(ConSan, Gfx1250FullRegisterFlatDynamicStackCapacityFailureIsAccounted) {
   options.delay_var_ssrc = 0u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -2045,7 +2064,7 @@ TEST(ConSan, Gfx1250FlatLoadCheckTrapSpillsLiveVccSavePairForFullAndHighHalfLoad
     options.scratch_vgpr = 3u;
     options.max_patches = 1u;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2104,14 +2123,14 @@ TEST(ConSan, Gfx1250FlatB64CheckTrapRejectsOddAndAcceptsEvenTupleScratch) {
   options.max_patches = 1u;
   options.scratch_vgpr = 5u;
 
-  const ConSanResult odd_result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts odd_result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(odd_result)) << testing::PrintToString(odd_result.errors);
   EXPECT_FALSE(odd_result.modified());
   EXPECT_TRUE(odd_result.patches.empty());
 
   options.scratch_vgpr = 6u;
-  const ConSanResult even_result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts even_result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(even_result)) << testing::PrintToString(even_result.errors);
   ASSERT_TRUE(even_result.modified()) << testing::PrintToString(even_result.warnings);
@@ -2151,7 +2170,7 @@ TEST(ConSan, Gfx950FlatCheckTrapFailsClosedWithoutDeadVccSavePair) {
   options.scratch_vgpr = 3u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -2208,7 +2227,7 @@ TEST(ConSan, Gfx1250SharedFlatVccSpillUsesAllOwnersCommonSgprAllocation) {
   options.scratch_vgpr = 3u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2269,7 +2288,7 @@ TEST(ConSan, Gfx1250SharedFlatDeadVccSaveSatisfiesEveryOwnerContinuation) {
   options.delay_nops = 1u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2319,7 +2338,7 @@ TEST(ConSan, Gfx1250SharedFlatRegisterSpillUsesOneLayoutForEveryOwner) {
   options.delay_var_ssrc = 0u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2385,7 +2404,7 @@ TEST(ConSan, Gfx1250SharedDynamicStackFlatSpillUsesOneRuntimeFrameRecipe) {
   options.delay_var_ssrc = 0u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2446,7 +2465,7 @@ TEST(ConSan, Gfx1250SharedMixedStackFlatSpillReportsTypedRejection) {
   options.delay_var_ssrc = 0u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -2875,7 +2894,8 @@ TEST(ConSan, Gfx1100LdsCheckTrapUsesRdna3CompletionWait) {
   options.scratch_vgpr = 3;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(make_rdna3_lds_code_object(text_words), options);
+  const ConSanTransformArtifacts result =
+      test_lower_consan(make_rdna3_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2949,7 +2969,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeEvenAlignsAutomaticGfx1250B64Scratch) {
   options.probe_lds_check_trap = true;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2979,7 +2999,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified());
@@ -3019,7 +3039,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad)
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 8;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified());
@@ -3061,7 +3081,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250LoadAcrossVgprBankBoundary) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 4;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3147,7 +3167,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I16VdsLoadInPlace) {
   options.scratch_vgpr = 3;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3201,7 +3221,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250I8VdsLoadInPlace) {
   options.scratch_vgpr = 3;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3226,7 +3246,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesGfx1250B96VdsLoadInPlace) {
   options.scratch_vgpr = 6;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3314,7 +3334,7 @@ TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
   options.fault_lds_address_vgpr = 8u;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3393,7 +3413,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackGfx1250B96VdsStore) {
   options.scratch_vgpr = 4;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3419,7 +3439,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackCdna4B96Store) {
   options.scratch_vgpr = 12;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3479,7 +3499,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSelectsGfx1250HighByteStoreValue) {
   options.scratch_vgpr = 3;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3513,7 +3533,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeMasksGfx1250B16StoreValues) {
     options.scratch_vgpr = 3;
     options.delay_nops = 2;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3561,7 +3581,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsGfx1250TwoAddressStoresAndReadbacks) {
     options.scratch_vgpr = 8;
     options.delay_nops = 2;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     EXPECT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     EXPECT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3636,7 +3656,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsLargeGfx1250TwoAddressOffsetsWithAddress
   options.scratch_vgpr = 8;
   options.delay_nops = 1;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3795,7 +3815,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesCdna4AccvgprB128Reads) {
     options.scratch_vgpr = 20u;
     options.delay_nops = 1u;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3861,7 +3881,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsCdna4AccvgprB128ScratchWithoutMovingBoun
   options.probe_lds_check_trap = true;
   options.delay_nops = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -3941,7 +3961,7 @@ TEST(ConSan, Gfx950B128AutoReportReusesReadbackAtAccvgprBoundary) {
   options.report_buffer_address = 0x1234567887654321ull;
   options.report_marker = 0xABCDEF01u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -4136,7 +4156,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackAndMasksCdna4B16Write) {
   options.scratch_vgpr = 6;
   options.delay_nops = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -4437,7 +4457,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSupportsByteD16LoadsAcrossTargets) {
       options.delay_nops = 1u;
       options.scratch_vgpr = 3u;
 
-      const ConSanResult result = test_lower_consan(bytes, options);
+      const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5485,7 +5505,7 @@ TEST(ConSan, ProbeLdsCheckTrapPatchesAliasedKernelSiteOnceForEveryOwner) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5536,7 +5556,7 @@ TEST(ConSan, ProbeLdsCoverageLedgerFailsClosedOnInconsistentPhysicalSiteAliases)
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified());
@@ -5558,7 +5578,7 @@ TEST(ConSan, ProbeLdsCheckTrapKernelFilterDoesNotShrinkPhysicalCoverageLedger) {
   options.max_patches = 1u;
   options.test_kernel_name_filter = "shared_owner_0";
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5591,7 +5611,7 @@ TEST(ConSan, ProbeLdsCheckTrapCoverageKeepsUnownedFunctionSiteUnsupported) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -5620,7 +5640,7 @@ TEST(ConSan, ProbeLdsCoverageRequiresSiteMembershipInEveryOwnerCfg) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -5695,7 +5715,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
   EXPECT_GE((sgpr_granulated + 1u) * 8u, body->indirect_required_sgpr_count);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
-  ConSanResult corrupted = result;
+  ConSanTransformArtifacts corrupted = result;
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   std::memcpy(corrupted.replacement.data() + text_file_offset + *body->indirect_return_offset +
@@ -5731,7 +5751,7 @@ TEST(ConSan, CdnaIndirectLdsScalarScratchReservesWholeVccPair) {
     options.probe_lds_check_trap = true;
     options.scratch_vgpr = 6u;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5783,7 +5803,7 @@ TEST(ConSan, Cdna3LdsVccSaveSkipsPartiallyLiveScalarPair) {
   options.scratch_vgpr = 15u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5873,7 +5893,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -5907,7 +5927,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   boundary_partial_words[first_host_word + 8u] =
       build_s_mov_b32(105u, static_cast<uint16_t>(jump_pc + 1u), ROCJITSU_CODE_ARCH_RDNA4);
 
-  const ConSanResult boundary_partial_result = test_lower_consan(
+  const ConSanTransformArtifacts boundary_partial_result = test_lower_consan(
       make_rdna4_lds_code_object(boundary_partial_words, "rdna4_dense_boundary_partial_host"),
       options);
 
@@ -5936,7 +5956,7 @@ TEST(ConSan, Rdna4DenseCheckTrapAlwaysUsesExplicitKeys) {
   block_exit_partial_words[first_host_word + 16u] =
       build_s_branch(kBranchDistanceDwords, ROCJITSU_CODE_ARCH_RDNA4);
 
-  const ConSanResult block_exit_partial_result = test_lower_consan(
+  const ConSanTransformArtifacts block_exit_partial_result = test_lower_consan(
       make_rdna4_lds_code_object(block_exit_partial_words, "rdna4_dense_block_exit_partial_host"),
       options);
 
@@ -5986,7 +6006,7 @@ TEST(ConSan, Rdna4DenseCheckTrapUsesCalledLocalFunctionHost) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6039,7 +6059,7 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 6u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6092,7 +6112,7 @@ TEST(ConSan, Gfx1250DenseCheckTrapUsesExplicitKeysAtScalarLimit) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6125,7 +6145,7 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   options.delay_var_ssrc = 0u;
   options.scratch_vgpr = 3;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6175,7 +6195,7 @@ TEST(ConSan, Rdna4CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   options.delay_var_ssrc = 0u;
   options.scratch_vgpr = 3;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6220,7 +6240,7 @@ TEST(ConSan, Gfx1250CheckTrapBorrowsAndPreservesS0WhenRuntimeDelayIsDisabled) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6283,7 +6303,7 @@ TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
   options.max_patches = 1u;
   options.test_kernel_name_filter = "shared_owner_0";
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6366,7 +6386,7 @@ TEST(ConSan, Gfx1250SharedLdsDeadVccSaveSatisfiesEveryOwnerDescriptor) {
   options.scratch_vgpr = 3u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6437,7 +6457,7 @@ TEST(ConSan, Rdna4InlineLdsDeadVccSaveUsesFixedSgprPoolWithoutGrowth) {
   options.delay_nops = 1u;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6487,7 +6507,7 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
   options.probe_lds_check_trap = true;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6575,7 +6595,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillUsesOneLayoutForEveryOwner) {
   options.probe_lds_check_trap = true;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6656,7 +6676,7 @@ TEST(ConSan, Gfx1250OverlappingSharedLdsSpillsAccumulateEveryOwnerRequirement) {
   options.probe_lds_check_trap = true;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6735,7 +6755,7 @@ TEST(ConSan, Gfx1250SelectedLdsSpillsStackWithinOneOwnerLayout) {
   options.probe_lds_check_trap = true;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6817,7 +6837,7 @@ TEST(ConSan, Gfx1250SelectedLdsSpillCapacityFailureRollsBackCandidate) {
   options.probe_lds_check_trap = true;
   options.max_patches = 2u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6872,7 +6892,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillRejectsAnyDynamicStackOwner) {
   options.probe_lds_check_trap = true;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -6906,7 +6926,7 @@ TEST(ConSan, Cdna3NativeLdsDynamicStackSpillUsesBracketLocalFrame) {
   options.delay_nops = 1u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -6935,7 +6955,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillCapacityFailureIsAccounted) {
   options.probe_lds_check_trap = true;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -6966,7 +6986,7 @@ TEST(ConSan, Gfx1250RejectedLdsSpillCandidateDoesNotGrowSelectedLayout) {
   options.max_patches = 1u;
   options.max_patches_is_expert_limit = false;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7032,7 +7052,7 @@ TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {
   options.scratch_vgpr = 3u;
   options.max_patches = 1u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7101,7 +7121,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   options.scratch_vgpr = 3;
   options.max_patches = 3;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7114,7 +7134,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
   ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
 
-  ConSanResult corrupted = result;
+  ConSanTransformArtifacts corrupted = result;
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
@@ -7156,7 +7176,7 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   options.scratch_vgpr = 3;
   options.max_patches = 3;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7188,7 +7208,7 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   options.scratch_vgpr = 3;
   options.max_patches = 1;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7228,7 +7248,7 @@ TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
   options.scratch_vgpr = 3;
   options.max_patches = 2;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7292,7 +7312,7 @@ TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
   reserve_kernel_filler(0u, kFirstReservoirWord);
   reserve_kernel_filler(kTextWords * sizeof(uint32_t), kSecondReservoirWord);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7386,7 +7406,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   options.max_patches = 3;
   options.scratch_vgpr = 6;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
@@ -7411,7 +7431,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   ASSERT_TRUE(reservoir->indirect_saved_vcc_sgpr.has_value());
   ASSERT_TRUE(reservoir->indirect_return_saved_vcc_sgpr.has_value());
 
-  const ConSanResult repeated = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts repeated = test_lower_consan(bytes, options);
   ASSERT_TRUE(consan_patch_succeeded(repeated));
   EXPECT_EQ(repeated.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(repeated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
@@ -7421,7 +7441,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
 
   ConSanOptions exhausted_options = options;
   exhausted_options.lds_relay_layout_planning_work_limit = {1u, 0u};
-  const ConSanResult exhausted = test_lower_consan(bytes, exhausted_options);
+  const ConSanTransformArtifacts exhausted = test_lower_consan(bytes, exhausted_options);
   EXPECT_FALSE(consan_patch_succeeded(exhausted));
   EXPECT_FALSE(exhausted.modified());
   EXPECT_TRUE(exhausted.patches.empty());
@@ -7450,7 +7470,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   }
   EXPECT_GE(used_payload_words, 3u);
 
-  ConSanResult corrupted_body = result;
+  ConSanTransformArtifacts corrupted_body = result;
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
   corrupted_body
       .replacement[text_file_offset + reservoir->trampoline_offset + 2u * sizeof(uint32_t)] ^= 1u;
@@ -7460,7 +7480,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
            std::string::npos;
   }));
 
-  ConSanResult unused = result;
+  ConSanTransformArtifacts unused = result;
   for (uint64_t offset = reservoir->anchor_offset + kReservoirEntryWords * sizeof(uint32_t);
        offset <
        reservoir->anchor_offset + reservoir->original_size - kReservoirTailWords * sizeof(uint32_t);
@@ -7504,7 +7524,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesOrdinaryScalarRelayReservoirForCdna4Wave64
            (kTextWords - kReservoirOffset / sizeof(uint32_t) - kReservoirWords - 1u) *
            sizeof(uint32_t))});
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7551,7 +7571,7 @@ TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {
   options.max_patches = 3u;
   options.scratch_vgpr = 8u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -7633,7 +7653,7 @@ TEST(ConSan, Gfx1250CheckTrapPreplansBranchFallbackBeforeReachableBodiesDrift) {
   options.scratch_vgpr = 3;
   options.delay_nops = 200;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.warnings.empty()) << testing::PrintToString(result.warnings);
@@ -7750,7 +7770,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReportsMissingVccSaveSite) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 3u;
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -7774,7 +7794,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReportsMissingScratchSite) {
   options.probe_lds_check_trap = true;
   options.scratch_vgpr = 1u; // Deliberately overlaps the load destination.
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());

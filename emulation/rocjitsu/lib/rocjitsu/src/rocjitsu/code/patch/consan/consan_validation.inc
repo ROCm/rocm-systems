@@ -41,7 +41,8 @@ struct UnmatchedBarrierWait {
 
 template <typename Container>
 void append_unmatched_barrier_waits(const Container &container, bool in_kernel,
-                                    const ConSanOptions &options, const ConSanResult &result,
+                                    const ConSanOptions &options,
+                                    const ConSanTransformArtifacts &result,
                                     std::vector<UnmatchedBarrierWait> &waits) {
   if (!options.test_kernel_name_filter.empty() &&
       container.name.find(options.test_kernel_name_filter) == std::string::npos)
@@ -80,7 +81,8 @@ void append_unmatched_barrier_waits(const Container &container, bool in_kernel,
 }
 
 void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_bytes,
-                                            const ConSanOptions &options, ConSanResult &result) {
+                                            const ConSanOptions &options,
+                                            ConSanTransformArtifacts &result) {
   if (!options.abort_unmatched_barrier_wait || options.fault_dry_run || !result.errors.empty())
     return;
   std::vector<UnmatchedBarrierWait> waits;
@@ -146,7 +148,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
                                " statically unmatched barrier wait(s)");
 }
 
-[[nodiscard]] bool has_blocked_kernel(const ConSanResult &result) {
+[[nodiscard]] bool has_blocked_kernel(const ConSanTransformArtifacts &result) {
   return std::ranges::any_of(result.program_inventory.kernels(),
                              [](const ConSanKernelInfo &kernel) {
                                return kernel.preflight_action == ConSanPreflightAction::Blocked;
@@ -196,7 +198,8 @@ struct InventoryRange {
 
 [[nodiscard]] std::vector<std::string>
 validate_patch_byte_accounting(const AmdGpuCodeObject &original,
-                               const AmdGpuCodeObject &replacement, const ConSanResult &result) {
+                               const AmdGpuCodeObject &replacement,
+                               const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1) {
     errors.emplace_back(
@@ -468,8 +471,9 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
   return true;
 }
 
-[[nodiscard]] std::vector<std::string> validate_patch_decoding(const AmdGpuCodeObject &replacement,
-                                                               const ConSanResult &result) {
+[[nodiscard]] std::vector<std::string>
+validate_patch_decoding(const AmdGpuCodeObject &replacement,
+                        const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   if (replacement.text_sections().size() != 1)
     return errors;
@@ -502,7 +506,7 @@ validate_patch_byte_accounting(const AmdGpuCodeObject &original,
 
 [[nodiscard]] std::vector<std::string>
 validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
-                                      const ConSanResult &result) {
+                                      const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   if (replacement.text_sections().size() != 1)
     return errors;
@@ -570,7 +574,7 @@ validate_sc_indirect_island_semantics(const AmdGpuCodeObject &replacement,
 [[nodiscard]] std::vector<std::string>
 validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
                                             const AmdGpuCodeObject &replacement,
-                                            const ConSanResult &result) {
+                                            const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   const bool has_branch_only = std::ranges::any_of(
       result.patches, [](const ConSanPatchInfo &patch) { return patch.branch_only_continuation; });
@@ -841,7 +845,8 @@ validate_branch_only_continuation_semantics(const AmdGpuCodeObject &original,
 
 [[nodiscard]] std::vector<std::string>
 validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
-                                 const AmdGpuCodeObject &replacement, const ConSanResult &result) {
+                                 const AmdGpuCodeObject &replacement,
+                                 const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   const bool has_dense = std::ranges::any_of(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineScDenseCallDispatcher ||
@@ -1036,7 +1041,7 @@ validate_sc_dense_call_semantics(const AmdGpuCodeObject &original,
 [[nodiscard]] std::vector<std::string>
 validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
                                       const AmdGpuCodeObject &replacement,
-                                      const ConSanResult &result) {
+                                      const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   std::vector<const ConSanPatchInfo *> anchors;
   std::vector<const ConSanPatchInfo *> hosts;
@@ -1283,7 +1288,7 @@ validate_branch_relay_donor_semantics(const AmdGpuCodeObject &original,
 [[nodiscard]] std::vector<std::string>
 validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
                                           const AmdGpuCodeObject &replacement,
-                                          const ConSanResult &result) {
+                                          const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   std::vector<const ConSanPatchInfo *> reservoirs;
   for (const ConSanPatchInfo &patch : result.patches) {
@@ -1682,13 +1687,14 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
          is_barrier_instruction(*instruction);
 }
 
-[[nodiscard]] bool has_consan_patch_phase(const ConSanResult &result, ConSanPatchPhase phase) {
+[[nodiscard]] bool has_consan_patch_phase(const ConSanTransformArtifacts &result,
+                                          ConSanPatchPhase phase) {
   return std::ranges::find(result.patches, phase, &ConSanPatchInfo::phase) != result.patches.end();
 }
 
 [[nodiscard]] std::vector<std::string>
 validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeObject &replacement,
-                            const ConSanResult &result) {
+                            const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   // Instrumentation-only transforms have no mutation semantics to rederive.
   // Avoid rebuilding the entire pristine synchronization/CFG inventory here:
@@ -1723,7 +1729,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   pristine_options.fault_dry_run = true;
   const auto original_image = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(original.image_data()), original.image_size());
-  const ConSanResult pristine_inventory = try_patch_consan_impl(original_image, pristine_options);
+  const ConSanTransformArtifacts pristine_inventory =
+      try_patch_consan_impl(original_image, pristine_options);
   std::vector<const ConSanPatchInfo *> markerless_sources;
   const ConSanPatchInfo *markerless_target = nullptr;
   std::vector<ConSanBarrierSite> barrier_id_scope_originals;
@@ -2621,12 +2628,11 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
   return errors;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
-                                   const AmdGpuCodeObject &original,
-                                   const AmdGpuCodeObject &replacement, const ConSanResult &result,
-                                   bool validating_carried_composite_stage,
-                                   const ConSanPerturbationPlanningState *carried_perturbation) {
+[[nodiscard]] std::vector<std::string> validate_sc_perturbation_semantics(
+    std::span<const uint8_t> original_image, const AmdGpuCodeObject &original,
+    const AmdGpuCodeObject &replacement, const ConSanTransformArtifacts &result,
+    bool validating_carried_composite_stage,
+    const ConSanPerturbationPlanningState *carried_perturbation) {
   std::vector<std::string> errors;
   const size_t perturbation_patch_count = static_cast<size_t>(std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind));
@@ -2661,8 +2667,8 @@ validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
   ConSanPerturbationPlanningState pristine_perturbation;
-  const ConSanResult pristine = try_patch_consan_impl(original_image, inventory_options, {},
-                                                      std::nullopt, &pristine_perturbation);
+  const ConSanTransformArtifacts pristine = try_patch_consan_impl(
+      original_image, inventory_options, {}, std::nullopt, &pristine_perturbation);
   if (!validating_carried_composite_stage && !pristine.errors.empty()) {
     errors.emplace_back(
         "ConSan SC perturbation proof could not rederive pristine synchronization semantics");
@@ -2741,7 +2747,8 @@ validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
       continue;
     }
 
-    const ConSanResult &semantic_inventory = validating_carried_composite_stage ? result : pristine;
+    const ConSanTransformArtifacts &semantic_inventory =
+        validating_carried_composite_stage ? result : pristine;
     const std::span<const ConSanPerturbationCandidate> semantic_candidates =
         validating_carried_composite_stage ? carried_perturbation->candidates
                                            : pristine_perturbation.candidates;
@@ -2910,7 +2917,7 @@ struct DescriptorRequirement {
 [[nodiscard]] std::vector<std::string>
 validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
                                        const AmdGpuCodeObject &replacement,
-                                       const ConSanResult &result) {
+                                       const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
     return errors;
@@ -3022,7 +3029,7 @@ validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
 [[nodiscard]] std::vector<std::string>
 validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
                                         const AmdGpuCodeObject &replacement,
-                                        const ConSanResult &result) {
+                                        const ConSanTransformArtifacts &result) {
   std::vector<std::string> errors;
   if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
     return errors;
@@ -3220,7 +3227,7 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
 
 [[nodiscard]] std::vector<std::string>
 validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
-                                       const ConSanResult &result,
+                                       const ConSanTransformArtifacts &result,
                                        uint64_t expected_moi_report_dispatch_id) {
   std::vector<std::string> errors;
   const auto is_exact_patch = [](const ConSanPatchInfo &patch) {
@@ -3229,29 +3236,12 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
   };
   if (!std::ranges::any_of(result.patches, is_exact_patch))
     return errors;
-  const auto owner_local_dispatch_vgpr = [&](const ConSanPatchInfo &patch) {
-    std::optional<uint16_t> common;
-    for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-      const auto prologue = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &item) {
-        return item.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
-               std::ranges::find(item.owner_descriptor_file_offsets, owner) !=
-                   item.owner_descriptor_file_offsets.end();
-      });
-      if (prologue == result.patches.end() || !prologue->dispatch_id_capture_vgpr ||
-          (common && *common != *prologue->dispatch_id_capture_vgpr)) {
-        return std::optional<uint16_t>{};
-      }
-      common = prologue->dispatch_id_capture_vgpr;
-    }
-    return common;
-  };
   const rj_code_arch_t arch = consan_arch_for_target(replacement.target_id());
   const bool has_exact_patch_without_dispatch =
       std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
         return is_exact_patch(patch) && patch.workgroup_shadow_size == 0u &&
                !patch.persistent_dispatch_id_private_offset &&
-               !result.resolved_moi_dispatch_id_sgpr && !result.resolved_moi_dispatch_id_vgpr &&
-               !owner_local_dispatch_vgpr(patch) &&
+               !patch.transient_sgpr_state.dispatch_id_sgpr && !patch.moi_dispatch_id_vgpr &&
                !consan_arch_uses_literal_dispatch_identity(arch);
       });
   if (replacement.text_sections().size() != 1 || has_exact_patch_without_dispatch) {
@@ -3455,87 +3445,9 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
     const size_t transaction_count = exact_cas_count / 2u;
     std::vector<uint32_t> capture_low;
     std::vector<uint32_t> capture_high;
-    const std::optional<uint16_t> owner_dispatch_vgpr = owner_local_dispatch_vgpr(patch);
-    std::optional<uint16_t> expected_dispatch_sgpr = result.resolved_moi_dispatch_id_sgpr;
-    std::optional<uint16_t> expected_dispatch_vgpr = result.resolved_moi_dispatch_id_vgpr;
-    if (!patch.persistent_dispatch_id_private_offset &&
-        !result.resolved_moi_transient_sgpr_assignments.empty()) {
-      // A partially admitted object-wide dispatch pair is present in the
-      // aggregate result even though an owner-local transient assignment can
-      // explicitly reject it. Resolve that choice for this patch before
-      // validating the emitted capture; the rejected owner may instead use
-      // its persistent dispatch VGPR pair.
-      const ConSanMoiTransientSgprAssignment *first_assignment = nullptr;
-      for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-        const auto assignment =
-            std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
-                              &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-        if (assignment != result.resolved_moi_transient_sgpr_assignments.end()) {
-          first_assignment = &*assignment;
-          break;
-        }
-      }
-      // A patch whose owners have no override continues to use the aggregate
-      // code-object-wide pair. Once any owner has an override, shared-site
-      // consistency requires every owner to have that same assignment; an
-      // explicit null pair then selects the private/persistent fallback.
-      if (first_assignment != nullptr) {
-        expected_dispatch_sgpr = first_assignment->dispatch_id_sgpr;
-        for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-          const auto assignment =
-              std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
-                                &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-          if (assignment == result.resolved_moi_transient_sgpr_assignments.end() ||
-              assignment->dispatch_id_sgpr != expected_dispatch_sgpr) {
-            expected_dispatch_sgpr.reset();
-            break;
-          }
-        }
-      }
-    } else if (patch.persistent_dispatch_id_private_offset) {
-      expected_dispatch_sgpr.reset();
-      std::optional<uint16_t> owner_reload_sgpr;
-      bool saw_owner_assignment = false;
-      bool inconsistent_owner_assignments = false;
-      for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-        const auto assignment =
-            std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
-                              &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
-        if (assignment == result.resolved_moi_transient_sgpr_assignments.end())
-          continue;
-        const std::optional<uint16_t> reload_sgpr =
-            assignment->indirect_pc_sgpr
-                ? assignment->indirect_pc_sgpr
-                : (!assignment->spill_backed
-                       ? std::optional<uint16_t>(assignment->exec_save_sgpr + 12u)
-                       : std::nullopt);
-        if (saw_owner_assignment && reload_sgpr != owner_reload_sgpr) {
-          expected_dispatch_sgpr.reset();
-          inconsistent_owner_assignments = true;
-          break;
-        }
-        saw_owner_assignment = true;
-        owner_reload_sgpr = reload_sgpr;
-      }
-      if (saw_owner_assignment) {
-        const bool every_owner_has_assignment =
-            std::ranges::all_of(patch.owner_descriptor_file_offsets, [&](uint64_t owner) {
-              return std::ranges::find(result.resolved_moi_transient_sgpr_assignments, owner,
-                                       &ConSanMoiTransientSgprAssignment::descriptor_file_offset) !=
-                     result.resolved_moi_transient_sgpr_assignments.end();
-            });
-        if (!inconsistent_owner_assignments && every_owner_has_assignment)
-          expected_dispatch_sgpr = owner_reload_sgpr;
-      } else if (!inconsistent_owner_assignments && result.resolved_moi_exec_save_sgpr) {
-        // An unrelated owner-local assignment does not replace this patch's
-        // code-object-wide non-spill Inline window. Its indirect PC pair is
-        // the fixed +12:+13 pair within that window, and private dispatch
-        // reload deliberately reuses the same dead body-local state.
-        expected_dispatch_sgpr = static_cast<uint16_t>(*result.resolved_moi_exec_save_sgpr + 12u);
-      }
-    }
-    if (!expected_dispatch_sgpr && !expected_dispatch_vgpr)
-      expected_dispatch_vgpr = owner_dispatch_vgpr;
+    const std::optional<uint16_t> expected_dispatch_sgpr =
+        patch.transient_sgpr_state.dispatch_id_sgpr;
+    const std::optional<uint16_t> expected_dispatch_vgpr = patch.moi_dispatch_id_vgpr;
     if (expected_dispatch_sgpr) {
       capture_low.push_back(
           build_v_mov_b32_e32(static_cast<uint16_t>(scratch + 2u), *expected_dispatch_sgpr, arch));
@@ -3588,7 +3500,6 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
           " capture_high=" + std::to_string(count_pattern(capture_high)) +
           " expected_dispatch_sgpr=" + optional_register(expected_dispatch_sgpr) +
           " expected_dispatch_vgpr=" + optional_register(expected_dispatch_vgpr) +
-          " owner_dispatch_vgpr=" + optional_register(owner_dispatch_vgpr) +
           " owner_count=" + std::to_string(patch.owner_descriptor_file_offsets.size()) +
           " legacy_swap=" + std::to_string(decoded_legacy_swap));
     }
@@ -3598,7 +3509,7 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
 
 [[nodiscard]] std::vector<std::string>
 validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacement,
-                                              const ConSanResult &result) {
+                                              const ConSanTransformArtifacts &result) {
   constexpr uint16_t kVccLo = 106u;
   std::vector<std::string> errors;
   const auto is_release_transaction = [&](const ConSanPatchInfo &patch) {
@@ -3620,9 +3531,9 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
   };
   if (!std::ranges::any_of(result.patches, is_release_transaction))
     return errors;
-  if (replacement.text_sections().size() != 1 || !result.resolved_moi_exec_save_sgpr) {
+  if (replacement.text_sections().size() != 1) {
     errors.emplace_back(
-        "ConSan final validation found release transaction without persistent state");
+        "ConSan final validation found release transaction without executable text");
     return errors;
   }
 
@@ -3656,7 +3567,8 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
   for (const ConSanPatchInfo &patch : result.patches) {
     if (!is_release_transaction(patch))
       continue;
-    if (!patch.scratch_vgpr || patch.trampoline_offset > text.size() ||
+    if (!patch.scratch_vgpr || !patch.transient_sgpr_state.exec_save_sgpr ||
+        patch.trampoline_offset > text.size() ||
         patch.trampoline_size > text.size() - patch.trampoline_offset ||
         patch.trampoline_size % sizeof(uint32_t) != 0) {
       errors.emplace_back(
@@ -3816,10 +3728,12 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
       const std::vector<size_t> store_positions = positions(*store);
       return store_positions.size() == 1u && !cas_positions.empty() &&
              publication_begin < store_positions.front() &&
-             std::ranges::any_of(owner_positions, [&](size_t owner_position) {
-               return store_positions.front() < owner_position &&
-                      owner_position < cas_positions.back();
-             });
+             std::ranges::any_of(
+                 owner_positions,
+                 [&](size_t owner_position) {
+                   return store_positions.front() < owner_position &&
+                          owner_position < cas_positions.back();
+                 });
     };
     bool snapshot_stores_valid =
         require_snapshot_store(offsetof(ConSanMoiInlineCausalSnapshot, entry_count),
@@ -3846,7 +3760,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
             vector_source_vgpr(static_cast<uint16_t>(*site->data_vgpr + 1u)), *site->dst_vgpr,
             arch);
         const auto narrow = instrumentation::build_s_and_saveexec_b64(
-            *result.resolved_moi_exec_save_sgpr, kVccLo, arch);
+            *patch.transient_sgpr_state.exec_save_sgpr, kVccLo, arch);
         if (!success || !narrow) {
           valid = false;
         } else {
@@ -3893,7 +3807,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
 [[nodiscard]] std::vector<std::string>
 validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                                       const AmdGpuCodeObject &replacement,
-                                      const ConSanResult &result) {
+                                      const ConSanTransformArtifacts &result) {
   using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
   std::vector<std::string> errors;
   if (original.text_sections().size() != 1 || replacement.text_sections().size() != 1)
@@ -4401,11 +4315,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
   return errors;
 }
 
-[[nodiscard]] std::vector<std::string>
-validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanResult &result,
-                          uint64_t expected_moi_report_dispatch_id,
-                          bool validating_carried_composite_stage = false,
-                          const ConSanPerturbationPlanningState *carried_perturbation = nullptr) {
+[[nodiscard]] std::vector<std::string> validate_final_consan_elf(
+    std::span<const uint8_t> original_bytes, const ConSanTransformArtifacts &result,
+    uint64_t expected_moi_report_dispatch_id, bool validating_carried_composite_stage = false,
+    const ConSanPerturbationPlanningState *carried_perturbation = nullptr) {
   const major_image_ownership::ScopedPhase validation_phase(
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
   std::vector<std::string> errors;
@@ -4524,8 +4437,8 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   return errors;
 }
 
-[[nodiscard]] ConSanResult
-finalize_consan_result(ConSanResult result, std::span<const uint8_t> original_bytes,
+[[nodiscard]] ConSanTransformArtifacts
+finalize_consan_result(ConSanTransformArtifacts result, std::span<const uint8_t> original_bytes,
                        uint64_t expected_moi_report_dispatch_id,
                        bool validating_carried_composite_stage,
                        const ConSanPerturbationPlanningState *carried_perturbation) {
@@ -4590,9 +4503,10 @@ finalize_consan_result(ConSanResult result, std::span<const uint8_t> original_by
 
 } // namespace
 
-std::vector<std::string> validate_consan_modified_elf(std::span<const uint8_t> original_bytes,
-                                                      const ConSanResult &modified_result,
-                                                      uint64_t expected_moi_report_dispatch_id) {
+std::vector<std::string>
+validate_consan_modified_elf(std::span<const uint8_t> original_bytes,
+                             const ConSanTransformArtifacts &modified_result,
+                             uint64_t expected_moi_report_dispatch_id) {
   return validate_final_consan_elf(original_bytes, modified_result,
                                    expected_moi_report_dispatch_id);
 }

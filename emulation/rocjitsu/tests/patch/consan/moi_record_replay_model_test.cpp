@@ -869,7 +869,7 @@ TEST(ConSanMoi, RecordReplayBarrierRecordsUsePersistentEpochState) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0, 1);
 
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -919,7 +919,7 @@ TEST(ConSanMoi, RecordReplayAtomicOnlyObjectCapturesPersistentEntryState) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0, 0, 1, 1);
 
-  const ConSanResult result =
+  const ConSanTransformArtifacts result =
       test_lower_consan(make_rdna4_ordered_flat_atomic_code_object(), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));

@@ -213,7 +213,7 @@ struct ConSanDispatchRequirements {
 ///
 /// This type separates caller-facing stage state, immutable semantic artifacts,
 /// address-free evidence requirements, validated replacement bytes, and typed
-/// failures from the prototype's large mutable `ConSanResult`. A result never
+/// failures from the prototype's large mutable `ConSanTransformArtifacts`. A result never
 /// contains runtime conflict evidence and makes no race-free claim. Public
 /// fields allow precise construction and invariant testing during the
 /// migration, while production creates values only through `transform_consan`

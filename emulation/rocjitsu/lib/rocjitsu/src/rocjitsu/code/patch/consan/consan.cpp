@@ -288,7 +288,7 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
-    ConSanResult inventory;
+    ConSanTransformArtifacts inventory;
     static_cast<ConSanTransformArtifacts &>(inventory) = std::move(inventory_artifacts);
     options.patched_image_growth_input_bytes = code_object_bytes.size();
     if (options.flavor != ConSanFlavor::Moi)
@@ -361,12 +361,12 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     // with perturbation planning, receives the ordinary fresh transform.
     if (has_late_fault &&
         (inventory_shape_mismatch || options.sc_perturb_kind != ConSanPerturbationKind::None)) {
-      ConSanResult result = try_patch_consan_impl(code_object_bytes, options);
+      ConSanTransformArtifacts result = try_patch_consan_impl(code_object_bytes, options);
       try_apply_unmatched_barrier_wait_abort(code_object_bytes, options, result);
       return finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id);
     }
-    ConSanResult result =
+    ConSanTransformArtifacts result =
         has_late_fault
             ? try_patch_consan_impl(code_object_bytes, options, {}, std::move(inventory))
             : try_patch_consan_moi(std::move(inventory), options, code_object_bytes, arch);
@@ -374,18 +374,18 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     return finalize_consan_result(std::move(result), code_object_bytes,
                                   options.moi_report_dispatch_id);
   } catch (const std::exception &error) {
-    ConSanResult result;
+    ConSanTransformArtifacts result;
     result.errors.emplace_back(std::string("ConSan MOI inventory retry threw an exception: ") +
                                error.what());
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (...) {
-    ConSanResult result;
+    ConSanTransformArtifacts result;
     result.errors.emplace_back("ConSan MOI inventory retry threw a non-standard exception");
     return finalize_consan_result(std::move(result), code_object_bytes);
   }
 }
 
-ConSanResult
+ConSanTransformArtifacts
 complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                          ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
@@ -394,18 +394,18 @@ complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSa
   try {
     ConSanOptions effective_options = options;
     effective_options.patched_image_growth_input_bytes = code_object_bytes.size();
-    ConSanResult result = try_patch_consan_impl(code_object_bytes, effective_options, {},
-                                                std::nullopt, inspected_perturbation);
+    ConSanTransformArtifacts result = try_patch_consan_impl(
+        code_object_bytes, effective_options, {}, std::nullopt, inspected_perturbation);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, effective_options, result);
     result = finalize_consan_result(std::move(result), code_object_bytes,
                                     options.moi_report_dispatch_id, false, inspected_perturbation);
     return result;
   } catch (const std::exception &error) {
-    ConSanResult result;
+    ConSanTransformArtifacts result;
     result.errors.emplace_back(std::string("ConSan transform threw an exception: ") + error.what());
     return finalize_consan_result(std::move(result), code_object_bytes);
   } catch (...) {
-    ConSanResult result;
+    ConSanTransformArtifacts result;
     result.errors.emplace_back("ConSan transform threw a non-standard exception");
     return finalize_consan_result(std::move(result), code_object_bytes);
   }

@@ -36,6 +36,46 @@ auto make_physical_alias_test_canonicalizer(std::vector<std::string> &errors,
       expected_candidate_count);
 }
 
+TEST(ConSan, MoiTransientSgprStateEqualityCoversCompletePatchContract) {
+  const ConSanMoiTransientSgprState empty;
+  const ConSanMoiTransientSgprState state{
+      .exec_save_sgpr = 2u,
+      .owner_sgpr = 3u,
+      .dispatch_id_sgpr = 4u,
+      .spill_backed = true,
+      .indirect_pc_sgpr = 6u,
+      .indirect_scc_sgpr = 7u,
+      .dispatch_key_sgpr = 8u,
+      .call_return_sgpr = 9u,
+      .visible_evidence_sgpr = 10u,
+      .branch_only_scalar_spill = true,
+      .dynamic_stack_borrowed_sgpr = 11u,
+      .owner_local = true,
+  };
+
+  EXPECT_EQ(empty, ConSanMoiTransientSgprState{});
+  EXPECT_EQ(state, ConSanMoiTransientSgprState(state));
+  EXPECT_NE(state, empty);
+
+  auto expect_field_participates = [&](auto mutate) {
+    ConSanMoiTransientSgprState changed = state;
+    mutate(changed);
+    EXPECT_NE(changed, state);
+  };
+  expect_field_participates([](auto &value) { value.exec_save_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.owner_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.dispatch_id_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.spill_backed = false; });
+  expect_field_participates([](auto &value) { value.indirect_pc_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.indirect_scc_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.dispatch_key_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.call_return_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.visible_evidence_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.branch_only_scalar_spill = false; });
+  expect_field_participates([](auto &value) { value.dynamic_stack_borrowed_sgpr.reset(); });
+  expect_field_participates([](auto &value) { value.owner_local = false; });
+}
+
 TEST(ConSan, PhysicalSiteAliasCanonicalizationRetainsOrderAndRunsTypedMerge) {
   std::vector<PhysicalAliasTestCandidate> candidates{
       {.file_offset = 24u,
@@ -410,7 +450,7 @@ TEST(ConSan, SynchronizationConsumerContractRequiresUniqueAcceptableSequence) {
   EXPECT_FALSE(consan_sync_confidence_meets(ConSanSemanticConfidence::Unsupported,
                                             ConSanSemanticConfidence::Ambiguous));
 
-  ConSanResult result;
+  ConSanTransformArtifacts result;
   ProgramInventoryBuilder inventory;
   ConSanSyncSequence sequence;
   sequence.identity = "sequence-a";
@@ -469,7 +509,7 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
 
-    const ConSanResult result = test_lower_consan(bytes, options);
+    const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
     EXPECT_TRUE(result.program_inventory.code_object_parsed());
@@ -486,7 +526,7 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
 }
 
 TEST(ConSan, ProgramInventoryOwnsSemanticArchitectureResolutionGate) {
-  ConSanResult parse_only;
+  ConSanTransformArtifacts parse_only;
   parse_only.outcome = ConSanTransformOutcome::Unsupported;
   ProgramInventoryBuilder inventory;
   inventory.text_sections().push_back({});
@@ -595,7 +635,7 @@ TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
   for (const auto &profile : all_consan_transform_profiles()) {
     for (const auto &[name, bytes] : cases) {
       SCOPED_TRACE(::testing::Message() << profile.name << ": " << name);
-      const ConSanResult result = test_lower_consan(bytes, profile.options);
+      const ConSanTransformArtifacts result = test_lower_consan(bytes, profile.options);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -678,7 +718,7 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
 
     for (const auto &profile : all_consan_transform_profiles()) {
       SCOPED_TRACE(::testing::Message() << damage.description << ": " << profile.name);
-      const ConSanResult result = test_lower_consan(damage.bytes, profile.options);
+      const ConSanTransformArtifacts result = test_lower_consan(damage.bytes, profile.options);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
       EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -724,7 +764,7 @@ TEST(ConSan, ReportsMultipleMalformedKernelMetadataNotes) {
 
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(result.program_inventory.kernel_metadata_trustworthy());
   EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(), 2u);
@@ -744,7 +784,7 @@ TEST(ConSan, InfersZeroSizedKernelFunctionThroughTextEnd) {
 
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -769,7 +809,7 @@ TEST(ConSan, UsesExplicitAliasedFunctionSizeForZeroSizedKernelSymbol) {
 
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -833,7 +873,7 @@ TEST(ConSan, SkipsEmptyTargetSelectionKernelAtTextEnd) {
 
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = test_lower_consan(bytes, options);
+  const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
@@ -872,7 +912,7 @@ TEST(ConSan, ExcessiveAllocatedSectionAlignmentCannotDriveTextGrowthAllocation) 
   for (const auto &profile : all_consan_replacement_profiles()) {
     for (const auto &[name, bytes] : cases) {
       SCOPED_TRACE(::testing::Message() << profile.name << ": " << name);
-      const ConSanResult result = test_lower_consan(bytes, profile.options);
+      const ConSanTransformArtifacts result = test_lower_consan(bytes, profile.options);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -892,7 +932,7 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
   const std::vector<uint8_t> valid = make_rdna4_lds_code_object(text_words);
   auto expect_transactional_result = [&](std::span<const uint8_t> input,
                                          const ConSanTransformProfile &profile) {
-    const ConSanResult result = test_lower_consan(input, profile.options);
+    const ConSanTransformArtifacts result = test_lower_consan(input, profile.options);
     EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(input));
     if (result.modified()) {
       EXPECT_TRUE(result.modified());
@@ -933,22 +973,22 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   for (const auto &profile : all_consan_replacement_profiles()) {
     SCOPED_TRACE(profile.name);
-    const ConSanResult valid = test_lower_consan(bytes, profile.options);
+    const ConSanTransformArtifacts valid = test_lower_consan(bytes, profile.options);
     ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());
 
-    ConSanResult wrong_target = valid;
+    ConSanTransformArtifacts wrong_target = valid;
     mutate_elf_header(wrong_target.replacement, [](Elf64_Ehdr &header) { header.e_flags = 0; });
     EXPECT_FALSE(validate_consan_modified_elf(bytes, wrong_target).empty());
 
-    ConSanResult stale_text = valid;
+    ConSanTransformArtifacts stale_text = valid;
     mutate_elf_section(stale_text.replacement, 1, [&](Elf64_Shdr &section) {
       section.sh_size = stale_text.replacement.size();
     });
     EXPECT_FALSE(validate_consan_modified_elf(bytes, stale_text).empty());
 
-    ConSanResult unaccounted_change = valid;
+    ConSanTransformArtifacts unaccounted_change = valid;
     unaccounted_change.replacement[0x100u + 48u] ^= 1u;
     const std::vector<std::string> unaccounted_errors =
         validate_consan_modified_elf(bytes, unaccounted_change);
@@ -957,7 +997,7 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
       return error.find("unaccounted executable byte change") != std::string::npos;
     }));
 
-    ConSanResult overlapping_inventory = valid;
+    ConSanTransformArtifacts overlapping_inventory = valid;
     ConSanPatchInfo overlap = overlapping_inventory.patches.front();
     overlap.anchor_offset += sizeof(uint32_t);
     overlapping_inventory.patches.push_back(overlap);
@@ -968,7 +1008,7 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
       return error.find("partially overlapping patch ranges") != std::string::npos;
     }));
 
-    ConSanResult stale_inventory = valid;
+    ConSanTransformArtifacts stale_inventory = valid;
     stale_inventory.patches.front().anchor_offset = UINT64_MAX;
     const std::vector<std::string> stale_inventory_errors =
         validate_consan_modified_elf(bytes, stale_inventory);
@@ -977,7 +1017,7 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
       return error.find("stale or unaligned patch range") != std::string::npos;
     }));
 
-    ConSanResult undecodable_patch = valid;
+    ConSanTransformArtifacts undecodable_patch = valid;
     const uint32_t invalid_instruction = 0xffffffffu;
     std::memcpy(undecodable_patch.replacement.data() + 0x100u + valid.patches.front().anchor_offset,
                 &invalid_instruction, sizeof(invalid_instruction));
@@ -997,7 +1037,7 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
   const std::vector<uint8_t> bytes =
       make_rdna4_lds_code_object(text_words, "many_disjoint_patch_ranges");
 
-  ConSanResult result;
+  ConSanTransformArtifacts result;
   result.mark_modified();
   result.replacement = bytes;
   AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());

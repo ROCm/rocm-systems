@@ -245,6 +245,42 @@ struct ConSanMoiPrologueScratchVgprAssignment {
   auto operator<=>(const ConSanMoiPrologueScratchVgprAssignment &) const = default;
 };
 
+/// Exact probe-local scalar ABI consumed by one emitted MOI mechanism.
+///
+/// Unlike an assignment candidate, this value has no descriptor identity: a
+/// shared helper has one instruction stream and therefore one ABI across all
+/// of its owners. `owner_local` records whether placement selected this state
+/// through an owner-component override rather than the code-object-wide
+/// fallback. Empty optionals mean the corresponding mechanism is absent.
+struct ConSanMoiTransientSgprState {
+  /// First SGPR in the EXEC/VCC/SCC save window used while the probe runs.
+  std::optional<uint16_t> exec_save_sgpr;
+  /// Probe-local normalized resident-wave identity, when required.
+  std::optional<uint16_t> owner_sgpr;
+  /// Persistent hardware dispatch-ID pair, when retained in scalar state.
+  std::optional<uint16_t> dispatch_id_sgpr;
+  /// Whether the transient window is preserved in per-lane private memory.
+  bool spill_backed = false;
+  /// Scalar pair used for an indirect body jump.
+  std::optional<uint16_t> indirect_pc_sgpr;
+  /// SCC save paired with an indirect body jump.
+  std::optional<uint16_t> indirect_scc_sgpr;
+  /// Dense-router dispatch key selected for this patch.
+  std::optional<uint16_t> dispatch_key_sgpr;
+  /// Dense-router call return selected for this patch.
+  std::optional<uint16_t> call_return_sgpr;
+  /// Inline visible-evidence scalar selected for this patch.
+  std::optional<uint16_t> visible_evidence_sgpr;
+  /// Whether control enters through branch-only scalar-spill relays.
+  bool branch_only_scalar_spill = false;
+  /// Live pair borrowed while a dynamic-stack spill frame is active.
+  std::optional<uint16_t> dynamic_stack_borrowed_sgpr;
+  /// Whether the state came from a per-owner-component assignment.
+  bool owner_local = false;
+
+  bool operator==(const ConSanMoiTransientSgprState &) const = default;
+};
+
 /// Probe-local scalar state selected for one connected set of owning kernels.
 /// A shared helper connects its callers because its single instruction stream
 /// cannot use a different transient window for each caller.
