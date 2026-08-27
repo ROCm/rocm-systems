@@ -537,6 +537,19 @@ TEST(WrapMicrotest, CeAllReduceGraphLatchTick_StaysLatchedWhileRefsLive) {
   delete comm;
 }
 
+// Not capturing, and the latch was never set: the else-if's `&&` short-
+// circuits on its first operand (graphModeSeen == false) without ever
+// evaluating localPersistentRefs -- distinct from the case above, where the
+// first operand is true and the second is what stops the clear.
+TEST(WrapMicrotest, CeAllReduceGraphLatchTick_NoopWhenNeverLatchedAndNotCapturing) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->ceColl.graphModeSeen = false;
+  comm->localPersistentRefs = 0;
+  rcclCeAllReduceGraphLatchTick(comm, /*ceCapturing=*/false);
+  EXPECT_FALSE(comm->ceColl.graphModeSeen);
+  delete comm;
+}
+
 TEST(WrapMicrotest, CeAllReduceAllowed_TrueWhenLatchClear) {
   ncclComm* comm = MakeZeroedComm();
   comm->ceColl.graphModeSeen = false;
@@ -563,21 +576,32 @@ TEST(WrapMicrotest, CeAllReduceAllowed_FalseWhenLatchSet) {
 
 TEST(WrapMicrotest, SetPxn_AlreadyCachedReturnsStoredValueUnchanged) {
   ncclComm* comm = MakeCommWithArch("gfx942");
-  comm->pxnDisable = 1;  // already resolved by a prior call; not RCCL_VALUE_UNSET
+  // 7 is outside {RCCL_VALUE_INVALID(-1), 0, 1}, the only values the
+  // fall-through arch/rank computation can ever produce for this comm. A
+  // value from that set (e.g. 1, this comm's nRanks=1 < the 64 threshold
+  // for gfx942 so the real computation also yields 1) would let this test
+  // pass even if the cached-value guard were broken and execution fell
+  // through -- which is exactly what happened until this was caught by
+  // mutation testing.
+  comm->pxnDisable = 7;  // already resolved by a prior call; not RCCL_VALUE_UNSET
   int rcclPxnDisable = -100;
   rcclSetPxn(comm, rcclPxnDisable);
-  EXPECT_EQ(1, rcclPxnDisable);
-  EXPECT_EQ(1, comm->pxnDisable);  // untouched: the cached-value arm never reassigns it
+  EXPECT_EQ(7, rcclPxnDisable);
+  EXPECT_EQ(7, comm->pxnDisable);  // untouched: the cached-value arm never reassigns it
   DeleteCommWithArch(comm);
 }
 
 TEST(WrapMicrotest, SetP2pNetChunkSize_AlreadyCachedReturnsStoredValueUnchanged) {
   ncclComm* comm = MakeCommWithArch("gfx942");
-  comm->p2pNetChunkSize = 1 << 17;
+  // 123456 is outside {RCCL_VALUE_INVALID(-1), 1<<17, 1<<18, 1<<19}, the only
+  // values the fall-through arch/rank computation can ever produce. 1<<17
+  // (this comm's nRanks=1 < the 64 threshold for gfx942) would coincide with
+  // the real computation's output, masking a broken cached-value guard.
+  comm->p2pNetChunkSize = 123456;
   int rcclP2pNetChunkSize = -100;
   rcclSetP2pNetChunkSize(comm, rcclP2pNetChunkSize);
-  EXPECT_EQ(1 << 17, rcclP2pNetChunkSize);
-  EXPECT_EQ(1 << 17, comm->p2pNetChunkSize);
+  EXPECT_EQ(123456, rcclP2pNetChunkSize);
+  EXPECT_EQ(123456, comm->p2pNetChunkSize);
   DeleteCommWithArch(comm);
 }
 
