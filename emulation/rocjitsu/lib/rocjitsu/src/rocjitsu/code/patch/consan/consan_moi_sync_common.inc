@@ -857,33 +857,31 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
   return consan_detail::append_workgroup_source_value(words, source, destination_vgpr, arch);
 }
 
-[[nodiscard]] bool append_inline_workgroup_key(std::vector<uint32_t> &words,
-                                               const ConSanMoiWorkgroupSources &sources,
-                                               const MoiOptions &options, uint16_t key_vgpr,
-                                               uint16_t coordinate_vgpr, uint16_t value_vgpr,
-                                               uint16_t original_exec_save_offset,
-                                               rj_code_arch_t arch) {
-  if (!options.moi_exec_save_sgpr)
+[[nodiscard]] bool
+append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgroupSources &sources,
+                            const MoiWorkgroupKeyRegisterPlan &registers, uint16_t key_vgpr,
+                            uint16_t coordinate_vgpr, uint16_t value_vgpr,
+                            uint16_t original_exec_save_offset, rj_code_arch_t arch) {
+  if (!registers.is_well_formed())
     return false;
-  const uint16_t exec_base = *options.moi_exec_save_sgpr;
+  const uint16_t exec_base = *registers.exec_save_sgpr;
   const auto save_original = instrumentation::build_s_mov_b64(
       static_cast<uint16_t>(exec_base + original_exec_save_offset), kRdna4ExecLo, arch);
   if (!save_original)
     return false;
   words.push_back(*save_original);
 
-  if (options.moi_workgroup_key_vgpr) {
+  if (registers.cached_key_vgpr) {
     words.push_back(
-        build_v_mov_b32_e32(key_vgpr, vector_source_vgpr(*options.moi_workgroup_key_vgpr), arch));
+        build_v_mov_b32_e32(key_vgpr, vector_source_vgpr(*registers.cached_key_vgpr), arch));
     const auto valid =
         instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch);
     const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
     InstructionSequence sequence(words);
     return sequence.emit_all(valid, narrow);
   }
-  if (options.moi_persistent_sgprs.workgroup_key) {
-    words.push_back(
-        build_v_mov_b32_e32(key_vgpr, *options.moi_persistent_sgprs.workgroup_key, arch));
+  if (registers.cached_key_sgpr) {
+    words.push_back(build_v_mov_b32_e32(key_vgpr, *registers.cached_key_sgpr, arch));
     const auto valid =
         instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch);
     const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
@@ -2677,7 +2675,8 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
 
   failure.stage = "transaction initialization";
   if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch) ||
-      !append_inline_workgroup_key(words, workgroup_sources, options, workgroup_key,
+      !append_inline_workgroup_key(words, workgroup_sources,
+                                   moi_workgroup_key_register_plan(options), workgroup_key,
                                    static_cast<uint16_t>(base + 6u), temporary,
                                    /*original_exec_save_offset=*/12u, arch)) {
     errors.emplace_back("ConSan MOI inline release could not initialize its EXEC transaction");
@@ -3588,7 +3587,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         kRdna4ExecLo, static_cast<uint16_t>(*options.moi_exec_save_sgpr + 12u), arch);
     if (!restore_original_exec ||
         !append_save_moi_special_state(words, moi_special_state_sgprs(options), arch) ||
-        !append_inline_workgroup_key(words, *workgroup_sources, options, workgroup_key_vgpr,
+        !append_inline_workgroup_key(words, *workgroup_sources,
+                                     moi_workgroup_key_register_plan(options), workgroup_key_vgpr,
                                      temporary_vgpr, value_vgpr,
                                      /*original_exec_save_offset=*/12u, arch) ||
         !append_inline_atomic_slot_address(words, slot_base, inline_atomic_release_capacity,
@@ -3686,7 +3686,8 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
   }
 
   if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch) ||
-      !append_inline_workgroup_key(words, *workgroup_sources, options, workgroup_key_vgpr,
+      !append_inline_workgroup_key(words, *workgroup_sources,
+                                   moi_workgroup_key_register_plan(options), workgroup_key_vgpr,
                                    temporary_vgpr, value_vgpr,
                                    /*original_exec_save_offset=*/12u, arch) ||
       !append_inline_atomic_slot_address(words, slot_base, inline_atomic_release_capacity,

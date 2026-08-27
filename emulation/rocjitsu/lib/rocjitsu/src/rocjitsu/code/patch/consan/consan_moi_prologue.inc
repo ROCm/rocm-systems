@@ -1285,9 +1285,12 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
       return std::nullopt;
     }
     words.push_back(build_v_mov_b32_e32(*workgroup_key_vgpr, scalar_positive_inline_u32(0), arch));
-    MoiOptions key_options;
-    key_options.moi_exec_save_sgpr = return_pc_sgpr;
-    if (!append_inline_workgroup_key(words, *workgroup_sources, key_options, *workgroup_key_vgpr,
+    const MoiWorkgroupKeyRegisterPlan key_registers{
+        .exec_save_sgpr = return_pc_sgpr,
+        .cached_key_vgpr = std::nullopt,
+        .cached_key_sgpr = std::nullopt,
+    };
+    if (!append_inline_workgroup_key(words, *workgroup_sources, key_registers, *workgroup_key_vgpr,
                                      owner_vgpr, epoch_vgpr,
                                      /*original_exec_save_offset=*/20u, arch)) {
       errors.emplace_back("ConSan MOI workgroup-key prologue could not encode launch identity");
@@ -1509,9 +1512,12 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
       errors.emplace_back("ConSan MOI private workgroup key requires entry ABI sources");
       return std::nullopt;
     }
-    MoiOptions key_options;
-    key_options.moi_exec_save_sgpr = return_pc_sgpr;
-    if (!append_inline_workgroup_key(words, *workgroup_sources, key_options, scratch_vgpr,
+    const MoiWorkgroupKeyRegisterPlan key_registers{
+        .exec_save_sgpr = return_pc_sgpr,
+        .cached_key_vgpr = std::nullopt,
+        .cached_key_sgpr = std::nullopt,
+    };
+    if (!append_inline_workgroup_key(words, *workgroup_sources, key_registers, scratch_vgpr,
                                      static_cast<uint16_t>(scratch_vgpr + 1u),
                                      static_cast<uint16_t>(scratch_vgpr + 2u), 20u, arch)) {
       errors.emplace_back("ConSan MOI private prologue could not capture workgroup identity");

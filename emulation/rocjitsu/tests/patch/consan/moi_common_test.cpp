@@ -350,6 +350,36 @@ TEST(ConSanMoi, WorkgroupShadowClearPlanFallsBackAndRejectsMalformedLayouts) {
       malformed, /*initialization_size=*/16u, /*initialization_lanes=*/64u, true));
 }
 
+TEST(ConSanMoi, WorkgroupKeyRegisterPlanRequiresOneUnambiguousExecutionPlan) {
+  using consan_detail::MoiWorkgroupKeyRegisterPlan;
+  const MoiWorkgroupKeyRegisterPlan missing_exec{};
+  const MoiWorkgroupKeyRegisterPlan derived{
+      .exec_save_sgpr = 40u,
+      .cached_key_vgpr = std::nullopt,
+      .cached_key_sgpr = std::nullopt,
+  };
+  const MoiWorkgroupKeyRegisterPlan vector_cached{
+      .exec_save_sgpr = 40u,
+      .cached_key_vgpr = 20u,
+      .cached_key_sgpr = std::nullopt,
+  };
+  const MoiWorkgroupKeyRegisterPlan scalar_cached{
+      .exec_save_sgpr = 40u,
+      .cached_key_vgpr = std::nullopt,
+      .cached_key_sgpr = 60u,
+  };
+  const MoiWorkgroupKeyRegisterPlan ambiguous{
+      .exec_save_sgpr = 40u,
+      .cached_key_vgpr = 20u,
+      .cached_key_sgpr = 60u,
+  };
+  EXPECT_FALSE(missing_exec.is_well_formed());
+  EXPECT_TRUE(derived.is_well_formed());
+  EXPECT_TRUE(vector_cached.is_well_formed());
+  EXPECT_TRUE(scalar_cached.is_well_formed());
+  EXPECT_FALSE(ambiguous.is_well_formed());
+}
+
 [[nodiscard]] constexpr bool sgpr_ranges_overlap(uint16_t base, uint16_t width, uint16_t other_base,
                                                  uint16_t other_width) {
   return base < static_cast<uint32_t>(other_base) + other_width &&

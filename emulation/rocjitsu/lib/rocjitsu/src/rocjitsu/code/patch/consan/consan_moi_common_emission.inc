@@ -2610,12 +2610,20 @@ append_add_exact_shadow_generation(std::vector<uint32_t> &words, uint16_t packed
   return sequence.emit_all(low, shift_low, add_low, high, mask_high, add_high);
 }
 
-[[nodiscard]] bool append_inline_workgroup_key(std::vector<uint32_t> &words,
-                                               const ConSanMoiWorkgroupSources &sources,
-                                               const MoiOptions &options, uint16_t key_vgpr,
-                                               uint16_t coordinate_vgpr, uint16_t value_vgpr,
-                                               uint16_t original_exec_save_offset,
-                                               rj_code_arch_t arch);
+[[nodiscard]] MoiWorkgroupKeyRegisterPlan
+moi_workgroup_key_register_plan(const MoiOptions &options) {
+  return MoiWorkgroupKeyRegisterPlan{
+      .exec_save_sgpr = options.moi_exec_save_sgpr,
+      .cached_key_vgpr = options.moi_workgroup_key_vgpr,
+      .cached_key_sgpr = options.moi_persistent_sgprs.workgroup_key,
+  };
+}
+
+[[nodiscard]] bool
+append_inline_workgroup_key(std::vector<uint32_t> &words, const ConSanMoiWorkgroupSources &sources,
+                            const MoiWorkgroupKeyRegisterPlan &registers, uint16_t key_vgpr,
+                            uint16_t coordinate_vgpr, uint16_t value_vgpr,
+                            uint16_t original_exec_save_offset, rj_code_arch_t arch);
 
 [[nodiscard]] bool append_inline_acquired_token_slot_address(
     std::vector<uint32_t> &words, uint64_t table_base, uint32_t table_capacity,

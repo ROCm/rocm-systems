@@ -85,6 +85,29 @@ struct ConSanMoiWorkgroupSource {
 
 namespace consan_detail {
 
+/// Resolved persistent-register inputs consumed while deriving one compact
+/// workgroup key.
+///
+/// `exec_save_sgpr` is the base of the scalar window used to narrow and later
+/// restore participating lanes. A previously initialized key may reside in
+/// either `cached_key_vgpr` or `cached_key_sgpr`; when neither is present, the
+/// emitter derives the key from the supplied launch-coordinate sources.
+/// Keeping this plan separate from `MoiOptions` prevents the key emitter from
+/// observing engine policy, report layout, or unrelated resource choices.
+struct MoiWorkgroupKeyRegisterPlan {
+  std::optional<uint16_t> exec_save_sgpr;
+  std::optional<uint16_t> cached_key_vgpr;
+  std::optional<uint16_t> cached_key_sgpr;
+
+  /// A usable plan has EXEC preservation and at most one cached
+  /// representation. Two cached sources would make selection ambiguous.
+  [[nodiscard]] bool is_well_formed() const {
+    return exec_save_sgpr.has_value() && !(cached_key_vgpr && cached_key_sgpr);
+  }
+
+  bool operator==(const MoiWorkgroupKeyRegisterPlan &) const = default;
+};
+
 /// Semantic request to materialize the current resident wave's owner identity
 /// in one scalar register.
 ///

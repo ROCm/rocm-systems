@@ -2656,7 +2656,7 @@
   const bool generation_tagged_local_shadow =
       workgroup_shadow && consan_moi_generation_tagged_workgroup_shadow(*workgroup_shadow);
   const uint16_t original_exec_save_offset = kConSanMoiInlineOriginalExecSaveOffset;
-  MoiOptions key_options = options;
+  MoiWorkgroupKeyRegisterPlan key_registers = moi_workgroup_key_register_plan(options);
   // Eagerly initialized and bitmap-backed workgroup-local mirrors are
   // physically unreachable from every other live workgroup and omit the
   // generation field. A generation-tagged local mirror deliberately retains
@@ -2683,10 +2683,11 @@
     }
     words.insert(words.end(), load->begin(), load->end());
     words.push_back(*wait);
-    key_options.moi_workgroup_key_vgpr = workgroup_key_vgpr;
+    key_registers.cached_key_vgpr = workgroup_key_vgpr;
+    key_registers.cached_key_sgpr = std::nullopt;
   }
   if ((!workgroup_shadow || generation_tagged_local_shadow) && options.moi_exec_save_sgpr &&
-      !append_inline_workgroup_key(words, workgroup_sources, key_options, workgroup_key_vgpr,
+      !append_inline_workgroup_key(words, workgroup_sources, key_registers, workgroup_key_vgpr,
                                    tmp_vgpr, address_lo_vgpr, original_exec_save_offset, arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not derive workgroup identity");
     return std::nullopt;
