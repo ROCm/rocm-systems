@@ -33,6 +33,7 @@ struct ExpectedTargetProfile {
   ConSanWaitCounterFamily wait_counter_family;
   ConSanDirectCallForm direct_call_form;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
+  ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
   bool supports_wave32;
   bool supports_wave64;
   uint8_t exec_register_width_bits;
@@ -71,6 +72,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
+                .maximum_lanes = 32,
+            },
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -107,6 +113,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::SplitB32Pair,
+                .maximum_lanes = 32,
+            },
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -143,6 +154,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx11,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
+                .maximum_lanes = 32,
+            },
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -179,6 +195,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
+                .maximum_lanes = 32,
+            },
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -215,6 +236,11 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallI64,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB128,
+                .maximum_lanes = 64,
+            },
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -254,6 +280,7 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.wait_counter_family, expected.wait_counter_family);
   EXPECT_EQ(actual.direct_call_form, expected.direct_call_form);
   EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
+  EXPECT_EQ(actual.workgroup_shadow_clear, expected.workgroup_shadow_clear);
   EXPECT_EQ(actual.supports_wave32, expected.supports_wave32);
   EXPECT_EQ(actual.supports_wave64, expected.supports_wave64);
   EXPECT_EQ(actual.exec_register_width_bits, expected.exec_register_width_bits);
@@ -349,6 +376,12 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
     profiles[0].resident_wave_identity.bit_offset = 31u;
     profiles[0].resident_wave_identity.bit_width = 2u;
   });
+  expect_invalid("unknown workgroup-shadow clear encoding", [](auto &profiles) {
+    profiles[0].workgroup_shadow_clear.encoding =
+        static_cast<ConSanWorkgroupShadowClearEncoding>(255u);
+  });
+  expect_invalid("unsupported workgroup-shadow clear lane limit",
+                 [](auto &profiles) { profiles[0].workgroup_shadow_clear.maximum_lanes = 48u; });
   expect_invalid("two-address relocation split on a non-gfx12 encoding", [](auto &profiles) {
     profiles[0].requires_split_two_address_lds_relocation = true;
   });

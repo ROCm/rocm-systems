@@ -196,6 +196,75 @@ TEST(ConSanMoi, DeviceCacheRefreshUsesOnlyQualifiedTargetSequences) {
   }
 }
 
+TEST(ConSanMoi, WorkgroupShadowClearPlanCoversEveryTargetProfile) {
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    EXPECT_EQ(consan_detail::moi_workgroup_shadow_initialization_lanes(target, std::nullopt), 32u);
+    EXPECT_EQ(consan_detail::moi_workgroup_shadow_initialization_lanes(
+                  target, std::array<uint32_t, 3>{16u, 1u, 1u}),
+              32u);
+    EXPECT_EQ(consan_detail::moi_workgroup_shadow_initialization_lanes(
+                  target, std::array<uint32_t, 3>{128u, 1u, 1u}),
+              target.workgroup_shadow_clear.maximum_lanes);
+
+    const auto plan = consan_detail::plan_moi_workgroup_shadow_clear(
+        target, /*initialization_size=*/16u, target.workgroup_shadow_clear.maximum_lanes,
+        /*has_quad_zero_tuple=*/true);
+    ASSERT_TRUE(plan);
+    switch (target.workgroup_shadow_clear.encoding) {
+    case ConSanWorkgroupShadowClearEncoding::SplitB32Pair:
+      EXPECT_EQ(plan->store_form, consan_detail::MoiWorkgroupShadowClearStoreForm::SplitB32Pair);
+      EXPECT_EQ(plan->zero_vgpr_count, 2u);
+      break;
+    case ConSanWorkgroupShadowClearEncoding::PackedB64:
+      EXPECT_EQ(plan->store_form, consan_detail::MoiWorkgroupShadowClearStoreForm::PackedB64);
+      EXPECT_EQ(plan->zero_vgpr_count, 2u);
+      break;
+    case ConSanWorkgroupShadowClearEncoding::PackedB128:
+      EXPECT_EQ(plan->store_form, consan_detail::MoiWorkgroupShadowClearStoreForm::PackedB128);
+      EXPECT_EQ(plan->zero_vgpr_count, 4u);
+      break;
+    }
+    EXPECT_EQ(plan->initialization_lanes, target.workgroup_shadow_clear.maximum_lanes);
+    EXPECT_EQ(consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count(target),
+              target.workgroup_shadow_clear.encoding ==
+                      ConSanWorkgroupShadowClearEncoding::PackedB128
+                  ? 4u
+                  : 2u);
+  }
+}
+
+TEST(ConSanMoi, WorkgroupShadowClearPlanFallsBackAndRejectsMalformedLayouts) {
+  const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(target, nullptr);
+  const auto missing_quad = consan_detail::plan_moi_workgroup_shadow_clear(
+      *target, /*initialization_size=*/16u, /*initialization_lanes=*/64u,
+      /*has_quad_zero_tuple=*/false);
+  ASSERT_TRUE(missing_quad);
+  EXPECT_EQ(missing_quad->store_form, consan_detail::MoiWorkgroupShadowClearStoreForm::PackedB64);
+  EXPECT_EQ(missing_quad->zero_vgpr_count, 2u);
+  const auto unaligned_range = consan_detail::plan_moi_workgroup_shadow_clear(
+      *target, /*initialization_size=*/24u, /*initialization_lanes=*/64u,
+      /*has_quad_zero_tuple=*/true);
+  ASSERT_TRUE(unaligned_range);
+  EXPECT_EQ(unaligned_range->store_form,
+            consan_detail::MoiWorkgroupShadowClearStoreForm::PackedB64);
+
+  EXPECT_FALSE(consan_detail::plan_moi_workgroup_shadow_clear(*target, /*initialization_size=*/0u,
+                                                              /*initialization_lanes=*/64u, true));
+  EXPECT_FALSE(consan_detail::plan_moi_workgroup_shadow_clear(*target, /*initialization_size=*/12u,
+                                                              /*initialization_lanes=*/64u, true));
+  EXPECT_FALSE(consan_detail::plan_moi_workgroup_shadow_clear(*target, /*initialization_size=*/16u,
+                                                              /*initialization_lanes=*/0u, true));
+  EXPECT_FALSE(consan_detail::plan_moi_workgroup_shadow_clear(*target, /*initialization_size=*/16u,
+                                                              /*initialization_lanes=*/65u, true));
+
+  ConSanTargetProfile malformed = *target;
+  malformed.workgroup_shadow_clear.encoding = static_cast<ConSanWorkgroupShadowClearEncoding>(255u);
+  EXPECT_FALSE(consan_detail::plan_moi_workgroup_shadow_clear(
+      malformed, /*initialization_size=*/16u, /*initialization_lanes=*/64u, true));
+}
+
 [[nodiscard]] constexpr bool sgpr_ranges_overlap(uint16_t base, uint16_t width, uint16_t other_base,
                                                  uint16_t other_width) {
   return base < static_cast<uint32_t>(other_base) + other_width &&

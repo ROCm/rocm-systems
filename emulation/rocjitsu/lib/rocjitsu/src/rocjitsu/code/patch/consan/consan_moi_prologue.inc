@@ -648,18 +648,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
   return true;
 }
 
-[[nodiscard]] uint16_t moi_workgroup_shadow_initialization_lanes(
-    const std::optional<std::array<uint32_t, 3>> &required_workgroup_size, rj_code_arch_t arch) {
-  constexpr uint16_t kWave32Lanes = 32u;
-  constexpr uint16_t kMaximumInlineLanes = 64u;
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !required_workgroup_size ||
-      (*required_workgroup_size)[0] <= kWave32Lanes) {
-    return kWave32Lanes;
-  }
-  return static_cast<uint16_t>(
-      std::min<uint32_t>((*required_workgroup_size)[0], kMaximumInlineLanes));
-}
-
 [[nodiscard]] bool append_moi_entry_workitem_coordinate(std::vector<uint32_t> &words,
                                                         uint16_t destination_vgpr,
                                                         uint8_t dimension, rj_code_arch_t arch) {
@@ -694,9 +682,21 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       layout.lazy_initialization ? layout.validity_base : layout.base;
   const uint32_t initialization_size =
       layout.lazy_initialization ? layout.validity_size : layout.size;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const auto clear_plan =
+      target ? plan_moi_workgroup_shadow_clear(*target, initialization_size,
+                                               layout.initialization_lanes, has_quad_zero_tuple)
+             : std::nullopt;
+  if (!clear_plan) {
+    errors.emplace_back(
+        "ConSan MOI parallel workgroup-shadow initializer has no valid target clear plan");
+    return false;
+  }
+  const bool use_wide_store =
+      clear_plan->store_form != MoiWorkgroupShadowClearStoreForm::SplitB32Pair;
   const bool use_quad_store =
-      arch == ROCJITSU_CODE_ARCH_CDNA5 && has_quad_zero_tuple && initialization_size % 16u == 0u;
-  const uint16_t zero_tuple_size = use_quad_store ? 4u : 2u;
+      clear_plan->store_form == MoiWorkgroupShadowClearStoreForm::PackedB128;
+  const uint16_t zero_tuple_size = clear_plan->zero_vgpr_count;
   if (!state_sgpr || *state_sgpr > 118u || initialization_size == 0u ||
       initialization_size % 8u != 0u || layout.workitem_id_dimensions == 0u ||
       layout.workitem_id_dimensions > 3u || layout.initialization_lanes == 0u ||
@@ -749,7 +749,6 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
       end_vgpr, scalar_positive_inline_u32(store_shift), end_vgpr, arch);
   const auto address =
       instrumentation::build_v_add_u32_literal(address_vgpr, initialization_base, end_vgpr, arch);
-  const bool use_wide_store = arch != ROCJITSU_CODE_ARCH_CDNA4;
   const auto end = instrumentation::build_v_mov_b32_literal(
       end_vgpr, initialization_base + initialization_size, arch);
   const auto store_low = instrumentation::build_ds_store_b32(address_vgpr, zero_vgpr, 0u, arch);
@@ -1814,6 +1813,11 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
         "emitted");
     return;
   }
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
+    result.errors.emplace_back("ConSan MOI private-epoch prologue has no admitted target profile");
+    return;
+  }
 
   std::span<const uint8_t> active_bytes(result.replacement.data(), result.replacement.size());
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
@@ -1999,7 +2003,7 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
                   .required_group_segment_size = access_patch->required_group_segment_size,
                   .workitem_id_dimensions = workitem_id_dimensions,
                   .initialization_lanes = moi_workgroup_shadow_initialization_lanes(
-                      active_kernel->required_workgroup_size, arch),
+                      *target, active_kernel->required_workgroup_size),
                   .lazy_initialization = access_patch->workgroup_shadow_lazy_initialization,
                   .compact = access_patch->workgroup_shadow_compact,
                   .visible_evidence_sgpr = std::nullopt,
@@ -2264,8 +2268,11 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
     return 0u;
   uint32_t required = std::max<uint32_t>(*options.moi_owner_vgpr, *options.moi_epoch_vgpr) + 1u;
   if (workgroup_shadow) {
+    const ConSanTargetProfile *target = consan_target_profile(arch);
     const uint32_t shadow_zero_tuple_count =
-        options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5 ? 4u : 2u;
+        options.automatic_moi_persistent_vgprs && target != nullptr
+            ? moi_workgroup_shadow_preferred_zero_vgpr_count(*target)
+            : 2u;
     required = std::max<uint32_t>(required, *options.moi_epoch_vgpr + shadow_zero_tuple_count);
   }
   if (options.moi_workgroup_key_vgpr)
@@ -2316,12 +2323,13 @@ void try_apply_private_epoch_prologue_patch(const MoiOptions &options, rj_code_a
   };
   if (overlaps(options.moi_owner_vgpr))
     return true;
-  const uint16_t epoch_width = workgroup_shadow
-                                   ? static_cast<uint16_t>(options.automatic_moi_persistent_vgprs &&
-                                                                   arch == ROCJITSU_CODE_ARCH_CDNA5
-                                                               ? 4u
-                                                               : 2u)
-                                   : 1u;
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  const uint16_t epoch_width =
+      workgroup_shadow
+          ? static_cast<uint16_t>(options.automatic_moi_persistent_vgprs && target != nullptr
+                                      ? moi_workgroup_shadow_preferred_zero_vgpr_count(*target)
+                                      : 2u)
+          : 1u;
   if (overlaps(options.moi_epoch_vgpr, epoch_width) || overlaps(options.moi_workgroup_key_vgpr) ||
       overlaps(options.moi_dispatch_id_vgpr, 2u)) {
     return true;
@@ -2345,6 +2353,11 @@ void try_apply_owner_epoch_prologue_patch(
   if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back(
         "ConSan MOI owner/epoch prologue does not support this architecture");
+    return;
+  }
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr) {
+    result.errors.emplace_back("ConSan MOI owner/epoch prologue has no admitted target profile");
     return;
   }
   if (options.automatic_moi_private_epoch) {
@@ -2539,7 +2552,7 @@ void try_apply_owner_epoch_prologue_patch(
           .required_group_segment_size = patch.required_group_segment_size,
           .workitem_id_dimensions = *workitem_id_dimensions,
           .initialization_lanes =
-              moi_workgroup_shadow_initialization_lanes(active.required_workgroup_size, arch),
+              moi_workgroup_shadow_initialization_lanes(*target, active.required_workgroup_size),
           .lazy_initialization = patch.workgroup_shadow_lazy_initialization,
           .compact = patch.workgroup_shadow_compact,
           .visible_evidence_sgpr = std::nullopt,
@@ -2970,7 +2983,8 @@ void try_apply_owner_epoch_prologue_patch(
         kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
         kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
         item.entry_scalar_backup, prologue_workgroup_shadow,
-        options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
+        options.automatic_moi_persistent_vgprs &&
+            moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
         item.workgroup_sources, displaced_entry_words, arch, result.errors);
     if (!words)
       return;
@@ -3058,7 +3072,8 @@ void try_apply_owner_epoch_prologue_patch(
           kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
           kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
           item.entry_scalar_backup, prologue_workgroup_shadow,
-          options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
+          options.automatic_moi_persistent_vgprs &&
+              moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
           item.workgroup_sources, std::span<const uint32_t>{}, arch, result.errors);
       if (!secondary_words)
         return;
@@ -3090,7 +3105,8 @@ void try_apply_owner_epoch_prologue_patch(
             kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
             kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
             item.entry_scalar_backup, prologue_workgroup_shadow,
-            options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
+            options.automatic_moi_persistent_vgprs &&
+                moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
             item.workgroup_sources, displaced_entry_words, arch, result.errors);
         if (!words)
           return;
@@ -3110,7 +3126,8 @@ void try_apply_owner_epoch_prologue_patch(
             kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
             kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
             item.entry_scalar_backup, prologue_workgroup_shadow,
-            options.automatic_moi_persistent_vgprs && arch == ROCJITSU_CODE_ARCH_CDNA5,
+            options.automatic_moi_persistent_vgprs &&
+                moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
             item.workgroup_sources, std::span<const uint32_t>{}, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, primary_body_offset);

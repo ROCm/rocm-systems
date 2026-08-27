@@ -215,6 +215,110 @@ struct MoiEncodedSccRestoreRequest {
 [[nodiscard]] bool append_moi_device_cache_refresh(std::vector<uint32_t> &words,
                                                    const ConSanTargetProfile &target);
 
+/// Names the concrete store shape selected for one parallel workgroup-shadow
+/// clear loop.
+///
+/// Unlike `ConSanWorkgroupShadowClearEncoding`, which records the widest form
+/// a target admits, this enum is the resolved lowering decision for one clear.
+/// A split pair writes the low and high 32-bit halves separately; the packed
+/// forms write the complete eight- or sixteen-byte zero tuple atomically with
+/// respect to instruction issue.
+enum class MoiWorkgroupShadowClearStoreForm : uint8_t {
+  SplitB32Pair,
+  PackedB64,
+  PackedB128,
+};
+
+/// Complete target-qualified lowering plan for one parallel LDS shadow clear.
+///
+/// `store_form` is the concrete instruction shape selected after considering
+/// target capability, range alignment, and available consecutive zero VGPRs.
+/// `initialization_lanes` is the already-planned number of entry lanes that
+/// participate in each x-row. `zero_vgpr_count` is the exact consecutive tuple
+/// consumed by the selected store. The emitter consumes this record without
+/// inspecting an architecture ID or independently recomputing resource needs.
+struct MoiWorkgroupShadowClearPlan {
+  MoiWorkgroupShadowClearStoreForm store_form = MoiWorkgroupShadowClearStoreForm::PackedB64;
+  uint16_t initialization_lanes = 32;
+  uint16_t zero_vgpr_count = 2;
+
+  bool operator==(const MoiWorkgroupShadowClearPlan &) const = default;
+};
+
+/// Select the number of entry lanes used by a target's shadow-clear loop.
+///
+/// A known x dimension wider than one wave may use up to the target's declared
+/// maximum. Missing or smaller launch geometry keeps the conservative 32-lane
+/// plan. The target profile is assumed to have passed the capability-contract
+/// validator.
+[[nodiscard]] constexpr uint16_t moi_workgroup_shadow_initialization_lanes(
+    const ConSanTargetProfile &target,
+    const std::optional<std::array<uint32_t, 3>> &required_workgroup_size) {
+  constexpr uint16_t kConservativeLanes = 32u;
+  if (!required_workgroup_size || (*required_workgroup_size)[0] <= kConservativeLanes)
+    return kConservativeLanes;
+  return static_cast<uint16_t>(std::min<uint32_t>((*required_workgroup_size)[0],
+                                                  target.workgroup_shadow_clear.maximum_lanes));
+}
+
+/// Return the consecutive zero-VGPR tuple reserved by automatic planning.
+///
+/// A target capable of a packed 128-bit clear reserves four registers so
+/// aligned layouts can use that form. Every other target reserves the two
+/// registers needed to clear one eight-byte shadow slot, including targets
+/// that encode those halves as separate 32-bit stores.
+[[nodiscard]] constexpr uint16_t
+moi_workgroup_shadow_preferred_zero_vgpr_count(const ConSanTargetProfile &target) {
+  return target.workgroup_shadow_clear.encoding == ConSanWorkgroupShadowClearEncoding::PackedB128
+             ? 4u
+             : 2u;
+}
+
+/// Resolve a target capability into the concrete store plan for one layout.
+///
+/// The input size must describe a nonempty sequence of complete eight-byte
+/// shadow slots, and the planned lane count must fit the target contract. A
+/// packed 128-bit target falls back to 64-bit stores if the range is not
+/// sixteen-byte aligned or resource planning did not supply a four-VGPR zero
+/// tuple. Invalid inputs return no plan rather than leaving emission to infer a
+/// partially valid fallback.
+[[nodiscard]] constexpr std::optional<MoiWorkgroupShadowClearPlan>
+plan_moi_workgroup_shadow_clear(const ConSanTargetProfile &target, uint32_t initialization_size,
+                                uint16_t initialization_lanes, bool has_quad_zero_tuple) {
+  if (initialization_size == 0u || initialization_size % 8u != 0u || initialization_lanes == 0u ||
+      initialization_lanes > target.workgroup_shadow_clear.maximum_lanes) {
+    return std::nullopt;
+  }
+  switch (target.workgroup_shadow_clear.encoding) {
+  case ConSanWorkgroupShadowClearEncoding::SplitB32Pair:
+    return MoiWorkgroupShadowClearPlan{
+        .store_form = MoiWorkgroupShadowClearStoreForm::SplitB32Pair,
+        .initialization_lanes = initialization_lanes,
+        .zero_vgpr_count = 2u,
+    };
+  case ConSanWorkgroupShadowClearEncoding::PackedB64:
+    return MoiWorkgroupShadowClearPlan{
+        .store_form = MoiWorkgroupShadowClearStoreForm::PackedB64,
+        .initialization_lanes = initialization_lanes,
+        .zero_vgpr_count = 2u,
+    };
+  case ConSanWorkgroupShadowClearEncoding::PackedB128:
+    if (has_quad_zero_tuple && initialization_size % 16u == 0u) {
+      return MoiWorkgroupShadowClearPlan{
+          .store_form = MoiWorkgroupShadowClearStoreForm::PackedB128,
+          .initialization_lanes = initialization_lanes,
+          .zero_vgpr_count = 4u,
+      };
+    }
+    return MoiWorkgroupShadowClearPlan{
+        .store_form = MoiWorkgroupShadowClearStoreForm::PackedB64,
+        .initialization_lanes = initialization_lanes,
+        .zero_vgpr_count = 2u,
+    };
+  }
+  return std::nullopt;
+}
+
 /// Canonical set of occupied half-open ranges in pristine executable text.
 ///
 /// Dense relay placement must reject original instructions already owned by

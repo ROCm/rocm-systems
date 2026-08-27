@@ -170,6 +170,39 @@ enum class ConSanDirectCallForm : uint8_t {
   SCallI64,
 };
 
+/// Selects the widest LDS store shape that a target's parallel workgroup-
+/// shadow clear operation may use.
+///
+/// `SplitB32Pair` emits two independently encoded 32-bit stores for each
+/// eight-byte shadow slot. `PackedB64` emits one 64-bit store. `PackedB128`
+/// permits a 128-bit store when resource planning supplies four consecutive
+/// zero VGPRs and the clear range has sixteen-byte alignment; otherwise it
+/// deliberately falls back to `PackedB64`. This is a lowering capability, not
+/// an engine policy: the InlineShadow engine decides whether a workgroup
+/// shadow is required, while the target contract decides how its bytes can be
+/// cleared.
+enum class ConSanWorkgroupShadowClearEncoding : uint8_t {
+  SplitB32Pair,
+  PackedB64,
+  PackedB128,
+};
+
+/// Target-wide limits used to plan and lower a parallel LDS shadow clear.
+///
+/// `encoding` determines the admitted store shapes. `maximum_lanes` bounds
+/// how many entry workitems may participate in one x-row of the clear loop;
+/// this is 32 on targets where only the first wave is used and 64 where two
+/// wave32 waves can be admitted from a proven workgroup size. Keeping these
+/// facts together prevents resource planning from reserving a zero tuple that
+/// the target emitter cannot consume, or emission from assuming more entry
+/// lanes than the layout recorded.
+struct ConSanWorkgroupShadowClearCapability {
+  ConSanWorkgroupShadowClearEncoding encoding = ConSanWorkgroupShadowClearEncoding::PackedB64;
+  uint8_t maximum_lanes = 32;
+
+  bool operator==(const ConSanWorkgroupShadowClearCapability &) const = default;
+};
+
 /// Describes the target HWREG field that uniquely identifies one resident
 /// wave for the lifetime of that residency.
 ///
@@ -239,6 +272,7 @@ struct ConSanTargetProfile {
   ConSanWaitCounterFamily wait_counter_family = ConSanWaitCounterFamily::Gfx9;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
   ConSanResidentWaveIdentityEncoding resident_wave_identity;
+  ConSanWorkgroupShadowClearCapability workgroup_shadow_clear;
 
   bool supports_wave32 = false;
   bool supports_wave64 = true;
@@ -331,6 +365,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
+                .maximum_lanes = 32,
+            },
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -367,6 +406,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::SplitB32Pair,
+                .maximum_lanes = 32,
+            },
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -403,6 +447,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx11,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
+                .maximum_lanes = 32,
+            },
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -439,6 +488,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB64,
+                .maximum_lanes = 32,
+            },
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -475,6 +529,11 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallI64,
         .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
+        .workgroup_shadow_clear =
+            {
+                .encoding = ConSanWorkgroupShadowClearEncoding::PackedB128,
+                .maximum_lanes = 64,
+            },
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -584,6 +643,10 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
         static_cast<uint16_t>(profile.resident_wave_identity.bit_offset) +
                 profile.resident_wave_identity.bit_width >
             32u ||
+        static_cast<uint8_t>(profile.workgroup_shadow_clear.encoding) >
+            static_cast<uint8_t>(ConSanWorkgroupShadowClearEncoding::PackedB128) ||
+        (profile.workgroup_shadow_clear.maximum_lanes != 32u &&
+         profile.workgroup_shadow_clear.maximum_lanes != 64u) ||
         (profile.semantic_form_mask & static_cast<uint16_t>(~all_form_bits)) != 0u ||
         profile.semantic_form_mask == 0u ||
         (profile.has_selectable_vgpr_bank !=
