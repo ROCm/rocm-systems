@@ -272,6 +272,7 @@ struct sqtt_buffer_status_t
     uint64_t                     read_offset{};
     hsa_ext_amd_aql_pm4_packet_t packet{};
     bool                         gpu_full{};
+    int                          shader_engine_id{};
 };
 
 // Virtual members for mocking in tests

@@ -264,7 +264,9 @@ SQTTBufferingPackets::query_buffer_status()
     ROCP_CI_LOG_IF(ERROR, (current_buffer++) != ret.num_swaps)
         << "Mismatch of AQL and SDK buffer states!";
 
-    auto query     = sqtt_buffer_status_t{};
+    auto query             = sqtt_buffer_status_t{};
+    query.shader_engine_id = shader_engine_id;
+
     query.data     = ret.data;
     query.size     = ret.read_size;
     query.gpu_full = ret.is_too_late;
