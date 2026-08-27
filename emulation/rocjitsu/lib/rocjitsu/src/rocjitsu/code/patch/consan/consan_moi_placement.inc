@@ -733,14 +733,15 @@ record_replay_persistent_workgroup_sources(const ConSanOptions &options, rj_code
   const auto private_source = [](uint32_t offset) {
     return ConSanMoiWorkgroupSource::private_state(offset);
   };
-  if (options.moi_record_replay_workgroup_sgprs.complete()) {
+  if (options.moi_persistent_sgprs.record_replay_workgroup.complete()) {
     return ConSanMoiWorkgroupSources{
-        .x = scalar_source(*options.moi_record_replay_workgroup_sgprs.x),
-        .y = scalar_source(*options.moi_record_replay_workgroup_sgprs.y),
-        .z = scalar_source(*options.moi_record_replay_workgroup_sgprs.z),
+        .x = scalar_source(*options.moi_persistent_sgprs.record_replay_workgroup.x),
+        .y = scalar_source(*options.moi_persistent_sgprs.record_replay_workgroup.y),
+        .z = scalar_source(*options.moi_persistent_sgprs.record_replay_workgroup.z),
         .cluster_workgroup_id =
-            options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id
-                ? scalar_source(*options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id)
+            options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id
+                ? scalar_source(
+                      *options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id)
                 : ConSanMoiWorkgroupSource{},
         .cdna_full_payload_base = std::nullopt,
         .cdna_guest_payload_base = std::nullopt,
@@ -4647,17 +4648,17 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
               architecturally_reserved(base, width) ||
               moi_sgpr_range_overlaps_dynamic_stack_state(base, width) ||
               persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-              overlaps_optional(base, width, options.moi_persistent_owner_sgpr) ||
-              overlaps_optional(base, width, options.moi_persistent_epoch_sgpr) ||
-              overlaps_optional(base, width, options.moi_persistent_workgroup_key_sgpr) ||
+              overlaps_optional(base, width, options.moi_persistent_sgprs.owner) ||
+              overlaps_optional(base, width, options.moi_persistent_sgprs.epoch) ||
+              overlaps_optional(base, width, options.moi_persistent_sgprs.workgroup_key) ||
               overlaps_optional(base, width, options.moi_dispatch_id_sgpr,
                                 moi_dispatch_state_sgpr_count(options)) ||
               overlaps_optional(base, width, options.moi_inline_visible_evidence_sgpr);
           for (const std::optional<uint16_t> reg :
-               {options.moi_record_replay_workgroup_sgprs.x,
-                options.moi_record_replay_workgroup_sgprs.y,
-                options.moi_record_replay_workgroup_sgprs.z,
-                options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+               {options.moi_persistent_sgprs.record_replay_workgroup.x,
+                options.moi_persistent_sgprs.record_replay_workgroup.y,
+                options.moi_persistent_sgprs.record_replay_workgroup.z,
+                options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
             overlaps |= overlaps_optional(base, width, reg);
           }
           if (options.delay_mode == ConSanDelayMode::SleepVar)
@@ -4806,18 +4807,19 @@ moi_indirect_jump_sgprs(const ConSanOptions &options) {
         return reg && range_overlaps(base, width, *reg, reg_width);
       };
       const auto overlaps_instrumentation_state = [&](uint16_t base, uint16_t width) {
-        bool overlaps = moi_sgpr_range_overlaps_dynamic_stack_state(base, width) ||
-                        persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
-                        overlaps_optional(base, width, options.moi_persistent_owner_sgpr) ||
-                        overlaps_optional(base, width, options.moi_persistent_epoch_sgpr) ||
-                        overlaps_optional(base, width, options.moi_persistent_workgroup_key_sgpr) ||
-                        overlaps_optional(base, width, options.moi_dispatch_id_sgpr,
-                                          moi_dispatch_state_sgpr_count(options));
+        bool overlaps =
+            moi_sgpr_range_overlaps_dynamic_stack_state(base, width) ||
+            persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
+            overlaps_optional(base, width, options.moi_persistent_sgprs.owner) ||
+            overlaps_optional(base, width, options.moi_persistent_sgprs.epoch) ||
+            overlaps_optional(base, width, options.moi_persistent_sgprs.workgroup_key) ||
+            overlaps_optional(base, width, options.moi_dispatch_id_sgpr,
+                              moi_dispatch_state_sgpr_count(options));
         for (const std::optional<uint16_t> reg :
-             {options.moi_record_replay_workgroup_sgprs.x,
-              options.moi_record_replay_workgroup_sgprs.y,
-              options.moi_record_replay_workgroup_sgprs.z,
-              options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+             {options.moi_persistent_sgprs.record_replay_workgroup.x,
+              options.moi_persistent_sgprs.record_replay_workgroup.y,
+              options.moi_persistent_sgprs.record_replay_workgroup.z,
+              options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
           overlaps |= overlaps_optional(base, width, reg);
         }
         return overlaps;
@@ -5912,9 +5914,10 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
                                  overlaps_architectural_state(options.moi_owner_sgpr, 1u));
   const auto persistent_workgroup_tuple_invalid = [&] {
     for (const std::optional<uint16_t> reg :
-         {options.moi_record_replay_workgroup_sgprs.x, options.moi_record_replay_workgroup_sgprs.y,
-          options.moi_record_replay_workgroup_sgprs.z,
-          options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+         {options.moi_persistent_sgprs.record_replay_workgroup.x,
+          options.moi_persistent_sgprs.record_replay_workgroup.y,
+          options.moi_persistent_sgprs.record_replay_workgroup.z,
+          options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
       if (reg && (*reg >= limit ||
                   persistent_sgpr_range_overlaps_reserved_ordinary_range(*reg, 1u, arch))) {
         return true;
@@ -5923,17 +5926,17 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
     return false;
   }();
   const bool persistent_invalid =
-      (options.moi_persistent_owner_sgpr && *options.moi_persistent_owner_sgpr >= limit) ||
-      (options.moi_persistent_epoch_sgpr && *options.moi_persistent_epoch_sgpr >= limit) ||
-      (options.moi_persistent_workgroup_key_sgpr &&
-       *options.moi_persistent_workgroup_key_sgpr >= limit) ||
-      (options.moi_persistent_owner_sgpr && persistent_sgpr_range_overlaps_reserved_ordinary_range(
-                                                *options.moi_persistent_owner_sgpr, 1u, arch)) ||
-      (options.moi_persistent_epoch_sgpr && persistent_sgpr_range_overlaps_reserved_ordinary_range(
-                                                *options.moi_persistent_epoch_sgpr, 1u, arch)) ||
-      (options.moi_persistent_workgroup_key_sgpr &&
+      (options.moi_persistent_sgprs.owner && *options.moi_persistent_sgprs.owner >= limit) ||
+      (options.moi_persistent_sgprs.epoch && *options.moi_persistent_sgprs.epoch >= limit) ||
+      (options.moi_persistent_sgprs.workgroup_key &&
+       *options.moi_persistent_sgprs.workgroup_key >= limit) ||
+      (options.moi_persistent_sgprs.owner && persistent_sgpr_range_overlaps_reserved_ordinary_range(
+                                                 *options.moi_persistent_sgprs.owner, 1u, arch)) ||
+      (options.moi_persistent_sgprs.epoch && persistent_sgpr_range_overlaps_reserved_ordinary_range(
+                                                 *options.moi_persistent_sgprs.epoch, 1u, arch)) ||
+      (options.moi_persistent_sgprs.workgroup_key &&
        persistent_sgpr_range_overlaps_reserved_ordinary_range(
-           *options.moi_persistent_workgroup_key_sgpr, 1u, arch)) ||
+           *options.moi_persistent_sgprs.workgroup_key, 1u, arch)) ||
       persistent_workgroup_tuple_invalid;
   const bool inline_external_invalid =
       (options.moi_inline_indirect_pc_sgpr &&
@@ -5970,17 +5973,18 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
     const uint16_t base = *options.moi_inline_dynamic_stack_borrowed_sgpr;
     const uint16_t exec_count = moi_exec_save_sgpr_count(options, arch);
     const bool overlaps_persistent =
-        (options.moi_persistent_owner_sgpr &&
-         range_overlaps(base, 2u, *options.moi_persistent_owner_sgpr, 1u)) ||
-        (options.moi_persistent_epoch_sgpr &&
-         range_overlaps(base, 2u, *options.moi_persistent_epoch_sgpr, 1u)) ||
-        (options.moi_persistent_workgroup_key_sgpr &&
-         range_overlaps(base, 2u, *options.moi_persistent_workgroup_key_sgpr, 1u));
+        (options.moi_persistent_sgprs.owner &&
+         range_overlaps(base, 2u, *options.moi_persistent_sgprs.owner, 1u)) ||
+        (options.moi_persistent_sgprs.epoch &&
+         range_overlaps(base, 2u, *options.moi_persistent_sgprs.epoch, 1u)) ||
+        (options.moi_persistent_sgprs.workgroup_key &&
+         range_overlaps(base, 2u, *options.moi_persistent_sgprs.workgroup_key, 1u));
     bool overlaps_workgroup_tuple = false;
     for (const std::optional<uint16_t> reg :
-         {options.moi_record_replay_workgroup_sgprs.x, options.moi_record_replay_workgroup_sgprs.y,
-          options.moi_record_replay_workgroup_sgprs.z,
-          options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+         {options.moi_persistent_sgprs.record_replay_workgroup.x,
+          options.moi_persistent_sgprs.record_replay_workgroup.y,
+          options.moi_persistent_sgprs.record_replay_workgroup.z,
+          options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
       overlaps_workgroup_tuple |= reg && range_overlaps(base, 2u, *reg, 1u);
     }
     return options.moi_engine != ConSanMoiEngine::InlineShadow ||
@@ -6207,13 +6211,13 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   const auto assign_scalar_persistent_state = [&](uint16_t base) {
     uint16_t next = base;
     if (!has_explicit_owner_epoch) {
-      options.moi_persistent_owner_sgpr = next++;
-      options.moi_persistent_epoch_sgpr = next++;
+      options.moi_persistent_sgprs.owner = next++;
+      options.moi_persistent_sgprs.epoch = next++;
     }
     if (needs_workgroup_key)
-      options.moi_persistent_workgroup_key_sgpr = next++;
+      options.moi_persistent_sgprs.workgroup_key = next++;
     if (needs_record_replay_workgroup_tuple) {
-      options.moi_record_replay_workgroup_sgprs = {
+      options.moi_persistent_sgprs.record_replay_workgroup = {
           .x = next,
           .y = static_cast<uint16_t>(next + 1u),
           .z = static_cast<uint16_t>(next + 2u),
@@ -6508,7 +6512,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
           const uint16_t vector_base = *owner_epoch_vector_base;
           options.moi_owner_vgpr = vector_base;
           options.moi_epoch_vgpr = static_cast<uint16_t>(vector_base + 1u);
-          options.moi_record_replay_workgroup_sgprs = {
+          options.moi_persistent_sgprs.record_replay_workgroup = {
               .x = scalar_base,
               .y = static_cast<uint16_t>(scalar_base + 1u),
               .z = static_cast<uint16_t>(scalar_base + 2u),
@@ -7138,15 +7142,15 @@ void note_moi_sgpr_requirements(MoiDescriptorSgprRequirements &requirements,
         required_count, static_cast<uint16_t>(*options.moi_dispatch_id_sgpr +
                                               moi_dispatch_state_sgpr_count(options)));
   }
-  if (options.moi_persistent_owner_sgpr)
+  if (options.moi_persistent_sgprs.owner)
     required_count = std::max<uint16_t>(
-        required_count, static_cast<uint16_t>(*options.moi_persistent_owner_sgpr + 1u));
-  if (options.moi_persistent_epoch_sgpr)
+        required_count, static_cast<uint16_t>(*options.moi_persistent_sgprs.owner + 1u));
+  if (options.moi_persistent_sgprs.epoch)
     required_count = std::max<uint16_t>(
-        required_count, static_cast<uint16_t>(*options.moi_persistent_epoch_sgpr + 1u));
-  if (options.moi_persistent_workgroup_key_sgpr)
+        required_count, static_cast<uint16_t>(*options.moi_persistent_sgprs.epoch + 1u));
+  if (options.moi_persistent_sgprs.workgroup_key)
     required_count = std::max<uint16_t>(
-        required_count, static_cast<uint16_t>(*options.moi_persistent_workgroup_key_sgpr + 1u));
+        required_count, static_cast<uint16_t>(*options.moi_persistent_sgprs.workgroup_key + 1u));
   if (options.moi_inline_indirect_pc_sgpr)
     required_count = std::max<uint16_t>(
         required_count, static_cast<uint16_t>(*options.moi_inline_indirect_pc_sgpr + 2u));

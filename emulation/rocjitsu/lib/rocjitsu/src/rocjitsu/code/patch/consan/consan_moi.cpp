@@ -860,7 +860,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     effective_options.moi_owner_vgpr.reset();
     effective_options.moi_epoch_vgpr.reset();
     effective_options.moi_record_replay_workgroup_vgprs = {};
-    effective_options.moi_record_replay_workgroup_sgprs = {};
+    effective_options.moi_persistent_sgprs.record_replay_workgroup = {};
     effective_options.moi_dispatch_id_vgpr.reset();
     result.moi_register_allocation.owner_persistent_vgprs.clear();
     result.warnings.emplace_back(

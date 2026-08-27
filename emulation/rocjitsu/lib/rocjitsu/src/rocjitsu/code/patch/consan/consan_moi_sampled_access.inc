@@ -209,7 +209,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // a different kernel or helper. Size the dense gates from the tuple they
   // will actually consume, not only from access-local analysis metadata.
   const bool has_cluster_workgroup_id =
-      options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id.has_value() ||
+      options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id.has_value() ||
       options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id.has_value() ||
       options.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id.has_value() ||
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {

@@ -35,9 +35,9 @@
       if (options.moi_workgroup_key_vgpr) {
         words.push_back(build_v_mov_b32_e32(
             workgroup_key, vector_source_vgpr(*options.moi_workgroup_key_vgpr), arch));
-      } else if (options.moi_persistent_workgroup_key_sgpr) {
+      } else if (options.moi_persistent_sgprs.workgroup_key) {
         words.push_back(
-            build_v_mov_b32_e32(workgroup_key, *options.moi_persistent_workgroup_key_sgpr, arch));
+            build_v_mov_b32_e32(workgroup_key, *options.moi_persistent_sgprs.workgroup_key, arch));
       } else {
         return false;
       }
@@ -233,7 +233,7 @@
   if (!skip_diagnostic_if_empty())
     return false;
 
-  const bool has_epoch = options.moi_epoch_vgpr || options.moi_persistent_epoch_sgpr ||
+  const bool has_epoch = options.moi_epoch_vgpr || options.moi_persistent_sgprs.epoch ||
                          options.automatic_moi_private_epoch;
   if (has_epoch) {
     if (!append_extract_exact_shadow_field(words, tmp_vgpr, old_value_vgpr,
@@ -2455,7 +2455,7 @@
       reject_candidate_scratch_range_overlap(candidate, *options.scratch_vgpr, scratch_count,
                                              errors))
     return std::nullopt;
-  if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr &&
+  if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner &&
       !options.automatic_moi_private_epoch) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return std::nullopt;

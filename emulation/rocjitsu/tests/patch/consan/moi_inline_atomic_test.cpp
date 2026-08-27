@@ -336,8 +336,8 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
     options.moi_exec_save_sgpr = 80u;
     options.moi_owner_vgpr = 40u;
     options.moi_epoch_vgpr = 41u;
-    options.moi_persistent_owner_sgpr = 70u;
-    options.moi_persistent_epoch_sgpr = 71u;
+    options.moi_persistent_sgprs.owner = 70u;
+    options.moi_persistent_sgprs.epoch = 71u;
     options.moi_dispatch_id_sgpr = 20u;
     options.moi_report_buffer_address = 0x123456780000ull;
     options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
@@ -368,7 +368,7 @@ TEST(ConSanMoi, SupportedTargetsInlineAtomicAcquirePersistsEpochBeforeGuestRetur
     const auto saturate = instrumentation::build_v_min_u32_literal(
         materialized_epoch, consan_moi_exact_shadow::max_epoch, materialized_epoch, target.arch);
     const auto persist = instrumentation::build_v_readfirstlane_b32(
-        *options.moi_persistent_epoch_sgpr, materialized_epoch, target.arch);
+        *options.moi_persistent_sgprs.epoch, materialized_epoch, target.arch);
     const auto dependency_wait = instrumentation::build_valu_to_salu_dependency_wait(target.arch);
     ASSERT_TRUE(advance && saturate && persist && dependency_wait);
     std::vector<uint32_t> expected(advance->begin(), advance->end());
@@ -4203,8 +4203,8 @@ TEST(ConSanMoi, InlineAtomicScalarPersistentAcquireGuardsEpochAdvanceAndPersist)
   options.moi_exec_save_sgpr = 80;
   options.moi_owner_vgpr = 40;
   options.moi_epoch_vgpr = 41;
-  options.moi_persistent_owner_sgpr = 70;
-  options.moi_persistent_epoch_sgpr = 71;
+  options.moi_persistent_sgprs.owner = 70;
+  options.moi_persistent_sgprs.epoch = 71;
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.max_patches = 2;
@@ -4231,8 +4231,8 @@ TEST(ConSanMoi, InlineAtomicScalarPersistentAcquireGuardsEpochAdvanceAndPersist)
   ASSERT_GE(acquire_plan->scratch_vgpr_count, 4u);
   const uint16_t materialized_epoch =
       static_cast<uint16_t>(*acquire_patch->scratch_vgpr + acquire_plan->scratch_vgpr_count - 3u);
-  EXPECT_EQ(test_moi_persistent_sgpr_state(result).owner, options.moi_persistent_owner_sgpr);
-  EXPECT_EQ(test_moi_persistent_sgpr_state(result).epoch, options.moi_persistent_epoch_sgpr);
+  EXPECT_EQ(test_moi_persistent_sgpr_state(result).owner, options.moi_persistent_sgprs.owner);
+  EXPECT_EQ(test_moi_persistent_sgpr_state(result).epoch, options.moi_persistent_sgprs.epoch);
   EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty())
       << "scalar-persistent atomic validation must derive owner state from the emitted prologue";
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
@@ -4247,7 +4247,7 @@ TEST(ConSanMoi, InlineAtomicScalarPersistentAcquireGuardsEpochAdvanceAndPersist)
       materialized_epoch, consan_moi_exact_shadow::max_epoch, materialized_epoch,
       ROCJITSU_CODE_ARCH_RDNA4);
   const auto persist_consumer_segment = instrumentation::build_v_readfirstlane_b32(
-      *options.moi_persistent_epoch_sgpr, materialized_epoch, ROCJITSU_CODE_ARCH_RDNA4);
+      *options.moi_persistent_sgprs.epoch, materialized_epoch, ROCJITSU_CODE_ARCH_RDNA4);
   const auto persist_wait =
       instrumentation::build_valu_to_salu_dependency_wait(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(advance_consumer_segment && saturate_consumer_segment && persist_consumer_segment &&

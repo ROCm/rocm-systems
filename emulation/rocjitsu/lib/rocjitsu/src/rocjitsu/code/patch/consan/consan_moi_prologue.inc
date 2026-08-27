@@ -2281,15 +2281,16 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
       options.automatic_moi_owner_sgpr && options.moi_owner_sgpr &&
       sgpr_base == *options.moi_owner_sgpr && sgpr_count == 1u;
   bool conflict = (options.moi_exec_save_sgprs_persistent && !backs_up_only_automatic_owner) ||
-                  overlaps(options.moi_persistent_owner_sgpr) ||
-                  overlaps(options.moi_persistent_epoch_sgpr) ||
-                  overlaps(options.moi_persistent_workgroup_key_sgpr) ||
+                  overlaps(options.moi_persistent_sgprs.owner) ||
+                  overlaps(options.moi_persistent_sgprs.epoch) ||
+                  overlaps(options.moi_persistent_sgprs.workgroup_key) ||
                   overlaps(options.moi_dispatch_id_sgpr, moi_dispatch_state_sgpr_count(options)) ||
                   overlaps(options.moi_inline_visible_evidence_sgpr);
   for (const std::optional<uint16_t> reg :
-       {options.moi_record_replay_workgroup_sgprs.x, options.moi_record_replay_workgroup_sgprs.y,
-        options.moi_record_replay_workgroup_sgprs.z,
-        options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+       {options.moi_persistent_sgprs.record_replay_workgroup.x,
+        options.moi_persistent_sgprs.record_replay_workgroup.y,
+        options.moi_persistent_sgprs.record_replay_workgroup.z,
+        options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
     conflict |= overlaps(reg);
   }
   return !conflict;
@@ -2342,7 +2343,7 @@ void try_apply_owner_epoch_prologue_patch(
   }
   if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) &&
       result.moi_register_allocation.owner_persistent_vgprs.empty() &&
-      (!options.moi_persistent_owner_sgpr || !options.moi_persistent_epoch_sgpr)) {
+      (!options.moi_persistent_sgprs.owner || !options.moi_persistent_sgprs.epoch)) {
     result.errors.emplace_back(
         "ConSan MOI owner/epoch prologue requires RJ_CONSAN_MOI_OWNER_VGPR and "
         "RJ_CONSAN_MOI_EPOCH_VGPR");
@@ -2568,9 +2569,9 @@ void try_apply_owner_epoch_prologue_patch(
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
     const bool has_record_replay_workgroup_tuple =
         !kernel_options.moi_record_replay_workgroup_vgprs.empty() ||
-        !kernel_options.moi_record_replay_workgroup_sgprs.empty();
-    if (kernel_options.moi_workgroup_key_vgpr || kernel_options.moi_persistent_workgroup_key_sgpr ||
-        has_record_replay_workgroup_tuple) {
+        !kernel_options.moi_persistent_sgprs.record_replay_workgroup.empty();
+    if (kernel_options.moi_workgroup_key_vgpr ||
+        kernel_options.moi_persistent_sgprs.workgroup_key || has_record_replay_workgroup_tuple) {
       std::vector<std::string> source_errors;
       std::optional<uint16_t> full_payload_user_sgpr_count;
       if (has_record_replay_workgroup_tuple &&
@@ -2702,21 +2703,21 @@ void try_apply_owner_epoch_prologue_patch(
           required_sgpr_count, static_cast<uint32_t>(*kernel_options.moi_dispatch_id_sgpr) +
                                    moi_dispatch_state_sgpr_count(kernel_options));
     }
-    if (options.moi_persistent_owner_sgpr)
+    if (options.moi_persistent_sgprs.owner)
       required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count, static_cast<uint32_t>(*options.moi_persistent_owner_sgpr) + 1u);
-    if (options.moi_persistent_epoch_sgpr)
+          required_sgpr_count, static_cast<uint32_t>(*options.moi_persistent_sgprs.owner) + 1u);
+    if (options.moi_persistent_sgprs.epoch)
       required_sgpr_count = std::max<uint32_t>(
-          required_sgpr_count, static_cast<uint32_t>(*options.moi_persistent_epoch_sgpr) + 1u);
-    if (options.moi_persistent_workgroup_key_sgpr)
+          required_sgpr_count, static_cast<uint32_t>(*options.moi_persistent_sgprs.epoch) + 1u);
+    if (options.moi_persistent_sgprs.workgroup_key)
       required_sgpr_count = std::max<uint32_t>(
           required_sgpr_count,
-          static_cast<uint32_t>(*options.moi_persistent_workgroup_key_sgpr) + 1u);
+          static_cast<uint32_t>(*options.moi_persistent_sgprs.workgroup_key) + 1u);
     for (const std::optional<uint16_t> reg :
-         {kernel_options.moi_record_replay_workgroup_sgprs.x,
-          kernel_options.moi_record_replay_workgroup_sgprs.y,
-          kernel_options.moi_record_replay_workgroup_sgprs.z,
-          kernel_options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+         {kernel_options.moi_persistent_sgprs.record_replay_workgroup.x,
+          kernel_options.moi_persistent_sgprs.record_replay_workgroup.y,
+          kernel_options.moi_persistent_sgprs.record_replay_workgroup.z,
+          kernel_options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
       if (reg)
         required_sgpr_count = std::max<uint32_t>(required_sgpr_count, *reg + 1u);
     }
@@ -2950,9 +2951,9 @@ void try_apply_owner_epoch_prologue_patch(
         *kernel_options.moi_epoch_vgpr, kernel_options.moi_workgroup_key_vgpr, *owner_shift,
         kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
         kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-        kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
-        kernel_options.moi_persistent_workgroup_key_sgpr,
-        kernel_options.moi_record_replay_workgroup_sgprs,
+        kernel_options.moi_persistent_sgprs.owner, kernel_options.moi_persistent_sgprs.epoch,
+        kernel_options.moi_persistent_sgprs.workgroup_key,
+        kernel_options.moi_persistent_sgprs.record_replay_workgroup,
         kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
         moi_runtime_workgroup_selection_source(kernel_options, arch),
         kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
@@ -3038,9 +3039,9 @@ void try_apply_owner_epoch_prologue_patch(
           *kernel_options.moi_owner_vgpr, *kernel_options.moi_epoch_vgpr,
           kernel_options.moi_workgroup_key_vgpr, *owner_shift, kernel_options.moi_owner_source,
           kernel_options.moi_owner_sgpr, kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-          kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
-          kernel_options.moi_persistent_workgroup_key_sgpr,
-          kernel_options.moi_record_replay_workgroup_sgprs,
+          kernel_options.moi_persistent_sgprs.owner, kernel_options.moi_persistent_sgprs.epoch,
+          kernel_options.moi_persistent_sgprs.workgroup_key,
+          kernel_options.moi_persistent_sgprs.record_replay_workgroup,
           kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
           moi_runtime_workgroup_selection_source(kernel_options, arch),
           kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
@@ -3070,9 +3071,9 @@ void try_apply_owner_epoch_prologue_patch(
             *kernel_options.moi_epoch_vgpr, kernel_options.moi_workgroup_key_vgpr, *owner_shift,
             kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
             kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-            kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
-            kernel_options.moi_persistent_workgroup_key_sgpr,
-            kernel_options.moi_record_replay_workgroup_sgprs,
+            kernel_options.moi_persistent_sgprs.owner, kernel_options.moi_persistent_sgprs.epoch,
+            kernel_options.moi_persistent_sgprs.workgroup_key,
+            kernel_options.moi_persistent_sgprs.record_replay_workgroup,
             kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
             moi_runtime_workgroup_selection_source(kernel_options, arch),
             kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
@@ -3090,9 +3091,9 @@ void try_apply_owner_epoch_prologue_patch(
             kernel_options.moi_workgroup_key_vgpr, *owner_shift, kernel_options.moi_owner_source,
             kernel_options.moi_owner_sgpr,
             kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-            kernel_options.moi_persistent_owner_sgpr, kernel_options.moi_persistent_epoch_sgpr,
-            kernel_options.moi_persistent_workgroup_key_sgpr,
-            kernel_options.moi_record_replay_workgroup_sgprs,
+            kernel_options.moi_persistent_sgprs.owner, kernel_options.moi_persistent_sgprs.epoch,
+            kernel_options.moi_persistent_sgprs.workgroup_key,
+            kernel_options.moi_persistent_sgprs.record_replay_workgroup,
             kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
             moi_runtime_workgroup_selection_source(kernel_options, arch),
             kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
@@ -3137,7 +3138,7 @@ void try_apply_owner_epoch_prologue_patch(
     info.dispatch_id_primary_prologue_offset = dispatch_id_primary_prologue_offset;
     info.dispatch_id_secondary_prologue_offset = dispatch_id_secondary_prologue_offset;
     note_moi_persistent_vgpr_state(info, kernel_options, result.moi_register_allocation);
-    info.persistent_sgpr_state = moi_persistent_sgpr_state(kernel_options);
+    info.persistent_sgpr_state = kernel_options.moi_persistent_sgprs;
     info.required_sgpr_count = item.required_sgpr_count;
     if (item.entry_scalar_backup) {
       info.entry_scalar_backup_vgpr = item.entry_scalar_backup->vgpr;

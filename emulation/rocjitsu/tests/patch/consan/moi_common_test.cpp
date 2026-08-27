@@ -479,8 +479,8 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
   for (uint32_t present_mask = 0u; present_mask < 3u; ++present_mask) {
     SCOPED_TRACE(present_mask);
     ConSanOptions options;
-    options.moi_persistent_owner_sgpr = 40u;
-    options.moi_persistent_epoch_sgpr = 41u;
+    options.moi_persistent_sgprs.owner = 40u;
+    options.moi_persistent_sgprs.epoch = 41u;
     if (present_mask & 1u)
       options.moi_owner_vgpr = 6u;
     if (present_mask & 2u)
@@ -495,8 +495,8 @@ TEST(ConSanMoi, ScalarPersistentTemporaryValidationFailsClosed) {
   }
 
   ConSanOptions valid;
-  valid.moi_persistent_owner_sgpr = 40u;
-  valid.moi_persistent_epoch_sgpr = 41u;
+  valid.moi_persistent_sgprs.owner = 40u;
+  valid.moi_persistent_sgprs.epoch = 41u;
   valid.moi_owner_vgpr = 6u;
   valid.moi_epoch_vgpr = 7u;
   std::vector<std::string> errors;

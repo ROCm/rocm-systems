@@ -201,9 +201,9 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     return std::nullopt;
   if (scalar_persistent) {
     words.push_back(
-        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_owner_sgpr, arch));
+        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_sgprs.owner, arch));
     words.push_back(
-        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
+        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_sgprs.epoch, arch));
   }
   if (!append_save_moi_special_state(words, options, arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
@@ -612,7 +612,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
   words.push_back(*restore_after_advance);
   if (scalar_persistent) {
     const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
-        *options.moi_persistent_epoch_sgpr, *options.moi_epoch_vgpr, arch);
+        *options.moi_persistent_sgprs.epoch, *options.moi_epoch_vgpr, arch);
     const auto delay = instrumentation::build_salu_dependency_delay(arch);
     if (!persist_epoch || !delay) {
       errors.emplace_back("ConSan MOI sampled barrier failed at scalar epoch persistence");
@@ -2398,16 +2398,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         };
         bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
                         overlaps_optional(group_options.moi_owner_sgpr) ||
-                        overlaps_optional(group_options.moi_persistent_owner_sgpr) ||
-                        overlaps_optional(group_options.moi_persistent_epoch_sgpr) ||
-                        overlaps_optional(group_options.moi_persistent_workgroup_key_sgpr) ||
+                        overlaps_optional(group_options.moi_persistent_sgprs.owner) ||
+                        overlaps_optional(group_options.moi_persistent_sgprs.epoch) ||
+                        overlaps_optional(group_options.moi_persistent_sgprs.workgroup_key) ||
                         overlaps_optional(group_options.moi_dispatch_id_sgpr,
                                           moi_dispatch_state_sgpr_count(group_options));
         for (const std::optional<uint16_t> reg :
-             {group_options.moi_record_replay_workgroup_sgprs.x,
-              group_options.moi_record_replay_workgroup_sgprs.y,
-              group_options.moi_record_replay_workgroup_sgprs.z,
-              group_options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+             {group_options.moi_persistent_sgprs.record_replay_workgroup.x,
+              group_options.moi_persistent_sgprs.record_replay_workgroup.y,
+              group_options.moi_persistent_sgprs.record_replay_workgroup.z,
+              group_options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
           overlaps |= overlaps_optional(reg);
         }
         if (group_options.delay_mode == ConSanDelayMode::SleepVar)
@@ -2834,16 +2834,16 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         };
         bool overlaps = persistent_sgpr_range_overlaps_reserved_ordinary_range(base, width, arch) ||
                         overlaps_optional(route_options.moi_owner_sgpr) ||
-                        overlaps_optional(route_options.moi_persistent_owner_sgpr) ||
-                        overlaps_optional(route_options.moi_persistent_epoch_sgpr) ||
-                        overlaps_optional(route_options.moi_persistent_workgroup_key_sgpr) ||
+                        overlaps_optional(route_options.moi_persistent_sgprs.owner) ||
+                        overlaps_optional(route_options.moi_persistent_sgprs.epoch) ||
+                        overlaps_optional(route_options.moi_persistent_sgprs.workgroup_key) ||
                         overlaps_optional(route_options.moi_dispatch_id_sgpr,
                                           moi_dispatch_state_sgpr_count(route_options));
         for (const std::optional<uint16_t> reg :
-             {route_options.moi_record_replay_workgroup_sgprs.x,
-              route_options.moi_record_replay_workgroup_sgprs.y,
-              route_options.moi_record_replay_workgroup_sgprs.z,
-              route_options.moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
+             {route_options.moi_persistent_sgprs.record_replay_workgroup.x,
+              route_options.moi_persistent_sgprs.record_replay_workgroup.y,
+              route_options.moi_persistent_sgprs.record_replay_workgroup.z,
+              route_options.moi_persistent_sgprs.record_replay_workgroup.cluster_workgroup_id}) {
           overlaps |= overlaps_optional(reg);
         }
         if (route_options.delay_mode == ConSanDelayMode::SleepVar)
@@ -3062,7 +3062,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
 
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr) {
+  if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner) {
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
     const auto owner = build_moi_record_owner_derivation(
         bytes, candidate.kernel_descriptor_file_offset, private_owner_offset, private_owner_shift,
@@ -3256,19 +3256,19 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
              record_words, kFenceRecordLayout,
              record_base + offsetof(ConSanMoiFenceRecord, owner_id), *options.moi_owner_vgpr,
              slot_vgpr, *options.scratch_vgpr, arch)) ||
-        (options.moi_persistent_owner_sgpr &&
+        (options.moi_persistent_sgprs.owner &&
          !append_dynamic_record_store_u32_scalar_src(
              record_words, kFenceRecordLayout,
              record_base + offsetof(ConSanMoiFenceRecord, owner_id),
-             *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+             *options.moi_persistent_sgprs.owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
         (options.moi_epoch_vgpr &&
          !append_dynamic_record_store_u32_vgpr(
              record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, epoch),
              *options.moi_epoch_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-        (options.moi_persistent_epoch_sgpr &&
+        (options.moi_persistent_sgprs.epoch &&
          !append_dynamic_record_store_u32_scalar_src(
              record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, epoch),
-             *options.moi_persistent_epoch_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+             *options.moi_persistent_sgprs.epoch, slot_vgpr, *options.scratch_vgpr, arch)) ||
         !append_dynamic_record_store_u32_literal(
             record_words, kFenceRecordLayout,
             record_base + offsetof(ConSanMoiFenceRecord, instruction_offset),

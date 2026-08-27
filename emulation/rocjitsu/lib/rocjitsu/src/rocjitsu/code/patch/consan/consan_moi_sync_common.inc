@@ -881,9 +881,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     InstructionSequence sequence(words);
     return sequence.emit_all(valid, narrow);
   }
-  if (options.moi_persistent_workgroup_key_sgpr) {
+  if (options.moi_persistent_sgprs.workgroup_key) {
     words.push_back(
-        build_v_mov_b32_e32(key_vgpr, *options.moi_persistent_workgroup_key_sgpr, arch));
+        build_v_mov_b32_e32(key_vgpr, *options.moi_persistent_sgprs.workgroup_key, arch));
     const auto valid =
         instrumentation::build_v_cmp_ne_u32_vcc(scalar_positive_inline_u32(0), key_vgpr, arch);
     const auto narrow = instrumentation::build_s_and_saveexec_b64(exec_base, kRdna4VccLo, arch);
@@ -1963,7 +1963,7 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     // Scalar persistent state is already wave-uniform and needs no widening.
     // Saturation stays fail-closed in the token readers.
     const bool widen_consumer_segment =
-        options.moi_inline_access_present && !options.moi_persistent_epoch_sgpr;
+        options.moi_inline_access_present && !options.moi_persistent_sgprs.epoch;
     const auto widen_exec =
         widen_consumer_segment
             ? instrumentation::build_s_mov_b64(kRdna4ExecLo, kScalarInlineNegativeOneOperand, arch)
@@ -1989,9 +1989,9 @@ append_inline_atomic_snapshot_address(std::vector<uint32_t> &words, uint64_t tab
     advance_words.insert(advance_words.end(), saturate_epoch->begin(), saturate_epoch->end());
     if (restore_matching_exec)
       advance_words.push_back(*restore_matching_exec);
-    if (options.moi_persistent_epoch_sgpr) {
+    if (options.moi_persistent_sgprs.epoch) {
       const auto persist_epoch = instrumentation::build_v_readfirstlane_b32(
-          *options.moi_persistent_epoch_sgpr, *options.moi_epoch_vgpr, arch);
+          *options.moi_persistent_sgprs.epoch, *options.moi_epoch_vgpr, arch);
       const auto persist_wait = instrumentation::build_valu_to_salu_dependency_wait(arch);
       if (!persist_epoch || !persist_wait) {
         errors.emplace_back("ConSan MOI inline acquire could not persist its consumer segment");
@@ -3236,7 +3236,7 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
     return std::nullopt;
   }
   const bool scalar_persistent =
-      options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
+      options.moi_persistent_sgprs.owner && options.moi_persistent_sgprs.epoch;
   if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) && !scalar_persistent &&
       private_layout == nullptr) {
     errors.emplace_back("ConSan MOI inline atomic patch requires RJ_CONSAN_MOI_OWNER_VGPR and "
@@ -3317,9 +3317,9 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         static_cast<uint16_t>(*options.scratch_vgpr + required_scratch_count - 4u);
     const uint16_t materialized_epoch = static_cast<uint16_t>(materialized_owner + 1u);
     words.push_back(
-        build_v_mov_b32_e32(materialized_owner, *options.moi_persistent_owner_sgpr, arch));
+        build_v_mov_b32_e32(materialized_owner, *options.moi_persistent_sgprs.owner, arch));
     words.push_back(
-        build_v_mov_b32_e32(materialized_epoch, *options.moi_persistent_epoch_sgpr, arch));
+        build_v_mov_b32_e32(materialized_epoch, *options.moi_persistent_sgprs.epoch, arch));
     options.moi_owner_vgpr = materialized_owner;
     options.moi_epoch_vgpr = materialized_epoch;
   }

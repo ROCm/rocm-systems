@@ -98,7 +98,7 @@ struct MoiPrivateRecordOwnerPlan {
 [[nodiscard]] bool moi_record_uses_private_owner(const ConSanOptions &options) {
   return options.moi_init_owner_epoch && options.automatic_moi_private_epoch &&
          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !options.moi_owner_vgpr &&
-         !options.moi_persistent_owner_sgpr;
+         !options.moi_persistent_sgprs.owner;
 }
 
 [[nodiscard]] std::optional<MoiPrivateRecordOwnerPlan> resolve_moi_private_record_owner(
@@ -992,7 +992,7 @@ private:
     errors.emplace_back("ConSan MOI first-light probe has an incomplete private owner plan");
     return std::nullopt;
   }
-  if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr &&
+  if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner &&
       (private_owner_offset || candidate.kernel_descriptor_file_offset)) {
     std::optional<uint16_t> owner_shift = private_owner_shift;
     if (!owner_shift && candidate.kernel_descriptor_file_offset) {
@@ -1192,8 +1192,8 @@ private:
               "ConSan MOI dynamic access-record probe could not store private epoch state");
           return std::nullopt;
         }
-      } else if (options.moi_persistent_epoch_sgpr) {
-        words.push_back(build_v_mov_b32_e32(value_vgpr, *options.moi_persistent_epoch_sgpr, arch));
+      } else if (options.moi_persistent_sgprs.epoch) {
+        words.push_back(build_v_mov_b32_e32(value_vgpr, *options.moi_persistent_sgprs.epoch, arch));
         if (!append_dynamic_record_store_u32_vgpr(
                 words, kAccessRecordLayout,
                 dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch), value_vgpr, slot_vgpr,
@@ -1209,11 +1209,11 @@ private:
                words, kAccessRecordLayout,
                dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id), *derived_owner_vgpr,
                slot_vgpr, *options.scratch_vgpr, arch)) ||
-          (options.moi_persistent_owner_sgpr &&
+          (options.moi_persistent_sgprs.owner &&
            !append_dynamic_record_store_u32_scalar_src(
                words, kAccessRecordLayout,
                dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
-               *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+               *options.moi_persistent_sgprs.owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
           !append_dynamic_record_store_moi_report_dispatch_id_pair(
               words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation), options, slot_vgpr,
@@ -1397,9 +1397,9 @@ private:
           build_v_mov_b32_e32(destination_vgpr, vector_source_vgpr(*options.moi_owner_vgpr), arch));
       return true;
     }
-    if (options.moi_persistent_owner_sgpr) {
+    if (options.moi_persistent_sgprs.owner) {
       words.push_back(
-          build_v_mov_b32_e32(destination_vgpr, *options.moi_persistent_owner_sgpr, arch));
+          build_v_mov_b32_e32(destination_vgpr, *options.moi_persistent_sgprs.owner, arch));
       return true;
     }
     if (!derived_owner_vgpr)
@@ -1968,9 +1968,9 @@ private:
                                : static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u)) ||
         (options.moi_owner_vgpr &&
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, wave_id), *options.moi_owner_vgpr)) ||
-        (options.moi_persistent_owner_sgpr &&
+        (options.moi_persistent_sgprs.owner &&
          !record.store_sgpr(offsetof(ConSanMoiAccessRecord, wave_id),
-                            *options.moi_persistent_owner_sgpr)) ||
+                            *options.moi_persistent_sgprs.owner)) ||
         (options.moi_epoch_vgpr &&
          !record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), *options.moi_epoch_vgpr)) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, instruction_offset),
@@ -2003,9 +2003,9 @@ private:
         errors.emplace_back("ConSan MOI first-light probe could not store private epoch state");
         return std::nullopt;
       }
-    } else if (options.moi_persistent_epoch_sgpr) {
+    } else if (options.moi_persistent_sgprs.epoch) {
       words.push_back(
-          build_v_mov_b32_e32(record_value_vgpr, *options.moi_persistent_epoch_sgpr, arch));
+          build_v_mov_b32_e32(record_value_vgpr, *options.moi_persistent_sgprs.epoch, arch));
       if (!record.store_vgpr(offsetof(ConSanMoiAccessRecord, epoch), record_value_vgpr)) {
         errors.emplace_back("ConSan MOI first-light probe could not store scalar epoch state");
         return std::nullopt;
@@ -2532,8 +2532,8 @@ private:
                                          consan_moi_exact_shadow::owner_shift,
                                          consan_moi_exact_shadow::max_owner, tmp_vgpr, arch);
   }
-  if (options.moi_persistent_owner_sgpr) {
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_persistent_owner_sgpr, arch));
+  if (options.moi_persistent_sgprs.owner) {
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_persistent_sgprs.owner, arch));
     return append_add_shifted_vgpr_field(words, low_vgpr, tmp_vgpr,
                                          consan_moi_exact_shadow::owner_shift,
                                          consan_moi_exact_shadow::max_owner, tmp_vgpr, arch);
@@ -2623,8 +2623,8 @@ private:
                                          consan_moi_exact_shadow::epoch_shift,
                                          consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);
   }
-  if (options.moi_persistent_epoch_sgpr) {
-    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_persistent_epoch_sgpr, arch));
+  if (options.moi_persistent_sgprs.epoch) {
+    words.push_back(build_v_mov_b32_e32(tmp_vgpr, *options.moi_persistent_sgprs.epoch, arch));
     return append_add_shifted_vgpr_field(words, low_vgpr, tmp_vgpr,
                                          consan_moi_exact_shadow::epoch_shift,
                                          consan_moi_exact_shadow::max_epoch, tmp_vgpr, arch);

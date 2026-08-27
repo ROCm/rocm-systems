@@ -20,7 +20,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     return;
   }
   if ((!options.moi_owner_vgpr || !options.moi_epoch_vgpr) &&
-      (!options.moi_persistent_owner_sgpr || !options.moi_persistent_epoch_sgpr) &&
+      (!options.moi_persistent_sgprs.owner || !options.moi_persistent_sgprs.epoch) &&
       !options.automatic_moi_private_epoch) {
     result.warnings.emplace_back("ConSan MOI inline atomic patch requires "
                                  "RJ_CONSAN_MOI_OWNER_VGPR and RJ_CONSAN_MOI_EPOCH_VGPR");
@@ -700,7 +700,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           info.relocated_guest_instruction_offset = body.offset + body.guest_instruction_offset;
           note_moi_probe_patch_info(info, planned);
           note_moi_persistent_vgpr_state(info, group_options, result.moi_register_allocation);
-          info.persistent_sgpr_state = moi_persistent_sgpr_state(group_options);
+          info.persistent_sgpr_state = group_options.moi_persistent_sgprs;
           patches.push_back(std::move(info));
           routed_by_dense_relay[body.planned_index] = true;
         }
@@ -808,7 +808,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     info.relocated_guest_instruction_offset = cave_text_offset + guest_instruction_offset;
     note_moi_probe_patch_info(info, planned);
     note_moi_persistent_vgpr_state(info, candidate_options, result.moi_register_allocation);
-    info.persistent_sgpr_state = moi_persistent_sgpr_state(candidate_options);
+    info.persistent_sgpr_state = candidate_options.moi_persistent_sgprs;
     patches.push_back(info);
   }
 
@@ -861,7 +861,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   (void)record_index;
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
-  if (!options.moi_owner_vgpr && !options.moi_persistent_owner_sgpr) {
+  if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner) {
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
     const auto owner = build_moi_record_owner_derivation(
         bytes, candidate.kernel_descriptor_file_offset, private_owner_offset, private_owner_shift,
@@ -1131,11 +1131,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                                  record_words, kAtomicRecordLayout,
                                  atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
                                  *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-      (options.moi_persistent_owner_sgpr &&
+      (options.moi_persistent_sgprs.owner &&
        !append_dynamic_record_store_u32_scalar_src(
            record_words, kAtomicRecordLayout,
            atomic_record_base + offsetof(ConSanMoiAtomicRecord, owner_id),
-           *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+           *options.moi_persistent_sgprs.owner, slot_vgpr, *options.scratch_vgpr, arch)) ||
       !append_dynamic_record_store_moi_report_dispatch_id_pair(
           record_words, kAtomicRecordLayout,
           atomic_record_base + offsetof(ConSanMoiAtomicRecord, generation), options, slot_vgpr,
@@ -1163,11 +1163,11 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
            record_words, kAtomicRecordLayout,
            atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch), *options.moi_epoch_vgpr,
            slot_vgpr, *options.scratch_vgpr, arch)) ||
-      (options.moi_persistent_epoch_sgpr &&
+      (options.moi_persistent_sgprs.epoch &&
        !append_dynamic_record_store_u32_scalar_src(
            record_words, kAtomicRecordLayout,
            atomic_record_base + offsetof(ConSanMoiAtomicRecord, epoch),
-           *options.moi_persistent_epoch_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+           *options.moi_persistent_sgprs.epoch, slot_vgpr, *options.scratch_vgpr, arch)) ||
       !append_dynamic_record_store_u32_vgpr(
           record_words, kAtomicRecordLayout,
           atomic_record_base + offsetof(ConSanMoiAtomicRecord, atomic_address),
@@ -1517,9 +1517,9 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
                                                           errors))
       return false;
     words.push_back(
-        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_owner_sgpr, arch));
+        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_sgprs.owner, arch));
     words.push_back(
-        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
+        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_sgprs.epoch, arch));
   }
   if (!guest_first && !guest_preserves_address) {
     // Compiler-emitted ordinary acquire loads may reuse the low address VGPR

@@ -242,6 +242,27 @@ struct ConSanMoiPersistentWorkgroupPrivateOffsets {
   auto operator<=>(const ConSanMoiPersistentWorkgroupPrivateOffsets &) const = default;
 };
 
+/// Exact ordinary-SGPR ABI that retains MOI state across arbitrary guest
+/// instructions.
+///
+/// Register placement builds this tuple as one indivisible lowering choice.
+/// Every entry prologue and access or synchronization probe owned by the same
+/// kernel consumes that choice. Emitted prologue metadata records the same
+/// value so the final mechanism remains self-describing after mutable lowering
+/// state is gone; it is not an independently reconstructed representation.
+struct ConSanMoiPersistentSgprState {
+  /// Resident-wave or workitem owner identity retained for every probe.
+  std::optional<uint16_t> owner;
+  /// Current synchronization epoch paired with the persistent owner.
+  std::optional<uint16_t> epoch;
+  /// Compact workgroup identity used by InlineShadow when that engine does
+  /// not require the exact coordinate tuple.
+  std::optional<uint16_t> workgroup_key;
+  /// Exact x/y/z and optional gfx1250 cluster coordinates retained by
+  /// Record/Replay and Sampled instrumentation.
+  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
+};
+
 /// Persistent vector state selected for one connected set of owning kernels.
 /// A shared helper connects all of its owners because its instruction stream
 /// must use one tuple, while unrelated kernels may use different safe tails.
@@ -829,17 +850,13 @@ struct ConSanOptions : ConSanRequest,
   std::optional<uint16_t> moi_record_replay_call_return_sgpr;
   std::optional<uint16_t> moi_dispatch_id_sgpr;
   std::optional<uint16_t> moi_dispatch_id_vgpr;
-  /// Uniform persistent state used when a dynamic-stack MOI owner has no
-  /// ordinary-VGPR tuple available below its compiler-defined accumulator
-  /// boundary. The owner is the wave ID captured from the entry workitem ID;
-  /// epoch and workgroup key are uniform for every lane.
-  std::optional<uint16_t> moi_persistent_owner_sgpr;
-  std::optional<uint16_t> moi_persistent_epoch_sgpr;
-  std::optional<uint16_t> moi_persistent_workgroup_key_sgpr;
-  /// Exact persistent workgroup coordinates used by every Record/Replay
-  /// layout. All three registers are assigned together; absent launch
-  /// dimensions are initialized to zero at kernel entry.
-  ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_sgprs;
+  /// Uniform persistent scalar state selected when an MOI owner cannot retain
+  /// the equivalent values in ordinary VGPRs. The owner is captured from the
+  /// entry workitem ID; epoch, compact workgroup key, and exact Record/Replay
+  /// coordinates are uniform for every lane. Keeping the complete ABI in one
+  /// value prevents planning, emission, and prologue telemetry from assembling
+  /// different partial tuples.
+  ConSanMoiPersistentSgprState moi_persistent_sgprs;
   ConSanMoiPersistentWorkgroupRegisters moi_record_replay_workgroup_vgprs;
   ConSanMoiPersistentWorkgroupPrivateOffsets moi_record_replay_workgroup_private_offsets;
   /// Persistent packed workgroup identity used only by Inline Shadow. Launch
@@ -849,7 +866,7 @@ struct ConSanOptions : ConSanRequest,
 };
 
 [[nodiscard]] inline bool moi_uses_scalar_persistent_state(const ConSanOptions &options) {
-  return options.moi_persistent_owner_sgpr && options.moi_persistent_epoch_sgpr;
+  return options.moi_persistent_sgprs.owner && options.moi_persistent_sgprs.epoch;
 }
 
 /// Process-local exact-one budget for repeated dynamic loads of one stable

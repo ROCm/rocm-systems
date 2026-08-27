@@ -91,7 +91,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   if (!validate_inline_shadow_exec_save_sgpr(options, arch, result.warnings))
     return;
   if (!options.moi_owner_vgpr && result.moi_register_allocation.owner_persistent_vgprs.empty() &&
-      !options.moi_persistent_owner_sgpr && !options.automatic_moi_private_epoch) {
+      !options.moi_persistent_sgprs.owner && !options.automatic_moi_private_epoch) {
     result.warnings.emplace_back("ConSan MOI inline-shadow probe requires persistent owner state");
     return;
   }
@@ -504,7 +504,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     const bool has_persistent_workgroup_key =
         (private_layout && private_layout->workgroup_key_offset) ||
         candidate_options.moi_workgroup_key_vgpr ||
-        candidate_options.moi_persistent_workgroup_key_sgpr;
+        candidate_options.moi_persistent_sgprs.workgroup_key;
     if (has_persistent_workgroup_key) {
       // The owner-specific entry prologue captured the descriptor-valid
       // coordinates. Shared physical text can therefore consume one stable
@@ -2779,9 +2779,9 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     if (!consan_detail::validate_scalar_state_temporaries(options, "sampled probe", errors))
       return std::nullopt;
     words.push_back(
-        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_owner_sgpr, arch));
+        build_v_mov_b32_e32(*options.moi_owner_vgpr, *options.moi_persistent_sgprs.owner, arch));
     words.push_back(
-        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_epoch_sgpr, arch));
+        build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_sgprs.epoch, arch));
   }
   const bool materialize_flat_address =
       candidate_requires_gfx12_flat_address_materialization(candidate, arch);

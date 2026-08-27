@@ -159,7 +159,7 @@ resolve_record_replay_report_layout(const ConSanOptions &options, bool include_b
 }
 
 [[nodiscard]] uint8_t record_replay_entry_workgroup_capture_count(const ConSanOptions &options) {
-  return static_cast<uint8_t>(options.moi_record_replay_workgroup_sgprs.complete()) +
+  return static_cast<uint8_t>(options.moi_persistent_sgprs.record_replay_workgroup.complete()) +
          static_cast<uint8_t>(options.moi_record_replay_workgroup_vgprs.complete()) +
          static_cast<uint8_t>(options.moi_record_replay_workgroup_private_offsets.complete());
 }
@@ -171,19 +171,6 @@ resolve_record_replay_report_layout(const ConSanOptions &options, bool include_b
 [[nodiscard]] bool
 record_replay_entry_workgroup_capture_is_unambiguous(const ConSanOptions &options) {
   return record_replay_entry_workgroup_capture_count(options) <= 1u;
-}
-
-/// Project the scalar-persistent ABI consumed by an emitted MOI mechanism.
-/// This is patch metadata, not a second owner of register selection: lowering
-/// continues to select registers in ConSanOptions and records the selection on
-/// each emitted consumer or initializer that depends on it.
-[[nodiscard]] ConSanMoiPersistentSgprState moi_persistent_sgpr_state(const ConSanOptions &options) {
-  return {
-      .owner = options.moi_persistent_owner_sgpr,
-      .epoch = options.moi_persistent_epoch_sgpr,
-      .workgroup_key = options.moi_persistent_workgroup_key_sgpr,
-      .record_replay_workgroup = options.moi_record_replay_workgroup_sgprs,
-  };
 }
 
 /// Record vector-persistent state on the emitted mechanism that initializes
