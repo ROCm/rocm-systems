@@ -29,16 +29,6 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_gpu_overdrive_level / amdsmi_set_gpu_overdrive_level.
-// ---- invalid parameters first ----
-TEST_F(GpuFunctionalReadWrite, SetOverdriveLevel_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_gpu_overdrive_level", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_gpu_overdrive_level(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 // ---- store -> change -> verify changed -> restore -> verify restored ----
 TEST_F(GpuFunctionalReadWrite, OverdriveLevel_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();

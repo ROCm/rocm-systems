@@ -50,10 +50,16 @@ with valid input and checked for valid output. Invalid-input cases run even when
 the matching device is absent, since argument validation does not depend on the
 device; positive cases skip when there is nothing to drive.
 
+Only `AMDSMI_STATUS_SUCCESS` counts as a positive pass. A status meaning the
+feature is absent on this host marks that device skipped, and a case where every
+device was unsupported is reported SKIPPED. This keeps an unimplemented API from
+reading as covered.
+
 The **functional** tier owns **setters** and any API needing setup from another
 API. Every read-write test stores the original value, sets a different one,
 verifies the readback against what it set, restores the original and confirms the
-restore took. Writes are opt-in behind `AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`.
+restore took, so a run leaves the device as it found it. Writes require root
+via `AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED()`.
 
 Performance benchmarks belong in `functional/` because they require a real device to produce
 meaningful timing data.

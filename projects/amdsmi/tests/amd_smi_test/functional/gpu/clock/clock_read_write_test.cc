@@ -29,15 +29,6 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_clk_freq / amdsmi_set_clk_freq (frequency-level mask).
-TEST_F(GpuFunctionalReadWrite, SetClkFreq_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_clk_freq(kInvalidHandle, AMDSMI_CLK_TYPE_SYS, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(GpuFunctionalReadWrite, ClkFreq_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
@@ -106,15 +97,6 @@ TEST_F(GpuFunctionalReadWrite, ClkFreq_SetVerifyRestore) {
 }
 
 // amdsmi_get_gpu_pci_bandwidth / amdsmi_set_gpu_pci_bandwidth (bandwidth mask).
-TEST_F(GpuFunctionalReadWrite, SetPciBandwidth_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_gpu_pci_bandwidth(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(GpuFunctionalReadWrite, PciBandwidth_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

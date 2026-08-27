@@ -47,7 +47,7 @@ TEST_F(NicIntegration, GetNicProcessorHandles_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_processor_handles(nullptr, &count, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicProcessorHandles_AllSockets) {
@@ -60,10 +60,7 @@ TEST_F(NicIntegration, GetNicProcessorHandles_AllSockets) {
     amdsmi_status_t err = amdsmi_get_nic_processor_handles(sockets()[i], &count, nullptr);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("socket=" + std::to_string(i) + " count-query", err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("socket=" + std::to_string(i) + " count-query", err);
     if (err != AMDSMI_STATUS_SUCCESS || count == 0) continue;
     std::vector<amdsmi_processor_handle> handles(count);
     DISPLAY_AMDSMI_API("amdsmi_get_nic_processor_handles", "socket=" + std::to_string(i) + " fill",
@@ -71,12 +68,9 @@ TEST_F(NicIntegration, GetNicProcessorHandles_AllSockets) {
     err = amdsmi_get_nic_processor_handles(sockets()[i], &count, handles.data());
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("socket=" + std::to_string(i) + " fill", err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("socket=" + std::to_string(i) + " fill", err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // =====================================================================
@@ -84,9 +78,8 @@ TEST_F(NicIntegration, GetNicProcessorHandles_AllSockets) {
 // =====================================================================
 
 TEST_F(NicIntegration, GetNicDeviceBdf_NullOutput) {
-  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_device_bdf", "nic=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_nic_device_bdf(nics()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_nic_device_bdf(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -98,7 +91,7 @@ TEST_F(NicIntegration, GetNicDeviceBdf_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_device_bdf(kInvalidHandle, &bdf);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicDeviceBdf_AllNics) {
@@ -111,12 +104,9 @@ TEST_F(NicIntegration, GetNicDeviceBdf_AllNics) {
     amdsmi_status_t err = amdsmi_get_nic_device_bdf(nics()[i], &bdf);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("nic=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("nic=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // =====================================================================
@@ -124,9 +114,8 @@ TEST_F(NicIntegration, GetNicDeviceBdf_AllNics) {
 // =====================================================================
 
 TEST_F(NicIntegration, GetNicDriverInfo_NullOutput) {
-  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_driver_info", "nic=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_nic_driver_info(nics()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_nic_driver_info(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -138,7 +127,7 @@ TEST_F(NicIntegration, GetNicDriverInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_driver_info(kInvalidHandle, &info);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicDriverInfo_AllNics) {
@@ -151,12 +140,9 @@ TEST_F(NicIntegration, GetNicDriverInfo_AllNics) {
     amdsmi_status_t err = amdsmi_get_nic_driver_info(nics()[i], &info);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("nic=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("nic=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // =====================================================================
@@ -164,9 +150,8 @@ TEST_F(NicIntegration, GetNicDriverInfo_AllNics) {
 // =====================================================================
 
 TEST_F(NicIntegration, GetNicAsicInfo_NullOutput) {
-  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_asic_info", "nic=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_nic_asic_info(nics()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_nic_asic_info(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -178,7 +163,7 @@ TEST_F(NicIntegration, GetNicAsicInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_asic_info(kInvalidHandle, &info);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicAsicInfo_AllNics) {
@@ -191,12 +176,9 @@ TEST_F(NicIntegration, GetNicAsicInfo_AllNics) {
     amdsmi_status_t err = amdsmi_get_nic_asic_info(nics()[i], &info);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("nic=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("nic=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // =====================================================================
@@ -204,9 +186,8 @@ TEST_F(NicIntegration, GetNicAsicInfo_AllNics) {
 // =====================================================================
 
 TEST_F(NicIntegration, GetNicBusInfo_NullOutput) {
-  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_bus_info", "nic=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_nic_bus_info(nics()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_nic_bus_info(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -218,7 +199,7 @@ TEST_F(NicIntegration, GetNicBusInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_bus_info(kInvalidHandle, &info);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicBusInfo_AllNics) {
@@ -231,12 +212,9 @@ TEST_F(NicIntegration, GetNicBusInfo_AllNics) {
     amdsmi_status_t err = amdsmi_get_nic_bus_info(nics()[i], &info);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("nic=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("nic=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // =====================================================================
@@ -244,9 +222,8 @@ TEST_F(NicIntegration, GetNicBusInfo_AllNics) {
 // =====================================================================
 
 TEST_F(NicIntegration, GetNicNumaInfo_NullOutput) {
-  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_numa_info", "nic=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_nic_numa_info(nics()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_nic_numa_info(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -258,7 +235,7 @@ TEST_F(NicIntegration, GetNicNumaInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_numa_info(kInvalidHandle, &info);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicNumaInfo_AllNics) {
@@ -271,12 +248,9 @@ TEST_F(NicIntegration, GetNicNumaInfo_AllNics) {
     amdsmi_status_t err = amdsmi_get_nic_numa_info(nics()[i], &info);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("nic=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("nic=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // =====================================================================
@@ -284,9 +258,8 @@ TEST_F(NicIntegration, GetNicNumaInfo_AllNics) {
 // =====================================================================
 
 TEST_F(NicIntegration, GetNicPortInfo_NullOutput) {
-  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_port_info", "nic=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_nic_port_info(nics()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_nic_port_info(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -298,7 +271,7 @@ TEST_F(NicIntegration, GetNicPortInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_port_info(kInvalidHandle, &info);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicPortInfo_AllNics) {
@@ -311,12 +284,9 @@ TEST_F(NicIntegration, GetNicPortInfo_AllNics) {
     amdsmi_status_t err = amdsmi_get_nic_port_info(nics()[i], &info);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("nic=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("nic=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // =====================================================================
@@ -324,9 +294,8 @@ TEST_F(NicIntegration, GetNicPortInfo_AllNics) {
 // =====================================================================
 
 TEST_F(NicIntegration, GetNicRdmaDevInfo_NullOutput) {
-  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_rdma_dev_info", "nic=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_nic_rdma_dev_info(nics()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_nic_rdma_dev_info(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -338,7 +307,7 @@ TEST_F(NicIntegration, GetNicRdmaDevInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_rdma_dev_info(kInvalidHandle, &info);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicRdmaDevInfo_AllNics) {
@@ -351,12 +320,9 @@ TEST_F(NicIntegration, GetNicRdmaDevInfo_AllNics) {
     amdsmi_status_t err = amdsmi_get_nic_rdma_dev_info(nics()[i], &info);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("nic=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("nic=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // =====================================================================
@@ -364,9 +330,8 @@ TEST_F(NicIntegration, GetNicRdmaDevInfo_AllNics) {
 // =====================================================================
 
 TEST_F(NicIntegration, GetNicFwInfo_NullOutput) {
-  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
   DISPLAY_AMDSMI_API("amdsmi_get_nic_fw_info", "nic=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_nic_fw_info(nics()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_nic_fw_info(any_nic(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -378,7 +343,7 @@ TEST_F(NicIntegration, GetNicFwInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_nic_fw_info(kInvalidHandle, &info);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 
 TEST_F(NicIntegration, GetNicFwInfo_AllNics) {
@@ -391,10 +356,49 @@ TEST_F(NicIntegration, GetNicFwInfo_AllNics) {
     amdsmi_status_t err = amdsmi_get_nic_fw_info(nics()[i], &info);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("nic=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("nic=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
+}
+
+TEST_F(NicIntegration, DeviceBdf_InvalidHandle) {
+  RequireInit();
+  amdsmi_bdf_t bdf;
+  memset(&bdf, 0, sizeof(bdf));
+  DISPLAY_AMDSMI_API("amdsmi_get_nic_device_bdf", "handle=invalid", kVerbose);
+  amdsmi_status_t err = amdsmi_get_nic_device_bdf(kInvalidHandle, &bdf);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
+                        AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+}
+
+TEST_F(NicIntegration, AsicInfo_NullOutput) {
+  DISPLAY_AMDSMI_API("amdsmi_get_nic_asic_info", "nic=0 out=nullptr", kVerbose);
+  amdsmi_status_t err = amdsmi_get_nic_asic_info(any_nic(), nullptr);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
+}
+
+TEST_F(NicIntegration, DeviceBdf_Stable) {
+  if (nics().empty()) GTEST_SKIP() << "No NIC devices";
+  amdsmi::test::StatusCollector col("amdsmi_get_nic_device_bdf");
+  for (size_t i = 0; i < nics().size(); ++i) {
+    amdsmi_bdf_t a, b;
+    memset(&a, 0, sizeof(a));
+    memset(&b, 0, sizeof(b));
+    DISPLAY_AMDSMI_API("amdsmi_get_nic_device_bdf", "nic=" + std::to_string(i), kVerbose);
+    amdsmi_status_t e1 = amdsmi_get_nic_device_bdf(nics()[i], &a);
+    amdsmi_status_t e2 = amdsmi_get_nic_device_bdf(nics()[i], &b);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, e1, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+    col.Record("nic=" + std::to_string(i), e1,
+               ::amdsmi::test::AmdsmiStatusIsExpected(e1, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    EXPECT_EQ(e1, e2) << "nic=" << i << " getter status not stable";
+    if (e1 == AMDSMI_STATUS_SUCCESS) {
+      EXPECT_EQ(a.as_uint, b.as_uint) << "nic=" << i << " BDF not stable across reads";
+    }
+  }
+  col.ExpectNoFailures();
 }

@@ -40,7 +40,7 @@ TEST_F(CpuIntegration, GetHsmpMetricsTableVersion_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_hsmp_metrics_table_version(kInvalidHandle, &version);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetHsmpMetricsTableVersion_AllCpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_hsmp_metrics_table_version");
@@ -52,12 +52,9 @@ TEST_F(CpuIntegration, GetHsmpMetricsTableVersion_AllCpus) {
     amdsmi_status_t err = amdsmi_get_hsmp_metrics_table_version(cpus()[i], &version);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("cpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("cpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_hsmp_metrics_table (handle guarded only) ----
@@ -68,7 +65,7 @@ TEST_F(CpuIntegration, GetHsmpMetricsTable_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_hsmp_metrics_table(kInvalidHandle, &table);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetHsmpMetricsTable_AllCpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_hsmp_metrics_table");
@@ -80,10 +77,7 @@ TEST_F(CpuIntegration, GetHsmpMetricsTable_AllCpus) {
     amdsmi_status_t err = amdsmi_get_hsmp_metrics_table(cpus()[i], &table);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("cpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("cpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }

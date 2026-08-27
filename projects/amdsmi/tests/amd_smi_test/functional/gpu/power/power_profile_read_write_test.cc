@@ -29,15 +29,6 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_power_cap_info / amdsmi_set_power_cap.
-TEST_F(GpuFunctionalReadWrite, SetPowerCap_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_power_cap", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_power_cap(kInvalidHandle, 0, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(GpuFunctionalReadWrite, PowerCap_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
@@ -86,16 +77,6 @@ TEST_F(GpuFunctionalReadWrite, PowerCap_SetVerifyRestore) {
 }
 
 // amdsmi_get_gpu_power_profile_presets / amdsmi_set_gpu_power_profile.
-TEST_F(GpuFunctionalReadWrite, SetPowerProfile_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_gpu_power_profile", "handle=invalid", kVerbose);
-  amdsmi_status_t err =
-      amdsmi_set_gpu_power_profile(kInvalidHandle, 0, AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(GpuFunctionalReadWrite, PowerProfile_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

@@ -93,10 +93,7 @@ TEST_F(SystemIntegration, StatusCodeToString_AllCodes) {
     amdsmi_status_t err = amdsmi_status_code_to_string(code, &status_string);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("status=" + std::to_string(code), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("status=" + std::to_string(code), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }

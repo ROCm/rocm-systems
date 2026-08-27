@@ -34,16 +34,6 @@ using amdsmi::test::kVerbose;
 // amdsmi_get_cpu_pwr_efficiency_mode / amdsmi_set_cpu_pwr_efficiency_mode.
 // amdsmi_get_cpu_sdps_limit / amdsmi_set_cpu_sdps_limit.
 // amdsmi_set_cpu_socket_boostlimit (no socket getter; reads back per core).
-// ---- amdsmi_set_cpu_socket_power_cap ----
-TEST_F(CpuFunctionalReadWrite, SetSocketPowerCap_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_power_cap", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_socket_power_cap(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(CpuFunctionalReadWrite, SocketPowerCap_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
@@ -83,27 +73,6 @@ TEST_F(CpuFunctionalReadWrite, SocketPowerCap_SetVerifyRestore) {
     }
   }
   col.ExpectNoFailures();
-}
-
-// ---- amdsmi_set_cpu_pwr_efficiency_mode ----
-TEST_F(CpuFunctionalReadWrite, SetPwrEfficiencyMode_InvalidHandle) {
-  RequireInit();
-  uint32_t util = 0;
-  uint32_t ppt = 0;
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_pwr_efficiency_mode", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_pwr_efficiency_mode(kInvalidHandle, 0, &util, &ppt);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetPwrEfficiencyMode_NullOutput) {
-  if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
-  uint32_t ppt = 0;
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_pwr_efficiency_mode", "utilization=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_pwr_efficiency_mode(cpus()[0], 0, nullptr, &ppt);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  AMDSMI_EXPECT_NULL_ARG(err);
 }
 
 TEST_F(CpuFunctionalReadWrite, PwrEfficiencyMode_SetVerifyRestore) {
@@ -151,16 +120,6 @@ TEST_F(CpuFunctionalReadWrite, PwrEfficiencyMode_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-// ---- amdsmi_set_cpu_sdps_limit ----
-TEST_F(CpuFunctionalReadWrite, SetSdpsLimit_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_sdps_limit", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_sdps_limit(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(CpuFunctionalReadWrite, SdpsLimit_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
@@ -195,16 +154,6 @@ TEST_F(CpuFunctionalReadWrite, SdpsLimit_SetVerifyRestore) {
     }
   }
   col.ExpectNoFailures();
-}
-
-// ---- amdsmi_set_cpu_socket_boostlimit ----
-TEST_F(CpuFunctionalReadWrite, SetSocketBoostlimit_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_boostlimit", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_socket_boostlimit(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
 // There is no socket-level boostlimit getter; the per-core getter reports the

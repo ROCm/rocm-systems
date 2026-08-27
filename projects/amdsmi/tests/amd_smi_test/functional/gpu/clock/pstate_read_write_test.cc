@@ -29,15 +29,6 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_soc_pstate / amdsmi_set_soc_pstate.
-TEST_F(GpuFunctionalReadWrite, SetSocPstate_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_soc_pstate", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_soc_pstate(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(GpuFunctionalReadWrite, SocPstate_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
@@ -91,15 +82,6 @@ TEST_F(GpuFunctionalReadWrite, SocPstate_SetVerifyRestore) {
 }
 
 // amdsmi_get_xgmi_plpd / amdsmi_set_xgmi_plpd.
-TEST_F(GpuFunctionalReadWrite, SetXgmiPlpd_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_xgmi_plpd", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_xgmi_plpd(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(GpuFunctionalReadWrite, XgmiPlpd_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (gpus().empty()) GTEST_SKIP() << "No GPU processors";

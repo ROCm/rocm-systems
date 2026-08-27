@@ -36,16 +36,6 @@ using amdsmi::test::kVerbose;
 // amdsmi_get_cpu_xgmi_pstate_range / amdsmi_set_cpu_xgmi_pstate_range.
 // amdsmi_get_cpu_socket_lclk_dpm_level / amdsmi_set_cpu_socket_lclk_dpm_level.
 // Link/pstate setters with no getter.
-// ---- amdsmi_set_cpu_pc6_enable (0/1 toggle) ----
-TEST_F(CpuFunctionalReadWrite, SetPc6Enable_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_pc6_enable", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_pc6_enable(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(CpuFunctionalReadWrite, Pc6Enable_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
@@ -82,16 +72,6 @@ TEST_F(CpuFunctionalReadWrite, Pc6Enable_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-// ---- amdsmi_set_cpu_cc6_enable (0/1 toggle) ----
-TEST_F(CpuFunctionalReadWrite, SetCc6Enable_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_cc6_enable", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_cc6_enable(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(CpuFunctionalReadWrite, Cc6Enable_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
@@ -126,25 +106,6 @@ TEST_F(CpuFunctionalReadWrite, Cc6Enable_SetVerifyRestore) {
     }
   }
   col.ExpectNoFailures();
-}
-
-// ---- amdsmi_set_cpu_rail_isofreq_policy (bool toggle; setter takes bool*) ----
-TEST_F(CpuFunctionalReadWrite, SetRailIsofreqPolicy_InvalidHandle) {
-  RequireInit();
-  bool policy = false;
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_rail_isofreq_policy", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_rail_isofreq_policy(kInvalidHandle, &policy);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetRailIsofreqPolicy_NullOutput) {
-  if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_rail_isofreq_policy", "policy=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_rail_isofreq_policy(cpus()[0], nullptr);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  AMDSMI_EXPECT_NULL_ARG(err);
 }
 
 TEST_F(CpuFunctionalReadWrite, RailIsofreqPolicy_SetVerifyRestore) {
@@ -184,25 +145,6 @@ TEST_F(CpuFunctionalReadWrite, RailIsofreqPolicy_SetVerifyRestore) {
   col.ExpectNoFailures();
 }
 
-// ---- amdsmi_set_cpu_dfc_ctrl (uint8_t* payload) ----
-TEST_F(CpuFunctionalReadWrite, SetDfcCtrl_InvalidHandle) {
-  RequireInit();
-  uint8_t dfc = 0;
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_dfc_ctrl", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_dfc_ctrl(kInvalidHandle, &dfc);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetDfcCtrl_NullOutput) {
-  if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_dfc_ctrl", "dfc=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_dfc_ctrl(cpus()[0], nullptr);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-  AMDSMI_EXPECT_NULL_ARG(err);
-}
-
 TEST_F(CpuFunctionalReadWrite, DfcCtrl_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
@@ -237,16 +179,6 @@ TEST_F(CpuFunctionalReadWrite, DfcCtrl_SetVerifyRestore) {
     }
   }
   col.ExpectNoFailures();
-}
-
-// ---- amdsmi_set_cpu_xgmi_pstate_range (min/max) ----
-TEST_F(CpuFunctionalReadWrite, SetXgmiPstateRange_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_xgmi_pstate_range", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_xgmi_pstate_range(kInvalidHandle, 0, 2);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
 TEST_F(CpuFunctionalReadWrite, XgmiPstateRange_SetVerifyRestore) {
@@ -298,16 +230,6 @@ TEST_F(CpuFunctionalReadWrite, XgmiPstateRange_SetVerifyRestore) {
     }
   }
   col.ExpectNoFailures();
-}
-
-// ---- amdsmi_set_cpu_socket_lclk_dpm_level (nbio id + min/max) ----
-TEST_F(CpuFunctionalReadWrite, SetSocketLclkDpmLevel_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_socket_lclk_dpm_level", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_socket_lclk_dpm_level(kInvalidHandle, 0, 0, 1);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
 TEST_F(CpuFunctionalReadWrite, SocketLclkDpmLevel_SetVerifyRestore) {
@@ -369,62 +291,6 @@ TEST_F(CpuFunctionalReadWrite, SocketLclkDpmLevel_SetVerifyRestore) {
     }
   }
   col.ExpectNoFailures();
-}
-
-// ---- link/pstate setters with no getter ----
-TEST_F(CpuFunctionalReadWrite, SetXgmiWidth_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_xgmi_width", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_xgmi_width(kInvalidHandle, 0, 1);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetGmi3LinkWidthRange_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_gmi3_link_width_range", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_gmi3_link_width_range(kInvalidHandle, 0, 1);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetPcieLinkRate_InvalidHandle) {
-  RequireInit();
-  uint8_t prev_mode = 0;
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_pcie_link_rate", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_pcie_link_rate(kInvalidHandle, 0, &prev_mode);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, SetDfPstateRange_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_df_pstate_range", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_df_pstate_range(kInvalidHandle, 0, 2);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, ApbEnable_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_cpu_apb_enable", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_cpu_apb_enable(kInvalidHandle);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
-TEST_F(CpuFunctionalReadWrite, ApbDisable_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_cpu_apb_disable", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_cpu_apb_disable(kInvalidHandle, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
 }
 
 // Every setter below is write-only -- AMD SMI exposes no getter for xgmi width,

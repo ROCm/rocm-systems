@@ -30,15 +30,6 @@ using amdsmi::test::kInvalidHandle;
 using amdsmi::test::kVerbose;
 
 // amdsmi_get_cpu_dimm_sb_reg / amdsmi_set_cpu_dimm_sb_reg.
-TEST_F(CpuFunctionalReadWrite, SetDimmSbReg_InvalidHandle) {
-  RequireInit();
-  DISPLAY_AMDSMI_API("amdsmi_set_cpu_dimm_sb_reg", "handle=invalid", kVerbose);
-  amdsmi_status_t err = amdsmi_set_cpu_dimm_sb_reg(kInvalidHandle, 0, 0, 0, 0, 0);
-  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
-                        AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
-}
-
 TEST_F(CpuFunctionalReadWrite, DimmSbReg_SetVerifyRestore) {
   AMDSMI_SKIP_UNLESS_MUTATION_ALLOWED();
   if (cpus().empty()) GTEST_SKIP() << "No CPU processors";

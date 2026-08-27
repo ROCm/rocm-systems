@@ -47,7 +47,7 @@ TEST_F(CpuIntegration, GetDdrBw_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_cpu_ddr_bw(kInvalidHandle, &bw);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetDdrBw_AllCpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_ddr_bw");
@@ -59,12 +59,9 @@ TEST_F(CpuIntegration, GetDdrBw_AllCpus) {
     amdsmi_status_t err = amdsmi_get_cpu_ddr_bw(cpus()[i], &bw);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("cpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("cpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_cpu_dimm_temp_range_and_refresh_rate (handle guarded only) ----
@@ -75,7 +72,7 @@ TEST_F(CpuIntegration, GetDimmTempRangeRefreshRate_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(kInvalidHandle, 0, &rate);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetDimmTempRangeRefreshRate_AllCpusAllDimms) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_dimm_temp_range_and_refresh_rate");
@@ -89,12 +86,9 @@ TEST_F(CpuIntegration, GetDimmTempRangeRefreshRate_AllCpusAllDimms) {
       amdsmi_status_t err = amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(cpus()[i], addr, &rate);
       DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                             AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-      amdsmi_col.Record("cpu=" + std::to_string(i) + " dimm=" + std::to_string(addr), err,
-                        ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                               AMDSMI_STATUS_NOT_SUPPORTED,
-                                                               AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+      amdsmi_col.RecordPositive("cpu=" + std::to_string(i) + " dimm=" + std::to_string(addr), err);
     }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_cpu_dimm_power_consumption (handle guarded only) ----
@@ -105,7 +99,7 @@ TEST_F(CpuIntegration, GetDimmPowerConsumption_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_cpu_dimm_power_consumption(kInvalidHandle, 0, &pow);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetDimmPowerConsumption_AllCpusAllDimms) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_dimm_power_consumption");
@@ -119,12 +113,9 @@ TEST_F(CpuIntegration, GetDimmPowerConsumption_AllCpusAllDimms) {
       amdsmi_status_t err = amdsmi_get_cpu_dimm_power_consumption(cpus()[i], addr, &pow);
       DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                             AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-      amdsmi_col.Record("cpu=" + std::to_string(i) + " dimm=" + std::to_string(addr), err,
-                        ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                               AMDSMI_STATUS_NOT_SUPPORTED,
-                                                               AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+      amdsmi_col.RecordPositive("cpu=" + std::to_string(i) + " dimm=" + std::to_string(addr), err);
     }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_cpu_dimm_thermal_sensor (handle guarded only) ----
@@ -135,7 +126,7 @@ TEST_F(CpuIntegration, GetDimmThermalSensor_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_cpu_dimm_thermal_sensor(kInvalidHandle, 0, &temp);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetDimmThermalSensor_AllCpusAllDimms) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_dimm_thermal_sensor");
@@ -149,19 +140,15 @@ TEST_F(CpuIntegration, GetDimmThermalSensor_AllCpusAllDimms) {
       amdsmi_status_t err = amdsmi_get_cpu_dimm_thermal_sensor(cpus()[i], addr, &temp);
       DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                             AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-      amdsmi_col.Record("cpu=" + std::to_string(i) + " dimm=" + std::to_string(addr), err,
-                        ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                               AMDSMI_STATUS_NOT_SUPPORTED,
-                                                               AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+      amdsmi_col.RecordPositive("cpu=" + std::to_string(i) + " dimm=" + std::to_string(addr), err);
     }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_cpu_dimm_sb_reg (data output guarded) ----
 TEST_F(CpuIntegration, GetDimmSbReg_NullOutput) {
-  if (cpus().empty()) GTEST_SKIP() << "No CPU processors";
   DISPLAY_AMDSMI_API("amdsmi_get_cpu_dimm_sb_reg", "data=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_cpu_dimm_sb_reg(cpus()[0], 0, 0, 0, 0, nullptr);
+  amdsmi_status_t err = amdsmi_get_cpu_dimm_sb_reg(any_cpu(), 0, 0, 0, 0, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -171,7 +158,7 @@ TEST_F(CpuIntegration, GetDimmSbReg_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_cpu_dimm_sb_reg(kInvalidHandle, 0, 0, 0, 0, &data);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(CpuIntegration, GetDimmSbReg_AllCpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_cpu_dimm_sb_reg");
@@ -182,12 +169,9 @@ TEST_F(CpuIntegration, GetDimmSbReg_AllCpus) {
     amdsmi_status_t err = amdsmi_get_cpu_dimm_sb_reg(cpus()[i], 0, 0, 0, 0, &data);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("cpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("cpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_set_cpu_dimm_sb_reg (invalid input only; valid-input cases are in functional/) ----
@@ -196,5 +180,5 @@ TEST_F(CpuIntegration, SetDimmSbReg_InvalidHandle) {
   amdsmi_status_t err = amdsmi_set_cpu_dimm_sb_reg(kInvalidHandle, 0, 0, 0, 0, 0);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }

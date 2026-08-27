@@ -30,9 +30,8 @@ using amdsmi::test::kVerbose;
 
 // ---------------- amdsmi_get_npm_info (node handle) ----------------
 TEST_F(GpuIntegration, GetNpmInfo_NullOutput) {
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   DISPLAY_AMDSMI_API("amdsmi_get_npm_info", "node=0 out=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_npm_info(gpus()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_npm_info(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -43,7 +42,7 @@ TEST_F(GpuIntegration, GetNpmInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_npm_info(kInvalidHandle, &info);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(GpuIntegration, GetNpmInfo_Node) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_npm_info");
@@ -62,11 +61,8 @@ TEST_F(GpuIntegration, GetNpmInfo_Node) {
     amdsmi_status_t err = amdsmi_get_npm_info(node, &info);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record(in, err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive(in, err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
   if (!resolved_any) GTEST_SKIP() << "No node handle on this system";
 }

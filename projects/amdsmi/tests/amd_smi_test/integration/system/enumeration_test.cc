@@ -84,7 +84,7 @@ TEST_F(SystemIntegration, GetSocketInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_socket_info(kInvalidSocket, sizeof(name), name);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(SystemIntegration, GetSocketInfo_AllSockets) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_socket_info");
@@ -96,12 +96,9 @@ TEST_F(SystemIntegration, GetSocketInfo_AllSockets) {
     amdsmi_status_t err = amdsmi_get_socket_info(sockets()[i], sizeof(name), name);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("socket=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("socket=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_processor_handles : invalid params first ----
@@ -123,10 +120,7 @@ TEST_F(SystemIntegration, GetProcessorHandles_AllSockets) {
     amdsmi_status_t err = amdsmi_get_processor_handles(sockets()[i], &processor_count, nullptr);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("socket=" + std::to_string(i) + " query count", err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("socket=" + std::to_string(i) + " query count", err);
     if (err != AMDSMI_STATUS_SUCCESS || processor_count == 0) continue;
     std::vector<amdsmi_processor_handle> handles(processor_count);
     DISPLAY_AMDSMI_API("amdsmi_get_processor_handles",
@@ -135,21 +129,17 @@ TEST_F(SystemIntegration, GetProcessorHandles_AllSockets) {
     err = amdsmi_get_processor_handles(sockets()[i], &processor_count, handles.data());
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("socket=" + std::to_string(i) + " count=" + std::to_string(processor_count),
-                      err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive(
+        "socket=" + std::to_string(i) + " count=" + std::to_string(processor_count), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_node_handle : invalid params first ----
 
 TEST_F(SystemIntegration, GetNodeHandle_NullOutput) {
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   DISPLAY_AMDSMI_API("amdsmi_get_node_handle", "node_handle=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_node_handle(gpus()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_node_handle(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -159,7 +149,7 @@ TEST_F(SystemIntegration, GetNodeHandle_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_node_handle(kInvalidHandle, &node_handle);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(SystemIntegration, GetNodeHandle_AllGpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_node_handle");
@@ -170,20 +160,16 @@ TEST_F(SystemIntegration, GetNodeHandle_AllGpus) {
     amdsmi_status_t err = amdsmi_get_node_handle(gpus()[i], &node_handle);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("gpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("gpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_processor_type : invalid params first ----
 
 TEST_F(SystemIntegration, GetProcessorType_NullOutput) {
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   DISPLAY_AMDSMI_API("amdsmi_get_processor_type", "processor_type=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_processor_type(gpus()[0], nullptr);
+  amdsmi_status_t err = amdsmi_get_processor_type(any_gpu(), nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -193,7 +179,7 @@ TEST_F(SystemIntegration, GetProcessorType_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_processor_type(kInvalidHandle, &type);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(SystemIntegration, GetProcessorType_AllGpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_processor_type");
@@ -204,20 +190,16 @@ TEST_F(SystemIntegration, GetProcessorType_AllGpus) {
     amdsmi_status_t err = amdsmi_get_processor_type(gpus()[i], &type);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("gpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("gpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_processor_info : invalid params first ----
 
 TEST_F(SystemIntegration, GetProcessorInfo_NullOutput) {
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   DISPLAY_AMDSMI_API("amdsmi_get_processor_info", "name=nullptr", kVerbose);
-  amdsmi_status_t err = amdsmi_get_processor_info(gpus()[0], 128, nullptr);
+  amdsmi_status_t err = amdsmi_get_processor_info(any_gpu(), 128, nullptr);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
   AMDSMI_EXPECT_NULL_ARG(err);
 }
@@ -228,7 +210,7 @@ TEST_F(SystemIntegration, GetProcessorInfo_InvalidHandle) {
   amdsmi_status_t err = amdsmi_get_processor_info(kInvalidHandle, sizeof(name), name);
   DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL,
                         AMDSMI_STATUS_NOT_SUPPORTED);
-  EXPECT_NE(err, AMDSMI_STATUS_SUCCESS);
+  AMDSMI_EXPECT_INVALID_HANDLE(err);
 }
 TEST_F(SystemIntegration, GetProcessorInfo_AllGpus) {
   amdsmi::test::StatusCollector amdsmi_col("amdsmi_get_processor_info");
@@ -240,18 +222,14 @@ TEST_F(SystemIntegration, GetProcessorInfo_AllGpus) {
     amdsmi_status_t err = amdsmi_get_processor_info(gpus()[i], sizeof(name), name);
     DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                           AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-    amdsmi_col.Record("gpu=" + std::to_string(i), err,
-                      ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                             AMDSMI_STATUS_NOT_SUPPORTED,
-                                                             AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    amdsmi_col.RecordPositive("gpu=" + std::to_string(i), err);
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_processor_count_from_handles : invalid params first ----
 
 TEST_F(SystemIntegration, GetProcessorCountFromHandles_NullCount) {
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   std::vector<amdsmi_processor_handle> handles(gpus());
   DISPLAY_AMDSMI_API("amdsmi_get_processor_count_from_handles", "processor_count=nullptr",
                      kVerbose);
@@ -261,7 +239,6 @@ TEST_F(SystemIntegration, GetProcessorCountFromHandles_NullCount) {
   AMDSMI_EXPECT_NULL_ARG(err);
 }
 TEST_F(SystemIntegration, GetProcessorCountFromHandles_Valid) {
-  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
   std::vector<amdsmi_processor_handle> handles(gpus());
   uint32_t processor_count = static_cast<uint32_t>(handles.size());
   uint32_t nr_cpusockets = 0;
@@ -300,10 +277,8 @@ TEST_F(SystemIntegration, GetProcessorHandlesByType_AllSocketsAllTypes) {
           amdsmi_get_processor_handles_by_type(sockets()[i], ptype, nullptr, &processor_count);
       DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                             AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-      amdsmi_col.Record("socket=" + std::to_string(i) + " type=" + std::to_string(ptype), err,
-                        ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                               AMDSMI_STATUS_NOT_SUPPORTED,
-                                                               AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+      amdsmi_col.RecordPositive("socket=" + std::to_string(i) + " type=" + std::to_string(ptype),
+                                err);
       if (err != AMDSMI_STATUS_SUCCESS || processor_count == 0) continue;
       std::vector<amdsmi_processor_handle> handles(processor_count);
       DISPLAY_AMDSMI_API("amdsmi_get_processor_handles_by_type",
@@ -314,15 +289,12 @@ TEST_F(SystemIntegration, GetProcessorHandlesByType_AllSocketsAllTypes) {
                                                  &processor_count);
       DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
                             AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
-      amdsmi_col.Record("socket=" + std::to_string(i) + " type=" + std::to_string(ptype) +
-                            " count=" + std::to_string(processor_count),
-                        err,
-                        ::amdsmi::test::AmdsmiStatusIsExpected(err, AMDSMI_STATUS_SUCCESS,
-                                                               AMDSMI_STATUS_NOT_SUPPORTED,
-                                                               AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+      amdsmi_col.RecordPositive("socket=" + std::to_string(i) + " type=" + std::to_string(ptype) +
+                                    " count=" + std::to_string(processor_count),
+                                err);
     }
   }
-  amdsmi_col.ExpectNoFailures();
+  AMDSMI_FINISH_POSITIVE(amdsmi_col);
 }
 
 // ---- amdsmi_get_processor_handle_from_bdf : invalid params first ----
@@ -349,4 +321,68 @@ TEST_F(SystemIntegration, GetProcessorHandleFromBdf_ZeroBdf) {
                         AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
   AMDSMI_EXPECT_STATUS(err, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_FOUND, AMDSMI_STATUS_INVAL,
                        AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+}
+
+TEST_F(SystemIntegration, LibVersion_NullOutput) {
+  RequireInit();
+  DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "version=nullptr", kVerbose);
+  amdsmi_status_t err = amdsmi_get_lib_version(nullptr);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  AMDSMI_EXPECT_NULL_ARG(err);
+}
+
+TEST_F(SystemIntegration, LibVersion_Stable) {
+  RequireInit();
+  amdsmi_version_t a, b;
+  memset(&a, 0, sizeof(a));
+  memset(&b, 0, sizeof(b));
+  DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "read x2", kVerbose);
+  amdsmi_status_t e1 = amdsmi_get_lib_version(&a);
+  amdsmi_status_t e2 = amdsmi_get_lib_version(&b);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, e1, AMDSMI_STATUS_SUCCESS,
+                        AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+  AMDSMI_EXPECT_STATUS(e1, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
+                       AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+  if (e1 == AMDSMI_STATUS_SUCCESS && e2 == AMDSMI_STATUS_SUCCESS) {
+    EXPECT_EQ(a.major, b.major);
+    EXPECT_EQ(a.minor, b.minor);
+    EXPECT_EQ(a.release, b.release);
+  }
+}
+
+TEST_F(SystemIntegration, SocketHandles_Stable) {
+  RequireInit();
+  uint32_t c1 = 0, c2 = 0;
+  DISPLAY_AMDSMI_API("amdsmi_get_socket_handles", "count x2", kVerbose);
+  amdsmi_status_t e1 = amdsmi_get_socket_handles(&c1, nullptr);
+  amdsmi_status_t e2 = amdsmi_get_socket_handles(&c2, nullptr);
+  DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, e1, AMDSMI_STATUS_SUCCESS,
+                        AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+  AMDSMI_EXPECT_STATUS(e1, AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_SUPPORTED,
+                       AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+  if (e1 == AMDSMI_STATUS_SUCCESS && e2 == AMDSMI_STATUS_SUCCESS) {
+    EXPECT_EQ(c1, c2) << "socket count not stable";
+  }
+}
+
+TEST_F(SystemIntegration, ProcessorType_Stable) {
+  if (gpus().empty()) GTEST_SKIP() << "No GPU processors";
+  amdsmi::test::StatusCollector col("amdsmi_get_processor_type");
+  for (size_t i = 0; i < gpus().size(); ++i) {
+    amdsmi_processor_type_t t1 = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+    amdsmi_processor_type_t t2 = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+    DISPLAY_AMDSMI_API("amdsmi_get_processor_type", "gpu=" + std::to_string(i), kVerbose);
+    amdsmi_status_t e1 = amdsmi_get_processor_type(gpus()[i], &t1);
+    amdsmi_status_t e2 = amdsmi_get_processor_type(gpus()[i], &t2);
+    DISPLAY_AMDSMI_STATUS(kVerbose, __FILE__, __LINE__, e1, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED);
+    col.Record("gpu=" + std::to_string(i), e1,
+               ::amdsmi::test::AmdsmiStatusIsExpected(e1, AMDSMI_STATUS_SUCCESS,
+                                                      AMDSMI_STATUS_NOT_SUPPORTED,
+                                                      AMDSMI_STATUS_NOT_YET_IMPLEMENTED));
+    if (e1 == AMDSMI_STATUS_SUCCESS && e2 == AMDSMI_STATUS_SUCCESS) {
+      EXPECT_EQ(t1, t2) << "gpu=" << i << " processor type not stable";
+    }
+  }
+  col.ExpectNoFailures();
 }
