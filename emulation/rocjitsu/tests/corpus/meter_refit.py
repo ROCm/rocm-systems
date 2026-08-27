@@ -386,9 +386,12 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
     # sixteen does not scale that way: the low-occupancy case reaches a higher
     # instruction rate, because fewer wavefronts contend for the same issue
     # slot. An exponent on the resident count is the smallest form of that.
-    # Relative to the exponent the config already applies, because the recorded
-    # issue term was produced with it. Adding it again would double it.
-    gamma = tuning.get("issue_occupancy_exponent", 0.0) - tuning.get("gamma_base", 0.0)
+    # The full exponent, not a relative one: the issue term above is rebuilt
+    # from the raw per-unit cycles the trace records, so nothing has applied it
+    # yet. (The barrier cost is the other way round -- the emulator charges it
+    # on the wavefront's own clock, so it is already inside the recorded chain
+    # and the knob there is relative.)
+    gamma = tuning.get("issue_occupancy_exponent", 0.0)
     if gamma != 0.0:
         issue *= (max(1.0, float(dispatch["resident"])) / 8.0) ** gamma
 

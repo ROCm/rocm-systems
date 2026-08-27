@@ -354,6 +354,18 @@ void DispatchDes::end() {
                                    std::log2(static_cast<double>(shape_.workgroup_count)));
   latency_bound += terms_.straggler;
 
+  // A unit's queue is not the whole story: how fast it drains depends on how
+  // many wavefronts are feeding it. Applied after the maximum over units and
+  // before the composition uses it -- which is the whole point, and was the
+  // bug: applied afterwards it changed only the reported term and never the
+  // dispatch's cost, so the parameter looked inert and the offline model,
+  // which applied it in the right place, drifted from the emulator by exactly
+  // this much.
+  if (tuning_.issue_occupancy_exponent != 0.0 && terms_.resident > 0)
+    issue_bound = static_cast<std::uint64_t>(
+        static_cast<double>(issue_bound) *
+        std::pow(static_cast<double>(terms_.resident) / 8.0, tuning_.issue_occupancy_exponent));
+
   const std::uint64_t placement =
       ceil_div_real(static_cast<double>(shape_.workgroup_count), tuning_.workgroups_per_cycle);
   const std::uint64_t bandwidth = ledger_.bound_cycles();
@@ -409,15 +421,6 @@ void DispatchDes::end() {
   // executing" almost never fires, because the emulator runs them one at a
   // time, and it moved nothing. The effect is real and the observation is not
   // there to detect it.
-  // A unit's queue is not the whole story: how fast it drains depends on how
-  // many wavefronts are feeding it. Applied after the maximum over units and
-  // before the composition, so that it scales the term the composition uses
-  // and nothing a wavefront's own chain is built from.
-  if (tuning_.issue_occupancy_exponent != 0.0 && terms_.resident > 0)
-    issue_bound = static_cast<std::uint64_t>(
-        static_cast<double>(issue_bound) *
-        std::pow(static_cast<double>(terms_.resident) / 8.0, tuning_.issue_occupancy_exponent));
-
   terms_.issue = issue_bound;
   terms_.bandwidth = bandwidth;
   terms_.l1_cycles = ledger_.l1_cycles();
