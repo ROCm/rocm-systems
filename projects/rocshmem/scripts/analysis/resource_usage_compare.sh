@@ -60,10 +60,11 @@
 #                         charts) to. Default:
 #                         $PROJECTS_DIR/resource-usage/<gpu>-<config>-<sha1>-vs-<sha2>/
 #
-# Also generates one self-contained interactive HTML dashboard per commit
-# (dashboard-<sha>.html, always on -- no flag needed): kernel stats, a
-# sortable/searchable table, a top-N chart, and (for two-commit runs) a
-# delta-vs-counterpart section per resource type.
+# Also generates one self-contained interactive HTML dashboard per variant
+# (dashboard.html, and dashboard-bitcode.html when bitcode data is available;
+# always on -- no flag needed): a baseline-vs-branch comparison table on top
+# (scrollable, filterable, switchable by metric) for two-commit runs, plus a
+# per-commit stats/chart/table view with an in-page commit selector.
 #
 # Example: compare two explicit commits (reusing cached builds if present)
 #   ./resource_usage_compare.sh --commit1 d48c64f6e --commit2 3caf8d080 \
@@ -316,22 +317,17 @@ measure_commit() {
   echo "$csv"
 }
 
-# generate_dashboards <csv1> <csv2> <sha1> <sha2> <outdir> <diff_prefix> <dash_suffix>
-# Reads the res_diff_*.csv files a prior diff loop already wrote (named
-# "${diff_prefix}_${sort_by}.csv" in $outdir) so the dashboards' delta numbers
-# always match the CSV/PNG report exactly -- never recomputes the diff itself.
-generate_dashboards() {
-  local csv1="$1" csv2="$2" sha1="$3" sha2="$4" outdir="$5" diff_prefix="$6" dash_suffix="$7"
-  local diff_args=()
-  for sort_by in "${SORT_BY_TYPE[@]}"; do
-    diff_args+=(--diff "${sort_by}:${outdir}/${diff_prefix}_${sort_by}.csv")
-  done
+# generate_dashboard <csv1> <csv2> <sha1> <sha2> <diff_csv> <out_html>
+# <diff_csv> is any one already-written res_diff_<Column>.csv -- every
+# --sort-by choice writes the same row set/columns (only row order differs),
+# so one file carries the full multi-metric diff data for the dashboard's
+# client-side metric switcher.
+generate_dashboard() {
+  local csv1="$1" csv2="$2" sha1="$3" sha2="$4" diff_csv="$5" out_html="$6"
   python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
-    --csv "$csv1" --commit "$sha1" --role baseline --counterpart-commit "$sha2" \
-    --top "$TOP_N" --out "$outdir/dashboard-${sha1}${dash_suffix}.html" "${diff_args[@]}" >&2
-  python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
-    --csv "$csv2" --commit "$sha2" --role branch --counterpart-commit "$sha1" \
-    --top "$TOP_N" --out "$outdir/dashboard-${sha2}${dash_suffix}.html" "${diff_args[@]}" >&2
+    --baseline-csv "$csv1" --baseline-commit "$sha1" \
+    --branch-csv "$csv2" --branch-commit "$sha2" \
+    --diff-csv "$diff_csv" --top "$TOP_N" --out "$out_html" >&2
 }
 
 if [[ -n "$PR_NUM" ]]; then
@@ -365,12 +361,22 @@ SHA_1="$(git rev-parse --short=12 "$COMMIT_1")"
 CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1")"
 
 if [[ -z "$COMMIT_2" ]]; then
-  DASHBOARD_1="$(dirname "$CSV_1")/dashboard-${SHA_1}.html"
+  DASHBOARD_1="$(dirname "$CSV_1")/dashboard.html"
   python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
-    --csv "$CSV_1" --commit "$SHA_1" --role snapshot --top "$TOP_N" --out "$DASHBOARD_1" >&2
+    --baseline-csv "$CSV_1" --baseline-commit "$SHA_1" --top "$TOP_N" --out "$DASHBOARD_1" >&2
   echo ""
   echo "Single-commit snapshot -> $CSV_1"
   echo "  Dashboard -> $DASHBOARD_1"
+
+  BITCODE_CSV_1="${CSV_1%.csv}-bitcode.csv"
+  if [[ -f "$BITCODE_CSV_1" ]]; then
+    DASHBOARD_1_BITCODE="$(dirname "$CSV_1")/dashboard-bitcode.html"
+    python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
+      --baseline-csv "$BITCODE_CSV_1" --baseline-commit "$SHA_1" --top "$TOP_N" \
+      --out "$DASHBOARD_1_BITCODE" >&2
+    echo "  Device bitcode -> $BITCODE_CSV_1"
+    echo "  Bitcode dashboard -> $DASHBOARD_1_BITCODE"
+  fi
   exit 0
 fi
 
@@ -391,8 +397,8 @@ for sort_by in "${SORT_BY_TYPE[@]}"; do
     --top "$TOP_N" --sort-by "$sort_by" \
     ${MATCH:+--match "$MATCH"}
 done
-generate_dashboards "$OUTDIR/res-${SHA_1}.csv" "$OUTDIR/res-${SHA_2}.csv" \
-  "$SHA_1" "$SHA_2" "$OUTDIR" "res_diff" ""
+generate_dashboard "$OUTDIR/res-${SHA_1}.csv" "$OUTDIR/res-${SHA_2}.csv" \
+  "$SHA_1" "$SHA_2" "$OUTDIR/res_diff_VGPRs.csv" "$OUTDIR/dashboard.html"
 
 # Device-bitcode (whole-program opt -O3) numbers, when both sides have them --
 # this inliner has no cost model/per-TU boundary, so a change that's
@@ -412,8 +418,8 @@ if [[ -f "$BITCODE_CSV_1" && -f "$BITCODE_CSV_2" ]]; then
       --top "$TOP_N" --sort-by "$sort_by" \
       ${MATCH:+--match "$MATCH"}
   done
-  generate_dashboards "$OUTDIR/res-${SHA_1}-bitcode.csv" "$OUTDIR/res-${SHA_2}-bitcode.csv" \
-    "$SHA_1" "$SHA_2" "$OUTDIR" "res_diff_bitcode" "-bitcode"
+  generate_dashboard "$OUTDIR/res-${SHA_1}-bitcode.csv" "$OUTDIR/res-${SHA_2}-bitcode.csv" \
+    "$SHA_1" "$SHA_2" "$OUTDIR/res_diff_bitcode_VGPRs.csv" "$OUTDIR/dashboard-bitcode.html"
 else
   echo "  note: device-bitcode resource-usage CSV missing for one or both commits" >&2
   echo "  ($BITCODE_CSV_1, $BITCODE_CSV_2) -- skipping bitcode diff." >&2
@@ -422,9 +428,9 @@ fi
 echo ""
 echo "Done. Self-contained report -> $OUTDIR/"
 echo "  Production library: res-${SHA_1}.csv, res-${SHA_2}.csv, res_diff_<Column>.{csv,png}"
-echo "  Dashboards:          dashboard-${SHA_1}.html, dashboard-${SHA_2}.html"
+echo "  Dashboard:           dashboard.html"
 if [[ -f "$OUTDIR/res-${SHA_1}-bitcode.csv" ]]; then
   echo "  Device bitcode:      res-${SHA_1}-bitcode.csv, res-${SHA_2}-bitcode.csv, res_diff_bitcode_<Column>.{csv,png}"
-  echo "  Bitcode dashboards:  dashboard-${SHA_1}-bitcode.html, dashboard-${SHA_2}-bitcode.html"
+  echo "  Bitcode dashboard:   dashboard-bitcode.html"
 fi
 echo "  (each report set covers: ${SORT_BY_TYPE[*]})"

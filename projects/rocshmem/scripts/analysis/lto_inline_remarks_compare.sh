@@ -38,8 +38,15 @@
 #                         why this matters for a real before/after decision --
 #                         AMDGPU LTO codegen is not build-to-build
 #                         deterministic).
+#   --top N               Rows shown in the dashboard's per-commit charts and
+#                         report panels/CSV sections (default: 20).
 #   --output-dir DIR      Where to write the report. Default:
 #                         $PROJECTS_DIR/lto-inline-remarks/<gpu>-<config>-<sha1>[-vs-<sha2>]/
+#
+# Also generates one self-contained interactive HTML dashboard (dashboard.html,
+# always on -- no flag needed): a baseline-vs-branch comparison table on top
+# (scrollable, filterable) for two-commit runs, plus a per-commit stats/chart/
+# table view with an in-page commit selector.
 #
 # Example:
 #   ./lto_inline_remarks_compare.sh --commit1 HEAD~1 --commit2 HEAD \
@@ -53,6 +60,7 @@ COMMIT_2=""
 GPU_TARGET="gfx950"
 BUILD_CONFIG="all_backends"
 FORCE_REBUILD=false
+TOP_N=20
 OUTPUT_DIR=""
 
 _need_arg() {
@@ -69,6 +77,7 @@ while [[ $# -gt 0 ]]; do
     --gpu-target)    _need_arg "$1" "$#"; GPU_TARGET="$2";    shift 2 ;;
     --build-config)  _need_arg "$1" "$#"; BUILD_CONFIG="$2";  shift 2 ;;
     --force-rebuild) FORCE_REBUILD=true; shift ;;
+    --top)           _need_arg "$1" "$#"; TOP_N="$2";         shift 2 ;;
     --output-dir)    _need_arg "$1" "$#"; OUTPUT_DIR="$2";    shift 2 ;;
     -h|--help)
       sed -n '2,/^#####/p' "$0" | head -n -1
@@ -186,10 +195,15 @@ if [[ -z "$COMMIT_2" ]]; then
   python3 "$TOOLS_DIR/lto_inline_remarks_report.py" \
     --csv "$OUTDIR/remarks-${SHA_1}.csv" \
     --out-chart "$OUTDIR/dashboard-${SHA_1}.png" \
-    --out-summary "$OUTDIR/summary-${SHA_1}.csv"
+    --out-summary "$OUTDIR/summary-${SHA_1}.csv" \
+    --top "$TOP_N"
+  python3 "$TOOLS_DIR/lto_inline_remarks_dashboard.py" \
+    --baseline-csv "$OUTDIR/remarks-${SHA_1}.csv" --baseline-commit "$SHA_1" \
+    --top "$TOP_N" --out "$OUTDIR/dashboard.html"
   echo ""
   echo "Single-commit snapshot -> $OUTDIR/"
   echo "  remarks-${SHA_1}.csv, summary-${SHA_1}.csv, dashboard-${SHA_1}.png"
+  echo "  Dashboard -> $OUTDIR/dashboard.html"
   echo "  (raw YAML in cache: ${CSV_1%.csv}.yaml)"
   exit 0
 fi
@@ -206,9 +220,17 @@ python3 "$TOOLS_DIR/lto_inline_remarks_diff.py" \
   --baseline "$OUTDIR/remarks-${SHA_1}.csv" --branch "$OUTDIR/remarks-${SHA_2}.csv" \
   --out "$OUTDIR/remarks_diff_pairs.csv" \
   --summary-out "$OUTDIR/remarks_diff_summary.csv" \
-  --chart "$OUTDIR/remarks_diff_dashboard.png"
+  --chart "$OUTDIR/remarks_diff_dashboard.png" \
+  --top "$TOP_N"
+
+python3 "$TOOLS_DIR/lto_inline_remarks_dashboard.py" \
+  --baseline-csv "$OUTDIR/remarks-${SHA_1}.csv" --baseline-commit "$SHA_1" \
+  --branch-csv "$OUTDIR/remarks-${SHA_2}.csv" --branch-commit "$SHA_2" \
+  --pairs-csv "$OUTDIR/remarks_diff_pairs.csv" \
+  --top "$TOP_N" --out "$OUTDIR/dashboard.html"
 
 echo ""
 echo "Done. Report -> $OUTDIR/"
 echo "  remarks-${SHA_1}.csv, remarks-${SHA_2}.csv,"
 echo "  remarks_diff_pairs.csv, remarks_diff_summary.csv, remarks_diff_dashboard.png"
+echo "  Dashboard -> $OUTDIR/dashboard.html"

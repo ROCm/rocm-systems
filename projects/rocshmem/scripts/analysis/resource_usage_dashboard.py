@@ -4,26 +4,26 @@
 #
 # SPDX-License-Identifier: MIT
 ###############################################################################
-"""Generate a self-contained, interactive HTML dashboard for one commit's
-resource-usage report (see resource_usage_to_csv.py / resource_usage_diff.py).
+"""Generate one self-contained, interactive HTML dashboard for a resource-usage
+report: either a single commit's snapshot, or a baseline-vs-branch comparison
+with both commits' data embedded in the same file (comparison view on top, an
+in-page toggle to inspect either commit's own kernels below). See
+resource_usage_to_csv.py / resource_usage_diff.py.
 
-One dashboard per commit, not per comparison: --diff lets a commit's
-dashboard also surface its delta vs. a paired commit, but the page itself is
-always about a single commit's kernels. No external JS/CSS, no build step --
-double-click the output file to view it, matching this project's existing
-self-contained HTML report style (see
+No external JS/CSS, no build step -- double-click the output file to view it,
+matching this project's existing self-contained HTML report style (see
 My-AMD-tips-and-tricks/Posts/2026-07-15-rocSHMEM-resource-chart.html).
 
 Usage:
     python3 scripts/analysis/resource_usage_dashboard.py \\
-        --csv resource_usage.csv --commit abc123 --role snapshot \\
+        --baseline-csv res-abc123.csv --baseline-commit abc123 \\
         --out dashboard.html --top 20
 
     python3 scripts/analysis/resource_usage_dashboard.py \\
-        --csv res-abc123.csv --commit abc123 --role baseline \\
-        --counterpart-commit def456 \\
-        --diff VGPRs:res_diff_VGPRs.csv --diff TotalSGPRs:res_diff_TotalSGPRs.csv \\
-        --out dashboard-abc123.html --top 20
+        --baseline-csv res-abc123.csv --baseline-commit abc123 \\
+        --branch-csv   res-def456.csv --branch-commit def456 \\
+        --diff-csv res_diff_VGPRs.csv \\
+        --out dashboard.html --top 20
 """
 
 import argparse
@@ -34,10 +34,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-import resource_usage_diff as rud  # reuse NUMERIC_COLS/labels/colors/to_num -- keeps
-
-# dashboard numbers in lockstep with the existing CSV/PNG report instead of a
-# second, possibly-drifting implementation of the same matching logic.
+import resource_usage_diff as rud  # reuse NUMERIC_COLS/labels/colors/to_num --
+# keeps dashboard numbers in lockstep with the existing CSV/PNG report instead
+# of a second, possibly-drifting implementation of the same matching logic.
 
 NUMERIC_COLS = rud.NUMERIC_COLS
 REPORT_COLS = rud.REPORT_COLS
@@ -45,12 +44,6 @@ RESOURCE_LABELS = rud.RESOURCE_LABELS
 OCC_COL = rud.OCC_COL
 OCC_LABEL = rud.OCC_LABEL
 to_num = rud.to_num
-
-ROLE_LABELS = {
-    "snapshot": "Snapshot",
-    "baseline": "Baseline",
-    "branch": "Branch",
-}
 
 
 def load_kernels(csv_path: Path):
@@ -77,64 +70,17 @@ def compute_stats(rows):
     return stats
 
 
-def load_diff(metric, diff_csv_path, top_n):
-    """Read an already-generated res_diff_<metric>.csv (see resource_usage_diff.py)
-    and pull out the summary + top-|delta| rows for one metric's dashboard section.
+def load_diff_rows(diff_csv_path: Path):
+    """Read an already-generated res_diff_<Column>.csv (see resource_usage_diff.py).
+
+    write_csv() there writes the same row set/fields for every --sort-by choice
+    (only row order differs), so any one of the 8 per-metric CSVs carries the
+    full multi-metric diff data -- metric selection in the dashboard is a
+    client-side re-sort/re-color over this single embedded dataset, not 8
+    separate fetches.
     """
     with open(diff_csv_path, newline="") as f:
-        rows = list(csv.DictReader(f))
-    changed = [
-        r for r in rows if r["status"] == "common" and to_num(r[f"{metric}_delta"]) != 0
-    ]
-    added = [r for r in rows if r["status"] == "added"]
-    removed = [r for r in rows if r["status"] == "removed"]
-    changed.sort(key=lambda r: abs(to_num(r[f"{metric}_delta"])), reverse=True)
-    top_k = min(10, top_n)
-    return {
-        "label": RESOURCE_LABELS.get(metric, OCC_LABEL),
-        "changed_count": len(changed),
-        "added_count": len(added),
-        "removed_count": len(removed),
-        "top": changed[:top_k],
-    }
-
-
-def delta_color(metric, delta):
-    if delta == 0:
-        return rud.COLOR_NEUTRAL
-    worse = delta > 0 if metric != OCC_COL else delta < 0
-    return rud.COLOR_BAD if worse else rud.COLOR_GOOD
-
-
-def render_diff_section(diffs):
-    if not diffs:
-        return ""
-    blocks = []
-    for metric, d in diffs.items():
-        rows_html = []
-        for r in d["top"]:
-            delta = to_num(r[f"{metric}_delta"])
-            color = delta_color(metric, delta)
-            sign = "+" if delta > 0 else ""
-            bv = r[f"{metric}_baseline"] or "-"
-            nv = r[f"{metric}_branch"] or "-"
-            rows_html.append(
-                f"<tr><td>{html.escape(r['demangled_name'])}</td>"
-                f"<td>{html.escape(bv)}</td><td>{html.escape(nv)}</td>"
-                f'<td style="color:{color};font-weight:600">{sign}{delta}</td></tr>'
-            )
-        summary = (
-            f"{d['changed_count']} changed, {d['added_count']} added, "
-            f"{d['removed_count']} removed"
-        )
-        table = (
-            f"<table class=\"diff-table\"><thead><tr><th>Kernel</th><th>Baseline</th>"
-            f"<th>Branch</th><th>&Delta;</th></tr></thead><tbody>{''.join(rows_html) or '<tr><td colspan=4>(no non-zero deltas)</td></tr>'}</tbody></table>"
-        )
-        blocks.append(
-            f"<details><summary>{html.escape(d['label'])} &mdash; {summary}</summary>{table}</details>"
-        )
-    return f'<section class="diff-section"><h2>Vs. counterpart</h2>{"".join(blocks)}</section>'
+        return list(csv.DictReader(f))
 
 
 def render_stat_cards(stats):
@@ -149,7 +95,7 @@ def render_stat_cards(stats):
         card("Kernels with spills", stats["spill_count"]),
         card("Kernels with dynamic stack", stats["dynamic_stack_count"]),
     ]
-    return f'<section class="stat-grid">{"".join(cards)}</section>'
+    return f'<div class="stat-grid">{"".join(cards)}</div>'
 
 
 NOTES_HTML = f"""
@@ -227,57 +173,100 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     font: inherit; color: var(--ink-primary); background: var(--surface-panel);
     border: 1px solid var(--gridline); border-radius: 4px; padding: 6px 10px;
   }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }}
+  .controls {{ display: flex; gap: 10px; align-items: center; margin: 14px 0; flex-wrap: wrap; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 12.5px; }}
   th, td {{ text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--gridline); }}
   th {{ cursor: pointer; color: var(--ink-secondary); font-weight: 600; user-select: none; }}
   th:hover {{ color: var(--ink-primary); }}
   tbody tr:hover {{ background: var(--surface-panel); }}
+  .scroll-box {{ max-height: 520px; overflow-y: auto; border: 1px solid var(--gridline); border-radius: 6px; }}
+  .scroll-box table thead th {{ position: sticky; top: 0; background: var(--surface-1); z-index: 1; }}
+  .scroll-box table {{ margin: 0; }}
   .notes p {{ color: var(--ink-secondary); font-size: 13px; line-height: 1.5; margin-bottom: 10px; }}
-  details {{ margin-bottom: 8px; }}
-  summary {{ cursor: pointer; font-size: 13px; color: var(--ink-secondary); padding: 6px 0; }}
+  .commit-toggle {{ display: flex; gap: 8px; margin-bottom: 16px; }}
+  .commit-toggle button {{
+    font: inherit; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--gridline);
+    background: var(--surface-panel); color: var(--ink-secondary); cursor: pointer;
+  }}
+  .commit-toggle button.active {{ background: var(--accent); color: #fff; border-color: var(--accent); }}
+  .diff-summary {{ color: var(--ink-secondary); font-size: 13px; margin-bottom: 10px; }}
   svg text {{ fill: var(--ink-secondary); font-size: 10px; }}
-  .diff-table {{ margin-bottom: 4px; }}
 </style>
 </head>
 <body>
 <div class="dash-root">
   <header>
-    <h1>{role_label} commit {commit_short}{counterpart_html}</h1>
-    <div class="sub">{arch} / {build_config} &middot; {kernel_count} kernels</div>
+    <h1>{title}</h1>
+    <div class="sub">{arch} / {build_config}</div>
   </header>
-  {stat_cards}
-  <section class="chart-section">
-    <h2>Top kernels by resource</h2>
-    <select id="metricPicker"></select>
-    <div id="chartContainer"></div>
-  </section>
-  <section class="table-section">
-    <h2>All kernels</h2>
-    <input type="text" id="searchBox" placeholder="Filter by kernel name...">
-    <table id="kernelTable">
-      <thead><tr></tr></thead>
-      <tbody></tbody>
-    </table>
+  {comparison_section}
+  <section class="commit-section">
+    {commit_toggle}
+    <div id="commitStats"></div>
+    <div class="chart-section">
+      <h2>Top kernels by resource</h2>
+      <div class="controls">
+        <select id="metricPicker"></select>
+      </div>
+      <div id="chartContainer"></div>
+    </div>
+    <div class="table-section">
+      <h2>All kernels</h2>
+      <div class="controls">
+        <input type="text" id="searchBox" placeholder="Filter by kernel name...">
+      </div>
+      <div class="scroll-box">
+        <table id="kernelTable">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   </section>
   {notes}
-  {diff_section}
 </div>
 <script>
-const KERNELS = {kernels_json};
+const KERNELS_BY_COMMIT = {kernels_by_commit_json};
+const STATS_HTML_BY_COMMIT = {stats_html_by_commit_json};
 const METRICS = {metrics_json};
 const TOP_N = {top_n};
+const OCC_COL = "{occ_col}";
 const COLOR_GOOD = "{color_good}", COLOR_BAD = "{color_bad}", COLOR_NEUTRAL = "{color_neutral}";
+const DIFF_ROWS = {diff_rows_json};
 
 function toNum(v) {{ const n = parseInt(v, 10); return isNaN(n) ? 0 : n; }}
+function deltaColor(metric, delta) {{
+  if (delta === 0) return COLOR_NEUTRAL;
+  const worse = metric !== OCC_COL ? delta > 0 : delta < 0;
+  return worse ? COLOR_BAD : COLOR_GOOD;
+}}
 
-// --- sortable / filterable kernel table -----------------------------------
+// --- commit toggle (per-commit section) -----------------------------------
+let activeCommit = Object.keys(KERNELS_BY_COMMIT)[0];
+
+function setActiveCommit(commit) {{
+  activeCommit = commit;
+  document.querySelectorAll(".commit-toggle button").forEach(b => {{
+    b.classList.toggle("active", b.dataset.commit === commit);
+  }});
+  document.getElementById("commitStats").innerHTML = STATS_HTML_BY_COMMIT[commit];
+  renderTable();
+  drawChart(document.getElementById("metricPicker").value);
+}}
+
+document.querySelectorAll(".commit-toggle button").forEach(b => {{
+  b.addEventListener("click", () => setActiveCommit(b.dataset.commit));
+}});
+
+// --- sortable / filterable kernel table (active commit only) -------------
 const COLUMNS = ["demangled_name", ...METRICS.map(m => m.key), "DynamicStack"];
 const HEAD_LABELS = ["Kernel", ...METRICS.map(m => m.label), "Dyn. Stack"];
 let sortCol = METRICS[0].key, sortDesc = true;
 
 function renderTable() {{
   const filter = document.getElementById("searchBox").value.toLowerCase();
-  const rows = KERNELS.filter(k => k.demangled_name.toLowerCase().includes(filter));
+  const kernels = KERNELS_BY_COMMIT[activeCommit];
+  const rows = kernels.filter(k => k.demangled_name.toLowerCase().includes(filter));
   rows.sort((a, b) => {{
     const av = sortCol === "demangled_name" || sortCol === "DynamicStack" ? a[sortCol] : toNum(a[sortCol]);
     const bv = sortCol === "demangled_name" || sortCol === "DynamicStack" ? b[sortCol] : toNum(b[sortCol]);
@@ -314,7 +303,7 @@ function buildHeader() {{
 
 document.getElementById("searchBox").addEventListener("input", renderTable);
 
-// --- SVG bar chart for the selected metric --------------------------------
+// --- SVG bar chart for the selected metric (active commit only) ----------
 const ns = "http://www.w3.org/2000/svg";
 function el(tag, attrs) {{
   const e = document.createElementNS(ns, tag);
@@ -325,8 +314,8 @@ function el(tag, attrs) {{
 function drawChart(metricKey) {{
   const container = document.getElementById("chartContainer");
   container.textContent = "";
-  const metric = METRICS.find(m => m.key === metricKey);
-  const ranked = [...KERNELS].sort((a, b) => toNum(b[metricKey]) - toNum(a[metricKey])).slice(0, TOP_N);
+  const kernels = KERNELS_BY_COMMIT[activeCommit];
+  const ranked = [...kernels].sort((a, b) => toNum(b[metricKey]) - toNum(a[metricKey])).slice(0, TOP_N);
   if (!ranked.length) return;
   const marginL = 220, marginR = 50, rowH = 20, W = 760, plotW = W - marginL - marginR;
   const H = ranked.length * rowH + 20;
@@ -359,20 +348,121 @@ function buildMetricPicker() {{
 
 buildHeader();
 buildMetricPicker();
-renderTable();
+setActiveCommit(activeCommit);
 drawChart(METRICS[0].key);
+
+// --- comparison table (baseline vs branch, all kernels, no top-N cap) ----
+if (DIFF_ROWS.length) {{
+  let diffMetric = METRICS[0].key;
+  const DIFF_COLUMNS = ["demangled_name", "status"];
+  const DIFF_HEAD_LABELS = ["Kernel", "Status"];
+
+  function diffMetricPicker() {{
+    const picker = document.getElementById("diffMetricPicker");
+    for (const m of METRICS) {{
+      const opt = document.createElement("option");
+      opt.value = m.key; opt.textContent = m.label;
+      picker.appendChild(opt);
+    }}
+    picker.addEventListener("change", () => {{ diffMetric = picker.value; renderDiffTable(); }});
+  }}
+
+  function buildDiffHeader() {{
+    const tr = document.querySelector("#diffTable thead tr");
+    tr.textContent = "";
+    const cols = [...DIFF_COLUMNS, "baseline", "branch", "delta"];
+    const labels = [...DIFF_HEAD_LABELS, "Baseline", "Branch", "Δ"];
+    cols.forEach(c => {{
+      const th = document.createElement("th");
+      th.textContent = labels[cols.indexOf(c)];
+      tr.appendChild(th);
+    }});
+  }}
+
+  function renderDiffTable() {{
+    const filter = document.getElementById("diffSearchBox").value.toLowerCase();
+    const rows = DIFF_ROWS.filter(r => r.demangled_name.toLowerCase().includes(filter));
+    rows.sort((a, b) => Math.abs(toNum(b[diffMetric + "_delta"])) - Math.abs(toNum(a[diffMetric + "_delta"])));
+
+    const changed = rows.filter(r => r.status === "common" && toNum(r[diffMetric + "_delta"]) !== 0);
+    const added = rows.filter(r => r.status === "added");
+    const removed = rows.filter(r => r.status === "removed");
+    document.getElementById("diffSummary").textContent =
+      `${{changed.length}} changed, ${{added.length}} added, ${{removed.length}} removed (of ${{rows.length}} shown)`;
+
+    const tbody = document.querySelector("#diffTable tbody");
+    tbody.textContent = "";
+    for (const r of rows) {{
+      const bv = r[diffMetric + "_baseline"] || "-";
+      const nv = r[diffMetric + "_branch"] || "-";
+      const delta = toNum(r[diffMetric + "_delta"]);
+      const sign = delta > 0 ? "+" : "";
+      const tr = document.createElement("tr");
+      const nameTd = document.createElement("td"); nameTd.textContent = r.demangled_name; tr.appendChild(nameTd);
+      const statusTd = document.createElement("td"); statusTd.textContent = r.status; tr.appendChild(statusTd);
+      const bTd = document.createElement("td"); bTd.textContent = bv; tr.appendChild(bTd);
+      const nTd = document.createElement("td"); nTd.textContent = nv; tr.appendChild(nTd);
+      const dTd = document.createElement("td");
+      dTd.textContent = sign + delta;
+      dTd.style.color = deltaColor(diffMetric, delta);
+      dTd.style.fontWeight = "600";
+      tr.appendChild(dTd);
+      tbody.appendChild(tr);
+    }}
+  }}
+
+  document.getElementById("diffSearchBox").addEventListener("input", renderDiffTable);
+  buildDiffHeader();
+  diffMetricPicker();
+  renderDiffTable();
+}}
 </script>
 </body>
 </html>
 """
 
 
-def render_page(args, rows, stats, diffs):
+def render_comparison_section(diff_rows, baseline_commit, branch_commit):
+    if not diff_rows:
+        return ""
+    return f"""
+  <section class="comparison-section">
+    <h2>Baseline vs Branch &mdash; {html.escape(baseline_commit[:12])} &rarr; {html.escape(branch_commit[:12])}</h2>
+    <div class="controls">
+      <select id="diffMetricPicker"></select>
+      <input type="text" id="diffSearchBox" placeholder="Filter by kernel name...">
+    </div>
+    <div class="diff-summary" id="diffSummary"></div>
+    <div class="scroll-box">
+      <table id="diffTable">
+        <thead><tr></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+"""
+
+
+def render_commit_toggle(baseline_commit, branch_commit):
+    if not branch_commit:
+        return ""
+    b_short = baseline_commit[:12] or "baseline"
+    n_short = branch_commit[:12] or "branch"
+    return (
+        '<div class="commit-toggle">'
+        f'<button data-commit="baseline" class="active">Baseline ({html.escape(b_short)})</button>'
+        f'<button data-commit="branch">Branch ({html.escape(n_short)})</button>'
+        "</div>"
+    )
+
+
+def render_page(args, baseline_rows, branch_rows, diff_rows):
     metrics = [{"key": c, "label": RESOURCE_LABELS[c]} for c in REPORT_COLS] + [
         {"key": OCC_COL, "label": OCC_LABEL}
     ]
-    kernels_json = json.dumps(
-        [
+
+    def kernels_json(rows):
+        return [
             {
                 "demangled_name": r.get("demangled_name", ""),
                 "DynamicStack": r.get("DynamicStack", ""),
@@ -380,30 +470,37 @@ def render_page(args, rows, stats, diffs):
             }
             for r in rows
         ]
-    )
-    commit_short = args.commit[:12] if args.commit else "(working tree)"
-    counterpart_html = ""
-    if args.counterpart_commit:
-        verb = "vs branch" if args.role == "baseline" else "vs baseline"
-        counterpart_html = f" <span class=\"sub\">({html.escape(verb)} {html.escape(args.counterpart_commit[:12])})</span>"
-    title = f"Resource usage — {commit_short}"
+
+    kernels_by_commit = {"baseline": kernels_json(baseline_rows)}
+    stats_html_by_commit = {"baseline": render_stat_cards(compute_stats(baseline_rows))}
+    if branch_rows is not None:
+        kernels_by_commit["branch"] = kernels_json(branch_rows)
+        stats_html_by_commit["branch"] = render_stat_cards(compute_stats(branch_rows))
+
+    baseline_short = args.baseline_commit[:12] if args.baseline_commit else "(working tree)"
+    if args.branch_commit:
+        title = f"Resource usage — {baseline_short} vs {args.branch_commit[:12]}"
+    else:
+        title = f"Resource usage — {baseline_short}"
+
     return PAGE_TEMPLATE.format(
         title=html.escape(title),
-        role_label=html.escape(ROLE_LABELS.get(args.role, args.role)),
-        commit_short=html.escape(commit_short),
-        counterpart_html=counterpart_html,
-        arch=html.escape(rows[0]["arch"]) if rows else "?",
-        build_config=html.escape(rows[0]["build_config"]) if rows else "?",
-        kernel_count=stats["kernel_count"],
-        stat_cards=render_stat_cards(stats),
+        arch=html.escape(baseline_rows[0]["arch"]) if baseline_rows else "?",
+        build_config=html.escape(baseline_rows[0]["build_config"]) if baseline_rows else "?",
+        comparison_section=render_comparison_section(
+            diff_rows, args.baseline_commit, args.branch_commit
+        ),
+        commit_toggle=render_commit_toggle(args.baseline_commit, args.branch_commit),
         notes=NOTES_HTML,
-        diff_section=render_diff_section(diffs),
-        kernels_json=kernels_json,
+        kernels_by_commit_json=json.dumps(kernels_by_commit),
+        stats_html_by_commit_json=json.dumps(stats_html_by_commit),
         metrics_json=json.dumps(metrics),
         top_n=args.top,
+        occ_col=OCC_COL,
         color_good=rud.COLOR_GOOD,
         color_bad=rud.COLOR_BAD,
         color_neutral=rud.COLOR_NEUTRAL,
+        diff_rows_json=json.dumps(diff_rows),
     )
 
 
@@ -411,52 +508,54 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--csv", required=True, type=Path, help="this commit's res-<sha>.csv")
-    ap.add_argument("--commit", default="", help="this commit's sha/ref")
     ap.add_argument(
-        "--role",
-        default="snapshot",
-        choices=["snapshot", "baseline", "branch"],
-        help="snapshot: single-commit run; baseline/branch: part of a two-commit comparison",
+        "--baseline-csv", required=True, type=Path, help="this commit's res-<sha>.csv"
     )
+    ap.add_argument("--baseline-commit", default="", help="this commit's sha/ref")
     ap.add_argument(
-        "--counterpart-commit", default="", help="the other commit, when --role is baseline/branch"
+        "--branch-csv",
+        type=Path,
+        default=None,
+        help="the other commit's res-<sha>.csv (omit for a single-commit snapshot)",
     )
+    ap.add_argument("--branch-commit", default="", help="the other commit's sha/ref")
     ap.add_argument(
-        "--diff",
-        action="append",
-        default=[],
-        metavar="METRIC:PATH",
-        help="an already-generated res_diff_<METRIC>.csv (see resource_usage_diff.py); "
-        "repeatable, one per metric",
+        "--diff-csv",
+        type=Path,
+        default=None,
+        help="an already-generated res_diff_<Column>.csv (see resource_usage_diff.py); "
+        "any one metric's file carries the full multi-metric diff data. Only "
+        "meaningful together with --branch-csv.",
     )
     ap.add_argument("--out", required=True, type=Path, help="output HTML path")
     ap.add_argument(
-        "--top", type=int, default=20, help="rows shown in the chart / diff sections"
+        "--top", type=int, default=20, help="rows shown in the per-commit chart"
     )
     args = ap.parse_args()
 
-    if not args.csv.exists():
-        sys.exit(f"error: csv not found: {args.csv}")
+    if not args.baseline_csv.exists():
+        sys.exit(f"error: baseline csv not found: {args.baseline_csv}")
+    baseline_rows = load_kernels(args.baseline_csv)
+    if not baseline_rows:
+        sys.exit(f"error: no kernel rows in {args.baseline_csv}")
 
-    rows = load_kernels(args.csv)
-    if not rows:
-        sys.exit(f"error: no kernel rows in {args.csv}")
-    stats = compute_stats(rows)
+    branch_rows = None
+    if args.branch_csv:
+        if not args.branch_csv.exists():
+            sys.exit(f"error: branch csv not found: {args.branch_csv}")
+        branch_rows = load_kernels(args.branch_csv)
+        if not branch_rows:
+            sys.exit(f"error: no kernel rows in {args.branch_csv}")
 
-    diffs = {}
-    for spec in args.diff:
-        metric, sep, path = spec.partition(":")
-        if not sep:
-            sys.exit(f"error: --diff must be METRIC:PATH, got {spec!r}")
-        if metric not in NUMERIC_COLS:
-            sys.exit(f"error: --diff metric {metric!r} is not one of {NUMERIC_COLS}")
-        diff_path = Path(path)
-        if not diff_path.exists():
-            sys.exit(f"error: diff csv not found: {diff_path}")
-        diffs[metric] = load_diff(metric, diff_path, args.top)
+    diff_rows = []
+    if args.diff_csv:
+        if branch_rows is None:
+            sys.exit("error: --diff-csv requires --branch-csv/--branch-commit")
+        if not args.diff_csv.exists():
+            sys.exit(f"error: diff csv not found: {args.diff_csv}")
+        diff_rows = load_diff_rows(args.diff_csv)
 
-    html_out = render_page(args, rows, stats, diffs)
+    html_out = render_page(args, baseline_rows, branch_rows, diff_rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(html_out)
     print(f"Wrote dashboard to {args.out}")
