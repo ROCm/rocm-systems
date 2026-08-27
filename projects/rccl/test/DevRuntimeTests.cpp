@@ -270,6 +270,82 @@ TEST_F(SymMemorySetAccessTest, SetAccessFails_ReturnsError) {
 
 
 // ---------------------------------------------------------------------------
+// symMemoryExportSegmentHandle records a segment's location type and size in
+// the outgoing message, then publishes the handle one of two ways: POSIX-FD
+// handles are passed through as-is, anything else is exported to a shareable
+// handle. Both CUCHECKGOTOs jump to the same trailing label.
+//
+// ncclCuMemHandleType is a stub global fixed to POSIX-FD; the fixture saves and
+// restores it so the export branch can be reached without leaking the change.
+
+class SymMemoryExportSegmentHandleTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  symLsaMessage msg{};
+  hipMemAllocationHandleType savedHandleType = ncclCuMemHandleType;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+  }
+  void TearDown() override {
+    ncclCuMemHandleType = savedHandleType;
+    ResetDevRuntimeFakes();
+  }
+};
+
+// Branch: POSIX-FD handles need no export, so the handle is stored directly.
+TEST_F(SymMemoryExportSegmentHandleTest, PosixFd_StoresHandleWithoutExporting) {
+  ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  ScopedHook exportHandle(g_hipMemExportToShareableHandle,
+                          [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                             unsigned long long) { return hipSuccess; });
+  auto handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x42);
+
+  EXPECT_EQ(symMemoryExportSegmentHandle(comm, &msg, handle, 8192), ncclSuccess);
+  EXPECT_EQ(exportHandle.calls, 0);
+  EXPECT_EQ(msg.memHandle, handle);
+  EXPECT_EQ(msg.segmentSize, 8192u);
+  EXPECT_EQ(msg.type, hipMemLocationTypeDevice);  // from the properties fake
+}
+
+// Branch: any other handle type takes the shareable-handle export path.
+TEST_F(SymMemoryExportSegmentHandleTest, FabricHandle_ExportsShareableHandle) {
+  ncclCuMemHandleType = hipMemHandleTypeFabric;
+  ScopedHook exportHandle(g_hipMemExportToShareableHandle,
+                          [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                             unsigned long long) { return hipSuccess; });
+
+  EXPECT_EQ(symMemoryExportSegmentHandle(comm, &msg, {}, 4096), ncclSuccess);
+  EXPECT_EQ(exportHandle.calls, 1);
+  EXPECT_EQ(msg.segmentSize, 4096u);
+}
+
+// Branch: the export fails, so the second CUCHECKGOTO propagates the error.
+TEST_F(SymMemoryExportSegmentHandleTest, ExportFails_ReturnsError) {
+  ncclCuMemHandleType = hipMemHandleTypeFabric;
+  ScopedHook exportHandle(g_hipMemExportToShareableHandle,
+                          [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                             unsigned long long) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(symMemoryExportSegmentHandle(comm, &msg, {}, 4096), ncclSuccess);
+  EXPECT_EQ(exportHandle.calls, 1);
+}
+
+// Branch: the properties fetch fails, so the first CUCHECKGOTO returns before
+// the message is touched.
+TEST_F(SymMemoryExportSegmentHandleTest, PropertiesFail_ReturnsErrorWithoutWritingMessage) {
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp*, hipMemGenericAllocationHandle_t) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(symMemoryExportSegmentHandle(comm, &msg, {}, 4096), ncclSuccess);
+  EXPECT_EQ(props.calls, 1);
+  EXPECT_EQ(msg.segmentSize, 0u);  // untouched
+}
+
+
+// ---------------------------------------------------------------------------
 // symBindTeamMemory binds memory into a team's multicast handle, guarded by
 // `comm->nvlsSupport && tm->mcBasePtr != nullptr`. The body is behind
 // `#if CUDART_VERSION >= 12010`, which no HIP build defines, so on this target
