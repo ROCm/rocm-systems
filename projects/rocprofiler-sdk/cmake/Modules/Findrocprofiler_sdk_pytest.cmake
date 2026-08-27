@@ -125,7 +125,7 @@ if(rocprofiler_sdk_pytest_FOUND AND NOT TARGET rocprofiler_sdk_pytest::Pytest)
         add_custom_command(
             VERBATIM
             OUTPUT "${_tests_file}"
-            DEPENDS ${_DEPENDS}
+            DEPENDS ${_DEPENDS} ${_TEST_PATHS}
             COMMAND
                 ${CMAKE_COMMAND} -D "PYTEST_EXECUTABLE=${ROCPSDK_PYTEST_EXECUTABLE}" -D
                 "PYTEST_PYTHON_EXECUTABLE=${_PYTHON_EXECUTABLE}" -D
