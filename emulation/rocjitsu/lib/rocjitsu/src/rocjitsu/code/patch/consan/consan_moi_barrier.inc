@@ -293,45 +293,52 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
   std::vector<uint32_t> record_words;
   record_words.reserve(128);
   record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
-  if ((derived_owner_vgpr &&
-       !append_dynamic_barrier_store_u32_vgpr(
-           record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
-           *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+  if ((derived_owner_vgpr && !append_dynamic_record_store_u32_vgpr(
+                                 record_words, kBarrierRecordLayout,
+                                 barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
+                                 *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
       !append_dynamic_record_store_moi_report_dispatch_id_pair(
-          record_words, kDynamicBarrierRecordLayout,
+          record_words, kBarrierRecordLayout,
           barrier_record_base + offsetof(ConSanMoiBarrierRecord, generation), options, slot_vgpr,
           *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
-      !append_dynamic_barrier_event_index_store(
-          record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
+      !append_dynamic_record_event_index_store(
+          record_words, kBarrierRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
           barrier_record_base + offsetof(ConSanMoiBarrierRecord, event_index), slot_vgpr,
           *options.scratch_vgpr, arch) ||
-      !append_dynamic_barrier_store_workgroup_source(
-          record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_x),
-          workgroup_sources.x, slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_barrier_store_workgroup_source(
-          record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_y),
-          workgroup_sources.y, slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_barrier_store_workgroup_source(
-          record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_z),
-          workgroup_sources.z, slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_barrier_store_u32_scalar_src(
-          record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, lane_mask),
+      !append_dynamic_record_store_workgroup_source(
+          record_words, kBarrierRecordLayout,
+          barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_x), workgroup_sources.x,
+          slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_record_store_workgroup_source(
+          record_words, kBarrierRecordLayout,
+          barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_y), workgroup_sources.y,
+          slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_record_store_workgroup_source(
+          record_words, kBarrierRecordLayout,
+          barrier_record_base + offsetof(ConSanMoiBarrierRecord, workgroup_z), workgroup_sources.z,
+          slot_vgpr, *options.scratch_vgpr, arch) ||
+      !append_dynamic_record_store_u32_scalar_src(
+          record_words, kBarrierRecordLayout,
+          barrier_record_base + offsetof(ConSanMoiBarrierRecord, lane_mask),
           *options.moi_exec_save_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-      !append_dynamic_barrier_store_u32_scalar_src(
-          record_words,
+      !append_dynamic_record_store_u32_scalar_src(
+          record_words, kBarrierRecordLayout,
           barrier_record_base + offsetof(ConSanMoiBarrierRecord, lane_mask) + sizeof(uint32_t),
           static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u), slot_vgpr, *options.scratch_vgpr,
           arch) ||
       (options.moi_owner_vgpr &&
-       !append_dynamic_barrier_store_u32_vgpr(
-           record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
-           *options.moi_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+       !append_dynamic_record_store_u32_vgpr(
+           record_words, kBarrierRecordLayout,
+           barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id), *options.moi_owner_vgpr,
+           slot_vgpr, *options.scratch_vgpr, arch)) ||
       (options.moi_persistent_owner_sgpr &&
-       !append_dynamic_barrier_store_u32_scalar_src(
-           record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
+       !append_dynamic_record_store_u32_scalar_src(
+           record_words, kBarrierRecordLayout,
+           barrier_record_base + offsetof(ConSanMoiBarrierRecord, wave_id),
            *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-      !append_dynamic_barrier_store_u32_literal(
-          record_words, barrier_record_base + offsetof(ConSanMoiBarrierRecord, instruction_offset),
+      !append_dynamic_record_store_u32_literal(
+          record_words, kBarrierRecordLayout,
+          barrier_record_base + offsetof(ConSanMoiBarrierRecord, instruction_offset),
           static_cast<uint32_t>(candidate.site.text_offset), slot_vgpr, *options.scratch_vgpr,
           arch)) {
     errors.emplace_back("ConSan MOI barrier record patch could not encode record stores");

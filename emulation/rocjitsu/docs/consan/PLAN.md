@@ -561,6 +561,13 @@ and `collect_moi_ordering_atomic_offsets` supplies orchestration,
 Record/Replay, and Sampled from that result. The two engine-local kernel and
 function scans and their duplicate forward declarations are gone.
 
+Dynamic MOI record emission now exposes its one real implementation directly.
+Barrier, access, atomic, and fence call sites select a canonical
+`DynamicRecordLayout` and call the common address, scalar, workgroup-identity,
+and event-index emitters; twenty record-kind pass-through wrappers are gone.
+The explicit layout argument preserves the only record-kind distinction while
+making every caller auditable against the ABI definition.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

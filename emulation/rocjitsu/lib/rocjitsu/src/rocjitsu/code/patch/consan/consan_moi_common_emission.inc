@@ -1198,18 +1198,20 @@ private:
         }
         words.insert(words.end(), load_epoch->begin(), load_epoch->end());
         words.push_back(*wait_epoch);
-        if (!append_dynamic_access_store_u32_vgpr(
-                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch), value_vgpr,
-                slot_vgpr, *options.scratch_vgpr, arch)) {
+        if (!append_dynamic_record_store_u32_vgpr(
+                words, kAccessRecordLayout,
+                dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch), value_vgpr, slot_vgpr,
+                *options.scratch_vgpr, arch)) {
           errors.emplace_back(
               "ConSan MOI dynamic access-record probe could not store private epoch state");
           return std::nullopt;
         }
       } else if (options.moi_persistent_epoch_sgpr) {
         words.push_back(build_v_mov_b32_e32(value_vgpr, *options.moi_persistent_epoch_sgpr, arch));
-        if (!append_dynamic_access_store_u32_vgpr(
-                words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch), value_vgpr,
-                slot_vgpr, *options.scratch_vgpr, arch)) {
+        if (!append_dynamic_record_store_u32_vgpr(
+                words, kAccessRecordLayout,
+                dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch), value_vgpr, slot_vgpr,
+                *options.scratch_vgpr, arch)) {
           errors.emplace_back(
               "ConSan MOI dynamic access-record probe could not store scalar epoch state");
           return std::nullopt;
@@ -1217,51 +1219,61 @@ private:
       }
 
       if ((derived_owner_vgpr &&
-           !append_dynamic_access_store_u32_vgpr(
-               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
-               *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+           !append_dynamic_record_store_u32_vgpr(
+               words, kAccessRecordLayout,
+               dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id), *derived_owner_vgpr,
+               slot_vgpr, *options.scratch_vgpr, arch)) ||
           (options.moi_persistent_owner_sgpr &&
-           !append_dynamic_access_store_u32_scalar_src(
-               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
+           !append_dynamic_record_store_u32_scalar_src(
+               words, kAccessRecordLayout,
+               dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
                *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
           !append_dynamic_record_store_moi_report_dispatch_id_pair(
-              words, kDynamicAccessRecordLayout,
+              words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, generation), options, slot_vgpr,
               *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
-          !append_dynamic_access_event_index_store(
-              words, base + offsetof(ConSanMoiReportHeader, event_counter),
+          !append_dynamic_record_event_index_store(
+              words, kAccessRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, event_index), slot_vgpr,
               *options.scratch_vgpr, arch) ||
-          !append_dynamic_access_store_workgroup_source(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_x),
+          !append_dynamic_record_store_workgroup_source(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_x),
               workgroup_sources.x, slot_vgpr, *options.scratch_vgpr, arch) ||
-          !append_dynamic_access_store_workgroup_source(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_y),
+          !append_dynamic_record_store_workgroup_source(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_y),
               workgroup_sources.y, slot_vgpr, *options.scratch_vgpr, arch) ||
-          !append_dynamic_access_store_workgroup_source(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_z),
+          !append_dynamic_record_store_workgroup_source(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, workgroup_z),
               workgroup_sources.z, slot_vgpr, *options.scratch_vgpr, arch) ||
-          !append_dynamic_access_store_u32_scalar_src(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask),
+          !append_dynamic_record_store_u32_scalar_src(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask),
               *options.moi_exec_save_sgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-          !append_dynamic_access_store_u32_scalar_src(
-              words,
+          !append_dynamic_record_store_u32_scalar_src(
+              words, kAccessRecordLayout,
               dynamic_record_base + offsetof(ConSanMoiAccessRecord, lane_mask) + sizeof(uint32_t),
               static_cast<uint16_t>(*options.moi_exec_save_sgpr + 1u), slot_vgpr,
               *options.scratch_vgpr, arch) ||
           (options.moi_owner_vgpr &&
-           !append_dynamic_access_store_u32_vgpr(
-               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
+           !append_dynamic_record_store_u32_vgpr(
+               words, kAccessRecordLayout,
+               dynamic_record_base + offsetof(ConSanMoiAccessRecord, wave_id),
                *options.moi_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
           (options.moi_epoch_vgpr &&
-           !append_dynamic_access_store_u32_vgpr(
-               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch),
+           !append_dynamic_record_store_u32_vgpr(
+               words, kAccessRecordLayout,
+               dynamic_record_base + offsetof(ConSanMoiAccessRecord, epoch),
                *options.moi_epoch_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-          !append_dynamic_access_store_u32_literal(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, instruction_offset),
+          !append_dynamic_record_store_u32_literal(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, instruction_offset),
               static_cast<uint32_t>(candidate.anchor()), slot_vgpr, *options.scratch_vgpr, arch) ||
-          !append_dynamic_access_store_u32_literal(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, access_kind),
+          !append_dynamic_record_store_u32_literal(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, access_kind),
               static_cast<uint32_t>(kind), slot_vgpr, *options.scratch_vgpr, arch)) {
         errors.emplace_back(
             "ConSan MOI dynamic access-record probe could not encode record stores");
@@ -1275,8 +1287,9 @@ private:
             "ConSan MOI dynamic access-record probe could not encode LDS byte offset");
         return std::nullopt;
       }
-      if (!append_dynamic_access_store_u32_vgpr(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_offset),
+      if (!append_dynamic_record_store_u32_vgpr(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_offset),
               *effective_lds_byte_offset_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not encode range fields");
         return std::nullopt;
@@ -1291,14 +1304,17 @@ private:
       words.push_back(*start_cell_shift);
       const ConSanMoiLdsCellRange static_range =
           consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
-      if (!append_dynamic_access_store_u32_vgpr(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, start_cell), value_vgpr,
+      if (!append_dynamic_record_store_u32_vgpr(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, start_cell), value_vgpr,
               slot_vgpr, *options.scratch_vgpr, arch) ||
-          !append_dynamic_access_store_u32_literal(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_count),
+          !append_dynamic_record_store_u32_literal(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_count),
               range.byte_width, slot_vgpr, *options.scratch_vgpr, arch) ||
-          !append_dynamic_access_store_u32_literal(
-              words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, cell_count),
+          !append_dynamic_record_store_u32_literal(
+              words, kAccessRecordLayout,
+              dynamic_record_base + offsetof(ConSanMoiAccessRecord, cell_count),
               static_range.cell_count, slot_vgpr, *options.scratch_vgpr, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not encode range fields");
         return std::nullopt;

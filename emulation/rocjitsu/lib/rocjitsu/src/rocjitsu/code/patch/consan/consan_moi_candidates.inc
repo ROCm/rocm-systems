@@ -891,15 +891,12 @@ struct DynamicRecordLayout {
   uint16_t value_vgpr_offset;
 };
 
-inline constexpr DynamicRecordLayout kDynamicBarrierRecordLayout = {sizeof(ConSanMoiBarrierRecord),
-                                                                    5};
-inline constexpr DynamicRecordLayout kDynamicAccessRecordLayout = {sizeof(ConSanMoiAccessRecord),
-                                                                   5};
-inline constexpr DynamicRecordLayout kDynamicAtomicRecordLayout = {sizeof(ConSanMoiAtomicRecord),
-                                                                   4};
-inline constexpr DynamicRecordLayout kDynamicFenceRecordLayout = {sizeof(ConSanMoiFenceRecord), 5};
-inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {
-    sizeof(ConSanMoiDiagnosticRecord), 4};
+inline constexpr DynamicRecordLayout kBarrierRecordLayout = {sizeof(ConSanMoiBarrierRecord), 5};
+inline constexpr DynamicRecordLayout kAccessRecordLayout = {sizeof(ConSanMoiAccessRecord), 5};
+inline constexpr DynamicRecordLayout kAtomicRecordLayout = {sizeof(ConSanMoiAtomicRecord), 4};
+inline constexpr DynamicRecordLayout kFenceRecordLayout = {sizeof(ConSanMoiFenceRecord), 5};
+inline constexpr DynamicRecordLayout kDiagnosticRecordLayout = {sizeof(ConSanMoiDiagnosticRecord),
+                                                                4};
 
 [[nodiscard]] bool append_dynamic_record_address(std::vector<uint32_t> &words,
                                                  const DynamicRecordLayout &layout,
@@ -1006,100 +1003,12 @@ inline constexpr DynamicRecordLayout kDynamicDiagnosticRecordLayout = {
                                               scratch_vgpr, arch);
 }
 
-#define RJ_DYNAMIC_RECORD_WRAPPERS(prefix, layout)                                                 \
-  [[nodiscard]] bool append_dynamic_##prefix##_store_u32_vgpr(                                     \
-      std::vector<uint32_t> &words, uint64_t address, uint16_t value, uint16_t slot,               \
-      uint16_t scratch, rj_code_arch_t arch) {                                                     \
-    return append_dynamic_record_store_u32_vgpr(words, layout, address, value, slot, scratch,      \
-                                                arch);                                             \
-  }                                                                                                \
-  [[nodiscard]] bool append_dynamic_##prefix##_store_u32_literal(                                  \
-      std::vector<uint32_t> &words, uint64_t address, uint32_t value, uint16_t slot,               \
-      uint16_t scratch, rj_code_arch_t arch) {                                                     \
-    return append_dynamic_record_store_u32_literal(words, layout, address, value, slot, scratch,   \
-                                                   arch);                                          \
-  }                                                                                                \
-  [[nodiscard]] bool append_dynamic_##prefix##_store_u32_scalar_src(                               \
-      std::vector<uint32_t> &words, uint64_t address, uint16_t value, uint16_t slot,               \
-      uint16_t scratch, rj_code_arch_t arch) {                                                     \
-    return append_dynamic_record_store_u32_scalar_src(words, layout, address, value, slot,         \
-                                                      scratch, arch);                              \
-  }
-
-RJ_DYNAMIC_RECORD_WRAPPERS(barrier, kDynamicBarrierRecordLayout)
-RJ_DYNAMIC_RECORD_WRAPPERS(access, kDynamicAccessRecordLayout)
-RJ_DYNAMIC_RECORD_WRAPPERS(atomic, kDynamicAtomicRecordLayout)
-RJ_DYNAMIC_RECORD_WRAPPERS(fence, kDynamicFenceRecordLayout)
-#undef RJ_DYNAMIC_RECORD_WRAPPERS
-
 [[nodiscard]] bool append_dynamic_diagnostic_record_address(std::vector<uint32_t> &words,
                                                             uint64_t address, uint16_t slot,
                                                             uint16_t address_vgpr,
                                                             rj_code_arch_t arch) {
   return consan_detail::append_dynamic_record_address(
-      words, address, kDynamicDiagnosticRecordLayout.stride_bytes, address_vgpr, slot, arch);
-}
-
-[[nodiscard]] bool append_dynamic_barrier_store_workgroup_source(
-    std::vector<uint32_t> &words, uint64_t field_address, const ConSanMoiWorkgroupSource &source,
-    uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return append_dynamic_record_store_workgroup_source(
-      words, kDynamicBarrierRecordLayout, field_address, source, slot_vgpr, scratch_vgpr, arch);
-}
-
-[[nodiscard]] bool append_dynamic_access_store_workgroup_source(
-    std::vector<uint32_t> &words, uint64_t field_address, const ConSanMoiWorkgroupSource &source,
-    uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return append_dynamic_record_store_workgroup_source(
-      words, kDynamicAccessRecordLayout, field_address, source, slot_vgpr, scratch_vgpr, arch);
-}
-
-[[nodiscard]] bool append_dynamic_atomic_store_workgroup_source(
-    std::vector<uint32_t> &words, uint64_t field_address, const ConSanMoiWorkgroupSource &source,
-    uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return append_dynamic_record_store_workgroup_source(
-      words, kDynamicAtomicRecordLayout, field_address, source, slot_vgpr, scratch_vgpr, arch);
-}
-
-[[nodiscard]] bool append_dynamic_fence_store_workgroup_source(
-    std::vector<uint32_t> &words, uint64_t field_address, const ConSanMoiWorkgroupSource &source,
-    uint16_t slot_vgpr, uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return append_dynamic_record_store_workgroup_source(
-      words, kDynamicFenceRecordLayout, field_address, source, slot_vgpr, scratch_vgpr, arch);
-}
-
-[[nodiscard]] bool
-append_dynamic_barrier_event_index_store(std::vector<uint32_t> &words, uint64_t counter_address,
-                                         uint64_t field_address, uint16_t slot_vgpr,
-                                         uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return append_dynamic_record_event_index_store(words, kDynamicBarrierRecordLayout,
-                                                 counter_address, field_address, slot_vgpr,
-                                                 scratch_vgpr, arch);
-}
-
-[[nodiscard]] bool
-append_dynamic_access_event_index_store(std::vector<uint32_t> &words, uint64_t counter_address,
-                                        uint64_t field_address, uint16_t slot_vgpr,
-                                        uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return append_dynamic_record_event_index_store(words, kDynamicAccessRecordLayout, counter_address,
-                                                 field_address, slot_vgpr, scratch_vgpr, arch);
-}
-
-[[nodiscard]] bool
-append_dynamic_atomic_event_index_store(std::vector<uint32_t> &words, uint64_t counter_address,
-                                        uint64_t field_address, uint16_t slot_vgpr,
-                                        uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  return append_dynamic_record_event_index_store(words, kDynamicAtomicRecordLayout, counter_address,
-                                                 field_address, slot_vgpr, scratch_vgpr, arch);
-}
-
-[[nodiscard]] bool append_dynamic_fence_event_index_store(std::vector<uint32_t> &words,
-                                                          uint64_t counter_address,
-                                                          uint64_t field_address,
-                                                          uint16_t slot_vgpr, uint16_t scratch_vgpr,
-                                                          rj_code_arch_t arch) {
-  return append_dynamic_record_event_index_store(words, kDynamicFenceRecordLayout, counter_address,
-                                                 field_address, slot_vgpr, scratch_vgpr, arch);
+      words, address, kDiagnosticRecordLayout.stride_bytes, address_vgpr, slot, arch);
 }
 
 [[nodiscard]] bool overlaps_scratch_range(uint16_t value, uint16_t scratch_vgpr, uint16_t count) {

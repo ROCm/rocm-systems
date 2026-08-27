@@ -6388,6 +6388,32 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DH: delete dynamic record-kind emission aliases
+
+- **One field-store implementation:** Barrier, access, atomic, and fence
+  emitters now call the layout-parameterized dynamic-record address, scalar,
+  workgroup-identity, and event-index operations directly. The canonical
+  `DynamicRecordLayout` at each call site carries the only record-kind-specific
+  information: record stride and the offset of a VGPR-valued field.
+- **Deleted aliases:** Twelve macro-generated scalar-store wrappers and eight
+  handwritten workgroup/event-index wrappers are gone. Short canonical layout
+  names keep the explicit calls readable without hiding which ABI layout each
+  field address uses.
+- **Contract coverage:** 166 focused host tests spanning dynamic record
+  construction, every record kind, both record-based engines, spills, routing,
+  target variation, and malformed inputs pass before the broader gate. This is
+  deletion of pass-through aliases rather than new behavior or a new type, so
+  the existing emitted-code and paired device behavior contracts are the
+  relevant regression tests.
+- **Accounting:** Across the five affected implementation files, physical
+  lines fall from 12,812 to 12,769, nonblank lines from 12,371 to 12,338, and
+  estimated comment-excluded code lines from 11,962 to 11,929. The slice adds
+  214 and deletes 257 physical implementation lines, a net deletion of 43.
+- **Checked-in gate:** The complete build, all 1,531 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

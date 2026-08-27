@@ -3219,62 +3219,70 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
     words.push_back(*slot_in_capacity);
     std::vector<uint32_t> record_words;
     record_words.insert(record_words.end(), derived_owner_words.begin(), derived_owner_words.end());
-    if ((derived_owner_vgpr &&
-         !append_dynamic_fence_store_u32_vgpr(
-             record_words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),
-             *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-        !append_dynamic_fence_event_index_store(
-            record_words, base + offsetof(ConSanMoiReportHeader, event_counter),
+    if ((derived_owner_vgpr && !append_dynamic_record_store_u32_vgpr(
+                                   record_words, kFenceRecordLayout,
+                                   record_base + offsetof(ConSanMoiFenceRecord, owner_id),
+                                   *derived_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+        !append_dynamic_record_event_index_store(
+            record_words, kFenceRecordLayout, base + offsetof(ConSanMoiReportHeader, event_counter),
             record_base + offsetof(ConSanMoiFenceRecord, event_index), slot_vgpr,
             *options.scratch_vgpr, arch) ||
         !append_dynamic_record_store_moi_report_dispatch_id_pair(
-            record_words, kDynamicFenceRecordLayout,
+            record_words, kFenceRecordLayout,
             record_base + offsetof(ConSanMoiFenceRecord, generation), options, slot_vgpr,
             *options.scratch_vgpr, arch, ConSanMoiLiteralDispatchIdPolicy::AnyArchitecture) ||
-        !append_dynamic_fence_store_workgroup_source(
-            record_words, record_base + offsetof(ConSanMoiFenceRecord, workgroup_x),
-            workgroup_sources.x, slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_fence_store_workgroup_source(
-            record_words, record_base + offsetof(ConSanMoiFenceRecord, workgroup_y),
-            workgroup_sources.y, slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_fence_store_workgroup_source(
-            record_words, record_base + offsetof(ConSanMoiFenceRecord, workgroup_z),
-            workgroup_sources.z, slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_record_store_workgroup_source(
+            record_words, kFenceRecordLayout,
+            record_base + offsetof(ConSanMoiFenceRecord, workgroup_x), workgroup_sources.x,
+            slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_record_store_workgroup_source(
+            record_words, kFenceRecordLayout,
+            record_base + offsetof(ConSanMoiFenceRecord, workgroup_y), workgroup_sources.y,
+            slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_record_store_workgroup_source(
+            record_words, kFenceRecordLayout,
+            record_base + offsetof(ConSanMoiFenceRecord, workgroup_z), workgroup_sources.z,
+            slot_vgpr, *options.scratch_vgpr, arch) ||
         (options.moi_owner_vgpr &&
-         !append_dynamic_fence_store_u32_vgpr(
-             record_words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),
-             *options.moi_owner_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
+         !append_dynamic_record_store_u32_vgpr(
+             record_words, kFenceRecordLayout,
+             record_base + offsetof(ConSanMoiFenceRecord, owner_id), *options.moi_owner_vgpr,
+             slot_vgpr, *options.scratch_vgpr, arch)) ||
         (options.moi_persistent_owner_sgpr &&
-         !append_dynamic_fence_store_u32_scalar_src(
-             record_words, record_base + offsetof(ConSanMoiFenceRecord, owner_id),
+         !append_dynamic_record_store_u32_scalar_src(
+             record_words, kFenceRecordLayout,
+             record_base + offsetof(ConSanMoiFenceRecord, owner_id),
              *options.moi_persistent_owner_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
         (options.moi_epoch_vgpr &&
-         !append_dynamic_fence_store_u32_vgpr(
-             record_words, record_base + offsetof(ConSanMoiFenceRecord, epoch),
+         !append_dynamic_record_store_u32_vgpr(
+             record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, epoch),
              *options.moi_epoch_vgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
         (options.moi_persistent_epoch_sgpr &&
-         !append_dynamic_fence_store_u32_scalar_src(
-             record_words, record_base + offsetof(ConSanMoiFenceRecord, epoch),
+         !append_dynamic_record_store_u32_scalar_src(
+             record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, epoch),
              *options.moi_persistent_epoch_sgpr, slot_vgpr, *options.scratch_vgpr, arch)) ||
-        !append_dynamic_fence_store_u32_literal(
-            record_words, record_base + offsetof(ConSanMoiFenceRecord, instruction_offset),
+        !append_dynamic_record_store_u32_literal(
+            record_words, kFenceRecordLayout,
+            record_base + offsetof(ConSanMoiFenceRecord, instruction_offset),
             static_cast<uint32_t>(candidate.fence_event->text_offset), slot_vgpr,
             *options.scratch_vgpr, arch) ||
-        !append_dynamic_fence_store_u32_literal(
-            record_words, record_base + offsetof(ConSanMoiFenceRecord, kind),
+        !append_dynamic_record_store_u32_literal(
+            record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, kind),
             static_cast<uint32_t>(kind), slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_fence_store_u32_literal(
-            record_words, record_base + offsetof(ConSanMoiFenceRecord, scope),
+        !append_dynamic_record_store_u32_literal(
+            record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, scope),
             *candidate.communication_site.raw_scope, slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_fence_store_u32_literal(
-            record_words, record_base + offsetof(ConSanMoiFenceRecord, semantics),
-            candidate.communication_site.raw_th.value_or(0u), slot_vgpr, *options.scratch_vgpr,
-            arch) ||
-        !append_dynamic_fence_store_u32_vgpr(
-            record_words, record_base + offsetof(ConSanMoiFenceRecord, communication_token),
+        !append_dynamic_record_store_u32_literal(record_words, kFenceRecordLayout,
+                                                 record_base +
+                                                     offsetof(ConSanMoiFenceRecord, semantics),
+                                                 candidate.communication_site.raw_th.value_or(0u),
+                                                 slot_vgpr, *options.scratch_vgpr, arch) ||
+        !append_dynamic_record_store_u32_vgpr(
+            record_words, kFenceRecordLayout,
+            record_base + offsetof(ConSanMoiFenceRecord, communication_token),
             recorded_address_vgpr, slot_vgpr, *options.scratch_vgpr, arch) ||
-        !append_dynamic_fence_store_u32_vgpr(
-            record_words,
+        !append_dynamic_record_store_u32_vgpr(
+            record_words, kFenceRecordLayout,
             record_base + offsetof(ConSanMoiFenceRecord, communication_token) + sizeof(uint32_t),
             static_cast<uint16_t>(recorded_address_vgpr + 1u), slot_vgpr, *options.scratch_vgpr,
             arch)) {

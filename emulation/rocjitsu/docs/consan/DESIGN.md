@@ -755,6 +755,15 @@ typed event plan into that old interface. It is not a second resource plan:
 its eventual deletion is coupled to replacing the emitter parameters with a
 narrow lowering contract.
 
+Dynamic record field stores have one layout-parameterized implementation.
+`DynamicRecordLayout` supplies the record stride and the VGPR-value field
+offset; each barrier, access, atomic, or fence caller passes its canonical
+layout to the shared address, scalar-value, workgroup-identity, and event-index
+emitters. Record-kind aliases do not sit between the caller and this contract,
+so the record ABI selected by an emission site is visible where its field
+address is computed. Diagnostic records retain their narrower address helper
+because they do not use the four event-record field transactions.
+
 ## Invariants and failure model
 
 The following rules hold across every component:
