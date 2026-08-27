@@ -745,7 +745,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     decode_kernel_stats(code_object_bytes, *decoder, arch, kernel, result.warnings);
   }
   for (ConSanFunctionInfo &function : inventory_builder.functions())
-    decode_function_stats(code_object_bytes, *decoder, arch, function, result.warnings);
+    decode_function_stats(code_object_bytes, *decoder, arch, function,
+                          inventory_builder.access_sites(), result.warnings);
   const bool has_decode_error =
       std::ranges::any_of(
           result.program_inventory.kernels(),
@@ -761,9 +762,9 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         "ConSan stopped before CFG analysis because an instruction could not be decoded");
     return result;
   }
-  relay_flat_pointer_provenance_across_calls(code_object_bytes, *code_object, arch,
-                                             inventory_builder.kernels(),
-                                             inventory_builder.functions(), result.warnings);
+  relay_flat_pointer_provenance_across_calls(
+      code_object_bytes, *code_object, arch, inventory_builder.kernels(),
+      inventory_builder.functions(), inventory_builder.access_sites(), result.warnings);
   publish_access_inventory();
   if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
       options.sc_perturb_kind == ConSanPerturbationKind::None) {

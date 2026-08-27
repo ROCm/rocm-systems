@@ -4467,6 +4467,42 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass in 63.43 seconds. Slice 5AC completed the
   periodic physical-gfx950 gate. E2E validation remains outside this work.
 
+### Slice 5AR: delete function-owned access staging
+
+- **Single construction owner:** `ConSanFunctionInfo` no longer owns an access
+  vector. Function decode and bounded call-provenance relay write normalized
+  records into builder-owned inventory staging, while the function value keeps
+  only container metadata and statistics. Kernel and function attribution use
+  the same documented `ConSanProgramContainerRef` construction helpers.
+- **Transactional relay:** Each call-provenance pass constructs a replacement
+  function-access projection and publishes it only after the pass succeeds.
+  Decode or relay exceptions restore both function metadata and the original
+  access staging, preserving the existing all-or-nothing composition contract.
+- **Deterministic publication:** Publication temporarily removes pending
+  function records from the global staging collection, publishes kernel
+  records in historical container order, and then completes the function
+  records. Already-completed revision prefixes remain in place. A completed
+  function record has a valid code-object identity, so repeated publication
+  cannot consume it again.
+- **Contract coverage:** Inventory and observation-plan tests construct
+  function-owned access facts only through builder staging. They prove
+  physical alias canonicalization across kernel and function attribution,
+  deterministic order, conflict behavior after attribution changes, and
+  preservation of a completed immutable revision.
+- **Temporary size cost and next deletion:** This slice adds 30 net production
+  lines and nine net test lines. The cost is explicit attribution and strong
+  exception safety around a seam that previously relied on a mutable field.
+  Deleting `ConSanKernelInfo::access_sites` next removes the final container
+  staging vector and permits publication to become a single completion pass
+  over builder-owned access facts.
+- **Completed checked-in gate:** The host gate passes all 1,512 runnable tests
+  with the two expected benchmark-object skips, and all 194 HSA-hook tests
+  pass. The five-target simulator gate passed 2,907 of 2,908 rows in one
+  64-way run; the sole gfx942 Sampled module-lifecycle row hit the shared
+  60-second timeout under contention and passed alone in 0.43 seconds. Slice
+  5AC completed the periodic physical-gfx950 gate. E2E validation remains
+  outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

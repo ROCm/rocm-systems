@@ -441,17 +441,24 @@ public:
   ///
   /// Existing completed accesses are retained so a mutable inventory revision
   /// can append a newly analyzed container without reconstructing prior facts.
-  /// Repeated publication is idempotent because each staging vector is cleared
-  /// immediately after its records are completed.
+  /// Repeated publication is idempotent. Kernel staging vectors are cleared
+  /// after consumption, while function records gain a valid code-object
+  /// identity and therefore no longer qualify as pending global staging.
   void publish_decoded_accesses(std::span<const uint8_t> code_object_bytes) {
+    std::vector<ConSanAccessInventorySite> staged_function_accesses;
+    std::erase_if(storage_->access_sites, [&](ConSanAccessInventorySite &access) {
+      if (access.physical_id.code_object.valid())
+        return false;
+      staged_function_accesses.push_back(std::move(access));
+      return true;
+    });
     for (ConSanKernelInfo &kernel : storage_->kernels) {
       append_container_accesses(kernel, code_object_bytes);
       kernel.access_sites.clear();
     }
-    for (ConSanFunctionInfo &function : storage_->functions) {
-      append_container_accesses(function, code_object_bytes);
-      function.access_sites.clear();
-    }
+    for (const ConSanAccessInventorySite &access : staged_function_accesses)
+      storage_->access_sites.push_back(
+          complete_access_site(access.container, access, code_object_bytes));
   }
 
   /// Transfer normalized accesses in a staged executable range to their
@@ -467,7 +474,7 @@ public:
                                 const ConSanKernelInfo &decoded_range,
                                 std::span<const uint8_t> code_object_bytes) {
     const uint64_t end = begin + size;
-    const ConSanProgramContainerRef reference = container_ref(owner);
+    const ConSanProgramContainerRef reference = consan_program_container_ref(owner);
     for (ConSanAccessInventorySite &access : storage_->access_sites) {
       if (access.physical_id.original_text_offset >= begin &&
           access.physical_id.original_text_offset < end)
@@ -551,23 +558,6 @@ private:
         .member_ordinal = 0,
         .range_ordinal = range_ordinal,
     };
-  }
-
-  template <typename Container>
-  [[nodiscard]] static ConSanProgramContainerRef container_ref(const Container &container) {
-    ConSanProgramContainerRef result;
-    result.name = container.name;
-    result.entry_text_offset = container.entry_text_offset;
-    result.text_file_offset = container.text_file_offset;
-    result.code_size_inferred_from_zero = container.code_size_inferred_from_zero;
-    result.uses_gfx1250_cluster_workgroup_id = container.uses_gfx1250_cluster_workgroup_id;
-    if constexpr (std::is_same_v<Container, ConSanKernelInfo>) {
-      result.kind = ConSanProgramContainerKind::Kernel;
-      result.kernel_descriptor_file_offset = container.descriptor_file_offset;
-    } else {
-      result.kind = ConSanProgramContainerKind::Function;
-    }
-    return result;
   }
 
   [[nodiscard]] ConSanAccessInventorySite
@@ -692,7 +682,8 @@ private:
   template <typename Container>
   void append_container_accesses(const Container &container,
                                  std::span<const uint8_t> code_object_bytes) {
-    append_container_accesses(container, container_ref(container), code_object_bytes, false);
+    append_container_accesses(container, consan_program_container_ref(container), code_object_bytes,
+                              false);
   }
 
   template <typename Container>

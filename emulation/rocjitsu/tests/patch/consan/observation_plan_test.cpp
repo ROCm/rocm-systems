@@ -29,6 +29,7 @@ struct AccessInventoryInput {
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_GFX1201;
   std::vector<ConSanKernelInfo> kernels;
   std::vector<ConSanFunctionInfo> functions;
+  std::vector<ConSanAccessInventorySite> function_accesses;
 };
 
 ConSanAccessInventorySite make_policy_lds_site(std::string mnemonic = "ds_store_b32",
@@ -80,6 +81,7 @@ ProgramInventory build_policy_inventory(AccessInventoryInput input) {
   builder.set_code_object_facts(true, 0, input.arch, input.target);
   builder.kernels() = std::move(input.kernels);
   builder.functions() = std::move(input.functions);
+  builder.access_sites() = std::move(input.function_accesses);
   builder.publish_decoded_accesses(input.bytes);
   return builder.view();
 }
@@ -493,12 +495,16 @@ TEST(ConSanAccessPolicy, IdenticalAliasesCoalesceButConflictingAliasesFailClosed
   ConSanFunctionInfo function;
   function.name = "function_alias";
   function.entry_text_offset = 0;
-  function.access_sites.push_back(make_policy_lds_site());
+  ConSanAccessInventorySite first_access = make_policy_lds_site();
+  first_access.container = consan_program_container_ref(function);
+  input.function_accesses.push_back(std::move(first_access));
   input.functions.push_back(std::move(function));
   ConSanFunctionInfo second_function;
   second_function.name = "second_function_alias";
   second_function.entry_text_offset = 0;
-  second_function.access_sites.push_back(make_policy_lds_site());
+  ConSanAccessInventorySite second_access = make_policy_lds_site();
+  second_access.container = consan_program_container_ref(second_function);
+  input.function_accesses.push_back(std::move(second_access));
   input.functions.push_back(std::move(second_function));
   const ConSanAccessPolicyResult coalesced = plan_consan_access_observation(
       build_policy_inventory(input), policy_request(ConSanCapabilityEngine::RecordReplay));
@@ -508,7 +514,7 @@ TEST(ConSanAccessPolicy, IdenticalAliasesCoalesceButConflictingAliasesFailClosed
   EXPECT_EQ(coalesced.plan.site_decisions.front().source_containers,
             (std::vector<std::string>{"function_alias", "second_function_alias"}));
 
-  input.functions.back().access_sites.front().decoded_width_bits = 64;
+  input.function_accesses.back().decoded_width_bits = 64;
   const ConSanAccessPolicyResult conflicting =
       plan_consan_access_observation(build_policy_inventory(std::move(input)),
                                      policy_request(ConSanCapabilityEngine::RecordReplay));

@@ -473,15 +473,43 @@ struct ConSanFunctionInfo {
   bool decoded = false;
   bool uses_gfx1250_cluster_workgroup_id = false;
   ConSanKernelStats stats;
-  /// Builder-only access records awaiting the same completion as kernel
-  /// accesses; bounded call-provenance relay may replace this vector before
-  /// immutable inventory is published.
-  std::vector<ConSanAccessInventorySite> access_sites;
   std::vector<ConSanOrdinaryMemorySite> ordinary_memory_sites;
   std::vector<ConSanBarrierSite> barrier_sites;
   std::vector<ConSanFenceSite> fence_sites;
   std::vector<ConSanAtomicSite> atomic_sites;
 };
+
+/// Build the stable symbol attribution shared by every access decoded through
+/// a dispatchable kernel. Code-object identity and execution ownership are
+/// deliberately absent: the inventory publication stage owns those facts.
+[[nodiscard]] inline ConSanProgramContainerRef
+consan_program_container_ref(const ConSanKernelInfo &kernel) {
+  return {
+      .kind = ConSanProgramContainerKind::Kernel,
+      .name = kernel.name,
+      .entry_text_offset = kernel.entry_text_offset,
+      .text_file_offset = kernel.text_file_offset,
+      .code_size_inferred_from_zero = kernel.code_size_inferred_from_zero,
+      .kernel_descriptor_file_offset = kernel.descriptor_file_offset,
+      .uses_gfx1250_cluster_workgroup_id = kernel.uses_gfx1250_cluster_workgroup_id,
+  };
+}
+
+/// Build the stable symbol attribution shared by every access decoded through
+/// a non-dispatchable function. A function never invents a kernel descriptor;
+/// execution-owner analysis associates its completed accesses separately.
+[[nodiscard]] inline ConSanProgramContainerRef
+consan_program_container_ref(const ConSanFunctionInfo &function) {
+  return {
+      .kind = ConSanProgramContainerKind::Function,
+      .name = function.name,
+      .entry_text_offset = function.entry_text_offset,
+      .text_file_offset = function.text_file_offset,
+      .code_size_inferred_from_zero = function.code_size_inferred_from_zero,
+      .kernel_descriptor_file_offset = std::nullopt,
+      .uses_gfx1250_cluster_workgroup_id = function.uses_gfx1250_cluster_workgroup_id,
+  };
+}
 
 struct ConSanPatchInfo {
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;

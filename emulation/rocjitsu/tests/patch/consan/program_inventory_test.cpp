@@ -401,8 +401,10 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   ConSanFunctionInfo added_function;
   added_function.name = "added-function";
   added_function.entry_text_offset = 24;
-  added_function.access_sites.push_back(make_inventory_lds_site("ds_load_b32", 24));
   revision.functions().push_back(std::move(added_function));
+  ConSanAccessInventorySite added_access = make_inventory_lds_site("ds_load_b32", 24);
+  added_access.container = consan_program_container_ref(revision.functions().back());
+  revision.access_sites().push_back(std::move(added_access));
   SynchronizationInventoryBuildView revised = revision.synchronization();
   revised.sync_events.front().identity = "revision-event";
   revised.sync_sequences.clear();
@@ -424,7 +426,6 @@ TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) 
   const ProgramInventory revised_inventory = revision.view();
   EXPECT_EQ(revised_inventory.kernels().front().name, "revision");
   ASSERT_EQ(revised_inventory.functions().size(), 1u);
-  EXPECT_TRUE(revised_inventory.functions().front().access_sites.empty());
   ASSERT_EQ(revised_inventory.access_sites().size(), 2u);
   EXPECT_EQ(revised_inventory.access_sites()[0].container.kind, ConSanProgramContainerKind::Kernel);
   EXPECT_EQ(revised_inventory.access_sites()[1].container.kind,
@@ -788,8 +789,10 @@ TEST(ConSanProgramInventory, SymbolAliasesSharePhysicalAndRangeIdentityButKeepAt
   ConSanFunctionInfo function;
   function.name = "function_alias";
   function.entry_text_offset = 72;
-  function.access_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
   builder.functions().push_back(std::move(function));
+  ConSanAccessInventorySite function_access = make_inventory_lds_site("ds_store_b32", 80);
+  function_access.container = consan_program_container_ref(builder.functions().back());
+  builder.access_sites().push_back(std::move(function_access));
   builder.publish_decoded_accesses(bytes);
 
   const auto sites = builder.view().access_sites();

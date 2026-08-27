@@ -2587,8 +2587,8 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
 
 void decode_function_stats(
     std::span<const uint8_t> code_object_bytes, Decoder &decoder, rj_code_arch_t arch,
-    ConSanFunctionInfo &function, std::vector<std::string> &warnings,
-    const FlatPointerTracker *entry_tracker = nullptr,
+    ConSanFunctionInfo &function, std::vector<ConSanAccessInventorySite> &accesses,
+    std::vector<std::string> &warnings, const FlatPointerTracker *entry_tracker = nullptr,
     const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
     std::unordered_map<uint64_t, FlatPointerTracker> *call_states = nullptr) {
   ConSanKernelInfo range;
@@ -2604,7 +2604,6 @@ void decode_function_stats(
   function.decoded = range.decoded;
   function.uses_gfx1250_cluster_workgroup_id = range.uses_gfx1250_cluster_workgroup_id;
   function.stats = range.stats;
-  function.access_sites = std::move(range.access_sites);
   function.ordinary_memory_sites = std::move(range.ordinary_memory_sites);
   function.barrier_sites = std::move(range.barrier_sites);
   function.fence_sites = std::move(range.fence_sites);
@@ -2616,10 +2615,10 @@ void decode_function_stats(
     const ConSanLdsAccessKind expected_kind =
         lds_load_api ? ConSanLdsAccessKind::Read : ConSanLdsAccessKind::Write;
     const auto terminal = std::ranges::find_if(
-        function.access_sites.rbegin(), function.access_sites.rend(), [&](const auto &site) {
+        range.access_sites.rbegin(), range.access_sites.rend(), [&](const auto &site) {
           return site.origin == ConSanAccessOrigin::Flat && site.kind == expected_kind;
         });
-    if (terminal != function.access_sites.rend() &&
+    if (terminal != range.access_sites.rend() &&
         (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown ||
          terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybePrivate)) {
       if (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown)
@@ -2633,6 +2632,11 @@ void decode_function_stats(
       ++function.stats.flat_maybe_group_hint_count;
     }
   }
+  const ConSanProgramContainerRef container = consan_program_container_ref(function);
+  for (ConSanAccessInventorySite &access : range.access_sites)
+    access.container = container;
+  accesses.insert(accesses.end(), std::make_move_iterator(range.access_sites.begin()),
+                  std::make_move_iterator(range.access_sites.end()));
 }
 
 template <typename Container>
@@ -2762,6 +2766,7 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
                                                 rj_code_arch_t arch,
                                                 std::vector<ConSanKernelInfo> &kernels,
                                                 std::vector<ConSanFunctionInfo> &functions,
+                                                std::vector<ConSanAccessInventorySite> &accesses,
                                                 std::vector<std::string> &warnings) {
   std::unique_ptr<Decoder> relay_decoder = Decoder::create(arch);
   if (!relay_decoder)
@@ -2798,11 +2803,13 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
     return;
 
   const std::vector<ConSanFunctionInfo> original_functions = functions;
+  const std::vector<ConSanAccessInventorySite> original_accesses = accesses;
   std::unordered_map<uint64_t, FlatPointerTracker> entry_trackers;
   constexpr uint32_t kMaxRelayPasses = 6u;
   for (uint32_t pass = 0; pass < kMaxRelayPasses; ++pass) {
     std::unordered_map<uint64_t, FlatPointerTracker> call_states;
     std::vector<std::string> pass_warnings;
+    std::vector<ConSanAccessInventorySite> pass_accesses;
     for (const ConSanKernelInfo &kernel : kernels) {
       ConSanKernelInfo decoded;
       decoded.name = kernel.name;
@@ -2815,6 +2822,7 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
                             nullptr, &call_targets, &call_states);
       } catch (...) {
         functions = original_functions;
+        accesses = original_accesses;
         return;
       }
     }
@@ -2826,15 +2834,17 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
       decoded.code_size = function.code_size;
       const auto entry = entry_trackers.find(function.entry_text_offset);
       try {
-        decode_function_stats(code_object_bytes, *relay_decoder, arch, decoded, pass_warnings,
-                              entry == entry_trackers.end() ? nullptr : &entry->second,
-                              &call_targets, &call_states);
+        decode_function_stats(
+            code_object_bytes, *relay_decoder, arch, decoded, pass_accesses, pass_warnings,
+            entry == entry_trackers.end() ? nullptr : &entry->second, &call_targets, &call_states);
       } catch (...) {
         functions = original_functions;
+        accesses = original_accesses;
         return;
       }
       function = std::move(decoded);
     }
+    accesses = std::move(pass_accesses);
 
     std::unordered_map<uint64_t, FlatPointerTracker> next_entry_trackers;
     std::unordered_set<uint64_t> initialized;
