@@ -85,18 +85,7 @@ exclusion_reasons(const ConSanAccessInventorySite &site) {
   return reasons;
 }
 
-TEST(ConSanProgramInventory, EnumContractsAreExhaustiveNamedAndRejectInvalidValues) {
-  expect_complete_enum_contract(kConSanSemanticSiteDomains, ConSanSemanticSiteDomain::Count,
-                                consan_semantic_site_domain_name, "invalid-semantic-site-domain");
-  expect_complete_enum_contract(kConSanAccessOrigins, ConSanAccessOrigin::Count,
-                                consan_access_origin_name, "invalid-access-origin");
-  expect_complete_enum_contract(kConSanAccessAddressSpaces, ConSanAccessAddressSpace::Count,
-                                consan_access_address_space_name, "invalid-access-address-space");
-  expect_complete_enum_contract(kConSanAccessProvenances, ConSanAccessProvenance::Count,
-                                consan_access_provenance_name, "invalid-access-provenance");
-  expect_complete_enum_contract(
-      kConSanInventoryExclusionReasons, ConSanInventoryExclusionReason::Count,
-      consan_inventory_exclusion_reason_name, "invalid-inventory-exclusion-reason");
+TEST(ConSanProgramInventory, FenceAssociationContractIsExhaustiveNamedAndRejectsInvalidValues) {
   expect_complete_enum_contract(kConSanFenceAssociations, ConSanFenceAssociation::Count,
                                 consan_fence_association_name, "invalid-fence-association");
 }

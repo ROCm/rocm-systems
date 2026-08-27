@@ -98,34 +98,6 @@ enum class ConSanSemanticSiteDomain : uint8_t {
   Count,
 };
 
-/// Complete iterable set of semantic-site domains, excluding the invalid
-/// one-past-the-end bound.
-inline constexpr std::array<ConSanSemanticSiteDomain, 3> kConSanSemanticSiteDomains = {
-    ConSanSemanticSiteDomain::Access,
-    ConSanSemanticSiteDomain::SynchronizationEvent,
-    ConSanSemanticSiteDomain::SynchronizationSequenceMember,
-};
-
-/// Return the stable diagnostic spelling of a semantic-site domain. Invalid
-/// values cannot acquire a plausible domain name.
-[[nodiscard]] constexpr std::string_view
-consan_semantic_site_domain_name(ConSanSemanticSiteDomain domain) {
-  switch (domain) {
-  case ConSanSemanticSiteDomain::Access:
-    return "access";
-  case ConSanSemanticSiteDomain::SynchronizationEvent:
-    return "synchronization-event";
-  case ConSanSemanticSiteDomain::SynchronizationSequenceMember:
-    return "synchronization-sequence-member";
-  case ConSanSemanticSiteDomain::Count:
-    break;
-  }
-  return "invalid-semantic-site-domain";
-}
-
-static_assert(kConSanSemanticSiteDomains.size() ==
-              static_cast<size_t>(ConSanSemanticSiteDomain::Count));
-
 /// Stable identity of one logical fact contributed by a physical instruction.
 ///
 /// `member_ordinal` distinguishes multiple semantic members in one domain;

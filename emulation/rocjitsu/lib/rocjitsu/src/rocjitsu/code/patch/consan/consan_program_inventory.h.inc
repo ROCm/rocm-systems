@@ -19,32 +19,6 @@ enum class ConSanAccessAddressSpace : uint8_t {
   Count,
 };
 
-/// Complete iterable set of normalized access address-space facts.
-inline constexpr std::array<ConSanAccessAddressSpace, 3> kConSanAccessAddressSpaces = {
-    ConSanAccessAddressSpace::Group,
-    ConSanAccessAddressSpace::NonGroup,
-    ConSanAccessAddressSpace::Unresolved,
-};
-
-/// Return the stable diagnostic spelling of a normalized address-space fact.
-[[nodiscard]] constexpr std::string_view
-consan_access_address_space_name(ConSanAccessAddressSpace address_space) {
-  switch (address_space) {
-  case ConSanAccessAddressSpace::Group:
-    return "group";
-  case ConSanAccessAddressSpace::NonGroup:
-    return "non-group";
-  case ConSanAccessAddressSpace::Unresolved:
-    return "unresolved";
-  case ConSanAccessAddressSpace::Count:
-    break;
-  }
-  return "invalid-access-address-space";
-}
-
-static_assert(kConSanAccessAddressSpaces.size() ==
-              static_cast<size_t>(ConSanAccessAddressSpace::Count));
-
 /// Source of the normalized access address-space claim.
 ///
 /// Confidence is stored separately because the same provenance mechanism can
@@ -63,35 +37,6 @@ enum class ConSanAccessProvenance : uint8_t {
   /// a decoded source.
   Count,
 };
-
-/// Complete iterable set of normalized access-provenance sources.
-inline constexpr std::array<ConSanAccessProvenance, 4> kConSanAccessProvenances = {
-    ConSanAccessProvenance::NativeLdsOpcode,
-    ConSanAccessProvenance::EncodedFlatSegment,
-    ConSanAccessProvenance::PropagatedFlatPointer,
-    ConSanAccessProvenance::UnresolvedFlatPointer,
-};
-
-/// Return the stable diagnostic spelling of an access-provenance source.
-[[nodiscard]] constexpr std::string_view
-consan_access_provenance_name(ConSanAccessProvenance provenance) {
-  switch (provenance) {
-  case ConSanAccessProvenance::NativeLdsOpcode:
-    return "native-lds-opcode";
-  case ConSanAccessProvenance::EncodedFlatSegment:
-    return "encoded-flat-segment";
-  case ConSanAccessProvenance::PropagatedFlatPointer:
-    return "propagated-flat-pointer";
-  case ConSanAccessProvenance::UnresolvedFlatPointer:
-    return "unresolved-flat-pointer";
-  case ConSanAccessProvenance::Count:
-    break;
-  }
-  return "invalid-access-provenance";
-}
-
-static_assert(kConSanAccessProvenances.size() ==
-              static_cast<size_t>(ConSanAccessProvenance::Count));
 
 /// Typed reason why part of a decoded access cannot participate in a complete
 /// normalized semantic inventory.
@@ -115,38 +60,6 @@ enum class ConSanInventoryExclusionReason : uint8_t {
   /// exclusion record.
   Count,
 };
-
-/// Complete iterable set of inventory-level access limitations.
-inline constexpr std::array<ConSanInventoryExclusionReason, 5> kConSanInventoryExclusionReasons = {
-    ConSanInventoryExclusionReason::NonAccessInstruction,
-    ConSanInventoryExclusionReason::InvalidInstructionSize,
-    ConSanInventoryExclusionReason::InvalidAccessWidth,
-    ConSanInventoryExclusionReason::MissingAddressOperand,
-    ConSanInventoryExclusionReason::RangeEncodingUnavailable,
-};
-
-/// Return the stable diagnostic spelling of an inventory-level limitation.
-[[nodiscard]] constexpr std::string_view
-consan_inventory_exclusion_reason_name(ConSanInventoryExclusionReason reason) {
-  switch (reason) {
-  case ConSanInventoryExclusionReason::NonAccessInstruction:
-    return "non-access-instruction";
-  case ConSanInventoryExclusionReason::InvalidInstructionSize:
-    return "invalid-instruction-size";
-  case ConSanInventoryExclusionReason::InvalidAccessWidth:
-    return "invalid-access-width";
-  case ConSanInventoryExclusionReason::MissingAddressOperand:
-    return "missing-address-operand";
-  case ConSanInventoryExclusionReason::RangeEncodingUnavailable:
-    return "range-encoding-unavailable";
-  case ConSanInventoryExclusionReason::Count:
-    break;
-  }
-  return "invalid-inventory-exclusion-reason";
-}
-
-static_assert(kConSanInventoryExclusionReasons.size() ==
-              static_cast<size_t>(ConSanInventoryExclusionReason::Count));
 
 /// One machine-readable limitation attached to a normalized access site.
 struct ConSanInventoryExclusion {

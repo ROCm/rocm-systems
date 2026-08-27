@@ -4751,6 +4751,31 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass in 76.43 seconds. Slice 5AS remains the latest
   periodic physical-gfx950 gate; E2E validation remains outside this work.
 
+### Slice 5BB: delete test-only enum catalogues
+
+- **No compiled test-support API:** Five production enums no longer carry a
+  parallel constexpr value array and string-name switch used only by one
+  generic unit-test assertion. Semantic-site domains, access origins,
+  address-space facts, provenance facts, and inventory-exclusion reasons are
+  represented once by their documented enum declarations and are consumed as
+  typed values by real inventory and policy code.
+- **Behavioral enum coverage remains:** Focused inventory tests exercise all
+  three semantic domains, all three access origins, every normalized address
+  space and provenance outcome, and every exclusion reason through their real
+  builders and consumers. The generic exhaustive-name helper remains only for
+  fence associations, whose iterable catalogue is itself used to drive
+  eligibility and atomic/fence policy tests.
+- **Deletion accounting:** Production deletes 139 physical lines and adds none
+  across the site-identity, decoded-code-object, and program-inventory types.
+  Tests delete thirteen lines and add one renamed test declaration, a net
+  deletion of twelve lines. No test-only replacement catalogue is introduced.
+- **Checked-in gate:** All eighteen focused program-inventory tests pass. The
+  host gate passes all 1,508 runnable tests with the two expected
+  benchmark-object skips; all 172 HSA-hook and hook-lifecycle tests pass; and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 72.13 seconds. Slice 5AS remains the latest
+  periodic physical-gfx950 gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

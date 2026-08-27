@@ -361,30 +361,6 @@ enum class ConSanAccessOrigin : uint8_t {
   Count,
 };
 
-/// Complete iterable set of decoded access origins.
-inline constexpr std::array<ConSanAccessOrigin, 3> kConSanAccessOrigins = {
-    ConSanAccessOrigin::NativeLds,
-    ConSanAccessOrigin::Flat,
-    ConSanAccessOrigin::DirectToLds,
-};
-
-/// Return the stable diagnostic spelling of an access-origin fact.
-[[nodiscard]] constexpr std::string_view consan_access_origin_name(ConSanAccessOrigin origin) {
-  switch (origin) {
-  case ConSanAccessOrigin::NativeLds:
-    return "native-lds";
-  case ConSanAccessOrigin::Flat:
-    return "flat";
-  case ConSanAccessOrigin::DirectToLds:
-    return "direct-to-lds";
-  case ConSanAccessOrigin::Count:
-    break;
-  }
-  return "invalid-access-origin";
-}
-
-static_assert(kConSanAccessOrigins.size() == static_cast<size_t>(ConSanAccessOrigin::Count));
-
 /// Decoder operands retained by normalized access inventory and temporary
 /// compatibility lowering.
 ///
