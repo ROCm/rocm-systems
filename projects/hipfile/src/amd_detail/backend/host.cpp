@@ -85,10 +85,10 @@ Host::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &
 }
 
 void *
-AsyncOpHost::operator new(size_t size)
+AsyncOpHost::operator new(size_t s)
 {
     HipHostAllocator<AsyncOpHost> alloc{};
-    return static_cast<void *>(alloc.allocate(size));
+    return static_cast<void *>(alloc.allocate(s));
 }
 
 void
@@ -131,7 +131,7 @@ private:
     int         fd;
     host_buff_t host_buf;
     size_t      size;
-    size_t      offset;
+    off_t       offset;
 };
 
 struct ReadFileFn {
@@ -140,7 +140,7 @@ struct ReadFileFn {
     using host_buff_t = uint8_t *;
     Sys *system       = Context<Sys>::get();
 
-    ssize_t run(int fd, host_buff_t host_buf, size_t size, size_t offset)
+    ssize_t run(int fd, host_buff_t host_buf, size_t size, off_t offset)
     {
         return system->pread(fd, host_buf, size, offset);
     }
@@ -156,7 +156,7 @@ struct WriteFileFn {
     using host_buff_t = const uint8_t *;
     Sys *system       = Context<Sys>::get();
 
-    ssize_t run(int fd, host_buff_t host_buf, size_t size, size_t offset)
+    ssize_t run(int fd, host_buff_t host_buf, size_t size, off_t offset)
     {
         return system->pwrite(fd, const_cast<uint8_t *>(host_buf), size, offset);
     }
@@ -169,7 +169,7 @@ struct WriteFileFn {
 template <typename CopyFn>
 CopyOp<CopyFn>::CopyOp(IFile &file, IBuffer &buffer, size_t op_size, hoff_t file_offset, hoff_t buffer_offset)
     : CopyFn{}, fd{file.bufferedFd()}, host_buf{static_cast<host_buff_t>(buffer.getBuffer()) + buffer_offset},
-      size{op_size}, offset{static_cast<size_t>(file_offset)}
+      size{op_size}, offset{file_offset}
 {
 }
 
@@ -181,12 +181,13 @@ CopyOp<CopyFn>::run()
     ssize_t io_bytes       = 0;
     do {
         try {
-            io_bytes = CopyFn::run(fd, host_buf, size - total_io_bytes, offset);
-            total_io_bytes += io_bytes;
-            host_buf += io_bytes;
+            io_bytes = CopyFn::run(fd, host_buf + total_io_bytes, size - total_io_bytes,
+                                   offset + static_cast<off_t>(total_io_bytes));
+            total_io_bytes += static_cast<size_t>(io_bytes);
         }
         catch (const std::system_error &e) {
             if (e.code().value() == EINTR) {
+                io_bytes = -1; // while condition re-evaluated after continue
                 continue;
             }
             Context<StatsCollection>::get()->error(CopyFn::op_type, StatsBackend::Host, size);
@@ -196,7 +197,7 @@ CopyOp<CopyFn>::run()
             Context<StatsCollection>::get()->error(CopyFn::op_type, StatsBackend::Host, size);
             throw;
         }
-    } while (io_bytes > 0 && total_io_bytes < size);
+    } while (io_bytes != 0 && total_io_bytes < size);
 
     CopyFn::sync(fd);
 
@@ -247,14 +248,13 @@ Host::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer
         throw std::invalid_argument("The selected file or buffer region is invalid");
     }
 
-    size_t total_io_bytes =
-        type == IoType::Read
-            ? CopyOp<ReadFileFn>(*file, *buffer, size, file_offset, buffer_offset).run()
-            : CopyOp<WriteFileFn>(*file, *buffer, size, file_offset, buffer_offset).run();
+    size_t total_io_bytes = type == IoType::Read
+                                ? CopyOp<ReadFileFn>(*file, *buffer, size, file_offset, buffer_offset).run()
+                                : CopyOp<WriteFileFn>(*file, *buffer, size, file_offset, buffer_offset).run();
 
     ioTracker.complete(total_io_bytes);
 
-    return total_io_bytes;
+    return static_cast<ssize_t>(total_io_bytes);
 }
 
 void
