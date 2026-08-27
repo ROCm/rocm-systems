@@ -495,43 +495,19 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
 }
 
 [[nodiscard]] bool is_two_address_lds_store(std::string_view mnemonic) {
-  return mnemonic == "ds_store_2addr_b32" || mnemonic == "ds_store_2addr_b64" ||
-         mnemonic == "ds_store_2addr_stride64_b32" || mnemonic == "ds_store_2addr_stride64_b64" ||
-         mnemonic == "ds_write2_b32" || mnemonic == "ds_write2st64_b32" ||
-         mnemonic == "ds_write2_b64" || mnemonic == "ds_write2st64_b64";
+  const auto form = consan_detail::native_lds_two_address_form(mnemonic);
+  return form && form->kind == ConSanLdsAccessKind::Write;
 }
 
 [[nodiscard]] bool is_two_address_lds_load(std::string_view mnemonic) {
-  return mnemonic == "ds_load_2addr_b32" || mnemonic == "ds_load_2addr_b64" ||
-         mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_load_2addr_stride64_b64" ||
-         mnemonic == "ds_read2_b32" || mnemonic == "ds_read2st64_b32" ||
-         mnemonic == "ds_read2_b64" || mnemonic == "ds_read2st64_b64";
+  const auto form = consan_detail::native_lds_two_address_form(mnemonic);
+  return form && form->kind == ConSanLdsAccessKind::Read;
 }
 
 [[nodiscard]] std::optional<uint32_t>
 two_address_lds_element_width_bits(std::string_view mnemonic) {
-  if (mnemonic.ends_with("b32"))
-    return 32u;
-  if (mnemonic.ends_with("b64"))
-    return 64u;
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<uint32_t>
-two_address_lds_offset_scale_bytes(std::string_view mnemonic) {
-  if (mnemonic == "ds_load_2addr_b32" || mnemonic == "ds_store_2addr_b32" ||
-      mnemonic == "ds_read2_b32" || mnemonic == "ds_write2_b32")
-    return 4u;
-  if (mnemonic == "ds_load_2addr_b64" || mnemonic == "ds_store_2addr_b64" ||
-      mnemonic == "ds_read2_b64" || mnemonic == "ds_write2_b64")
-    return 8u;
-  if (mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_store_2addr_stride64_b32" ||
-      mnemonic == "ds_read2st64_b32" || mnemonic == "ds_write2st64_b32")
-    return 256u;
-  if (mnemonic == "ds_load_2addr_stride64_b64" || mnemonic == "ds_store_2addr_stride64_b64" ||
-      mnemonic == "ds_read2st64_b64" || mnemonic == "ds_write2st64_b64")
-    return 512u;
-  return std::nullopt;
+  const auto form = consan_detail::native_lds_two_address_form(mnemonic);
+  return form ? std::optional<uint32_t>(form->element_width_bits) : std::nullopt;
 }
 
 struct TwoAddressLdsByteOffsets {
@@ -541,7 +517,7 @@ struct TwoAddressLdsByteOffsets {
 
 [[nodiscard]] std::optional<TwoAddressLdsByteOffsets>
 two_address_lds_byte_offsets(std::string_view mnemonic, uint32_t word0) {
-  const auto scale = two_address_lds_offset_scale_bytes(mnemonic);
+  const auto scale = consan_detail::two_address_native_lds_offset_scale(mnemonic);
   if (!scale)
     return std::nullopt;
   return TwoAddressLdsByteOffsets{

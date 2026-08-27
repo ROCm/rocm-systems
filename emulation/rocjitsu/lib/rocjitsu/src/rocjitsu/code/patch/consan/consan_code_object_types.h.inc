@@ -28,13 +28,6 @@ struct ConSanKernelStats {
   uint64_t fence_like_count = 0;
 };
 
-enum class ConSanLdsAccessKind : uint8_t {
-  Read,
-  Write,
-  Atomic,
-  Other,
-};
-
 enum class ConSanFlatAddressSpaceHint : uint8_t {
   Unknown,
   Group,

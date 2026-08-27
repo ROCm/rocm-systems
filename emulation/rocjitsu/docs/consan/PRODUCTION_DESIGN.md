@@ -5590,6 +5590,33 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CG: give two-address LDS shape one typed owner
+
+- **One complete form record:** `NativeLdsTwoAddressForm` now owns direction,
+  per-address element width, and encoded-offset byte scale for all sixteen
+  LLVM-style and native two-address LDS spellings. Program inventory,
+  instruction-width analysis, placement, access policy, and every MOI lowerer
+  consume that record or a direct projection of it.
+- **Deleted partial classifiers:** Inventory no longer carries private copies
+  of the mnemonic set, width inference, and scale table. Placement no longer
+  carries separate read, write, suffix-width, and scale lists, and analysis no
+  longer special-cases the eight stride-64 spellings to avoid mistaking
+  address spacing for transfer width. Fault-injection admission remains
+  separate because mutation capability is not the same contract as decoded
+  access shape.
+- **Focused contract coverage:** The direct unit test now enumerates all
+  sixteen forms and checks direction, element width, and scale, plus a rejected
+  ordinary LDS form. Existing inventory and gfx1250 lowering tests check that
+  the shared facts produce two stable semantic ranges and safe scratch use.
+- **Deletion accounting:** Implementation files add 163 and delete 184
+  physical lines, a net deletion of twenty-one. The new foundational header
+  replaces the formerly MOI-private table while making the complete shared
+  contract available during inventory construction.
+- **Checked-in gate:** All 1,530 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

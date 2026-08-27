@@ -2369,13 +2369,41 @@ TEST(ConSanMoi, NativeB96CapabilityMatchesArchitectureBoundary) {
 
 TEST(ConSanMoi, SharedAccessShapeContractOwnsTwoRangeAndFlatVocabulary) {
   using consan_detail::is_supported_moi_flat_access_mnemonic;
-  using consan_detail::two_address_native_lds_offset_scale;
+  using consan_detail::native_lds_two_address_form;
 
-  EXPECT_EQ(two_address_native_lds_offset_scale("ds_load_2addr_b32"), 4u);
-  EXPECT_EQ(two_address_native_lds_offset_scale("ds_write2_b64"), 8u);
-  EXPECT_EQ(two_address_native_lds_offset_scale("ds_read2st64_b32"), 256u);
-  EXPECT_EQ(two_address_native_lds_offset_scale("ds_store_2addr_stride64_b64"), 512u);
-  EXPECT_FALSE(two_address_native_lds_offset_scale("ds_load_b32"));
+  struct ExpectedForm {
+    std::string_view mnemonic;
+    ConSanLdsAccessKind kind;
+    uint32_t width_bits;
+    uint32_t scale_bytes;
+  };
+  constexpr std::array expected_forms = {
+      ExpectedForm{"ds_load_2addr_b32", ConSanLdsAccessKind::Read, 32u, 4u},
+      ExpectedForm{"ds_store_2addr_b32", ConSanLdsAccessKind::Write, 32u, 4u},
+      ExpectedForm{"ds_read2_b32", ConSanLdsAccessKind::Read, 32u, 4u},
+      ExpectedForm{"ds_write2_b32", ConSanLdsAccessKind::Write, 32u, 4u},
+      ExpectedForm{"ds_load_2addr_b64", ConSanLdsAccessKind::Read, 64u, 8u},
+      ExpectedForm{"ds_store_2addr_b64", ConSanLdsAccessKind::Write, 64u, 8u},
+      ExpectedForm{"ds_read2_b64", ConSanLdsAccessKind::Read, 64u, 8u},
+      ExpectedForm{"ds_write2_b64", ConSanLdsAccessKind::Write, 64u, 8u},
+      ExpectedForm{"ds_load_2addr_stride64_b32", ConSanLdsAccessKind::Read, 32u, 256u},
+      ExpectedForm{"ds_store_2addr_stride64_b32", ConSanLdsAccessKind::Write, 32u, 256u},
+      ExpectedForm{"ds_read2st64_b32", ConSanLdsAccessKind::Read, 32u, 256u},
+      ExpectedForm{"ds_write2st64_b32", ConSanLdsAccessKind::Write, 32u, 256u},
+      ExpectedForm{"ds_load_2addr_stride64_b64", ConSanLdsAccessKind::Read, 64u, 512u},
+      ExpectedForm{"ds_store_2addr_stride64_b64", ConSanLdsAccessKind::Write, 64u, 512u},
+      ExpectedForm{"ds_read2st64_b64", ConSanLdsAccessKind::Read, 64u, 512u},
+      ExpectedForm{"ds_write2st64_b64", ConSanLdsAccessKind::Write, 64u, 512u},
+  };
+  for (const auto &expected : expected_forms) {
+    SCOPED_TRACE(expected.mnemonic);
+    const auto actual = native_lds_two_address_form(expected.mnemonic);
+    ASSERT_TRUE(actual);
+    EXPECT_EQ(actual->kind, expected.kind);
+    EXPECT_EQ(actual->element_width_bits, expected.width_bits);
+    EXPECT_EQ(actual->offset_scale_bytes, expected.scale_bytes);
+  }
+  EXPECT_FALSE(native_lds_two_address_form("ds_load_b32"));
 
   EXPECT_TRUE(is_supported_moi_flat_access_mnemonic("flat_load_b128"));
   EXPECT_TRUE(is_supported_moi_flat_access_mnemonic("flat_store_short"));

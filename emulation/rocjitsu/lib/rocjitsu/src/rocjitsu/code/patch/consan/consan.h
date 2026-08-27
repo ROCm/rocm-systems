@@ -24,8 +24,8 @@
 #include <utility>
 #include <vector>
 
+#include "rocjitsu/code/patch/consan/consan_access_shape.h"
 #include "rocjitsu/code/patch/consan/consan_capability_contract.h"
-#include "rocjitsu/code/patch/consan/consan_flat_access.h"
 #include "rocjitsu/code/patch/planning_work.h"
 #include "rocjitsu/code/rj_code.h"
 

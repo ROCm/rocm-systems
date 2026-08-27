@@ -443,43 +443,6 @@ public:
   }
 
 private:
-  [[nodiscard]] static bool is_two_address_lds(std::string_view mnemonic) {
-    return mnemonic == "ds_store_2addr_b32" || mnemonic == "ds_store_2addr_b64" ||
-           mnemonic == "ds_store_2addr_stride64_b32" || mnemonic == "ds_store_2addr_stride64_b64" ||
-           mnemonic == "ds_write2_b32" || mnemonic == "ds_write2st64_b32" ||
-           mnemonic == "ds_write2_b64" || mnemonic == "ds_write2st64_b64" ||
-           mnemonic == "ds_load_2addr_b32" || mnemonic == "ds_load_2addr_b64" ||
-           mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_load_2addr_stride64_b64" ||
-           mnemonic == "ds_read2_b32" || mnemonic == "ds_read2st64_b32" ||
-           mnemonic == "ds_read2_b64" || mnemonic == "ds_read2st64_b64";
-  }
-
-  [[nodiscard]] static std::optional<uint32_t>
-  two_address_element_width_bits(std::string_view mnemonic) {
-    if (mnemonic.ends_with("b32"))
-      return 32u;
-    if (mnemonic.ends_with("b64"))
-      return 64u;
-    return std::nullopt;
-  }
-
-  [[nodiscard]] static std::optional<uint32_t>
-  two_address_offset_scale_bytes(std::string_view mnemonic) {
-    if (mnemonic == "ds_load_2addr_b32" || mnemonic == "ds_store_2addr_b32" ||
-        mnemonic == "ds_read2_b32" || mnemonic == "ds_write2_b32")
-      return 4u;
-    if (mnemonic == "ds_load_2addr_b64" || mnemonic == "ds_store_2addr_b64" ||
-        mnemonic == "ds_read2_b64" || mnemonic == "ds_write2_b64")
-      return 8u;
-    if (mnemonic == "ds_load_2addr_stride64_b32" || mnemonic == "ds_store_2addr_stride64_b32" ||
-        mnemonic == "ds_read2st64_b32" || mnemonic == "ds_write2st64_b32")
-      return 256u;
-    if (mnemonic == "ds_load_2addr_stride64_b64" || mnemonic == "ds_store_2addr_stride64_b64" ||
-        mnemonic == "ds_read2st64_b64" || mnemonic == "ds_write2st64_b64")
-      return 512u;
-    return std::nullopt;
-  }
-
   [[nodiscard]] static std::optional<uint32_t>
   read_little_endian_u32(std::span<const uint8_t> bytes, uint64_t offset) {
     if (offset > bytes.size() || sizeof(uint32_t) > bytes.size() - offset)
@@ -551,17 +514,16 @@ private:
     result.provenance = ConSanAccessProvenance::NativeLdsOpcode;
     result.confidence = ConSanSemanticConfidence::Exact;
     append_common_exclusions(result, site.origin == ConSanAccessOrigin::DirectToLds);
-    if (is_two_address_lds(site.mnemonic)) {
-      const auto width = two_address_element_width_bits(site.mnemonic);
-      const auto scale = two_address_offset_scale_bytes(site.mnemonic);
+    if (const auto form = consan_detail::native_lds_two_address_form(site.mnemonic)) {
       const auto word0 = read_little_endian_u32(bytes, site.file_offset);
-      if (width && scale && word0) {
+      if (word0) {
         result.ranges.push_back({.id = access_range_id(site.physical_id.original_text_offset, 0),
-                                 .static_byte_offset = (*word0 & 0xffu) * *scale,
-                                 .byte_width = *width / 8u});
-        result.ranges.push_back({.id = access_range_id(site.physical_id.original_text_offset, 1),
-                                 .static_byte_offset = ((*word0 >> 8u) & 0xffu) * *scale,
-                                 .byte_width = *width / 8u});
+                                 .static_byte_offset = (*word0 & 0xffu) * form->offset_scale_bytes,
+                                 .byte_width = form->element_width_bits / 8u});
+        result.ranges.push_back(
+            {.id = access_range_id(site.physical_id.original_text_offset, 1),
+             .static_byte_offset = ((*word0 >> 8u) & 0xffu) * form->offset_scale_bytes,
+             .byte_width = form->element_width_bits / 8u});
       } else {
         result.exclusions.push_back({
             .reason = ConSanInventoryExclusionReason::RangeEncodingUnavailable,
