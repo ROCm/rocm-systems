@@ -13,6 +13,13 @@ inline constexpr char kUnknownKernelIdentity[] = "?";
 /// @brief Metadata for an AMDGPU kernel dispatch, passed to plugins.
 struct KernelDispatchInfo {
   uint32_t dispatch_id = 0;
+  /// @brief Hardware queue the packet was submitted on.
+  ///
+  /// @details dispatch_id is allocated per command processor, and a multi-XCD
+  /// part has one command processor per XCD, so ids collide across them.
+  /// Anything correlating dispatches over a whole device — a profiler, a timing
+  /// model — has to key on the pair, not on dispatch_id alone.
+  uint32_t queue_id = 0;
   uint64_t kernel_object = 0;
   uint64_t entry_pc = 0;
   std::string kernel_symbol;
@@ -23,6 +30,14 @@ struct KernelDispatchInfo {
   uint32_t wfs_per_workgroup = 0;
   uint32_t sgprs_per_wf = 0;
   uint32_t vgprs_per_wf = 0;
+  /// @brief Group segment reserved per workgroup, in bytes, as allocated.
+  ///
+  /// @details The allocated size rather than the kernel descriptor's request:
+  /// LDS is handed out in granules, and occupancy is decided by what was taken
+  /// rather than by what was asked for.
+  uint32_t lds_bytes_per_workgroup = 0;
+  /// @brief Lanes per wavefront on the compute units this dispatch runs on.
+  uint32_t wave_size = 0;
 
   std::string kernelNameOrUnknown() const {
     return kernel_name.empty() ? kUnknownKernelIdentity : kernel_name;

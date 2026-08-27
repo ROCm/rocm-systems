@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/timing/collector.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -528,8 +529,15 @@ void CommandProcessor::startup() {
   // before register_queue() can start the poll thread; nothing to (re)bind here.
   completion_ = std::make_unique<CompletionTracker>(memory_, cus_);
   completion_->set_plugin_group(plugin_group_);
-  completion_->set_dispatch_retired_callback(
-      [this](const DispatchEntry &entry) { erase_cluster_workgroups(entry.dispatch_id); });
+  completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
+    erase_cluster_workgroups(entry.dispatch_id);
+    // Alongside the completion tracker's own execution-end hook, which fires a
+    // few lines earlier on the same entry. Driven from here rather than from
+    // the tracker because the tracker takes a plugin group and the plane is not
+    // a plugin.
+    if (timing_ != nullptr)
+      timing_->dispatch_execution_end(entry.dispatch_id);
+  });
   if (interrupt_cb_)
     completion_->set_interrupt_callback(interrupt_cb_);
 }
@@ -1083,8 +1091,11 @@ bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id)
     auto peer_members = cu->complete_barrier(wf.dispatch_id(), peer_wg_id, completion_bit);
     members.insert(members.end(), peer_members.begin(), peer_members.end());
   }
-  if (!members.empty())
+  if (!members.empty()) {
     plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+    if (timing_ != nullptr)
+      timing_->barrier_resolved(std::span<Wavefront *>(members));
+  }
   return is_first;
 }
 
@@ -1143,8 +1154,11 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
       auto peer_members = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit);
       members.insert(members.end(), peer_members.begin(), peer_members.end());
     }
-    if (!members.empty())
+    if (!members.empty()) {
       plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+      if (timing_ != nullptr)
+        timing_->barrier_resolved(std::span<Wavefront *>(members));
+    }
   }
 
   release_cluster_lds_pins(unpin);
@@ -1341,6 +1355,13 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
                                                std::span<Wavefront *>(wg_wavefronts));
     for (auto *wf : wg_wavefronts)
       plugin_group_->onAmdgpuWavefrontDispatched(*wf);
+    // Not from ComputeUnitCore::dispatch_wf_at, which is where the wave's slot
+    // is claimed: the dispatch and queue ids are written above, after that
+    // returns, and a wavefront announced without them would be attributed to
+    // dispatch zero on every queue.
+    if (timing_ != nullptr)
+      for (auto *wf : wg_wavefronts)
+        timing_->wave_dispatched(*wf);
 
     ++entry.dispatched_wgs;
     ++dispatched;
@@ -1796,6 +1817,7 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
 
   KernelDispatchInfo dispatch_info{};
   dispatch_info.dispatch_id = dp.dispatch_id;
+  dispatch_info.queue_id = dp.queue_id;
   dispatch_info.kernel_object = pkt.kernel_object;
   dispatch_info.entry_pc = entry_pc;
   dispatch_info.kernel_symbol = kernel_symbol;
@@ -1810,7 +1832,13 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dispatch_info.wfs_per_workgroup = wfs_per_wg;
   dispatch_info.sgprs_per_wf = dp.sgprs_per_wf;
   dispatch_info.vgprs_per_wf = dp.vgprs_per_wf;
+  // The granule-aligned size, which is what the compute unit actually reserves
+  // and therefore what bounds how many workgroups fit on it.
+  dispatch_info.lds_bytes_per_workgroup = aligned_lds_bytes_per_workgroup(dp);
+  dispatch_info.wave_size = wave_size;
   plugin_group_->onAmdgpuDispatchPacketProcessed(dispatch_info);
+  if (timing_ != nullptr)
+    timing_->dispatch_packet(dispatch_info);
 
   util::Logger::vm([&](auto &os) {
     os << std::format("dispatch #{} d={} \"{}\" symbol=\"{}\" grid=[{},{},{}] wg=[{},{},{}] wgs={} "
@@ -2894,9 +2922,10 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     case sdma::OP_TIMESTAMP: {
       uint64_t addr_va = static_cast<uint64_t>(dw(1)) | (static_cast<uint64_t>(dw(2)) << 32);
       if (addr_va > 0x1000) {
-        auto now = std::chrono::steady_clock::now().time_since_epoch();
-        uint64_t ts = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+        // The same clock the HIP event timestamps come from, so a guest that
+        // brackets a copy with SDMA timestamps and a dispatch with HIP events
+        // gets both durations in one domain.
+        const uint64_t ts = hsa_system_timestamp();
         auto *ptr = static_cast<uint64_t *>(resolve(addr_va, sizeof(uint64_t)));
         if (ptr) {
           // Flush before the direct store so a dirty cached line overlapping the

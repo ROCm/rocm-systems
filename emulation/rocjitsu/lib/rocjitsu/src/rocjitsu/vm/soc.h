@@ -25,6 +25,10 @@
 
 namespace rocjitsu {
 
+namespace timing {
+class TimingCollector;
+}
+
 /// @brief System-on-Chip container with XCDs, I/O Dies, and shared GPU memory.
 ///
 /// Constructs the full GPU hierarchy (memory + IODs + XCDs + shader engines + CUs)
@@ -179,6 +183,13 @@ public:
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
+  /// @brief Install the layer that turns execution into modelled time.
+  ///
+  /// @details Fanned out to every die the same way the plugin group is. Null
+  /// means no timing plane, which is the default and costs each compute unit a
+  /// single not-taken branch on its issue path.
+  void set_timing_collector(timing::TimingCollector *collector);
+
   const std::vector<amdgpu::ComputeUnitCore *> &all_cus();
 
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
@@ -193,6 +204,7 @@ private:
   amdgpu::GpuMemory *memory_ = nullptr;
   std::unique_ptr<amdgpu::HbmController> hbm_standalone_; ///< Used when num_iods == 0.
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
+  timing::TimingCollector *timing_collector_ = nullptr;
   std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
 };
 

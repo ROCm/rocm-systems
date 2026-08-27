@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/timing/collector.h"
 #include "util/except.h"
 #include "util/log.h"
 
@@ -232,6 +233,19 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   return wf;
 }
 
+void ComputeUnitCore::set_timing_collector(timing::TimingCollector *collector) {
+  timing_ = collector;
+  if (collector == nullptr)
+    return;
+  // Every slot, now, rather than at dispatch. The collector reads its
+  // wavefront-state slot on the issue path with no bounds check, so the storage
+  // behind it has to exist before a wavefront can execute, and growing it there
+  // would put an allocation on the hottest path the simulator has.
+  std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
+  for (auto &wf : wfs_)
+    collector->attach(*wf);
+}
+
 size_t ComputeUnitCore::num_wfs() const {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   size_t count = 0;
@@ -400,8 +414,11 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
 }
 
 void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
-  if (!members.empty())
-    plugin_group_->onAmdgpuBarrierResolved(members);
+  if (members.empty())
+    return;
+  plugin_group_->onAmdgpuBarrierResolved(members);
+  if (timing_ != nullptr)
+    timing_->barrier_resolved(members);
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -660,6 +677,8 @@ void ComputeUnitCore::update_wf_states() {
             w2->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(w2.get());
       plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
+      if (timing_ != nullptr)
+        timing_->barrier_resolved(std::span<Wavefront *>(barrier_wfs));
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
@@ -750,6 +769,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
+  if (timing_ != nullptr)
+    timing_->before_execute(active->pc, *inst, *active);
 
   // s_trap enters the per-process handler configured by SET_TRAP_HANDLER. The
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at
@@ -848,6 +869,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
+  if (timing_ != nullptr)
+    timing_->after_execute(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {

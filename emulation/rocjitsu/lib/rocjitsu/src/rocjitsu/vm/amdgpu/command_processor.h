@@ -175,6 +175,14 @@ public:
     }
   }
 
+  /// @brief Install the layer that turns execution into modelled time.
+  ///
+  /// @details Borrowed, and null means no timing plane. The command processor
+  /// is the only component that sees a dispatch whole -- its packet on the way
+  /// in and its retirement on the way out -- so it drives the plane's dispatch
+  /// boundaries while the compute units drive everything inside them.
+  void set_timing_collector(timing::TimingCollector *collector) { timing_ = collector; }
+
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
   void add_compute_unit(ComputeUnitCore *cu) {
@@ -438,6 +446,7 @@ private:
   std::recursive_mutex hw_queue_mutex_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+  timing::TimingCollector *timing_ = nullptr;
 
   friend class ComputeUnitCore;
 

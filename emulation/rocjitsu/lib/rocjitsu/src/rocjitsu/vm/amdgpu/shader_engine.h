@@ -57,6 +57,12 @@ public:
       cu->set_plugin_group(pg);
   }
 
+  /// @brief Set the timing collector on all CUs (borrowed; null disables it).
+  void set_timing_collector(timing::TimingCollector *collector) {
+    for (auto *cu : cus_)
+      cu->set_timing_collector(collector);
+  }
+
   /// @brief Return the number of compute units.
   /// @returns Number of CUs in this shader engine.
   uint32_t num_compute_units() const { return static_cast<uint32_t>(cus_.size()); }

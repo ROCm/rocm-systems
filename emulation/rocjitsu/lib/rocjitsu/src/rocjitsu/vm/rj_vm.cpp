@@ -9,7 +9,14 @@
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include "rocjitsu/vm/timing/simulated_clock.h"
+#include "rocjitsu/vm/timing/tuning.h"
+
 #include "rocjitsu/vm/soc.h"
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "util/log.h"
@@ -29,6 +36,55 @@ RJ_DIAGNOSTIC_POP
 using namespace rocjitsu;
 
 namespace {
+
+/// @brief The plane whose report an exit handler should write.
+///
+/// @details Nothing tears the VM down under the interposer: a guest process
+/// exits without unwinding, so no destructor and no shutdown callback runs and
+/// an end-of-run report written from either would simply never appear. The
+/// handler is armed once, when a plane is first installed, and reads through
+/// this pointer so that a plane taken down normally clears it and is not
+/// reported twice.
+std::atomic<rocjitsu::timing::TimingPlane *> g_exit_plane{nullptr};
+
+void write_timing_report(rocjitsu::timing::TimingPlane *plane) {
+  if (plane == nullptr)
+    return;
+  const char *path = std::getenv("ROCJITSU_TIMING_REPORT");
+  if (path == nullptr)
+    return;
+  std::string report;
+  plane->write_report(report);
+  if (std::FILE *file = std::fopen(path, "w"); file != nullptr) {
+    std::fwrite(report.data(), 1, report.size(), file);
+    std::fclose(file);
+  }
+}
+
+void arm_exit_reporter() {
+  static const int armed = std::atexit(
+      [] { write_timing_report(g_exit_plane.exchange(nullptr, std::memory_order_acq_rel)); });
+  (void)armed;
+}
+
+/// @brief Take the timing plane down, in the one order that is safe.
+///
+/// @details The simulated clock is pointed away from the plane first, and
+/// unconditionally, because guest threads read it from inside ioctls holding
+/// none of this object's locks: a plane destroyed while the clock still points
+/// at it is a use-after-free on a thread that has nothing to do with the
+/// teardown. The report is written before the plane goes, because it is the
+/// plane that holds it.
+void shutdown_timing(rj_vm_t *vm) {
+  if (!vm || !vm->timing_plane)
+    return;
+  rocjitsu::amdgpu::SimulatedClock::instance().set_time_source(nullptr);
+  if (vm->soc)
+    vm->soc->set_timing_collector(nullptr);
+  write_timing_report(g_exit_plane.exchange(nullptr, std::memory_order_acq_rel));
+  vm->timing_collector.reset();
+  vm->timing_plane.reset();
+}
 
 void shutdown_plugin_group(rj_vm_t *vm) {
   // Host API preconditions keep this outside the simulation-callback interval:
@@ -276,10 +332,31 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
     auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "");
     // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
     // the group cannot overlap simulation callbacks.
+    shutdown_timing(vm);
     shutdown_plugin_group(vm);
     vm->soc->set_plugin_group(group);
     group->onInit();
     vm->plugin_group_active.store(true, std::memory_order_release);
+
+    // The timing block is read from the same raw document, in a second pass
+    // with no schema, for the same reason the plugin block is: the typed load
+    // runs with unexpected fields skipped, so a timing block on the typed path
+    // would be dropped in silence and the plane would run entirely on
+    // fallbacks with nothing to say it had.
+    shutdown_timing(vm);
+    timing::Tuning tuning = timing::Tuning::parse(config_json);
+    if (tuning.enabled) {
+      vm->timing_plane = std::make_unique<timing::TimingPlane>(std::move(tuning));
+      vm->timing_collector = std::make_unique<timing::TimingCollector>(*vm->timing_plane);
+      vm->soc->set_timing_collector(vm->timing_collector.get());
+      // Installing the plane is what makes every guest-visible clock report
+      // modelled time rather than the host's: hipEventElapsedTime, the KFD
+      // clock counters, a completion signal's timestamps and s_memtime inside
+      // a kernel all resolve to this one source.
+      amdgpu::SimulatedClock::instance().set_time_source(vm->timing_plane.get());
+      g_exit_plane.store(vm->timing_plane.get(), std::memory_order_release);
+      arm_exit_reporter();
+    }
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_ERROR;
@@ -302,6 +379,7 @@ void rj_vm_destroy(rj_vm_t *vm) {
   if (!vm)
     return;
   // The API requires an asynchronous host to stop and join rj_vm_run() first.
+  shutdown_timing(vm);
   shutdown_plugin_group(vm);
   if (vm->destroy())
     delete vm;
@@ -334,6 +412,7 @@ rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed) {
 
   // shutdown() joins all engine workers before plugin state is torn down.
   vm->engine->shutdown();
+  shutdown_timing(vm);
   shutdown_plugin_group(vm);
   return (exit.code == 0) ? ROCJITSU_STATUS_SUCCESS : ROCJITSU_STATUS_ERROR;
 }

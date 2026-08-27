@@ -10,6 +10,8 @@ set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_amdgpu_isa_registry
     simdojo
     rocjitsu_vm_amdgpu
+    rocjitsu_timing_clock
+    rocjitsu_timing
 )
 
 add_library(rocjitsu_tooling STATIC dbt_translate.cpp)

@@ -52,6 +52,11 @@
 #include <vector>
 
 namespace rocjitsu {
+
+namespace timing {
+class TimingCollector;
+} // namespace timing
+
 namespace amdgpu {
 
 class CommandProcessor;
@@ -322,6 +327,21 @@ public:
 
   /// @brief Return the execution plugin group.
   ExecutionPluginGroup &plugin_group() { return *plugin_group_; }
+
+  /// @brief Install the layer that turns execution into modelled time.
+  ///
+  /// @details Borrowed, and null means no timing plane, which is the default.
+  /// Every call site on the issue path is guarded on this pointer, so a run
+  /// with no plane pays a single predictable not-taken branch there, which is
+  /// what the execution plugin group already costs in the same place.
+  ///
+  /// Installing also gives every wavefront slot its collector state, because
+  /// the collector reads that slot without bounds checking and growing the
+  /// storage behind it lazily would put an allocation on the issue path.
+  void set_timing_collector(timing::TimingCollector *collector);
+
+  /// @brief Return the timing collector, or null when no plane is installed.
+  timing::TimingCollector *timing_collector() const { return timing_; }
 
   /// @brief Return the number of resident (not-yet-halted) wavefront slots.
   /// @details A wave frees its resources and its slot at s_endpgm, so halted
@@ -895,6 +915,7 @@ protected:
   uint64_t private_aperture_limit_ = 0;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+  timing::TimingCollector *timing_ = nullptr;
 
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
   /// Populated at dispatch_wf time. Null entries mean "not allocated".

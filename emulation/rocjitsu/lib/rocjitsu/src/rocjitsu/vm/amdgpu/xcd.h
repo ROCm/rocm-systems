@@ -67,6 +67,17 @@ public:
       se->set_plugin_group(pg);
   }
 
+  /// @brief Set the timing collector on CP and all CUs (borrowed).
+  ///
+  /// @details The command processor gets it as well as the compute units
+  /// because a dispatch's boundaries are only visible there: the packet on the
+  /// way in and the retirement on the way out.
+  void set_timing_collector(timing::TimingCollector *collector) {
+    cp_->set_timing_collector(collector);
+    for (auto *se : shader_engines_)
+      se->set_timing_collector(collector);
+  }
+
   /// @brief Wire topology links between CP→CU and CU→L2.
   ///
   /// @details L2→HBM/fabric wiring is done by SoC::initialize() since the
