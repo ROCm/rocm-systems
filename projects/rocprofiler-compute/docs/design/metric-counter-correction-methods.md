@@ -5,7 +5,7 @@
 **Audience:** Primary — designers and maintainers choosing correction methods for metric YAML; secondary — source material for enduser-facing explanations.  
 **Related code (shipped):** `src/utils/metrics/noise_clamper.py`, `src/utils/utils_analysis.py`, `src/rocprof_compute_soc/soc_base.py`, `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml`, `src/utils/metrics/common.py` (`ValuDualIssueDetector`)
 
-**Related code (proposed):** `src/utils/metrics/aggregation.py` (`BOUND_RATIO` / `to_bound_ratio` — follow-up PR)
+**Related code (shipped in follow-up PR):** `src/utils/metrics/aggregation.py` (`BOUND_RATIO` / `to_bound_ratio`, element-wise `MIN`/`MAX` on Series — PR #10717)
 
 ---
 
@@ -25,7 +25,8 @@ This guidance is **hybrid**: normative **MUST** / **MUST NOT** rules for PR revi
 |---|---|
 | **Correction method** | End-to-end approach: collection (single-pass grouping) or analyze-time formula helper |
 | **Clamp / cap** | Analyze-time adjustment that bounds a computed value (e.g. `NOISE_CLAMP` → 0, `BOUND_RATIO` → 100%) |
-| **Ratio cap** | Upper-bound correction: `BOUND_RATIO` or `SUM(MIN(a,b))/SUM(b)` only — not `NOISE_CLAMP` |
+| **Ratio cap** | Upper-bound correction on ratios: `BOUND_RATIO` (per-row), aggregate cap on `SUM(a)/SUM(b)` (avg), or per-row `SUM(MIN(a,b))/SUM(b)` — not `NOISE_CLAMP` |
+| **Aggregate cap** | Cap the volume-weighted fraction after summing: `min(100, 100 × SUM(a)/SUM(b))` — preserves `SUM(a)/SUM(b)` whenever the uncapped result is already ≤ 100% |
 
 ### Definitions (used in MUST rules and §5.4)
 
@@ -42,20 +43,22 @@ This guidance is **hybrid**: normative **MUST** / **MUST NOT** rules for PR revi
 1. **MUST** document the **co-collection strategy** in the PR for any new or changed ratio or subtraction formula (`--block`, `--set`, or grouping-policy entry).
 2. **MUST** use `NOISE_CLAMP` (not raw `a − b` alone) in Percent metrics where a subtraction result must be ≥ 0 (e.g. remote traffic, cache splits).  
    *Rationale:* Shipped pattern with analyze-time warnings (≥ 1% relative error). Negative values are clearly invalid; ratio caps (Rules 3–6) stay silent today and require validate-first.
-3. **MUST** run §5 **single-pass validation** before merging any PR that adds **`BOUND_RATIO`** or **`SUM(MIN(a,b))/SUM(b)`** (no other ratio cap helpers without updating this doc). **MUST** attach in the PR: profile command, workload, and validation conclusion (sporadic → cap acceptable / systematic → escalate / no cap needed).
+3. **MUST** run §5 **single-pass validation** before merging any PR that adds **`BOUND_RATIO`**, **aggregate cap** on partition avg, or **`SUM(MIN(a,b))/SUM(b)`** (no other ratio cap helpers without updating this doc). **MUST** attach in the PR: profile command, workload, and validation conclusion (sporadic → cap acceptable / systematic → escalate / no cap needed).
 4. **MUST NOT** merge **clamp-only** formula changes when single-pass validation shows **systematic violations** (§0 Definitions); **escalate** instead.
 5. **Partition metrics only — MUST NOT** apply caps when single-pass data is already ≤ 100% (no change needed). **MUST NOT** cap-only when violations are **systematic** under single-pass.
-6. **Non-partition pairs — MUST NOT** use `SUM(MIN(a,b))/SUM(b)` — falsely implies a subset. **MUST NOT** cap the **avg** column with ratio caps; min/max caps only per Rule 3 validation.
-7. **MUST NOT** apply `BOUND_RATIO`, `SUM(MIN(a,b))/SUM(b)`, or similar ratio caps to metrics in `ValuDualIssueDetector.candidate_metrics` (`VALU Utilization`, `VALU FLOPs (F64)` on gfx942) — use existing detectors and user-facing warnings.
+6. **Non-partition pairs — MUST NOT** use `SUM(MIN(a,b))/SUM(b)` or aggregate cap on avg — falsely implies a subset. **MUST NOT** cap the **avg** column with ratio caps; min/max caps only per Rule 3 validation.
+7. **MUST NOT** apply `BOUND_RATIO`, aggregate cap, `SUM(MIN(a,b))/SUM(b)`, or similar ratio caps to metrics in `ValuDualIssueDetector.candidate_metrics` (`VALU Utilization`, `VALU FLOPs (F64)` on gfx942) — use existing detectors and user-facing warnings.
 
 ### Advisory guidance (SHOULD / MAY)
 
 - **SHOULD** use **single-pass collection** when perfmon budget allows (`--block`, `--set`, grouping policy).
-- **SHOULD** apply `BOUND_RATIO` (min/max) or `SUM(MIN(a,b))/SUM(b)` (partition avg only) **after** Rule 3 validation confirms **sporadic** noise — same validate-first gate for partition and non-partition metrics.
+- **SHOULD** apply **`BOUND_RATIO` on min/max** and **aggregate cap on partition avg** (`min(100, 100 × SUM(a)/SUM(b))`) **after** Rule 3 validation confirms **sporadic** noise — same validate-first gate for partition and non-partition metrics.
+- **MAY** use per-row **`SUM(MIN(a,b))/SUM(b)`** on partition avg only when aggregate cap is insufficient and the PR documents the extra downward bias (§2.4.2).
 - **SHOULD** add unit tests in `tests/test_metric_utils.py` (or single-pass workload golden data) when introducing new cap helpers or capped YAML formulas.
 - **SHOULD** add grouping-policy entries for high-priority ratio partners on specific arches.
 - **MAY** adopt numeric thresholds in §5.4 later if the team agrees — **intentionally qualitative for now**.
-- **MAY** add diagnostics when `BOUND_RATIO` or `SUM(MIN)` adjust values (open question §6).
+- **MAY** add diagnostics when `BOUND_RATIO`, aggregate cap, or `SUM(MIN)` adjust values (open question §6).
+- **MAY** leave partition **avg uncapped** and emit warnings when `SUM(a)/SUM(b) > 100%` (transparency over plausibility — §2.4.4).
 - **MAY** derive public-facing explanations from §7 when product/docs are updated.
 
 ### PR review checklist (ratio / split metrics)
@@ -63,7 +66,7 @@ This guidance is **hybrid**: normative **MUST** / **MUST NOT** rules for PR revi
 - [ ] **Rule 1:** Co-collection approach documented (`--block`, `--set`, or policy)
 - [ ] **Rule 2:** Subtraction uses `NOISE_CLAMP` where result must be ≥ 0
 - [ ] **Rule 3:** Single-pass validation attached (§5.3 recipe); cap decision stated
-- [ ] **Rules 4–6:** Systematic single-pass violations escalated, not clamp-only; no `SUM(MIN)/SUM(b)` on non-partition; no avg cap on non-partition
+- [ ] **Rules 4–6:** Systematic single-pass violations escalated, not clamp-only; no partition avg cap on non-partition; no avg cap on non-partition pairs
 - [ ] **Rule 7:** No ratio cap on `ValuDualIssueDetector.candidate_metrics`
 - [ ] **SHOULD:** Tests or golden workload data for new caps
 
@@ -77,10 +80,11 @@ This table tracks **implementation state of related components** — not a one-t
 | **Single-pass grouping** (allocator, `--set`, `--block`) | **Shipped** | `soc_base.py`, `profiling_counter_grouping_policy.yaml`; gfx115x has tier-0 entries, many arches (e.g. gfx942) empty | Correction method (§1.3) |
 | **Multi-pass imputation** | **Shipped** | `utils_analysis.py` — stitches counters across passes | Root-cause context (§1.2) — not a correction |
 | **`ValuDualIssueDetector`** (VALU > 100% exception) | **Shipped** | `utils/metrics/common.py` — warnings, no clamp | Documented exception (§0 Rule 7) |
-| **`BOUND_RATIO`** (`to_bound_ratio`) | **Proposed** | Helper + YAML registration — follow-up PR | Correction method (§1.3) |
-| **`SUM(MIN(a,b))/SUM(b)`** on partition avg (e.g. HBM Read Traffic) | **Proposed** | `1700_l2_cache.yaml` — follow-up PR | Correction method — avg rollout (§1.3) |
-| **`BOUND_RATIO` on min/max** (e.g. Workgroup Manager Utilization, CPC Stall) | **Proposed** | Panel YAML updates — follow-up PR | Correction method — min/max rollout (§1.3) |
-| **Clamp diagnostics** (`BOUND_RATIO`, `SUM(MIN)`) | **Not started** | Open question §6 — only `NOISE_CLAMP` warns today | Planned tooling (§6) |
+| **`BOUND_RATIO`** (`to_bound_ratio`) | **Shipped** | `aggregation.py`; min/max on panel YAML (gfx940–942) | Correction method (§1.3) |
+| **Aggregate cap** on partition avg (`min(100, SUM(a)/SUM(b))`) | **Proposed** | Preferred avg fix — §2.4.2; may use `MIN(100, …)` in YAML | Correction method — avg rollout (§1.3) |
+| **Per-row `SUM(MIN(a,b))/SUM(b)`** on partition avg | **Shipped (interim)** | `1700_l2_cache.yaml`, CPF Util avg — follow-up PR #10717; prefer aggregate cap for new work | Correction method — avg alternative (§2.4.3) |
+| **`BOUND_RATIO` on min/max** (e.g. Workgroup Manager Utilization, CPC Stall) | **Shipped** | Panel YAML updates — PR #10717 | Correction method — min/max rollout (§1.3) |
+| **Clamp diagnostics** (`BOUND_RATIO`, aggregate cap, `SUM(MIN)`) | **Not started** | Open question §6 — only `NOISE_CLAMP` warns today | Planned tooling (§6) |
 
 ---
 
@@ -114,14 +118,15 @@ These symptoms appear across architectures more or less.
 
 ### 1.3 Correction methods (overview)
 
-**Scope:** §2–§3 below cover **four correction methods** — the levers designers apply to metric YAML. **Implementation status** (§0) lists additional related components (imputation, VALU exception, diagnostics); only the four rows below are correction methods. `BOUND_RATIO` and `SUM(MIN)/SUM(b)` appear twice in the status table (helper vs YAML rollout) but are one method each here.
+**Scope:** §2–§3 below cover **correction methods** designers apply to metric YAML. **Implementation status** (§0) lists additional related components (imputation, VALU exception, diagnostics). Partition **avg** has multiple analyze-time options (§2.4); **`BOUND_RATIO`** covers min/max.
 
 | Method | Layer | What it fixes | Primary lever |
 |---|---|---|---|
 | **Single-pass counter grouping** | Profile (collection) | Prevents cross-pass stitching for related counters | `profiling_counter_grouping_policy.yaml`, `--set`, greedy coalescing in `soc_base.py` |
 | **`NOISE_CLAMP`** | Analyze (formula) | Negative values from subtracting counters (`a − b < 0`) | Lower bound → 0, with diagnostics |
 | **`BOUND_RATIO`** | Analyze (formula) | Per-row ratio > 100% before min/max aggregation | Upper bound → 100% (silent today) |
-| **`SUM(MIN(a,b))/SUM(b)`** | Analyze (formula) | Aggregate avg inflation from `SUM(a)/SUM(b)` | Cap numerator per row before summing (avg columns only) |
+| **Aggregate cap** | Analyze (formula) | Volume-weighted avg `SUM(a)/SUM(b)` > 100% | `min(100, 100 × SUM(a)/SUM(b))` — partition avg only (§2.4.2) |
+| **Per-row `SUM(MIN(a,b))/SUM(b)`** | Analyze (formula) | Same symptom as aggregate cap; per-row invariant enforcement | Cap numerator per row before summing — partition avg alternative (§2.4.3) |
 
 Methods compose: **grouping** addresses the cause; **clamp/cap helpers** are downstream guards when multi-pass or noise remains unavoidable. None of the analyze-time helpers **prove** a violation is noise — see §2.5 (masking risk) and §5 (validation per §0 Rule 3).
 
@@ -172,12 +177,12 @@ result = difference if difference >= 0 else 0.0
 
 ---
 
-### 2.3 `BOUND_RATIO` (`to_bound_ratio`) *(proposed)*
+### 2.3 `BOUND_RATIO` (`to_bound_ratio`) *(shipped)*
 
 **Definition:** Compute per-row `(numerator / denominator) × scale`, capping the result at `cap` (default 100). Used before `MIN()` / `MAX()` aggregation on min/max columns.
 
 ```python
-# src/utils/metrics/aggregation.py (proposed)
+# src/utils/metrics/aggregation.py
 return (num / safe_den * scale).clip(upper=cap)
 ```
 
@@ -198,28 +203,71 @@ return (num / safe_den * scale).clip(upper=cap)
 
 ---
 
-### 2.4 Aggregate numerator capping — `SUM(MIN(a,b))/SUM(b)`
+### 2.4 Partition avg corrections — volume-weighted fractions
 
-**Definition:** For **avg** columns using volume-weighted fractions, cap each row's numerator at the denominator before summing:
+**Baseline (uncapped):** For partition metrics where `a ⊆ b`, the intended volume-weighted aggregate is:
+
+```yaml
+avg: 100 * SUM(a) / SUM(b)
+```
+
+This equals the volume-weighted mean of per-row ratios: each dispatch contributes weight `bᵢ / Σb` and ratio `aᵢ/bᵢ`. When every row satisfies `a ≤ b`, the result is ≤ 100% and no correction is needed.
+
+**Problem:** Multi-pass imputation can make some rows have `a > b`. Then `SUM(a)/SUM(b)` can exceed 100% even when most rows are valid. **No analyze-time variant is algebraically identical to uncapped `SUM(a)/SUM(b)` when violations exist** — each option below is a different estimator or display policy. All require **§0 Rule 3** single-pass validation and apply only to **partition** avg columns.
+
+#### 2.4.1 Aggregate cap *(SHOULD default for partition avg)*
+
+Cap only the **final** volume-weighted fraction:
+
+```yaml
+avg: MIN(100, 100 * SUM(a) / SUM(b))
+```
+
+| Pros | Cons |
+|---|---|
+| Same volume weighting as `SUM(a)/SUM(b)` | Only fixes display when aggregate > 100% |
+| **No change** when uncapped result is already ≤ 100% | Silent today — no diagnostic when cap fires |
+| Minimal distortion vs per-row capping (§2.4.3) | Does not fix min/max column explosions (use `BOUND_RATIO`) |
+| Does not claim to be a substitute — only bounds an impossible aggregate | Can hide systematic `a > b` if over-applied without validation |
+
+**When aggregate cap and per-row MIN differ:** If one row has `a > b` but the uncapped aggregate is still ≤ 100%, aggregate cap leaves the avg unchanged; per-row `SUM(MIN)/SUM(b)` reduces it (downward bias). See §3.1 Problem F.
+
+#### 2.4.2 Per-row numerator cap — `SUM(MIN(a,b))/SUM(b)` *(MAY — interim in PR #10717)*
+
+Cap each row's numerator before summing:
 
 ```yaml
 avg: 100 * SUM(MIN(a, b)) / SUM(b)
 ```
 
-Mathematical guarantee: `MIN(aᵢ, bᵢ) ≤ bᵢ` for all rows → aggregate ratio ≤ 100%.
+Algebraically equivalent to: `100 × Σ (bᵢ/Σb) × min(aᵢ/bᵢ, 1)` — volume-weighted mean of **capped** per-row ratios. **Not equivalent** to uncapped `SUM(a)/SUM(b)` when any row has `a > b`.
 
 | Pros | Cons |
 |---|---|
-| Preserves volume weighting of `SUM(a)/SUM(b)` | Only valid when `a` is a **subset** of `b` |
-| Fixes avg inflation (e.g. 103.23% → 100%) without changing min/max logic | Discards excess `a − b` on inflated rows (slight under-count) |
-| Mathematically bounded | Not interchangeable with min/max column formulas |
-| Same weighting semantics as uncapped aggregate | Silent — no warning when capping occurs |
+| Same denominator weights `bᵢ` as uncapped aggregate | **Different statistic** — not a drop-in substitute for `SUM(a)/SUM(b)` |
+| Guarantees aggregate ≤ 100% | Can **under-report** when uncapped aggregate is already ≤ 100% (discards excess on bad rows) |
+| Strong per-row invariant `a ≤ b` before sum | Silent — no warning when capping occurs |
+| Mathematically bounded | Higher masking risk than aggregate cap (§2.5) |
 
-**Masking risk (HW bugs):** **High when silent.** Discards `a − b` excess on every inflated row before summing, so a **biased** subset counter that consistently over-reports can still yield a plausible avg ≤ 100%. The under-count is invisible unless raw `a` and `b` are inspected. Always cross-check uncapped `SUM(a)/SUM(b)` under single-pass when validating new counter definitions.
+**When to use:** Only if aggregate cap is insufficient and the PR documents acceptance of extra downward bias. **New work SHOULD prefer §2.4.1** unless per-dispatch invariant enforcement before summing is explicitly required.
 
-**Validate before cap:** Per **§0 Rules 3–5**. Apply `SUM(MIN(a,b))/SUM(b)` only when single-pass data shows **sporadic** avg inflation. If single-pass raw data is already ≤ 100%, no cap is needed.
+#### 2.4.3 Other partition avg options
 
-**When to use (if validation supports it):** Avg columns for **partition** Percent metrics only (HBM traffic, CPF Utilization `busy/(busy+idle)`).
+| Option | Formula / approach | Tradeoff |
+|---|---|---|
+| **Uncapped + warning** | `100 * SUM(a)/SUM(b)` + diagnostic when > 100% or rows with `a > b` | Most transparent; user may see 103% avg |
+| **Exclude bad rows** | `SUM(a)/SUM(b)` over rows where `a ≤ b` only | Drops whole dispatches — changes weights more aggressively than MIN |
+| **Complement / subtraction path** | Derive share via `NOISE_CLAMP(b − a, b)` (see Remote Read Traffic) | Already used for complements; HBM + Remote may not sum to exactly 100% |
+| **Imputation-layer reconcile** | Enforce `a = min(a,b)` when stitching passes in `utils_analysis.py` | Fixes all formulas using those counters; harder to review per metric |
+| **Unweighted `AVG(a/b)`** | Mean of per-row ratios | Treats dispatches equally — **wrong** for traffic fractions unless explicitly intended |
+
+#### 2.4.4 Validate before cap
+
+Per **§0 Rules 3–5**. Apply any partition avg correction only when single-pass data shows **sporadic** inflation. If single-pass raw data is already ≤ 100%, no cap is needed. If violations are **systematic**, **escalate** — do not cap-only.
+
+**When to use (if validation supports it):** Avg columns for **partition** Percent metrics only (HBM traffic, CPF Utilization `busy/(busy+idle)`). **Min/max** for the same metrics use **`BOUND_RATIO`** (§2.3) — different column semantics (§3.1 Problem B).
+
+**Masking risk (HW bugs):** Aggregate cap — **moderate** when silent. Per-row `SUM(MIN)/SUM(b)` — **high** when silent. Always cross-check uncapped `SUM(a)/SUM(b)` under single-pass when validating new counter definitions.
 
 ---
 
@@ -232,7 +280,8 @@ How much each method can hide a **potential hardware counter bug** (persistent w
 | **Single-pass grouping** | Low | Raw ratios in analyze; same formula, cleaner inputs | Violations still > 100% or negative after single-pass |
 | **`NOISE_CLAMP`** | Moderate | Summary warning count; raw PMC if inspected manually | Warnings on most dispatches; large rel. error under single-pass |
 | **`BOUND_RATIO`** | High (today) | Nothing in metric output unless raw PMC reviewed | Same metric capped on many dispatches under single-pass |
-| **`SUM(MIN(a,b))/SUM(b)`** | High (today) | Uncapped aggregate only if formula run separately | Avg always 100% while raw `SUM(a)/SUM(b)` still > 100% under single-pass |
+| **Aggregate cap** | Moderate (today) | Uncapped aggregate only if formula run separately | Avg pinned at 100% while raw `SUM(a)/SUM(b)` still > 100% under single-pass |
+| **Per-row `SUM(MIN(a,b))/SUM(b)`** | High (today) | Uncapped aggregate only if formula run separately | Avg below uncapped even when uncapped ≤ 100%; or pinned at 100% when raw > 100% |
 
 **Principle:** Analyze-time corrections improve **user-facing plausibility** for known collection noise. They are **not** a substitute for validating counter correctness under stable collection conditions (§5).
 
@@ -255,7 +304,23 @@ Assume three dispatches. All formulas use Percent scale (× 100).
 | Method | Formula | Result |
 |---|---|---:|
 | Raw | `SUM(a)/SUM(b) × 100` | `(110+100+100)/300 × 100` = **103.33%** |
-| Aggregate cap | `SUM(MIN(a,b))/SUM(b) × 100` | `(100+100+100)/300 × 100` = **100.00%** |
+| Aggregate cap | `min(100, SUM(a)/SUM(b) × 100)` | **100.00%** |
+| Per-row MIN | `SUM(MIN(a,b))/SUM(b) × 100` | `(100+100+100)/300 × 100` = **100.00%** |
+
+#### Problem F — per-row MIN can bias avg when uncapped aggregate is already valid
+
+| Dispatch | `a` | `b` |
+|---:|---:|---:|
+| 1 | 110 | 100 |
+| 2 | 60 | 100 |
+
+| Method | Formula | Result |
+|---|---|---:|
+| Raw | `SUM(a)/SUM(b) × 100` | `(110+60)/200 × 100` = **85.00%** |
+| Aggregate cap | `min(100, SUM(a)/SUM(b) × 100)` | **85.00%** (unchanged — total already ≤ 100%) |
+| Per-row MIN | `SUM(MIN(a,b))/SUM(b) × 100` | `(100+60)/200 × 100` = **80.00%** ← downward bias |
+
+This illustrates why **aggregate cap is the preferred avg correction**: it bounds impossible totals without changing the volume-weighted mean when the uncapped result is already plausible.
 
 #### Problem B — min/max column explosion
 
@@ -268,7 +333,7 @@ Assume three dispatches. All formulas use Percent scale (× 100).
 |---|---|---:|
 | Raw max | `MAX(a/b) × 100` | **120%** |
 | `BOUND_RATIO` max | `MAX(BOUND_RATIO(a,b))` | `MAX(50%, 100%)` = **100%** |
-| Wrong tool: aggregate cap | `SUM(MIN(a,b))/SUM(b) × 100` | `(50+100)/200 × 100` = **75%** ← not a max |
+| Wrong tool: per-row MIN on max column | `SUM(MIN(a,b))/SUM(b) × 100` | `(50+100)/200 × 100` = **75%** ← not a max |
 
 #### Problem C — negative subtraction (remote traffic)
 
@@ -317,7 +382,7 @@ All methods agree; clamping is a no-op. Residual violations (> 100%) should be r
 | Interpretation | Action |
 |---|---|
 | **Systematic** under single-pass (§0 Definitions) | **Escalate** — do not cap-only; investigate counter/driver/hardware |
-| After `BOUND_RATIO` / `SUM(MIN)` without validation | User sees ≤ 100%; **bug signal is hidden** unless raw PMC is checked |
+| After `BOUND_RATIO` / aggregate cap / `SUM(MIN)` without validation | User sees ≤ 100%; **bug signal is hidden** unless raw PMC is checked |
 
 ---
 
@@ -353,7 +418,7 @@ When `TCC_EA0_RDREQ_DRAM_sum > TCC_EA0_RDREQ_sum` on a dispatch (multi-pass vari
 
 ---
 
-#### `BOUND_RATIO` *(proposed — apply only after single-pass validation)*
+#### `BOUND_RATIO` *(shipped — apply only after single-pass validation)*
 
 **Real metric:** *Workgroup Manager Utilization* min/max (gfx942 `0600_workgroup_manager_spi.yaml`)
 
@@ -370,19 +435,27 @@ Reproduction example (mat_exp workload, multi-pass analyze): raw max **739.60%**
 
 ---
 
-#### `SUM(MIN(a,b))/SUM(b)` *(proposed — apply only after single-pass validation)*
+#### Partition avg — aggregate cap *(SHOULD)* and per-row `SUM(MIN)/SUM(b)` *(MAY — interim)*
 
 **Real metric:** *HBM Read Traffic* avg (gfx942)
 
-**Validation-first workflow:** Profile block 17.1 (or `--set`) so `TCC_EA0_RDREQ_DRAM_sum` and `TCC_EA0_RDREQ_sum` are co-collected (§5.3). Compare uncapped `SUM(a)/SUM(b)` vs per-dispatch ratios in raw PMC. Apply `SUM(MIN)/SUM(b)` in YAML only if single-pass avg still exceeds 100% due to sporadic row inflation — not if violations are systematic.
+**Validation-first workflow:** Profile block 17.1 (or `--set`) so `TCC_EA0_RDREQ_DRAM_sum` and `TCC_EA0_RDREQ_sum` are co-collected (§5.3). Compare uncapped `SUM(a)/SUM(b)` vs per-dispatch ratios in raw PMC. Apply a cap in YAML only if single-pass avg still exceeds 100% due to **sporadic** row inflation — not if violations are **systematic**.
+
+**Preferred (aggregate cap):**
+
+```yaml
+avg: MIN(100, 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum))
+```
+
+**Interim (per-row MIN — shipped in PR #10717; prefer aggregate cap for new work):**
 
 ```yaml
 avg: 100 * SUM(MIN(TCC_EA0_RDREQ_DRAM_sum, TCC_EA0_RDREQ_sum)) / SUM(TCC_EA0_RDREQ_sum)
 ```
 
-Reproduction example (occupancy workload, multi-pass analyze): raw avg **103.23%** → capped **100.00%** if cap is applied. **Decision to cap pending single-pass validation.**
+Reproduction example (occupancy workload, multi-pass analyze): raw avg **103.23%** → capped **100.00%** with either formula when total > 100%. When uncapped avg is already ≤ 100% but individual rows violate `a ≤ b`, aggregate cap preserves the uncapped value; per-row MIN does not (§3.1 Problem F).
 
-**Note:** Min/max for the same metric use `BOUND_RATIO` (also after validation) — different column semantics (see §3.1 Problem B).
+**Note:** Min/max for the same metric use `BOUND_RATIO` (after validation) — different column semantics (§3.1 Problem B).
 
 ---
 
@@ -406,11 +479,12 @@ flowchart TD
     D --> E{"Formula shape?"}
     E -->|Subtraction| F["NOISE_CLAMP<br/>(lower bound; shipped)"]
     E -->|Ratio min/max| G["Consider BOUND_RATIO<br/>after §5 validation"]
-    E -->|Ratio avg, partition| H["Consider SUM(MIN)/SUM(b)<br/>after §5 validation"]
+    E -->|Ratio avg, partition| H["Consider aggregate cap<br/>min(100, SUM(a)/SUM(b))<br/>after §5 validation"]
+    E -->|Ratio avg, partition alt| H2["MAY: per-row SUM(MIN)/SUM(b)<br/>if documented — §2.4.2"]
     B -->|Yes — single pass or --set| I{"Is a a subset of b?"}
     I -->|Yes — e.g. dram ⊆ total| J["Single-pass validate"]
     J --> J2{"Violations sporadic?"}
-    J2 -->|Yes| K["Consider cap if needed<br/>(SUM(MIN) or BOUND_RATIO)"]
+    J2 -->|Yes| K["Consider cap if needed<br/>(aggregate cap avg;<br/>BOUND_RATIO min/max)"]
     J2 -->|No — systematic| P["Potential HW counter bug<br/>— escalate, do not clamp-only"]
     I -->|No — e.g. Workgroup Manager Utilization| L["Single-pass validate"]
     L --> L2{"Violations sporadic?"}
@@ -463,7 +537,7 @@ rocprof-compute profile --block 17.1 --kernel-name <kernel> --output-directory w
 rocprof-compute analyze --block 17.1 --path workloads/validate_hbm/
 
 # 3. Inspect raw PMC: per-dispatch TCC_EA0_RDREQ_DRAM_sum vs TCC_EA0_RDREQ_sum
-# 4. Compare uncapped SUM(a)/SUM(b) vs SUM(MIN(a,b))/SUM(b) on same data
+# 4. Compare uncapped SUM(a)/SUM(b) vs aggregate cap vs per-row SUM(MIN(a,b))/SUM(b) on same data
 # 5. Record conclusion in PR per §0 Rule 3
 ```
 
@@ -475,7 +549,7 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 
 | Observation under single-pass + stable workload | Likely cause | Action |
 |---|---|---|
-| **Sporadic** ratio > 100% (partition or non-partition) | Short dispatch, async sampling, or residual multi-pass noise | **SHOULD** consider cap after Rule 3 validation (`SUM(MIN)` partition avg; `BOUND_RATIO` min/max) |
+| **Sporadic** ratio > 100% (partition or non-partition) | Short dispatch, async sampling, or residual multi-pass noise | **SHOULD** consider cap after Rule 3 validation (aggregate cap on partition avg; `BOUND_RATIO` on min/max) |
 | **Systematic** partition metric > 100% | Potential HW counter bug or wrong event pairing | **MUST NOT** cap-only (**§0 Rule 4–5**); **escalate** |
 | **Systematic** non-partition metric > 100% | Semantics or denominator collapse | Same gate; **SHOULD** cap min/max only if reclassified as sporadic after investigation |
 | Single-dispatch max spike (e.g. >> 200%) with tiny denominator | Denominator collapse / short dispatch | After validation confirms **sporadic** spike: **SHOULD** `BOUND_RATIO` on max; document in PR |
@@ -487,13 +561,13 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 
 ## 6. Open Questions
 
-1. **Silent vs diagnostic capping:** Should `BOUND_RATIO` and `SUM(MIN)/SUM(b)` adopt `NOISE_CLAMP`-style warnings when values are adjusted (threshold, counter, summary at end of analyze)? This is critical for not masking potential HW counter bugs.
+1. **Silent vs diagnostic capping:** Should `BOUND_RATIO`, aggregate cap, and per-row `SUM(MIN)/SUM(b)` adopt `NOISE_CLAMP`-style warnings when values are adjusted (threshold, counter, summary at end of analyze)? This is critical for not masking potential HW counter bugs.
 
-2. **Scope of `BOUND_RATIO` rollout:** Which Percent metrics across gfx940/942/950 (and other arches) should be updated, and in what priority order?
+2. **Scope of ratio-cap rollout:** Which Percent metrics across gfx940/942/950 (and other arches) should be updated, and in what priority order?
 
-3. **Avg column consistency:** **§0 Rule 6** forbids `SUM(MIN)/SUM(b)` and avg ratio caps on non-partition pairs — confirm no exceptions needed.
+3. **Avg column consistency:** **§0 Rule 6** forbids aggregate cap and `SUM(MIN)/SUM(b)` on non-partition avg — confirm no exceptions needed. **Migrate interim per-row MIN YAML (PR #10717) to aggregate cap** where validation supports it?
 
-4. **Complementary metric consistency:** After independent clamping on HBM (`SUM(MIN)` / `BOUND_RATIO`) and Remote (`NOISE_CLAMP`), should we enforce or document that splits may not sum to exactly 100%?
+4. **Complementary metric consistency:** After independent clamping on HBM (aggregate cap / `BOUND_RATIO`) and Remote (`NOISE_CLAMP`), should we enforce or document that splits may not sum to exactly 100%?
 
 5. **Single-pass validation metadata:** Can we add analyze-time metadata (pass-id per counter group) to detect when ratio partners were not co-collected and warn before clamping?
 
@@ -527,4 +601,4 @@ Repeat with `--set` when a predefined set already co-packages the needed counter
 - `src/utils/utils_analysis.py` — Multi-pass data imputation
 - `src/rocprof_compute_soc/analysis_configs/profiling_counter_grouping_policy.yaml` — Coalescing priorities
 - `src/utils/metrics/noise_clamper.py` — `NOISE_CLAMP` implementation
-- `src/utils/metrics/aggregation.py` — `BOUND_RATIO` (**proposed** in follow-up PR)
+- `src/utils/metrics/aggregation.py` — `BOUND_RATIO`, element-wise `MIN`/`MAX` (PR #10717)
