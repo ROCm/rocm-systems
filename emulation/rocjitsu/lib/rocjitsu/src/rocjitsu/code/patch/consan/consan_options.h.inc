@@ -141,40 +141,6 @@ enum class ConSanAtomicOrderEdge : uint8_t {
   Acquire,
 };
 
-/// Barrier-mutation forms whose evidence must not be conflated across host
-/// code-object proof, live hardware, or multi-device/cluster topology.
-enum class ConSanBarrierMutationForm : uint8_t {
-  PairScopeCrossing,
-  PairCompletingId,
-  StaticNamedLifecycle,
-};
-
-enum class ConSanQualificationEvidence : uint8_t {
-  None,
-  Proven,
-  DeferredA1,
-};
-
-struct ConSanBarrierMutationQualification {
-  ConSanQualificationEvidence host = ConSanQualificationEvidence::None;
-  ConSanQualificationEvidence live_gpu = ConSanQualificationEvidence::None;
-  ConSanQualificationEvidence cluster_or_multi_device = ConSanQualificationEvidence::None;
-};
-
-/// Durable qualification boundary for the currently implemented barrier
-/// mutation slices. This is deliberately narrower than encoder availability:
-/// successful synthetic patching cannot silently become a live-GPU or
-/// topology claim.
-[[nodiscard]] constexpr ConSanBarrierMutationQualification
-consan_barrier_mutation_qualification(std::string_view target, ConSanBarrierMutationForm form) {
-  if (target == "gfx1201" && form == ConSanBarrierMutationForm::PairScopeCrossing)
-    return {.host = ConSanQualificationEvidence::Proven};
-  if (target == "gfx1250" && form == ConSanBarrierMutationForm::StaticNamedLifecycle) {
-    return {.host = ConSanQualificationEvidence::Proven,
-            .live_gpu = ConSanQualificationEvidence::DeferredA1};
-  }
-  return {};
-}
 enum class ConSanMoiOwnerSource : uint8_t {
   Automatic,
   WorkitemId,

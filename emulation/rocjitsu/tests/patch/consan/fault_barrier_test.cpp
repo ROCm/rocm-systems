@@ -229,11 +229,6 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
   EXPECT_EQ(text[3], 0xBF940002u);   // s_barrier_wait 2
   EXPECT_EQ(text[4], text_words[4]); // fixed-zero leave stays byte-identical
   EXPECT_EQ(text[5], text_words[5]);
-  const auto qualification = consan_barrier_mutation_qualification(
-      "gfx1250", ConSanBarrierMutationForm::StaticNamedLifecycle);
-  EXPECT_EQ(qualification.host, ConSanQualificationEvidence::Proven);
-  EXPECT_EQ(qualification.live_gpu, ConSanQualificationEvidence::DeferredA1);
-  EXPECT_EQ(qualification.cluster_or_multi_device, ConSanQualificationEvidence::None);
 }
 
 TEST(ConSan, FaultBarrierIdScopeRejectsLiteralLifecycleMembersAtDecode) {
@@ -1151,11 +1146,6 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarge
   EXPECT_EQ(plan.target_barrier_id, -2);
   EXPECT_EQ(plan.original_barrier_scope, ConSanBarrierSite::Scope::Workgroup);
   EXPECT_EQ(plan.target_barrier_scope, ConSanBarrierSite::Scope::Workgroup);
-  const auto qualification = consan_barrier_mutation_qualification(
-      "gfx1201", ConSanBarrierMutationForm::PairScopeCrossing);
-  EXPECT_EQ(qualification.host, ConSanQualificationEvidence::Proven);
-  EXPECT_EQ(qualification.live_gpu, ConSanQualificationEvidence::None);
-  EXPECT_EQ(qualification.cluster_or_multi_device, ConSanQualificationEvidence::None);
 }
 
 TEST(ConSan, FaultBarrierIdScopePairsBoundedSignalWaitWithInterveningInstructions) {
@@ -1279,10 +1269,6 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   EXPECT_EQ(text[0], 0xBE804EC2u); // s_barrier_signal -2
   EXPECT_EQ(text[1], 0xBF94FFFEu); // s_barrier_wait -2
   EXPECT_EQ(text[2], text_words[2]);
-  const auto qualification = consan_barrier_mutation_qualification(
-      "gfx1201", ConSanBarrierMutationForm::PairScopeCrossing);
-  EXPECT_EQ(qualification.host, ConSanQualificationEvidence::Proven);
-  EXPECT_EQ(qualification.live_gpu, ConSanQualificationEvidence::None);
 }
 
 TEST(ConSan, FaultBarrierIdScopeRejectsLiteralSignalMarkerAtDecode) {

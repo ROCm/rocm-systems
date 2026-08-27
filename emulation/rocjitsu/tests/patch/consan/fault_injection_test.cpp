@@ -353,32 +353,6 @@ TEST(ConSanMoi, LdsAddressFaultComposesWithEveryMoiAccessEngine) {
   }
 }
 
-TEST(ConSan, BarrierMutationQualificationSeparatesHostLiveAndTopologyEvidence) {
-  const auto scope_crossing = consan_barrier_mutation_qualification(
-      "gfx1201", ConSanBarrierMutationForm::PairScopeCrossing);
-  EXPECT_EQ(scope_crossing.host, ConSanQualificationEvidence::Proven);
-  EXPECT_EQ(scope_crossing.live_gpu, ConSanQualificationEvidence::None);
-  EXPECT_EQ(scope_crossing.cluster_or_multi_device, ConSanQualificationEvidence::None);
-
-  const auto completing_id =
-      consan_barrier_mutation_qualification("gfx1201", ConSanBarrierMutationForm::PairCompletingId);
-  EXPECT_EQ(completing_id.host, ConSanQualificationEvidence::None);
-  EXPECT_EQ(completing_id.live_gpu, ConSanQualificationEvidence::None);
-  EXPECT_EQ(completing_id.cluster_or_multi_device, ConSanQualificationEvidence::None);
-
-  const auto lifecycle = consan_barrier_mutation_qualification(
-      "gfx1250", ConSanBarrierMutationForm::StaticNamedLifecycle);
-  EXPECT_EQ(lifecycle.host, ConSanQualificationEvidence::Proven);
-  EXPECT_EQ(lifecycle.live_gpu, ConSanQualificationEvidence::DeferredA1);
-  EXPECT_EQ(lifecycle.cluster_or_multi_device, ConSanQualificationEvidence::None);
-
-  const auto unknown = consan_barrier_mutation_qualification(
-      "gfx9999", ConSanBarrierMutationForm::PairScopeCrossing);
-  EXPECT_EQ(unknown.host, ConSanQualificationEvidence::None);
-  EXPECT_EQ(unknown.live_gpu, ConSanQualificationEvidence::None);
-  EXPECT_EQ(unknown.cluster_or_multi_device, ConSanQualificationEvidence::None);
-}
-
 TEST(ConSan, FinalValidationRejectsUnprovenBarrierMutation) {
   const std::array<uint32_t, 2> text_words = {
       0xBF940000u, // s_barrier_wait

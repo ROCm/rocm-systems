@@ -4631,6 +4631,33 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass in 84.62 seconds. Slice 5AS completed the
   periodic physical-gfx950 gate. E2E validation remains outside this work.
 
+### Slice 5AW: delete the non-operative barrier qualification table
+
+- **Claims without a consumer removed:** The barrier-mutation qualification
+  enums, record, and target/form lookup function were linked into the ConSan
+  implementation but were read only by host tests. No request validation,
+  semantic admission, mutation planning, final validation, lowering, runtime
+  policy, or diagnostic consulted them. Their `Proven`, `DeferredA1`, and
+  topology values therefore could neither enable safe behavior nor prevent an
+  unqualified operation.
+- **Executable contracts remain authoritative:** The retained barrier tests
+  still exercise decoded lifecycle admission, pair-scope mutation planning,
+  exact rewritten instructions, transactional rejection, and final validation.
+  Checked-in device tests retain the cross-target correct/incorrect behavioral
+  contracts. Qualification status belongs in validation documentation until a
+  real policy consumer needs a typed input; an isolated production lookup table
+  is not evidence.
+- **Deletion accounting:** Production deletes 34 physical lines and adds none.
+  Tests delete 40 lines and add none: one test existed only to inspect the dead
+  table, while three live mutation tests lose only adjacent assertions about
+  the same non-operative metadata.
+- **Checked-in gate:** The host gate passes all 1,508 runnable tests with the
+  two expected benchmark-object skips; all 172 HSA-hook and hook-lifecycle
+  tests pass; and all 2,908 simulator-device tests across `gfx942`, `gfx950`,
+  `gfx1100`, `gfx1201`, and `gfx1250` pass in 82.98 seconds. Slice 5AS remains
+  the latest periodic physical-gfx950 gate; E2E validation remains outside this
+  work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
