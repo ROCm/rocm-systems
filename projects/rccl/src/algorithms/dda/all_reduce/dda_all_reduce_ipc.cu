@@ -13,7 +13,6 @@
 #include "debug.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 #include "algorithms/dda/dda_init_detail.h"
-#include "param.h"
 
 #include <cuda_runtime.h>
 
@@ -22,17 +21,6 @@
 #include <memory>
 #include <new>
 #include <utility>
-
-// Relax the DDA IPC AllReduce eligibility beyond exactly kDdaNranks (8) ranks.
-// When 0 (default) the classic 8-rank-only gate is enforced and behaviour is
-// bit- and perf-identical to baseline. When 1, comms of 2/4/8 ranks are eligible
-// for the IPC path. Only power-of-two participant counts <= kDdaNranks are
-// supported because the DDA kernels are template-instantiated per count.
-RCCL_PARAM(DdaNranksRelax, "DDA_NRANKS_RELAX", 0);
-
-bool ncclDdaNranksRelaxEnabled() {
-  return rcclParamDdaNranksRelax() != 0;
-}
 
 namespace {
 
