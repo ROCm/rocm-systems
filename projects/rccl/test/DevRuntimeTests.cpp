@@ -17,6 +17,9 @@
 
 #include <gtest/gtest.h>
 
+#include "DevRuntimeTestsStubs.h"
+#include "host/ScopedHook.h"
+
 #include <initializer_list>
 #include <memory>
 #include <vector>
@@ -214,6 +217,55 @@ TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
   ASSERT_EQ(ncclDevrFinalize(comm), ncclSuccess);
 
   EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
+
+// ---------------------------------------------------------------------------
+// symMemorySetAccessForVASegment fills a device access descriptor and hands it
+// to cuMemSetAccess. The only branch is the CUCHECK on that call.
+
+class SymMemorySetAccessTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  symLsaMessage msg{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->cudaDev = 3;
+    msg.segmentSize = 4096;
+  }
+  void TearDown() override { ResetDevRuntimeFakes(); }
+};
+
+// Branch: cuMemSetAccess succeeds. Also pins the descriptor the caller builds,
+// which is otherwise invisible from the return value alone.
+TEST_F(SymMemorySetAccessTest, Succeeds_RequestsReadWriteForOwnDevice) {
+  hipMemAccessDesc seen{};
+  size_t seenSize = 0;
+  ScopedHook setAccess(g_hipMemSetAccess,
+                       [&](void*, size_t size, const hipMemAccessDesc* desc, size_t count) {
+                         if (desc && count == 1) seen = *desc;
+                         seenSize = size;
+                         return hipSuccess;
+                       });
+
+  EXPECT_EQ(symMemorySetAccessForVASegment(comm, &msg, reinterpret_cast<hipDeviceptr_t>(0x1000)), ncclSuccess);
+  EXPECT_EQ(setAccess.calls, 1);
+  EXPECT_EQ(seenSize, msg.segmentSize);
+  EXPECT_EQ(seen.location.type, hipMemLocationTypeDevice);
+  EXPECT_EQ(seen.location.id, comm->cudaDev);
+  EXPECT_EQ(seen.flags, hipMemAccessFlagsProtReadWrite);
+}
+
+// Branch: cuMemSetAccess fails, so CUCHECK returns instead of ncclSuccess.
+TEST_F(SymMemorySetAccessTest, SetAccessFails_ReturnsError) {
+  ScopedHook setAccess(g_hipMemSetAccess,
+                       [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(symMemorySetAccessForVASegment(comm, &msg, reinterpret_cast<hipDeviceptr_t>(0x1000)), ncclSuccess);
+  EXPECT_EQ(setAccess.calls, 1);
 }
 
 
