@@ -2889,3 +2889,487 @@ TEST_F(RasClientMicrotest, ConnectFailLabel_SockNeverOpened_ReturnsOneAndClosesN
   EXPECT_EQ(-1, sock);
   EXPECT_EQ(1, g_freeaddrinfoCalls);  // the walk's own free; fail: adds no second
 }
+
+
+// ===========================================================================
+// monitorNCCLEvents: command + activation, the leftover-data flush, and the
+// continuous monitor loop.
+//
+// Two structural findings pinned by the tests below:
+//   * the loop's `errno == EINTR` arm is unreachable -- rasRead retries EINTR
+//     itself and only ever returns -1 with errno != EINTR;
+//   * `okEnd` can never be null on the accepted path -- activation requires
+//     msgBuf[2] == '\n', so strchr always finds it at index 2.
+// ===========================================================================
+
+namespace {
+
+constexpr int kMonitorSock = 91;
+constexpr char kMonitorGroups[] = "lifecycle,trace";
+constexpr char kMonitorBanner[] = "RAS Monitor Mode - watching for peer changes (Ctrl+C to exit)...\n";
+constexpr char kMonitorRule[] = "================================================================\n";
+
+// One (size, nmemb) pair as client.cc handed it to fwrite. Recording both is
+// what makes the fwrite(buf,1,n) vs fwrite(buf,n,1) swap visible.
+struct MonFwriteCall {
+  size_t size;
+  size_t nmemb;
+};
+
+}  // namespace
+
+// --- stage 1: the command on the wire ---------------------------------------
+
+TEST_F(RasClientMicrotest, MonitorEvents_NoEventGroups_SendsBareMonitorCommandAndReturnsZero) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("MONITOR\n", g_writtenData);
+  EXPECT_EQ("", g_stdoutData);
+  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
+  EXPECT_TRUE(LogHas(log, "Connection closed by the NCCL job.\n")) << log;
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_EventGroupsRequested_SendsThemInTheMonitorCommand) {
+  sock = kMonitorSock;
+  events = kMonitorGroups;
+  ScriptReadData("OK\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("MONITOR lifecycle,trace\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, kMonitorRule)) << log;
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_WriteFailsWithEagain_ReportsConnectionTimedOutAndReturnsOne) {
+  sock = kMonitorSock;
+
+  int rc = -1;
+  ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
+    errno = EAGAIN;
+    return -1;
+  });
+  ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Connection timed out\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Failed to send monitor command"));
+  EXPECT_FALSE(LogHas(log, kMonitorBanner));
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ(0, readHook.calls);
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_WriteFailsWithBrokenPipe_ReportsSendFailureAndReturnsOne) {
+  sock = kMonitorSock;
+
+  int rc = -1;
+  ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
+    errno = EPIPE;
+    return -1;
+  });
+  ScopedHook readHook(g_read, [](int, void*, size_t) { return static_cast<ssize_t>(0); });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  const std::string expected = std::string("Failed to send monitor command: ") + std::strerror(EPIPE) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+  EXPECT_EQ(0, readHook.calls);
+}
+
+// --- stage 1: the activation response ---------------------------------------
+
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationReadFailsWithEagain_ReportsConnectionTimedOutAndReturnsOne) {
+  sock = kMonitorSock;
+  ScriptRead(-1, EAGAIN, "");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("MONITOR\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, "Connection timed out\n")) << log;
+  EXPECT_FALSE(LogHas(log, "read socket"));
+  EXPECT_FALSE(LogHas(log, kMonitorBanner));
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationReadFailsWithConnectionReset_ReportsPerrorAndReturnsOne) {
+  sock = kMonitorSock;
+  ScriptRead(-1, ECONNRESET, "");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  const std::string expected = std::string("read socket: ") + std::strerror(ECONNRESET) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("MONITOR\n", g_writtenData);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+  EXPECT_FALSE(LogHas(log, "Connection closed by server"));
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_ServerClosesBeforeActivation_ReportsConnectionClosedByServerAndReturnsOne) {
+  sock = kMonitorSock;  // empty script => the default read reports EOF straight away
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Connection closed by server\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Connection closed by the NCCL job"));
+  EXPECT_FALSE(LogHas(log, "Monitor mode activation failed"));
+  EXPECT_EQ(-1, g_lastSetsockoptOptname);
+}
+
+// bytes < 3: "OK" with no newline reads short, so the length guard fires first.
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseShorterThanThreeBytes_ReportsActivationFailedAndReturnsOne) {
+  sock = kMonitorSock;
+  ScriptReadData("OK");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Monitor mode activation failed: OK")) << log;
+  EXPECT_FALSE(LogHas(log, kMonitorBanner));
+  EXPECT_EQ(-1, g_lastSetsockoptOptname);
+}
+
+// "OKAY\n" shares two characters with "OK\n"; the third must still mismatch.
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseOkay_ReportsActivationFailedAndReturnsOne) {
+  sock = kMonitorSock;
+  ScriptReadData("OKAY\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "Monitor mode activation failed: OKAY\n")) << log;
+  EXPECT_FALSE(LogHas(log, kMonitorRule));
+  EXPECT_EQ("", g_stdoutData);
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseLowercaseOk_IsAcceptedCaseInsensitively) {
+  sock = kMonitorSock;
+  ScriptReadData("ok\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
+  EXPECT_FALSE(LogHas(log, "Monitor mode activation failed"));
+}
+
+// strncasecmp(...,3) only inspects the OK line, unlike setOutputFormat's
+// whole-string strcasecmp, which rejects the very same response.
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseHasTrailingText_IsAcceptedUnlikeSetOutputFormat) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\nmore");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("more", g_stdoutData);
+  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
+  EXPECT_FALSE(LogHas(log, "Monitor mode activation failed"));
+}
+
+// --- stage 1: disabling the receive timeout ---------------------------------
+
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationSucceeds_DisablesTheReceiveTimeoutAndPrintsBothBanners) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(SO_RCVTIMEO, g_lastSetsockoptOptname);
+  EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_sec);
+  EXPECT_EQ(0, g_lastSetsockoptTimeval.tv_usec);
+  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
+  EXPECT_TRUE(LogHas(log, kMonitorRule)) << log;
+}
+
+// Unlike connectToNCCL's setsockopt, this one is fatal: no banners, no loop.
+TEST_F(RasClientMicrotest, MonitorEvents_SetsockoptFails_ReportsPerrorAndReturnsOneBeforeTheBanners) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+
+  int rc = -1;
+  auto baseRead = g_read;
+  ScopedHook readHook(g_read, [baseRead](int fd, void* buf, size_t n) { return baseRead(fd, buf, n); });
+  ScopedHook sockoptHook(g_setsockopt, [](int, int, int, const void*, socklen_t) {
+    errno = ENOPROTOOPT;
+    return -1;
+  });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  const std::string expected =
+      std::string("Failed to disable socket timeout for monitor mode: ") + std::strerror(ENOPROTOOPT) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, kMonitorBanner));
+  EXPECT_EQ(1, sockoptHook.calls);
+  EXPECT_EQ(1, readHook.calls);  // the loop was never entered
+  EXPECT_EQ("", g_stdoutData);
+}
+
+// --- stage 2: the leftover-data flush ---------------------------------------
+
+// Boundary: for exactly "OK\n" (bytes == 3) okEnd is the last byte, so the
+// flush must not run at all -- a zero-length fwrite would still be observable.
+TEST_F(RasClientMicrotest, MonitorEvents_ActivationResponseIsExactlyTheOkLine_SkipsTheLeftoverFlushEntirely) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+
+  int rc = -1;
+  ScopedHook fwriteHook(g_fwrite, [](const void*, size_t, size_t nmemb, FILE*) { return nmemb; });
+  ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ(0, fflushHook.calls);
+  EXPECT_TRUE(LogHas(log, "Connection closed by the NCCL job.\n")) << log;
+}
+
+// okLen (3) differs from remainingBytes (7), so an off-by-one in either is visible.
+TEST_F(RasClientMicrotest, MonitorEvents_LeftoverAfterOkLine_FlushesOnlyTheRemainder) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\nabcdef\n");
+
+  int rc = -1;
+  std::vector<MonFwriteCall> seen;
+  ScopedHook fwriteHook(g_fwrite, [&seen](const void* p, size_t size, size_t nmemb, FILE*) {
+    seen.push_back(MonFwriteCall{size, nmemb});
+    g_stdoutData.append(static_cast<const char*>(p), size * nmemb);
+    return nmemb;
+  });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("abcdef\n", g_stdoutData);
+  ASSERT_EQ(1u, seen.size());
+  EXPECT_EQ(1u, seen[0].size);
+  EXPECT_EQ(7u, seen[0].nmemb);
+  EXPECT_TRUE(LogHas(log, "Connection closed by the NCCL job.\n")) << log;
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_LeftoverIsASingleByte_StillFlushesThatByte) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\nX");
+
+  int rc = -1;
+  std::vector<MonFwriteCall> seen;
+  ScopedHook fwriteHook(g_fwrite, [&seen](const void* p, size_t size, size_t nmemb, FILE*) {
+    seen.push_back(MonFwriteCall{size, nmemb});
+    g_stdoutData.append(static_cast<const char*>(p), size * nmemb);
+    return nmemb;
+  });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("X", g_stdoutData);
+  ASSERT_EQ(1u, seen.size());
+  EXPECT_EQ(1u, seen[0].size);
+  EXPECT_EQ(1u, seen[0].nmemb);
+  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
+}
+
+// The flush is byte-counted, not string-based: an embedded NUL is forwarded.
+TEST_F(RasClientMicrotest, MonitorEvents_LeftoverContainsEmbeddedNul_FlushesEveryRawByte) {
+  sock = kMonitorSock;
+  ScriptReadData(std::string("OK\nA\0B\n", 7));
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ(std::string("A\0B\n", 4), g_stdoutData);
+  EXPECT_TRUE(LogHas(log, kMonitorBanner)) << log;
+}
+
+// Leftover-site fwrite failure. readHook.calls == 1 is what separates this from
+// the identically-worded failure inside the monitor loop.
+TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFwriteShort_ReportsFwriteFailureBeforeEnteringTheLoop) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\nabcdef\n");
+
+  int rc = -1;
+  auto baseRead = g_read;
+  ScopedHook readHook(g_read, [baseRead](int fd, void* buf, size_t n) { return baseRead(fd, buf, n); });
+  ScopedHook fwriteHook(g_fwrite, [](const void*, size_t, size_t nmemb, FILE*) { return nmemb - 1; });
+  ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "fwrite to stdout failed!\n")) << log;
+  EXPECT_EQ(1, readHook.calls);
+  EXPECT_EQ(1, fwriteHook.calls);
+  EXPECT_EQ(0, fflushHook.calls);
+  EXPECT_EQ("", g_stdoutData);
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_LeftoverFflushFails_ReportsPerrorBeforeEnteringTheLoop) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\nabcdef\n");
+
+  int rc = -1;
+  auto baseRead = g_read;
+  ScopedHook readHook(g_read, [baseRead](int fd, void* buf, size_t n) { return baseRead(fd, buf, n); });
+  ScopedHook fflushHook(g_fflush, [](FILE*) {
+    errno = EIO;
+    return -1;
+  });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  const std::string expected = std::string("fflush stdout: ") + std::strerror(EIO) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
+  EXPECT_EQ("abcdef\n", g_stdoutData);
+  EXPECT_EQ(1, readHook.calls);
+  EXPECT_EQ(1, fflushHook.calls);
+}
+
+// --- stage 3: the monitor loop ----------------------------------------------
+
+// Three chunks of distinct, unequal length: a mutant that drops, reorders or
+// double-counts one cannot produce this exact concatenation.
+TEST_F(RasClientMicrotest, MonitorEvents_ServerSendsSeveralChunks_ForwardsThemInOrderThenReportsClose) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+  ScriptReadData("alpha\n");
+  ScriptReadData("be\n");
+  ScriptReadData("gamma-delta\n");
+
+  int rc = -1;
+  std::vector<MonFwriteCall> seen;
+  ScopedHook fwriteHook(g_fwrite, [&seen](const void* p, size_t size, size_t nmemb, FILE*) {
+    seen.push_back(MonFwriteCall{size, nmemb});
+    g_stdoutData.append(static_cast<const char*>(p), size * nmemb);
+    return nmemb;
+  });
+  ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("alpha\nbe\ngamma-delta\n", g_stdoutData);
+  ASSERT_EQ(3u, seen.size());
+  EXPECT_EQ(1u, seen[0].size);
+  EXPECT_EQ(6u, seen[0].nmemb);
+  EXPECT_EQ(1u, seen[1].size);
+  EXPECT_EQ(3u, seen[1].nmemb);
+  EXPECT_EQ(1u, seen[2].size);
+  EXPECT_EQ(12u, seen[2].nmemb);
+  EXPECT_EQ(3, fflushHook.calls);
+  EXPECT_TRUE(LogHas(log, "Connection closed by the NCCL job.\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Monitoring stopped by user"));
+}
+
+// rasRead swallows and retries EINTR itself, so the loop's `errno == EINTR`
+// arm is unreachable: an interrupted read surfaces as ordinary data.
+TEST_F(RasClientMicrotest, MonitorEvents_LoopReadInterrupted_IsRetriedInsideRasReadNotReportedAsStopped) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+  ScriptRead(-1, EINTR, "");
+  ScriptReadData("beta\n");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(0, rc);
+  EXPECT_EQ("beta\n", g_stdoutData);
+  EXPECT_TRUE(LogHas(log, "Connection closed by the NCCL job.\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Monitoring stopped by user"));
+  EXPECT_FALSE(LogHas(log, "read socket"));
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_LoopReadFailsWithConnectionReset_ReportsPerrorAndReturnsOne) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+  ScriptReadData("alpha\n");
+  ScriptRead(-1, ECONNRESET, "");
+
+  int rc = -1;
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  const std::string expected = std::string("read socket: ") + std::strerror(ECONNRESET) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_EQ("alpha\n", g_stdoutData);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "Monitoring stopped by user"));
+  EXPECT_FALSE(LogHas(log, "Connection closed by the NCCL job"));
+}
+
+// Loop-site fwrite failure: readHook.calls == 3 and the already-forwarded first
+// chunk are what tell this apart from the leftover-flush site.
+TEST_F(RasClientMicrotest, MonitorEvents_LoopFwriteShort_ReportsFwriteFailureAfterTheEarlierChunks) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+  ScriptReadData("alpha\n");
+  ScriptReadData("bb\n");
+
+  int rc = -1;
+  auto baseRead = g_read;
+  auto baseFwrite = g_fwrite;
+  std::vector<MonFwriteCall> seen;
+  ScopedHook readHook(g_read, [baseRead](int fd, void* buf, size_t n) { return baseRead(fd, buf, n); });
+  ScopedHook fwriteHook(g_fwrite, [&seen, baseFwrite](const void* p, size_t size, size_t nmemb, FILE* f) -> size_t {
+    seen.push_back(MonFwriteCall{size, nmemb});
+    if (seen.size() == 2) return nmemb - 1;  // the second chunk is the one that fails
+    return baseFwrite(p, size, nmemb, f);
+  });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, "fwrite to stdout failed!\n")) << log;
+  EXPECT_EQ("alpha\n", g_stdoutData);
+  EXPECT_EQ(2, fwriteHook.calls);
+  EXPECT_EQ(3, readHook.calls);
+  EXPECT_FALSE(LogHas(log, "Connection closed by the NCCL job"));
+}
+
+TEST_F(RasClientMicrotest, MonitorEvents_LoopFflushFails_ReportsPerrorAndReturnsOne) {
+  sock = kMonitorSock;
+  ScriptReadData("OK\n");
+  ScriptReadData("data1\n");
+
+  int rc = -1;
+  auto baseRead = g_read;
+  ScopedHook readHook(g_read, [baseRead](int fd, void* buf, size_t n) { return baseRead(fd, buf, n); });
+  ScopedHook fflushHook(g_fflush, [](FILE*) {
+    errno = ENOSPC;
+    return -1;
+  });
+
+  const std::string log = CaptureLog([&]() { rc = monitorNCCLEvents(); });
+
+  const std::string expected = std::string("fflush stdout: ") + std::strerror(ENOSPC) + "\n";
+  EXPECT_EQ(1, rc);
+  EXPECT_TRUE(LogHas(log, expected.c_str())) << log;
+  EXPECT_EQ("data1\n", g_stdoutData);
+  EXPECT_EQ(2, readHook.calls);
+  EXPECT_EQ(1, fflushHook.calls);
+  EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
+}
