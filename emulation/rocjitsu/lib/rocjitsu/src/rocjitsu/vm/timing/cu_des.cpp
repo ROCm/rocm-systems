@@ -680,6 +680,18 @@ void ComputeUnitDes::instruction(std::uint32_t slot, const RetiredInstruction &r
 }
 
 void ComputeUnitDes::barrier(const std::vector<std::uint32_t> &slots) {
+  // Beyond the spread between the wavefronts, every barrier costs the hardware
+  // a round of arrive-and-release across the workgroup. The spread this model
+  // can see is near zero, because every wavefront in the group runs the same
+  // instruction stream and reaches the barrier at the same modelled cycle, so
+  // without this a kernel that barriers thousands of times per wavefront is
+  // charged nothing for any of them.
+  if (tuning_.barrier_cycles != 0)
+    for (std::uint32_t slot : slots) {
+      WaveTimeline &wave = timeline_for(waves_, tuning_, slot);
+      if (wave.live)
+        wave.cycle += tuning_.barrier_cycles;
+    }
   // Every wavefront in the group leaves the barrier at the cycle the slowest
   // one reached, so the barrier costs the spread. Knowable only for the group,
   // which is why it arrives as one.

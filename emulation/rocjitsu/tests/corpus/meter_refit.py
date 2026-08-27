@@ -378,6 +378,16 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
             bandwidth = max(bandwidth, far / rate)
 
     placement = float(dispatch["placement"]) * tuning.get("placement_scale", 1.0)
+    # Per-instruction issue cost is not independent of how many wavefronts are
+    # resident. The model charges a unit's queue linearly in the work on it,
+    # and the same kernel measured at four wavefronts per compute unit and at
+    # sixteen does not scale that way: the low-occupancy case reaches a higher
+    # instruction rate, because fewer wavefronts contend for the same issue
+    # slot. An exponent on the resident count is the smallest form of that.
+    gamma = tuning.get("issue_occupancy_exponent", 0.0)
+    if gamma != 0.0:
+        issue *= (max(1.0, float(dispatch["resident"])) / 8.0) ** gamma
+
     throughput = max(issue, bandwidth, placement)
     latency = max(latency, dispatch["fill"] * tuning.get("fill_scale", 1.0))
 
@@ -390,6 +400,20 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
     # kernel costs about the same extra per doubling of its wavefront count,
     # from four wavefronts up to a thousand.
     latency += dispatch.get("straggler", 0.0) * tuning.get("straggler_scale", 1.0)
+
+    # A workgroup barrier costs the spread between its wavefronts, and this
+    # model gives every wavefront the same instruction stream, so the modelled
+    # spread is near zero and a barrier is nearly free. On hardware it is not:
+    # the wavefronts arrive skewed by whatever their memory accesses did, and a
+    # kernel that barriers thousands of times per wavefront pays for it. Charged
+    # per barrier on the wavefront's own path.
+    per_barrier = tuning.get("barrier_cycles", 0.0)
+    if per_barrier > 0.0:
+        waves_here = max(1.0, float(dispatch["waves"]))
+        share = float(dispatch["latency_waves"]) / waves_here
+        barriers = dispatch["class_counts"].get("barrier", 0) * share
+        per_wave = barriers / max(1.0, float(dispatch["latency_waves"]))
+        latency += per_barrier * per_wave
 
     body = throughput + latency + dispatch["filling"] * tuning.get("filling_scale", 1.0)
     return fixed + body

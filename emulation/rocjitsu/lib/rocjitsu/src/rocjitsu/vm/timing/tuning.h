@@ -154,6 +154,32 @@ struct Tuning {
   /// cannot presently name. They are separated from the machine parameters
   /// deliberately: a reader has to be able to tell what is a property of the
   /// part from what is a number fitted to a corpus.
+  /// @brief Cycles a workgroup barrier costs a wavefront, beyond the spread
+  ///        between the wavefronts the model can see.
+  ///
+  /// @details A barrier costs the difference between the first wavefront to
+  /// arrive and the last, and this model gives every wavefront in a group the
+  /// same instruction stream, so the modelled difference is near zero and a
+  /// barrier comes out nearly free. On hardware the wavefronts arrive skewed
+  /// by whatever their memory accesses did, and a kernel that barriers
+  /// thousands of times per wavefront -- a blocked matrix multiply staging
+  /// tiles through the local data share does exactly that -- pays for all of
+  /// them. Fitted, so it lives with the calibration; zero by default, which is
+  /// the old behaviour.
+  std::uint64_t barrier_cycles = 0;
+
+  /// @brief How the issue term scales with wavefronts resident per compute
+  ///        unit, as an exponent on that count.
+  ///
+  /// @details Zero is the linear model: a unit's queue is the work on it and
+  /// nothing else. Measurement disagrees. The same kernel at four wavefronts
+  /// per compute unit reaches a higher instruction rate than at sixteen --
+  /// 1.35 against 0.86 instructions per cycle -- because fewer wavefronts
+  /// contend for the same issue slot, and a linear term over-charges the
+  /// sparse case and under-charges the dense one by exactly that ratio. This
+  /// is the smallest correction of the right shape, and it is fitted rather
+  /// than derived, which is why it lives with the calibration.
+  double issue_occupancy_exponent = 0.0;
   double stall_exposed_fraction = 1.0;
   double latency_exposure_scale = 1.0;
   double fill_exposure_scale = 1.0;

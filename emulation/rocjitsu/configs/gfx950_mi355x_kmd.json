@@ -150,6 +150,8 @@
     "machine": {
       "//calibration": "The four scales below and straggler_cycles are the composition's calibration factors, and they are neutral here. Each exists because a term is right in shape and wrong in size for a reason the model cannot yet name: stall_exposed_fraction is how much of a wavefront's modelled memory stall is really exposed, latency_exposure_scale and fill_exposure_scale scale the two halves of the latency term, fill_ramp_scale scales the machine-fill ramp, and straggler_cycles is how far a dispatch's slowest wavefront runs past its average one per doubling of the wavefront count. They are named rather than folded into the parameters they scale so that a reader can tell a fitted number from a measured one.",
       "fill_exposure_scale": 1.0,
+      "barrier_cycles": 0,
+      "issue_occupancy_exponent": 0.0,
       "fill_ramp_scale": 1.0,
       "latency_exposure_scale": 1.0,
       "stall_exposed_fraction": 1.0,

@@ -335,7 +335,8 @@ const FRONT_END_CYCLES: f64 = 1.0;
 /// so every one is neutral here and moves only under an overlay. They
 /// are named rather than folded into the parameters they scale so that a
 /// reader can tell the two apart.
-const COMPOSITION: [(&str, f64); 4] = [
+const COMPOSITION: [(&str, f64); 5] = [
+    ("issue_occupancy_exponent", 0.0),
     ("stall_exposed_fraction", 1.0),
     ("latency_exposure_scale", 1.0),
     ("fill_exposure_scale", 1.0),
@@ -432,6 +433,7 @@ pub(crate) fn table(
     // one. Off unless an overlay says otherwise: the size of the effect
     // is measured, and nothing here can derive it.
     count(keys, "straggler_cycles", 0);
+    count(keys, "barrier_cycles", 0);
     count(keys, "stall_overlap_wavefronts", 1);
     // The untyped rate is what an opcode whose input type went
     // unrecognised is charged, so it is the slowest the part has rather
@@ -701,6 +703,7 @@ mod tests {
             want.push(key.into());
         }
         want.push("straggler_cycles".into());
+        want.push("barrier_cycles".into());
         want.push("stall_overlap_wavefronts".into());
         for level in ["l1_vector", "l1_scalar", "l1_instruction", "l2", "mall"] {
             for field in [

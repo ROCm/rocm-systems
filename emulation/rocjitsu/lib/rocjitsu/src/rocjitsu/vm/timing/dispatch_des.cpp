@@ -391,6 +391,15 @@ void DispatchDes::end() {
   // executing" almost never fires, because the emulator runs them one at a
   // time, and it moved nothing. The effect is real and the observation is not
   // there to detect it.
+  // A unit's queue is not the whole story: how fast it drains depends on how
+  // many wavefronts are feeding it. Applied after the maximum over units and
+  // before the composition, so that it scales the term the composition uses
+  // and nothing a wavefront's own chain is built from.
+  if (tuning_.issue_occupancy_exponent != 0.0 && terms_.resident > 0)
+    issue_bound = static_cast<std::uint64_t>(
+        static_cast<double>(issue_bound) *
+        std::pow(static_cast<double>(terms_.resident) / 8.0, tuning_.issue_occupancy_exponent));
+
   terms_.issue = issue_bound;
   terms_.bandwidth = bandwidth;
   terms_.l1_cycles = ledger_.l1_cycles();
