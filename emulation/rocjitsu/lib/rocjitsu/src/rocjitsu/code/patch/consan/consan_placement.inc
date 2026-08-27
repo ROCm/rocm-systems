@@ -969,13 +969,13 @@ void append_decoded_operand(std::string &summary, std::string_view name,
   return result.empty() ? "-" : result;
 }
 
-[[nodiscard]] std::string lds_decoded_operands(const ConSanLdsSite &site) {
+[[nodiscard]] std::string lds_decoded_operands(const ConSanAccessOperandFacts &operands) {
   std::string result;
-  append_decoded_operand(result, "dst_vgpr", site.dst_vgpr);
-  append_decoded_operand(result, "dst_accvgpr", site.dst_accvgpr);
-  append_decoded_operand(result, "addr_vgpr", site.addr_vgpr);
-  append_decoded_operand(result, "data_vgpr", site.data_vgpr);
-  append_decoded_operand(result, "second_data_vgpr", site.second_data_vgpr);
+  append_decoded_operand(result, "dst_vgpr", operands.destination_vgpr);
+  append_decoded_operand(result, "dst_accvgpr", operands.destination_accvgpr);
+  append_decoded_operand(result, "addr_vgpr", operands.address_vgpr);
+  append_decoded_operand(result, "data_vgpr", operands.data_vgpr);
+  append_decoded_operand(result, "second_data_vgpr", operands.second_data_vgpr);
   return result.empty() ? "-" : result;
 }
 

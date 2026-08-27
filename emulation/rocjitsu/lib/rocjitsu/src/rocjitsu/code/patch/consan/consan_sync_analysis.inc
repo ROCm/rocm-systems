@@ -43,10 +43,11 @@ enum class AtomicFaultEncoding : uint8_t {
   return consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx12_encoding(arch);
 }
 
-[[nodiscard]] bool lds_address_fault_site_supported(const ConSanLdsSite &site,
+[[nodiscard]] bool lds_address_fault_site_supported(const ConSanAccessInventorySite &site,
                                                     rj_code_arch_t arch) {
-  if (!lds_address_fault_arch_supported(arch) || !site.supported_mvp || !site.addr_vgpr ||
-      site.size != 2u * sizeof(uint32_t) ||
+  if (site.origin != ConSanAccessOrigin::NativeLds || !lds_address_fault_arch_supported(arch) ||
+      !site.supported_mvp || !site.operands.address_vgpr ||
+      site.instruction_size != 2u * sizeof(uint32_t) ||
       (site.kind != ConSanLdsAccessKind::Read && site.kind != ConSanLdsAccessKind::Write)) {
     return false;
   }
@@ -117,35 +118,6 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
     sites.push_back(std::move(site));
   }
 
-  uint32_t lds_occurrence = 0;
-  for (const ConSanLdsSite &lds : container.lds_sites) {
-    if (!lds_address_fault_site_supported(lds, arch)) {
-      continue;
-    }
-    ConSanFaultSite site;
-    site.kind = ConSanFaultSiteKind::LdsAccess;
-    site.code_object_fingerprint = fingerprint;
-    site.container_name = container.name;
-    site.in_kernel = in_kernel;
-    site.occurrence = lds_occurrence++;
-    site.text_offset = lds.text_offset;
-    site.file_offset = lds.file_offset;
-    site.size = lds.size;
-    site.width_bits = lds.width_bits;
-    site.address_vgpr = lds.addr_vgpr;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && lds.file_offset >= lds.text_offset) {
-      site.gfx1250_vgpr_msb_mode = consan_gfx1250_vgpr_msb_mode_at(
-          bytes, container.text_file_offset, container.entry_text_offset, lds.file_offset);
-    }
-    site.mnemonic = lds.mnemonic;
-    site.semantic_role = lds.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";
-    site.decoded_operands = lds_decoded_operands(lds);
-    site.identity = std::string(fingerprint) + "|" + container_kind + "=" + container.name +
-                    "|kind=lds-access|pc=0x" + fixed_hex(site.text_offset, 16) +
-                    "|mnemonic=" + site.mnemonic + "|occurrence=" + std::to_string(site.occurrence);
-    sites.push_back(std::move(site));
-  }
-
   uint32_t ordinary_memory_occurrence = 0;
   for (const ConSanOrdinaryMemorySite &memory : container.ordinary_memory_sites) {
     ConSanFaultSite site;
@@ -170,6 +142,47 @@ void append_fault_sites_for_container(std::span<const uint8_t> bytes, std::strin
   }
 }
 
+void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_view fingerprint,
+                                    rj_code_arch_t arch,
+                                    std::span<const ConSanAccessInventorySite> accesses,
+                                    std::vector<ConSanFaultSite> &sites) {
+  std::optional<ConSanProgramContainerRef> previous_container;
+  uint32_t occurrence = 0;
+  for (const ConSanAccessInventorySite &access : accesses) {
+    if (!lds_address_fault_site_supported(access, arch) ||
+        (access.container.is_kernel() && is_rocclr_runtime_kernel_name(access.container.name)))
+      continue;
+    if (!previous_container || *previous_container != access.container) {
+      previous_container = access.container;
+      occurrence = 0;
+    }
+    ConSanFaultSite site;
+    site.kind = ConSanFaultSiteKind::LdsAccess;
+    site.code_object_fingerprint = fingerprint;
+    site.container_name = access.container.name;
+    site.in_kernel = access.container.is_kernel();
+    site.occurrence = occurrence++;
+    site.text_offset = access.physical_id.original_text_offset;
+    site.file_offset = access.file_offset;
+    site.size = access.instruction_size;
+    site.width_bits = access.decoded_width_bits;
+    site.address_vgpr = access.operands.address_vgpr;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 && access.file_offset >= site.text_offset) {
+      site.gfx1250_vgpr_msb_mode =
+          consan_gfx1250_vgpr_msb_mode_at(bytes, access.container.text_file_offset,
+                                          access.container.entry_text_offset, access.file_offset);
+    }
+    site.mnemonic = access.mnemonic;
+    site.semantic_role = access.kind == ConSanLdsAccessKind::Read ? "lds-read" : "lds-write";
+    site.decoded_operands = lds_decoded_operands(access.operands);
+    site.identity = std::string(fingerprint) + (site.in_kernel ? "|kernel=" : "|function=") +
+                    site.container_name + "|kind=lds-access|pc=0x" +
+                    fixed_hex(site.text_offset, 16) + "|mnemonic=" + site.mnemonic +
+                    "|occurrence=" + std::to_string(site.occurrence);
+    sites.push_back(std::move(site));
+  }
+}
+
 void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t arch,
                                 ConSanResult &result) {
   const std::string fingerprint = code_object_fingerprint(bytes);
@@ -180,6 +193,8 @@ void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t a
   }
   for (const ConSanFunctionInfo &function : result.program_inventory.functions())
     append_fault_sites_for_container(bytes, fingerprint, function, false, arch, result.fault_sites);
+  append_lds_address_fault_sites(bytes, fingerprint, arch, result.program_inventory.access_sites(),
+                                 result.fault_sites);
 }
 
 [[nodiscard]] ConSanSyncAddressSource sync_address_source(ConSanAtomicAddressSpaceHint hint) {

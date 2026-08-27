@@ -368,6 +368,8 @@ struct ConSanProgramContainerRef {
   std::string name;
   /// Original executable-text entry offset of the symbol range.
   uint64_t entry_text_offset = 0;
+  /// File offset corresponding to `entry_text_offset` in the pristine image.
+  uint64_t text_file_offset = 0;
   /// Descriptor file offset for a kernel; absent for a function.
   std::optional<uint64_t> kernel_descriptor_file_offset;
   /// Whether this container's code observes the gfx1250 cluster workgroup ID.

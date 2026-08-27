@@ -526,6 +526,7 @@ private:
     ConSanProgramContainerRef result;
     result.name = container.name;
     result.entry_text_offset = container.entry_text_offset;
+    result.text_file_offset = container.text_file_offset;
     result.uses_gfx1250_cluster_workgroup_id = container.uses_gfx1250_cluster_workgroup_id;
     if constexpr (std::is_same_v<Container, ConSanKernelInfo>) {
       result.kind = ConSanProgramContainerKind::Kernel;

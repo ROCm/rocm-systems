@@ -61,6 +61,7 @@ ConSanKernelInfo make_inventory_kernel(std::string name = "inventory_kernel") {
   kernel.descriptor_file_offset = 512;
   kernel.declared_group_segment_bytes = 4096;
   kernel.entry_text_offset = 32;
+  kernel.text_file_offset = 1024;
   kernel.uses_gfx1250_cluster_workgroup_id = true;
   return kernel;
 }
@@ -486,6 +487,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_TRUE(byte.supported_mvp);
   EXPECT_EQ(byte.container.kind, ConSanProgramContainerKind::Kernel);
   EXPECT_EQ(byte.container.kernel_descriptor_file_offset, 512u);
+  EXPECT_EQ(byte.container.text_file_offset, 1024u);
   EXPECT_TRUE(byte.container.uses_gfx1250_cluster_workgroup_id);
   EXPECT_EQ(byte.operands.destination_vgpr, 2u);
   EXPECT_EQ(byte.operands.destination_accvgpr, 4u);

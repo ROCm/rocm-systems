@@ -4308,6 +4308,40 @@ analysis completed.
   targets pass in 59.84 seconds. Slice 5AC completed the periodic
   physical-gfx950 gate. E2E validation remains outside this work.
 
+### Slice 5AM: derive LDS fault inventory from normalized accesses
+
+- **One fault-analysis input:** Exact LDS-address fault discovery now consumes
+  `ConSanAccessInventorySite`, including the direct-to-LDS distinction,
+  normalized operands, decoded width, target support, and stable container
+  attribution. It no longer scans either prototype container LDS vector.
+- **Self-contained container attribution:** Normalized container references now
+  retain their pristine text file offset as well as their executable entry
+  offset. That fact lets gfx1250 fault analysis recover VGPR-MSB mode without a
+  reverse lookup into mutable decode containers, and is independently covered
+  by the inventory value-record test.
+- **Debug-path convergence:** The destructive LDS-to-`endpgm` proof probe also
+  selects a normalized native-LDS access and reads its physical identity and
+  instruction width. Its only container query is the still-live kernel
+  preflight status; no fault or placement source now accepts `ConSanLdsSite`.
+- **Contract coverage:** The cross-target exact-address fault test continues to
+  require stable discovery, identity selection, operand diagnostics, owner
+  recovery, mutation, and final validation on CDNA3, CDNA4, RDNA4, and CDNA5.
+  The gfx1250 two-address exclusion and MOI composition tests remain green,
+  together with all focused inventory and proof-probe cases.
+- **Temporary size cost and deletion point:** This cutover adds 23 production
+  lines because normalized fault construction temporarily coexists with the
+  container access vectors and their normalization bridge. It introduces no
+  fallback. The same short series must next migrate provenance,
+  reattribution, pruning, and decode publication, then delete both legacy
+  access structs, all four container vectors, and the bridge; that deletion is
+  the required payoff before this tranche is complete.
+- **Completed checked-in gate:** All 217 focused inventory, fault, LDS, and
+  proof-probe tests pass. The complete host gate passes 1,510 tests with the two
+  expected benchmark-object skips; all 194 HSA-hook tests pass; and all 2,908
+  simulator-device tests across the five supported targets pass in 68.06
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

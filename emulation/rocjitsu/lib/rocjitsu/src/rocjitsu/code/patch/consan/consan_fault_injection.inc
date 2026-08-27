@@ -2074,24 +2074,29 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
   result.patches.push_back(info);
 }
 
-[[nodiscard]] const ConSanLdsSite *
+[[nodiscard]] const ConSanAccessInventorySite *
 find_first_supported_lds_read_b32_site(const ConSanResult &result) {
-  const ConSanLdsSite *best = nullptr;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    if (kernel.preflight_action == ConSanPreflightAction::Blocked)
+  const ConSanAccessInventorySite *best = nullptr;
+  for (const ConSanAccessInventorySite &site : result.program_inventory.access_sites()) {
+    if (!site.container.is_kernel() || !site.container.kernel_descriptor_file_offset ||
+        site.origin != ConSanAccessOrigin::NativeLds || site.kind != ConSanLdsAccessKind::Read ||
+        !site.supported_mvp || site.decoded_width_bits != 32)
       continue;
-    for (const ConSanLdsSite &site : kernel.lds_sites) {
-      if (site.kind == ConSanLdsAccessKind::Read && site.supported_mvp && site.width_bits == 32 &&
-          (best == nullptr || site.file_offset < best->file_offset))
-        best = &site;
-    }
+    const auto kernel = std::ranges::find(result.program_inventory.kernels(),
+                                          *site.container.kernel_descriptor_file_offset,
+                                          &ConSanKernelInfo::descriptor_file_offset);
+    if (kernel == result.program_inventory.kernels().end() ||
+        kernel->preflight_action == ConSanPreflightAction::Blocked)
+      continue;
+    if (best == nullptr || site.file_offset < best->file_offset)
+      best = &site;
   }
   return best;
 }
 
 void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
                                 ConSanResult &result) {
-  const ConSanLdsSite *site = find_first_supported_lds_read_b32_site(result);
+  const ConSanAccessInventorySite *site = find_first_supported_lds_read_b32_site(result);
   if (site == nullptr) {
     result.warnings.emplace_back("ConSan LDS endpgm proof found no supported ds_read_b32 site");
     return;
@@ -2103,9 +2108,9 @@ void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arc
 
   ConSanPatchInfo info;
   info.kind = ConSanPatchKind::InlineLdsEndpgmRewrite;
-  info.anchor_offset = site->text_offset;
-  info.trampoline_offset = site->text_offset;
-  info.original_size = site->size;
+  info.anchor_offset = site->physical_id.original_text_offset;
+  info.trampoline_offset = site->physical_id.original_text_offset;
+  info.original_size = site->instruction_size;
   result.patches.push_back(info);
 }
 
