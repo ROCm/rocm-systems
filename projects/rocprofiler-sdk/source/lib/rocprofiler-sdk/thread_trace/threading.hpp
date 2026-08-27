@@ -84,9 +84,7 @@ struct triple_buffer_shared_data_t
         std::condition_variable cv{};
     };
 
-    /// Maximum number of slots. Capped at 16 to keep the per-slot thread
-    /// count bounded; the public API rejects values above this.
-    static constexpr size_t MAX_SLOTS = 16;
+    static constexpr size_t MAX_SLOTS = 32;
 
     att_queue_t* queue{nullptr};  // non-owning; ThreadTracerAgent owns the queue
 
@@ -120,8 +118,8 @@ struct triple_buffer_producer_data_t
     std::shared_ptr<hsa_signal_t>                start_pkt_signal{};
     std::unique_ptr<hsa::TraceControlAQLPacket>  control_packet{};
     std::shared_ptr<triple_buffer_shared_data_t> shared{};
-    std::unique_ptr<hsa::SQTTBufferingPackets>   buffer_packet{};
-    int64_t                                      shader_engine_id{0};
+
+    std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> buffer_packets{};
 };
 
 // Worker flags have three states: stop (either stopped or stopping), running and (global)destructor
