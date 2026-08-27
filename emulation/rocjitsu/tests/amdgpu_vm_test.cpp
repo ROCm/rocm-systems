@@ -22,6 +22,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
@@ -1114,6 +1115,75 @@ TEST(GpuMemoryTest, SanitizedMappedExtentTracksCurrentShadowState) {
   __asan_unpoison_memory_region(allocation.get() + kInteriorPoisonOffset, kInteriorPoisonBytes);
 }
 
+TEST(GpuMemoryTest, SanitizedMtypeLookupAvoidsAllocatorMetadataReentry) {
+  amdgpu::GpuMemory memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  allocation[0] = 0x5a;
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize, amdgpu::Mtype::UC);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation(), process.page_table_request_mutex());
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    ++hook_calls;
+    process.set_page_mtype(kBaseVa, KfdProcess::kPageSize, amdgpu::Mtype::RW);
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+  {
+    amdgpu::RequestMtypeResolver request(&memory, kPid);
+    EXPECT_EQ(request.at(kBaseVa), amdgpu::Mtype::UC);
+    EXPECT_EQ(hook_calls, 0u);
+  }
+
+  EXPECT_EQ(memory.read8(kBaseVa, kPid), 0x5a);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(memory.pte_mtype(kBaseVa, kPid), amdgpu::Mtype::RW);
+}
+
+TEST(GpuMemoryTest, SanitizedL1BackingLookupAllowsAllocatorMetadataReentry) {
+  amdgpu::GpuMemory memory("memory");
+  amdgpu::L2Cache l2("l2");
+  amdgpu::L1ScalarCache l1(&l2);
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kBaseVa = 0x40000000;
+  constexpr uint32_t kInitial = 0x11112222;
+  constexpr uint32_t kReplacement = 0x33334444;
+  constexpr uint32_t kLatest = 0x55556666;
+
+  KfdProcess process(kPid);
+  auto allocation = std::make_unique<uint8_t[]>(KfdProcess::kPageSize);
+  std::memcpy(allocation.get(), &kInitial, sizeof(kInitial));
+  process.map_pages(kBaseVa, allocation.get(), KfdProcess::kPageSize, amdgpu::Mtype::RW);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation(), process.page_table_request_mutex());
+  l2.set_backing_memory(&memory);
+  l1.set_memory(&memory);
+
+  size_t hook_calls = 0;
+  std::function<void()> query_hook = [&] {
+    amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
+    ++hook_calls;
+    process.set_page_mtype(kBaseVa, KfdProcess::kPageSize, amdgpu::Mtype::UC);
+    std::memcpy(allocation.get(), &kReplacement, sizeof(kReplacement));
+  };
+  amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
+
+  uint32_t result = 0;
+  l1.load(kBaseVa, 1, &result, kPid);
+  EXPECT_EQ(result, kReplacement);
+  EXPECT_EQ(hook_calls, 1u);
+  EXPECT_EQ(memory.pte_mtype(kBaseVa, kPid), amdgpu::Mtype::UC);
+
+  std::memcpy(allocation.get(), &kLatest, sizeof(kLatest));
+  l1.load(kBaseVa, 1, &result, kPid);
+  EXPECT_EQ(result, kLatest);
+}
+
 TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
   amdgpu::GpuMemory memory("memory");
   constexpr uint32_t kPid = 7;
@@ -1128,13 +1198,13 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryPreservesOuterWalkAcrossReentry) {
   process.map_pages(kOuterVa, outer_page.get(), KfdProcess::kPageSize);
   process.map_pages(kNestedVa, nested_page.get(), KfdProcess::kPageSize);
   memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                          process.page_table_generation());
+                          process.page_table_generation(), process.page_table_request_mutex());
 
   std::function<void()> query_hook = [&] {
     amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, nullptr);
     memory.unregister_process(kPid);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                            process.page_table_generation());
+                            process.page_table_generation(), process.page_table_request_mutex());
     EXPECT_EQ(memory.read8(kNestedVa, kPid), 0x22);
   };
   amdgpu::GpuMemoryTestAccess::set_page_table_unlocked_hook(memory, &query_hook);
@@ -1155,7 +1225,8 @@ TEST(GpuMemoryTest, SanitizedUnlockedQueryRetriesAfterRemap) {
     new_page[0] = 0x22;
     process.map_pages(kBaseVa, old_page.get(), KfdProcess::kPageSize);
     memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
-                            use_generation ? process.page_table_generation() : nullptr);
+                            use_generation ? process.page_table_generation() : nullptr,
+                            process.page_table_request_mutex());
 
     uint8_t *current_page = old_page.get();
     size_t hook_calls = 0;
@@ -3792,6 +3863,10 @@ constexpr uint32_t tr_b8_byte_value(uint32_t lane, uint32_t byte) {
   return (0x40u + lane * 7u + byte) & 0xffu;
 }
 
+constexpr uint32_t cdna5_tr_b8_matrix_value(uint32_t row, uint32_t col) {
+  return (0x20u + row * 17u + col * 3u) & 0xffu;
+}
+
 constexpr uint32_t pack_tr_b8_word(uint32_t source_base, uint32_t source_byte,
                                    uint32_t dest_byte_base) {
   uint32_t word = 0;
@@ -3800,7 +3875,7 @@ constexpr uint32_t pack_tr_b8_word(uint32_t source_base, uint32_t source_byte,
   return word;
 }
 
-void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
+void verify_ds_b8_transpose_lane_layout(std::string_view arch, uint32_t wave_size) {
   VmFixture f(arch, 1, 10);
   auto *snap = f.capture_halts();
 
@@ -3846,9 +3921,18 @@ void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
   for (uint32_t lane = 0; lane < wave_size; ++lane) {
     uint32_t lo = 0;
     uint32_t hi = 0;
-    for (uint32_t byte = 0; byte < 4; ++byte) {
-      lo |= tr_b8_byte_value(lane, byte) << (byte * 8);
-      hi |= tr_b8_byte_value(lane, byte + 4) << (byte * 8);
+    if (arch == "cdna5") {
+      const uint32_t row = 8u * (lane >> 4) + (lane & 3u) + 4u * ((lane >> 3) & 1u);
+      const uint32_t col_base = 8u * ((lane >> 2) & 1u);
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        lo |= cdna5_tr_b8_matrix_value(row, col_base + byte) << (byte * 8);
+        hi |= cdna5_tr_b8_matrix_value(row, col_base + byte + 4) << (byte * 8);
+      }
+    } else {
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        lo |= tr_b8_byte_value(lane, byte) << (byte * 8);
+        hi |= tr_b8_byte_value(lane, byte + 4) << (byte * 8);
+      }
     }
     cu->lds().write32(lane * BYTES_PER_LANE, lo);
     cu->lds().write32(lane * BYTES_PER_LANE + 4, hi);
@@ -3862,6 +3946,19 @@ void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
   const auto &wf = snap->snapshots().front();
 
   for (uint32_t lane = 0; lane < wave_size; ++lane) {
+    if (arch == "cdna5") {
+      const uint32_t row_base = 8u * (lane >> 4);
+      const uint32_t col = lane & 15u;
+      uint32_t expected_lo = 0;
+      uint32_t expected_hi = 0;
+      for (uint32_t byte = 0; byte < 4; ++byte) {
+        expected_lo |= cdna5_tr_b8_matrix_value(row_base + byte, col) << (byte * 8);
+        expected_hi |= cdna5_tr_b8_matrix_value(row_base + byte + 4, col) << (byte * 8);
+      }
+      EXPECT_EQ(wf.vgpr(VDST, lane), expected_lo) << "lane " << lane << " v" << VDST;
+      EXPECT_EQ(wf.vgpr(VDST + 1, lane), expected_hi) << "lane " << lane << " v" << (VDST + 1);
+      continue;
+    }
     const uint32_t source_byte = lane & 7u;
     const uint32_t source_base = (lane & ~0xfu) | ((lane >> 3) & 1u);
     EXPECT_EQ(wf.vgpr(VDST, lane), pack_tr_b8_word(source_base, source_byte, 0))
@@ -3872,11 +3969,11 @@ void verify_b64_tr_b8_lane_layout(std::string_view arch, uint32_t wave_size) {
 }
 
 TEST(DsTransposeTest, ReadB64TrB8_LaneLayout) {
-  verify_b64_tr_b8_lane_layout("cdna4", /*wave_size=*/64);
+  verify_ds_b8_transpose_lane_layout("cdna4", /*wave_size=*/64);
 }
 
 TEST(DsTransposeTest, Gfx1250LoadTr8B64_LaneLayout) {
-  verify_b64_tr_b8_lane_layout("cdna5", /*wave_size=*/32);
+  verify_ds_b8_transpose_lane_layout("cdna5", /*wave_size=*/32);
 }
 
 // Verify the ds_read_b64_tr_b16 cross-lane layout: within each 16-lane group,
