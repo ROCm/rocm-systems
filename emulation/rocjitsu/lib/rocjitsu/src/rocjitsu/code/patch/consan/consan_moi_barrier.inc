@@ -1624,31 +1624,19 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   if (!dense_fallback_indices.empty()) {
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
-    std::map<std::pair<bool, std::string>, std::vector<size_t>> owner_groups;
+    std::vector<consan_detail::MoiDenseRouteSite> route_sites;
+    route_sites.reserve(dense_fallback_indices.size());
     for (size_t index : dense_fallback_indices) {
       const BarrierRecordCandidate &candidate = planned_candidates[index].candidate;
-      owner_groups[{candidate.in_kernel, candidate.container_name}].push_back(index);
-    }
-    constexpr uint64_t kMaxCommonRelayAnchorSpan =
-        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
-                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
-        sizeof(uint32_t);
-    std::vector<std::pair<std::pair<bool, std::string>, std::vector<size_t>>> groups;
-    for (auto &[owner_key, owner_indices] : owner_groups) {
-      std::ranges::sort(owner_indices, [&](size_t lhs, size_t rhs) {
-        return planned_candidates[lhs].candidate.site.text_offset <
-               planned_candidates[rhs].candidate.site.text_offset;
+      route_sites.push_back({
+          .owner = {candidate.in_kernel ? ConSanProgramContainerKind::Kernel
+                                        : ConSanProgramContainerKind::Function,
+                    candidate.container_name},
+          .anchor = candidate.site.text_offset,
+          .source_index = index,
       });
-      for (size_t index : owner_indices) {
-        const uint64_t anchor = planned_candidates[index].candidate.site.text_offset;
-        if (groups.empty() || groups.back().first != owner_key ||
-            anchor - planned_candidates[groups.back().second.front()].candidate.site.text_offset >
-                kMaxCommonRelayAnchorSpan) {
-          groups.push_back({owner_key, {}});
-        }
-        groups.back().second.push_back(index);
-      }
     }
+    const auto groups = consan_detail::partition_moi_dense_route_sites(route_sites, 0u);
     std::vector<std::pair<uint64_t, uint64_t>> occupied_ranges;
     occupied_ranges.reserve(result.patches.size() + patches.size() + selected_candidates.size());
     const auto append_occupied_range = [&](uint64_t begin, uint64_t size) {
@@ -1922,7 +1910,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     };
 
     for (const auto &group : groups) {
-      const std::vector<size_t> &indices = group.second;
+      const std::vector<size_t> &indices = group.source_indices;
       if (indices.empty())
         continue;
       const BarrierRecordCandidate &first_candidate = planned_candidates[indices.front()].candidate;

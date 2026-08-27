@@ -5458,6 +5458,34 @@ analysis completed.
   approximately 67 seconds. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CB: share dense synchronization and atomic topology
+
+- **One heterogeneous route partition:** `MoiDenseRouteSite` and
+  `MoiDenseRouteIndexGroup` carry only typed kernel/function ownership,
+  pristine-text anchors, and caller-owned indices. The common partitioner now
+  supplies deterministic owner ordering, dispatcher-capacity splitting, and
+  SOPP branch-span splitting to access, barrier, sampled-atomic, and
+  inline-atomic planners without forcing their semantic candidate types or
+  evidence policy into one representation.
+- **Deleted planner copies:** Sampled barrier, Inline Shadow barrier, Sampled
+  atomic, and Inline Shadow atomic planners no longer build local owner maps,
+  sort their own anchors, or reproduce the common branch-span rule. Three
+  synchronization/atomic relocation paths also use `MoiOccupiedTextRanges`
+  instead of retaining private range normalization and lookup algorithms.
+- **Focused contract coverage:** A direct unit test separates same-named
+  kernels and functions, proves deterministic anchor order and caller-index
+  retention, exercises explicit and unlimited capacity, forces branch-span
+  splitting, and covers empty input. Existing cross-target dense access,
+  barrier, and atomic tests exercise each engine-specific consumer.
+- **Deletion accounting:** Implementation files add 146 and delete 177
+  physical lines, a net deletion of thirty-one. Tests add thirty lines. The
+  replaced owner/group and occupied-range algorithms are deleted rather than
+  retained behind compatibility adapters.
+- **Checked-in gate:** All 1,528 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

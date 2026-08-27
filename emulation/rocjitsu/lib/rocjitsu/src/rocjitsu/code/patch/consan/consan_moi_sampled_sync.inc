@@ -1210,40 +1210,25 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
   if (use_dense_barrier_relay) {
     constexpr uint64_t kDispatcherWordsPerSite = 20u;
 
-    using ContainerKey = std::pair<bool, std::string>;
-    std::map<ContainerKey, std::vector<size_t>> owner_groups;
+    std::vector<consan_detail::MoiDenseRouteSite> route_sites;
+    route_sites.reserve(selected.size());
     for (size_t index = 0; index < selected.size(); ++index) {
       const SampledBarrierCandidate &candidate = selected[index].candidate;
-      owner_groups[{candidate.sequence->in_kernel, candidate.sequence->container_name}].push_back(
-          index);
+      route_sites.push_back({
+          .owner = {candidate.sequence->in_kernel ? ConSanProgramContainerKind::Kernel
+                                                  : ConSanProgramContainerKind::Function,
+                    candidate.sequence->container_name},
+          .anchor = candidate.barrier.site.text_offset,
+          .source_index = index,
+      });
     }
-    constexpr uint64_t kMaxCommonRelayAnchorSpan =
-        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
-                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
-        sizeof(uint32_t);
     // GFX1250 helpers can be cloned independently during B0-to-A0 translation.
     // Keep every caller identity in the non-negative scalar inline-constant
     // range so a clone-local two-word entry stub can carry it to the common
     // appended dispatcher without embedding a clone address.
     constexpr size_t kMaxGfx1250CloneLocalRoutes = 63u;
-    std::vector<std::pair<ContainerKey, std::vector<size_t>>> groups;
-    for (auto &[key, owner_indices] : owner_groups) {
-      std::ranges::sort(owner_indices, [&](size_t lhs, size_t rhs) {
-        return selected[lhs].candidate.barrier.site.text_offset <
-               selected[rhs].candidate.barrier.site.text_offset;
-      });
-      for (size_t index : owner_indices) {
-        const uint64_t anchor = selected[index].candidate.barrier.site.text_offset;
-        if (groups.empty() || groups.back().first != key ||
-            (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-             groups.back().second.size() >= kMaxGfx1250CloneLocalRoutes) ||
-            anchor - selected[groups.back().second.front()].candidate.barrier.site.text_offset >
-                kMaxCommonRelayAnchorSpan) {
-          groups.push_back({key, {}});
-        }
-        groups.back().second.push_back(index);
-      }
-    }
+    const auto groups = consan_detail::partition_moi_dense_route_sites(
+        route_sites, arch == ROCJITSU_CODE_ARCH_CDNA5 ? kMaxGfx1250CloneLocalRoutes : 0u);
     std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
     std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
     fixed_claims.reserve(result.patches.size() + selected.size());
@@ -1256,24 +1241,9 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       if (site.size != 0u)
         fixed_claims.emplace_back(site.text_offset, site.text_offset + site.size);
     }
-    std::ranges::sort(fixed_claims);
-    size_t merged_claim_count = 0u;
-    for (const auto &claim : fixed_claims) {
-      if (merged_claim_count != 0u && fixed_claims[merged_claim_count - 1u].second >= claim.first) {
-        fixed_claims[merged_claim_count - 1u].second =
-            std::max(fixed_claims[merged_claim_count - 1u].second, claim.second);
-      } else {
-        fixed_claims[merged_claim_count++] = claim;
-      }
-    }
-    fixed_claims.resize(merged_claim_count);
-    const auto overlaps_fixed_claim = [&](uint64_t begin, uint64_t end) {
-      const auto found = std::ranges::lower_bound(fixed_claims, begin, {},
-                                                  [](const auto &range) { return range.second; });
-      return found != fixed_claims.end() && found->first < end;
-    };
+    const consan_detail::MoiOccupiedTextRanges occupied(std::move(fixed_claims));
     const auto overlaps_existing = [&](uint64_t begin, uint64_t end) {
-      if (overlaps_fixed_claim(begin, end) ||
+      if (occupied.overlaps(begin, end) ||
           std::ranges::any_of(claimed_hosts, [&](const auto &range) {
             return range.first < end && range.second > begin;
           }))
@@ -1281,22 +1251,23 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
       return false;
     };
 
-    for (const auto &[container, indices] : groups) {
+    for (const auto &group : groups) {
+      const auto &indices = group.source_indices;
       if (indices.empty())
         continue;
       uint64_t container_begin = 0u;
       uint64_t container_end = 0u;
-      std::string_view container_name = container.second;
-      if (container.first) {
+      std::string_view container_name = group.owner.name;
+      if (group.owner.kind == ConSanProgramContainerKind::Kernel) {
         const ConSanKernelInfo *kernel =
-            result.program_inventory.find_kernel_by_name(container.second);
+            result.program_inventory.find_kernel_by_name(group.owner.name);
         if (kernel == nullptr)
           continue;
         container_begin = kernel->entry_text_offset;
         container_end = container_begin + kernel->code_size;
       } else {
         const ConSanFunctionInfo *function =
-            result.program_inventory.find_function_by_name(container.second);
+            result.program_inventory.find_function_by_name(group.owner.name);
         if (function == nullptr)
           continue;
         container_begin = function->entry_text_offset;
@@ -2396,8 +2367,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
   // call, so share the same liveness-proven, call-return-keyed relay model as
   // far barriers instead of silently dropping the causal edge.
   if (consan_uses_gfx9_cdna_encoding(arch)) {
-    using ContainerGroup = std::pair<std::string, std::vector<size_t>>;
-    std::map<std::string, std::vector<size_t>> owner_groups;
+    std::vector<consan_detail::MoiDenseRouteSite> route_sites;
     for (size_t index = 0u; index < selected.size(); ++index) {
       const Planned &planned = selected[index];
       const uint64_t anchor = planned.physical_anchor_offset;
@@ -2409,28 +2379,20 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
       const bool stranded = !compute_sopp_branch_simm16(anchor, new_text.size()) &&
                             !reserved_reachable && !indirect_allocator.has_reachable(anchor);
       if (stranded && anchor == planned.candidate.atomic.site.text_offset &&
-          planned.relocated_guest_size >= sizeof(uint32_t))
-        owner_groups[planned.candidate.atomic.container_name].push_back(index);
-    }
-    constexpr uint64_t kMaxCommonRelayAnchorSpan =
-        static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
-                              static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
-        sizeof(uint32_t);
-    std::vector<ContainerGroup> groups;
-    for (auto &[container, indices] : owner_groups) {
-      std::ranges::sort(indices, [&](size_t lhs, size_t rhs) {
-        return selected[lhs].physical_anchor_offset < selected[rhs].physical_anchor_offset;
-      });
-      for (size_t index : indices) {
-        const uint64_t anchor = selected[index].physical_anchor_offset;
-        if (groups.empty() || groups.back().first != container ||
-            anchor - selected[groups.back().second.front()].physical_anchor_offset >
-                kMaxCommonRelayAnchorSpan) {
-          groups.push_back({container, {}});
-        }
-        groups.back().second.push_back(index);
+          planned.relocated_guest_size >= sizeof(uint32_t)) {
+        const std::string_view encoded_owner = planned.candidate.atomic.container_name;
+        const bool in_kernel = encoded_owner.starts_with("kernel:");
+        route_sites.push_back({
+            .owner = {in_kernel ? ConSanProgramContainerKind::Kernel
+                                : ConSanProgramContainerKind::Function,
+                      std::string(encoded_owner.substr(in_kernel ? sizeof("kernel:") - 1u
+                                                                 : sizeof("function:") - 1u))},
+            .anchor = anchor,
+            .source_index = index,
+        });
       }
     }
+    const auto groups = consan_detail::partition_moi_dense_route_sites(route_sites, 0u);
 
     std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
     fixed_claims.reserve(result.patches.size() + selected.size());
@@ -2444,31 +2406,21 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         fixed_claims.emplace_back(site.text_offset,
                                   site.text_offset + planned.relocated_guest_size);
     }
-    std::ranges::sort(fixed_claims);
-    size_t merged_claim_count = 0u;
-    for (const auto &claim : fixed_claims) {
-      if (merged_claim_count != 0u && fixed_claims[merged_claim_count - 1u].second >= claim.first) {
-        fixed_claims[merged_claim_count - 1u].second =
-            std::max(fixed_claims[merged_claim_count - 1u].second, claim.second);
-      } else {
-        fixed_claims[merged_claim_count++] = claim;
-      }
-    }
-    fixed_claims.resize(merged_claim_count);
+    const consan_detail::MoiOccupiedTextRanges occupied(std::move(fixed_claims));
     std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
     const auto overlaps_existing = [&](uint64_t begin, uint64_t end) {
-      const auto fixed = std::ranges::lower_bound(fixed_claims, begin, {},
-                                                  [](const auto &range) { return range.second; });
-      return (fixed != fixed_claims.end() && fixed->first < end) ||
+      return occupied.overlaps(begin, end) ||
              std::ranges::any_of(claimed_hosts, [&](const auto &range) {
                return range.first < end && begin < range.second;
              });
     };
 
-    for (const auto &[container, indices] : groups) {
-      const bool in_kernel = container.starts_with("kernel:");
-      const std::string_view owner_name = std::string_view(container).substr(
-          in_kernel ? sizeof("kernel:") - 1u : sizeof("function:") - 1u);
+    for (const auto &group : groups) {
+      const auto &indices = group.source_indices;
+      const bool in_kernel = group.owner.kind == ConSanProgramContainerKind::Kernel;
+      const std::string_view owner_name = group.owner.name;
+      const std::string container =
+          std::string(in_kernel ? "kernel:" : "function:") + std::string(owner_name);
       uint64_t owner_begin = 0u;
       uint64_t owner_end = 0u;
       if (in_kernel) {

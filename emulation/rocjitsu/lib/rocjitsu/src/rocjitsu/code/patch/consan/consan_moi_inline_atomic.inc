@@ -363,7 +363,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   // liveness-proven relocated host supplies one shared in-kernel island.  Its
   // scalar key identifies the normal host path or one of the atomic bodies.
   if (consan_uses_gfx9_cdna_encoding(arch)) {
-    std::map<std::string, std::vector<size_t>> owner_groups;
+    std::vector<consan_detail::MoiDenseRouteSite> route_sites;
     for (size_t index = 0; index < planned_candidates.size(); ++index) {
       const PlannedInlineAtomic &planned = planned_candidates[index];
       const uint64_t anchor = planned.candidate.site.text_offset;
@@ -373,9 +373,20 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
           });
       const bool stranded = !compute_sopp_branch_simm16(anchor, placement_planner.appended_end()) &&
                             !appended_reachable && !indirect_allocator.has_reachable(anchor);
-      if (stranded && planned.relocated_guest_size >= 2u * sizeof(uint32_t))
-        owner_groups[planned.candidate.container_name].push_back(index);
+      if (stranded && planned.relocated_guest_size >= 2u * sizeof(uint32_t)) {
+        const std::string_view encoded_owner = planned.candidate.container_name;
+        const bool in_kernel = encoded_owner.starts_with("kernel:");
+        route_sites.push_back({
+            .owner = {in_kernel ? ConSanProgramContainerKind::Kernel
+                                : ConSanProgramContainerKind::Function,
+                      std::string(encoded_owner.substr(in_kernel ? sizeof("kernel:") - 1u
+                                                                 : sizeof("function:") - 1u))},
+            .anchor = anchor,
+            .source_index = index,
+        });
+      }
     }
+    const auto route_groups = consan_detail::partition_moi_dense_route_sites(route_sites, 31u);
 
     std::vector<std::pair<uint64_t, uint64_t>> fixed_claims;
     fixed_claims.reserve(result.patches.size() + planned_candidates.size());
@@ -387,50 +398,20 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       fixed_claims.emplace_back(planned.candidate.site.text_offset,
                                 planned.candidate.site.text_offset + planned.relocated_guest_size);
     }
-    std::ranges::sort(fixed_claims);
-    size_t merged_claim_count = 0u;
-    for (const auto &claim : fixed_claims) {
-      if (merged_claim_count != 0u && fixed_claims[merged_claim_count - 1u].second >= claim.first) {
-        fixed_claims[merged_claim_count - 1u].second =
-            std::max(fixed_claims[merged_claim_count - 1u].second, claim.second);
-      } else {
-        fixed_claims[merged_claim_count++] = claim;
-      }
-    }
-    fixed_claims.resize(merged_claim_count);
+    const consan_detail::MoiOccupiedTextRanges occupied(std::move(fixed_claims));
     std::vector<std::pair<uint64_t, uint64_t>> claimed_hosts;
     const auto overlaps_existing = [&](uint64_t begin, uint64_t end) {
-      const auto fixed = std::ranges::lower_bound(fixed_claims, begin, {},
-                                                  [](const auto &range) { return range.second; });
-      return (fixed != fixed_claims.end() && fixed->first < end) ||
+      return occupied.overlaps(begin, end) ||
              std::ranges::any_of(claimed_hosts, [&](const auto &range) {
                return range.first < end && begin < range.second;
              });
     };
 
-    for (auto &[container_name, indices] : owner_groups) {
-      std::ranges::sort(indices, [&](size_t lhs, size_t rhs) {
-        return planned_candidates[lhs].candidate.site.text_offset <
-               planned_candidates[rhs].candidate.site.text_offset;
-      });
-      while (!indices.empty()) {
-        std::vector<size_t> group;
-        const uint64_t first_anchor =
-            planned_candidates[indices.front()].candidate.site.text_offset;
-        constexpr uint64_t kMaxCommonRelayAnchorSpan =
-            static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
-                                  static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
-            sizeof(uint32_t);
-        for (size_t index : indices) {
-          const uint64_t anchor = planned_candidates[index].candidate.site.text_offset;
-          if (group.size() == 31u || anchor - first_anchor > kMaxCommonRelayAnchorSpan)
-            break;
-          group.push_back(index);
-        }
-        indices.erase(indices.begin(), indices.begin() + static_cast<ptrdiff_t>(group.size()));
-        if (group.empty())
-          continue;
-
+    for (const consan_detail::MoiDenseRouteIndexGroup &route_group : route_groups) {
+      const std::vector<size_t> &group = route_group.source_indices;
+      // Keep the route's resource choices and emitted-body descriptors from
+      // remaining live while the next independent group is planned.
+      {
         std::vector<uint64_t> group_owners;
         std::vector<uint64_t> anchors;
         for (size_t index : group) {
@@ -468,12 +449,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
 
         uint64_t owner_begin = 0u;
         uint64_t owner_end = 0u;
-        const bool in_kernel = container_name.starts_with("kernel:");
-        const bool in_function = container_name.starts_with("function:");
-        const std::string_view owner_name = std::string_view(container_name)
-                                                .substr(in_kernel     ? sizeof("kernel:") - 1u
-                                                        : in_function ? sizeof("function:") - 1u
-                                                                      : 0u);
+        const std::string_view owner_name = route_group.owner.name;
         const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(owner_name);
         if (kernel != nullptr) {
           owner_begin = kernel->entry_text_offset;

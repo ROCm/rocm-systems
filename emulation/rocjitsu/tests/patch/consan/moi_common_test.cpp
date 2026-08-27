@@ -3201,6 +3201,36 @@ TEST(ConSanMoi, OccupiedTextRangesCanonicalizeAndUseHalfOpenOverlap) {
   EXPECT_FALSE(occupied.overlaps(30u, 20u));
 }
 
+TEST(ConSanMoi, DenseRouteSitesPartitionByTypedOwnerCapacityAndBranchReach) {
+  using consan_detail::MoiDenseRouteOwner;
+  using consan_detail::MoiDenseRouteSite;
+  const MoiDenseRouteOwner kernel_owner{ConSanProgramContainerKind::Kernel, "same_name"};
+  const MoiDenseRouteOwner function_owner{ConSanProgramContainerKind::Function, "same_name"};
+  const std::array sites = {
+      MoiDenseRouteSite{kernel_owner, 100u, 10u},    MoiDenseRouteSite{function_owner, 30u, 20u},
+      MoiDenseRouteSite{kernel_owner, 300000u, 30u}, MoiDenseRouteSite{kernel_owner, 20u, 40u},
+      MoiDenseRouteSite{kernel_owner, 40u, 50u},
+  };
+
+  const auto capacity_two = consan_detail::partition_moi_dense_route_sites(sites, 2u);
+  ASSERT_EQ(capacity_two.size(), 4u);
+  EXPECT_EQ(capacity_two[0].owner, kernel_owner);
+  EXPECT_EQ(capacity_two[0].first_anchor, 20u);
+  EXPECT_EQ(capacity_two[0].source_indices, (std::vector<size_t>{40u, 50u}));
+  EXPECT_EQ(capacity_two[1].source_indices, (std::vector<size_t>{10u}));
+  EXPECT_EQ(capacity_two[2].first_anchor, 300000u);
+  EXPECT_EQ(capacity_two[2].source_indices, (std::vector<size_t>{30u}));
+  EXPECT_EQ(capacity_two[3].owner, function_owner);
+  EXPECT_EQ(capacity_two[3].source_indices, (std::vector<size_t>{20u}));
+
+  const auto unlimited = consan_detail::partition_moi_dense_route_sites(sites, 0u);
+  ASSERT_EQ(unlimited.size(), 3u);
+  EXPECT_EQ(unlimited[0].source_indices, (std::vector<size_t>{40u, 50u, 10u}));
+  EXPECT_EQ(unlimited[1].source_indices, (std::vector<size_t>{30u}));
+  EXPECT_EQ(unlimited[2].source_indices, (std::vector<size_t>{20u}));
+  EXPECT_TRUE(consan_detail::partition_moi_dense_route_sites({}, 2u).empty());
+}
+
 TEST(ConSanMoi, DenseCandidatePartitionSeparatesOwnerCapacityAndBranchReach) {
   const auto make_candidate = [](ConSanProgramContainerKind kind, std::string name,
                                  uint64_t anchor) {

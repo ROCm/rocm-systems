@@ -318,15 +318,18 @@ caves, dense dispatchers, branch islands, or relays. It updates code and kernel
 resource metadata together, reparses and validates the result, and publishes
 replacement bytes only after final validation.
 
-Dense access routing has one shared topology contract across Record/Replay,
-Sampled, and Inline Shadow. `MoiDenseCandidatePartition` groups sites by the
-typed kernel/function owner, orders their pristine-text anchors, preserves each
-site's appended-bank index, and splits groups only at a caller-supplied
-dispatcher capacity or the common SOPP branch-reach limit. Each engine still
-owns its evidence-specific relay width, scalar ABI, and decision to use a dense
-route. `MoiOccupiedTextRanges` gives access and barrier placement one canonical
-half-open range set, so every engine excludes access, barrier, fence, atomic,
-and previously patched guest instructions with the same overlap semantics.
+Dense routing has one shared topology contract across access, barrier, and
+atomic planners in Record/Replay, Sampled, and Inline Shadow.
+`MoiDenseRouteSite` retains only a typed kernel/function owner, pristine-text
+anchor, and caller index; `partition_moi_dense_route_sites` orders those facts
+and splits groups only at a caller-supplied dispatcher capacity or the common
+SOPP branch-reach limit. `MoiDenseCandidatePartition` is the access-specific
+view layered on that mechanism. Each engine still owns its evidence-specific
+relay width, scalar ABI, admission rule, and decision to use a dense route.
+`MoiOccupiedTextRanges` gives access, barrier, and atomic placement one
+canonical half-open range set, so every engine excludes access, barrier, fence,
+atomic, and previously patched guest instructions with the same overlap
+semantics.
 `claim_moi_dense_owner_relay_host` additionally owns kernel/function lookup,
 owner-local liveness proof, relocation decoding, and cross-group host
 reservation for Sampled and Inline Shadow. Target policy is therefore explicit

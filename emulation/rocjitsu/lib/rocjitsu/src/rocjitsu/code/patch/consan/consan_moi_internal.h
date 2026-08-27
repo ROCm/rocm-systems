@@ -24,6 +24,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -140,6 +141,61 @@ struct MoiDenseRouteOwner {
   auto operator<=>(const MoiDenseRouteOwner &) const = default;
 };
 
+/// Minimal target-independent site presented to the common dense-route
+/// partitioner.
+///
+/// `source_index` remains in the caller's domain, allowing access, barrier,
+/// and atomic planners to share grouping without sharing their semantic
+/// candidate types.
+struct MoiDenseRouteSite {
+  MoiDenseRouteOwner owner;
+  uint64_t anchor = 0;
+  size_t source_index = 0;
+};
+
+/// One owner-local, branch-reachable set of caller indices that may share a
+/// dense dispatcher.
+///
+/// Indices are ordered by their corresponding pristine-text anchor.
+/// `first_anchor` makes the common branch-span invariant explicit without
+/// requiring callers to reconstruct it from engine-private candidate values.
+struct MoiDenseRouteIndexGroup {
+  MoiDenseRouteOwner owner;
+  uint64_t first_anchor = 0;
+  std::vector<size_t> source_indices;
+};
+
+/// Partition heterogeneous lowering sites by typed owner, dispatcher
+/// capacity, and the maximum span reachable from one SOPP relay.
+///
+/// A zero capacity means unlimited sites per group. Every returned group is
+/// nonempty; input order does not affect the result except as a deterministic
+/// tie-break for sites with the same owner and anchor.
+[[nodiscard]] inline std::vector<MoiDenseRouteIndexGroup>
+partition_moi_dense_route_sites(std::span<const MoiDenseRouteSite> sites,
+                                size_t max_sites_per_group) {
+  std::vector<MoiDenseRouteSite> ordered(sites.begin(), sites.end());
+  std::ranges::sort(ordered, [](const MoiDenseRouteSite &lhs, const MoiDenseRouteSite &rhs) {
+    return std::tie(lhs.owner, lhs.anchor, lhs.source_index) <
+           std::tie(rhs.owner, rhs.anchor, rhs.source_index);
+  });
+  constexpr uint64_t kMaxCommonRelayAnchorSpan =
+      static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
+                            static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
+      sizeof(uint32_t);
+  std::vector<MoiDenseRouteIndexGroup> groups;
+  for (const MoiDenseRouteSite &site : ordered) {
+    const bool capacity_reached = max_sites_per_group != 0u && !groups.empty() &&
+                                  groups.back().source_indices.size() >= max_sites_per_group;
+    if (groups.empty() || groups.back().owner != site.owner || capacity_reached ||
+        site.anchor - groups.back().first_anchor > kMaxCommonRelayAnchorSpan) {
+      groups.push_back({.owner = site.owner, .first_anchor = site.anchor, .source_indices = {}});
+    }
+    groups.back().source_indices.push_back(site.source_index);
+  }
+  return groups;
+}
+
 /// One bounded, branch-reachable group of access candidates that may share a
 /// dense entry relay and dispatcher.
 ///
@@ -205,35 +261,32 @@ partition_moi_dense_candidates(std::span<const ConSanMoiCandidate *const> candid
                                size_t max_candidates_per_group) {
   MoiDenseCandidatePartition partition;
   partition.index_by_candidate.reserve(candidates.size());
+  std::vector<MoiDenseRouteSite> sites;
+  sites.reserve(candidates.size());
   for (size_t index = 0; index < candidates.size(); ++index) {
     const ConSanMoiCandidate *candidate = candidates[index];
     partition.index_by_candidate.emplace(candidate, index);
-    partition.candidates_by_owner[{candidate->container.kind, candidate->container.name}].push_back(
-        candidate);
+    const MoiDenseRouteOwner owner{candidate->container.kind, candidate->container.name};
+    partition.candidates_by_owner[owner].push_back(candidate);
+    sites.push_back({.owner = owner, .anchor = candidate->anchor(), .source_index = index});
   }
 
-  constexpr uint64_t kMaxCommonRelayAnchorSpan =
-      static_cast<uint64_t>(static_cast<int64_t>(std::numeric_limits<int16_t>::max()) -
-                            static_cast<int64_t>(std::numeric_limits<int16_t>::min())) *
-      sizeof(uint32_t);
   for (auto &[owner, owner_candidates] : partition.candidates_by_owner) {
+    (void)owner;
     std::ranges::sort(owner_candidates, {},
                       [](const ConSanMoiCandidate *candidate) { return candidate->anchor(); });
-    for (const ConSanMoiCandidate *candidate : owner_candidates) {
-      const bool capacity_reached =
-          max_candidates_per_group != 0u && !partition.groups.empty() &&
-          partition.groups.back().candidates.size() == max_candidates_per_group;
-      if (partition.groups.empty() || partition.groups.back().owner != owner || capacity_reached ||
-          candidate->anchor() - partition.groups.back().candidates.front()->anchor() >
-              kMaxCommonRelayAnchorSpan) {
-        partition.groups.push_back({
-            .owner = owner,
-            .candidates = {},
-            .first_candidate_index = partition.index_by_candidate.at(candidate),
-        });
-      }
-      partition.groups.back().candidates.push_back(candidate);
-    }
+  }
+  for (const MoiDenseRouteIndexGroup &group :
+       partition_moi_dense_route_sites(sites, max_candidates_per_group)) {
+    MoiDenseCandidateGroup candidates_group{
+        .owner = group.owner,
+        .candidates = {},
+        .first_candidate_index = group.source_indices.front(),
+    };
+    candidates_group.candidates.reserve(group.source_indices.size());
+    for (size_t index : group.source_indices)
+      candidates_group.candidates.push_back(candidates[index]);
+    partition.groups.push_back(std::move(candidates_group));
   }
   return partition;
 }
