@@ -2840,6 +2840,111 @@ struct MoiDenseAccessRoutePlan {
 resource_plan_for_candidate(const ConSanTransformArtifacts &result,
                             const ConSanMoiCandidate &candidate);
 
+/// Returns the merged original-text ranges occupied by synchronization
+/// instructions that access-engine relocation must preserve.
+///
+/// Barrier, atomic, and fence inventories are deliberately projected through
+/// one query so Record/Replay, Sampled, and Inline Shadow cannot silently
+/// disagree about which synchronization instructions are unavailable as
+/// relocation donors. Empty sites are ignored and adjacent ranges are merged;
+/// consumers may therefore also use the result for logarithmic overlap tests.
+[[nodiscard]] std::vector<std::pair<uint64_t, uint64_t>>
+collect_moi_synchronization_ranges(const ConSanTransformArtifacts &result) {
+  std::vector<std::pair<uint64_t, uint64_t>> ranges;
+  const auto append_sites = [&](const auto &sites) {
+    for (const auto &site : sites) {
+      if (site.size != 0u)
+        ranges.emplace_back(site.text_offset, site.text_offset + site.size);
+    }
+  };
+  const auto append_container = [&](const auto &container) {
+    append_sites(container.barrier_sites);
+    append_sites(container.atomic_sites);
+    append_sites(container.fence_sites);
+  };
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+    append_container(kernel);
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+    append_container(function);
+
+  std::ranges::sort(ranges);
+  size_t merged_count = 0u;
+  for (const auto &range : ranges) {
+    if (merged_count != 0u && ranges[merged_count - 1u].second >= range.first) {
+      ranges[merged_count - 1u].second = std::max(ranges[merged_count - 1u].second, range.second);
+    } else {
+      ranges[merged_count++] = range;
+    }
+  }
+  ranges.resize(merged_count);
+  return ranges;
+}
+
+/// Reports whether every execution owner of one access uses the branch-only
+/// scalar fallback selected during resource planning.
+///
+/// The candidate-to-resource-plan association and the all-owner rule are part
+/// of one shared query because the three access engines route this state with
+/// the same capacity-one relay mechanism. A missing plan or owner set is not
+/// branch-only state.
+[[nodiscard]] bool
+moi_candidate_uses_branch_only_scalar_spill(const ConSanTransformArtifacts &result,
+                                            const ConSanOptions &options,
+                                            const ConSanMoiCandidate &candidate) {
+  const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, candidate);
+  return plan != nullptr && !plan->owner_descriptor_file_offsets.empty() &&
+         moi_transient_sgpr_assignment_is_branch_only(options, plan->owner_descriptor_file_offsets);
+}
+
+/// Plans the direct branch-relay reservoirs shared by all MOI access engines.
+///
+/// Callers retain engine policy: they choose candidate widths, route frontier,
+/// relay demand, placement planner, and diagnostic context. This transaction
+/// adds only the common preservation contract (synchronization sites, kernel
+/// entry prefixes, preapplied reservations, and dense-entry relocation hosts),
+/// projects owned CFG blocks to the router's non-owning view, and delegates the
+/// atomic reservoir plan. No emitted storage or router capacity is committed
+/// when the underlying planner fails.
+[[nodiscard]] bool plan_moi_access_direct_reservoirs(
+    const ConSanTransformArtifacts &result, const ConSanOptions &options, rj_code_arch_t arch,
+    std::span<const std::unique_ptr<BasicBlock>> blocks, std::span<const uint8_t> original_text,
+    std::span<const std::pair<uint64_t, uint64_t>> synchronization_ranges,
+    std::span<const std::pair<uint64_t, uint64_t>> candidate_ranges,
+    const std::map<uint64_t, MoiDenseEntryHost> &dense_entry_hosts, uint64_t route_frontier_source,
+    size_t target_relay_count, DbiPatchPlacementPlanner &placement_planner,
+    BranchOnlyRelayRouter &branch_router, BranchOnlyDirectRelayReservoirSet &reservoirs,
+    std::string *error_out) {
+  std::vector<std::pair<uint64_t, uint64_t>> protected_ranges(synchronization_ranges.begin(),
+                                                              synchronization_ranges.end());
+  protected_ranges.reserve(protected_ranges.size() + candidate_ranges.size() +
+                           result.program_inventory.kernels().size() +
+                           options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
+  protected_ranges.insert(protected_ranges.end(), candidate_ranges.begin(), candidate_ranges.end());
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
+    protected_ranges.emplace_back(
+        kernel.entry_text_offset,
+        std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));
+  }
+  for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
+    protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
+  for (const auto &[dispatcher, host] : dense_entry_hosts) {
+    (void)dispatcher;
+    protected_ranges.emplace_back(host.host_offset, host.host_offset + host.displaced_words.size() *
+                                                                           sizeof(uint32_t));
+  }
+
+  std::vector<BasicBlock *> reservoir_blocks;
+  reservoir_blocks.reserve(blocks.size());
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    if (block)
+      reservoir_blocks.push_back(block.get());
+  }
+  return branch_router.plan_direct_reservoirs(
+      reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
+      target_relay_count, placement_planner, reservoirs, error_out,
+      {.discovery = options.direct_reservoir_planning_work_limit});
+}
+
 /// Plan the dense access-entry mechanism shared by Record/Replay, Sampled, and
 /// Inline Shadow.
 ///

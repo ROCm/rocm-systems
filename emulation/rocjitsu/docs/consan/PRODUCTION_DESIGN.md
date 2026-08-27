@@ -6272,6 +6272,41 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DD: share direct access reservoir preservation
+
+- **One preservation inventory:** `collect_moi_synchronization_ranges` projects
+  barrier, atomic, and fence sites once and canonicalizes adjacent ranges.
+  Inline Shadow reuses that inventory for its relocation-overlap proof;
+  Record/Replay and Sampled no longer rebuild different copies immediately
+  before direct-reservoir discovery.
+- **One reservoir transaction:** `plan_moi_access_direct_reservoirs` adds the
+  shared kernel-entry prefix, preapplied reservation, and dense relocated-host
+  ranges; projects the owned CFG blocks to the router view; and performs the
+  atomic direct-reservoir plan. The three engine-private range, block, and
+  router setup loops are deleted.
+- **Policy remains engine-owned:** Record/Replay still expands candidate ranges
+  for borrowed entries and includes barrier relay demand. Sampled retains its
+  selected-candidate count and independent appended planner. Inline Shadow
+  retains its distinct demand, planner ownership, overlap proof, and candidate
+  ordering. The common candidate query merely expresses the already-shared
+  all-owner branch-only assignment rule.
+- **Contract coverage:** Focused branch-router host tests cover discovery,
+  rollback, bounded work, route capacity, and emission. Existing access tests
+  cover synchronization exclusion, preapplied ranges, dense hosts, far
+  frontiers, borrowed entries, and all three branch-only engine paths. The full
+  paired device matrix then exercises those paths across all five targets. No
+  behavioral contract changed, so a test of the private range-copy loop would
+  be weaker than these existing behavior tests.
+- **Accounting:** Across the four affected implementation files, physical
+  lines fall from 13,531 to 13,516, nonblank lines from 13,126 to 13,106, and
+  estimated comment-excluded code lines from 12,161 to 12,117. The slice adds
+  136 and deletes 151 physical implementation lines, a net deletion of 15,
+  while replacing three executable preservation transactions with one.
+- **Checked-in gate:** The complete build, all 1,530 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

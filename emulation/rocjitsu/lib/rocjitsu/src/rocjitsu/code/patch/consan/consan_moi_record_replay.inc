@@ -278,11 +278,10 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
   }
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
+  const std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges =
+      collect_moi_synchronization_ranges(result);
   const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
-    const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
-    return plan != nullptr && !plan->owner_descriptor_file_offsets.empty() &&
-           moi_transient_sgpr_assignment_is_branch_only(options,
-                                                        plan->owner_descriptor_file_offsets);
+    return moi_candidate_uses_branch_only_scalar_spill(result, options, *candidate);
   };
   struct BorrowedEntryProtectedRange {
     uint64_t begin = 0u;
@@ -366,46 +365,14 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   const size_t branch_only_routing_demand_count =
       saturated_add(branch_only_candidate_count, branch_only_barrier_count);
   if (branch_only_routing_demand_count != 0u && use_indirect_appended && !original_text.empty()) {
-    std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
-    protected_ranges.reserve(candidates.size() + result.program_inventory.kernels().size() +
-                             result.program_inventory.functions().size() +
-                             options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
-    const auto append_synchronization_ranges = [&](const auto &container) {
-      for (const ConSanBarrierSite &site : container.barrier_sites)
-        protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
-      for (const ConSanFenceSite &site : container.fence_sites)
-        protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
-      for (const ConSanAtomicSite &site : container.atomic_sites)
-        protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
-    };
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-      append_synchronization_ranges(kernel);
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-      append_synchronization_ranges(function);
+    std::vector<std::pair<uint64_t, uint64_t>> candidate_ranges;
+    candidate_ranges.reserve(candidates.size());
     for (const ConSanMoiCandidate *candidate : candidates) {
       const auto borrowed_words = borrowed_entry_words_for_candidate(candidate);
-      protected_ranges.emplace_back(
+      candidate_ranges.emplace_back(
           candidate->anchor(),
           candidate->anchor() +
               (borrowed_words ? borrowed_words->size() * sizeof(uint32_t) : candidate->size()));
-    }
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      protected_ranges.emplace_back(
-          kernel.entry_text_offset,
-          std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));
-    }
-    for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
-      protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
-    for (const auto &[dispatcher, host] : dense_entry_hosts) {
-      (void)dispatcher;
-      protected_ranges.emplace_back(
-          host.host_offset, host.host_offset + host.displaced_words.size() * sizeof(uint32_t));
-    }
-    std::vector<BasicBlock *> reservoir_blocks;
-    reservoir_blocks.reserve(resource_state.blocks.size());
-    for (const std::unique_ptr<BasicBlock> &block : resource_state.blocks) {
-      if (block)
-        reservoir_blocks.push_back(block.get());
     }
     uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
     for (const ConSanMoiCandidate *candidate : candidates) {
@@ -424,11 +391,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       return;
     }
     std::string relay_error;
-    if (!branch_router.plan_direct_reservoirs(
-            reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
+    if (!plan_moi_access_direct_reservoirs(
+            result, options, arch, resource_state.blocks, original_text, synchronization_ranges,
+            candidate_ranges, dense_entry_hosts, route_frontier_source,
             saturated_multiply(2u, branch_only_routing_demand_count), branch_only_placement_planner,
-            direct_branch_reservoirs, &relay_error,
-            {.discovery = options.direct_reservoir_planning_work_limit})) {
+            branch_router, direct_branch_reservoirs, &relay_error)) {
       result.errors.emplace_back("ConSan MOI first-light probe " + relay_error);
       return;
     }

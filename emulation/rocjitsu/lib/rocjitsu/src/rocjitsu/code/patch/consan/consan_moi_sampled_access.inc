@@ -310,62 +310,29 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
   }
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
+  const std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges =
+      collect_moi_synchronization_ranges(result);
   size_t branch_only_candidate_count = 0u;
   uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
   for (const ConSanMoiCandidate *candidate : candidates) {
-    const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
-    if (plan == nullptr || plan->owner_descriptor_file_offsets.empty() ||
-        !moi_transient_sgpr_assignment_is_branch_only(options,
-                                                      plan->owner_descriptor_file_offsets)) {
+    if (!moi_candidate_uses_branch_only_scalar_spill(result, options, *candidate)) {
       continue;
     }
     ++branch_only_candidate_count;
     route_frontier_source = std::min(route_frontier_source, candidate->anchor());
   }
   if (branch_only_candidate_count != 0u && use_indirect_appended && !original_text.empty()) {
-    std::vector<std::pair<uint64_t, uint64_t>> protected_ranges;
-    protected_ranges.reserve(candidates.size() + result.program_inventory.kernels().size() +
-                             result.program_inventory.functions().size() +
-                             options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
-    const auto append_synchronization_ranges = [&](const auto &container) {
-      for (const ConSanBarrierSite &site : container.barrier_sites)
-        protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
-      for (const ConSanFenceSite &site : container.fence_sites)
-        protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
-      for (const ConSanAtomicSite &site : container.atomic_sites)
-        protected_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
-    };
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-      append_synchronization_ranges(kernel);
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-      append_synchronization_ranges(function);
+    std::vector<std::pair<uint64_t, uint64_t>> candidate_ranges;
+    candidate_ranges.reserve(candidates.size());
     for (const ConSanMoiCandidate *candidate : candidates) {
-      protected_ranges.emplace_back(candidate->anchor(), candidate->anchor() + candidate->size());
-    }
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      protected_ranges.emplace_back(
-          kernel.entry_text_offset,
-          std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));
-    }
-    for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
-      protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
-    for (const auto &[dispatcher, host] : dense_entry_hosts) {
-      (void)dispatcher;
-      protected_ranges.emplace_back(
-          host.host_offset, host.host_offset + host.displaced_words.size() * sizeof(uint32_t));
-    }
-    std::vector<BasicBlock *> reservoir_blocks;
-    reservoir_blocks.reserve(resource_state.blocks.size());
-    for (const std::unique_ptr<BasicBlock> &block : resource_state.blocks) {
-      if (block)
-        reservoir_blocks.push_back(block.get());
+      candidate_ranges.emplace_back(candidate->anchor(), candidate->anchor() + candidate->size());
     }
     std::string relay_error;
-    if (!branch_router.plan_direct_reservoirs(
-            reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
-            2u * branch_only_candidate_count, branch_only_placement_planner,
-            direct_branch_reservoirs, &relay_error,
-            {.discovery = options.direct_reservoir_planning_work_limit})) {
+    if (!plan_moi_access_direct_reservoirs(
+            result, options, arch, resource_state.blocks, original_text, synchronization_ranges,
+            candidate_ranges, dense_entry_hosts, route_frontier_source,
+            2u * branch_only_candidate_count, branch_only_placement_planner, branch_router,
+            direct_branch_reservoirs, &relay_error)) {
       result.errors.emplace_back("ConSan MOI sampled probe " + relay_error);
       return;
     }

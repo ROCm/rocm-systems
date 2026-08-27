@@ -661,6 +661,18 @@ artificial getter tests. Their purpose is to give subsequent resource and
 emission cutovers one shared state boundary while deleting three independently
 evolving field lists.
 
+Dense and branch-only access routing also share their engine-independent
+placement transactions. `plan_moi_dense_access_routes` partitions candidates,
+resolves owner-local scalar state, claims direct or relocated entry hosts, and
+publishes the dispatcher map. After an engine has computed its own route
+frontier and capacity demand, `plan_moi_access_direct_reservoirs` protects the
+common synchronization inventory, kernel-entry prefixes, preapplied ranges,
+and dense relocation hosts before asking the branch-only router for donor
+reservoirs. Record/Replay still owns borrowed-entry widths and barrier demand;
+Sampled still counts selected access routes; Inline Shadow still owns its
+placement planner and shadow semantics. The shared code owns preservation and
+transactionality, not those policies.
+
 The access contracts also own their derived descriptor and patch facts.
 `note_moi_access_private_requirements` grows each owning kernel to the plan's
 fixed private extent. After successful placement, `note_moi_access_patch_info`

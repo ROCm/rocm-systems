@@ -199,35 +199,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     original_text =
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
   }
-  std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges;
-  const auto append_synchronization_ranges = [&](const auto &sites) {
-    for (const auto &site : sites) {
-      if (site.size != 0u)
-        synchronization_ranges.emplace_back(site.text_offset, site.text_offset + site.size);
-    }
-  };
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    append_synchronization_ranges(kernel.barrier_sites);
-    append_synchronization_ranges(kernel.atomic_sites);
-    append_synchronization_ranges(kernel.fence_sites);
-  }
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions()) {
-    append_synchronization_ranges(function.barrier_sites);
-    append_synchronization_ranges(function.atomic_sites);
-    append_synchronization_ranges(function.fence_sites);
-  }
-  std::ranges::sort(synchronization_ranges);
-  size_t merged_synchronization_range_count = 0u;
-  for (const auto &range : synchronization_ranges) {
-    if (merged_synchronization_range_count != 0u &&
-        synchronization_ranges[merged_synchronization_range_count - 1u].second >= range.first) {
-      synchronization_ranges[merged_synchronization_range_count - 1u].second = std::max(
-          synchronization_ranges[merged_synchronization_range_count - 1u].second, range.second);
-    } else {
-      synchronization_ranges[merged_synchronization_range_count++] = range;
-    }
-  }
-  synchronization_ranges.resize(merged_synchronization_range_count);
+  const std::vector<std::pair<uint64_t, uint64_t>> synchronization_ranges =
+      collect_moi_synchronization_ranges(result);
   const auto relocation_overlaps_synchronization = [&](uint64_t begin, uint64_t end) {
     const auto after = std::ranges::lower_bound(synchronization_ranges, end, {},
                                                 [](const auto &range) { return range.first; });
@@ -279,35 +252,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     }
   }
   const auto uses_branch_only_scalar_spill = [&](const ConSanMoiCandidate *candidate) {
-    const ConSanCandidateResourcePlan *plan = resource_plan_for_candidate(result, *candidate);
-    if (plan == nullptr || plan->owner_descriptor_file_offsets.empty())
-      return false;
-    return std::ranges::all_of(
-        plan->owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
-          const auto *assignment = find_moi_transient_sgpr_assignment(options, descriptor_offset);
-          return assignment != nullptr && assignment->branch_only_scalar_spill;
-        });
+    return moi_candidate_uses_branch_only_scalar_spill(result, options, *candidate);
   };
   BranchOnlyDirectRelayReservoirSet direct_branch_reservoirs;
   if (has_branch_only_scalar_assignment && use_indirect_appended && !original_text.empty()) {
-    std::vector<std::pair<uint64_t, uint64_t>> protected_ranges = synchronization_ranges;
-    protected_ranges.reserve(protected_ranges.size() + candidates.size() +
-                             result.program_inventory.kernels().size() +
-                             options.preapplied_reserved_ranges.size() + dense_entry_hosts.size());
+    std::vector<std::pair<uint64_t, uint64_t>> candidate_ranges;
+    candidate_ranges.reserve(candidates.size());
     for (const ConSanMoiCandidate *candidate : candidates)
-      protected_ranges.emplace_back(candidate->anchor(), candidate->anchor() + candidate->size());
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      protected_ranges.emplace_back(
-          kernel.entry_text_offset,
-          std::min<uint64_t>(original_text.size(), kernel.entry_text_offset + 256u));
-    }
-    for (const ConSanPreappliedReservedRange &range : options.preapplied_reserved_ranges)
-      protected_ranges.emplace_back(range.text_offset, range.text_offset + range.size);
-    for (const auto &[dispatcher, host] : dense_entry_hosts) {
-      (void)dispatcher;
-      protected_ranges.emplace_back(
-          host.host_offset, host.host_offset + host.displaced_words.size() * sizeof(uint32_t));
-    }
+      candidate_ranges.emplace_back(candidate->anchor(), candidate->anchor() + candidate->size());
     uint64_t route_frontier_source = std::numeric_limits<uint64_t>::max();
     for (const ConSanMoiCandidate *candidate : candidates) {
       if (uses_branch_only_scalar_spill(candidate))
@@ -318,17 +270,11 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
           "ConSan MOI inline-shadow probe lost its branch-only routing frontier");
       return;
     }
-    std::vector<BasicBlock *> reservoir_blocks;
-    reservoir_blocks.reserve(dense_host_blocks.size());
-    for (const std::unique_ptr<BasicBlock> &block : dense_host_blocks) {
-      if (block)
-        reservoir_blocks.push_back(block.get());
-    }
     std::string relay_error;
-    if (!branch_router.plan_direct_reservoirs(
-            reservoir_blocks, original_text, protected_ranges, arch, route_frontier_source,
-            2u * candidates.size(), placement_planner, direct_branch_reservoirs, &relay_error,
-            {.discovery = options.direct_reservoir_planning_work_limit})) {
+    if (!plan_moi_access_direct_reservoirs(
+            result, options, arch, dense_host_blocks, original_text, synchronization_ranges,
+            candidate_ranges, dense_entry_hosts, route_frontier_source, 2u * candidates.size(),
+            placement_planner, branch_router, direct_branch_reservoirs, &relay_error)) {
       result.errors.emplace_back("ConSan MOI inline-shadow probe " + relay_error);
       return;
     }

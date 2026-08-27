@@ -532,6 +532,15 @@ GFX11 admission, spill-backed route preference, and Record/Replay's stronger
 ordering-sequence exclusion. This deletes the last engine-private dense access
 search loops without merging their evidence semantics.
 
+The same access engines now use one synchronization-range inventory and one
+direct-reservoir setup transaction after dense placement. Common preservation
+of synchronization sites, kernel-entry prefixes, preapplied reservations, and
+dense relocated hosts can no longer drift among engines. Record/Replay retains
+its borrowed-entry range expansion and combined access/barrier demand; Sampled
+and Inline Shadow retain their distinct frontiers, demand rules, planners, and
+evidence behavior. The change deletes the three range/block/router setup loops
+without introducing a callback or an engine-policy facade.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named
