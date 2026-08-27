@@ -2890,7 +2890,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
   if (is_rdna4_family_arch(arch) && !branch_only_candidates.empty() &&
       selected_candidates.size() < max_patches) {
     std::string branch_only_route_error;
-    ConSanBranchOnlyRoutingTelemetry &routing_telemetry = result.lds_branch_only_routing_telemetry;
     std::ranges::sort(branch_only_candidates, [](const auto &lhs, const auto &rhs) {
       return lhs.site->text_offset < rhs.site->text_offset;
     });
@@ -3076,13 +3075,8 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       branch_only_route_error.clear();
       BranchOnlyRelayBatchPlan route_plan =
           branch_router.plan_pairs(tentative_planner, route_requests, &route_error);
-      record_branch_only_relay_plan(routing_telemetry, route_plan.plan_outcome(),
-                                    route_plan.pair_strategies);
-      if (!route_plan.complete()) {
+      if (!route_plan.complete())
         branch_only_route_error = route_error;
-        for (BranchOnlyRelayPairRejection rejection : route_plan.rejection_reasons)
-          record_branch_only_relay_rejection(routing_telemetry, rejection);
-      }
       for (const BranchOnlyRelayRoute &route : route_plan.routes) {
         for (const BranchOnlyRelayClaim &claim : route.claims) {
           if (const auto owner = optimistic_relay_owner.find(claim.offset);
@@ -3736,17 +3730,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                  branch_only_claimed_relay_slots.contains(offset);
         });
   }
-  ConSanBranchOnlyReservoirTelemetry lds_reservoir_telemetry = result.lds_relay_reservoir_telemetry;
-  for (const ScRelayReservoir &reservoir : selected_relay_reservoirs) {
-    // Derive the footprint from the same structural inputs as planning and
-    // emission. The final overhead word is the return-control word; keeping it
-    // separate avoids depending on the placement body-size convention.
-    const uint64_t retained_payload_bytes =
-        reservoir.original_size +
-        static_cast<uint64_t>(kScRelayAppendedOverheadWords - 1u) * sizeof(uint32_t);
-    accumulate_branch_only_reservoir_telemetry(lds_reservoir_telemetry, retained_payload_bytes,
-                                               sizeof(uint32_t), reservoir.used);
-  }
   const bool generated_relay_bank_used =
       std::ranges::any_of(selected_relay_slots, [&](uint64_t offset) {
         const bool used =
@@ -4330,7 +4313,6 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       }
     }
     result.elf_bytes = std::move(patcher).emit();
-    result.lds_relay_reservoir_telemetry = lds_reservoir_telemetry;
     result.modified = true;
     return;
   }

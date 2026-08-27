@@ -35,93 +35,6 @@ struct ConSanPerturbationPlan {
   bool removed_cache_boundary = false;
 };
 
-/// Retained branch-only routing activity used to verify integration behavior.
-/// Pair attempts count submitted requests and plan calls count router
-/// invocations, including LDS convergence iterations; together they detect an
-/// accidental return to per-site inventory construction. Entry-route, relay-
-/// contention, and work-budget failures retain the rejection classes exercised
-/// by integration tests. Detailed return, reservation, invariant, and
-/// optimizer outcomes remain on the router's direct result, where focused unit
-/// tests inspect them without copying them into every completed transform.
-///
-/// Fallback counters count pairs that reached the corresponding tier, whether
-/// or not it produced a route. Greedy fallback attempts are a subset of exact-
-/// pair fallback attempts and the counters must not be summed. Work-budget
-/// exhaustion counts plan calls whose qualification, routing, setup, or greedy
-/// tier reached its configured limit, including calls recovered by fallback.
-/// The individual work counters identify qualification, setup, feasibility
-/// scanning, and route-optimization phases. Search counters measure charged
-/// work units rather than physical relay inspections: a mixed owner inventory
-/// may perform one uncharged second cost tier, so physical inspections are at
-/// most twice the charged traversal units for optimization. A losing FLAT
-/// direct-reservoir retry is transactionally discarded and does not contribute.
-struct ConSanBranchOnlyRoutingTelemetry {
-  size_t pair_attempt_count = 0;
-  size_t plan_call_count = 0;
-  size_t entry_route_failure_count = 0;
-  size_t relay_contention_failure_count = 0;
-  size_t work_budget_failure_count = 0;
-  size_t work_budget_exhaustion_count = 0;
-  size_t exact_pair_fallback_attempt_count = 0;
-  size_t greedy_pair_fallback_attempt_count = 0;
-  size_t route_optimization_search_work_count = 0;
-  size_t route_optimization_scan_work_count = 0;
-  size_t relay_qualification_work_count = 0;
-  size_t fallback_setup_work_count = 0;
-  size_t feasibility_scan_work_count = 0;
-
-  bool operator==(const ConSanBranchOnlyRoutingTelemetry &) const = default;
-};
-
-/// Instruction reservoirs retained for shared relay routing, including both
-/// branch-only and legacy indirect relay consumers. Appended byte counts
-/// include each complete reserved appended body. Unused reservations remain
-/// explicit NOP padding so later planned offsets stay stable, and this
-/// inventory makes that retained footprint observable. It is an observational
-/// inventory, not a score for the unweighted owner-group minimizer.
-struct ConSanBranchOnlyReservoirTelemetry {
-  size_t planned_reservoir_count = 0;
-  size_t used_reservoir_count = 0;
-  size_t planned_appended_bytes = 0;
-  size_t used_appended_bytes = 0;
-
-  bool operator==(const ConSanBranchOnlyReservoirTelemetry &) const = default;
-};
-
-static_assert(sizeof(ConSanBranchOnlyReservoirTelemetry) == 4u * sizeof(size_t),
-              "update the reservoir telemetry schema tests");
-
-/// Records one complete reserved appended footprint. Keeping the payload and
-/// final return-control bytes separate makes the shared normalization
-/// structural instead of relying on placement-specific body-size conventions.
-inline void
-accumulate_branch_only_reservoir_telemetry(ConSanBranchOnlyReservoirTelemetry &telemetry,
-                                           uint64_t retained_payload_bytes,
-                                           uint64_t retained_return_bytes, bool used) {
-  const auto add = [](size_t &total, size_t value) {
-    total = value > std::numeric_limits<size_t>::max() - total ? std::numeric_limits<size_t>::max()
-                                                               : total + value;
-  };
-  const uint64_t retained_appended_bytes =
-      retained_return_bytes > std::numeric_limits<uint64_t>::max() - retained_payload_bytes
-          ? std::numeric_limits<uint64_t>::max()
-          : retained_payload_bytes + retained_return_bytes;
-  const size_t bytes = [&] {
-    if constexpr (sizeof(uint64_t) > sizeof(size_t)) {
-      if (retained_appended_bytes > std::numeric_limits<size_t>::max())
-        return std::numeric_limits<size_t>::max();
-    }
-    return static_cast<size_t>(retained_appended_bytes);
-  }();
-
-  add(telemetry.planned_reservoir_count, 1u);
-  add(telemetry.planned_appended_bytes, bytes);
-  if (used) {
-    add(telemetry.used_reservoir_count, 1u);
-    add(telemetry.used_appended_bytes, bytes);
-  }
-}
-
 /// Work consumed outside the fixed-pair branch router. Counts are measured
 /// units charged by the shared bounded-planning meter; exhaustion counts are
 /// call- or convergence-scope events, not elapsed-time samples.
@@ -193,17 +106,6 @@ struct ConSanMutationOutcome {
 
 struct ConSanResult {
   bool modified = false;
-  ConSanBranchOnlyRoutingTelemetry moi_branch_only_routing_telemetry;
-  /// Reservoir footprint retained in a successfully emitted MOI patch. A
-  /// rejected transform retains no output image, so this remains zero; any
-  /// attempted-plan inventory must use separate telemetry.
-  ConSanBranchOnlyReservoirTelemetry moi_branch_only_reservoir_telemetry;
-  ConSanBranchOnlyRoutingTelemetry lds_branch_only_routing_telemetry;
-  /// Reservoir footprint retained by all successfully emitted LDS relay
-  /// consumers, including branch-only and legacy indirect routing. A rejected
-  /// transform retains no output image, so this remains zero; any attempted-
-  /// plan inventory must use separate telemetry.
-  ConSanBranchOnlyReservoirTelemetry lds_relay_reservoir_telemetry;
   ConSanPlanningWorkTelemetry planning_work_telemetry;
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   std::optional<uint16_t> resolved_moi_owner_vgpr;

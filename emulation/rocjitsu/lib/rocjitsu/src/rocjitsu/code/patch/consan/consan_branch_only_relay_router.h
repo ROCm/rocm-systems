@@ -259,8 +259,7 @@ struct BranchOnlyRelayPlanFlags {
   }
 };
 
-static_assert(sizeof(BranchOnlyRelayPlanFlags) == 5u * sizeof(bool),
-              "map new plan flags in record_branch_only_relay_plan");
+static_assert(sizeof(BranchOnlyRelayPlanFlags) == 5u * sizeof(bool));
 
 struct BranchOnlyRelayPlanOutcome : BranchOnlyRelayPlanFlags {
   BranchOnlyRelayPlanFailure failure = BranchOnlyRelayPlanFailure::None;
@@ -312,22 +311,6 @@ struct BranchOnlyRelayBatchPlan : BranchOnlyRelayPlanOutcome {
   [[nodiscard]] const BranchOnlyRelayPlanOutcome &plan_outcome() const { return *this; }
 };
 
-/// Records one router invocation using pair-counted units shared by FLAT, LDS,
-/// and MOI producers. A greedy pair also counts as an exact-pair fallback
-/// attempt because it reaches that tier first.
-void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
-                                   const BranchOnlyRelayPlanOutcome &outcome,
-                                   std::span<const BranchOnlyRelayPlanStrategy> pair_strategies);
-
-/// Records a retained aggregate failure for a single-pair call. Batch callers
-/// record their retained per-pair causes with
-/// `record_branch_only_relay_rejection`.
-void record_branch_only_relay_failure(ConSanBranchOnlyRoutingTelemetry &telemetry,
-                                      BranchOnlyRelayPlanFailure failure);
-
-void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &telemetry,
-                                        BranchOnlyRelayPairRejection rejection);
-
 struct BranchOnlyDirectRelayReservoir {
   uint64_t anchor_offset = 0;
   std::vector<uint32_t> original_words;
@@ -344,7 +327,6 @@ struct BranchOnlyDirectRelayReservoirSet {
 
   [[nodiscard]] bool mark_claims_used(std::span<const BranchOnlyRelayClaim> claims,
                                       std::string *error_out = nullptr);
-  [[nodiscard]] ConSanBranchOnlyReservoirTelemetry telemetry() const;
 };
 
 struct BranchOnlyDirectReservoirWorkLimits {

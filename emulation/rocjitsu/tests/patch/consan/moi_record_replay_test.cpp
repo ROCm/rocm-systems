@@ -8817,11 +8817,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessWithoutDeadTransientScalarRegist
   EXPECT_GT(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
                                &ConSanPatchInfo::kind),
             0u);
-  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
-  // A many-site object must qualify and index its shared relay inventory once,
-  // rather than rebuilding it for every far access.
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count, kAccessCount);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 1u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -8878,9 +8873,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesFarAccessThroughSelectedAnchorTails) {
   const auto access_count = std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
   ASSERT_EQ(access_count, kAccessWords.size()) << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.moi_branch_only_reservoir_telemetry.planned_reservoir_count, 0u);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count, kAccessWords.size());
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 1u);
 
   std::set<uint64_t> anchor_tail_offsets;
   for (size_t access_word : kAccessWords) {
@@ -8972,7 +8964,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRecursivelyRoutesInstructionReservoirs) {
                patch.original_size != 0u && patch.branch_only_continuation;
       });
   EXPECT_GE(routed_reservoir_count, 2u);
-  EXPECT_GE(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, kDonorWords.size());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -9056,10 +9047,6 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierConsumesReservoirOmittedByAccessSelectio
     return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
            patch.anchor_offset == branch_only_access_offset;
   }));
-  ASSERT_GT(result.moi_branch_only_reservoir_telemetry.planned_reservoir_count, 0u);
-  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
-  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.planned_reservoir_count,
-            result.moi_branch_only_reservoir_telemetry.used_reservoir_count);
   const auto barrier_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier_patch, result.patches.end()) << testing::PrintToString(result.warnings);
@@ -9146,7 +9133,6 @@ TEST(ConSanMoi, Cdna4RecordReplayBarrierReturnRoutesThroughSelectedAccessAnchorT
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             kAccessWords.size());
-  EXPECT_EQ(result.moi_branch_only_reservoir_telemetry.planned_reservoir_count, 0u);
   size_t published_access_tail_count = 0u;
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore)
@@ -9279,13 +9265,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRelaySpineCrossesBarrierPrefixBeyondSoppReach) 
   };
   EXPECT_TRUE(std::ranges::any_of(routed_barrier->branch_only_entry_relay_offsets, is_donor_tail));
   EXPECT_TRUE(std::ranges::any_of(routed_barrier->branch_only_return_relay_offsets, is_donor_tail));
-  // The access pass and the barrier pass each route their entire inventory in
-  // one batch. A per-barrier plan call would make large E2E objects scale with
-  // the product of barrier count and relay-index construction cost.
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count, kRoutedBarrierCount + 1u);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 2u);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.work_budget_failure_count, 0u);
-  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     if (patch.kind != ConSanPatchKind::TrampolineBranchRelayReservoir ||
         patch.original_size != 0u || patch.trampoline_offset < original_text_size) {
@@ -9411,7 +9390,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRejectsFarAccessWithoutFirstHopBeforeReservingB
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                                &ConSanPatchInfo::kind),
             0u);
@@ -9750,7 +9728,6 @@ TEST(ConSanMoi, Cdna4RecordReplayRoutesBarrierWithoutDeadTransientScalarRegister
   EXPECT_TRUE(barrier_patch->branch_only_continuation);
   EXPECT_TRUE(barrier_patch->branch_only_borrowed_indirect_entry);
   EXPECT_TRUE(barrier_patch->branch_only_entry_relay_offsets.empty());
-  EXPECT_GT(result.moi_branch_only_routing_telemetry.plan_call_count, 0u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -11072,10 +11049,6 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
     EXPECT_NE(std::ranges::search(entry_body, *save_semantic_workgroup_x).begin(), entry_body.end())
         << "the private prologue must back up guest-semantic workgroup X, not the raw "
            "dispatch-preload value occupying its ABI slot";
-    EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count,
-              uses_branch_only_scalar_spill ? kAccessCount : 0u);
-    EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count,
-              uses_branch_only_scalar_spill ? 1u : 0u);
     const auto uses_appended_relay = [&](const ConSanPatchInfo &patch) {
       return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
              (std::ranges::any_of(patch.branch_only_entry_relay_offsets,
@@ -11164,9 +11137,6 @@ TEST(ConSanMoi, Cdna4OrdinaryBodiesPreserveLaterBranchOnlyRelaySpine) {
                                &ConSanPatchInfo::kind),
             1u)
       << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count,
-            kAccessCountPerKernel + 1u);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 2u);
   EXPECT_TRUE(std::ranges::any_of(result.patches, [&](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::TrampolineMoiAccessRecordStore &&
            patch.branch_only_continuation &&

@@ -3765,6 +3765,34 @@ analysis completed.
   2,878 simulator-device tests across the five supported targets pass in 67.86
   seconds. E2E validation remains outside this work.
 
+### Slice 5U: delete copied branch-routing telemetry
+
+- **Single planning-fact owner:** `BranchOnlyRelayPlanOutcome` remains the
+  typed result of a direct-router planning attempt. It owns the selected
+  strategy, route, planning-work counters, and structured failure when no
+  route exists. Lowering no longer copies those facts into a second mutable
+  event log attached to the broad transform result.
+- **Completed compatibility deletion:** The result-wide MOI and LDS routing
+  logs, their reservoir-footprint summaries, all record-and-aggregate helper
+  functions, and the reservoir set's telemetry projection are gone. These
+  fields had no runtime consumer; they exposed the chronology of the current
+  routing implementation solely so integration tests could reconstruct it.
+- **Contract coverage:** Direct-router tests continue to validate every field
+  of the typed planning outcome, including randomized oracle agreement,
+  deterministic selection, owner provenance, failures, strategies, and work
+  limits. Integration tests continue to validate the behavior that survives a
+  router replacement: emitted patch topology and bytes, warnings, rollback,
+  resource limits, and deterministic output. Two tests whose only contract was
+  the deleted telemetry representation are removed.
+- **Deletion result:** Production source is 261 physical lines smaller, and
+  tests are 171 physical lines smaller. No replacement result field, event
+  recorder, aggregation API, or compatibility projection was introduced.
+- **Completed checked-in gate:** The focused router and integration gate passes
+  all 112 tests. The complete host gate passes 1,510 tests with the two expected
+  benchmark-object skips; all 194 HSA-hook tests pass; and all 2,878
+  simulator-device tests across the five supported targets pass in 63.80
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

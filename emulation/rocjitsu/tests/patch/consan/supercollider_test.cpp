@@ -7170,11 +7170,6 @@ TEST(ConSan, Rdna4CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   EXPECT_FALSE(branch_only->indirect_pc_sgpr.has_value());
   ASSERT_FALSE(branch_only->branch_only_entry_relay_offsets.empty());
   ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
-  const ConSanBranchOnlyRoutingTelemetry &routing = result.lds_branch_only_routing_telemetry;
-  EXPECT_GT(routing.pair_attempt_count, 0u);
-  EXPECT_GT(routing.plan_call_count, 0u);
-  EXPECT_GT(routing.relay_qualification_work_count, 0u);
-  EXPECT_GT(routing.fallback_setup_work_count + routing.feasibility_scan_work_count, 0u);
 }
 
 TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
@@ -7209,13 +7204,6 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyThroughRelayReservoir) {
   const auto reservoir = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
   ASSERT_NE(reservoir, result.patches.end());
-  // Discovery, one optimistic owner selection, and the final
-  // materialized-only replay must each run exactly once.
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.plan_call_count, 3u);
-  // Owner-affinity preprocessing proves the one-owner lower bound here, so
-  // branch-and-bound search is unnecessary. Its independent scan counter
-  // still verifies that the LDS owner keys reached the shared router.
-  EXPECT_GT(result.lds_branch_only_routing_telemetry.route_optimization_scan_work_count, 0u);
 }
 
 TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
@@ -7249,14 +7237,6 @@ TEST(ConSan, Gfx1250LdsConvergenceMinimizesPromotedRelayReservoirOwners) {
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(std::ranges::count(result.patches, true, &ConSanPatchInfo::branch_only_continuation),
             1u);
-  // This layout admits competing optimistic reservoir owners. The nonzero
-  // search count proves that convergence exercised the owner branch-and-bound
-  // pass rather than accepting the binary one-owner lower bound immediately.
-  EXPECT_GT(result.lds_branch_only_routing_telemetry.route_optimization_search_work_count, 0u);
-  // Discovery, the minimized optimistic-owner selection, and the final
-  // materialized-only replay converge in three bounded planner calls.
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.plan_call_count, 3u);
-  EXPECT_EQ(result.lds_relay_reservoir_telemetry.used_reservoir_count, 1u);
   EXPECT_GT(result.planning_work_telemetry.lds_convergence_work_count, 0u);
   EXPECT_EQ(result.planning_work_telemetry.lds_convergence_exhaustion_count, 0u);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
@@ -7320,21 +7300,6 @@ TEST(ConSan, Rdna4LdsDegradedPartialRoutePromotesOptimisticRelayReservoirs) {
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified) << testing::PrintToString(result.warnings);
-  // Discovery without optimistic owners rejects both pairs. The next call
-  // sees the complete optimistic inventory through exact-pair fallback,
-  // retains the first pair, and rejects the second for contention. That
-  // degraded partial plan is not a capacity verdict, so its owners are
-  // materialized and replayed once before the route is rejected.
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.plan_call_count, 3u);
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.pair_attempt_count, 6u)
-      << testing::PrintToString(result.warnings);
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.entry_route_failure_count, 2u);
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.relay_contention_failure_count, 2u);
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.work_budget_failure_count, 0u);
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.work_budget_exhaustion_count, 0u);
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.exact_pair_fallback_attempt_count, 6u);
-  EXPECT_EQ(result.lds_branch_only_routing_telemetry.greedy_pair_fallback_attempt_count, 0u);
-  EXPECT_EQ(result.lds_relay_reservoir_telemetry, ConSanBranchOnlyReservoirTelemetry{});
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("branch-only continuation could not route all spill-backed sites") !=
                std::string::npos &&
@@ -7449,12 +7414,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
             (kReservoirWords + kReservoirAppendedOverheadWords) * sizeof(uint32_t));
   ASSERT_TRUE(reservoir->indirect_saved_vcc_sgpr.has_value());
   ASSERT_TRUE(reservoir->indirect_return_saved_vcc_sgpr.has_value());
-  const ConSanBranchOnlyReservoirTelemetry &inventory = result.lds_relay_reservoir_telemetry;
-  EXPECT_GE(inventory.planned_reservoir_count, 1u);
-  EXPECT_EQ(inventory.used_reservoir_count, 1u);
-  EXPECT_GE(inventory.planned_reservoir_count, inventory.used_reservoir_count);
-  EXPECT_GE(inventory.planned_appended_bytes, inventory.used_appended_bytes);
-  EXPECT_EQ(inventory.used_appended_bytes, reservoir->trampoline_size);
   EXPECT_GT(result.planning_work_telemetry.sopp_relay_work_count, 0u);
   EXPECT_EQ(result.planning_work_telemetry.sopp_relay_exhaustion_count, 0u);
   EXPECT_GT(result.planning_work_telemetry.lds_relay_layout_work_count, 0u);
@@ -7468,8 +7427,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   EXPECT_EQ(std::ranges::count(repeated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_EQ(repeated.lds_branch_only_routing_telemetry, result.lds_branch_only_routing_telemetry);
-  EXPECT_EQ(repeated.lds_relay_reservoir_telemetry, result.lds_relay_reservoir_telemetry);
   EXPECT_EQ(repeated.planning_work_telemetry, result.planning_work_telemetry);
   EXPECT_EQ(repeated.elf_bytes, result.elf_bytes);
 
@@ -7578,7 +7535,6 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesOrdinaryScalarRelayReservoirForCdna4Wave64
   EXPECT_TRUE(reservoir->indirect_return_pc_sgpr.has_value());
   EXPECT_TRUE(reservoir->indirect_return_saved_scc_sgpr.has_value());
   EXPECT_FALSE(reservoir->indirect_return_saved_vcc_sgpr.has_value());
-  EXPECT_EQ(result.lds_relay_reservoir_telemetry.used_reservoir_count, 1u);
 }
 
 TEST(ConSan, Cdna4RelayReservoirUsesSkippedKernelWhenNonTextMakesImageLarge) {

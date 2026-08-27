@@ -1797,47 +1797,6 @@ TEST(ConSanBranchOnlyRelayRouter, TinyLimitsExerciseObservableGreedyFallback) {
   EXPECT_EQ(batch.pair_strategies, (std::vector{BranchOnlyRelayPlanStrategy::GreedyPairFallback}));
 }
 
-TEST(ConSanBranchOnlyRelayRouter, RecordsRetainedIntegrationTelemetryWithSharedUnits) {
-  ConSanBranchOnlyRoutingTelemetry telemetry;
-  BranchOnlyRelayPlanOutcome outcome;
-  outcome.failure = BranchOnlyRelayPlanFailure::None;
-  outcome.strategy = BranchOnlyRelayPlanStrategy::GreedyPairFallback;
-  outcome.relay_qualification_exhausted = true;
-  outcome.routing_work_exhausted = true;
-  outcome.route_optimization_search_work_consumed = 29u;
-  outcome.route_optimization_scan_work_consumed = 31u;
-  outcome.relay_qualification_work_consumed = 5u;
-  outcome.fallback_setup_work_consumed = 7u;
-  outcome.feasibility_scan_work_consumed = 11u;
-  const std::array strategies = {
-      BranchOnlyRelayPlanStrategy::ExactBatch,
-      BranchOnlyRelayPlanStrategy::ExactPairFallback,
-      BranchOnlyRelayPlanStrategy::GreedyPairFallback,
-  };
-
-  record_branch_only_relay_plan(telemetry, outcome, strategies);
-  record_branch_only_relay_failure(telemetry, BranchOnlyRelayPlanFailure::EntryRoute);
-  record_branch_only_relay_failure(telemetry, BranchOnlyRelayPlanFailure::RelayContention);
-  record_branch_only_relay_failure(telemetry, BranchOnlyRelayPlanFailure::WorkBudget);
-  record_branch_only_relay_rejection(telemetry, BranchOnlyRelayPairRejection::EntryUnreachable);
-  record_branch_only_relay_rejection(telemetry, BranchOnlyRelayPairRejection::RelayContention);
-  record_branch_only_relay_rejection(telemetry, BranchOnlyRelayPairRejection::WorkBudget);
-
-  EXPECT_EQ(telemetry.pair_attempt_count, 3u);
-  EXPECT_EQ(telemetry.plan_call_count, 1u);
-  EXPECT_EQ(telemetry.work_budget_exhaustion_count, 1u);
-  EXPECT_EQ(telemetry.exact_pair_fallback_attempt_count, 2u);
-  EXPECT_EQ(telemetry.greedy_pair_fallback_attempt_count, 1u);
-  EXPECT_EQ(telemetry.route_optimization_search_work_count, 29u);
-  EXPECT_EQ(telemetry.route_optimization_scan_work_count, 31u);
-  EXPECT_EQ(telemetry.relay_qualification_work_count, 5u);
-  EXPECT_EQ(telemetry.fallback_setup_work_count, 7u);
-  EXPECT_EQ(telemetry.feasibility_scan_work_count, 11u);
-  EXPECT_EQ(telemetry.entry_route_failure_count, 2u);
-  EXPECT_EQ(telemetry.relay_contention_failure_count, 2u);
-  EXPECT_EQ(telemetry.work_budget_failure_count, 2u);
-}
-
 TEST(ConSanBranchOnlyRelayRouter, ZeroTierLimitsAreNormalizedInsteadOfDisablingRouting) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   BranchOnlyRelayRouter router;
@@ -2644,11 +2603,6 @@ TEST(ConSanBranchOnlyRelayRouter,
   size_t trials_selecting_extra_relays = 0u;
   bool saw_selected_pristine_relay = false;
   bool saw_selected_owned_relay = false;
-  ConSanBranchOnlyRoutingTelemetry telemetry;
-  size_t expected_qualification_work = 0u;
-  size_t expected_fallback_setup_work = 0u;
-  size_t expected_feasibility_scan_work = 0u;
-
   for (size_t trial = 0u; trial < kTrialCount; ++trial) {
     SCOPED_TRACE(::testing::Message() << "trial=" << trial);
     const uint64_t jitter = (rng() % 1'024u) * sizeof(uint32_t);
@@ -2770,11 +2724,6 @@ TEST(ConSanBranchOnlyRelayRouter,
     EXPECT_EQ(plan.scan_work_consumed(), plan.relay_qualification_work_consumed +
                                              plan.fallback_setup_work_consumed +
                                              plan.feasibility_scan_work_consumed);
-    record_branch_only_relay_plan(telemetry, plan, plan.pair_strategies);
-    expected_qualification_work += plan.relay_qualification_work_consumed;
-    expected_fallback_setup_work += plan.fallback_setup_work_consumed;
-    expected_feasibility_scan_work += plan.feasibility_scan_work_consumed;
-
     if (oracle_feasible) {
       ASSERT_TRUE(plan.complete()) << error;
       EXPECT_TRUE(plan.rejected_pair_indices.empty());
@@ -2815,14 +2764,6 @@ TEST(ConSanBranchOnlyRelayRouter,
   EXPECT_GT(trials_selecting_extra_relays, 0u);
   EXPECT_TRUE(saw_selected_pristine_relay);
   EXPECT_TRUE(saw_selected_owned_relay);
-  EXPECT_EQ(telemetry.pair_attempt_count, kTrialCount);
-  EXPECT_EQ(telemetry.plan_call_count, kTrialCount);
-  EXPECT_EQ(telemetry.work_budget_exhaustion_count, kTrialCount);
-  EXPECT_EQ(telemetry.exact_pair_fallback_attempt_count, kTrialCount);
-  EXPECT_EQ(telemetry.greedy_pair_fallback_attempt_count, kTrialCount);
-  EXPECT_EQ(telemetry.relay_qualification_work_count, expected_qualification_work);
-  EXPECT_EQ(telemetry.fallback_setup_work_count, expected_fallback_setup_work);
-  EXPECT_EQ(telemetry.feasibility_scan_work_count, expected_feasibility_scan_work);
 }
 
 TEST(ConSanBranchOnlyRelayRouter, PlansMultipleDisjointEntryAndReturnPairsAtomically) {
@@ -3478,35 +3419,6 @@ TEST(ConSanBranchOnlyRelayRouter, DirectReservoirFailureRollsBackTheWholeCall) {
   EXPECT_TRUE(planner.occupied_ranges().empty());
 }
 
-TEST(ConSanBranchOnlyRelayRouter, InventoriesUsedAndUnusedDirectReservoirFootprint) {
-  BranchOnlyDirectRelayReservoirSet reservoirs;
-  reservoirs.reservoirs = {
-      BranchOnlyDirectRelayReservoir{
-          .anchor_offset = 64u,
-          .original_words = std::vector<uint32_t>(16u),
-          .placement = {},
-          .route = std::nullopt,
-          .used = true,
-      },
-      BranchOnlyDirectRelayReservoir{
-          .anchor_offset = 256u,
-          .original_words = std::vector<uint32_t>(32u),
-          .placement = {},
-          .route = std::nullopt,
-          .used = false,
-      },
-  };
-
-  const ConSanBranchOnlyReservoirTelemetry telemetry = reservoirs.telemetry();
-  EXPECT_EQ(telemetry.planned_reservoir_count, 2u);
-  EXPECT_EQ(telemetry.used_reservoir_count, 1u);
-  EXPECT_EQ(telemetry.planned_reservoir_count - telemetry.used_reservoir_count, 1u);
-  EXPECT_EQ(telemetry.planned_appended_bytes, (16u + 32u) * sizeof(uint32_t) + 2u * 4u);
-  EXPECT_EQ(telemetry.used_appended_bytes, 16u * sizeof(uint32_t) + 4u);
-  EXPECT_EQ(telemetry.planned_appended_bytes - telemetry.used_appended_bytes,
-            32u * sizeof(uint32_t) + 4u);
-}
-
 TEST(ConSanBranchOnlyRelayRouter, EmitsDirectReservoirAtItsOwnedAppendedOffset) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint64_t kAnchor = 64u;
@@ -3552,9 +3464,6 @@ TEST(ConSanBranchOnlyRelayRouter, EmitsDirectReservoirAtItsOwnedAppendedOffset) 
   ASSERT_EQ(patches.size(), 1u);
   EXPECT_EQ(patches.front().kind, ConSanPatchKind::TrampolineBranchRelayReservoir);
   EXPECT_EQ(patches.front().original_size, kOriginalSize);
-  BranchOnlyDirectRelayReservoirSet reservoirs;
-  reservoirs.reservoirs.push_back(reservoir);
-  EXPECT_EQ(reservoirs.telemetry().used_appended_bytes, patches.front().trampoline_size);
 }
 
 } // namespace

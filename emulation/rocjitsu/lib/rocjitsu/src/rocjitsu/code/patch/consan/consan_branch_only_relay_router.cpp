@@ -1518,75 +1518,6 @@ BranchOnlyRelaySearchLimits branch_only_relay_greedy_pair_limits(size_t relay_co
   return limits;
 }
 
-void record_branch_only_relay_plan(ConSanBranchOnlyRoutingTelemetry &telemetry,
-                                   const BranchOnlyRelayPlanOutcome &outcome,
-                                   std::span<const BranchOnlyRelayPlanStrategy> pair_strategies) {
-  accumulate_saturated(telemetry.pair_attempt_count, pair_strategies.size());
-  accumulate_saturated(telemetry.plan_call_count, 1u);
-  if (outcome.work_budget_exhausted())
-    accumulate_saturated(telemetry.work_budget_exhaustion_count, 1u);
-  accumulate_saturated(telemetry.route_optimization_search_work_count,
-                       outcome.route_optimization_search_work_consumed);
-  accumulate_saturated(telemetry.route_optimization_scan_work_count,
-                       outcome.route_optimization_scan_work_consumed);
-  accumulate_saturated(telemetry.relay_qualification_work_count,
-                       outcome.relay_qualification_work_consumed);
-  accumulate_saturated(telemetry.fallback_setup_work_count, outcome.fallback_setup_work_consumed);
-  accumulate_saturated(telemetry.feasibility_scan_work_count,
-                       outcome.feasibility_scan_work_consumed);
-  for (BranchOnlyRelayPlanStrategy strategy : pair_strategies) {
-    if (strategy == BranchOnlyRelayPlanStrategy::ExactPairFallback ||
-        strategy == BranchOnlyRelayPlanStrategy::GreedyPairFallback) {
-      accumulate_saturated(telemetry.exact_pair_fallback_attempt_count, 1u);
-    }
-    if (strategy == BranchOnlyRelayPlanStrategy::GreedyPairFallback)
-      accumulate_saturated(telemetry.greedy_pair_fallback_attempt_count, 1u);
-  }
-}
-
-void record_branch_only_relay_failure(ConSanBranchOnlyRoutingTelemetry &telemetry,
-                                      BranchOnlyRelayPlanFailure failure) {
-  switch (failure) {
-  case BranchOnlyRelayPlanFailure::None:
-  case BranchOnlyRelayPlanFailure::ReturnRoute:
-  case BranchOnlyRelayPlanFailure::Reservation:
-    break;
-  case BranchOnlyRelayPlanFailure::EntryRoute:
-    accumulate_saturated(telemetry.entry_route_failure_count, 1u);
-    break;
-  case BranchOnlyRelayPlanFailure::RelayContention:
-    accumulate_saturated(telemetry.relay_contention_failure_count, 1u);
-    break;
-  case BranchOnlyRelayPlanFailure::WorkBudget:
-    accumulate_saturated(telemetry.work_budget_failure_count, 1u);
-    break;
-  }
-}
-
-void record_branch_only_relay_rejection(ConSanBranchOnlyRoutingTelemetry &telemetry,
-                                        BranchOnlyRelayPairRejection rejection) {
-  switch (rejection) {
-  case BranchOnlyRelayPairRejection::None:
-    break;
-  case BranchOnlyRelayPairRejection::InvalidEntryCoordinates:
-  case BranchOnlyRelayPairRejection::EntryUnreachable:
-    accumulate_saturated(telemetry.entry_route_failure_count, 1u);
-    break;
-  case BranchOnlyRelayPairRejection::InvalidReturnCoordinates:
-  case BranchOnlyRelayPairRejection::ReturnUnreachable:
-    break;
-  case BranchOnlyRelayPairRejection::RelayContention:
-    accumulate_saturated(telemetry.relay_contention_failure_count, 1u);
-    break;
-  case BranchOnlyRelayPairRejection::WorkBudget:
-    accumulate_saturated(telemetry.work_budget_failure_count, 1u);
-    break;
-  case BranchOnlyRelayPairRejection::Count:
-    assert(false && "rejection count sentinel is not a rejection reason");
-    break;
-  }
-}
-
 bool is_consan_branch_relay_reservoir_instruction(const Instruction &instruction, uint64_t offset,
                                                   std::span<const uint8_t> text,
                                                   rj_code_arch_t arch) {
@@ -2124,19 +2055,6 @@ bool BranchOnlyDirectRelayReservoirSet::mark_claims_used(
   for (size_t index = 0u; index < selected.size(); ++index)
     reservoirs[index].used = reservoirs[index].used || selected[index];
   return true;
-}
-
-ConSanBranchOnlyReservoirTelemetry BranchOnlyDirectRelayReservoirSet::telemetry() const {
-  ConSanBranchOnlyReservoirTelemetry result;
-  for (const BranchOnlyDirectRelayReservoir &reservoir : reservoirs) {
-    // Direct placements describe displaced body bytes separately from their
-    // immediately following return word.
-    const size_t displaced_bytes =
-        saturated_multiply(reservoir.original_words.size(), sizeof(uint32_t));
-    accumulate_branch_only_reservoir_telemetry(result, displaced_bytes, sizeof(uint32_t),
-                                               reservoir.used);
-  }
-  return result;
 }
 
 bool BranchOnlyRelayRouter::plan_direct_reservoirs(

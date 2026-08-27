@@ -1387,12 +1387,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     std::string relay_error;
     BranchOnlyRelayBatchPlan route_plan =
         tentative_router.plan_pairs(tentative_planner, requests, &relay_error, relay_limits);
-    record_branch_only_relay_plan(result.moi_branch_only_routing_telemetry,
-                                  route_plan.plan_outcome(), route_plan.pair_strategies);
     if (!route_plan.complete() || route_plan.routes.size() != requests.size() ||
         !tentative_router.commit(route_plan.routes, &relay_error)) {
-      for (BranchOnlyRelayPairRejection rejection : route_plan.rejection_reasons)
-        record_branch_only_relay_rejection(result.moi_branch_only_routing_telemetry, rejection);
       result.warnings.emplace_back(
           "ConSan MOI first-light branch-only scalar-spill route batch was rejected" +
           (relay_error.empty() ? std::string{} : ": " + relay_error));
@@ -2205,7 +2201,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
     result.elf_bytes = std::move(patcher).emit();
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-    result.moi_branch_only_reservoir_telemetry = direct_branch_reservoirs.telemetry();
     if (reserved_sync_island_count != 0u) {
       access_output.reserved_sync_islands = MoiReservedBarrierIslandLayout{
           .begin = original_text_size,

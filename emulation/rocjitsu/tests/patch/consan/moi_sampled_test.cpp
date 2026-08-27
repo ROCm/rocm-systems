@@ -7348,7 +7348,6 @@ TEST(ConSanMoi, Cdna4SampledBranchOnlyReservoirsCoverEarliestSource) {
                 }),
             2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
 }
 
 TEST(ConSanMoi, Rdna3SampledPrivateOwnerCapturePrecedesEntryScalarSpillScratchClobber) {

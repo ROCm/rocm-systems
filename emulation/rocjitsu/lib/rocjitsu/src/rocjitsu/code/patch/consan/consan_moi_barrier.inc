@@ -757,19 +757,6 @@ build_inline_shadow_private_epoch_barrier_cave_words(
     pruned_any = true;
   }
 
-  if (pruned_any) {
-    size_t used_count = 0u;
-    size_t used_bytes = 0u;
-    for (const ConSanPatchInfo &patch : result.patches) {
-      if (!is_direct_reservoir(patch))
-        continue;
-      ++used_count;
-      used_bytes = saturated_add(used_bytes, patch.trampoline_size);
-    }
-    ConSanBranchOnlyReservoirTelemetry &telemetry = result.moi_branch_only_reservoir_telemetry;
-    telemetry.used_reservoir_count = used_count;
-    telemetry.used_appended_bytes = used_bytes;
-  }
   return pruned_any;
 }
 
@@ -2885,12 +2872,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     std::string relay_error;
     BranchOnlyRelayBatchPlan route_plan = tentative_router.plan_pairs(
         tentative_planner, branch_only_requests, &relay_error, barrier_relay_limits);
-    record_branch_only_relay_plan(result.moi_branch_only_routing_telemetry,
-                                  route_plan.plan_outcome(), route_plan.pair_strategies);
     if (!route_plan.complete() || route_plan.routes.size() != branch_only_requests.size() ||
         !tentative_router.commit(route_plan.routes, &relay_error)) {
-      for (BranchOnlyRelayPairRejection rejection : route_plan.rejection_reasons)
-        record_branch_only_relay_rejection(result.moi_branch_only_routing_telemetry, rejection);
       result.warnings.emplace_back(
           "ConSan MOI barrier record patch found no complete routed register-free batch for " +
           std::to_string(branch_only_requests.size()) + " barrier(s)" +

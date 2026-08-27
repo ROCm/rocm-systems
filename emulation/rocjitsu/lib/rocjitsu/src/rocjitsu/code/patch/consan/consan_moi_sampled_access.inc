@@ -858,23 +858,16 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         const auto reservation = tentative_planner.plan_indirect_appended(
             candidate.text_offset, candidate.size, patch_bytes + sizeof(uint32_t), &relay_error);
         if (reservation) {
-          BranchOnlyRelayPlanOutcome relay_outcome;
           BranchOnlyRelaySearchLimits relay_limits;
           relay_limits.batch.fallback_setup = 1'000'000u;
           relay_limits.pair.greedy = 1'000'000u;
           branch_only_route = tentative_router.plan_pair(
               tentative_planner, candidate.text_offset, reservation->body_offset,
               reservation->body_offset + patch_bytes, candidate.text_offset + candidate.size,
-              &relay_error, &relay_outcome, relay_limits);
-          const std::array pair_strategies = {relay_outcome.strategy};
-          record_branch_only_relay_plan(result.moi_branch_only_routing_telemetry, relay_outcome,
-                                        pair_strategies);
-          if (!branch_only_route) {
-            record_branch_only_relay_failure(result.moi_branch_only_routing_telemetry,
-                                             relay_outcome.failure);
-          } else if (!tentative_router.commit(*branch_only_route, &relay_error)) {
+              &relay_error, nullptr, relay_limits);
+          if (branch_only_route && !tentative_router.commit(*branch_only_route, &relay_error)) {
             branch_only_route.reset();
-          } else {
+          } else if (branch_only_route) {
             for (const BranchOnlyRelayClaim &claim : branch_only_route->claims) {
               if (local_entry_islands &&
                   claim.provenance == BranchOnlyRelayProvenance::PristineNop) {
@@ -1758,7 +1751,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     }
     result.elf_bytes = std::move(patcher).emit();
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
-    result.moi_branch_only_reservoir_telemetry = direct_branch_reservoirs.telemetry();
     result.modified = true;
     return;
   }

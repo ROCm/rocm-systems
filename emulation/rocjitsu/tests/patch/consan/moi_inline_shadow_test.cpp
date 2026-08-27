@@ -3324,9 +3324,6 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyDynamicStackPreservesEntryScalarInputs) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineNopBranchRelay,
                                &ConSanPatchInfo::kind),
             0u);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.pair_attempt_count, 1u);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.plan_call_count, 1u);
-  EXPECT_EQ(result.moi_branch_only_routing_telemetry.work_budget_exhaustion_count, 0u);
 
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_TRUE(patched.is_valid());
@@ -3720,15 +3717,6 @@ TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackRelocatesInstructionReservoirs) {
   };
   EXPECT_TRUE(std::ranges::any_of(branch_only->branch_only_entry_relay_offsets, in_reservoir));
   EXPECT_TRUE(std::ranges::any_of(branch_only->branch_only_return_relay_offsets, in_reservoir));
-  const ConSanBranchOnlyReservoirTelemetry &inventory =
-      relocated.moi_branch_only_reservoir_telemetry;
-  const size_t emitted_reservoir_count = std::ranges::count(
-      relocated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir, &ConSanPatchInfo::kind);
-  EXPECT_GE(inventory.planned_reservoir_count, 1u);
-  EXPECT_EQ(inventory.used_reservoir_count, emitted_reservoir_count);
-  EXPECT_GE(inventory.planned_reservoir_count, inventory.used_reservoir_count);
-  EXPECT_GE(inventory.planned_appended_bytes, inventory.used_appended_bytes);
-  EXPECT_GT(inventory.used_appended_bytes, 0u);
 }
 
 TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
@@ -3774,7 +3762,6 @@ TEST(ConSanMoi, Rdna4InlineBranchOnlyReservoirsCoverEarliestPendingSource) {
                                   }),
             2u)
       << testing::PrintToString(result.warnings);
-  EXPECT_GT(result.moi_branch_only_reservoir_telemetry.used_reservoir_count, 0u);
 }
 
 TEST(ConSanMoi, Rdna4BranchOnlyDynamicStackFailsClosedWithoutAdmissibleReservoir) {
