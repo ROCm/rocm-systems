@@ -351,8 +351,6 @@ TEST(ConSan, SharedDiagnosticVocabularyUsesStableNames) {
       consan_barrier_operand_source_name(ConSanBarrierSite::OperandSource::StaticM0Literal32),
       "static-m0-literal32");
   EXPECT_STREQ(consan_barrier_scope_name(ConSanBarrierSite::Scope::Workgroup), "workgroup");
-  EXPECT_STREQ(consan_moi_candidate_source_name(ConSanMoiCandidateSource::FlatMaybeGroup),
-               "flat-maybe-group");
   EXPECT_STREQ(consan_lds_access_kind_name(ConSanLdsAccessKind::Atomic), "atomic");
   EXPECT_STREQ(consan_flat_address_space_hint_name(ConSanFlatAddressSpaceHint::MaybePrivate),
                "maybe-private");

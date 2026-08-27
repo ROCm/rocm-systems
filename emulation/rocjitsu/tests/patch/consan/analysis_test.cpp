@@ -61,8 +61,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
     EXPECT_EQ(site.width_bits, expected_widths[index]);
     EXPECT_EQ(site.addr_vgpr, expected_addresses[index]);
     const ConSanMoiCandidate &candidate = result.moi_candidates[index];
-    EXPECT_TRUE(candidate.direct_to_lds);
-    EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::NativeLds);
+    EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
     EXPECT_EQ(candidate.width_bits, expected_widths[index]);
     EXPECT_EQ(candidate.addr_vgpr, expected_addresses[index]);
@@ -121,7 +120,6 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
     EXPECT_EQ(site.addr_vgpr, expected_addresses[index]);
     const ConSanMoiCandidate &candidate = result.moi_candidates[index];
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
-    EXPECT_TRUE(candidate.direct_to_lds);
     EXPECT_EQ(candidate.width_bits, expected_widths[index]);
     EXPECT_EQ(candidate.addr_vgpr, expected_addresses[index]);
   }
@@ -167,8 +165,7 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
   EXPECT_EQ(kernel.lds_sites[1].width_bits, 128u);
   EXPECT_FALSE(kernel.lds_sites[1].addr_vgpr.has_value());
   for (const ConSanMoiCandidate &candidate : result.moi_candidates) {
-    EXPECT_TRUE(candidate.direct_to_lds);
-    EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::NativeLds);
+    EXPECT_EQ(candidate.origin, ConSanAccessOrigin::DirectToLds);
     EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
   }
 }
@@ -1602,7 +1599,9 @@ TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   EXPECT_EQ(unknown_store.raw_vsrc, 5u);
   EXPECT_EQ(unknown_store.raw_segment, 0u);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+            ConSanFlatAddressSpaceHint::Group);
   EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
 }
@@ -2216,7 +2215,8 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
         ASSERT_EQ(result.moi_candidates.size(), 1u);
         const ConSanMoiCandidate &candidate = result.moi_candidates.front();
         EXPECT_EQ(candidate.mnemonic, expected_mnemonic);
-        EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
+        EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
+        EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
         EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
         EXPECT_EQ(candidate.width_bits, form.memory_width_bits);
         EXPECT_TRUE(consan_moi_supports_flat_access_mnemonic(candidate.mnemonic));
@@ -2350,7 +2350,8 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
         ASSERT_EQ(result.moi_candidates.size(), 1u);
         const ConSanMoiCandidate &candidate = result.moi_candidates.front();
         EXPECT_EQ(candidate.mnemonic, expected_mnemonic);
-        EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
+        EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
+        EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
         EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Write);
         EXPECT_EQ(candidate.width_bits, form.memory_width_bits);
         const auto semantics = consan_flat_store_subword_semantics(candidate.mnemonic);
@@ -2592,7 +2593,9 @@ TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
-    EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+    EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
+    EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+              ConSanFlatAddressSpaceHint::Group);
     EXPECT_EQ(result.moi_candidates.front().size, 2u * sizeof(uint32_t));
     EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_dword");
     EXPECT_EQ(result.moi_candidates.front().raw_segment, 0u);

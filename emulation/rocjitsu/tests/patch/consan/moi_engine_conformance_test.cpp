@@ -166,7 +166,8 @@ TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) 
         << testing::PrintToString(result.errors);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
     const ConSanMoiCandidate &candidate = result.moi_candidates.front();
-    EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
+    EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
+    EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
     EXPECT_EQ(candidate.raw_saddr, 14u);
     EXPECT_EQ(candidate.raw_ioffset, 12);
     ASSERT_TRUE(candidate.raw_scale_offset);

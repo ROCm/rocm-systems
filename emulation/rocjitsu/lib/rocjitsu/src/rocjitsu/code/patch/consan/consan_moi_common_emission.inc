@@ -904,7 +904,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint16_t base_scratch_count = automatic_banked_capture ? 10u : 6u;
   const bool materialize_flat_address =
       candidate_requires_gfx12_flat_address_materialization(candidate, arch);
-  const bool materialize_direct_to_lds = candidate.direct_to_lds;
+  const bool materialize_direct_to_lds = candidate.origin == ConSanAccessOrigin::DirectToLds;
   const bool load_clobbers_address = moi_load_clobbers_address(candidate);
   const bool capture_high_bank_address =
       moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);

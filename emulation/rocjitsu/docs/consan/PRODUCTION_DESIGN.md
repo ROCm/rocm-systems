@@ -3909,6 +3909,37 @@ analysis completed.
   preceding tranche; this metadata-only slice does not alter lowering or device
   bytes. E2E validation remains outside this work.
 
+### Slice 5Z: consume normalized access origin directly
+
+- **One decoder fact, not a lowering reclassification:** `ProgramInventory`
+  already records whether an admitted access originated from a native LDS
+  instruction, a FLAT instruction, or a global instruction that writes
+  directly to LDS. The temporary MOI candidate now retains that exact
+  `ConSanAccessOrigin`; resource planning and emission no longer translate it
+  into their own three-way source enum.
+- **Completed compatibility deletion:** `ConSanMoiCandidateSource`, its
+  formatter and formatter test, and the candidate's derived `direct_to_lds`
+  boolean are gone. Native-versus-FLAT address width, gfx1250 high-bank
+  capture, spill recovery, gfx12 address materialization, and direct-to-LDS
+  relocation all branch on the normalized origin fact. The origin enum moved
+  earlier in the assembled type declarations so both inventory and the
+  temporary lowering operand use the same definition.
+- **Contract coverage:** Host tests now assert the exact normalized origin for
+  native LDS, FLAT, and direct-to-LDS candidates, together with FLAT
+  address-space provenance where it affects strict or likely admission. They
+  no longer test agreement between two copied tags. Existing paired device
+  contracts exercise all three origins across the five supported targets.
+- **Deletion result:** Production source is 29 physical lines smaller. Tests
+  add 14 net lines because they replace one compatibility-tag assertion with
+  the stronger origin and provenance contract where applicable. No helper
+  predicate, compatibility alias, or second origin representation was added.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 98.12
+  seconds. The complete physical-gfx950 gate was exercised in Slice 5X; this
+  representation cutover preserves the selected access set and emitted bytes.
+  E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -2669,11 +2669,13 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   // A DS load may overwrite its own address VGPR. Snapshot that address before
   // executing the displaced instruction so sampled publication remains tied
   // to the guest access rather than to the loaded payload.
-  if (relocate_instruction && (candidate.direct_to_lds || moi_load_clobbers_address(candidate)) &&
+  if (relocate_instruction &&
+      (candidate.origin == ConSanAccessOrigin::DirectToLds ||
+       moi_load_clobbers_address(candidate)) &&
       !preserved_lds_byte_offset_vgpr) {
     const uint16_t saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(*options.scratch_vgpr + base_scratch_count);
-    if (candidate.direct_to_lds) {
+    if (candidate.origin == ConSanAccessOrigin::DirectToLds) {
       if (!options.moi_exec_save_sgpr) {
         errors.emplace_back(
             "ConSan MOI sampled direct-to-LDS probe requires an EXEC-save SGPR pair");

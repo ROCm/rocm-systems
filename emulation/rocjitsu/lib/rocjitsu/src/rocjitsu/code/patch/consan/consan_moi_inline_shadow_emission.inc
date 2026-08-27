@@ -2511,7 +2511,7 @@
       (consan_uses_gfx9_cdna_encoding(arch)) && moi_load_clobbers_address(candidate) &&
       !source_is_spilled(*lds_byte_offset_vgpr);
   std::optional<uint16_t> saved_lds_byte_offset_vgpr;
-  if (candidate.direct_to_lds) {
+  if (candidate.origin == ConSanAccessOrigin::DirectToLds) {
     saved_lds_byte_offset_vgpr =
         static_cast<uint16_t>(consan_detail::inline_shadow_loop_counter_vgpr(
                                   *options.scratch_vgpr, options.moi_exec_save_sgpr.has_value(),
@@ -2611,7 +2611,7 @@
   // otherwise the loaded payload becomes the exact-shadow cell index.
   if (saved_lds_byte_offset_vgpr) {
     if (!spill_backed_lds_byte_offset_source) {
-      if (candidate.direct_to_lds) {
+      if (candidate.origin == ConSanAccessOrigin::DirectToLds) {
         if (!options.moi_exec_save_sgpr) {
           errors.emplace_back(
               "ConSan MOI inline-shadow direct-to-LDS probe requires an EXEC-save SGPR pair");
@@ -2754,7 +2754,8 @@
     words.insert(words.end(), accounting_words.begin(), accounting_words.end());
     words.push_back(*restore_valid_exec);
   }
-  if (candidate.in_kernel && candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup) {
+  if (candidate.in_kernel && candidate.origin == ConSanAccessOrigin::Flat &&
+      candidate.flat_address_space_hint != ConSanFlatAddressSpaceHint::Group) {
     // Likely provenance deliberately admits flat sites whose static dataflow
     // cannot prove one aperture. Resolve that uncertainty with the same high
     // address comparison used by hardware: a 32-bit SHARED_BASE source is the

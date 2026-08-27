@@ -192,18 +192,6 @@ const char *consan_barrier_scope_name(ConSanBarrierSite::Scope scope) {
   return "unknown";
 }
 
-const char *consan_moi_candidate_source_name(ConSanMoiCandidateSource source) {
-  switch (source) {
-  case ConSanMoiCandidateSource::NativeLds:
-    return "native-lds";
-  case ConSanMoiCandidateSource::FlatGroup:
-    return "flat-group";
-  case ConSanMoiCandidateSource::FlatMaybeGroup:
-    return "flat-maybe-group";
-  }
-  return "unknown";
-}
-
 const char *consan_lds_access_kind_name(ConSanLdsAccessKind kind) {
   switch (kind) {
   case ConSanLdsAccessKind::Read:

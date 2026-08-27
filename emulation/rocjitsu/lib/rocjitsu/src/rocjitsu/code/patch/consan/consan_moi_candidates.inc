@@ -363,13 +363,8 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
   candidate.container_name = access.container.name;
   candidate.in_kernel = access.container.kind == ConSanProgramContainerKind::Kernel;
   candidate.container_entry_text_offset = access.container.entry_text_offset;
-  candidate.source = access.origin == ConSanAccessOrigin::Flat
-                         ? (access.flat_address_space_hint == ConSanFlatAddressSpaceHint::Group
-                                ? ConSanMoiCandidateSource::FlatGroup
-                                : ConSanMoiCandidateSource::FlatMaybeGroup)
-                         : ConSanMoiCandidateSource::NativeLds;
+  candidate.origin = access.origin;
   candidate.kind = access.kind;
-  candidate.direct_to_lds = access.origin == ConSanAccessOrigin::DirectToLds;
   candidate.flat_address_space_hint = access.flat_address_space_hint;
   candidate.text_offset = access.physical_id.original_text_offset;
   candidate.file_offset = access.file_offset;

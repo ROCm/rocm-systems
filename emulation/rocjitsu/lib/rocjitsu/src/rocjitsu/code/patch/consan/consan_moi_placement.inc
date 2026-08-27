@@ -1050,7 +1050,7 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                std::vector<std::string> &errors) {
   // Direct-to-LDS candidates materialize their implicit physical-lane address
   // into dedicated scratch before this placeholder can be consumed.
-  if (candidate.direct_to_lds)
+  if (candidate.origin == ConSanAccessOrigin::DirectToLds)
     return 0u;
   if (!candidate.addr_vgpr) {
     errors.emplace_back("ConSan MOI probe requires an LDS address VGPR");
@@ -1064,7 +1064,7 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
                                                             uint16_t result_vgpr,
                                                             uint16_t exec_save_sgpr,
                                                             rj_code_arch_t arch) {
-  if (!candidate.direct_to_lds)
+  if (candidate.origin != ConSanAccessOrigin::DirectToLds)
     return false;
 
   // CDNA5 VGLOBAL direct-to-LDS instructions carry the LDS byte destination
@@ -1114,18 +1114,14 @@ candidate_lds_byte_offset_vgpr(const ConSanMoiCandidate &candidate,
 [[nodiscard]] bool
 candidate_uses_gfx12_scalar_vector_flat_address(const ConSanMoiCandidate &candidate,
                                                 rj_code_arch_t arch) {
-  return is_rdna4_family_arch(arch) &&
-         (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
-          candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup) &&
+  return is_rdna4_family_arch(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
          candidate.raw_saddr && !is_vector_flat_no_saddr(*candidate.raw_saddr, arch);
 }
 
 [[nodiscard]] bool
 candidate_requires_gfx12_flat_address_materialization(const ConSanMoiCandidate &candidate,
                                                       rj_code_arch_t arch) {
-  return is_rdna4_family_arch(arch) &&
-         (candidate.source == ConSanMoiCandidateSource::FlatGroup ||
-          candidate.source == ConSanMoiCandidateSource::FlatMaybeGroup) &&
+  return is_rdna4_family_arch(arch) && candidate.origin == ConSanAccessOrigin::Flat &&
          candidate.raw_saddr && candidate.raw_ioffset && candidate.raw_scale_offset &&
          (candidate_uses_gfx12_scalar_vector_flat_address(candidate, arch) ||
           *candidate.raw_ioffset != 0);
@@ -1218,8 +1214,7 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
 [[nodiscard]] bool moi_load_clobbers_address(const ConSanMoiCandidate &candidate) {
   if (!candidate.addr_vgpr || !candidate.dst_vgpr)
     return false;
-  const uint16_t address_vgpr_count =
-      candidate.source == ConSanMoiCandidateSource::NativeLds ? 1u : 2u;
+  const uint16_t address_vgpr_count = candidate.origin == ConSanAccessOrigin::Flat ? 2u : 1u;
   return range_overlaps(*candidate.addr_vgpr, address_vgpr_count, *candidate.dst_vgpr,
                         candidate_payload_vgpr_count(candidate));
 }
@@ -1232,9 +1227,8 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
   // SRC0, SRC1, SRC2, and DST. Native LDS addresses are SRC0, so a nonzero
   // SRC0 bank must be copied while that bank is still selected. The appended
   // probe subsequently selects bank zero for its own scratch registers.
-  return arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-         candidate.source == ConSanMoiCandidateSource::NativeLds && candidate.addr_vgpr &&
-         (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0x3u) != 0u;
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.origin != ConSanAccessOrigin::Flat &&
+         candidate.addr_vgpr && (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0x3u) != 0u;
 }
 
 // A Sampled store executes its displaced guest instruction before the probe
@@ -1248,7 +1242,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
 [[nodiscard]] bool sampled_access_can_emit_spill_over_guest_operands(
     const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   return options.moi_engine == ConSanMoiEngine::Sampled && !candidate.dst_vgpr &&
-         !candidate.direct_to_lds && options.moi_owner_vgpr &&
+         candidate.origin != ConSanAccessOrigin::DirectToLds && options.moi_owner_vgpr &&
          !options.automatic_moi_private_epoch && !moi_uses_scalar_persistent_state(options) &&
          !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
 }
@@ -1258,7 +1252,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
   if (sampled_access_can_emit_spill_over_guest_operands(options, candidate, arch))
     return true;
   if (options.moi_engine != ConSanMoiEngine::Sampled || candidate.dst_vgpr ||
-      candidate.direct_to_lds || options.automatic_moi_private_epoch ||
+      candidate.origin == ConSanAccessOrigin::DirectToLds || options.automatic_moi_private_epoch ||
       moi_uses_scalar_persistent_state(options) ||
       candidate_requires_gfx12_flat_address_materialization(candidate, arch)) {
     return false;
@@ -1278,7 +1272,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
 [[nodiscard]] bool sampled_access_supports_spill_backed_operand_recovery(
     const ConSanOptions &options, const ConSanMoiCandidate &candidate, rj_code_arch_t arch) {
   return options.moi_engine == ConSanMoiEngine::Sampled &&
-         candidate.source == ConSanMoiCandidateSource::NativeLds && !candidate.direct_to_lds &&
+         candidate.origin == ConSanAccessOrigin::NativeLds &&
          (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
           consan_uses_gfx9_cdna_encoding(arch)) &&
          !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
@@ -1300,7 +1294,8 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
           : 0u;
   return static_cast<uint16_t>(
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
-      ((candidate.direct_to_lds || moi_load_clobbers_address(candidate) ||
+      ((candidate.origin == ConSanAccessOrigin::DirectToLds ||
+        moi_load_clobbers_address(candidate) ||
         moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)) &&
                flat_offset_address_count == 0u
            ? 1u
@@ -1317,8 +1312,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
   // Only the non-spill path must retain a dedicated address snapshot when a
   // load overwrites its address operand.
   const bool can_reload_clobbered_address =
-      (consan_uses_gfx9_cdna_encoding(arch)) &&
-      candidate.source == ConSanMoiCandidateSource::NativeLds &&
+      (consan_uses_gfx9_cdna_encoding(arch)) && candidate.origin != ConSanAccessOrigin::Flat &&
       moi_load_clobbers_address(candidate) &&
       !candidate_requires_gfx12_flat_address_materialization(candidate, arch);
   return static_cast<uint16_t>(normal_count - (can_reload_clobbered_address ? 1u : 0u));
@@ -1340,7 +1334,8 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
       base_scratch_count + 1u +
       (gfx12_flat_access_address_scratch_count(candidate, arch) != 0u
            ? gfx12_flat_access_address_scratch_count(candidate, arch)
-       : candidate.direct_to_lds || moi_load_clobbers_address(candidate) ||
+       : candidate.origin == ConSanAccessOrigin::DirectToLds ||
+               moi_load_clobbers_address(candidate) ||
                moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)
            ? 1u
            : 0u) +
@@ -1393,8 +1388,7 @@ struct SampledAtomicScratchLayout {
   auto address_vgpr = candidate_lds_byte_offset_vgpr(candidate, errors);
   if (!address_vgpr)
     return true;
-  const uint16_t address_vgpr_count =
-      candidate.source == ConSanMoiCandidateSource::NativeLds ? 1u : 2u;
+  const uint16_t address_vgpr_count = candidate.origin == ConSanAccessOrigin::Flat ? 2u : 1u;
   if (range_overlaps(*address_vgpr, address_vgpr_count, scratch_vgpr, scratch_count)) {
     errors.emplace_back("ConSan MOI probe scratch VGPRs overlap the LDS address VGPRs");
     return true;
@@ -1865,7 +1859,8 @@ struct MoiOwnerRegisterReferenceSummary {
         (record_replay_uses_automatic_banked_capture(options) ? 10u : 6u) +
         (gfx12_flat_access_address_scratch_count(candidate, arch) != 0u
              ? gfx12_flat_access_address_scratch_count(candidate, arch)
-         : candidate.direct_to_lds || moi_load_clobbers_address(candidate) ||
+         : candidate.origin == ConSanAccessOrigin::DirectToLds ||
+                 moi_load_clobbers_address(candidate) ||
                  moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)
              ? 1u
              : 0u) +
@@ -2944,8 +2939,7 @@ plan_moi_resource_site(MoiResourcePlanningState &state, const ConSanOptions &opt
   // a liveness-dead window rather than rejecting the chosen window later.
   if (access_candidate != nullptr) {
     if (access_candidate->addr_vgpr) {
-      const uint8_t address_count =
-          access_candidate->source == ConSanMoiCandidateSource::NativeLds ? 1u : 2u;
+      const uint8_t address_count = access_candidate->origin == ConSanAccessOrigin::Flat ? 2u : 1u;
       request.forbidden.expand({RegClass::VGPR, *access_candidate->addr_vgpr, address_count});
     }
     const uint8_t payload_count =
@@ -3244,8 +3238,7 @@ void append_moi_resource_plans(MoiResourcePlanningState &state, const ConSanOpti
     }
     if (site_options.moi_engine == ConSanMoiEngine::InlineShadow &&
         (consan_uses_gfx9_cdna_encoding(state.arch)) &&
-        candidate.source == ConSanMoiCandidateSource::NativeLds &&
-        moi_load_clobbers_address(candidate) &&
+        candidate.origin != ConSanAccessOrigin::Flat && moi_load_clobbers_address(candidate) &&
         !candidate_requires_gfx12_flat_address_materialization(candidate, state.arch) &&
         (plan.source == ConSanRegisterAllocationSource::SpillRequired ||
          (plan.source == ConSanRegisterAllocationSource::Unsupported &&

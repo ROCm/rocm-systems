@@ -1102,7 +1102,7 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   ASSERT_EQ(result.program_inventory.functions().front().flat_sites.size(), 1u);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   const ConSanMoiCandidate &candidate = result.moi_candidates.front();
-  EXPECT_EQ(candidate.source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
   EXPECT_EQ(candidate.kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(candidate.flat_address_space_hint, ConSanFlatAddressSpaceHint::Group);
   EXPECT_FALSE(candidate.in_kernel);
@@ -2573,7 +2573,9 @@ TEST(ConSanMoi, AutoReportInventoryCoversFullLdsApertureForFlatGroupAccess) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  ASSERT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  ASSERT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
+  ASSERT_EQ(result.moi_candidates.front().flat_address_space_hint,
+            ConSanFlatAddressSpaceHint::Group);
   const ConSanMoiAutoReportInventory inventory = plan_test_moi_evidence_inventory(result, options);
   EXPECT_EQ(inventory.access_range_count, 1u);
   EXPECT_EQ(inventory.inline_lds_bytes, kConSanMoiInlineShadowConservativeExactShadowEntries *
@@ -3160,7 +3162,9 @@ TEST(ConSanMoi, StrictFlatProvenanceExcludesMaybeGroupCandidates) {
   const auto likely_result = try_patch_consan(bytes, likely_options);
   ASSERT_TRUE(likely_result.errors.empty());
   ASSERT_EQ(likely_result.moi_candidates.size(), 1u);
-  EXPECT_EQ(likely_result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatMaybeGroup);
+  EXPECT_EQ(likely_result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(likely_result.moi_candidates.front().flat_address_space_hint,
+            ConSanFlatAddressSpaceHint::MaybeGroup);
 
   ConSanOptions strict_options = likely_options;
   strict_options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;

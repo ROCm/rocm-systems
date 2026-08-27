@@ -2144,7 +2144,9 @@ TEST(ConSanMoi, Cdna4InlineShadowReloadsBothSpilledMaybeGroupAddressHalves) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatMaybeGroup);
+  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+            ConSanFlatAddressSpaceHint::MaybeGroup);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::SpillRequired);
   EXPECT_EQ(result.resource_plans.front().scratch_vgpr, 0u);
@@ -8936,7 +8938,9 @@ TEST(ConSanMoi, InlineShadowPublishesStronglyClassifiedFlatLdsCell) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+            ConSanFlatAddressSpaceHint::Group);
   const auto access_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end());

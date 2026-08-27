@@ -342,11 +342,47 @@ struct ConSanAtomicSite {
          site.mnemonic.find("cmpxchg") != std::string::npos;
 }
 
-enum class ConSanMoiCandidateSource : uint8_t {
+/// Instruction family from which one normalized access fact originated.
+///
+/// This is decoder provenance, not engine applicability. `DirectToLds` names
+/// a global-memory instruction whose architectural destination is LDS; it is
+/// kept distinct because its address and payload operands differ from an
+/// ordinary DS instruction even though both access group memory.
+enum class ConSanAccessOrigin : uint8_t {
+  /// Native DS/LDS instruction.
   NativeLds,
-  FlatGroup,
-  FlatMaybeGroup,
+  /// FLAT instruction with separately classified address-space provenance.
+  Flat,
+  /// Global-memory operation carrying a direct-to-LDS modifier.
+  DirectToLds,
+  /// One past the last origin. This is an iteration bound and never a decoded
+  /// access origin.
+  Count,
 };
+
+/// Complete iterable set of decoded access origins.
+inline constexpr std::array<ConSanAccessOrigin, 3> kConSanAccessOrigins = {
+    ConSanAccessOrigin::NativeLds,
+    ConSanAccessOrigin::Flat,
+    ConSanAccessOrigin::DirectToLds,
+};
+
+/// Return the stable diagnostic spelling of an access-origin fact.
+[[nodiscard]] constexpr std::string_view consan_access_origin_name(ConSanAccessOrigin origin) {
+  switch (origin) {
+  case ConSanAccessOrigin::NativeLds:
+    return "native-lds";
+  case ConSanAccessOrigin::Flat:
+    return "flat";
+  case ConSanAccessOrigin::DirectToLds:
+    return "direct-to-lds";
+  case ConSanAccessOrigin::Count:
+    break;
+  }
+  return "invalid-access-origin";
+}
+
+static_assert(kConSanAccessOrigins.size() == static_cast<size_t>(ConSanAccessOrigin::Count));
 
 /// One normalized byte range retained by the temporary MOI lowering operand.
 ///
@@ -365,9 +401,8 @@ struct ConSanMoiCandidate {
   bool in_kernel = true;
   uint64_t container_entry_text_offset = 0;
   std::optional<uint16_t> gfx1250_vgpr_msb_mode;
-  ConSanMoiCandidateSource source = ConSanMoiCandidateSource::NativeLds;
+  ConSanAccessOrigin origin = ConSanAccessOrigin::NativeLds;
   ConSanLdsAccessKind kind = ConSanLdsAccessKind::Other;
-  bool direct_to_lds = false;
   ConSanFlatAddressSpaceHint flat_address_space_hint = ConSanFlatAddressSpaceHint::Unknown;
   uint64_t text_offset = 0;
   uint64_t file_offset = 0;

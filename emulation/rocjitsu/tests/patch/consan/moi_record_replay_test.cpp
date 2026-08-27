@@ -71,7 +71,7 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(kernel.stats.lds_write_count, 1u);
   ASSERT_EQ(kernel.lds_sites.size(), 2u);
   ASSERT_EQ(result.moi_candidates.size(), 2u);
-  EXPECT_EQ(result.moi_candidates[0].source, ConSanMoiCandidateSource::NativeLds);
+  EXPECT_EQ(result.moi_candidates[0].origin, ConSanAccessOrigin::NativeLds);
   EXPECT_EQ(result.moi_candidates[0].kind, ConSanLdsAccessKind::Write);
   EXPECT_TRUE(result.moi_candidates[0].in_kernel);
   EXPECT_EQ(result.moi_candidates[0].container_name, "lds_probe");
@@ -2986,7 +2986,7 @@ TEST(ConSanMoi, Cdna4FirstLightProbeEmitsNativeVariableLengthRecipes) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::NativeLds);
+  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::NativeLds);
   EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Write);
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -6837,7 +6837,9 @@ TEST(ConSanMoi, FirstLightProbeWritesOneLikelyGroupFlatAccessRecord) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+            ConSanFlatAddressSpaceHint::Group);
   EXPECT_EQ(result.moi_candidates.front().kind, ConSanLdsAccessKind::Read);
   EXPECT_EQ(result.moi_candidates.front().mnemonic, "flat_load_b32");
   EXPECT_EQ(result.moi_candidates.front().text_offset, 28u);
@@ -10280,7 +10282,9 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
-  EXPECT_EQ(result.moi_candidates.front().source, ConSanMoiCandidateSource::FlatGroup);
+  EXPECT_EQ(result.moi_candidates.front().origin, ConSanAccessOrigin::Flat);
+  EXPECT_EQ(result.moi_candidates.front().flat_address_space_hint,
+            ConSanFlatAddressSpaceHint::Group);
   EXPECT_EQ(result.moi_candidates.front().raw_ioffset, 16);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 

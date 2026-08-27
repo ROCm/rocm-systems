@@ -5153,7 +5153,7 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
   rocjitsu::ConSanResult result = auto_report_atomic_transform_result();
 
   rocjitsu::ConSanMoiCandidate candidate;
-  candidate.source = rocjitsu::ConSanMoiCandidateSource::NativeLds;
+  candidate.origin = rocjitsu::ConSanAccessOrigin::NativeLds;
   candidate.kind = rocjitsu::ConSanLdsAccessKind::Write;
   candidate.size = sizeof(uint32_t);
   candidate.width_bits = 32u;
