@@ -86,6 +86,7 @@ partially written data. This framework automates that process:
 | `lds_reduce.hip` | LDS (shared memory) | RAW via shared memory | `s_wait_dscnt`, `s_wait_kmcnt` |
 | `lds_war_pattern.hip` | LDS (shared memory) | WAR (`ds_read` then `ds_write`, same slot) | `s_wait_dscnt`, `s_wait_kmcnt` |
 | `tensor_lds.hip` | Tensor DMA → LDS | RAW (TDM write→LDS read) | `s_wait_tensorcnt`, `s_wait_dscnt` |
+| `tensor_lds_offset.hip` | Tensor DMA → LDS at a nonzero descriptor base | RAW (TDM write→LDS read away from offset zero) | `s_wait_tensorcnt`, `s_wait_dscnt` |
 | `fa_barrier_epoch.hip` | Tensor DMA + LDS + barriers | Cross-wave LDS reuse across barrier epochs | `s_wait_tensorcnt`, `s_wait_dscnt` |
 | `trans_sin_cos.hip` | Global vector | RAW (load→`v_sin`/`v_cos`) | `s_wait_loadcnt`, `s_wait_kmcnt` |
 | `trans_rcp_sqrt.hip` | Global vector | RAW (load→`v_rcp`/`v_sqrt`/`v_rsq`) | `s_wait_loadcnt`, `s_wait_kmcnt` |
@@ -100,8 +101,9 @@ partially written data. This framework automates that process:
 A kernel that only assembles for particular targets declares them with a
 `// requires: <arch>` comment, and both the CLI and the pytest suite skip a
 shader whose `requires:` list does not contain the target architecture.
-`tensor_lds.hip` and `wmma_exp.hip` declare `// requires: gfx1250` because their
-builtins need the `gfx1250-insts` target feature. A shader without that comment
+`tensor_lds.hip`, `tensor_lds_offset.hip` and `wmma_exp.hip` declare
+`// requires: gfx1250` because their builtins need the `gfx1250-insts` target
+feature. A shader without that comment
 is treated as portable and runs everywhere, so a kernel that names its target
 only in prose is compiled for every architecture and fails there instead of
 being skipped.
