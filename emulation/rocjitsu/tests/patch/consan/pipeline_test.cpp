@@ -354,7 +354,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   mechanism.coverage_ledger = coverage;
   mechanism.outcome = ConSanTransformOutcome::ModifiedValid;
   mechanism.modified = true;
-  mechanism.elf_bytes = {0x7f, 'E', 'L', 'F'};
+  mechanism.replacement = {0x7f, 'E', 'L', 'F'};
   mechanism.fault_sites.emplace_back().identity = "published-fault-site";
   mechanism.barrier_move_destinations.emplace_back().identity = "published-destination";
   mechanism.fault_plans.emplace_back().primary_identity = "published-fault-plan";
@@ -388,6 +388,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
       complete_runtime_capabilities(), BoundRuntimeResources{}, std::move(mechanism));
 
   ASSERT_TRUE(published.well_formed()) << testing::PrintToString(published.issues);
+  EXPECT_EQ(published.replacement, (std::vector<uint8_t>{0x7f, 'E', 'L', 'F'}));
   ASSERT_EQ(published.fault_sites.size(), 1u);
   EXPECT_EQ(published.fault_sites.front().identity, "published-fault-site");
   ASSERT_EQ(published.barrier_move_destinations.size(), 1u);
@@ -507,7 +508,7 @@ TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
   EXPECT_EQ(open.program_inventory.target(), closed.program_inventory.target());
   EXPECT_EQ(open.observation_plan, closed.observation_plan);
   EXPECT_EQ(open.coverage_ledger, closed.coverage_ledger);
-  EXPECT_EQ(open.replacement_bytes, closed.replacement_bytes);
+  EXPECT_EQ(open.replacement, closed.replacement);
   EXPECT_EQ(open.outcome, closed.outcome);
   EXPECT_EQ(open.configuration_issue, closed.configuration_issue);
   EXPECT_EQ(open.issues, closed.issues);
@@ -738,7 +739,7 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   malformed.outcome = ConSanTransformOutcome::ModifiedValid;
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
-  malformed.replacement_bytes.push_back(1);
+  malformed.replacement.push_back(1);
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   malformed.stages.back().status = ConSanPipelineStageStatus::Invalid;
@@ -759,10 +760,10 @@ TEST(ConSanPipeline, InstallActionTruthTableUsesOnlySplitStaticResult) {
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
 
   result.outcome = ConSanTransformOutcome::ModifiedValid;
-  result.replacement_bytes = {1};
-  result.replacement_bytes.clear();
+  result.replacement = {1};
+  result.replacement.clear();
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::Reject);
-  result.replacement_bytes = {1};
+  result.replacement = {1};
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadReplacement);
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::LoadReplacement);
 }
@@ -789,7 +790,7 @@ TEST(ConSanPipeline, ProductionResultOwnsAllPublishedTransformArtifacts) {
   EXPECT_FALSE(split.observation_plan.probe_intents.empty());
   EXPECT_EQ(split.coverage_ledger.intent_entries().size(),
             split.observation_plan.probe_intents.size());
-  EXPECT_FALSE(split.replacement_bytes.empty());
+  EXPECT_FALSE(split.replacement.empty());
   EXPECT_FALSE(split.patches.empty());
   EXPECT_FALSE(split.resource_plans.empty());
   EXPECT_EQ(split.install_action(false), split.outcome == ConSanTransformOutcome::ModifiedValid
@@ -868,9 +869,9 @@ TEST(ConSanPipeline, PristineMoiInventoryPreservesOnlyTheRequestedExtendedBarrie
   EXPECT_EQ(std::ranges::count(preserved_sync, ConSanSyncOperation::BarrierFull,
                                &ConSanSyncSequence::operation),
             1u);
-  EXPECT_TRUE(ordinary.replacement_bytes.empty());
-  EXPECT_TRUE(preserved.replacement_bytes.empty());
-  EXPECT_TRUE(cleared_binding.replacement_bytes.empty());
+  EXPECT_TRUE(ordinary.replacement.empty());
+  EXPECT_TRUE(preserved.replacement.empty());
+  EXPECT_TRUE(cleared_binding.replacement.empty());
   ASSERT_EQ(cleared_sync.size(), preserved_sync.size());
   ASSERT_FALSE(cleared_sync.empty());
   EXPECT_EQ(cleared_sync.front().identity, preserved_sync.front().identity);
@@ -910,7 +911,7 @@ TEST(ConSanPipeline, PristineMoiRetryRemainsInsideTypedPipelineBoundary) {
   EXPECT_EQ(retried.code_object, direct.code_object);
   EXPECT_EQ(retried.observation_plan, direct.observation_plan);
   EXPECT_EQ(retried.coverage_ledger, direct.coverage_ledger);
-  EXPECT_EQ(retried.replacement_bytes, direct.replacement_bytes);
+  EXPECT_EQ(retried.replacement, direct.replacement);
   EXPECT_EQ(retried.patches.size(), direct.patches.size());
   EXPECT_EQ(retried.resource_plans.size(), direct.resource_plans.size());
   EXPECT_EQ(retried.fault_sites.size(), direct.fault_sites.size());
@@ -967,7 +968,7 @@ TEST(ConSanPipeline, OrdinaryAndMutationEntryPointsAreSeparateAndDeterministic) 
   EXPECT_EQ(first.observation_plan, second.observation_plan);
   EXPECT_EQ(first.evidence_requirements, second.evidence_requirements);
   EXPECT_EQ(first.outcome, second.outcome);
-  EXPECT_EQ(first.replacement_bytes, second.replacement_bytes);
+  EXPECT_EQ(first.replacement, second.replacement);
   EXPECT_EQ(first.issues, second.issues);
   EXPECT_EQ(first.warnings, second.warnings);
   EXPECT_EQ(first.mutation, second.mutation);
@@ -1007,7 +1008,7 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
       transform_consan(bytes, request, TransformPolicy{}, enabled_runtime_policy(),
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), resources);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_FALSE(result.replacement_bytes.empty());
+  ASSERT_FALSE(result.replacement.empty());
   ASSERT_FALSE(result.patches.empty());
   ASSERT_FALSE(result.dispatch_requirements.kernels.empty());
 
@@ -1015,7 +1016,7 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
 
   ASSERT_TRUE(result.well_formed()) << testing::PrintToString(result.issues);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
-  EXPECT_TRUE(result.replacement_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.dispatch_requirements.kernels.empty());
   EXPECT_EQ(result.install_action(false), ConSanInstallAction::LoadOriginal);
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);

@@ -176,7 +176,7 @@ TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) 
         std::ranges::count(result.patches, test_case.access_patch_kind, &ConSanPatchInfo::kind), 1u)
         << testing::PrintToString(result.warnings);
 
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     ASSERT_EQ(patched.text_sections().size(), 1u);
     std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));

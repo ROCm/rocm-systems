@@ -807,7 +807,7 @@ void expect_moi_engines_admit_native_b96_accesses(
           std::ranges::find(result.patches, expected_patch_kind, &ConSanPatchInfo::kind);
       ASSERT_NE(access_patch, result.patches.end());
       ASSERT_TRUE(access_patch->scratch_vgpr);
-      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
       ASSERT_TRUE(patched.is_valid());
       const std::vector<uint32_t> body = text_words_at_offset(
           patched, access_patch->trampoline_offset, access_patch->trampoline_size);
@@ -1459,11 +1459,11 @@ TEST(ConSanMoi, SharedHelperAtomicSpillUsesOneLayoutForEveryOwner) {
   }
   ASSERT_GT(shared_private_size, 0u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, shared_private_size);
@@ -1502,7 +1502,7 @@ TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnch
   EXPECT_EQ(patch.owner_descriptor_file_offsets,
             result.resource_plans.front().owner_descriptor_file_offsets);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto patched_unrelated =
       std::ranges::find_if(patched.kernels(), [](const AmdGpuKernelInfo &kernel) {
@@ -1511,7 +1511,7 @@ TEST(ConSanMoi, SharedHelperPatchNamesEveryOwnerAndLeavesUnrelatedDescriptorUnch
   ASSERT_NE(patched_unrelated, patched.kernels().end());
   KD patched_unrelated_descriptor{};
   std::memcpy(&patched_unrelated_descriptor,
-              result.elf_bytes.data() + patched_unrelated->descriptor_file_offset,
+              result.replacement.data() + patched_unrelated->descriptor_file_offset,
               sizeof(patched_unrelated_descriptor));
   // Text growth legitimately adjusts KD-relative entry offsets. Resource and
   // ABI fields for a kernel that cannot reach the helper stay unchanged.
@@ -1546,11 +1546,11 @@ TEST(ConSanMoi, SharedHelperPlanGrowsEveryOwnerForOneFreshWindow) {
   EXPECT_EQ(plan.required_vgpr_count, 10u);
   ASSERT_EQ(plan.owner_descriptor_file_offsets.size(), 2u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     const uint32_t granulated = AMDHSA_BITS_GET(
         descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
@@ -1585,7 +1585,7 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
   EXPECT_EQ(patch.required_private_segment_size, 56u);
   ASSERT_EQ(patch.owner_descriptor_file_offsets.size(), 2u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const std::vector<uint32_t> expected_save =
@@ -1598,7 +1598,7 @@ TEST(ConSanMoi, SharedHelperSpillUsesOneLayoutAndGrowsEveryOwner) {
 
   for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 56u);
@@ -1657,11 +1657,11 @@ TEST(ConSanMoi, ScopedSpillPlanningExcludesUnselectedFullVgprCandidate) {
   EXPECT_EQ(result.resource_plans.front().text_offset, result.patches.front().anchor_offset);
   EXPECT_LT(result.resource_plans.front().required_vgpr_count, 256u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (const AmdGpuKernelInfo &kernel : patched.kernels()) {
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + kernel.descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + kernel.descriptor_file_offset,
                 sizeof(descriptor));
     if (kernel.name == "shared_owner_0" || kernel.name == "shared_owner_1") {
       EXPECT_EQ(descriptor.private_segment_fixed_size, 56u);
@@ -1855,11 +1855,11 @@ TEST(ConSanMoi, DispatchPreloadDescriptorPermutationsUseExactAmdhsaPrefix) {
     EXPECT_EQ(prologue->dispatch_id_system_sgpr_count, 2u);
     EXPECT_TRUE(prologue->dispatch_id_preload_inserted);
 
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     KD descriptor{};
     std::memcpy(&descriptor,
-                result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                result.replacement.data() + patched.kernels().front().descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
                               kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID),
@@ -1919,12 +1919,12 @@ TEST(ConSanMoi, DispatchPrologueCapturesBeforeAscendingRestoreAtBothKernargEntri
   EXPECT_EQ(prologue->dispatch_id_system_sgpr_count, 4u);
   EXPECT_GE(prologue->trampoline_size, 256u + 20u * sizeof(uint32_t));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
             16u);
@@ -2002,11 +2002,11 @@ TEST(ConSanMoi, AlreadyEnabledDispatchPreloadIsCapturedWithoutGuestShuffle) {
   EXPECT_EQ(prologue->dispatch_id_expanded_user_sgpr_count, 4u);
   EXPECT_FALSE(prologue->dispatch_id_preload_inserted);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
             4u);
@@ -2067,7 +2067,7 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
   EXPECT_EQ(sources, (std::array<uint16_t, 2>{2u, 6u}));
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(original.is_valid());
   ASSERT_TRUE(patched.is_valid());
   const auto original_unrelated =
@@ -2081,7 +2081,7 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
   std::memcpy(&original_descriptor, bytes.data() + original_unrelated->descriptor_file_offset,
               sizeof(KD));
   std::memcpy(&patched_descriptor,
-              result.elf_bytes.data() + patched_unrelated->descriptor_file_offset, sizeof(KD));
+              result.replacement.data() + patched_unrelated->descriptor_file_offset, sizeof(KD));
   EXPECT_EQ(patched_descriptor.compute_pgm_rsrc1, original_descriptor.compute_pgm_rsrc1);
   EXPECT_EQ(patched_descriptor.compute_pgm_rsrc2, original_descriptor.compute_pgm_rsrc2);
   EXPECT_EQ(patched_descriptor.kernel_code_properties, original_descriptor.kernel_code_properties);
@@ -2103,7 +2103,7 @@ TEST(ConSanMoi, SharedHelperDispatchCaptureUsesPerKernelLayoutsAndOnePersistentP
   const ConSanResult rejected = try_patch_consan(rejected_bytes, options);
   EXPECT_EQ(rejected.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(rejected.modified);
-  EXPECT_TRUE(rejected.elf_bytes.empty());
+  EXPECT_TRUE(rejected.replacement.empty());
   EXPECT_TRUE(rejected.patches.empty());
 }
 
@@ -2136,7 +2136,7 @@ TEST(ConSanMoi, DispatchPreloadUnsupportedLayoutsRollbackTransactionally) {
   });
   EXPECT_EQ(user_limit.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(user_limit.modified);
-  EXPECT_TRUE(user_limit.elf_bytes.empty());
+  EXPECT_TRUE(user_limit.replacement.empty());
   EXPECT_TRUE(user_limit.patches.empty());
 
   const ConSanResult malformed_prefix = run([](KD &descriptor) {
@@ -2146,13 +2146,13 @@ TEST(ConSanMoi, DispatchPreloadUnsupportedLayoutsRollbackTransactionally) {
   });
   EXPECT_EQ(malformed_prefix.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(malformed_prefix.modified);
-  EXPECT_TRUE(malformed_prefix.elf_bytes.empty());
+  EXPECT_TRUE(malformed_prefix.replacement.empty());
   EXPECT_TRUE(malformed_prefix.patches.empty());
 
   const ConSanResult invalid_pair = run([](KD &) {}, 105u);
   EXPECT_EQ(invalid_pair.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(invalid_pair.modified);
-  EXPECT_TRUE(invalid_pair.elf_bytes.empty());
+  EXPECT_TRUE(invalid_pair.replacement.empty());
   EXPECT_TRUE(invalid_pair.patches.empty());
 }
 
@@ -2174,16 +2174,16 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
   EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());
 
   ConSanResult descriptor_corruption = valid;
-  AmdGpuCodeObject descriptor_object(descriptor_corruption.elf_bytes.data(),
-                                     descriptor_corruption.elf_bytes.size());
+  AmdGpuCodeObject descriptor_object(descriptor_corruption.replacement.data(),
+                                     descriptor_corruption.replacement.size());
   ASSERT_TRUE(descriptor_object.is_valid());
   const uint64_t descriptor_offset = descriptor_object.kernels().front().descriptor_file_offset;
   KD descriptor{};
-  std::memcpy(&descriptor, descriptor_corruption.elf_bytes.data() + descriptor_offset,
+  std::memcpy(&descriptor, descriptor_corruption.replacement.data() + descriptor_offset,
               sizeof(descriptor));
   AMDHSA_BITS_SET(descriptor.kernel_code_properties,
                   kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID, 0u);
-  std::memcpy(descriptor_corruption.elf_bytes.data() + descriptor_offset, &descriptor,
+  std::memcpy(descriptor_corruption.replacement.data() + descriptor_offset, &descriptor,
               sizeof(descriptor));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, descriptor_corruption).empty());
 
@@ -2199,7 +2199,7 @@ TEST(ConSanMoi, FinalValidationPinsDispatchDescriptorAndCaptureSequence) {
   const uint32_t wrong_capture = build_s_mov_b32(
       *prologue->dispatch_id_capture_sgpr,
       static_cast<uint16_t>(prologue->dispatch_id_source_sgpr + 1u), ROCJITSU_CODE_ARCH_RDNA4);
-  std::memcpy(capture_corruption.elf_bytes.data() + capture_file_offset, &wrong_capture,
+  std::memcpy(capture_corruption.replacement.data() + capture_file_offset, &wrong_capture,
               sizeof(wrong_capture));
   EXPECT_FALSE(validate_consan_modified_elf(bytes, capture_corruption).empty());
 }
@@ -2617,7 +2617,7 @@ TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   EXPECT_EQ(result.patches.front().original_size, 0u);
   EXPECT_EQ(result.patches.front().trampoline_size, 3u * sizeof(uint32_t));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   ASSERT_EQ(patched.text_sections().size(), 1u);
@@ -2626,7 +2626,7 @@ TEST(ConSanMoi, OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
 
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint64_t descriptor_vaddr = patched.kernel_descriptor_offset("lds_probe");
   ASSERT_NE(descriptor_vaddr, 0u);
@@ -2689,12 +2689,12 @@ TEST(ConSanMoi, Cdna4OwnerEpochPrologueRedirectsKernelDescriptorEntry) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint64_t descriptor_vaddr = patched.kernel_descriptor_offset("owner_epoch");
   ASSERT_NE(descriptor_vaddr, 0u);
@@ -2724,7 +2724,7 @@ TEST(ConSanMoi, OwnerEpochPrologueUsesIndirectReturnBeyondSoppRange) {
   EXPECT_EQ(patch.kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
   EXPECT_EQ(patch.trampoline_size, 8u * sizeof(uint32_t));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const std::vector<uint32_t> actual_words =
@@ -2777,7 +2777,7 @@ TEST(ConSanMoi, OwnerEpochPrologueUsesWave32DescriptorForOwnerShift) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
 
@@ -2808,12 +2808,12 @@ TEST(ConSanMoi, OwnerEpochPrologueGrowsKernelDescriptorVgprAllocation) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint32_t granulated = AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
@@ -2867,14 +2867,14 @@ TEST(ConSanMoi, OwnerEpochPrologueCanUseHwIdOwnerSource) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
   EXPECT_EQ(result.patches.front().trampoline_size, 6u * sizeof(uint32_t));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   ASSERT_EQ(patched.text_sections().size(), 1u);
 
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint32_t vgpr_granulated = AMDHSA_BITS_GET(
       descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
@@ -2937,7 +2937,7 @@ TEST(ConSanMoi, Gfx1100OwnerEpochPrologueUsesHwId1ResidentWaveIdentity) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
 
@@ -2995,7 +2995,7 @@ TEST(ConSanMoi, InlineShadowHwIdOwnerPrologueRemapsReservedZero) {
   ASSERT_TRUE(options.moi_owner_sgpr);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto hwreg = build_hwreg_imm(/*reg_id=*/23, /*offset=*/0, /*size_bits=*/10);
   ASSERT_TRUE(hwreg);

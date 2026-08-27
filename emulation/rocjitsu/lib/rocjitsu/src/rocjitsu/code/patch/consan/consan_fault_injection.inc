@@ -865,7 +865,7 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     return;
   }
 
-  result.elf_bytes = std::move(patched.elf_bytes);
+  result.replacement = std::move(patched.elf_bytes);
   result.modified = true;
   result.patches.reserve(patched.patches.size());
   for (const InstrumentationPatch &patch : patched.patches) {
@@ -919,15 +919,15 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
       }
     }
 
-    if (result.elf_bytes.empty())
-      result.elf_bytes.assign(original_bytes.begin(), original_bytes.end());
+    if (result.replacement.empty())
+      result.replacement.assign(original_bytes.begin(), original_bytes.end());
     const uint32_t replacement_nop = build_s_nop(0, arch);
     for (const ConSanFaultSite *member : members) {
       const ExactBarrierDropPair &owning_pair =
           group && (member == group->second.primary || member == group->second.companion)
               ? group->second
               : (group ? group->first : *pair);
-      std::memcpy(result.elf_bytes.data() + member->file_offset, &replacement_nop,
+      std::memcpy(result.replacement.data() + member->file_offset, &replacement_nop,
                   sizeof(replacement_nop));
       ConSanPatchInfo info;
       info.phase = ConSanPatchPhase::Mutation;
@@ -974,19 +974,19 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
     return;
   }
 
-  if (result.elf_bytes.empty())
-    result.elf_bytes.assign(original_bytes.begin(), original_bytes.end());
+  if (result.replacement.empty())
+    result.replacement.assign(original_bytes.begin(), original_bytes.end());
 
   const uint32_t replacement_nop = build_s_nop(0, arch);
-  if (site->file_offset > result.elf_bytes.size() ||
-      sizeof(replacement_nop) > result.elf_bytes.size() - site->file_offset) {
+  if (site->file_offset > result.replacement.size() ||
+      sizeof(replacement_nop) > result.replacement.size() - site->file_offset) {
     result.errors.emplace_back("ConSan barrier fault offset is outside ELF bytes");
     if (!result.modified)
-      result.elf_bytes.clear();
+      result.replacement.clear();
     return;
   }
 
-  std::memcpy(result.elf_bytes.data() + site->file_offset, &replacement_nop,
+  std::memcpy(result.replacement.data() + site->file_offset, &replacement_nop,
               sizeof(replacement_nop));
 
   ConSanPatchInfo info;
@@ -1143,7 +1143,7 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
     }
   }
 
-  result.elf_bytes = std::move(replacement);
+  result.replacement = std::move(replacement);
   for (const ConSanSyncEvent *member : members) {
     if (member->operation == ConSanSyncOperation::BarrierLeave)
       continue;
@@ -1209,8 +1209,8 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
   uint32_t replacement_literal = *init->participant_setup_literal;
   replacement_literal = (replacement_literal & ~kParticipantCountMask) |
                         (*options.fault_barrier_target_participant_count << 16u);
-  result.elf_bytes.assign(original_bytes.begin(), original_bytes.end());
-  std::memcpy(result.elf_bytes.data() + literal_file_offset, &replacement_literal,
+  result.replacement.assign(original_bytes.begin(), original_bytes.end());
+  std::memcpy(result.replacement.data() + literal_file_offset, &replacement_literal,
               sizeof(replacement_literal));
 
   ConSanPatchInfo patch;
@@ -1449,7 +1449,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     if (!replace_consan_text(patcher, new_text, options, "markerless barrier move", result)) {
       return;
     }
-    result.elf_bytes = std::move(patcher).emit();
+    result.replacement = std::move(patcher).emit();
 
     for (const BarrierSite &source : ordered_sources) {
       ConSanPatchInfo source_info;
@@ -1533,18 +1533,18 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
     return;
   }
 
-  if (result.elf_bytes.empty())
-    result.elf_bytes.assign(original_bytes.begin(), original_bytes.end());
+  if (result.replacement.empty())
+    result.replacement.assign(original_bytes.begin(), original_bytes.end());
   uint32_t barrier_word = 0;
   uint32_t second_barrier_word = 0;
   std::memcpy(&barrier_word, original_bytes.data() + site->file_offset, sizeof(barrier_word));
   std::memcpy(&second_barrier_word, original_bytes.data() + second_site->file_offset,
               sizeof(second_barrier_word));
   const uint32_t nop = build_s_nop(0, arch);
-  std::memcpy(result.elf_bytes.data() + site->file_offset, &nop, sizeof(nop));
-  std::memcpy(result.elf_bytes.data() + second_site->file_offset, &nop, sizeof(nop));
-  std::memcpy(result.elf_bytes.data() + *marker_file_offset, &barrier_word, sizeof(barrier_word));
-  std::memcpy(result.elf_bytes.data() + *second_marker_file_offset, &second_barrier_word,
+  std::memcpy(result.replacement.data() + site->file_offset, &nop, sizeof(nop));
+  std::memcpy(result.replacement.data() + second_site->file_offset, &nop, sizeof(nop));
+  std::memcpy(result.replacement.data() + *marker_file_offset, &barrier_word, sizeof(barrier_word));
+  std::memcpy(result.replacement.data() + *second_marker_file_offset, &second_barrier_word,
               sizeof(second_barrier_word));
 
   ConSanPatchInfo source_info;
@@ -1610,10 +1610,10 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
 
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
-  if (result.elf_bytes.empty())
-    result.elf_bytes.assign(original_bytes.begin(), original_bytes.end());
+  if (result.replacement.empty())
+    result.replacement.assign(original_bytes.begin(), original_bytes.end());
   std::array<uint32_t, 3> words{};
-  std::memcpy(words.data(), result.elf_bytes.data() + selected->file_offset, selected->size);
+  std::memcpy(words.data(), result.replacement.data() + selected->file_offset, selected->size);
   if (options.fault_atomic_wrong_address) {
     if (options.fault_atomic_address_delta == 0 ||
         options.fault_atomic_address_delta % sizeof(uint32_t) != 0 ||
@@ -1699,7 +1699,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
       const auto expected_store = build_s_wait_storecnt0(arch);
       uint32_t preceding_word = 0;
       std::memcpy(&preceding_word,
-                  result.elf_bytes.data() + selected->file_offset - sizeof(uint32_t),
+                  result.replacement.data() + selected->file_offset - sizeof(uint32_t),
                   sizeof(preceding_word));
       if ((expected_combined && preceding_word == *expected_combined) ||
           (expected_store && preceding_word == *expected_store)) {
@@ -1725,7 +1725,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
         return;
       }
       for (uint32_t offset = 0; offset < fence->size; offset += sizeof(uint32_t))
-        std::memcpy(result.elf_bytes.data() + fence->file_offset + offset, &nop, sizeof(nop));
+        std::memcpy(result.replacement.data() + fence->file_offset + offset, &nop, sizeof(nop));
       info.anchor_offset = fence->text_offset;
       info.trampoline_offset = fence->text_offset;
       info.original_size = fence->size;
@@ -1747,20 +1747,20 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
         }
         const uint64_t wait_file_offset =
             selected->file_offset - (selected->text_offset - *release_wait_text_offset);
-        if (wait_file_offset > result.elf_bytes.size() ||
-            sizeof(uint32_t) > result.elf_bytes.size() - wait_file_offset) {
+        if (wait_file_offset > result.replacement.size() ||
+            sizeof(uint32_t) > result.replacement.size() - wait_file_offset) {
           result.errors.emplace_back(
               "ConSan atomic weaken-order mutation release wait exceeds the code object");
           return;
         }
         uint32_t wait_word = 0;
-        std::memcpy(&wait_word, result.elf_bytes.data() + wait_file_offset, sizeof(wait_word));
+        std::memcpy(&wait_word, result.replacement.data() + wait_file_offset, sizeof(wait_word));
         if (wait_word != *expected_combined && wait_word != *expected_store) {
           result.errors.emplace_back(
               "ConSan atomic weaken-order release wait no longer has its admitted encoding");
           return;
         }
-        std::memcpy(result.elf_bytes.data() + wait_file_offset, &nop, sizeof(nop));
+        std::memcpy(result.replacement.data() + wait_file_offset, &nop, sizeof(nop));
         release_wait_info = info;
         release_wait_info->anchor_offset = *release_wait_text_offset;
         release_wait_info->trampoline_offset = *release_wait_text_offset;
@@ -1782,20 +1782,20 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
       }
       const uint64_t wait_file_offset =
           selected->file_offset - (selected->text_offset - *release_wait_text_offset);
-      if (wait_file_offset > result.elf_bytes.size() ||
-          sizeof(uint32_t) > result.elf_bytes.size() - wait_file_offset) {
+      if (wait_file_offset > result.replacement.size() ||
+          sizeof(uint32_t) > result.replacement.size() - wait_file_offset) {
         result.errors.emplace_back(
             "ConSan atomic weaken-order mutation release wait exceeds the code object");
         return;
       }
       uint32_t wait_word = 0;
-      std::memcpy(&wait_word, result.elf_bytes.data() + wait_file_offset, sizeof(wait_word));
+      std::memcpy(&wait_word, result.replacement.data() + wait_file_offset, sizeof(wait_word));
       if (wait_word != *expected_combined && wait_word != *expected_store) {
         result.errors.emplace_back(
             "ConSan atomic weaken-order release wait no longer has its admitted encoding");
         return;
       }
-      std::memcpy(result.elf_bytes.data() + wait_file_offset, &nop, sizeof(nop));
+      std::memcpy(result.replacement.data() + wait_file_offset, &nop, sizeof(nop));
       info.anchor_offset = *release_wait_text_offset;
       info.trampoline_offset = *release_wait_text_offset;
       info.original_size = sizeof(uint32_t);
@@ -1826,7 +1826,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
     result.warnings.emplace_back("ConSan atomic fault lowered " + selected->mnemonic +
                                  " scope from " + std::to_string(original_scope) + " to wave");
   }
-  std::memcpy(result.elf_bytes.data() + selected->file_offset, words.data(), selected->size);
+  std::memcpy(result.replacement.data() + selected->file_offset, words.data(), selected->size);
   result.modified = true;
   if (options.fault_atomic_wrong_address) {
     result.warnings.emplace_back("ConSan atomic fault rewrote " + selected->mnemonic +
@@ -1901,10 +1901,10 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     result.errors.emplace_back("ConSan LDS address fault selected an invalid instruction range");
     return;
   }
-  if (result.elf_bytes.empty())
-    result.elf_bytes.assign(original_bytes.begin(), original_bytes.end());
+  if (result.replacement.empty())
+    result.replacement.assign(original_bytes.begin(), original_bytes.end());
   std::array<uint32_t, 2> words{};
-  std::memcpy(words.data(), result.elf_bytes.data() + selected->file_offset, selected->size);
+  std::memcpy(words.data(), result.replacement.data() + selected->file_offset, selected->size);
   // Every supported target encodes the DS address VGPR in the low byte of
   // word one. Cross-check the decoder before rewriting that operand alone.
   if ((words[1] & 0xffu) != *selected->address_vgpr) {
@@ -1912,7 +1912,7 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
     return;
   }
   words[1] = (words[1] & ~0xffu) | target_address_vgpr;
-  std::memcpy(result.elf_bytes.data() + selected->file_offset, words.data(), selected->size);
+  std::memcpy(result.replacement.data() + selected->file_offset, words.data(), selected->size);
 
   ConSanPatchInfo info;
   info.phase = ConSanPatchPhase::Mutation;
@@ -1952,8 +1952,9 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
   const auto original_bytes = std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(code_object.image_data()), code_object.image_size());
   std::vector<uint8_t> candidate =
-      result.elf_bytes.empty() ? std::vector<uint8_t>(original_bytes.begin(), original_bytes.end())
-                               : result.elf_bytes;
+      result.replacement.empty()
+          ? std::vector<uint8_t>(original_bytes.begin(), original_bytes.end())
+          : result.replacement;
   if (target->site->size != sizeof(rdna4::VglobalMachineInst) ||
       target->site->file_offset > candidate.size() ||
       target->site->size > candidate.size() - target->site->file_offset ||
@@ -2035,7 +2036,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
                                 target->site->text_offset, target->site->size, {}));
   }
 
-  result.elf_bytes = std::move(candidate);
+  result.replacement = std::move(candidate);
   result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
                         std::make_move_iterator(patches.end()));
   result.mutation.applied_fault_logical_identity = target->sequence->identity;

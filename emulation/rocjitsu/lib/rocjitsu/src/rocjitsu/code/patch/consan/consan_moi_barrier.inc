@@ -981,7 +981,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 
   std::span<const uint8_t> active_bytes = bytes;
   if (result.modified)
-    active_bytes = std::span<const uint8_t>(result.elf_bytes.data(), result.elf_bytes.size());
+    active_bytes = std::span<const uint8_t>(result.replacement.data(), result.replacement.size());
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -2343,7 +2343,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  result.elf_bytes = std::move(patcher).emit();
+  result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }
@@ -2464,7 +2464,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
 
   std::span<const uint8_t> active_bytes = bytes;
   if (result.modified)
-    active_bytes = std::span<const uint8_t>(result.elf_bytes.data(), result.elf_bytes.size());
+    active_bytes = std::span<const uint8_t>(result.replacement.data(), result.replacement.size());
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3060,7 +3060,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
                                result)) {
         return;
       }
-      result.elf_bytes = std::move(patcher).emit();
+      result.replacement = std::move(patcher).emit();
       result.modified = true;
     }
     return;
@@ -3077,7 +3077,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     return;
   }
 
-  result.elf_bytes = std::move(patcher).emit();
+  result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }

@@ -118,7 +118,7 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
 }
 
 [[nodiscard]] ConSanFaultTransformStage take_modified_stage(ConSanResult &result) {
-  return {std::move(result.elf_bytes), std::move(result.patches), std::move(result.warnings),
+  return {std::move(result.replacement), std::move(result.patches), std::move(result.warnings),
           result.mutation.fault, std::move(result.mutation.applied_fault_logical_identity)};
 }
 
@@ -265,7 +265,7 @@ carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
 [[nodiscard]] ConSanResult rollback_composite_mutation(ConSanResult result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.modified = false;
-  result.elf_bytes.clear();
+  result.replacement.clear();
   result.patches.clear();
   result.mutation.fault.applied = 0;
   result.mutation.perturbation.applied = 0;
@@ -338,10 +338,10 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
 } // namespace
 
-[[nodiscard]] ConSanResult try_patch_consan_impl(
-    std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
-    std::span<const CarriedPerturbationPlan> carried_plans = {},
-    std::optional<ConSanResult> pristine_inventory = std::nullopt) {
+[[nodiscard]] ConSanResult
+try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                      std::span<const CarriedPerturbationPlan> carried_plans = {},
+                      std::optional<ConSanResult> pristine_inventory = std::nullopt) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanResult result;
@@ -508,7 +508,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried),
         mutation_stage.image, /*validating_carried_composite_stage=*/!instrument_carried.empty());
     const major_image_ownership::ScopedOwner instrument_result_owner(
-        major_image_ownership::OwnerKind::ResultImage, instrument_result.elf_bytes);
+        major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
     // Resource ownership is a logical kernel identity, but instrumentation of
     // a staged mutation records descriptor offsets in the mutation image.
     // Normalize those offsets before merging stages: an intermediate offset
@@ -557,7 +557,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
             "ConSan staged composition is missing an independently validated stage");
         instrument_result.outcome = ConSanTransformOutcome::Invalid;
         instrument_result.modified = false;
-        instrument_result.elf_bytes.clear();
+        instrument_result.replacement.clear();
         instrument_result.patches.clear();
         instrument_result.mutation.fault.applied = 0;
         instrument_result.mutation.applied_fault_logical_identity.reset();
@@ -587,7 +587,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
         instrument_result.mutation.fault.planned = retained_planned_faults;
         instrument_result.fault_plans = retained_fault_plans;
       }
-      instrument_result.elf_bytes = std::move(mutation_stage.image);
+      instrument_result.replacement = std::move(mutation_stage.image);
       instrument_result.patches = std::move(mutation_stage.patches);
       instrument_result.modified = true;
       return instrument_result;
@@ -606,7 +606,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
           instrument_result.mutation.fault.planned = retained_planned_faults;
           instrument_result.fault_plans = retained_fault_plans;
         }
-        instrument_result.elf_bytes = std::move(mutation_stage.image);
+        instrument_result.replacement = std::move(mutation_stage.image);
         instrument_result.patches = std::move(mutation_stage.patches);
         instrument_result.modified = true;
         return instrument_result;
@@ -623,14 +623,14 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
       instrument_result.mutation.applied_fault_logical_identity.reset();
       break;
     }
-    instrument_result.elf_bytes.clear();
+    instrument_result.replacement.clear();
     instrument_result.patches.clear();
     instrument_result.modified = false;
     return instrument_result;
   }
 
   const major_image_ownership::ScopedOwner result_owner(
-      major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
+      major_image_ownership::OwnerKind::ResultImage, result.replacement);
 
   if (options.flavor == ConSanFlavor::None)
     return result;
@@ -932,7 +932,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
     try_apply_perturbation_patches(*code_object, arch, options, result);
     if (result.mutation.perturbation.applied != result.perturbation_plans.size()) {
       result.modified = false;
-      result.elf_bytes.clear();
+      result.replacement.clear();
       result.patches.clear();
     }
   }

@@ -128,8 +128,8 @@ struct ConSanMutationOutcome {
 /// Keeping these artifacts together prevents the production pipeline from
 /// redeclaring and individually projecting inventory, policy, coverage,
 /// mutation, resource, patch, outcome, and diagnostic state. Runtime evidence,
-/// installation state, replacement-image storage, and private working
-/// candidates deliberately live elsewhere.
+/// installation state and private working candidates deliberately live
+/// elsewhere.
 struct ConSanTransformArtifacts {
   /// Immutable ownership of original code-object/container/access facts.
   ProgramInventory program_inventory;
@@ -151,6 +151,8 @@ struct ConSanTransformArtifacts {
   std::vector<ConSanCandidateResourcePlan> resource_plans;
   /// Validated byte-level changes emitted by lowering.
   std::vector<ConSanPatchInfo> patches;
+  /// Complete validated code-object replacement, or empty when none is installable.
+  std::vector<uint8_t> replacement;
   /// Final static classification of the transformation attempt.
   ConSanTransformOutcome outcome = ConSanTransformOutcome::Unchanged;
   /// Non-fatal diagnostics retained from analysis and lowering.
@@ -163,8 +165,8 @@ struct ConSanTransformArtifacts {
 /// The inherited transform artifacts are the sole semantic output consumed by
 /// the production pipeline. Members declared here exist only while current
 /// lowering selects registers, builds engine-private candidates, owns a
-/// replacement image, and accumulates failures. They must not be projected to
-/// a second public representation.
+/// replacement-image construction state, and accumulates failures. They must
+/// not be projected to a second public representation.
 struct ConSanResult : ConSanTransformArtifacts {
   bool modified = false;
   std::optional<uint16_t> resolved_moi_owner_vgpr;
@@ -188,7 +190,6 @@ struct ConSanResult : ConSanTransformArtifacts {
   /// a runtime-allocated report buffer trims only the prior MOI-stage
   /// diagnostics while retaining parser and semantic-analysis warnings.
   size_t moi_stage_warning_begin = 0;
-  std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
 };
 

@@ -106,7 +106,7 @@ TEST(ConSan, AtomicOrderFaultComposesWithRemovedReleaseBoundary) {
   EXPECT_EQ(mutation->anchor_offset, perturbation->anchor_offset);
   EXPECT_TRUE(perturbation->perturbation_composite_atomic_overlap);
   EXPECT_TRUE(perturbation->perturbation_composite_removed_boundary);
-  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   const Section *text = replacement.text_sections().front();
   std::array<uint32_t, 4> body{};
   std::memcpy(body.data(), text->data() + perturbation->trampoline_offset, sizeof(body));
@@ -116,8 +116,8 @@ TEST(ConSan, AtomicOrderFaultComposesWithRemovedReleaseBoundary) {
   }));
   ConSanResult corrupted = result;
   const uint32_t cache = 0xEE0B0000u;
-  std::memcpy(corrupted.elf_bytes.data() + text->sectionOffset() + perturbation->trampoline_offset +
-                  sizeof(uint32_t),
+  std::memcpy(corrupted.replacement.data() + text->sectionOffset() +
+                  perturbation->trampoline_offset + sizeof(uint32_t),
               &cache, sizeof(cache));
   const auto errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
@@ -147,7 +147,7 @@ TEST(ConSan, AtomicFaultRollsBackWhenCarriedPerturbationIsUnreachable) {
       try_patch_consan(make_rdna4_lds_code_object(words, "atomic_composite_far"), options);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_EQ(result.mutation.fault.applied, 0u);
   EXPECT_EQ(result.mutation.perturbation.applied, 0u);
@@ -262,7 +262,7 @@ TEST(ConSan, FaultAtomicDryRunPreservesBytesAndReportsExactPlans) {
   EXPECT_EQ(bytes, original);
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(result.fault_plans.size(), 2u);
   EXPECT_EQ(result.fault_plans[0].kind, ConSanFaultMutationKind::AtomicWrongAddress);
@@ -356,13 +356,13 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   EXPECT_TRUE(std::ranges::any_of(order.warnings, [](const std::string &warning) {
     return warning.find("removed associated buffer_wbl2") != std::string::npos;
   }));
-  ASSERT_FALSE(order.elf_bytes.empty());
+  ASSERT_FALSE(order.replacement.empty());
   const uint64_t text_file_offset = inventory.program_inventory.kernels().front().text_file_offset;
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
   for (uint64_t offset = 0; offset < release.size() * sizeof(uint32_t);
        offset += sizeof(uint32_t)) {
     uint32_t staged_word = 0;
-    std::memcpy(&staged_word, order.elf_bytes.data() + text_file_offset + offset,
+    std::memcpy(&staged_word, order.replacement.data() + text_file_offset + offset,
                 sizeof(staged_word));
     EXPECT_EQ(staged_word, nop);
   }
@@ -370,7 +370,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   const uint64_t preserved_size = (words.size() - release.size() - 1u) * sizeof(uint32_t);
   EXPECT_TRUE(std::equal(bytes.begin() + text_file_offset + preserved_begin,
                          bytes.begin() + text_file_offset + preserved_begin + preserved_size,
-                         order.elf_bytes.begin() + text_file_offset + preserved_begin));
+                         order.replacement.begin() + text_file_offset + preserved_begin));
 
   ConSanOptions scope_options = inventory_options;
   scope_options.fault_atomic_weaken_scope = true;
@@ -439,8 +439,8 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerGlobalSequence) {
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("removed associated buffer_wbl2") != std::string::npos;
   }));
-  ASSERT_FALSE(result.elf_bytes.empty());
-  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(result.replacement.empty());
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   const Section *text = replacement.text_sections().front();
   std::array<uint32_t, 9> staged{};
   std::memcpy(staged.data(), text->data(), sizeof(staged));
@@ -484,7 +484,7 @@ TEST(ConSan, FaultAtomicWeakenScopeDryRunPreservesBytesAndIdentity) {
   EXPECT_EQ(bytes, original);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(result.fault_plans.size(), 1u);
   EXPECT_EQ(result.fault_plans.front().kind, ConSanFaultMutationKind::AtomicWeakenScope);
@@ -708,10 +708,10 @@ TEST(ConSan, FaultNoReturnAtomicWeakenOrderRemovesExactReleaseWait) {
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("removed associated s_wait_storecnt_dscnt") != std::string::npos;
   }));
-  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
   uint32_t first_word = 0;
-  std::memcpy(&first_word, result.elf_bytes.data() + text_file_offset, sizeof(first_word));
+  std::memcpy(&first_word, result.replacement.data() + text_file_offset, sizeof(first_word));
   EXPECT_EQ(first_word, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
 }
 
@@ -741,12 +741,12 @@ TEST(ConSan, FaultAtomicWeakenOrderRemovesReleaseWaitBeforeWaitAlu) {
   });
   ASSERT_NE(mutation, result.patches.end());
   EXPECT_EQ(mutation->anchor_offset, 0u);
-  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
   uint32_t first_word = 0;
   uint32_t second_word = 0;
-  std::memcpy(&first_word, result.elf_bytes.data() + text_file_offset, sizeof(first_word));
-  std::memcpy(&second_word, result.elf_bytes.data() + text_file_offset + sizeof(uint32_t),
+  std::memcpy(&first_word, result.replacement.data() + text_file_offset, sizeof(first_word));
+  std::memcpy(&second_word, result.replacement.data() + text_file_offset + sizeof(uint32_t),
               sizeof(second_word));
   EXPECT_EQ(first_word, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(second_word, text_words[1]);
@@ -891,7 +891,7 @@ TEST(ConSan, FaultDsAtomicWrongAddressUsesAlignedOffset0AndExactCardinality) {
   ASSERT_EQ(result.program_inventory.text_sections().size(), 1u);
   uint32_t mutated_word0 = 0;
   std::memcpy(&mutated_word0,
-              result.elf_bytes.data() +
+              result.replacement.data() +
                   result.program_inventory.text_sections().front().file_offset,
               sizeof(mutated_word0));
   EXPECT_EQ(mutated_word0 & 0xffu, 4u);
@@ -910,7 +910,7 @@ TEST(ConSan, FaultDsAtomicScopeAndOrderFailClosedBeforeStagingBytes) {
 
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
     EXPECT_FALSE(result.modified);
-    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.replacement.empty());
     EXPECT_TRUE(result.patches.empty());
     EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {
       return error.find(weaken_scope ? "scope fault is unsupported"

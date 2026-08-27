@@ -1584,7 +1584,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
 }
 
 [[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch, ConSanResult &result) {
-  if (result.elf_bytes.empty() ||
+  if (result.replacement.empty() ||
       (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
        arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
        arch != ROCJITSU_CODE_ARCH_CDNA5)) {
@@ -1609,7 +1609,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
   if (owner_names.empty())
     return true;
 
-  AmdGpuCodeObject code_object(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject code_object(result.replacement.data(), result.replacement.size());
   if (!code_object.is_valid()) {
     result.errors.emplace_back(
         "ConSan MOI could not parse its replacement before enabling workgroup IDs");
@@ -1668,7 +1668,7 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
         "ConSan MOI could not resolve every replacement owner while enabling workgroup IDs");
     return false;
   }
-  result.elf_bytes = std::move(patcher).emit();
+  result.replacement = std::move(patcher).emit();
   return true;
 }
 
@@ -1765,7 +1765,7 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
 void rollback_moi_dispatch_id_as_unsupported(ConSanResult &result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.modified = false;
-  result.elf_bytes.clear();
+  result.replacement.clear();
   result.patches.clear();
   result.warnings.emplace_back("ConSan MOI dispatch-ID capture is unsupported: " +
                                std::move(reason));
@@ -1809,14 +1809,14 @@ void note_dispatch_id_patch_info(ConSanPatchInfo &info, const ConSanMoiDispatchI
 
 void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_code_arch_t arch,
                                             ConSanResult &result) {
-  if (!result.modified || result.elf_bytes.empty()) {
+  if (!result.modified || result.replacement.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI private-epoch prologue skipped because no private-epoch access probe was "
         "emitted");
     return;
   }
 
-  std::span<const uint8_t> active_bytes(result.elf_bytes.data(), result.elf_bytes.size());
+  std::span<const uint8_t> active_bytes(result.replacement.data(), result.replacement.size());
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -2256,7 +2256,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
   if (!replace_consan_text(patcher, new_text, options, "MOI private-epoch prologue", result)) {
     return;
   }
-  result.elf_bytes = std::move(patcher).emit();
+  result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }
@@ -2378,7 +2378,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
 
   std::span<const uint8_t> active_bytes = bytes;
   if (result.modified)
-    active_bytes = std::span<const uint8_t>(result.elf_bytes.data(), result.elf_bytes.size());
+    active_bytes = std::span<const uint8_t>(result.replacement.data(), result.replacement.size());
   AmdGpuCodeObject code_object(active_bytes.data(), active_bytes.size());
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> old_text = patcher.text_bytes();
@@ -3205,7 +3205,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  result.elf_bytes = std::move(patcher).emit();
+  result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), patches.begin(), patches.end());
   result.modified = true;
 }

@@ -44,7 +44,7 @@ std::vector<uint32_t> record_access_patch_words(const ConSanResult &result,
   }
 
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
   if (!patched.is_valid())
     return {};
@@ -60,7 +60,7 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.observation_plan.engine, ConSanCapabilityEngine::RecordReplay);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
   const ConSanKernelInfo &kernel = result.program_inventory.kernels().front();
   ASSERT_TRUE(kernel.uses_dynamic_stack.has_value());
@@ -140,7 +140,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayZerosUnusedPersistentClusterCoordinate) {
   const auto prologue = std::ranges::find(
       result.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue, &ConSanPatchInfo::kind);
   ASSERT_NE(prologue, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
@@ -422,7 +422,7 @@ TEST(ConSanMoi, RejectsPhysicalSyncAliasWithConflictingContainerSemantics) {
            error.find("decoded inconsistently through aliases") != std::string::npos;
   })) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSanMoi, Rdna4RecordReplayRecordsHardwareDispatchIdentity) {
@@ -443,7 +443,7 @@ TEST(ConSanMoi, Rdna4RecordReplayRecordsHardwareDispatchIdentity) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> access_words =
       access->kind == ConSanPatchKind::InlineMoiAccessRecordStore
@@ -484,7 +484,7 @@ TEST(ConSanMoi, ReportBufferRetryMatchesFreshRecordReplayTransform) {
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
   EXPECT_EQ(retried.outcome, fresh.outcome);
   EXPECT_EQ(retried.modified, fresh.modified);
-  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.replacement, fresh.replacement);
   EXPECT_EQ(retried.warnings, fresh.warnings);
   ASSERT_EQ(retried.patches.size(), fresh.patches.size());
   for (size_t index = 0; index < fresh.patches.size(); ++index) {
@@ -533,7 +533,7 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   EXPECT_TRUE(fresh.modified);
   EXPECT_TRUE(retried.modified);
   EXPECT_EQ(retried.outcome, fresh.outcome);
-  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.replacement, fresh.replacement);
   EXPECT_EQ(retried.warnings, fresh.warnings);
   EXPECT_NE(std::ranges::find(retried.patches, ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue,
                               &ConSanPatchInfo::kind),
@@ -572,7 +572,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
       return error.find(expected_error) != std::string::npos;
     })) << testing::PrintToString(result.errors);
     EXPECT_FALSE(result.modified);
-    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.replacement.empty());
   };
 
   std::vector<uint8_t> wrong_size = bytes;
@@ -657,7 +657,7 @@ TEST(ConSanMoi, AutoRecordReplaySelectsBoundedSlotFromFullAccessIdentity) {
   const uint16_t scratch = *access->scratch_vgpr;
   const uint32_t access_identity_capacity = report_plan.layout.access_record_capacity;
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> access_words =
       access->kind == ConSanPatchKind::InlineMoiAccessRecordStore
@@ -962,7 +962,7 @@ TEST(ConSanMoi, AutoRecordReplayOneByOneHeadroomStillAddressesTheHashedSlot) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
   const uint16_t scratch = *access->scratch_vgpr;
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> access_words =
       access->kind == ConSanPatchKind::InlineMoiAccessRecordStore
@@ -1033,12 +1033,12 @@ TEST(ConSanMoi, AutoRecordReplayCapturesDispatchIdentityInPersistentVgprsAtScala
   EXPECT_FALSE(prologue->dispatch_id_capture_sgpr);
   EXPECT_EQ(prologue->dispatch_id_capture_vgpr, result.resolved_moi_dispatch_id_vgpr);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint32_t allocated_vgprs =
       (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
@@ -1096,11 +1096,11 @@ TEST(ConSanMoi, Gfx1100AutoRecordReplayCapturesDispatchIdentityInPersistentVgprs
   EXPECT_EQ(prologue->dispatch_id_shifted_system_sgpr_count, 0u);
   EXPECT_EQ(prologue->dispatch_id_system_sgpr_shift, 0u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT),
             15u);
@@ -1297,7 +1297,7 @@ TEST(ConSanMoi, AutoRecordReplaySpillsWideAddressGroupStateAtScalarPressure) {
         result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
     ASSERT_NE(access_patch, result.patches.end());
     EXPECT_EQ(access_patch->required_private_segment_size, 0u);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     expect_lane_backed_scalar_spill(result, patched, *access_patch, assignment.exec_save_sgpr,
                                     arch);
@@ -1489,7 +1489,7 @@ TEST(ConSanMoi, RecordReplayRuntimeGateUsesPersistentWorkgroupTuple) {
                                &ConSanPatchInfo::kind),
             9);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
@@ -1600,7 +1600,7 @@ TEST(ConSanMoi, AutomaticRecordReplayPreservesRuntimeWorkgroupTupleAcrossTargets
                   result.resolved_moi_record_replay_workgroup_vgprs.cluster_workgroup_id);
     }
 
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     const std::vector<uint32_t> patched_words =
         text_words_at_offset(patched, /*text_offset=*/0u,
@@ -1662,7 +1662,7 @@ TEST(ConSanMoi, RecordReplayRuntimeGateCoversBarrierRecords) {
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -1708,7 +1708,7 @@ TEST(ConSanMoi, RecordReplayRuntimeGateCoversStandaloneAtomicAndFenceRecords) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto gate_entry = instrumentation::build_s_cselect_b32(
       /*sdst=*/84u, scalar_positive_inline_u32(1u), scalar_positive_inline_u32(0u),
@@ -1764,7 +1764,7 @@ TEST(ConSanMoi, CdnaRecordReplayEnablesAndCapturesEveryLaunchCoordinate) {
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
       AmdGpuCodeObject original(bytes.data(), bytes.size());
-      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
       ASSERT_TRUE(original.is_valid());
       ASSERT_TRUE(patched.is_valid());
       ASSERT_EQ(original.kernels().size(), 1u);
@@ -1775,7 +1775,7 @@ TEST(ConSanMoi, CdnaRecordReplayEnablesAndCapturesEveryLaunchCoordinate) {
                   bytes.data() + original.kernels().front().descriptor_file_offset,
                   sizeof(original_descriptor));
       std::memcpy(&patched_descriptor,
-                  result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                  result.replacement.data() + patched.kernels().front().descriptor_file_offset,
                   sizeof(patched_descriptor));
       EXPECT_NE(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc2,
                                 kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X),
@@ -1911,7 +1911,7 @@ TEST(ConSanMoi, AutoRecordReplayBarrierRecordsCapturedWorkgroupIdentity) {
   const auto barrier = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiBarrierRecord, &ConSanPatchInfo::kind);
   ASSERT_NE(barrier, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> barrier_words =
       text_words_at_offset(patched, barrier->trampoline_offset, barrier->trampoline_size);
@@ -2423,12 +2423,12 @@ TEST(ConSanMoi, FirstLightProbeAutomaticallyGrowsOwningDescriptor) {
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).scratch_vgpr, 4);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   const uint64_t descriptor_offset = patched.kernels().front().descriptor_file_offset;
   KD descriptor{};
-  std::memcpy(&descriptor, result.elf_bytes.data() + descriptor_offset, sizeof(descriptor));
+  std::memcpy(&descriptor, result.replacement.data() + descriptor_offset, sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                             kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
             2u);
@@ -2464,7 +2464,7 @@ TEST(ConSanMoi, FirstLightProbeSpillsVictimWindowInAppendedCave) {
   EXPECT_EQ(patch.spilled_vgpr_count, 6u);
   EXPECT_EQ(patch.required_private_segment_size, 56u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const std::vector<uint32_t> trampoline_words =
@@ -2490,7 +2490,7 @@ TEST(ConSanMoi, FirstLightProbeSpillsVictimWindowInAppendedCave) {
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   const uint64_t descriptor_offset = patched.kernels().front().descriptor_file_offset;
-  std::memcpy(&descriptor, result.elf_bytes.data() + descriptor_offset, sizeof(descriptor));
+  std::memcpy(&descriptor, result.replacement.data() + descriptor_offset, sizeof(descriptor));
   EXPECT_EQ(descriptor.private_segment_fixed_size, 56u);
   EXPECT_EQ(
       AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
@@ -2498,7 +2498,7 @@ TEST(ConSanMoi, FirstLightProbeSpillsVictimWindowInAppendedCave) {
 
   ConSanResult insufficient_descriptor = result;
   descriptor.private_segment_fixed_size = 32;
-  std::memcpy(insufficient_descriptor.elf_bytes.data() + descriptor_offset, &descriptor,
+  std::memcpy(insufficient_descriptor.replacement.data() + descriptor_offset, &descriptor,
               sizeof(descriptor));
   const std::vector<std::string> validation_errors =
       validate_consan_modified_elf(bytes, insufficient_descriptor);
@@ -2546,7 +2546,7 @@ TEST(ConSanMoi, AutomaticPersistentStatePreservesStaticRecordReplaySpillWindow) 
   ASSERT_NE(access, result.patches.end());
   EXPECT_EQ(access->spilled_vgpr_count, 6u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
@@ -2576,12 +2576,12 @@ TEST(ConSanMoi, FirstLightProbeSupportsZeroToNonzeroDispatchScratch) {
   EXPECT_EQ(only_non_entry_prologue_patch(result).spilled_vgpr_count, 6u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).required_private_segment_size, 24u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(descriptor.private_segment_fixed_size, 24u);
   EXPECT_EQ(
@@ -2621,7 +2621,7 @@ TEST(ConSanMoi, Rdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
   EXPECT_EQ(patch->spilled_vgpr_count, 6u);
   EXPECT_EQ(patch->required_private_segment_size, 24u);
   EXPECT_EQ(patch->dynamic_private_segment_addend, 24u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -2719,7 +2719,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->spilled_vgpr_count, 6u);
   EXPECT_EQ(patch->required_private_segment_size, 32u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -2795,7 +2795,7 @@ TEST(ConSanMoi, Cdna3RecordReplaySpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->spilled_vgpr_count, 6u);
   EXPECT_EQ(patch->required_private_segment_size, 32u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -3213,8 +3213,9 @@ TEST(ConSanMoi, Cdna4RecordReplayRecordsDispatchIdentity) {
       access->kind == ConSanPatchKind::InlineMoiAccessRecordStore
           ? patched_words_at_file_offset(result, 0x100 + access->anchor_offset,
                                          access->original_size)
-          : text_words_at_offset(AmdGpuCodeObject(result.elf_bytes.data(), result.elf_bytes.size()),
-                                 access->trampoline_offset, access->trampoline_size);
+          : text_words_at_offset(
+                AmdGpuCodeObject(result.replacement.data(), result.replacement.size()),
+                access->trampoline_offset, access->trampoline_size);
   const auto expected_dispatch_store = [&](uint32_t byte_offset, uint16_t scalar_src) {
     const uint16_t value_vgpr = static_cast<uint16_t>(*access->scratch_vgpr + 2u);
     std::vector<uint32_t> words = {
@@ -3273,11 +3274,11 @@ TEST(ConSanMoi, Cdna3PrivateEpochRecordReplayLoadsEntryOwner) {
   EXPECT_EQ(prologue->persistent_private_state_end, access->persistent_private_state_end);
   ASSERT_TRUE(prologue->scratch_vgpr);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   KD patched_descriptor{};
   std::memcpy(&patched_descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(patched_descriptor));
   const uint16_t full_payload_base = static_cast<uint16_t>(
       AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT));
@@ -3353,7 +3354,7 @@ TEST(ConSanMoi, Gfx1250PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
   ASSERT_TRUE(atomic_patch->scratch_vgpr);
   ASSERT_TRUE(fence_patch->scratch_vgpr);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto expect_captured_owner = [&](const ConSanPatchInfo &patch, uint16_t owner_vgpr) {
     const std::vector<uint32_t> words =
@@ -3409,7 +3410,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerSpillsBeginAfterCapturedState) {
   ASSERT_TRUE(access->persistent_owner_private_offset);
   ASSERT_TRUE(access->persistent_private_state_end);
   ASSERT_GT(*access->persistent_private_state_end, 0u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (ConSanPatchKind kind :
        {ConSanPatchKind::TrampolineMoiAtomicRecord, ConSanPatchKind::TrampolineMoiFenceRecord}) {
@@ -3489,7 +3490,7 @@ TEST(ConSanMoi, Gfx1250PrivateOwnerScalarSpillsDoNotOverlapCapturedState) {
   ASSERT_NE(access, result.patches.end()) << testing::PrintToString(result.warnings);
   ASSERT_TRUE(access->persistent_private_state_end);
   ASSERT_GT(*access->persistent_private_state_end, 0u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (ConSanPatchKind kind :
        {ConSanPatchKind::TrampolineMoiAtomicRecord, ConSanPatchKind::TrampolineMoiFenceRecord}) {
@@ -3707,7 +3708,7 @@ TEST(ConSanMoi, Cdna3PrivateEpochAtomicAndFenceRecordsLoadEntryOwner) {
   ASSERT_TRUE(atomic_patch->scratch_vgpr);
   ASSERT_TRUE(fence_patch->scratch_vgpr);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto expect_captured_owner = [&](const ConSanPatchInfo &patch, uint16_t owner_vgpr) {
     const std::vector<uint32_t> words =
@@ -3825,12 +3826,12 @@ TEST(ConSanMoi, Cdna4FirstLightProbeDescriptorGrowthUsesEightVgprGranules) {
   ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
   EXPECT_EQ(only_non_entry_prologue_patch(result).scratch_vgpr, 8u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                             kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
@@ -3881,12 +3882,12 @@ TEST(ConSanMoi, Cdna4FirstLightTransientSgprsAvoidOldAndGrownPhysicalVcc) {
   EXPECT_FALSE(overlaps(dispatch_id, 2u, kOriginalVcc, 2u));
   EXPECT_FALSE(overlaps(exec_save, 5u, kOriginalVcc, 2u));
   EXPECT_FALSE(overlaps(dispatch_id, 2u, exec_save, 5u));
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint16_t allocated_sgprs = static_cast<uint16_t>(
       (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
@@ -3936,12 +3937,12 @@ TEST(ConSanMoi, Cdna3TransientSgprsAvoidOldAndGrownPhysicalVcc) {
   EXPECT_FALSE(overlaps(dispatch_id, 2u, kOriginalVcc, 2u));
   EXPECT_FALSE(overlaps(exec_save, 5u, kOriginalVcc, 2u));
   EXPECT_FALSE(overlaps(dispatch_id, 2u, exec_save, 5u));
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint16_t allocated_sgprs = static_cast<uint16_t>(
       (AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
@@ -4017,7 +4018,7 @@ TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
 
   const auto wait = build_cdna4_s_wait_vmcnt0(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(wait);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const std::vector<uint32_t> patched_words =
@@ -4052,7 +4053,7 @@ TEST(ConSanMoi, Cdna4FirstLightProbeForcedSpillUsesNativePrivateWindow) {
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(descriptor.private_segment_fixed_size, patch.required_private_segment_size);
   EXPECT_EQ(
@@ -4106,7 +4107,7 @@ TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingStoreOperandsBeforeGue
   ASSERT_LE(scratch, 6u);
   ASSERT_GT(static_cast<uint32_t>(scratch) + patch->spilled_vgpr_count, 6u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -4188,7 +4189,7 @@ TEST(ConSanMoi, Cdna4StaticRecordReplayRestoresOverlappingLoadOperandsBeforeGues
   ASSERT_EQ(patch->scratch_vgpr, 0u);
   ASSERT_EQ(patch->spilled_vgpr_count, 6u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -4362,7 +4363,7 @@ TEST(ConSanMoi, DynamicRecordKindsUseLiteralDispatchIdentityAtFullScalarPressure
   EXPECT_FALSE(result.resolved_moi_dispatch_id_sgpr);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto expect_literals = [&](const ConSanPatchInfo &patch, uint16_t value_vgpr_offset) {
     ASSERT_TRUE(patch.scratch_vgpr);
@@ -4459,12 +4460,12 @@ TEST(ConSanMoi, DynamicAccessRecordPreservesWave32AndWave64SpecialState) {
     ASSERT_TRUE(result.modified);
     ASSERT_TRUE(result.resolved_moi_exec_save_sgpr);
     ASSERT_EQ(non_entry_prologue_patch_count(result), 1u);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     ASSERT_EQ(patched.kernels().size(), 1u);
     KD descriptor{};
     std::memcpy(&descriptor,
-                result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                result.replacement.data() + patched.kernels().front().descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(AMDHSA_BITS_GET(descriptor.kernel_code_properties,
                               kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32),
@@ -4472,7 +4473,7 @@ TEST(ConSanMoi, DynamicAccessRecordPreservesWave32AndWave64SpecialState) {
 
     std::vector<uint32_t> words(only_non_entry_prologue_patch(result).original_size /
                                 sizeof(uint32_t));
-    std::memcpy(words.data(), result.elf_bytes.data() + 0x100, words.size() * sizeof(uint32_t));
+    std::memcpy(words.data(), result.replacement.data() + 0x100, words.size() * sizeof(uint32_t));
     const uint16_t base = *result.resolved_moi_exec_save_sgpr;
     const auto save_exec = build_s_and_saveexec_b64(base, kRdna4VccLo, ROCJITSU_CODE_ARCH_RDNA4);
     const auto save_vcc =
@@ -4523,7 +4524,7 @@ TEST(ConSanMoi, FirstLightProbeCapturesOwnerFromWorkitemIdAtEntryWhenOwnerVgprIs
 
   const std::vector<uint32_t> access_words = record_access_patch_words(result, *access, 0x100u);
   const std::vector<uint32_t> prologue_words =
-      text_words_at_offset(AmdGpuCodeObject(result.elf_bytes.data(), result.elf_bytes.size()),
+      text_words_at_offset(AmdGpuCodeObject(result.replacement.data(), result.replacement.size()),
                            prologue->trampoline_offset, prologue->trampoline_size);
   ASSERT_TRUE(result.resolved_moi_owner_vgpr);
   const uint16_t owner_vgpr = *result.resolved_moi_owner_vgpr;
@@ -4585,7 +4586,7 @@ TEST(ConSanMoi, FirstLightProbeCapturesCompleteHardwareGridAtEntry) {
   EXPECT_NE(result.resolved_moi_record_replay_workgroup_vgprs.complete(),
             result.resolved_moi_record_replay_workgroup_sgprs.complete());
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
@@ -4964,7 +4965,7 @@ TEST(ConSanMoi, FirstLightRecordLinearizesBeforeDisplacedTwoAddressLoad) {
       << "two-range dispatch/workgroup-qualified Record/Replay probes must remain within the "
          "2144-byte append-cave budget including complete returning-atomic waits";
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const std::vector<uint32_t> cave =
@@ -5063,7 +5064,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbeDrainsTerminalAppendedCaveBeforeEndpgm) 
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   EXPECT_EQ(patch.anchor_offset, 0u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   std::vector<uint32_t> actual_words(patched.text_sections().front()->size() / sizeof(uint32_t));
@@ -5111,7 +5112,7 @@ TEST(ConSanMoi, DynamicAccessRecordProbePreservesOverlappingLoadAddress) {
   const ConSanPatchInfo &patch = only_non_entry_prologue_patch(result);
   EXPECT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const std::vector<uint32_t> cave =
@@ -5199,10 +5200,10 @@ TEST(ConSanMoi, FirstLightProbeCanPatchTwoNativeLdsAccessRecords) {
 
   std::vector<uint32_t> first_words(result.patches[0].original_size / sizeof(uint32_t));
   std::vector<uint32_t> second_words(result.patches[1].original_size / sizeof(uint32_t));
-  std::memcpy(first_words.data(), result.elf_bytes.data() + 0x100,
+  std::memcpy(first_words.data(), result.replacement.data() + 0x100,
               first_words.size() * sizeof(uint32_t));
   std::memcpy(second_words.data(),
-              result.elf_bytes.data() + 0x100 +
+              result.replacement.data() + 0x100 +
                   static_cast<uint64_t>(kSecondSiteWord) * sizeof(uint32_t),
               second_words.size() * sizeof(uint32_t));
   ASSERT_GE(first_words.size(), 2u);
@@ -5244,7 +5245,7 @@ TEST(ConSanMoi, FirstLightProbeCanPatchTwoAppendedCaveAccessRecords) {
   EXPECT_EQ(result.patches[1].anchor_offset, 2u * sizeof(uint32_t));
   EXPECT_EQ(result.patches[1].original_size, 2u * sizeof(uint32_t));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   EXPECT_GT(patched.text_sections().front()->size(), text_words.size() * sizeof(uint32_t));
@@ -5436,7 +5437,7 @@ TEST(ConSanMoi, Gfx1250SparseRecordReplaySpillPreservesKernargPreloadScalarWindo
   EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, assignment.exec_save_sgpr);
   EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kExecWindowSize);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> prologue_words =
       text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
@@ -5523,7 +5524,7 @@ TEST(ConSanMoi, SparseRecordReplaySpillPreservesEntryHashWindowAcrossTargets) {
     EXPECT_EQ(prologue->entry_scalar_backup_sgpr_base, kExecSaveSgpr);
     EXPECT_EQ(prologue->entry_scalar_backup_sgpr_count, kExecWindowSize);
 
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     const std::vector<uint32_t> prologue_words =
         text_words_at_offset(patched, prologue->trampoline_offset, prologue->trampoline_size);
@@ -5729,7 +5730,7 @@ TEST(ConSanMoi, RecordReplaySpillsExecVccStateOnRdna) {
             std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore,
                               &ConSanPatchInfo::kind);
         ASSERT_NE(access_patch, result.patches.end());
-        AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+        AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
         ASSERT_TRUE(patched.is_valid());
         expect_lane_backed_scalar_spill(result, patched, *access_patch, assignment.exec_save_sgpr,
                                         arch);
@@ -5840,7 +5841,7 @@ TEST(ConSanMoi, RecordReplayDynamicStackKernelEntryRelayUsesSpecialStateOnly) {
   expected.push_back(build_s_nop(0, kArch));
   expected.push_back(build_s_setpc_b64(kRdna4VccLo, kArch));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   EXPECT_EQ(text_words_at_offset(patched, relay_offset, 7u * sizeof(uint32_t)), expected);
 }
@@ -5936,7 +5937,7 @@ TEST(ConSanMoi, Gfx1250OwnerPrologueUsesOwnerLocalEntryAndReturnRelays) {
   ASSERT_TRUE(to_relay);
   ASSERT_TRUE(from_relay);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   EXPECT_EQ(text_words_at_offset(patched, return_branch_offset, sizeof(uint32_t)),
             std::vector<uint32_t>{build_s_branch(*to_relay, kArch)});
@@ -6082,7 +6083,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
     const auto patch = std::ranges::find(result.patches, kind, &ConSanPatchInfo::kind);
     ASSERT_NE(patch, result.patches.end()) << testing::PrintToString(result.warnings);
     EXPECT_EQ(patch->required_private_segment_size, 0u);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     expect_lane_backed_scalar_spill(result, patched, *patch, assignment.exec_save_sgpr, kArch);
   }
@@ -6128,7 +6129,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
     // private segment or automatic private epoch.
     EXPECT_FALSE(patch->persistent_private_state_end);
     EXPECT_EQ(patch->required_private_segment_size, 0u);
-    AmdGpuCodeObject patched(dense_result.elf_bytes.data(), dense_result.elf_bytes.size());
+    AmdGpuCodeObject patched(dense_result.replacement.data(), dense_result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     expect_lane_backed_scalar_spill(dense_result, patched, *patch, dense_assignment.exec_save_sgpr,
                                     kArch);
@@ -6149,7 +6150,7 @@ TEST(ConSanMoi, Cdna4RecordReplaySpillsTransientStateAcrossAccessAndBarrier) {
                patch.anchor_offset == indirect_barrier->anchor_offset;
       });
   ASSERT_NE(barrier_island, dense_result.patches.end());
-  AmdGpuCodeObject dense_patched(dense_result.elf_bytes.data(), dense_result.elf_bytes.size());
+  AmdGpuCodeObject dense_patched(dense_result.replacement.data(), dense_result.replacement.size());
   ASSERT_TRUE(dense_patched.is_valid());
   const std::vector<uint32_t> island_words = text_words_at_offset(
       dense_patched, barrier_island->trampoline_offset, barrier_island->trampoline_size);
@@ -6268,7 +6269,7 @@ TEST(ConSanMoi, Rdna4SpillBackedTwoSiteDenseDispatcherIncludesSharedHostArm) {
            patch.original_size != 0u;
   });
   ASSERT_NE(dense_host, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> entry_island = text_words_at_offset(
       patched, dense_host->anchor_offset + sizeof(uint32_t), 8u * sizeof(uint32_t));
@@ -6423,7 +6424,7 @@ TEST(ConSanMoi, RecordReplaySpillBackedDenseHostPreservesBarrierAndCapturedCallK
            patch.trampoline_size != 0u;
   });
   ASSERT_NE(dispatcher, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> dispatcher_words =
       text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
@@ -6493,7 +6494,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySpillBackedDenseBarrierUsesCapturedEntryKey) 
   });
   ASSERT_NE(dispatcher, result.patches.end()) << testing::PrintToString(result.warnings);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> dispatcher_words =
       text_words_at_offset(patched, dispatcher->trampoline_offset, dispatcher->trampoline_size);
@@ -6688,7 +6689,7 @@ TEST(ConSanMoi, RecordReplayReservedRelaySpaceComposesWithBarrierEpochs) {
   EXPECT_GE(*barrier_patch->relocated_guest_instruction_offset, barrier_patch->trampoline_offset);
   EXPECT_LT(*barrier_patch->relocated_guest_instruction_offset,
             barrier_patch->trampoline_offset + barrier_patch->trampoline_size);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   uint64_t entry_target = barrier_patch->trampoline_offset;
@@ -6747,7 +6748,7 @@ TEST(ConSanMoi, RecordReplayAllowsScratchBetweenDisjointGfx1250StoreTuples) {
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
   EXPECT_EQ(*access->scratch_vgpr, 32u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
@@ -6797,7 +6798,7 @@ TEST(ConSanMoi, RecordReplaySplitsLargeGfx1250TwoAddressOffsetsWithPlannedScratc
   ASSERT_GE(plan->scratch_vgpr_count, 1u);
   const uint16_t adjusted_address =
       static_cast<uint16_t>(*access->scratch_vgpr + plan->scratch_vgpr_count - 1u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
@@ -7000,7 +7001,7 @@ TEST(ConSanMoi, BarrierRecordPatchTrampolinesBarrierAndWritesRecord) {
             text_words.size() * sizeof(uint32_t));
   EXPECT_EQ(only_non_entry_prologue_patch(result).original_size, sizeof(uint32_t));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
 
@@ -7113,7 +7114,7 @@ TEST(ConSanMoi, Cdna4AdjacentFullBarriersShareOneRecordProbe) {
   EXPECT_EQ(barriers[0]->anchor_offset,
             result.program_inventory.kernels()[0].barrier_sites[0].text_offset);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> second_barrier = text_words_at_offset(
       patched, result.program_inventory.kernels()[0].barrier_sites[1].text_offset,
@@ -7172,7 +7173,7 @@ TEST(ConSanMoi, BarrierRecordUsesLocalIndirectIslandForFarAppendedHelper) {
   EXPECT_EQ(island->trampoline_size, 8u * sizeof(uint32_t));
   EXPECT_EQ(body->trampoline_offset, original_text_size);
   EXPECT_TRUE(compute_sopp_branch_simm16(island->anchor_offset, island->trampoline_offset));
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
 }
 
@@ -7207,7 +7208,7 @@ TEST(ConSanMoi, BarrierRecordUsesEntryCapturedWorkgroupIds) {
   ASSERT_NE(prologue, result.patches.end());
   ASSERT_TRUE(result.resolved_moi_record_replay_workgroup_vgprs.complete());
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
 
@@ -7603,7 +7604,7 @@ TEST(ConSanMoi, Gfx1250FullVgprRecordReplayUsesScalarEpochCoalescing) {
       result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access, result.patches.end());
   ASSERT_TRUE(access->scratch_vgpr);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> access_words =
       text_words_at_offset(patched, access->trampoline_offset, access->trampoline_size);
@@ -7883,7 +7884,7 @@ TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {
             1u);
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(original.is_valid());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(original.kernels().size(), 1u);
@@ -7894,7 +7895,7 @@ TEST(ConSanMoi, Cdna4AccvgprBoundaryRecordReplayUsesScalarEpochCoalescing) {
               bytes.data() + original.kernels().front().descriptor_file_offset,
               sizeof(original_descriptor));
   std::memcpy(&patched_descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(patched_descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc3,
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
@@ -8024,7 +8025,7 @@ TEST(ConSanMoi, Cdna4AutomaticBankedReplaySkipsOccupiedExactTupleScalarHole) {
             1u);
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(original.is_valid());
   ASSERT_TRUE(patched.is_valid());
   KD original_descriptor{};
@@ -8033,7 +8034,7 @@ TEST(ConSanMoi, Cdna4AutomaticBankedReplaySkipsOccupiedExactTupleScalarHole) {
               bytes.data() + original.kernels().front().descriptor_file_offset,
               sizeof(original_descriptor));
   std::memcpy(&patched_descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(patched_descriptor));
   EXPECT_EQ(patched_descriptor.compute_pgm_rsrc1, original_descriptor.compute_pgm_rsrc1);
   EXPECT_EQ(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc3,
@@ -8445,11 +8446,11 @@ TEST(ConSanMoi, CdnaRecordReplayMovesOnlyEmptyAccumulatorBoundaryForDynamicStack
       EXPECT_EQ(*assignment.record_replay_workgroup_vgprs.y, 129u);
       EXPECT_EQ(*assignment.record_replay_workgroup_vgprs.z, 130u);
 
-      AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
       ASSERT_TRUE(patched.is_valid());
       KD descriptor{};
       std::memcpy(&descriptor,
-                  result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                  result.replacement.data() + patched.kernels().front().descriptor_file_offset,
                   sizeof(descriptor));
       EXPECT_GT(
           AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
@@ -9333,14 +9334,14 @@ TEST(ConSanMoi, Cdna4RejectedRecordReplayBarrierDoesNotMutateItsOwnerDescriptor)
     return warning.find("no reachable indirect entry island") != std::string::npos;
   }));
 
-  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(replacement.is_valid());
   const auto replacement_rejected =
       std::ranges::find(replacement.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
   ASSERT_NE(replacement_rejected, replacement.kernels().end());
   KD replacement_rejected_descriptor{};
   std::memcpy(&replacement_rejected_descriptor,
-              result.elf_bytes.data() + replacement_rejected->descriptor_file_offset,
+              result.replacement.data() + replacement_rejected->descriptor_file_offset,
               sizeof(replacement_rejected_descriptor));
   EXPECT_EQ(std::memcmp(&replacement_rejected_descriptor, &original_rejected_descriptor,
                         sizeof(original_rejected_descriptor)),
@@ -10057,7 +10058,7 @@ TEST(ConSanMoi, Gfx1250PrivateEpochBarrierPreservesGuestVgprMsbMode) {
                                &ConSanPatchInfo::kind),
             1u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const uint32_t select_low =
       *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_CDNA5);
@@ -10105,7 +10106,7 @@ TEST(ConSanMoi, AtomicRecordPatchTrampolinesFlatAtomicAndWritesRecord) {
       << "dynamically indexed atomic Record/Replay probes must remain within the 1200-byte "
          "append-cave budget";
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
 
@@ -10282,7 +10283,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayMaterializesSignedFlatAccessOffset) {
   EXPECT_EQ(result.moi_candidates.front().operands.raw_ioffset, 16);
   EXPECT_EQ(consan_access_lowering_count(result, ConSanLoweringOutcomeKind::Instrumented), 1u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   std::vector<uint32_t> patched_words(patched.text_sections().front()->size() / sizeof(uint32_t));
@@ -10480,7 +10481,7 @@ TEST(ConSanMoi, Gfx1250FarOrdinaryAcquireUsesOwnerLocalEntryWithAutomaticExecSav
                                &ConSanPatchInfo::kind),
             2u)
       << testing::PrintToString(result.warnings);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (const ConSanPatchInfo &fence : result.patches) {
     if (fence.kind != ConSanPatchKind::TrampolineMoiFenceRecord)
@@ -10550,7 +10551,7 @@ TEST(ConSanMoi, Gfx1250DenseRuntimeGatePreservesCallReturnPair) {
   const auto access_patch = std::ranges::find(
       result.patches, ConSanPatchKind::TrampolineMoiAccessRecordStore, &ConSanPatchInfo::kind);
   ASSERT_NE(access_patch, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
       text_words_at_offset(patched, access_patch->trampoline_offset, access_patch->trampoline_size);
@@ -10703,7 +10704,7 @@ TEST(ConSanMoi, Cdna4DenseRecordReplayRouteRestoresGuestSccBeforeAccessBody) {
                                &ConSanPatchInfo::kind),
             kAccessCount);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto last_route_compare = instrumentation::build_s_cmp_eq_u32(
       kDispatchKeySgpr, scalar_positive_inline_u32(kAccessCount), kArch);
@@ -11009,7 +11010,7 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
     const auto restore_first = instrumentation::build_v_readlane_b32(
         *result.resolved_moi_exec_save_sgpr, reservoir, /*lane=*/0u, arch);
     ASSERT_TRUE(save_first && restore_first);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     ASSERT_EQ(original.kernels().size(), 1u);
     ASSERT_EQ(patched.kernels().size(), 1u);
@@ -11019,7 +11020,7 @@ TEST(ConSanMoi, AmdhsaScalarPressureAccessBodiesRetainEverySiteAcrossTargets) {
                 bytes.data() + original.kernels().front().descriptor_file_offset,
                 sizeof(original_descriptor));
     std::memcpy(&patched_descriptor,
-                result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                result.replacement.data() + patched.kernels().front().descriptor_file_offset,
                 sizeof(patched_descriptor));
     const std::vector<uint32_t> first_body = text_words_at_offset(
         patched, first_access->trampoline_offset, first_access->trampoline_size);
@@ -11618,7 +11619,7 @@ TEST(ConSanMoi, Gfx1250DenseAccessesPreserveGuestVgprMsbMode) {
   for (const ConSanMoiCandidate &candidate : result.moi_candidates)
     EXPECT_EQ(candidate.gfx1250_vgpr_msb_mode, kGuestVgprMsbMode);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const uint32_t select_low =
       *build_gfx1250_s_set_vgpr_msb_transition(kGuestVgprMsbMode, 0u, ROCJITSU_CODE_ARCH_CDNA5);
@@ -11687,7 +11688,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayCapturesHighBankLdsAddressBeforeSelectingScra
   ASSERT_EQ(patch.kind, ConSanPatchKind::TrampolineMoiAccessRecordStore);
   ASSERT_TRUE(patch.scratch_vgpr);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave =
       text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
@@ -11754,7 +11755,7 @@ TEST(ConSanMoi, Gfx1250RecordReplaySavesSpillBeforeCompositeHighBankAddressCaptu
   ASSERT_TRUE(patch.scratch_vgpr);
   ASSERT_EQ(patch.spilled_vgpr_count, 7u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave =
       text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
@@ -11864,7 +11865,7 @@ TEST(ConSanMoi, AtomicRecordUsesLocalIndirectIslandForFarAppendedHelper) {
   EXPECT_EQ(island->trampoline_size, 8u * sizeof(uint32_t));
   EXPECT_EQ(body->trampoline_offset, original_text_size);
   EXPECT_TRUE(compute_sopp_branch_simm16(island->anchor_offset, island->trampoline_offset));
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
 }
 
@@ -11920,7 +11921,7 @@ TEST(ConSanMoi, FenceRecordRelocatesSccDeadPrefixForCompactFarEntry) {
   EXPECT_GE(fence->trampoline_offset, original_text_size);
   EXPECT_FALSE(compute_sopp_branch_simm16(fence->anchor_offset, fence->trampoline_offset));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
 }
 
@@ -11942,7 +11943,7 @@ TEST(ConSanMoi, AtomicRecordKeepsAcquireResultBeforeReporting) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                &ConSanPatchInfo::kind),
             2);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto acquire_patch = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -11999,7 +12000,7 @@ TEST(ConSanMoi, RecordReplayNeutralizesWorkgroupReleaseScalarClauseAcrossRdnaTar
     EXPECT_EQ(clause_patch->anchor_offset, fixture.clause_text_offset);
     EXPECT_EQ(clause_patch->original_size, sizeof(uint32_t));
     EXPECT_EQ(atomic_patch->anchor_offset, fixture.release_text_offset);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     const std::vector<uint32_t> clause =
         text_words_at_offset(patched, fixture.clause_text_offset, sizeof(uint32_t));
@@ -12026,7 +12027,7 @@ TEST(ConSanMoi, AtomicRecordKeepsReturningReleaseAtEndOfProbe) {
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -12071,7 +12072,7 @@ TEST(ConSanMoi, FenceRecordPatchCardinalityIsBoundedAndPrefixComplete) {
   EXPECT_EQ(fence->anchor_offset, result.program_inventory.sync()
                                       .moi_fence_candidates.front()
                                       .fence_event.physical.original_text_offset);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
       text_words_at_offset(patched, fence->trampoline_offset, fence->trampoline_size);
@@ -12271,7 +12272,7 @@ TEST(ConSanMoi, AtomicRecordMarksCompareExchangeOutcomeUnavailableUntilCaptured)
       << testing::PrintToString(result.warnings) << testing::PrintToString(result.errors)
       << testing::PrintToString(result.resource_plans);
   const ConSanPatchInfo &patch = *atomic_patch;
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> words =
       text_words_at_offset(patched, patch.trampoline_offset, patch.trampoline_size);
@@ -12501,7 +12502,7 @@ TEST(ConSanMoi, AtomicRecordSpillsSpecialStateOnRdna4) {
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiFenceRecord,
                                &ConSanPatchInfo::kind),
             1u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (const ConSanPatchInfo &patch : result.patches) {
     if (patch.kind != ConSanPatchKind::TrampolineMoiAtomicRecord &&
@@ -12684,7 +12685,7 @@ TEST(ConSanMoi, Cdna4AtomicRecordSpillsThroughSiteLocalDynamicStackFrame) {
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->spilled_vgpr_count, 7u);
   EXPECT_EQ(patch->required_private_segment_size, 48u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> cave_words =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);

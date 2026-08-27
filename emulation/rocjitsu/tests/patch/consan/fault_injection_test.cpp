@@ -257,9 +257,9 @@ TEST(ConSan, LdsAddressFaultRejectsSameRegisterAndFinalProofRejectsOtherFieldDri
                                      *instrumentation_patch->relocated_guest_instruction_offset +
                                      sizeof(uint32_t);
   uint32_t word1 = 0;
-  std::memcpy(&word1, corrupted.elf_bytes.data() + word1_file_offset, sizeof(word1));
+  std::memcpy(&word1, corrupted.replacement.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u << 8u;
-  std::memcpy(corrupted.elf_bytes.data() + word1_file_offset, &word1, sizeof(word1));
+  std::memcpy(corrupted.replacement.data() + word1_file_offset, &word1, sizeof(word1));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("fields other than the selected LDS address VGPR") != std::string::npos;
@@ -367,7 +367,7 @@ TEST(ConSan, FinalValidationRejectsUnprovenBarrierMutation) {
   ASSERT_EQ(valid.program_inventory.text_sections().size(), 1u);
 
   ConSanResult corrupted = valid;
-  std::memcpy(corrupted.elf_bytes.data() +
+  std::memcpy(corrupted.replacement.data() +
                   valid.program_inventory.text_sections().front().file_offset,
               text_words.data(), sizeof(uint32_t));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
@@ -391,9 +391,9 @@ TEST(ConSan, FinalValidationRejectsWrongAtomicMutationDisplacement) {
   const size_t word2_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                    valid.patches.front().anchor_offset + 2 * sizeof(uint32_t);
   uint32_t word2 = 0;
-  std::memcpy(&word2, corrupted.elf_bytes.data() + word2_file_offset, sizeof(word2));
+  std::memcpy(&word2, corrupted.replacement.data() + word2_file_offset, sizeof(word2));
   word2 = (word2 & 0xffu) | (2u << 8u);
-  std::memcpy(corrupted.elf_bytes.data() + word2_file_offset, &word2, sizeof(word2));
+  std::memcpy(corrupted.replacement.data() + word2_file_offset, &word2, sizeof(word2));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
@@ -429,9 +429,9 @@ TEST(ConSan, FinalValidationRejectsScopeMutationThatChangesTh) {
   const size_t word1_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                    scope_patch->anchor_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
-  std::memcpy(&word1, corrupted.elf_bytes.data() + word1_file_offset, sizeof(word1));
+  std::memcpy(&word1, corrupted.replacement.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u << 16u;
-  std::memcpy(corrupted.elf_bytes.data() + word1_file_offset, &word1, sizeof(word1));
+  std::memcpy(corrupted.replacement.data() + word1_file_offset, &word1, sizeof(word1));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
@@ -452,9 +452,9 @@ TEST(ConSan, FinalValidationRejectsCorruptedDsAtomicAddressMutation) {
   const size_t word1_file_offset =
       valid.program_inventory.text_sections().front().file_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
-  std::memcpy(&word1, corrupted.elf_bytes.data() + word1_file_offset, sizeof(word1));
+  std::memcpy(&word1, corrupted.replacement.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u;
-  std::memcpy(corrupted.elf_bytes.data() + word1_file_offset, &word1, sizeof(word1));
+  std::memcpy(corrupted.replacement.data() + word1_file_offset, &word1, sizeof(word1));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {

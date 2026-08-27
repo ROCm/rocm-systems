@@ -4861,13 +4861,13 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
 
     if (install_action == rocjitsu::ConSanInstallAction::LoadReplacement) {
       dump_code_object_bytes(*config, dump_id, code_object_reader.handle, "patched",
-                             std::span<const uint8_t>(transform_result.replacement_bytes.data(),
-                                                      transform_result.replacement_bytes.size()));
+                             std::span<const uint8_t>(transform_result.replacement.data(),
+                                                      transform_result.replacement.size()));
     } else {
       // All metadata consumers above are finished. Discard the unused final
       // image and its reservation together before invoking the original
       // loader, which may block or re-enter the hook.
-      transform_state.discard_image_and_release(patch_result_storage->replacement_bytes);
+      transform_state.discard_image_and_release(patch_result_storage->replacement);
     }
   } else {
     log_message(kLogInfo, "ConSan pass-through reader=%llu bytes=unavailable",
@@ -4882,12 +4882,12 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
 
     const size_t input_size = patch_result_storage->code_object.byte_size;
-    const size_t replacement_size = patch_result_storage->replacement_bytes.size();
+    const size_t replacement_size = patch_result_storage->replacement.size();
     const uint64_t replacement_growth_bytes =
         replacement_size > input_size ? static_cast<uint64_t>(replacement_size - input_size) : 0;
     try {
       replacement_storage = std::make_shared<const std::vector<uint8_t>>(
-          std::move(patch_result_storage->replacement_bytes));
+          std::move(patch_result_storage->replacement));
     } catch (const std::bad_alloc &) {
       replacement_storage.reset();
     }
@@ -4978,7 +4978,7 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
                      "[rocjitsu-dbi-hooks] failed to retain replacement code-object storage\n");
       }
       replacement_storage.reset();
-      transform_state.discard_image_and_release(patch_result_storage->replacement_bytes);
+      transform_state.discard_image_and_release(patch_result_storage->replacement);
       if (config->fail_closed) {
         record_static_coverage(false);
         return reject_code_object_load(*config, HSA_STATUS_ERROR_OUT_OF_RESOURCES,

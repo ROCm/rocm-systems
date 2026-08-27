@@ -240,23 +240,24 @@ std::array<uint32_t, WordCount> patched_words_at_file_offset(const ConSanResult 
                                                              size_t file_offset) {
   std::array<uint32_t, WordCount> words{};
   constexpr size_t byte_count = WordCount * sizeof(uint32_t);
-  if (file_offset > result.elf_bytes.size() || byte_count > result.elf_bytes.size() - file_offset) {
+  if (file_offset > result.replacement.size() ||
+      byte_count > result.replacement.size() - file_offset) {
     ADD_FAILURE() << "patched word range exceeds the emitted ELF image";
     return words;
   }
-  std::memcpy(words.data(), result.elf_bytes.data() + file_offset, byte_count);
+  std::memcpy(words.data(), result.replacement.data() + file_offset, byte_count);
   return words;
 }
 
 std::vector<uint32_t> patched_words_at_file_offset(const ConSanResult &result, size_t file_offset,
                                                    size_t byte_count) {
-  if (byte_count % sizeof(uint32_t) != 0 || file_offset > result.elf_bytes.size() ||
-      byte_count > result.elf_bytes.size() - file_offset) {
+  if (byte_count % sizeof(uint32_t) != 0 || file_offset > result.replacement.size() ||
+      byte_count > result.replacement.size() - file_offset) {
     ADD_FAILURE() << "patched word range is unaligned or exceeds the emitted ELF image";
     return {};
   }
   std::vector<uint32_t> words(byte_count / sizeof(uint32_t));
-  std::memcpy(words.data(), result.elf_bytes.data() + file_offset, byte_count);
+  std::memcpy(words.data(), result.replacement.data() + file_offset, byte_count);
   return words;
 }
 

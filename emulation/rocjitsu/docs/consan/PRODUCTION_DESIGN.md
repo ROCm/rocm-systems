@@ -5065,6 +5065,37 @@ analysis completed.
   23.06 seconds; the complete serialized physical matrix remains reserved for
   the final tranche gate. E2E validation remains outside this work.
 
+### Slice 5BN: give the validated replacement image the same owner
+
+- **One replacement-image value:** `ConSanTransformArtifacts::replacement`
+  now owns the complete validated replacement code object. Compatibility
+  lowering and `TransformResult` no longer declare separate byte vectors or
+  move the image explicitly across their boundary. The generic RocJitsu
+  instrumentation result keeps its independent `elf_bytes` field because it
+  belongs to a different API.
+- **Publication is exact by construction:** Moving the common artifact
+  subobject publishes the replacement together with its patch inventory,
+  outcome, and warnings. The focused publication test fills a recognizable
+  replacement and verifies that the exact bytes arrive in the typed result;
+  existing result-validation, installation, retry-equivalence, determinism,
+  and runtime-discard tests continue to exercise its lifecycle.
+- **Deletion accounting:** Implementation files add 161 and delete 162
+  physical lines, a net deletion of one. Nearly all changed lines are the
+  mechanical replacement of two former field names by the one shared name;
+  structurally, the slice removes two vector declarations and one explicit
+  transfer while adding one documented shared field. Tests add 728 and delete
+  719 physical lines, likewise dominated by the mechanical name change, plus
+  the exact publication assertion.
+- **Checked-in gate:** All 1,524 ConSan host tests and all 172 HSA-hook tests
+  pass. Of the 2,908 simulator-device tests across `gfx942`, `gfx950`,
+  `gfx1100`, `gfx1201`, and `gfx1250`, 2,906 pass in the parallel matrix; the
+  two gfx950 large-LDS InlineShadow cases reach their 60-second timeout after
+  starting in the most heavily contended wave, then both pass in isolation in
+  54.44 seconds. Slice 5BM's 26-case physical-gfx950 cross-engine smoke remains
+  the physical gate for this artifact-ownership tranche; the complete
+  serialized physical matrix remains reserved for the final gate. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

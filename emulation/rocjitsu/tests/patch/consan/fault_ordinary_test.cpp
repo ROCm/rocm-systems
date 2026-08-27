@@ -696,11 +696,11 @@ TEST(ConSan, OrdinaryAcquireWeakenOrderRemovesOnlyGlobalInvAndPreservesLoadWait)
   const size_t text_file_offset = result.program_inventory.text_sections().front().file_offset;
   EXPECT_TRUE(std::equal(bytes.begin() + static_cast<ptrdiff_t>(text_file_offset),
                          bytes.begin() + static_cast<ptrdiff_t>(text_file_offset + 16u),
-                         result.elf_bytes.begin() + static_cast<ptrdiff_t>(text_file_offset)));
+                         result.replacement.begin() + static_cast<ptrdiff_t>(text_file_offset)));
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
   for (size_t offset = 16u; offset < 28u; offset += sizeof(uint32_t)) {
     uint32_t word = 0;
-    std::memcpy(&word, result.elf_bytes.data() + text_file_offset + offset, sizeof(word));
+    std::memcpy(&word, result.replacement.data() + text_file_offset + offset, sizeof(word));
     EXPECT_EQ(word, nop);
   }
 }
@@ -725,7 +725,7 @@ TEST(ConSan, OrdinaryAcquireWrongAddressChangesOnlyAlignedSignedIoffset) {
   std::array<uint32_t, 3> before{};
   std::array<uint32_t, 3> after{};
   std::memcpy(before.data(), bytes.data() + text_file_offset, sizeof(before));
-  std::memcpy(after.data(), result.elf_bytes.data() + text_file_offset, sizeof(after));
+  std::memcpy(after.data(), result.replacement.data() + text_file_offset, sizeof(after));
   EXPECT_EQ(after[0], before[0]);
   EXPECT_EQ(after[1], before[1]);
   EXPECT_EQ(after[2] & 0xffu, before[2] & 0xffu);
@@ -773,7 +773,7 @@ TEST(ConSan, OrdinaryAcquireWeakenScopeChangesOnlyDeviceScopeBits) {
   uint32_t before = 0;
   uint32_t after = 0;
   std::memcpy(&before, bytes.data() + word1_file_offset, sizeof(before));
-  std::memcpy(&after, result.elf_bytes.data() + word1_file_offset, sizeof(after));
+  std::memcpy(&after, result.replacement.data() + word1_file_offset, sizeof(after));
   EXPECT_EQ((before >> 18u) & 0x3u, 3u);
   EXPECT_EQ((after >> 18u) & 0x3u, 0u);
   EXPECT_EQ(after, before & ~(0x3u << 18u));
@@ -836,9 +836,9 @@ TEST(ConSan, FinalValidationRejectsCorruptedOrdinaryScopeMutation) {
   const size_t word1_file_offset = valid.program_inventory.text_sections().front().file_offset +
                                    valid.patches.front().anchor_offset + sizeof(uint32_t);
   uint32_t word1 = 0;
-  std::memcpy(&word1, corrupted.elf_bytes.data() + word1_file_offset, sizeof(word1));
+  std::memcpy(&word1, corrupted.replacement.data() + word1_file_offset, sizeof(word1));
   word1 ^= 1u << 20u;
-  std::memcpy(corrupted.elf_bytes.data() + word1_file_offset, &word1, sizeof(word1));
+  std::memcpy(corrupted.replacement.data() + word1_file_offset, &word1, sizeof(word1));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
     return error.find("fields other than the exact ordinary load scope") != std::string::npos;

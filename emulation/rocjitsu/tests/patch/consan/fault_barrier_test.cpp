@@ -220,7 +220,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesCompleteStaticLifecycleAsOneMutation) {
     return patch.kind == ConSanPatchKind::InlineBarrierIdScopeRewrite;
   }));
 
-  AmdGpuCodeObject patched(execution.elf_bytes.data(), execution.elf_bytes.size());
+  AmdGpuCodeObject patched(execution.replacement.data(), execution.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
   EXPECT_EQ(text[0], 0xBE805182u);   // s_barrier_init 2
@@ -313,7 +313,7 @@ TEST(ConSan, FaultBarrierParticipantCountRewritesProvenLiteralM0LifecycleSetup) 
   EXPECT_EQ(result.patches.front().original_size, 8u);
   EXPECT_EQ(result.patches.front().original_participant_count, 12u);
   EXPECT_EQ(result.patches.front().target_participant_count, 8u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
   EXPECT_EQ(text[0], text_words[0]);
@@ -495,7 +495,7 @@ TEST(ConSan, FaultBarrierLifecycleRollsBackWhenMoiResourcesAreUnsupported) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(result.modified);
   EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   EXPECT_TRUE(result.errors.empty());
   EXPECT_EQ(result.mutation.fault.requested, 1u);
@@ -537,12 +537,13 @@ TEST(ConSan, FaultDropBarrierModeRewritesSelectedBarrier) {
   EXPECT_EQ(result.patches.front().anchor_offset, 12u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 12u);
   EXPECT_EQ(result.patches.front().original_size, 4u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   uint32_t first_barrier = 0;
   uint32_t rewritten_barrier = 0;
-  std::memcpy(&first_barrier, result.elf_bytes.data() + 0x100, sizeof(first_barrier));
-  std::memcpy(&rewritten_barrier, result.elf_bytes.data() + 0x100 + 12, sizeof(rewritten_barrier));
+  std::memcpy(&first_barrier, result.replacement.data() + 0x100, sizeof(first_barrier));
+  std::memcpy(&rewritten_barrier, result.replacement.data() + 0x100 + 12,
+              sizeof(rewritten_barrier));
   EXPECT_EQ(first_barrier, 0xBF940000u);
   EXPECT_EQ(rewritten_barrier, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
 }
@@ -688,7 +689,7 @@ TEST(ConSan, FaultDropBarrierExactSequenceRewritesBothMembersAsOneMutation) {
            patch.fault_companion_identity == inventory.fault_sites.back().identity &&
            patch.fault_sequence_identity == sequence->identity;
   }));
-  AmdGpuCodeObject patched(execution.elf_bytes.data(), execution.elf_bytes.size());
+  AmdGpuCodeObject patched(execution.replacement.data(), execution.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
   EXPECT_EQ(text[0], build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
@@ -927,7 +928,7 @@ TEST(ConSan, FaultDropBarrierExactGroupRewritesTwoCompletePairsAsOneMutation) {
     return patch.phase == ConSanPatchPhase::Mutation &&
            patch.kind == ConSanPatchKind::InlineBarrierNopRewrite;
   }));
-  AmdGpuCodeObject patched(execution.elf_bytes.data(), execution.elf_bytes.size());
+  AmdGpuCodeObject patched(execution.replacement.data(), execution.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
   EXPECT_EQ(text[0], build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
@@ -1088,7 +1089,7 @@ TEST(ConSan, FaultBarrierMoveDryRunReportsCompletingPairWithoutChangingBytes) {
   const ConSanResult result = try_patch_consan(bytes, options);
 
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
   ASSERT_EQ(result.fault_plans.size(), 1u);
   EXPECT_EQ(result.fault_plans[0].kind, ConSanFaultMutationKind::MoveBarrierPair);
@@ -1132,7 +1133,7 @@ TEST(ConSan, FaultBarrierIdScopeDryRunSelectsExactLogicalSequenceForValidRetarge
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.planned, 1u);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   ASSERT_EQ(result.fault_plans.size(), 1u);
   const ConSanFaultMutationPlan &plan = result.fault_plans.front();
   EXPECT_EQ(plan.kind, ConSanFaultMutationKind::BarrierIdScope);
@@ -1255,7 +1256,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified);
-  EXPECT_FALSE(result.elf_bytes.empty());
+  EXPECT_FALSE(result.replacement.empty());
   EXPECT_EQ(result.mutation.fault.requested, 1u);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -1263,7 +1264,7 @@ TEST(ConSan, FaultBarrierIdScopeRewritesInlinePairAsOneMutation) {
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineBarrierIdScopeRewrite);
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::InlineBarrierIdScopeRewrite);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto *text = reinterpret_cast<const uint32_t *>(patched.text_sections().front()->data());
   EXPECT_EQ(text[0], 0xBE804EC2u); // s_barrier_signal -2
@@ -1499,7 +1500,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionRelocatesExactPairEarlierAndLater) {
     ASSERT_TRUE(target.barrier_move_direction);
     EXPECT_EQ(*target.barrier_move_direction, direction);
 
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_EQ(patched.text_sections().size(), 1u);
     std::array<uint32_t, 5> cave{};
     std::memcpy(cave.data(), patched.text_sections().front()->data() + target.trampoline_offset,
@@ -1548,7 +1549,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionPreservesTwelveByteDestination) {
   EXPECT_EQ(result.patches.back().original_size, 12u);
   EXPECT_EQ(result.patches.back().trampoline_size, 24u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   std::array<uint32_t, 6> cave{};
   std::memcpy(cave.data(),
               patched.text_sections().front()->data() + result.patches.back().trampoline_offset,
@@ -1820,7 +1821,7 @@ TEST(ConSan, FaultBarrierMarkerlessExecutionPrefersReachableUncoveredLocalCave) 
             (kernel_words.size() + function_words.size()) * sizeof(uint32_t));
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_EQ(patched.text_sections().front()->size(), original.text_sections().front()->size());
 }
 
@@ -1880,13 +1881,13 @@ TEST(ConSan, FinalValidationRejectsCorruptedMarkerlessBarrierMoveComponents) {
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(valid.patches.size(), 3u);
   const ConSanPatchInfo &target = valid.patches.back();
-  AmdGpuCodeObject patched(valid.elf_bytes.data(), valid.elf_bytes.size());
+  AmdGpuCodeObject patched(valid.replacement.data(), valid.replacement.size());
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
 
   const auto expect_rejected = [&](uint64_t body_offset, uint32_t replacement,
                                    std::string_view expected_error) {
     ConSanResult corrupted = valid;
-    std::memcpy(corrupted.elf_bytes.data() + text_file_offset + target.trampoline_offset +
+    std::memcpy(corrupted.replacement.data() + text_file_offset + target.trampoline_offset +
                     body_offset,
                 &replacement, sizeof(replacement));
     const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
@@ -1897,7 +1898,7 @@ TEST(ConSan, FinalValidationRejectsCorruptedMarkerlessBarrierMoveComponents) {
   const auto expect_anchor_rejected = [&](uint64_t anchor_offset, uint32_t replacement,
                                           std::string_view expected_error) {
     ConSanResult corrupted = valid;
-    std::memcpy(corrupted.elf_bytes.data() + text_file_offset + anchor_offset, &replacement,
+    std::memcpy(corrupted.replacement.data() + text_file_offset + anchor_offset, &replacement,
                 sizeof(replacement));
     const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
     EXPECT_TRUE(std::ranges::any_of(errors, [&](const std::string &error) {
@@ -1942,7 +1943,7 @@ TEST(ConSan, FaultDropBarrierModeSkipsRocclrRuntimeHelpers) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
 
   bool saw_skip_warning = false;
@@ -1976,10 +1977,11 @@ TEST(ConSan, FaultDropBarrierModeComposesWithLdsCheckTrapPatch) {
   EXPECT_EQ(result.patches[0].kind, ConSanPatchKind::InlineBarrierNopRewrite);
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches[0].anchor_offset, 40u);
-  EXPECT_GT(result.elf_bytes.size(), bytes.size());
+  EXPECT_GT(result.replacement.size(), bytes.size());
 
   uint32_t rewritten_barrier = 0;
-  std::memcpy(&rewritten_barrier, result.elf_bytes.data() + 0x100 + 40, sizeof(rewritten_barrier));
+  std::memcpy(&rewritten_barrier, result.replacement.data() + 0x100 + 40,
+              sizeof(rewritten_barrier));
   EXPECT_EQ(rewritten_barrier, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
 
   const ConSanPatchInfo &instrumentation = result.patches[1];
@@ -1990,7 +1992,7 @@ TEST(ConSan, FaultDropBarrierModeComposesWithLdsCheckTrapPatch) {
        instrumentation.trampoline_offset + instrumentation.trampoline_size;
        offset += sizeof(uint32_t)) {
     uint32_t word = 0;
-    std::memcpy(&word, result.elf_bytes.data() + 0x100 + offset, sizeof(word));
+    std::memcpy(&word, result.replacement.data() + 0x100 + offset, sizeof(word));
     relocated_access_count += word == 0xD8D80000u;
   }
   EXPECT_EQ(relocated_access_count, 2u);
@@ -2031,10 +2033,10 @@ TEST(ConSan, FaultMoveBarrierRelocatesBarrierToMarker) {
   uint32_t second_source = 0;
   uint32_t target = 0;
   uint32_t second_target = 0;
-  std::memcpy(&source, result.elf_bytes.data() + 0x100, sizeof(source));
-  std::memcpy(&second_source, result.elf_bytes.data() + 0x100 + 4, sizeof(second_source));
-  std::memcpy(&target, result.elf_bytes.data() + 0x100 + 16, sizeof(target));
-  std::memcpy(&second_target, result.elf_bytes.data() + 0x100 + 20, sizeof(second_target));
+  std::memcpy(&source, result.replacement.data() + 0x100, sizeof(source));
+  std::memcpy(&second_source, result.replacement.data() + 0x100 + 4, sizeof(second_source));
+  std::memcpy(&target, result.replacement.data() + 0x100 + 16, sizeof(target));
+  std::memcpy(&second_target, result.replacement.data() + 0x100 + 20, sizeof(second_target));
   EXPECT_EQ(source, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(second_source, build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(target, 0xBE804EC1u);

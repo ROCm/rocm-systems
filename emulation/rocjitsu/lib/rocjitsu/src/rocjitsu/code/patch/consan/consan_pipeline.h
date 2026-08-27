@@ -325,8 +325,6 @@ public:
   std::vector<ConSanPipelineStageRecord> stages;
   /// Address-free engine-specific report/marker contract when applicable.
   std::optional<ConSanEvidenceRequirements> evidence_requirements;
-  /// Validated replacement image only for `ModifiedValid`.
-  std::vector<uint8_t> replacement_bytes;
   /// First typed configuration failure, or `None` after valid configuration.
   ConSanContractIssue configuration_issue = ConSanContractIssue::None;
   /// Machine-readable failures owned by static pipeline stages.

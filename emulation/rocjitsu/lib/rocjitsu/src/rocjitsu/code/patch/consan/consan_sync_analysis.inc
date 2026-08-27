@@ -3015,9 +3015,9 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
 
   std::unique_ptr<AmdGpuCodeObject> composed_code_object;
   const AmdGpuCodeObject *emission_code_object = &code_object;
-  if (!result.elf_bytes.empty()) {
+  if (!result.replacement.empty()) {
     composed_code_object =
-        std::make_unique<AmdGpuCodeObject>(result.elf_bytes.data(), result.elf_bytes.size());
+        std::make_unique<AmdGpuCodeObject>(result.replacement.data(), result.replacement.size());
     if (!composed_code_object->is_valid() || composed_code_object->text_sections().size() != 1u) {
       result.errors.emplace_back(
           "ConSan SC perturbation could not parse the composed redundant-access image");
@@ -3193,7 +3193,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
   if (!replace_consan_text(patcher, new_text, options, "SC perturbation", result)) {
     return;
   }
-  result.elf_bytes = std::move(patcher).emit();
+  result.replacement = std::move(patcher).emit();
   for (const PlannedPatch &patch : planned) {
     ConSanPatchInfo info;
     info.kind = ConSanPatchKind::TrampolineScPerturbation;
@@ -3222,7 +3222,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
                             &ConSanKernelInfo::name);
       if (owner == result.program_inventory.kernels().end()) {
         result.errors.emplace_back("ConSan carried perturbation lost its exact kernel owner");
-        result.elf_bytes.clear();
+        result.replacement.clear();
         return;
       }
       info.owner_descriptor_file_offsets.push_back(owner->descriptor_file_offset);

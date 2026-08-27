@@ -87,7 +87,7 @@ TEST(ConSanMoi, AtomicWrongAddressRetryFromInventoryMatchesFreshLiveTransform) {
   EXPECT_EQ(retried.mutation.fault.applied, fresh.mutation.fault.applied);
   EXPECT_EQ(retried.mutation.applied_fault_logical_identity,
             fresh.mutation.applied_fault_logical_identity);
-  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.replacement, fresh.replacement);
   ASSERT_EQ(retried.patches.size(), fresh.patches.size());
   for (size_t index = 0; index < fresh.patches.size(); ++index) {
     EXPECT_EQ(retried.patches[index].kind, fresh.patches[index].kind);
@@ -113,7 +113,7 @@ TEST(ConSanMoi, UnsatisfiedLateFaultRetryMatchesFreshRejection) {
 
   EXPECT_EQ(retried.outcome, fresh.outcome);
   EXPECT_EQ(retried.mutation.fault.applied, 0u);
-  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.replacement, fresh.replacement);
   EXPECT_EQ(retried.errors, fresh.errors);
   EXPECT_EQ(retried.warnings, fresh.warnings);
 }
@@ -134,7 +134,7 @@ TEST(ConSanMoi, DisabledTypedFaultUsesReportOnlyRetryPath) {
 
   EXPECT_EQ(disabled.outcome, absent.outcome);
   EXPECT_EQ(disabled.modified, absent.modified);
-  EXPECT_EQ(disabled.elf_bytes, absent.elf_bytes);
+  EXPECT_EQ(disabled.replacement, absent.replacement);
   EXPECT_EQ(disabled.errors, absent.errors);
   EXPECT_EQ(disabled.warnings, absent.warnings);
 }
@@ -200,7 +200,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   });
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
-  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.replacement, fresh.replacement);
   EXPECT_EQ(retried.mutation.fault.applied, 1u);
   const ConSanMoiAutoReportInventory required = plan_test_moi_evidence_inventory(retried, live);
   EXPECT_TRUE(consan_moi_auto_report_inventory_covers(capacity, required));
@@ -268,7 +268,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
       << testing::PrintToString(fresh.errors) << testing::PrintToString(fresh.warnings);
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
-  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.replacement, fresh.replacement);
   const ConSanMoiAutoReportInventory required = plan_test_moi_evidence_inventory(retried, live);
   EXPECT_TRUE(consan_moi_auto_report_inventory_covers(capacity, required));
 
@@ -281,8 +281,8 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
             << " fresh_live_ms=" << fresh_ms << " retry_ms=" << retry_ms
             << " candidates=" << retried.moi_candidates.size()
             << " candidate_owners=" << candidate_owners.size()
-            << " patches=" << retried.patches.size() << " output_bytes=" << retried.elf_bytes.size()
-            << '\n';
+            << " patches=" << retried.patches.size()
+            << " output_bytes=" << retried.replacement.size() << '\n';
 }
 
 TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
@@ -294,7 +294,7 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
       << testing::PrintToString(valid.errors) << testing::PrintToString(valid.warnings);
   EXPECT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(valid.mutation.fault.applied, 1u);
-  ASSERT_GE(valid.elf_bytes.size(), bytes.size());
+  ASSERT_GE(valid.replacement.size(), bytes.size());
   const auto mutation = std::ranges::find(
       valid.patches, ConSanPatchKind::InlineAtomicAddressRewrite, &ConSanPatchInfo::kind);
   const auto record = std::ranges::find(valid.patches, ConSanPatchKind::TrampolineMoiAtomicRecord,
@@ -306,19 +306,19 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
                 sizeof(uint32_t),
             record->trampoline_offset + record->trampoline_size);
 
-  AmdGpuCodeObject replacement(valid.elf_bytes.data(), valid.elf_bytes.size());
+  AmdGpuCodeObject replacement(valid.replacement.data(), valid.replacement.size());
   ASSERT_TRUE(replacement.is_valid());
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
   uint32_t relocated_word2 = 0;
   std::memcpy(&relocated_word2,
-              valid.elf_bytes.data() + text_file_offset +
+              valid.replacement.data() + text_file_offset +
                   *record->relocated_guest_instruction_offset + 2u * sizeof(uint32_t),
               sizeof(relocated_word2));
   EXPECT_EQ((relocated_word2 >> 8u) & 0xffffffu, 4u);
 
   ConSanResult negative_drift = valid;
   relocated_word2 = (relocated_word2 & 0xffu) | (0xfffffcu << 8u);
-  std::memcpy(negative_drift.elf_bytes.data() + text_file_offset +
+  std::memcpy(negative_drift.replacement.data() + text_file_offset +
                   *record->relocated_guest_instruction_offset + 2u * sizeof(uint32_t),
               &relocated_word2, sizeof(relocated_word2));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, negative_drift);
@@ -338,10 +338,10 @@ TEST(ConSanOwnership, CompositePeakFitsAdmissionAcrossAllPhases) {
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
-  ASSERT_GE(result.elf_bytes.size(), bytes.size());
+  ASSERT_GE(result.replacement.size(), bytes.size());
   const ConSanPatchedImageGrowthLimit exact_growth = {
       .kind = ConSanPatchedImageGrowthLimitKind::AbsoluteBytes,
-      .absolute_bytes = result.elf_bytes.size() - bytes.size(),
+      .absolute_bytes = result.replacement.size() - bytes.size(),
   };
   const auto ownership_estimate =
       consan_hook::consan_transform_major_image_reservation(bytes.size(), exact_growth);
@@ -352,9 +352,9 @@ TEST(ConSanOwnership, CompositePeakFitsAdmissionAcrossAllPhases) {
                         &consan_hook::ConSanTransformOwnership::phase);
   ASSERT_NE(composite_phase, consan_hook::kConSanTransformOwnershipPhases.end());
   const auto composite_reservation = consan_hook::consan_transform_phase_reservation_bytes(
-      *composite_phase, bytes.size(), result.elf_bytes.size());
+      *composite_phase, bytes.size(), result.replacement.size());
   ASSERT_TRUE(composite_reservation);
-  EXPECT_EQ(*composite_reservation, bytes.size() + 12u * result.elf_bytes.size())
+  EXPECT_EQ(*composite_reservation, bytes.size() + 12u * result.replacement.size())
       << "modified composite transforms must retain their explicit parser-complete phase";
   EXPECT_GE(ownership_estimate->reservation_bytes, *composite_reservation);
 
@@ -381,7 +381,7 @@ TEST(ConSanOwnership, CompositePeakFitsAdmissionAcrossAllPhases) {
                           &consan_hook::ConSanTransformOwnership::phase);
     ASSERT_NE(admitted, consan_hook::kConSanTransformOwnershipPhases.end());
     const auto reservation = consan_hook::consan_transform_phase_reservation_bytes(
-        *admitted, bytes.size(), result.elf_bytes.size());
+        *admitted, bytes.size(), result.replacement.size());
     ASSERT_TRUE(reservation);
     const auto &observation = observed.phase(phase.measured);
     EXPECT_GT(observation.peak_bytes, 0u);
@@ -415,7 +415,7 @@ TEST(ConSanOwnership, CompositePeakFitsAdmissionAcrossAllPhases) {
   RecordProperty("composite_peak_bytes", composite.peak_bytes);
   RecordProperty("final_validation_peak_bytes", validation.peak_bytes);
   RecordProperty("input_image_bytes", bytes.size());
-  RecordProperty("replacement_image_bytes", result.elf_bytes.size());
+  RecordProperty("replacement_image_bytes", result.replacement.size());
 }
 
 TEST(ConSanOwnership, OrdinaryIncrementalPeakFitsAdmission) {
@@ -433,7 +433,7 @@ TEST(ConSanOwnership, OrdinaryIncrementalPeakFitsAdmission) {
                                        &consan_hook::ConSanTransformOwnership::phase);
   ASSERT_NE(phase, consan_hook::kConSanTransformOwnershipPhases.end());
   const auto reservation = consan_hook::consan_transform_phase_reservation_bytes(
-      *phase, bytes.size(), result.elf_bytes.size());
+      *phase, bytes.size(), result.replacement.size());
   ASSERT_TRUE(reservation);
   const auto &incremental = observed.phase(major_image_ownership::Phase::IncrementalPatch);
   EXPECT_FALSE(observed.overflowed);
@@ -454,7 +454,7 @@ TEST(ConSanOwnership, OrdinaryIncrementalPeakFitsAdmission) {
   EXPECT_EQ(observed.phase(major_image_ownership::Phase::CompositeIncrementalPatch).peak_bytes, 0u);
   RecordProperty("incremental_peak_bytes", incremental.peak_bytes);
   RecordProperty("input_image_bytes", bytes.size());
-  RecordProperty("replacement_image_bytes", result.elf_bytes.size());
+  RecordProperty("replacement_image_bytes", result.replacement.size());
 }
 
 TEST(ConSanMoi, AtomicWrongAddressComposesWithRetainedInlineShadowProbe) {
@@ -496,19 +496,19 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithRetainedInlineShadowProbe) {
   EXPECT_LE(*inline_shadow->relocated_guest_instruction_offset + mutation->original_size,
             inline_shadow->trampoline_offset + inline_shadow->trampoline_size);
 
-  AmdGpuCodeObject replacement(valid.elf_bytes.data(), valid.elf_bytes.size());
+  AmdGpuCodeObject replacement(valid.replacement.data(), valid.replacement.size());
   ASSERT_TRUE(replacement.is_valid());
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
   uint32_t relocated_word2 = 0;
   std::memcpy(&relocated_word2,
-              valid.elf_bytes.data() + text_file_offset +
+              valid.replacement.data() + text_file_offset +
                   *inline_shadow->relocated_guest_instruction_offset + 2u * sizeof(uint32_t),
               sizeof(relocated_word2));
   EXPECT_EQ((relocated_word2 >> 8u) & 0xffffffu, 4u);
 
   ConSanResult negative_drift = valid;
   relocated_word2 = (relocated_word2 & 0xffu) | (0xfffffcu << 8u);
-  std::memcpy(negative_drift.elf_bytes.data() + text_file_offset +
+  std::memcpy(negative_drift.replacement.data() + text_file_offset +
                   *inline_shadow->relocated_guest_instruction_offset + 2u * sizeof(uint32_t),
               &relocated_word2, sizeof(relocated_word2));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, negative_drift);
@@ -571,7 +571,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   ASSERT_EQ(retried.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(retried.errors) << testing::PrintToString(retried.warnings);
   EXPECT_EQ(retried.mutation.fault.applied, 1u);
-  EXPECT_EQ(retried.elf_bytes, live.elf_bytes);
+  EXPECT_EQ(retried.replacement, live.replacement);
   EXPECT_EQ(retried.outcome, live.outcome);
   const ConSanMoiAutoReportInventory live_inventory =
       plan_test_moi_evidence_inventory(retried, live_options);
@@ -630,7 +630,7 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
   EXPECT_EQ(fresh.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_EQ(retried.outcome, fresh.outcome);
   EXPECT_EQ(retried.mutation.fault.applied, 0u);
-  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.replacement, fresh.replacement);
   EXPECT_EQ(retried.errors, fresh.errors);
   EXPECT_EQ(retried.warnings, fresh.warnings);
 }
@@ -684,7 +684,7 @@ TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
       << testing::PrintToString(fresh.errors);
   EXPECT_EQ(retried.outcome, fresh.outcome);
   EXPECT_EQ(retried.mutation.fault.applied, 1u);
-  EXPECT_EQ(retried.elf_bytes, fresh.elf_bytes);
+  EXPECT_EQ(retried.replacement, fresh.replacement);
   EXPECT_EQ(retried.errors, fresh.errors);
   EXPECT_EQ(retried.warnings, fresh.warnings);
 }
@@ -760,7 +760,7 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   EXPECT_TRUE(post_return_candidate->kernel_descriptor_file_offset.has_value());
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_EQ(original.kernels().size(), 2u);
   ASSERT_EQ(patched.kernels().size(), 2u);
   const auto original_owner =
@@ -823,12 +823,12 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   EXPECT_EQ(prologue->anchor_offset, original_owner->entry_text_offset);
 
   ConSanResult corrupted = result;
-  AmdGpuCodeObject composed(corrupted.elf_bytes.data(), corrupted.elf_bytes.size());
+  AmdGpuCodeObject composed(corrupted.replacement.data(), corrupted.replacement.size());
   ASSERT_EQ(composed.text_sections().size(), 1u);
   const uint64_t text_file_offset = composed.text_sections().front()->sectionOffset();
   ASSERT_GE(nested_instrumentation->trampoline_size, sizeof(uint32_t));
   const uint32_t invalid_opcode = 0;
-  std::memcpy(corrupted.elf_bytes.data() + text_file_offset +
+  std::memcpy(corrupted.replacement.data() + text_file_offset +
                   nested_instrumentation->trampoline_offset +
                   nested_instrumentation->trampoline_size - sizeof(uint32_t),
               &invalid_opcode, sizeof(invalid_opcode));
@@ -1086,7 +1086,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
                                &ConSanPatchInfo::kind),
             1u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   std::array<uint32_t, 2> dropped{};

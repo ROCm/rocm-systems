@@ -6,38 +6,38 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
     const MoiDescriptorSgprRequirements &scalar_requirements, std::string_view probe_name,
     rj_code_arch_t arch, BuildWords build_words, MakePatchInfo make_patch_info,
     ApplyExtraRequirements apply_extra_requirements, ConSanResult &result) {
-  result.elf_bytes.assign(bytes.begin(), bytes.end());
+  result.replacement.assign(bytes.begin(), bytes.end());
   for (const PlannedPatch &planned_patch : planned_patches) {
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;
     auto words = build_words(planned_patch);
     if (!words) {
-      result.elf_bytes.clear();
+      result.replacement.clear();
       return false;
     }
     const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t));
     if (patch_bytes != planned_patch.placement.body_size) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " final patch size changed");
-      result.elf_bytes.clear();
+      result.replacement.clear();
       return false;
     }
-    if (candidate.file_offset > result.elf_bytes.size() ||
-        patch_bytes > result.elf_bytes.size() - candidate.file_offset) {
+    if (candidate.file_offset > result.replacement.size() ||
+        patch_bytes > result.replacement.size() - candidate.file_offset) {
       result.errors.emplace_back("ConSan MOI " + std::string(probe_name) +
                                  " inline patch exceeds the code object");
-      result.elf_bytes.clear();
+      result.replacement.clear();
       return false;
     }
-    std::memcpy(result.elf_bytes.data() + candidate.file_offset, words->data(),
+    std::memcpy(result.replacement.data() + candidate.file_offset, words->data(),
                 static_cast<size_t>(patch_bytes));
   }
 
-  if (!apply_descriptor_requirements(result.elf_bytes, result, descriptor_requirements, arch,
+  if (!apply_descriptor_requirements(result.replacement, result, descriptor_requirements, arch,
                                      result.errors) ||
-      !apply_sgpr_descriptor_requirements(result.elf_bytes, result, scalar_requirements,
+      !apply_sgpr_descriptor_requirements(result.replacement, result, scalar_requirements,
                                           result.errors) ||
-      !apply_extra_requirements(result.elf_bytes, result)) {
-    result.elf_bytes.clear();
+      !apply_extra_requirements(result.replacement, result)) {
+    result.replacement.clear();
     return false;
   }
 

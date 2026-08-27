@@ -233,16 +233,16 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
 
 [[nodiscard]] bool rewrite_word_in_place(const AmdGpuCodeObject &code_object, uint64_t file_offset,
                                          uint32_t replacement, ConSanResult &result) {
-  result.elf_bytes.assign(reinterpret_cast<const uint8_t *>(code_object.image_data()),
-                          reinterpret_cast<const uint8_t *>(code_object.image_data()) +
-                              code_object.image_size());
-  if (file_offset > result.elf_bytes.size() ||
-      sizeof(replacement) > result.elf_bytes.size() - file_offset) {
+  result.replacement.assign(reinterpret_cast<const uint8_t *>(code_object.image_data()),
+                            reinterpret_cast<const uint8_t *>(code_object.image_data()) +
+                                code_object.image_size());
+  if (file_offset > result.replacement.size() ||
+      sizeof(replacement) > result.replacement.size() - file_offset) {
     result.errors.emplace_back("ConSan proof rewrite offset is outside ELF bytes");
-    result.elf_bytes.clear();
+    result.replacement.clear();
     return false;
   }
-  std::memcpy(result.elf_bytes.data() + file_offset, &replacement, sizeof(replacement));
+  std::memcpy(result.replacement.data() + file_offset, &replacement, sizeof(replacement));
   result.modified = true;
   return true;
 }

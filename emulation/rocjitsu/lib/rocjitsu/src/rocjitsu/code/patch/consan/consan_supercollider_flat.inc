@@ -538,8 +538,8 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     max_observed_padding_words = std::max(max_observed_padding_words, observed_padding);
     // Text growth must start from the same image whose earlier patches we retain.
     // The combined native-LDS + flat path currently carries those earlier edits
-    // in result.elf_bytes, so leave it to inline/local placement for now.
-    if (appended_cave_offset != 0 && result.elf_bytes.empty()) {
+    // in result.replacement, so leave it to inline/local placement for now.
+    if (appended_cave_offset != 0 && result.replacement.empty()) {
       const uint64_t return_branch_pc = appended_cave_offset + requested_words * sizeof(uint32_t);
       if (compute_sopp_branch_simm16(site.physical_id.original_text_offset, appended_cave_offset) &&
           compute_sopp_branch_simm16(return_branch_pc, site.physical_id.original_text_offset +
@@ -568,7 +568,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                          owner_descriptor_file_offsets));
       finish_candidate(local_cave_candidates.back());
     }
-    if (!scalar_vcc_spill_vgpr && appended_cave_offset != 0 && result.elf_bytes.empty() &&
+    if (!scalar_vcc_spill_vgpr && appended_cave_offset != 0 && result.replacement.empty() &&
         !owner_descriptor_file_offsets.empty()) {
       auto scalar_scratch = choose_flat_check_trap_indirect_scalar_scratch(
           site_inst, owner_liveness, min_fresh_sgpr, options);
@@ -1709,10 +1709,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   }
 
   std::vector<uint8_t> patched_bytes;
-  if (result.elf_bytes.empty())
+  if (result.replacement.empty())
     patched_bytes.assign(original_bytes.begin(), original_bytes.end());
   else
-    patched_bytes = result.elf_bytes;
+    patched_bytes = result.replacement;
 
   std::vector<ConSanPatchInfo> new_patch_infos;
   new_patch_infos.reserve(planned_patches.size());
@@ -1860,10 +1860,10 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     if (!replace_consan_text(patcher, new_text, options, "flat check/trap proof", result)) {
       return;
     }
-    result.elf_bytes = std::move(patcher).emit();
+    result.replacement = std::move(patcher).emit();
   } else {
     std::optional<AmdGpuCodeObject> current_object;
-    if (!result.elf_bytes.empty())
+    if (!result.replacement.empty())
       current_object.emplace(patched_bytes.data(), patched_bytes.size());
     const auto current_descriptor_offset =
         [&](uint64_t original_descriptor_offset) -> std::optional<uint64_t> {
@@ -1920,7 +1920,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
         return;
       }
     }
-    result.elf_bytes = std::move(patched_bytes);
+    result.replacement = std::move(patched_bytes);
   }
   result.patches.insert(result.patches.end(), new_patch_infos.begin(), new_patch_infos.end());
   result.modified = true;
@@ -1971,20 +1971,20 @@ void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch
         return lhs->physical_id.original_text_offset < rhs->physical_id.original_text_offset;
       });
 
-  result.elf_bytes.assign(reinterpret_cast<const uint8_t *>(code_object.image_data()),
-                          reinterpret_cast<const uint8_t *>(code_object.image_data()) +
-                              code_object.image_size());
+  result.replacement.assign(reinterpret_cast<const uint8_t *>(code_object.image_data()),
+                            reinterpret_cast<const uint8_t *>(code_object.image_data()) +
+                                code_object.image_size());
   const std::array<uint32_t, 3> replacement = {*trap, build_s_nop(0, arch), build_s_nop(0, arch)};
   for (const ConSanAccessInventorySite *access : candidates) {
-    if (access->file_offset > result.elf_bytes.size() ||
-        access->instruction_size > result.elf_bytes.size() - access->file_offset) {
+    if (access->file_offset > result.replacement.size() ||
+        access->instruction_size > result.replacement.size() - access->file_offset) {
       result.errors.emplace_back("ConSan flat trap proof exceeds ELF bytes");
-      result.elf_bytes.clear();
+      result.replacement.clear();
       result.patches.clear();
       result.modified = false;
       return;
     }
-    std::memcpy(result.elf_bytes.data() + access->file_offset, replacement.data(),
+    std::memcpy(result.replacement.data() + access->file_offset, replacement.data(),
                 replacement.size() * sizeof(uint32_t));
 
     ConSanPatchInfo info;

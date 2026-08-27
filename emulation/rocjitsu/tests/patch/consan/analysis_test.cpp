@@ -426,7 +426,7 @@ TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.raw_vsrc, 0u);
   EXPECT_EQ(*result.program_inventory.access_sites()[1].operands.raw_ioffset, 0);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
@@ -467,7 +467,7 @@ TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
   ASSERT_TRUE(result.program_inventory.access_sites().front().operands.destination_vgpr);
   EXPECT_EQ(*result.program_inventory.access_sites().front().operands.destination_vgpr, 2u);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSan, ClassifiesExactSharedApertureWithIndependentLowHalfAsGroup) {
@@ -497,7 +497,7 @@ TEST(ConSan, ClassifiesExactSharedApertureWithIndependentLowHalfAsGroup) {
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::Group);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
@@ -529,7 +529,7 @@ TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
   EXPECT_EQ(result.program_inventory.access_sites().front().flat_address_space_hint,
             ConSanFlatAddressSpaceHint::MaybeGroup);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSan, ClassifiesCdnaSharedBaseAfterLowHalfVectorAdd) {
@@ -909,7 +909,7 @@ TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
   EXPECT_EQ(result.program_inventory.access_sites().front().physical_id.original_text_offset, 24u);
   EXPECT_EQ(result.program_inventory.access_sites().front().file_offset, 0x118u);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSan, PropagatesCdna4LaneStateThroughAccVgpr) {
@@ -1421,7 +1421,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   EXPECT_EQ(result.program_inventory.sync().sync_sequences[2].confidence,
             ConSanSemanticConfidence::Conservative);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
@@ -2045,7 +2045,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       ASSERT_TRUE(patch->scratch_vgpr);
       ASSERT_LT(*patch->scratch_vgpr, 255u);
 
-      AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+      AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
       ASSERT_TRUE(replacement.is_valid());
       ASSERT_EQ(replacement.text_sections().size(), 1u);
       const Section *text = replacement.text_sections().front();
@@ -2095,7 +2095,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       ASSERT_TRUE(patch->scratch_vgpr);
       ASSERT_LT(*patch->scratch_vgpr, 255u);
 
-      AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+      AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
       ASSERT_TRUE(replacement.is_valid());
       ASSERT_EQ(replacement.text_sections().size(), 1u);
       const Section *text = replacement.text_sections().front();
@@ -2168,8 +2168,8 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       ASSERT_NE(patch, result.patches.end());
       ASSERT_TRUE(patch->scratch_vgpr);
       ASSERT_TRUE(site.operands.destination_vgpr);
-      ASSERT_FALSE(result.elf_bytes.empty());
-      AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_FALSE(result.replacement.empty());
+      AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
       ASSERT_EQ(replacement.text_sections().size(), 1u);
       const Section *text = replacement.text_sections().front();
       const auto words = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
@@ -2297,8 +2297,8 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
           result.patches, ConSanPatchKind::InlineFlatStoreCheckTrap, &ConSanPatchInfo::kind);
       ASSERT_NE(patch, result.patches.end());
       ASSERT_TRUE(patch->scratch_vgpr);
-      ASSERT_FALSE(result.elf_bytes.empty());
-      AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_FALSE(result.replacement.empty());
+      AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
       ASSERT_EQ(replacement.text_sections().size(), 1u);
       const Section *text = replacement.text_sections().front();
       const auto words = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
@@ -2454,8 +2454,8 @@ TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   EXPECT_EQ(result.coverage_ledger.intent_entries().front().lowering,
             ConSanLoweringOutcomeKind::Instrumented);
   EXPECT_TRUE(result.coverage_ledger.all_intents_instrumented());
-  ASSERT_FALSE(result.elf_bytes.empty());
-  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(result.replacement.empty());
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   ASSERT_EQ(replacement.text_sections().size(), 1u);
   const Section *text = replacement.text_sections().front();
   const auto words = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
@@ -2510,7 +2510,7 @@ TEST(ConSan, Cdna4SuperColliderComparesGroupFlatShortValuesAsU16) {
     ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
     ASSERT_EQ(result.patches.size(), 1u);
-    AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
     const Section *text = replacement.text_sections().front();
     const auto words = std::span<const uint32_t>(reinterpret_cast<const uint32_t *>(text->data()),
                                                  text->size() / sizeof(uint32_t));
@@ -4010,7 +4010,7 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
     EXPECT_EQ(patch.phase, ConSanPatchPhase::Instrumentation);
     EXPECT_EQ(patch.anchor_offset, 0u);
     EXPECT_EQ(patch.original_size, sizeof(uint32_t));
-    AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(replacement.is_valid());
     uint32_t replacement_word = 0;
     std::memcpy(&replacement_word, replacement.text_sections().front()->data(),
@@ -4484,7 +4484,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
         patch.original_size == 2u * sizeof(uint32_t) ? sizeof(uint32_t) : 0u;
     uint32_t word = 0;
     std::memcpy(&word,
-                wrong_target.elf_bytes.data() + text_file_offset + patch.anchor_offset +
+                wrong_target.replacement.data() + text_file_offset + patch.anchor_offset +
                     operand_offset,
                 sizeof(word));
     if (patch.original_size == 2u * sizeof(uint32_t)) {
@@ -4494,7 +4494,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
     } else {
       word = (word & ~0xffu) | (128u + 15u);
     }
-    std::memcpy(wrong_target.elf_bytes.data() + text_file_offset + patch.anchor_offset +
+    std::memcpy(wrong_target.replacement.data() + text_file_offset + patch.anchor_offset +
                     operand_offset,
                 &word, sizeof(word));
     expect_invalid(wrong_target);
@@ -4502,7 +4502,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
     // Restoring bytes while omitting the corresponding record defeats generic
     // byte accounting alone; pristine group derivation must still reject it.
     ConSanResult omitted = valid;
-    std::memcpy(omitted.elf_bytes.data() + text_file_offset + patch.anchor_offset,
+    std::memcpy(omitted.replacement.data() + text_file_offset + patch.anchor_offset,
                 original_text.data() + patch.anchor_offset, patch.original_size);
     omitted.patches.erase(omitted.patches.begin() + static_cast<ptrdiff_t>(i));
     expect_invalid(omitted);
@@ -4511,11 +4511,12 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
     // must retain its original size and encoding class.
     ConSanResult wrong_shape = valid;
     uint32_t first_word = 0;
-    std::memcpy(&first_word, wrong_shape.elf_bytes.data() + text_file_offset + patch.anchor_offset,
+    std::memcpy(&first_word,
+                wrong_shape.replacement.data() + text_file_offset + patch.anchor_offset,
                 sizeof(first_word));
     first_word ^= 1u << 24u;
-    std::memcpy(wrong_shape.elf_bytes.data() + text_file_offset + patch.anchor_offset, &first_word,
-                sizeof(first_word));
+    std::memcpy(wrong_shape.replacement.data() + text_file_offset + patch.anchor_offset,
+                &first_word, sizeof(first_word));
     expect_invalid(wrong_shape);
   }
 
@@ -4532,7 +4533,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
         patch.original_size == 2u * sizeof(uint32_t) ? sizeof(uint32_t) : 0u;
     uint32_t word = 0;
     std::memcpy(&word,
-                wrong_scope.elf_bytes.data() + text_file_offset + patch.anchor_offset +
+                wrong_scope.replacement.data() + text_file_offset + patch.anchor_offset +
                     operand_offset,
                 sizeof(word));
     if (patch.original_size == 2u * sizeof(uint32_t)) {
@@ -4542,7 +4543,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
     } else {
       word = (word & ~0xffu) | 195u;
     }
-    std::memcpy(wrong_scope.elf_bytes.data() + text_file_offset + patch.anchor_offset +
+    std::memcpy(wrong_scope.replacement.data() + text_file_offset + patch.anchor_offset +
                     operand_offset,
                 &word, sizeof(word));
   }
@@ -4557,7 +4558,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
   ConSanResult changed_leave = valid;
   const uint64_t leave_offset = 5u * sizeof(uint32_t);
   uint32_t nonzero_leave = 0xBF950001u;
-  std::memcpy(changed_leave.elf_bytes.data() + text_file_offset + leave_offset, &nonzero_leave,
+  std::memcpy(changed_leave.replacement.data() + text_file_offset + leave_offset, &nonzero_leave,
               sizeof(nonzero_leave));
   ConSanPatchInfo fake_leave_accounting;
   fake_leave_accounting.phase = ConSanPatchPhase::Instrumentation;
@@ -4573,7 +4574,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
 
   ConSanResult unaccounted = valid;
   uint32_t changed_endpgm = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
-  std::memcpy(unaccounted.elf_bytes.data() + text_file_offset + 6u * sizeof(uint32_t),
+  std::memcpy(unaccounted.replacement.data() + text_file_offset + 6u * sizeof(uint32_t),
               &changed_endpgm, sizeof(changed_endpgm));
   const std::vector<std::string> accounting_errors =
       validate_consan_modified_elf(bytes, unaccounted);
@@ -4718,7 +4719,7 @@ TEST(ConSan, FinalValidationRejectsMissingMovedBarrierTarget) {
   const size_t target_file_offset =
       valid.program_inventory.text_sections().front().file_offset + valid.patches[2].anchor_offset;
   const uint32_t marker = build_s_nop(42, ROCJITSU_CODE_ARCH_RDNA4);
-  std::memcpy(corrupted.elf_bytes.data() + target_file_offset, &marker, sizeof(marker));
+  std::memcpy(corrupted.replacement.data() + target_file_offset, &marker, sizeof(marker));
   const std::vector<std::string> errors = validate_consan_modified_elf(bytes, corrupted);
 
   EXPECT_TRUE(std::ranges::any_of(errors, [](const std::string &error) {
@@ -4758,7 +4759,7 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::Candidate);
   EXPECT_GE(kernel.preflight_reasons.size(), 2u);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSan, PreflightBlockerProducesPolicyNeutralUnsupportedOutcome) {

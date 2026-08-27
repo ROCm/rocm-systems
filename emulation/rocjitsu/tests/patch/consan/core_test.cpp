@@ -241,7 +241,7 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.errors.empty());
   EXPECT_TRUE(result.warnings.empty());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
@@ -406,7 +406,7 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_FALSE(result.errors.empty());
   EXPECT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_INVALID);
   EXPECT_TRUE(result.program_inventory.kernels().empty());
@@ -486,7 +486,7 @@ TEST(ConSan, StubRejectsEmptyCodeObject) {
   EXPECT_FALSE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_FALSE(result.errors.empty());
 }
 
@@ -567,7 +567,7 @@ TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
     }
   }
@@ -650,7 +650,7 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
       EXPECT_FALSE(result.modified);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
       EXPECT_FALSE(result.program_inventory.kernel_metadata_trustworthy());
       EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(),
@@ -844,7 +844,7 @@ TEST(ConSan, ExcessiveAllocatedSectionAlignmentCannotDriveTextGrowthAllocation) 
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
     }
   }
@@ -865,13 +865,13 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
     if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
       EXPECT_TRUE(result.modified);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      EXPECT_FALSE(result.elf_bytes.empty());
+      EXPECT_FALSE(result.replacement.empty());
       EXPECT_FALSE(result.patches.empty());
       EXPECT_TRUE(validate_consan_modified_elf(input, result).empty());
     } else {
       EXPECT_FALSE(result.modified);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.replacement.empty());
       EXPECT_TRUE(result.patches.empty());
     }
   };
@@ -907,16 +907,17 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
     EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());
 
     ConSanResult wrong_target = valid;
-    mutate_elf_header(wrong_target.elf_bytes, [](Elf64_Ehdr &header) { header.e_flags = 0; });
+    mutate_elf_header(wrong_target.replacement, [](Elf64_Ehdr &header) { header.e_flags = 0; });
     EXPECT_FALSE(validate_consan_modified_elf(bytes, wrong_target).empty());
 
     ConSanResult stale_text = valid;
-    mutate_elf_section(stale_text.elf_bytes, 1,
-                       [&](Elf64_Shdr &section) { section.sh_size = stale_text.elf_bytes.size(); });
+    mutate_elf_section(stale_text.replacement, 1, [&](Elf64_Shdr &section) {
+      section.sh_size = stale_text.replacement.size();
+    });
     EXPECT_FALSE(validate_consan_modified_elf(bytes, stale_text).empty());
 
     ConSanResult unaccounted_change = valid;
-    unaccounted_change.elf_bytes[0x100u + 48u] ^= 1u;
+    unaccounted_change.replacement[0x100u + 48u] ^= 1u;
     const std::vector<std::string> unaccounted_errors =
         validate_consan_modified_elf(bytes, unaccounted_change);
     ASSERT_FALSE(unaccounted_errors.empty());
@@ -946,7 +947,7 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
 
     ConSanResult undecodable_patch = valid;
     const uint32_t invalid_instruction = 0xffffffffu;
-    std::memcpy(undecodable_patch.elf_bytes.data() + 0x100u + valid.patches.front().anchor_offset,
+    std::memcpy(undecodable_patch.replacement.data() + 0x100u + valid.patches.front().anchor_offset,
                 &invalid_instruction, sizeof(invalid_instruction));
     const std::vector<std::string> decode_errors =
         validate_consan_modified_elf(bytes, undecodable_patch);
@@ -966,15 +967,15 @@ TEST(ConSan, FinalValidationScalesAcrossManyDisjointPatchRanges) {
 
   ConSanResult result;
   result.modified = true;
-  result.elf_bytes = bytes;
-  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  result.replacement = bytes;
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   ASSERT_EQ(replacement.text_sections().size(), 1u);
   const uint64_t text_file_offset = replacement.text_sections().front()->sectionOffset();
   const uint32_t replacement_word = build_s_nop(1, ROCJITSU_CODE_ARCH_RDNA4);
   result.patches.reserve(kPatchCount);
   for (size_t index = 0; index < kPatchCount; ++index) {
     const uint64_t anchor = index * sizeof(uint32_t);
-    std::memcpy(result.elf_bytes.data() + text_file_offset + anchor, &replacement_word,
+    std::memcpy(result.replacement.data() + text_file_offset + anchor, &replacement_word,
                 sizeof(replacement_word));
     ConSanPatchInfo patch;
     patch.kind = ConSanPatchKind::InlineNopRewrite;

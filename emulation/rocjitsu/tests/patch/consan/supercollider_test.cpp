@@ -85,8 +85,8 @@ TEST(ConSan, FlatTrapProofRewritesLikelyGroupLocalFunctionSite) {
   EXPECT_EQ(result.patches.front().anchor_offset, 24u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 36u);
   EXPECT_EQ(result.patches.front().original_size, 12u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_EQ(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   const auto rewritten_words = patched_words_at_file_offset<3>(result, 0x118);
   EXPECT_EQ(rewritten_words[0], 0xBF900000u); // s_trap 0
@@ -122,7 +122,7 @@ TEST(ConSan, FlatCheckTrapProofUsesReachableAppendedCave) {
   EXPECT_EQ(result.patches.front().original_size, 12u);
   EXPECT_GT(result.patches.front().trampoline_offset, result.patches.front().anchor_offset);
   EXPECT_GT(result.patches.front().trampoline_size, 0u);
-  EXPECT_GT(result.elf_bytes.size(), bytes.size());
+  EXPECT_GT(result.replacement.size(), bytes.size());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 
@@ -409,7 +409,7 @@ TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
   GrowthPolicyFixture fixture = make_growth_policy_fixture();
   ASSERT_TRUE(consan_patch_succeeded(fixture.baseline))
       << testing::PrintToString(fixture.baseline.errors);
-  const size_t required_growth = fixture.baseline.elf_bytes.size() - fixture.bytes.size();
+  const size_t required_growth = fixture.baseline.replacement.size() - fixture.bytes.size();
   ASSERT_GT(required_growth, 0u);
   const size_t admitting_percent =
       (required_growth * 100u + fixture.bytes.size() - 1u) / fixture.bytes.size();
@@ -435,14 +435,14 @@ TEST(ConSan, RelativeGrowthLimitRejectsAndAdmitsAtExactPercentageBoundary) {
       static_cast<uint32_t>(admitting_percent);
   const ConSanResult admitted = try_patch_consan(fixture.bytes, fixture.options);
   ASSERT_TRUE(consan_patch_succeeded(admitted)) << testing::PrintToString(admitted.errors);
-  EXPECT_EQ(admitted.elf_bytes, fixture.baseline.elf_bytes);
+  EXPECT_EQ(admitted.replacement, fixture.baseline.replacement);
 }
 
 TEST(ConSan, AbsoluteGrowthLimitReportsExactRejection) {
   GrowthPolicyFixture fixture = make_growth_policy_fixture();
   ASSERT_TRUE(consan_patch_succeeded(fixture.baseline))
       << testing::PrintToString(fixture.baseline.errors);
-  const size_t required_growth = fixture.baseline.elf_bytes.size() - fixture.bytes.size();
+  const size_t required_growth = fixture.baseline.replacement.size() - fixture.bytes.size();
   ASSERT_GT(required_growth, 0u);
   fixture.options.patched_image_growth_limit.absolute_bytes = required_growth - 1u;
 
@@ -460,16 +460,16 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
   GrowthPolicyFixture fixture = make_growth_policy_fixture();
   ASSERT_TRUE(consan_patch_succeeded(fixture.baseline))
       << testing::PrintToString(fixture.baseline.errors);
-  const size_t first_stage_growth = fixture.baseline.elf_bytes.size() - fixture.bytes.size();
+  const size_t first_stage_growth = fixture.baseline.replacement.size() - fixture.bytes.size();
   ASSERT_GT(first_stage_growth, 0u);
-  AmdGpuCodeObject grown(fixture.baseline.elf_bytes.data(), fixture.baseline.elf_bytes.size());
+  AmdGpuCodeObject grown(fixture.baseline.replacement.data(), fixture.baseline.replacement.size());
   ASSERT_TRUE(grown.is_valid());
   ASSERT_EQ(grown.text_sections().size(), 1u);
   std::vector<uint8_t> second_stage_text(grown.text_sections().front()->size() + sizeof(uint32_t));
   std::memcpy(second_stage_text.data(), grown.text_sections().front()->data(),
               grown.text_sections().front()->size());
 
-  AmdGpuCodeObject probe(fixture.baseline.elf_bytes.data(), fixture.baseline.elf_bytes.size());
+  AmdGpuCodeObject probe(fixture.baseline.replacement.data(), fixture.baseline.replacement.size());
   ASSERT_TRUE(probe.is_valid());
   CodeObjectPatcher probe_patcher(probe);
   ConSanOptions probe_options;
@@ -478,7 +478,7 @@ TEST(ConSan, StagedGrowthUsesOriginalInputBudgetInsteadOfCompounding) {
   ASSERT_TRUE(
       replace_consan_text(probe_patcher, second_stage_text, probe_options, "probe", probe_result));
   const size_t second_stage_growth =
-      probe_patcher.image_bytes().size() - fixture.baseline.elf_bytes.size();
+      probe_patcher.image_bytes().size() - fixture.baseline.replacement.size();
   ASSERT_GT(second_stage_growth, 0u);
   const size_t required_total_growth = first_stage_growth + second_stage_growth;
   const size_t admitting_percent =
@@ -712,11 +712,11 @@ TEST(ConSan, FlatCheckTrapProofUsesReachableUncoveredNopCave) {
   EXPECT_EQ(result.patches.front().original_size, 12u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
-  ASSERT_GT(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_GT(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   std::array<uint32_t, 3> anchor_words{};
-  std::memcpy(anchor_words.data(), result.elf_bytes.data() + 0x118,
+  std::memcpy(anchor_words.data(), result.replacement.data() + 0x118,
               anchor_words.size() * sizeof(uint32_t));
   EXPECT_EQ(anchor_words[1], build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
   EXPECT_EQ(anchor_words[2], build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4));
@@ -828,8 +828,8 @@ TEST(ConSan, FlatLoadCheckTrapProofRewritesPaddedSecondKernelSite) {
   EXPECT_EQ(result.patches.front().original_size, 52u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_EQ(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
   const uint16_t vcc_save_sgpr =
@@ -1378,8 +1378,8 @@ TEST(ConSan, FlatStoreCheckTrapProofRewritesPaddedSecondKernelSite) {
   EXPECT_EQ(result.patches.front().original_size, 52u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_EQ(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
   const uint16_t vcc_save_sgpr =
@@ -1620,7 +1620,7 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsLiveVccSavePairThroughVgprsInBothWav
     const uint16_t vcc_save_sgpr = static_cast<uint16_t>(patch->required_sgpr_count - 2u);
     EXPECT_FALSE(vcc_save_sgpr == 0u || vcc_save_sgpr == 1u);
 
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     ASSERT_EQ(patched.text_sections().size(), 1u);
     const Section *text = patched.text_sections().front();
@@ -1752,14 +1752,14 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsSimultaneouslyLiveRegisterFilesInBot
     EXPECT_EQ(patch->spilled_vgpr_count, 3u);
     EXPECT_EQ(patch->required_private_segment_size, 12u);
     EXPECT_EQ(patch->trampoline_offset, original_text_size);
-    EXPECT_GT(result.elf_bytes.size(), bytes.size());
+    EXPECT_GT(result.replacement.size(), bytes.size());
 
     SpillManager expected_manager(/*original_private_bytes=*/0,
                                   *address_free_scratch_private_limit(ROCJITSU_CODE_ARCH_CDNA5));
     const auto expected_spill = build_vgpr_spill_sequence(
         expected_manager, /*vgpr_base=*/3, /*vgpr_count=*/3, ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_TRUE(expected_spill);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     ASSERT_EQ(patched.kernels().size(), 1u);
     ASSERT_EQ(patched.text_sections().size(), 1u);
@@ -1781,7 +1781,7 @@ TEST(ConSan, Gfx1250FlatStoreCheckTrapSpillsSimultaneouslyLiveRegisterFilesInBot
 
     KD descriptor{};
     std::memcpy(&descriptor,
-                result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                result.replacement.data() + patched.kernels().front().descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(descriptor.private_segment_fixed_size, 12u);
     EXPECT_EQ(
@@ -1917,7 +1917,7 @@ TEST(ConSan, Gfx1250FullRegisterFlatDynamicStackSpillPreservesAbiStateInBothWave
         /*vgpr_base=*/3u, /*vgpr_count=*/5u, /*borrowed_sgpr_base=*/2u,
         /*scalar_reservoir_vgpr_base=*/4u, /*original_private_bytes=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_TRUE(expected_spill);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     ASSERT_EQ(patched.kernels().size(), 1u);
     ASSERT_EQ(patched.text_sections().size(), 1u);
@@ -1935,7 +1935,7 @@ TEST(ConSan, Gfx1250FullRegisterFlatDynamicStackSpillPreservesAbiStateInBothWave
 
     KD descriptor{};
     std::memcpy(&descriptor,
-                result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+                result.replacement.data() + patched.kernels().front().descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(descriptor.private_segment_fixed_size, 20u);
     EXPECT_EQ(
@@ -2057,7 +2057,7 @@ TEST(ConSan, Gfx1250FlatLoadCheckTrapSpillsLiveVccSavePairForFullAndHighHalfLoad
     EXPECT_EQ(*patch->scalar_vcc_spill_vgpr, load_case.scalar_spill_vgpr);
     EXPECT_EQ(patch->scalar_vcc_spill_vgpr_count, 1u);
     const uint16_t vcc_save_sgpr = static_cast<uint16_t>(patch->required_sgpr_count - 2u);
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     const Section *text = patched.text_sections().front();
     std::vector<uint32_t> body(patch->trampoline_size / sizeof(uint32_t));
@@ -2226,15 +2226,15 @@ TEST(ConSan, Gfx1250SharedFlatVccSpillUsesAllOwnersCommonSgprAllocation) {
   EXPECT_LE(patch->required_sgpr_count, 8u);
   EXPECT_GT(patch->required_sgpr_count, 2u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (const auto &[owner_name, expected_granulated] :
        {std::pair{"shared_owner_0", 3u}, std::pair{"shared_owner_1", 0u}}) {
     const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
     ASSERT_NE(owner, patched.kernels().end());
-    ASSERT_LE(owner->descriptor_file_offset + sizeof(KD), result.elf_bytes.size());
+    ASSERT_LE(owner->descriptor_file_offset + sizeof(KD), result.replacement.size());
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
@@ -2334,13 +2334,13 @@ TEST(ConSan, Gfx1250SharedFlatRegisterSpillUsesOneLayoutForEveryOwner) {
   EXPECT_EQ(patch->required_private_segment_size, 44u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
     const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
     ASSERT_NE(owner, patched.kernels().end());
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(descriptor.private_segment_fixed_size, 44u);
     EXPECT_EQ(
@@ -2402,13 +2402,13 @@ TEST(ConSan, Gfx1250SharedDynamicStackFlatSpillUsesOneRuntimeFrameRecipe) {
   EXPECT_EQ(patch->dynamic_private_segment_addend, 20u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
     const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
     ASSERT_NE(owner, patched.kernels().end());
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(descriptor.private_segment_fixed_size, 52u);
   }
@@ -2485,7 +2485,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepDelay) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 52u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
   const uint16_t vcc_save_sgpr =
@@ -2539,7 +2539,7 @@ TEST(ConSan, FlatStoreCheckTrapProofCanUseSleepVarDelay) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineFlatStoreCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 52u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   ASSERT_GE(result.patches.front().required_sgpr_count, 2u);
   const uint16_t vcc_save_sgpr =
@@ -2586,14 +2586,14 @@ TEST(ConSan, ProbeNopModeEmitsPatchedElfForCandidate) {
             ConSanPreflightAction::Candidate);
   EXPECT_TRUE(result.modified);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  EXPECT_FALSE(result.elf_bytes.empty());
-  EXPECT_NE(result.elf_bytes, bytes);
+  EXPECT_FALSE(result.replacement.empty());
+  EXPECT_NE(result.replacement, bytes);
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineNop);
   EXPECT_EQ(result.patches.front().anchor_offset, 20u);
   EXPECT_EQ(result.patches.front().original_size, 4u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   EXPECT_GT(patched.text_sections().front()->size(),
@@ -2621,11 +2621,11 @@ TEST(ConSan, ProbeNopModeRewritesExistingNopInPlace) {
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 8u);
   EXPECT_EQ(result.patches.front().original_size, 4u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_EQ(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   uint32_t rewritten_word = 0;
-  std::memcpy(&rewritten_word, result.elf_bytes.data() + 0x100 + 8, sizeof(rewritten_word));
+  std::memcpy(&rewritten_word, result.replacement.data() + 0x100 + 8, sizeof(rewritten_word));
   EXPECT_EQ(rewritten_word, 0xBF800001u);
 }
 
@@ -2650,10 +2650,10 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsExistingNopRewrite) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineNop);
   EXPECT_EQ(result.patches.front().anchor_offset, 12u);
   EXPECT_EQ(result.patches.front().original_size, 4u);
-  ASSERT_GT(result.elf_bytes.size(), bytes.size());
+  ASSERT_GT(result.replacement.size(), bytes.size());
 
   uint32_t original_nop = 0;
-  std::memcpy(&original_nop, result.elf_bytes.data() + 0x100, sizeof(original_nop));
+  std::memcpy(&original_nop, result.replacement.data() + 0x100, sizeof(original_nop));
   EXPECT_EQ(original_nop, 0xBF800000u);
 }
 
@@ -2680,7 +2680,7 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsSClauseRun) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::TrampolineNop);
   EXPECT_EQ(result.patches.front().anchor_offset, 32u);
   EXPECT_EQ(result.patches.front().original_size, 4u);
-  ASSERT_GT(result.elf_bytes.size(), bytes.size());
+  ASSERT_GT(result.replacement.size(), bytes.size());
 
   const auto prefix_words = patched_words_at_file_offset<8>(result, 0x100);
   EXPECT_EQ(prefix_words[0], 0xD8340000u);
@@ -2710,7 +2710,7 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsRocclrRuntimeHelpers) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
 
   bool saw_skip_warning = false;
@@ -2729,7 +2729,7 @@ TEST(ConSan, ProbeTrampolineNopModeSkipsCodeObjectWithoutCandidateSites) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   EXPECT_TRUE(result.patches.empty());
 
   bool saw_skip_warning = false;
@@ -2782,11 +2782,11 @@ TEST(ConSan, ProbeEndpgmModeRewritesVectorAluInPlace) {
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 8u);
   EXPECT_EQ(result.patches.front().original_size, 4u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_EQ(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   uint32_t rewritten_word = 0;
-  std::memcpy(&rewritten_word, result.elf_bytes.data() + 0x100 + 8, sizeof(rewritten_word));
+  std::memcpy(&rewritten_word, result.replacement.data() + 0x100 + 8, sizeof(rewritten_word));
   EXPECT_EQ(rewritten_word, 0xBFB00000u);
 }
 
@@ -2806,11 +2806,11 @@ TEST(ConSan, ProbeLdsEndpgmModeRewritesFirstSupportedReadInPlace) {
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 8u);
   EXPECT_EQ(result.patches.front().original_size, 8u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_EQ(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   uint32_t rewritten_word = 0;
-  std::memcpy(&rewritten_word, result.elf_bytes.data() + 0x100 + 8, sizeof(rewritten_word));
+  std::memcpy(&rewritten_word, result.replacement.data() + 0x100 + 8, sizeof(rewritten_word));
   EXPECT_EQ(rewritten_word, 0xBFB00000u);
 }
 
@@ -2841,7 +2841,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedLoadInPlace) {
   EXPECT_EQ(result.patches.front().original_size, 48u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 3u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 13> expected_words = {
       0xD8D80000u,
@@ -2987,7 +2987,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250GuestVgprBankMode) {
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
   EXPECT_EQ(patch->anchor_offset, sizeof(uint32_t));
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto patched_text = std::span<const uint8_t>(
@@ -3026,7 +3026,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesGfx1250LowBankAddressForHighBankLoad)
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineLdsLoadCheckTrap,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto patched_text = std::span<const uint8_t>(
@@ -3068,7 +3068,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesGfx1250LoadAcrossVgprBankBoundary) {
   const auto patch = std::ranges::find(result.patches, ConSanPatchKind::InlineLdsLoadCheckTrap,
                                        &ConSanPatchInfo::kind);
   ASSERT_NE(patch, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto patched_text = std::span<const uint32_t>(
@@ -3278,7 +3278,7 @@ TEST(ConSan, LdsAddressFaultTracksGuestAfterGfx1250PrivateSpillPrologue) {
   EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
   EXPECT_EQ(result.mutation.fault.applied, 1u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 1u);
@@ -3286,7 +3286,7 @@ TEST(ConSan, LdsAddressFaultTracksGuestAfterGfx1250PrivateSpillPrologue) {
             result.program_inventory.kernels().front().descriptor_file_offset);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(descriptor.private_segment_fixed_size, 4u);
   EXPECT_EQ(
@@ -3330,7 +3330,7 @@ TEST(ConSan, Gfx1250BankedLdsRelocationTracksGuestAfterScalarSpillPrologue) {
   ASSERT_TRUE(patch->relocated_guest_instruction_offset);
   EXPECT_GT(*patch->relocated_guest_instruction_offset, patch->trampoline_offset);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   std::array<uint32_t, 2> relocated{};
@@ -3573,7 +3573,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsGfx1250TwoAddressStoresAndReadbacks) {
              candidate.kind == ConSanPatchKind::InlineLdsStoreCheckTrap;
     });
     ASSERT_NE(patch, result.patches.end());
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     ASSERT_EQ(patched.text_sections().size(), 1u);
     const uint64_t body_text_offset = patch->kind == ConSanPatchKind::InlineLdsStoreCheckTrap
@@ -3645,7 +3645,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSplitsLargeGfx1250TwoAddressOffsetsWithAddress
            candidate.kind == ConSanPatchKind::InlineLdsStoreCheckTrap;
   });
   ASSERT_NE(patch, result.patches.end());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const uint64_t body_text_offset = patch->kind == ConSanPatchKind::InlineLdsStoreCheckTrap
@@ -3710,12 +3710,12 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsGfx1250B8VdsStoreScratchWindow) {
   EXPECT_EQ(patch->required_private_segment_size, 8u);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(descriptor.private_segment_fixed_size, 8u);
   EXPECT_EQ(
@@ -3807,7 +3807,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesCdna4AccvgprB128Reads) {
     EXPECT_EQ(result.program_inventory.access_sites().front().operands.destination_accvgpr,
               test_case.acc_base);
 
-    AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
     ASSERT_TRUE(patched.is_valid());
     ASSERT_EQ(patched.text_sections().size(), 1u);
     const Section *text = patched.text_sections().front();
@@ -3875,7 +3875,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsCdna4AccvgprB128ScratchWithoutMovingBoun
   EXPECT_EQ(patch->scratch_vgpr, 0u);
 
   AmdGpuCodeObject original(bytes.data(), bytes.size());
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(original.is_valid());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(original.kernels().size(), 1u);
@@ -3886,7 +3886,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeSpillsCdna4AccvgprB128ScratchWithoutMovingBoun
               bytes.data() + original.kernels().front().descriptor_file_offset,
               sizeof(original_descriptor));
   std::memcpy(&patched_descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(patched_descriptor));
   EXPECT_EQ(AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc3,
                             kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
@@ -4012,7 +4012,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4TransposeRead) {
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const Section *text = patched.text_sections().front();
   const auto body =
@@ -4043,7 +4043,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesCdna4Read2B64) {
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const Section *text = patched.text_sections().front();
   const auto body =
@@ -4074,7 +4074,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackCdna4Write2st64) {
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::LocalCaveLdsStoreCheckTrap);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const Section *text = patched.text_sections().front();
   const auto body =
@@ -4221,7 +4221,7 @@ TEST(ConSan, ProbeLdsCheckTrapAllSupportedPolicyIgnoresNominalPatchLimit) {
   EXPECT_EQ(result.patches[1].anchor_offset, 44u);
   EXPECT_EQ(result.patches[1].trampoline_offset, 52u);
   EXPECT_EQ(result.patches[1].original_size, 44u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 22> expected_words = {
       0xD8D80000u,
@@ -4276,7 +4276,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedU16D16LoadInPlace) {
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 8u);
   EXPECT_EQ(result.patches.front().original_size, 52u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 14> expected_words = {
       0xDA980000u,
@@ -4321,7 +4321,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedU16D16HiLoadInPlace) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 52u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 14> expected_words = {
       0xDA9C0000u,
@@ -4376,7 +4376,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedByteD16LoadsInPlace) {
     EXPECT_EQ(result.patches.front().anchor_offset, 0u);
     EXPECT_EQ(result.patches.front().trampoline_offset, 8u);
     EXPECT_EQ(result.patches.front().original_size, 52u);
-    ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+    ASSERT_EQ(result.replacement.size(), bytes.size());
 
     const std::array<uint32_t, 14> expected_words = {
         load_word0,
@@ -4477,7 +4477,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanUseSleepDelay) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 44u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 12> expected_words = {
       0xD8D80000u,
@@ -4522,7 +4522,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanUseSleepVarDelay) {
   ASSERT_EQ(result.patches.size(), 1u);
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_EQ(result.patches.front().original_size, 44u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 12> expected_words = {
       0xD8D80000u,
@@ -4559,7 +4559,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRejectsOversizedSleepDelay) {
   const auto result = try_patch_consan(bytes, options);
 
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
   ASSERT_FALSE(result.errors.empty());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_NE(result.errors.front().find("16-bit s_sleep"), std::string::npos);
@@ -4592,7 +4592,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedStoreInPlace) {
   EXPECT_EQ(result.patches.front().original_size, 48u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 3u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 13> expected_words = {
       0xD8340000u,
@@ -4642,7 +4642,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanReportMismatchToMarkerBuffer) {
   EXPECT_EQ(result.patches.front().original_size, 84u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 3u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const auto mov_report_lo = build_v_mov_b32_e64_literal(4, 0x87654321u, ROCJITSU_CODE_ARCH_RDNA4);
   const auto mov_report_hi = build_v_mov_b32_e64_literal(5, 0x12345678u, ROCJITSU_CODE_ARCH_RDNA4);
@@ -4710,7 +4710,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedB64LoadInPlace) {
   EXPECT_EQ(result.patches.front().original_size, 60u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 16> expected_words = {
       0xD9D80000u,
@@ -4762,7 +4762,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRewritesPaddedB128StoreInPlace) {
   EXPECT_EQ(result.patches.front().original_size, 80u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 21> expected_words = {
       0xDB7C0000u,
@@ -4815,7 +4815,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeAutoScratchUsesLiveness) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 14> expected_words = {
       0xD8D80000u,
@@ -4863,11 +4863,11 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanGrowDescriptorForAutoScratch) {
   EXPECT_EQ(result.patches.front().kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 4u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const uint64_t descriptor_offset = 0x100 + text_words.size() * sizeof(uint32_t);
   KD descriptor{};
-  std::memcpy(&descriptor, result.elf_bytes.data() + descriptor_offset, sizeof(descriptor));
+  std::memcpy(&descriptor, result.replacement.data() + descriptor_offset, sizeof(descriptor));
   const uint32_t granulated = AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   EXPECT_EQ(granulated, 1u);
@@ -4900,14 +4900,14 @@ TEST(ConSan, ProbeLdsCheckTrapModeCanGrowDescriptorForB64ScratchHeadroom) {
   EXPECT_EQ(result.patches.front().original_size, 8u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 14u);
-  EXPECT_GT(result.elf_bytes.size(), bytes.size());
+  EXPECT_GT(result.replacement.size(), bytes.size());
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint32_t granulated = AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
@@ -4940,12 +4940,12 @@ TEST(ConSan, ProbeLdsCheckTrapModePreservesOverwrittenTwoAddressLoadAddress) {
   EXPECT_EQ(patch.trampoline_size, 84u);
 
   std::array<uint32_t, 5> body_prefix{};
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const Section *text = patched.text_sections().front();
   std::memcpy(body_prefix.data(),
-              result.elf_bytes.data() + text->sectionOffset() + patch.trampoline_offset,
+              result.replacement.data() + text->sectionOffset() + patch.trampoline_offset,
               sizeof(body_prefix));
   EXPECT_EQ(body_prefix[0],
             build_v_mov_b32_e32(12, vector_source_vgpr(0), ROCJITSU_CODE_ARCH_RDNA4));
@@ -4981,12 +4981,12 @@ TEST(ConSan, ProbeLdsCheckTrapModeReadsBackTwoAddressStore) {
   EXPECT_EQ(patch.trampoline_size, 56u);
 
   std::array<uint32_t, 4> body_prefix{};
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const Section *text = patched.text_sections().front();
   std::memcpy(body_prefix.data(),
-              result.elf_bytes.data() + text->sectionOffset() + patch.trampoline_offset,
+              result.replacement.data() + text->sectionOffset() + patch.trampoline_offset,
               sizeof(body_prefix));
   EXPECT_EQ(body_prefix[0], text_words[0]);
   EXPECT_EQ(body_prefix[1], text_words[1]);
@@ -5030,11 +5030,11 @@ TEST(ConSan, ProbeLdsCheckTrapModePrefersDescriptorCoveredCandidate) {
   EXPECT_EQ(result.patches.front().anchor_offset, 3u * sizeof(uint32_t));
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 14u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
 
   const uint64_t descriptor_offset = 0x100 + text_words.size() * sizeof(uint32_t);
   KD descriptor{};
-  std::memcpy(&descriptor, result.elf_bytes.data() + descriptor_offset, sizeof(descriptor));
+  std::memcpy(&descriptor, result.replacement.data() + descriptor_offset, sizeof(descriptor));
   const uint32_t granulated = AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   EXPECT_EQ(granulated, sixteen_vgprs_granulated);
@@ -5073,15 +5073,15 @@ TEST(ConSan, ProbeLdsCheckTrapModeRejectsLocalCaveOwnedByAnotherFunction) {
   EXPECT_EQ(result.patches.front().original_size, 8u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 3u);
-  ASSERT_GT(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_GT(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   const std::array<uint32_t, 2> expected_anchor = {
       build_s_branch(15, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
   };
   std::array<uint32_t, expected_anchor.size()> anchor_words{};
-  std::memcpy(anchor_words.data(), result.elf_bytes.data() + 0x100,
+  std::memcpy(anchor_words.data(), result.replacement.data() + 0x100,
               anchor_words.size() * sizeof(uint32_t));
   EXPECT_EQ(anchor_words, expected_anchor);
 
@@ -5182,7 +5182,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeLeavesAdjacentAtomicAndBarrierUntouched) {
                                            ConSanLoweringOutcomeKind::Instrumented));
   constexpr uint64_t adjacent_file_offset = 0x108u;
   constexpr uint64_t adjacent_size = 5u * sizeof(uint32_t);
-  EXPECT_EQ(0, std::memcmp(result.elf_bytes.data() + adjacent_file_offset,
+  EXPECT_EQ(0, std::memcmp(result.replacement.data() + adjacent_file_offset,
                            bytes.data() + adjacent_file_offset, adjacent_size));
 }
 
@@ -5257,7 +5257,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRejectsCrossKernelLocalCave) {
   // The padding at 16 belongs to the second kernel. The first kernel must use
   // a fresh appended cave rather than branch into another kernel's text.
   EXPECT_EQ(result.patches.front().trampoline_offset, 64u);
-  EXPECT_GT(result.elf_bytes.size(), bytes.size());
+  EXPECT_GT(result.replacement.size(), bytes.size());
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveFor2addrB64Load) {
@@ -5294,15 +5294,15 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveFor2addrB64Load) 
   EXPECT_EQ(result.patches.front().original_size, 8u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
-  ASSERT_GT(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_GT(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   const std::array<uint32_t, 2> expected_anchor = {
       build_s_branch(24, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
   };
   std::array<uint32_t, expected_anchor.size()> anchor_words{};
-  std::memcpy(anchor_words.data(), result.elf_bytes.data() + 0x100,
+  std::memcpy(anchor_words.data(), result.replacement.data() + 0x100,
               anchor_words.size() * sizeof(uint32_t));
   EXPECT_EQ(anchor_words, expected_anchor);
 
@@ -5368,15 +5368,15 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesReachableUncoveredNopCaveForB128Store) {
   EXPECT_EQ(result.patches.front().original_size, 8u);
   ASSERT_TRUE(result.patches.front().scratch_vgpr);
   EXPECT_EQ(*result.patches.front().scratch_vgpr, 5u);
-  ASSERT_GT(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_GT(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   const std::array<uint32_t, 2> expected_anchor = {
       build_s_branch(24, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
   };
   std::array<uint32_t, expected_anchor.size()> anchor_words{};
-  std::memcpy(anchor_words.data(), result.elf_bytes.data() + 0x100,
+  std::memcpy(anchor_words.data(), result.replacement.data() + 0x100,
               anchor_words.size() * sizeof(uint32_t));
   EXPECT_EQ(anchor_words, expected_anchor);
 
@@ -5430,14 +5430,14 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesAppendedTextCaveWhenNoLocalCaveFits) {
   EXPECT_EQ(result.patches.front().anchor_offset, 0u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 12u);
   EXPECT_EQ(result.patches.front().original_size, 8u);
-  EXPECT_GT(result.elf_bytes.size(), bytes.size());
+  EXPECT_GT(result.replacement.size(), bytes.size());
 
   const std::array<uint32_t, 2> expected_anchor = {
       build_s_branch(2, ROCJITSU_CODE_ARCH_RDNA4),
       build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
   };
   std::array<uint32_t, expected_anchor.size()> anchor_words{};
-  std::memcpy(anchor_words.data(), result.elf_bytes.data() + 0x100,
+  std::memcpy(anchor_words.data(), result.replacement.data() + 0x100,
               anchor_words.size() * sizeof(uint32_t));
   EXPECT_EQ(anchor_words, expected_anchor);
 }
@@ -5681,14 +5681,14 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
                                               7u * sizeof(uint32_t),
                                           body->anchor_offset + body->original_size));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   EXPECT_GT(patched.text_sections().front()->size(), original_text_size);
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   const uint32_t sgpr_granulated = AMDHSA_BITS_GET(
       descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
@@ -5698,7 +5698,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesIndirectIslandForLargeAppendedTextCave) {
   ConSanResult corrupted = result;
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
-  std::memcpy(corrupted.elf_bytes.data() + text_file_offset + *body->indirect_return_offset +
+  std::memcpy(corrupted.replacement.data() + text_file_offset + *body->indirect_return_offset +
                   5u * sizeof(uint32_t),
               &nop, sizeof(nop));
   const auto corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
@@ -5795,7 +5795,7 @@ TEST(ConSan, Cdna3LdsVccSaveSkipsPartiallyLiveScalarPair) {
   const uint16_t vcc_save = static_cast<uint16_t>(patch->required_sgpr_count - 2u);
   EXPECT_EQ(vcc_save, 18u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -5851,7 +5851,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePartitionsLongLocalCaveIntoEntryIslands) {
   }
   std::ranges::sort(island_offsets);
   EXPECT_EQ(island_offsets, (std::vector<uint64_t>{5u * sizeof(uint32_t), 12u * sizeof(uint32_t)}));
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
 }
 
@@ -6059,12 +6059,12 @@ TEST(ConSan, Cdna4DenseCheckTrapCoversRocblasShapedLargeKernel) {
   EXPECT_EQ(*explicit_dispatcher->indirect_pc_sgpr, 10u);
   EXPECT_GE(explicit_dispatcher->indirect_required_sgpr_count, 12u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto kernel = std::ranges::find(patched.kernels(), "lds_probe", &AmdGpuKernelInfo::name);
   ASSERT_NE(kernel, patched.kernels().end());
   KD descriptor{};
-  std::memcpy(&descriptor, result.elf_bytes.data() + kernel->descriptor_file_offset,
+  std::memcpy(&descriptor, result.replacement.data() + kernel->descriptor_file_offset,
               sizeof(descriptor));
   const uint32_t sgpr_granulated = AMDHSA_BITS_GET(
       descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
@@ -6140,7 +6140,7 @@ TEST(ConSan, Gfx1250CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   EXPECT_NE(*patch.scalar_vcc_spill_sgpr, options.delay_var_ssrc);
   EXPECT_EQ(patch.required_sgpr_count, static_cast<uint16_t>(*patch.scalar_vcc_spill_sgpr + 1u));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto scalar_save = instrumentation::build_v_writelane_b32(
@@ -6190,7 +6190,7 @@ TEST(ConSan, Rdna4CheckTrapSpillsLiveVccSaveScalarThroughVgpr) {
   EXPECT_NE(*patch.scalar_vcc_spill_sgpr, options.delay_var_ssrc);
   EXPECT_EQ(patch.required_sgpr_count, static_cast<uint16_t>(*patch.scalar_vcc_spill_sgpr + 1u));
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto scalar_save = instrumentation::build_v_writelane_b32(
@@ -6231,7 +6231,7 @@ TEST(ConSan, Gfx1250CheckTrapBorrowsAndPreservesS0WhenRuntimeDelayIsDisabled) {
   ASSERT_TRUE(patch.scalar_vcc_spill_vgpr);
   EXPECT_EQ(patch.required_sgpr_count, 1u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto scalar_save = instrumentation::build_v_writelane_b32(
       *patch.scalar_vcc_spill_vgpr, 0u, /*lane=*/0u, ROCJITSU_CODE_ARCH_CDNA5);
@@ -6304,7 +6304,7 @@ TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
   // emitted fixed-lane round trip.
   EXPECT_LE(patch->required_sgpr_count, 8u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const auto scalar_save = instrumentation::build_v_writelane_b32(
       *patch->scalar_vcc_spill_vgpr, *patch->scalar_vcc_spill_sgpr, /*lane=*/0u,
@@ -6322,7 +6322,7 @@ TEST(ConSan, Gfx1250SharedLdsVccSpillUsesAllOwnersCommonSgprAllocation) {
     const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
     ASSERT_NE(owner, patched.kernels().end());
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
@@ -6380,7 +6380,7 @@ TEST(ConSan, Gfx1250SharedLdsDeadVccSaveSatisfiesEveryOwnerDescriptor) {
   EXPECT_GT(patch->required_sgpr_count, 8u);
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -6395,7 +6395,7 @@ TEST(ConSan, Gfx1250SharedLdsDeadVccSaveSatisfiesEveryOwnerDescriptor) {
     const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
     ASSERT_NE(owner, patched.kernels().end());
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     const uint32_t granulated = AMDHSA_BITS_GET(
         descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
@@ -6442,16 +6442,16 @@ TEST(ConSan, Rdna4InlineLdsDeadVccSaveUsesFixedSgprPoolWithoutGrowth) {
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
+  ASSERT_EQ(result.replacement.size(), bytes.size());
   ASSERT_EQ(result.patches.size(), 1u);
   const ConSanPatchInfo &patch = result.patches.front();
   EXPECT_EQ(patch.kind, ConSanPatchKind::InlineLdsLoadCheckTrap);
   EXPECT_GT(patch.required_sgpr_count, 8u);
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   KD patched_descriptor{};
   std::memcpy(&patched_descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(patched_descriptor));
   const uint32_t granulated = AMDHSA_BITS_GET(
       patched_descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
@@ -6503,13 +6503,13 @@ TEST(ConSan, Gfx1250SharedLdsAutoScratchUsesAllOwnersAndGrowsEveryDescriptor) {
   EXPECT_EQ(patch->owner_descriptor_file_offsets[0], first_owner->descriptor_file_offset);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[1], second_owner->descriptor_file_offset);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
     const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
     ASSERT_NE(owner, patched.kernels().end());
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
@@ -6589,7 +6589,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillUsesOneLayoutForEveryOwner) {
   ASSERT_GT(patch->spilled_vgpr_count, 0u);
   EXPECT_GT(patch->required_private_segment_size, fixture.second_private_bytes);
   EXPECT_EQ(patch->trampoline_offset, original_text_size);
-  EXPECT_GT(result.elf_bytes.size(), bytes.size());
+  EXPECT_GT(result.replacement.size(), bytes.size());
   ASSERT_EQ(patch->owner_descriptor_file_offsets.size(), 2u);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[0], first_owner->descriptor_file_offset);
   EXPECT_EQ(patch->owner_descriptor_file_offsets[1], second_owner->descriptor_file_offset);
@@ -6602,7 +6602,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillUsesOneLayoutForEveryOwner) {
   ASSERT_TRUE(expected_spill);
   EXPECT_EQ(patch->required_private_segment_size, expected_spill->total_private_bytes);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> body =
       text_words_at_offset(patched, patch->trampoline_offset, patch->trampoline_size);
@@ -6616,7 +6616,7 @@ TEST(ConSan, Gfx1250SharedLdsPrivateSpillUsesOneLayoutForEveryOwner) {
     ASSERT_NE(old_owner, original.kernels().end());
     EXPECT_GT(owner->descriptor_file_offset, old_owner->descriptor_file_offset);
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(descriptor.private_segment_fixed_size, patch->required_private_segment_size);
     EXPECT_EQ(
@@ -6705,7 +6705,7 @@ TEST(ConSan, Gfx1250OverlappingSharedLdsSpillsAccumulateEveryOwnerRequirement) {
   EXPECT_EQ(patch_bc.required_private_segment_size, expected_bc->total_private_bytes);
   EXPECT_LT(patch_ab.required_private_segment_size, patch_bc.required_private_segment_size);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (const auto &[patch, expected] :
        {std::pair{&patch_ab, &*expected_ab}, std::pair{&patch_bc, &*expected_bc}}) {
@@ -6722,7 +6722,7 @@ TEST(ConSan, Gfx1250OverlappingSharedLdsSpillsAccumulateEveryOwnerRequirement) {
     const auto owner = std::ranges::find(patched.kernels(), name, &AmdGpuKernelInfo::name);
     ASSERT_NE(owner, patched.kernels().end());
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     EXPECT_EQ(descriptor.private_segment_fixed_size, expected_private_bytes);
   }
@@ -6784,12 +6784,12 @@ TEST(ConSan, Gfx1250SelectedLdsSpillsStackWithinOneOwnerLayout) {
   }
   EXPECT_TRUE(found_shared_register);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(descriptor.private_segment_fixed_size, expected_second->total_private_bytes);
   for (const auto &[patch, expected] : {std::pair{spill_patches[0], &*expected_first},
@@ -6848,12 +6848,12 @@ TEST(ConSan, Gfx1250SelectedLdsSpillCapacityFailureRollsBackCandidate) {
   EXPECT_EQ(spill_patches.front()->required_private_segment_size, expected->total_private_bytes);
   EXPECT_LT(expected->total_private_bytes, *private_limit);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.kernels().size(), 1u);
   KD descriptor{};
   std::memcpy(&descriptor,
-              result.elf_bytes.data() + patched.kernels().front().descriptor_file_offset,
+              result.replacement.data() + patched.kernels().front().descriptor_file_offset,
               sizeof(descriptor));
   EXPECT_EQ(descriptor.private_segment_fixed_size, expected->total_private_bytes);
 }
@@ -7064,13 +7064,13 @@ TEST(ConSan, Gfx1250SharedLdsFarBodyUsesScalarScratchDeadInEveryOwner) {
   EXPECT_TRUE(*patch->indirect_saved_scc_sgpr < *patch->indirect_pc_sgpr ||
               *patch->indirect_saved_scc_sgpr > *patch->indirect_pc_sgpr + 1u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   for (std::string_view owner_name : {"shared_owner_0", "shared_owner_1"}) {
     const auto owner = std::ranges::find(patched.kernels(), owner_name, &AmdGpuKernelInfo::name);
     ASSERT_NE(owner, patched.kernels().end());
     KD descriptor{};
-    std::memcpy(&descriptor, result.elf_bytes.data() + owner->descriptor_file_offset,
+    std::memcpy(&descriptor, result.replacement.data() + owner->descriptor_file_offset,
                 sizeof(descriptor));
     const uint32_t granulated = AMDHSA_BITS_GET(
         descriptor.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT);
@@ -7115,12 +7115,12 @@ TEST(ConSan, Gfx1250CheckTrapRoutesSpillBackedFarBodyWithoutScalarPcPair) {
   ASSERT_FALSE(branch_only->branch_only_return_relay_offsets.empty());
 
   ConSanResult corrupted = result;
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
   const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
-  std::memcpy(corrupted.elf_bytes.data() + text_file_offset +
+  std::memcpy(corrupted.replacement.data() + text_file_offset +
                   branch_only->branch_only_return_relay_offsets.front(),
               &nop, sizeof(nop));
   const auto corrupted_errors = validate_consan_modified_elf(bytes, corrupted);
@@ -7338,7 +7338,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeRoutesThroughRelocatedAnchorSecondWord) {
   ASSERT_NE(island, result.patches.end());
   EXPECT_EQ(island->anchor_offset, 0u);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   uint32_t relay_word = 0;
@@ -7417,7 +7417,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   EXPECT_EQ(std::ranges::count(repeated.patches, ConSanPatchKind::TrampolineBranchRelayReservoir,
                                &ConSanPatchInfo::kind),
             1u);
-  EXPECT_EQ(repeated.elf_bytes, result.elf_bytes);
+  EXPECT_EQ(repeated.replacement, result.replacement);
 
   ConSanOptions exhausted_options = options;
   exhausted_options.lds_relay_layout_planning_work_limit = {1u, 0u};
@@ -7429,7 +7429,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
     return error.find("LDS relay-layout replay exhausted its work allowance") != std::string::npos;
   })) << testing::PrintToString(exhausted.errors);
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_EQ(patched.text_sections().size(), 1u);
   const auto patched_text = std::span<const uint8_t>(
@@ -7453,7 +7453,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
   ConSanResult corrupted_body = result;
   const uint64_t text_file_offset = patched.text_sections().front()->sectionOffset();
   corrupted_body
-      .elf_bytes[text_file_offset + reservoir->trampoline_offset + 2u * sizeof(uint32_t)] ^= 1u;
+      .replacement[text_file_offset + reservoir->trampoline_offset + 2u * sizeof(uint32_t)] ^= 1u;
   const auto body_errors = validate_consan_modified_elf(bytes, corrupted_body);
   EXPECT_TRUE(std::ranges::any_of(body_errors, [](const std::string &error) {
     return error.find("relay reservoir proof found a corrupted displaced sequence") !=
@@ -7466,7 +7466,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeUsesVariableRelayReservoirAtMaximumCardinality
        reservoir->anchor_offset + reservoir->original_size - kReservoirTailWords * sizeof(uint32_t);
        offset += sizeof(uint32_t)) {
     const uint32_t nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
-    std::memcpy(unused.elf_bytes.data() + text_file_offset + offset, &nop, sizeof(nop));
+    std::memcpy(unused.replacement.data() + text_file_offset + offset, &nop, sizeof(nop));
   }
   const auto unused_errors = validate_consan_modified_elf(bytes, unused);
   EXPECT_TRUE(std::ranges::any_of(unused_errors, [](const std::string &error) {
@@ -7602,7 +7602,7 @@ TEST(ConSan, ProbeLdsCheckTrapModePreplansIslandsBeforeAppendedCursorDriftsOutOf
       });
   ASSERT_NE(last_body, result.patches.rend());
   EXPECT_FALSE(compute_sopp_branch_simm16(last_body->trampoline_offset, last_body->anchor_offset));
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
 }
 
@@ -7674,9 +7674,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeReservesMultipleAppendedTextCaves) {
   EXPECT_EQ(result.patches[1].anchor_offset, 8u);
   EXPECT_EQ(result.patches[1].trampoline_offset,
             result.patches[0].trampoline_offset + result.patches[0].trampoline_size);
-  EXPECT_GT(result.elf_bytes.size(), bytes.size());
+  EXPECT_GT(result.replacement.size(), bytes.size());
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
 }
 
@@ -7707,9 +7707,9 @@ TEST(ConSan, ProbeLdsCheckTrapModeComposesInlineAndAppendedTextCaves) {
   EXPECT_EQ(result.patches[1].kind, ConSanPatchKind::LocalCaveLdsLoadCheckTrap);
   EXPECT_EQ(result.patches[1].anchor_offset, 10u * sizeof(uint32_t));
   EXPECT_EQ(result.patches[1].trampoline_offset, text_words.size() * sizeof(uint32_t));
-  EXPECT_GT(result.elf_bytes.size(), bytes.size());
+  EXPECT_GT(result.replacement.size(), bytes.size());
 
-  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   EXPECT_TRUE(patched.is_valid());
 }
 
@@ -7733,7 +7733,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeReportsExcessiveDelay) {
   EXPECT_NE(result.warnings.back().find("requested delay needs too much padding"),
             std::string::npos);
   EXPECT_FALSE(result.modified);
-  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.replacement.empty());
 }
 
 TEST(ConSan, ProbeLdsCheckTrapModeReportsMissingVccSaveSite) {
@@ -7804,11 +7804,11 @@ TEST(ConSan, ProbeLdsEndpgmModeCanRewriteCandidateWithExcludedAtomic) {
   EXPECT_EQ(result.patches.front().anchor_offset, 8u);
   EXPECT_EQ(result.patches.front().trampoline_offset, 8u);
   EXPECT_EQ(result.patches.front().original_size, 8u);
-  ASSERT_EQ(result.elf_bytes.size(), bytes.size());
-  EXPECT_NE(result.elf_bytes, bytes);
+  ASSERT_EQ(result.replacement.size(), bytes.size());
+  EXPECT_NE(result.replacement, bytes);
 
   uint32_t rewritten_word = 0;
-  std::memcpy(&rewritten_word, result.elf_bytes.data() + 0x100 + 8, sizeof(rewritten_word));
+  std::memcpy(&rewritten_word, result.replacement.data() + 0x100 + 8, sizeof(rewritten_word));
   EXPECT_EQ(rewritten_word, 0xBFB00000u);
 }
 

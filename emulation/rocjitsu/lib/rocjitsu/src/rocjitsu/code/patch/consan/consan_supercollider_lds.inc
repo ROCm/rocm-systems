@@ -4260,26 +4260,26 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
         return;
       }
     }
-    result.elf_bytes = std::move(patcher).emit();
+    result.replacement = std::move(patcher).emit();
     result.modified = true;
     return;
   }
 
-  if (result.elf_bytes.empty())
-    result.elf_bytes.assign(original_bytes.begin(), original_bytes.end());
-  if (!apply_descriptor_vgpr_growths_to_bytes(result.elf_bytes, descriptor_growths, arch,
+  if (result.replacement.empty())
+    result.replacement.assign(original_bytes.begin(), original_bytes.end());
+  if (!apply_descriptor_vgpr_growths_to_bytes(result.replacement, descriptor_growths, arch,
                                               result.errors)) {
     result.patches.clear();
     return;
   }
-  if (!apply_descriptor_sgpr_growths_to_bytes(result.elf_bytes, descriptor_sgpr_growths, arch,
+  if (!apply_descriptor_sgpr_growths_to_bytes(result.replacement, descriptor_sgpr_growths, arch,
                                               result.errors)) {
     result.patches.clear();
     return;
   }
   for (const auto &[descriptor_offset, required_private_bytes] : descriptor_private_requirements) {
     const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
-        result.elf_bytes, descriptor_offset, required_private_bytes);
+        result.replacement, descriptor_offset, required_private_bytes);
     if (update != SpillDescriptorUpdate::Updated && update != SpillDescriptorUpdate::Unchanged) {
       result.errors.emplace_back("ConSan LDS check/trap could not grow its spill descriptor");
       result.patches.clear();
@@ -4291,13 +4291,13 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     if (planned.use_local_cave) {
       const uint64_t anchor_bytes = planned.anchor_words.size() * sizeof(uint32_t);
       const uint64_t cave_bytes = planned.cave_words.size() * sizeof(uint32_t);
-      std::memcpy(result.elf_bytes.data() + site.file_offset, planned.anchor_words.data(),
+      std::memcpy(result.replacement.data() + site.file_offset, planned.anchor_words.data(),
                   static_cast<size_t>(anchor_bytes));
-      std::memcpy(result.elf_bytes.data() + planned.local_cave->file_offset,
+      std::memcpy(result.replacement.data() + planned.local_cave->file_offset,
                   planned.cave_words.data(), static_cast<size_t>(cave_bytes));
     } else {
       const uint64_t patch_bytes = static_cast<uint64_t>(planned.words.size() * sizeof(uint32_t));
-      std::memcpy(result.elf_bytes.data() + site.file_offset, planned.words.data(),
+      std::memcpy(result.replacement.data() + site.file_offset, planned.words.data(),
                   static_cast<size_t>(patch_bytes));
     }
     result.patches.push_back(planned.info);

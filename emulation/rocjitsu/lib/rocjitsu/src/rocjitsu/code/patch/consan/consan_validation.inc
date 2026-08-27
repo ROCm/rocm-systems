@@ -92,7 +92,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
     return;
 
   const std::span<const uint8_t> active_bytes =
-      result.elf_bytes.empty() ? original_bytes : std::span<const uint8_t>(result.elf_bytes);
+      result.replacement.empty() ? original_bytes : std::span<const uint8_t>(result.replacement);
   AmdGpuCodeObject active(active_bytes.data(), active_bytes.size());
   const rj_code_arch_t arch = consan_arch_for_target(active.target_id());
   if (arch == ROCJITSU_CODE_ARCH_INVALID)
@@ -138,7 +138,7 @@ void try_apply_unmatched_barrier_wait_abort(std::span<const uint8_t> original_by
   if (!replace_consan_text(patcher, new_text, options, "unmatched barrier abort", result)) {
     return;
   }
-  result.elf_bytes = std::move(patcher).emit();
+  result.replacement = std::move(patcher).emit();
   result.patches.insert(result.patches.end(), std::make_move_iterator(patches.begin()),
                         std::make_move_iterator(patches.end()));
   result.modified = true;
@@ -4379,7 +4379,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     }
     if (requirement.required_vgpr_count != 0) {
       const std::optional<uint16_t> actual_vgprs = descriptor_vgpr_allocation_count(
-          result.elf_bytes, replacement_kernel.descriptor_file_offset, arch);
+          result.replacement, replacement_kernel.descriptor_file_offset, arch);
       if (!actual_vgprs || *actual_vgprs < requirement.required_vgpr_count) {
         errors.emplace_back(
             "ConSan final validation found insufficient descriptor VGPRs for kernel '" +
@@ -4430,7 +4430,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
   std::vector<std::string> errors;
   AmdGpuCodeObject original(original_bytes.data(), original_bytes.size());
-  AmdGpuCodeObject replacement(result.elf_bytes.data(), result.elf_bytes.size());
+  AmdGpuCodeObject replacement(result.replacement.data(), result.replacement.size());
   if (!original.is_valid() || !replacement.is_valid()) {
     errors.emplace_back("ConSan final validation could not parse original and replacement ELFs");
     return errors;
@@ -4479,8 +4479,8 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       }
     }
   }
-  if (result.elf_bytes.size() == original_bytes.size() &&
-      std::ranges::equal(result.elf_bytes, original_bytes)) {
+  if (result.replacement.size() == original_bytes.size() &&
+      std::ranges::equal(result.replacement, original_bytes)) {
     errors.emplace_back("ConSan final validation found no byte change in a modified result");
   }
   if (result.patches.empty())
@@ -4547,7 +4547,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
                                                   std::span<const uint8_t> original_bytes,
                                                   bool validating_carried_composite_stage) {
   const major_image_ownership::ScopedOwner result_owner(
-      major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
+      major_image_ownership::OwnerKind::ResultImage, result.replacement);
   if (result.program_inventory.empty()) {
     ProgramInventoryBuilder inventory_builder(original_bytes);
     result.program_inventory = inventory_builder.view();
@@ -4555,7 +4555,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   if (has_blocked_kernel(result)) {
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.modified = false;
-    result.elf_bytes.clear();
+    result.replacement.clear();
     result.patches.clear();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
@@ -4563,7 +4563,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   if (!result.errors.empty()) {
     result.outcome = ConSanTransformOutcome::Invalid;
     result.modified = false;
-    result.elf_bytes.clear();
+    result.replacement.clear();
     result.patches.clear();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
@@ -4574,13 +4574,13 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   // to turn an Unsupported result back into ModifiedValid.
   if (result.outcome == ConSanTransformOutcome::Unsupported) {
     result.modified = false;
-    result.elf_bytes.clear();
+    result.replacement.clear();
     result.patches.clear();
     result.mutation.applied_fault_logical_identity.reset();
     return result;
   }
   if (result.modified) {
-    if (result.elf_bytes.empty()) {
+    if (result.replacement.empty()) {
       result.errors.emplace_back("ConSan modified result has no replacement ELF bytes");
       result.outcome = ConSanTransformOutcome::Invalid;
       result.modified = false;
@@ -4596,7 +4596,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
         result.outcome = ConSanTransformOutcome::Invalid;
         result.modified = false;
         result.mutation.applied_fault_logical_identity.reset();
-        result.elf_bytes.clear();
+        result.replacement.clear();
         result.patches.clear();
       }
     }

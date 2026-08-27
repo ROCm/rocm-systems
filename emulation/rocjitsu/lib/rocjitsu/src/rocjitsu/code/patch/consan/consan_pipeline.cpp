@@ -256,13 +256,13 @@ bool TransformResult::well_formed() const {
   }
   switch (outcome) {
   case ConSanTransformOutcome::ModifiedValid:
-    if (replacement_bytes.empty())
+    if (replacement.empty())
       return false;
     break;
   case ConSanTransformOutcome::Unchanged:
   case ConSanTransformOutcome::Unsupported:
   case ConSanTransformOutcome::Invalid:
-    if (!replacement_bytes.empty() || !dispatch_requirements.kernels.empty())
+    if (!replacement.empty() || !dispatch_requirements.kernels.empty())
       return false;
     break;
   default:
@@ -282,7 +282,7 @@ bool TransformResult::well_formed() const {
 ConSanInstallAction TransformResult::install_action(bool fail_closed) const {
   switch (outcome) {
   case ConSanTransformOutcome::ModifiedValid:
-    if (!replacement_bytes.empty())
+    if (!replacement.empty())
       return ConSanInstallAction::LoadReplacement;
     return ConSanInstallAction::Reject;
   case ConSanTransformOutcome::Unchanged:
@@ -301,7 +301,7 @@ void TransformResult::discard_replacement(std::string warning) {
                                                "runtime-owned report allocation failed");
   }
   outcome = ConSanTransformOutcome::Unsupported;
-  replacement_bytes.clear();
+  replacement.clear();
   patches.clear();
   dispatch_requirements = {};
   warnings.push_back(std::move(warning));
@@ -434,7 +434,6 @@ TransformResult TransformResult::publish_optional(
   }
   static_cast<ConSanTransformArtifacts &>(result) =
       std::move(static_cast<ConSanTransformArtifacts &>(legacy));
-  result.replacement_bytes = std::move(legacy.elf_bytes);
   if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
     result.dispatch_requirements = build_dispatch_requirements(
         result.program_inventory, result.coverage_ledger, result.patches);
@@ -556,7 +555,7 @@ TransformResult TransformResult::publish_optional(
       binding_stage.contract_issue = binding_issue;
       add_contract_issue(result, ConSanPipelineStage::RuntimeBinding, binding_issue);
       result.outcome = ConSanTransformOutcome::Unsupported;
-      result.replacement_bytes.clear();
+      result.replacement.clear();
       result.dispatch_requirements = {};
       result.patches.clear();
     }

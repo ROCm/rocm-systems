@@ -477,7 +477,7 @@ bool consan_moi_supports_native_lds_mnemonic(std::string_view mnemonic, rj_code_
 ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &options,
                                   std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch) {
   const major_image_ownership::ScopedOwner result_owner(
-      major_image_ownership::OwnerKind::ResultImage, result.elf_bytes);
+      major_image_ownership::OwnerKind::ResultImage, result.replacement);
   if (result.moi_stage_warning_begin <= result.warnings.size())
     result.warnings.resize(result.moi_stage_warning_begin);
   else
@@ -507,7 +507,7 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_dispatch_id_vgpr.reset();
   result.moi_report_dispatch_id = effective_options.moi_report_dispatch_id;
   result.modified = false;
-  result.elf_bytes.clear();
+  result.replacement.clear();
   result.moi_candidates.clear();
   result.resource_plans.clear();
   result.patches.clear();

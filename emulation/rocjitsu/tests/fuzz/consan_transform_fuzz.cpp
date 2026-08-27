@@ -23,7 +23,7 @@ void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOp
   require(result.program_inventory.code_object_id() == rocjitsu::make_consan_code_object_id(input));
   if (result.outcome == rocjitsu::ConSanTransformOutcome::ModifiedValid) {
     require(result.modified);
-    require(!result.elf_bytes.empty());
+    require(!result.replacement.empty());
     require(!result.patches.empty());
     require(rocjitsu::validate_consan_modified_elf(input, result).empty());
 
@@ -42,18 +42,18 @@ void exercise_transform(std::span<const uint8_t> input, const rocjitsu::ConSanOp
       const uint64_t file_offset =
           original.text_sections().front()->sectionOffset() + abort_patch->anchor_offset;
       require(file_offset + sizeof(uint32_t) <= input.size());
-      require(file_offset + sizeof(uint32_t) <= result.elf_bytes.size());
+      require(file_offset + sizeof(uint32_t) <= result.replacement.size());
       uint32_t original_word = 0;
       uint32_t replacement_word = 0;
       std::memcpy(&original_word, input.data() + file_offset, sizeof(original_word));
-      std::memcpy(&replacement_word, result.elf_bytes.data() + file_offset,
+      std::memcpy(&replacement_word, result.replacement.data() + file_offset,
                   sizeof(replacement_word));
       require(original_word == 0xBF94FFFFu);    // s_barrier_wait -1
       require(replacement_word == 0xBFB00000u); // s_endpgm
     }
   } else {
     require(!result.modified);
-    require(result.elf_bytes.empty());
+    require(result.replacement.empty());
     require(result.patches.empty());
   }
 }

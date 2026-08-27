@@ -1754,7 +1754,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     if (!replace_consan_text(patcher, new_text, options, "MOI sampled probe", result)) {
       return;
     }
-    result.elf_bytes = std::move(patcher).emit();
+    result.replacement = std::move(patcher).emit();
     result.patches.insert(result.patches.end(), patches.begin(), patches.end());
     result.modified = true;
     return;
