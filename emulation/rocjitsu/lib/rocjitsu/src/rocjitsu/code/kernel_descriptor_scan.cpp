@@ -219,4 +219,28 @@ uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t
   return 1;
 }
 
+uint32_t kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, const KD &desc) {
+  // gfx1250 widens USER_SGPR_COUNT from the generic five-bit field at [5:1]
+  // to a six-bit field at [6:1], allowing valid counts such as 32.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
+                           rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT);
+  }
+  return AMDHSA_BITS_GET(desc.compute_pgm_rsrc2,
+                         rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
+}
+
+void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
+                                           uint32_t user_sgpr_count) {
+  // Select the same architecture-specific field when rewriting descriptors so
+  // DBT and patching do not truncate gfx1250 counts above 31.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2,
+                    rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgpr_count);
+    return;
+  }
+  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                  user_sgpr_count);
+}
+
 } // namespace rocjitsu
