@@ -635,6 +635,24 @@ options, are not copied into access or synchronization candidates, and do not
 survive the prologue stage. The durable result remains the emitted prologue
 patch and the completed scalar allocation it initializes.
 
+Access placement now has one target-neutral planner-to-emitter representation.
+`MoiPlannedAccessPatch` owns the candidate, placement, entry-island and dense
+route, displaced guest words, scratch and spill resources, private owner/epoch
+state, and branch-only route shared by Record/Replay, Sampled, and Inline
+Shadow. `MoiPlannedReplayAccessPatch` adds only the mechanics shared by the two
+engines that replay a relocated guest access: island sizing, CDNA5 high-bank
+state, private workgroup identity, relocated-guest position, and operand
+overlap state. Each engine extends those types only with its evidence-specific
+indices, sampling gates, or shadow layout. Target instruction encoding remains
+outside these plan types.
+
+These are private lowering contracts, not another public pipeline layer. They
+contain no selection algorithm of their own, so their meaningful test surface
+is the existing cross-engine placement and paired device behavior rather than
+artificial getter tests. Their purpose is to give subsequent resource and
+emission cutovers one shared state boundary while deleting three independently
+evolving field lists.
+
 ## Invariants and failure model
 
 The following rules hold across every component:

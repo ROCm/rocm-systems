@@ -189,42 +189,18 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       window_bank_count *= 2u;
   }
 
-  struct PlannedSampledPatch {
-    const ConSanMoiCandidate *candidate = nullptr;
+  struct PlannedSampledPatch : MoiPlannedReplayAccessPatch {
     uint32_t first_record_index = 0;
     uint32_t access_range_count = 0;
     std::optional<uint32_t> prior_first_record_index;
     uint32_t prior_access_range_count = 0;
     uint32_t runtime_sample_index = 0;
-    DbiPatchPlacement placement;
-    std::optional<uint64_t> entry_island_offset;
-    uint64_t entry_island_word_count = 0;
-    bool entry_island_at_anchor = false;
-    bool dense_call_anchor = false;
-    std::optional<uint64_t> dense_dispatcher_offset;
-    bool branch_only_scalar_spill = false;
-    std::optional<BranchOnlyRelayRoute> branch_only_route;
-    std::vector<uint32_t> displaced_tail_words;
     uint64_t workgroup_descriptor_file_offset = 0;
-    ResolvedMoiScratchPlan resources;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<uint16_t> gfx1250_vgpr_msb_mode;
     bool runtime_fast_gate = false;
     bool dense_runtime_fast_gate = false;
     bool runtime_workgroup_gate_in_body = false;
-    std::optional<uint32_t> private_epoch_offset;
-    std::optional<uint32_t> private_owner_offset;
-    std::optional<uint16_t> private_owner_shift;
-    ConSanMoiPersistentWorkgroupPrivateOffsets private_workgroup_offsets;
-    uint32_t persistent_private_state_end = 0;
-    uint32_t required_private_bytes = 0;
-    uint32_t probe_guest_instruction_offset = 0;
-    uint32_t guest_instruction_word_count = 0;
     std::optional<uint16_t> transient_exec_save_sgpr;
-    bool spill_overlaps_guest_operands = false;
     bool spill_backed_operand_recovery = false;
-    bool wrap_embedded_guest_vgpr_bank = false;
   };
   std::vector<PlannedSampledPatch> planned_patches;
   planned_patches.reserve(candidates.size());

@@ -129,30 +129,14 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         "table");
   }
 
-  struct PlannedInlineShadowPatch {
-    const ConSanMoiCandidate *candidate = nullptr;
-    DbiPatchPlacement placement;
-    std::optional<uint64_t> entry_island_offset;
-    bool entry_island_at_anchor = false;
-    bool dense_call_anchor = false;
-    std::optional<uint64_t> dense_dispatcher_offset;
-    std::optional<BranchOnlyRelayRoute> branch_only_route;
+  struct PlannedInlineShadowPatch : MoiPlannedAccessPatch {
     std::optional<uint64_t> branch_only_relay_bank_offset;
     uint64_t branch_only_relay_bank_word_count = 0;
-    std::vector<uint32_t> displaced_tail_words;
-    ResolvedMoiScratchPlan resources;
     ConSanMoiWorkgroupSources workgroup_sources;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<uint32_t> private_epoch_offset;
-    std::optional<uint32_t> private_owner_offset;
     std::optional<uint32_t> private_workgroup_key_offset;
     std::optional<uint32_t> private_dispatch_id_offset;
-    std::optional<uint16_t> private_owner_shift;
     std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
     uint16_t workgroup_shadow_compact_token = 0;
-    uint32_t required_private_bytes = 0;
-    uint32_t guest_instruction_word_count = 0;
   };
   std::vector<PlannedInlineShadowPatch> planned_patches;
   planned_patches.reserve(candidates.size());

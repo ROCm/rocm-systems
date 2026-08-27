@@ -5982,7 +5982,7 @@ analysis completed.
   26-case physical-gfx950 cross-engine smoke also pass. E2E validation remains
   outside this deletion work.
 
-### End audit of the local deletion tranche
+### Boundary audit before shared component cutovers
 
 The remaining low-reference mutable fields are not duplicate switches:
 
@@ -6000,9 +6000,42 @@ The remaining low-reference mutable fields are not duplicate switches:
 Deleting these facts locally would either recompute them from an invalid
 intermediate view or scatter new parameters across the prototype lowerer. Their
 next deletion boundary is the typed transform/resource context and component
-cutover described above. This tranche therefore stops at the principled edge
-between low-hanging duplicate state and the deeper redesign, rather than
-contorting the retained code for a nominal line-count reduction.
+cutover described above. The low-hanging tranche therefore ended at the
+principled edge of the deeper redesign; subsequent slices cross that edge by
+moving complete shared responsibilities, not by contorting individual flags
+for nominal line-count reductions.
+
+### Slice 5CW: share the planned-access placement contract
+
+- **One cross-engine handoff:** `MoiPlannedAccessPatch` is the target-neutral
+  placement-to-emission state shared by Record/Replay, Sampled, and Inline
+  Shadow. `MoiPlannedReplayAccessPatch` adds the relocated-guest mechanics
+  shared only by Record/Replay and Sampled. Engine-local plan types now contain
+  only evidence indices, sampling gates, shadow layouts, and other genuinely
+  engine-specific values.
+- **Completed deletion:** The three copies of candidate, placement,
+  entry-island, dense-router, displaced-guest, scratch/spill, private identity,
+  and branch-only-route fields are gone. The second Record/Replay/Sampled copy
+  of island sizing, private workgroup state, relocated-guest position, and
+  overlap handling is gone as well. No compatibility projection or fallback
+  remains.
+- **Sharing and target boundary:** The common types contain no architecture
+  discriminator and no instruction encoding. CDNA5 high-bank state is data in
+  the replay plan; its native interpretation remains in target emission. This
+  slice removes representation duplication across three engines without
+  merging their evidence semantics.
+- **Test policy:** The extracted types are passive stage contracts with no
+  independent algorithm, so getter/equality tests would only test the language.
+  Their behavior is covered by the existing host placement tests and paired
+  device contracts for all three engines.
+- **Accounting:** Implementation files add 56 and delete 74 physical lines, a
+  net deletion of eighteen. Across the four affected implementation files,
+  nonblank lines fall by twenty and comment-excluded code lines fall by 37.
+  No target discriminator is added or moved, and no tests are added or deleted.
+- **Checked-in gate:** All 1,530 ConSan host tests, all 172 HSA-hook tests, all
+  2,878 generated simulator-device tests across the five supported targets,
+  and the 26-case physical-gfx950 cross-engine smoke pass. E2E validation
+  remains outside this deletion work.
 
 ### Slice 6: explicit pipeline and result cutover
 

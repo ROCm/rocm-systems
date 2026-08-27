@@ -87,39 +87,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   const size_t selected_candidate_limit =
       options.max_patches_is_expert_limit ? options.max_patches : candidates.size();
 
-  struct PlannedAccessRecordPatch {
-    const ConSanMoiCandidate *candidate = nullptr;
-    DbiPatchPlacement placement;
-    std::optional<uint64_t> entry_island_offset;
-    uint64_t entry_island_word_count = 0;
-    bool entry_island_at_anchor = false;
-    bool dense_call_anchor = false;
+  struct PlannedAccessRecordPatch : MoiPlannedReplayAccessPatch {
     bool runtime_workgroup_gate = false;
     bool dense_runtime_workgroup_gate = false;
-    std::optional<uint64_t> dense_dispatcher_offset;
     std::optional<ConSanMoiWorkgroupSources> runtime_workgroup_sources;
-    std::vector<uint32_t> displaced_tail_words;
     uint32_t record_index = 0;
     uint32_t record_count = 0;
     uint32_t logical_range_index = 0;
-    ResolvedMoiScratchPlan resources;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<uint16_t> gfx1250_vgpr_msb_mode;
-    std::optional<uint32_t> private_epoch_offset;
-    std::optional<uint32_t> private_owner_offset;
-    std::optional<uint16_t> private_owner_shift;
-    ConSanMoiPersistentWorkgroupPrivateOffsets private_record_replay_workgroup_offsets;
-    uint32_t persistent_private_state_end = 0;
-    uint32_t required_private_bytes = 0;
-    uint32_t probe_guest_instruction_offset = 0;
-    uint32_t guest_instruction_word_count = 0;
-    bool spill_overlaps_guest_operands = false;
-    bool wrap_embedded_guest_vgpr_bank = false;
-    bool branch_only_scalar_spill = false;
     std::vector<uint64_t> appended_branch_relay_offsets;
     std::optional<MoiBorrowedRecordReplayEntry> borrowed_entry;
-    std::optional<BranchOnlyRelayRoute> branch_only_route;
   };
   std::vector<PlannedAccessRecordPatch> planned_patches;
   uint32_t planned_record_count = 0;
@@ -1228,8 +1204,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       planned.private_epoch_offset = private_layout->epoch_offset;
       planned.private_owner_offset = private_layout->owner_offset;
       planned.private_owner_shift = private_owner_shift;
-      planned.private_record_replay_workgroup_offsets =
-          private_layout->record_replay_workgroup_offsets;
+      planned.private_workgroup_offsets = private_layout->record_replay_workgroup_offsets;
       planned.persistent_private_state_end = private_layout->ephemeral_base;
     }
     planned.required_private_bytes = required_private_bytes;
@@ -1409,7 +1384,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     note_descriptor_requirements(descriptor_requirements, planned_patch.resources);
     ConSanOptions candidate_options = options;
     candidate_options.moi_record_replay_workgroup_private_offsets =
-        planned_patch.private_record_replay_workgroup_offsets;
+        planned_patch.private_workgroup_offsets;
     if (!apply_moi_transient_sgpr_assignment(candidate_options,
                                              planned_patch.resources.owner_descriptor_file_offsets))
       continue;
@@ -1491,7 +1466,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       ConSanOptions candidate_options = options;
       candidate_options.scratch_vgpr = planned_patch.resources.base;
       candidate_options.moi_record_replay_workgroup_private_offsets =
-          planned_patch.private_record_replay_workgroup_offsets;
+          planned_patch.private_workgroup_offsets;
       if (!apply_moi_transient_sgpr_assignment(
               candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
           !apply_record_replay_entry_workgroup_assignment(
@@ -1520,7 +1495,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
       info.persistent_owner_private_offset = planned_patch.private_owner_offset;
       info.persistent_record_replay_workgroup_private_offsets =
-          planned_patch.private_record_replay_workgroup_offsets;
+          planned_patch.private_workgroup_offsets;
       if (planned_patch.private_epoch_offset)
         info.persistent_private_state_end = planned_patch.persistent_private_state_end;
       info.required_private_segment_size = planned_patch.required_private_bytes;
@@ -1875,7 +1850,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             ConSanOptions candidate_options = options;
             candidate_options.scratch_vgpr = planned_patch.resources.base;
             candidate_options.moi_record_replay_workgroup_private_offsets =
-                planned_patch.private_record_replay_workgroup_offsets;
+                planned_patch.private_workgroup_offsets;
             if (!apply_moi_transient_sgpr_assignment(
                     candidate_options, planned_patch.resources.owner_descriptor_file_offsets) ||
                 !apply_record_replay_entry_workgroup_assignment(
@@ -1902,7 +1877,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
             info.persistent_owner_private_offset = planned_patch.private_owner_offset;
             info.persistent_record_replay_workgroup_private_offsets =
-                planned_patch.private_record_replay_workgroup_offsets;
+                planned_patch.private_workgroup_offsets;
             if (planned_patch.private_epoch_offset)
               info.persistent_private_state_end = planned_patch.persistent_private_state_end;
             info.required_private_segment_size = planned_patch.required_private_bytes;

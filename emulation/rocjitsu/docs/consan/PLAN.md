@@ -466,6 +466,14 @@ emission. They should move into the planned typed transform and resource
 contexts as part of a component cutover; replacing them now with scattered
 parameters or recomputation would increase code and weaken invariants.
 
+That deeper component migration is now underway. The first cutover replaces
+the three engine-private planned-access field lists with one shared
+target-neutral placement/resource contract; Record/Replay and Sampled also
+share the stronger replay-access subset. Engine-specific evidence and sampling
+state remains local. The old representations were deleted in the same slice,
+which is net-negative and gives subsequent resource/emission work one typed
+boundary rather than another wrapper around `ConSanOptions`.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

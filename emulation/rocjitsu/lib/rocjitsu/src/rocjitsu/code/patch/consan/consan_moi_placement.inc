@@ -3420,6 +3420,53 @@ struct ResolvedMoiScratchPlan {
   ConSanRegisterAllocationSource source = ConSanRegisterAllocationSource::Unsupported;
 };
 
+/// Target-neutral placement and resource result shared by every planned MOI
+/// access patch.
+///
+/// This is the complete common handoff from access planning to emission. It
+/// deliberately excludes engine evidence indices, sampling gates, and shadow
+/// layouts: those values describe Record/Replay, Sampled, or Inline Shadow
+/// semantics rather than the mechanics of placing one access probe. Keeping
+/// this state in one type prevents each engine from evolving a subtly
+/// different interpretation of entry islands, displaced guest words, spill
+/// resources, private identity state, or branch-only routing.
+struct MoiPlannedAccessPatch {
+  const ConSanMoiCandidate *candidate = nullptr;
+  DbiPatchPlacement placement;
+  std::optional<uint64_t> entry_island_offset;
+  bool entry_island_at_anchor = false;
+  bool dense_call_anchor = false;
+  std::optional<uint64_t> dense_dispatcher_offset;
+  std::optional<BranchOnlyRelayRoute> branch_only_route;
+  std::vector<uint32_t> displaced_tail_words;
+  ResolvedMoiScratchPlan resources;
+  std::optional<VgprSpillSequence> spill;
+  std::optional<SgprSpillSequence> scalar_spill;
+  std::optional<uint32_t> private_epoch_offset;
+  std::optional<uint32_t> private_owner_offset;
+  std::optional<uint16_t> private_owner_shift;
+  uint32_t required_private_bytes = 0;
+  uint32_t guest_instruction_word_count = 0;
+};
+
+/// Additional common plan for Record/Replay and Sampled access bodies.
+///
+/// Both engines relocate a guest access into a replayable body and therefore
+/// share entry-island sizing, CDNA5 high-bank state, private workgroup
+/// identity, the relocated guest offset, and operand-overlap handling. Inline
+/// Shadow does not replay the access and intentionally does not inherit this
+/// stronger contract.
+struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
+  uint64_t entry_island_word_count = 0;
+  std::optional<uint16_t> gfx1250_vgpr_msb_mode;
+  ConSanMoiPersistentWorkgroupPrivateOffsets private_workgroup_offsets;
+  uint32_t persistent_private_state_end = 0;
+  uint32_t probe_guest_instruction_offset = 0;
+  bool spill_overlaps_guest_operands = false;
+  bool wrap_embedded_guest_vgpr_bank = false;
+  bool branch_only_scalar_spill = false;
+};
+
 /// An at-anchor entry island replaces a multi-instruction owner-local window.
 /// Every original control-flow edge into that window must therefore enter at
 /// its first instruction. Staying within the anchor's original basic block is
