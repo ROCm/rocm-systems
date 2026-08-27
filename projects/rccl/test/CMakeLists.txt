@@ -850,6 +850,13 @@ if(BUILD_TESTS)
     # Link the GIN device backend library and device-link its rdc code (-fgpu-rdc
     # --hip-link --offload-arch=... -rdynamic) so GIN device tests can run.
     if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_INSTALL_DIR AND "${test_executable}" STREQUAL "rccl-UnitTestsMPI")
+      if(TARGET rocshmem_ext)
+        add_dependencies(${test_executable} rocshmem_ext)
+      endif()
+      target_include_directories(${test_executable} PRIVATE
+        ${ROCSHMEM_INCLUDE_DIR}
+        ${ROCSHMEM_SOURCE_DIR}/include
+        ${ROCSHMEM_SOURCE_DIR}/src)
       set(_ROCSHMEM_OFFLOAD_FLAGS "")
       foreach(_g IN LISTS GPU_TARGETS)
         if(_g)
