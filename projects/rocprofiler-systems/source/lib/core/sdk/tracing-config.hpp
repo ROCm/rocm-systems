@@ -861,6 +861,7 @@ tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_operation_options
     static const auto s_domains = std::unordered_set<std::string_view>{
         "none",
         "correlation_id_retirement",
+        "marker_core_api",
         "marker_control_api",
         "marker_name_api",
         "code_object",

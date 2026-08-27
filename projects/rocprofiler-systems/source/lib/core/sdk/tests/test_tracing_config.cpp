@@ -71,6 +71,7 @@ enum backend_tag : int
     buffered_domains_callback_only_skipped      = 104,
     callback_domains_buffer_only_no_warning     = 105,
     buffered_domains_callback_only_no_warning   = 106,
+    operation_settings_marker_core_api_skip     = 107,
 };
 
 // tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -513,6 +514,37 @@ TEST_F(tracing_config_test, operation_settings_registers_marker_api_domain_alias
     EXPECT_EQ(itr->env_names.operations_annotate_backtrace_env_name,
               "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS_ANNOTATE_BACKTRACE");
     EXPECT_THAT(itr->operation_choices, gtest::Not(gtest::IsEmpty()));
+}
+
+// The buffered marker_core_api entry keeps its raw SDK name (MARKER_CORE_API);
+// only the callback path renames it to MARKER_API. Without skipping
+// marker_core_api in get_domains_to_skip_for_operation_options(), the buffered
+// entry would register a second, unused ROCPROFSYS_ROCM_MARKER_CORE_API_OPERATIONS
+// setting alongside the correct MARKER_API one.
+TEST_F(tracing_config_test, operation_settings_does_not_register_marker_core_api_domain)
+{
+    using sut = tracing_config<tagged_backend<operation_settings_marker_core_api_skip>,
+                               mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    const auto specs = sut::get_operation_settings();
+
+    const auto marker_api_count = std::ranges::count_if(specs, [](const auto& spec) {
+        return spec.env_names.operations_include_env_name ==
+               "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS";
+    });
+    EXPECT_EQ(marker_api_count, 1);
+
+    EXPECT_TRUE(std::ranges::none_of(specs, [](const auto& spec) {
+        return spec.env_names.operations_include_env_name ==
+               "ROCPROFSYS_ROCM_MARKER_CORE_API_OPERATIONS";
+    }));
 }
 
 // ─── get_callback_domains ─────────────────────────────────────────────────────
