@@ -22,7 +22,8 @@
   const uint64_t report_base = *options.moi_report_buffer_address;
   const uint64_t diagnostic_base = report_base + layout.diagnostic_records_offset;
 
-  if (!special_state_already_saved && !append_save_moi_special_state(words, options, arch))
+  if (!special_state_already_saved &&
+      !append_save_moi_special_state(words, moi_special_state_sgprs(options), arch))
     return false;
 
   const uint16_t workgroup_key = static_cast<uint16_t>(*options.scratch_vgpr + 19u);
@@ -951,7 +952,7 @@
   if (!restore_exec)
     return false;
   words.push_back(*restore_exec);
-  return append_restore_moi_special_state(words, options, arch);
+  return append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch);
 }
 
 // Publish one exact slot through an odd-version reservation. EXEC on entry is
@@ -1935,7 +1936,7 @@
   // the existing diagnostic helper can snapshot and restore the true program
   // state while evaluating every lane in this address group.
   failure.stage = "pre-diagnostic state restoration";
-  if (!append_restore_moi_special_state(words, options, arch))
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
     return false;
   failure.stage = "diagnostic encoding";
   if (!append_inline_shadow_diagnostic_words(
@@ -1998,7 +1999,7 @@
   // access starts from the original owner/epoch/workgroup metadata.
   words.push_back(restore_current_low);
   words.push_back(restore_current_high);
-  if (!append_restore_moi_special_state(words, options, arch))
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
     return false;
 
   const auto branch_offset = [](size_t from, size_t to) -> std::optional<int16_t> {
@@ -2357,7 +2358,7 @@
   // Address formation and conflict filtering use condition state. Reinstall
   // the displaced program's state before the diagnostic helper, whose final
   // restoration makes the local path observationally transparent.
-  if (!append_restore_moi_special_state(words, options, arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back(
         "ConSan MOI inline-shadow local publish could not restore special scalar state");
     return false;
@@ -2640,7 +2641,8 @@
   // instructions; snapshotting inside the exchange loop would retain those
   // generated values rather than the state at the displaced LDS access.
   const bool preserve_special_state = options.moi_exec_save_sgpr.has_value();
-  if (preserve_special_state && !append_save_moi_special_state(words, options, arch)) {
+  if (preserve_special_state &&
+      !append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI inline-shadow probe could not preserve application VCC/SCC");
     return std::nullopt;
   }
@@ -3226,7 +3228,8 @@
       return std::nullopt;
     }
     words.push_back(*restore_original_exec);
-    if (preserve_special_state && !append_restore_moi_special_state(words, options, arch)) {
+    if (preserve_special_state &&
+        !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not restore workgroup-filtered state");
       return std::nullopt;

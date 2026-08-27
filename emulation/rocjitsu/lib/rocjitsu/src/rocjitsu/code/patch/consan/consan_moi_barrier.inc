@@ -250,7 +250,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
-  if (!append_save_moi_special_state(words, options, arch)) {
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI barrier record patch could not save VCC/SCC");
     return std::nullopt;
   }
@@ -360,7 +360,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
   words.push_back(*skip_record);
   words.insert(words.end(), record_words.begin(), record_words.end());
   words.push_back(*restore_exec);
-  if (!append_restore_moi_special_state(words, options, arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI barrier record patch could not restore VCC/SCC");
     return std::nullopt;
   }
@@ -481,7 +481,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     if (scalar_spill)
       words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
     if (publish_visible_evidence) {
-      if (!append_save_moi_special_state(words, options, arch)) {
+      if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
         errors.emplace_back("ConSan MOI inline barrier could not save visible-evidence state");
         return std::nullopt;
       }
@@ -502,7 +502,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     }
     if (publish_visible_evidence) {
       if (!append_visible_evidence(words) ||
-          !append_restore_moi_special_state(words, options, arch)) {
+          !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
         errors.emplace_back("ConSan MOI inline barrier could not publish visible evidence");
         return std::nullopt;
       }
@@ -563,14 +563,16 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     words.insert(words.end(), spill->save_words.begin(), spill->save_words.end());
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->save_words.begin(), scalar_spill->save_words.end());
-  if (publish_visible_evidence && !append_save_moi_special_state(words, options, arch)) {
+  if (publish_visible_evidence &&
+      !append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI inline barrier could not save visible-evidence state");
     return std::nullopt;
   }
   words.insert(words.end(), increment_epoch->begin(), increment_epoch->end());
   words.insert(words.end(), saturate_epoch->begin(), saturate_epoch->end());
-  if (publish_visible_evidence && (!append_visible_evidence(words) ||
-                                   !append_restore_moi_special_state(words, options, arch))) {
+  if (publish_visible_evidence &&
+      (!append_visible_evidence(words) ||
+       !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))) {
     errors.emplace_back("ConSan MOI inline barrier could not publish visible evidence");
     return std::nullopt;
   }

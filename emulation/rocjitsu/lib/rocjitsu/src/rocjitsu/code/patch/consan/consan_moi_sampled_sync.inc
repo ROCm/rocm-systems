@@ -205,7 +205,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     words.push_back(
         build_v_mov_b32_e32(*options.moi_epoch_vgpr, *options.moi_persistent_sgprs.epoch, arch));
   }
-  if (!append_save_moi_special_state(words, options, arch)) {
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
@@ -632,7 +632,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     words.insert(words.end(), store->begin(), store->end());
     words.push_back(*wait);
   }
-  if (!append_restore_moi_special_state(words, options, arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state restore");
     return std::nullopt;
   }
@@ -3167,7 +3167,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   }
   if (!candidate.capture_address_before_guest && !append_address_capture())
     return std::nullopt;
-  if (!append_save_moi_special_state(words, options, arch)) {
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI fence record patch could not save VCC/SCC");
     return std::nullopt;
   }
@@ -3312,7 +3312,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
     words.insert(words.end(), record_words.begin(), record_words.end());
     words.push_back(*restore_exec);
   }
-  if (!append_restore_moi_special_state(words, options, arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI fence record patch could not restore VCC/SCC");
     return std::nullopt;
   }

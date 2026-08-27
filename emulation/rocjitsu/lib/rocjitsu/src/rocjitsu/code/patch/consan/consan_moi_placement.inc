@@ -4191,18 +4191,19 @@ moi_indirect_jump_sgprs(const MoiOptions &options) {
   };
 }
 
-[[nodiscard]] bool append_save_moi_special_state(std::vector<uint32_t> &words,
-                                                 const MoiOptions &options, rj_code_arch_t arch) {
-  const auto registers = moi_special_state_sgprs(options);
+[[nodiscard]] bool
+append_save_moi_special_state(std::vector<uint32_t> &words,
+                              const std::optional<MoiSpecialStateSgprs> &registers,
+                              rj_code_arch_t arch) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   return registers && target &&
          consan_detail::append_save_moi_special_state(words, *registers, *target);
 }
 
-[[nodiscard]] bool append_restore_moi_special_state(std::vector<uint32_t> &words,
-                                                    const MoiOptions &options,
-                                                    rj_code_arch_t arch) {
-  const auto registers = moi_special_state_sgprs(options);
+[[nodiscard]] bool
+append_restore_moi_special_state(std::vector<uint32_t> &words,
+                                 const std::optional<MoiSpecialStateSgprs> &registers,
+                                 rj_code_arch_t arch) {
   const ConSanTargetProfile *target = consan_target_profile(arch);
   return registers && target &&
          consan_detail::append_restore_moi_special_state(words, *registers, *target);

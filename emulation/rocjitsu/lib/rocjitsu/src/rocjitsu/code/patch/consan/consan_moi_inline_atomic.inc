@@ -949,7 +949,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
                               candidate.event_kind == ConSanMoiAtomicEventKind::AcquireRelease);
   const uint16_t reserved_event_index_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 7u);
   if (reserve_event_before_guest) {
-    if (!append_save_moi_special_state(words, options, arch)) {
+    if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
       errors.emplace_back(
           "ConSan MOI release CAS could not preserve VCC/SCC before event reservation");
       return std::nullopt;
@@ -987,7 +987,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return std::nullopt;
     }
     words.push_back(*restore_exec);
-    if (!append_restore_moi_special_state(words, options, arch)) {
+    if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
       errors.emplace_back(
           "ConSan MOI release CAS could not restore VCC/SCC after event reservation");
       return std::nullopt;
@@ -1003,7 +1003,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
       return std::nullopt;
   }
 
-  if (!append_save_moi_special_state(words, options, arch)) {
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI atomic record patch could not save VCC/SCC");
     return std::nullopt;
   }
@@ -1240,7 +1240,7 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   words.insert(words.end(), record_words.begin(), record_words.end());
   words.push_back(*restore_exec);
 
-  if (!append_restore_moi_special_state(words, options, arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI atomic record patch could not restore VCC/SCC");
     return std::nullopt;
   }
@@ -1646,7 +1646,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   const auto contention_label = sequence.make_label();
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  if (!append_save_moi_special_state(words, options, arch)) {
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI sampled barrier failed at special-state save");
     return std::nullopt;
   }
@@ -1830,7 +1830,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
 
   const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
   if (!sequence.bind(restore_label) || !sequence.emit(restore_exec) ||
-      !append_restore_moi_special_state(words, options, arch))
+      !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
     return std::nullopt;
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),
@@ -1976,7 +1976,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   ConSanMoiRecordEmitter record(words, base, value, arch);
   const auto collision_label = sequence.make_label();
   const auto restore_label = sequence.make_label();
-  if (!append_save_moi_special_state(words, options, arch))
+  if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch))
     return std::nullopt;
   const auto save_exec = instrumentation::build_s_mov_b64(original_exec, kRdna4ExecLo, arch);
   if (!save_exec)
@@ -2267,7 +2267,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   const auto restore_exec = instrumentation::build_s_mov_b64(kRdna4ExecLo, original_exec, arch);
   if (!sequence.bind(restore_label) || !sequence.emit(restore_exec) ||
-      !append_restore_moi_special_state(words, options, arch))
+      !append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch))
     return std::nullopt;
   if (scalar_spill)
     words.insert(words.end(), scalar_spill->restore_words.begin(),

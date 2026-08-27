@@ -1020,7 +1020,7 @@ private:
     const uint64_t dynamic_record_base = base + layout.access_records_offset;
 
     for (const ConSanAccessRange &range : access_ranges) {
-      if (!append_save_moi_special_state(words, options, arch)) {
+      if (!append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
         return std::nullopt;
       }
@@ -1201,7 +1201,7 @@ private:
       // EXEC are still intact, so wave termination cannot race those stores.
       words.push_back(*wait_store);
       words.push_back(*restore_exec);
-      if (!append_restore_moi_special_state(words, options, arch)) {
+      if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not restore VCC/SCC");
         return std::nullopt;
       }
@@ -1339,7 +1339,8 @@ private:
                         std::string(consan_detail::moi_spilled_vgpr_reload_result_name(reload)));
     return false;
   };
-  if (!options.moi_exec_save_sgpr || !append_save_moi_special_state(words, options, arch)) {
+  if (!options.moi_exec_save_sgpr ||
+      !append_save_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not save EXEC/VCC/SCC");
     return std::nullopt;
   }
@@ -2357,7 +2358,7 @@ private:
     return fail("ConSan MOI first-light probe could not bind its EXEC restore");
   }
   words.push_back(*restore_exec);
-  if (!append_restore_moi_special_state(words, options, arch)) {
+  if (!append_restore_moi_special_state(words, moi_special_state_sgprs(options), arch)) {
     errors.emplace_back("ConSan MOI first-light probe could not restore VCC/SCC");
     return std::nullopt;
   }
