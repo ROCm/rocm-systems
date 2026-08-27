@@ -446,6 +446,7 @@ using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::moi_workgroup_shadow_initialization_lanes;
 using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
 using consan_detail::MoiEntryScalarBackup;
+using consan_detail::MoiOwnerEpochPrologueEmissionPlan;
 using consan_detail::MoiPrivateEpochPrologueEmissionPlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkgroupKeyRegisterPlan;

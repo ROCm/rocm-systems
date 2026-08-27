@@ -261,6 +261,96 @@ struct MoiEntryScalarBackup {
   bool operator==(const MoiEntryScalarBackup &) const = default;
 };
 
+/// Complete semantic input to one register-backed owner/epoch entry body.
+///
+/// Placement resolves this record once per kernel after assigning persistent
+/// registers and decoding the kernel-entry ABI. Body and return addresses and
+/// displaced guest words remain call-specific because paired kernarg-preload
+/// entries may share this semantic plan while occupying different locations.
+/// The native emitter therefore cannot consult `MoiOptions`, patch metadata,
+/// or a kernel descriptor to rediscover any initialization decision.
+struct MoiOwnerEpochPrologueEmissionPlan {
+  /// VGPR receiving the owner identity when no persistent owner SGPR exists.
+  uint16_t owner_vgpr = 0;
+
+  /// VGPR receiving epoch zero when no persistent epoch SGPR exists.
+  uint16_t epoch_vgpr = 0;
+
+  /// Optional persistent VGPR receiving the compact workgroup key.
+  std::optional<uint16_t> workgroup_key_vgpr;
+
+  /// Logical shift converting entry workitem-x into a wave owner.
+  uint16_t owner_shift_bits = 0;
+
+  /// Resolved architectural source of owner identity.
+  ConSanMoiOwnerSource owner_source = ConSanMoiOwnerSource::Automatic;
+
+  /// Scalar temporary or persistent destination required by HW_ID ownership.
+  std::optional<uint16_t> owner_sgpr;
+
+  /// Whether zero is reserved for an empty shadow cell and real owners are
+  /// represented as their architectural identity plus one.
+  bool one_based_owner_ids = false;
+
+  /// Persistent scalar destinations selected for owner, epoch, workgroup key,
+  /// and exact Record/Replay workgroup identity.
+  ConSanMoiPersistentSgprState persistent_sgprs;
+
+  /// Persistent vector destinations selected for exact Record/Replay
+  /// workgroup identity.
+  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs;
+
+  /// Descriptor-derived dispatch preload transformation fixed by planning.
+  std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
+
+  /// Unique register representation receiving the dispatch identity.
+  ConSanMoiDispatchIdCapture dispatch_capture;
+
+  /// Optional launch-coordinate source controlling runtime workgroup
+  /// selection.
+  std::optional<ConSanMoiWorkgroupSource> runtime_workgroup_selection_source;
+
+  /// First SGPR in the entry-local scalar scratch window, when required.
+  std::optional<uint16_t> return_pc_sgpr;
+
+  /// Power-of-two modulus used by runtime workgroup selection.
+  uint32_t runtime_sample_stride = 1u;
+
+  /// Selected residue in `[0, runtime_sample_stride)`.
+  uint32_t runtime_sample_offset = 0u;
+
+  /// Stable report identity mixed into runtime workgroup selection.
+  uint64_t runtime_report_dispatch_id = 0u;
+
+  /// Optional entry-local carrier preserving a borrowed guest SGPR window.
+  std::optional<MoiEntryScalarBackup> entry_scalar_backup;
+
+  /// Optional LDS shadow region initialized cooperatively at kernel entry.
+  std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
+
+  /// Whether workgroup-shadow initialization can use the target's four-VGPR
+  /// zero tuple instead of the portable two-VGPR form.
+  bool has_quad_zero_tuple = false;
+
+  /// Resolved launch-coordinate sources needed by workgroup identity and
+  /// runtime-selection initialization.
+  std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
+
+  /// Return whether all target-independent invariants are safe to lower.
+  [[nodiscard]] bool is_well_formed() const {
+    if (owner_vgpr >= 256u || epoch_vgpr >= 256u || owner_vgpr == epoch_vgpr ||
+        owner_shift_bits >= 32u || owner_source == ConSanMoiOwnerSource::Automatic ||
+        (owner_source == ConSanMoiOwnerSource::HwId && !owner_sgpr) ||
+        (dispatch_capture.present() && !dispatch_capture.unambiguous()) ||
+        (workgroup_sources && !workgroup_sources->is_well_formed())) {
+      return false;
+    }
+    return runtime_sample_stride != 0u &&
+           (runtime_sample_stride & (runtime_sample_stride - 1u)) == 0u &&
+           runtime_sample_offset < runtime_sample_stride;
+  }
+};
+
 /// Resolved persistent-register inputs consumed while deriving one compact
 /// workgroup key.
 ///

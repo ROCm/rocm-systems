@@ -532,6 +532,32 @@ TEST(ConSanMoi, PrivateEpochProloguePlanValidatesRuntimeSelectionDomain) {
   EXPECT_FALSE(plan.is_well_formed());
 }
 
+TEST(ConSanMoi, OwnerEpochProloguePlanValidatesResolvedOwnerAndEntrySources) {
+  consan_detail::MoiOwnerEpochPrologueEmissionPlan plan;
+  plan.owner_vgpr = 20u;
+  plan.epoch_vgpr = 21u;
+  plan.owner_shift_bits = 6u;
+  plan.owner_source = ConSanMoiOwnerSource::WorkitemId;
+  EXPECT_TRUE(plan.is_well_formed());
+
+  plan.epoch_vgpr = plan.owner_vgpr;
+  EXPECT_FALSE(plan.is_well_formed());
+  plan.epoch_vgpr = 21u;
+  plan.owner_shift_bits = 32u;
+  EXPECT_FALSE(plan.is_well_formed());
+  plan.owner_shift_bits = 6u;
+
+  plan.owner_source = ConSanMoiOwnerSource::HwId;
+  EXPECT_FALSE(plan.is_well_formed());
+  plan.owner_sgpr = 40u;
+  EXPECT_TRUE(plan.is_well_formed());
+
+  plan.workgroup_sources = ConSanMoiWorkgroupSources{};
+  plan.workgroup_sources->x.scalar_src = 17u;
+  plan.workgroup_sources->x.vector_src = 23u;
+  EXPECT_FALSE(plan.is_well_formed());
+}
+
 TEST(ConSanMoi, EntryScalarBackupValidatesCarrierAndScalarWindow) {
   using consan_detail::MoiEntryScalarBackup;
   constexpr uint16_t kVgprLimit = 256u;
