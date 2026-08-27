@@ -82,6 +82,7 @@ Settings::Settings() {
   blocking_blit_ = amd::IS_HIP;
 
   max_hw_queues_ = GPU_MAX_HW_QUEUES;
+  aql_barrier_opt_ = amd::IS_HIP && DEBUG_CLR_AQL_BARRIER_OPT;
 
   queue_pipe_dist_ = false;
 }

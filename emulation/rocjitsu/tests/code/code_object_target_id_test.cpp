@@ -19,6 +19,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decoder.h"
 #include "scoped_temp.h"
 
 #include <gtest/gtest.h>
@@ -51,7 +52,9 @@ uint64_t align_up(uint64_t value, uint64_t alignment) {
 
 // Minimal AMDGPU ELF tagged with @p mach_flag. .text contains two `s_nop 0`
 // words so it can be decoded by any AMDGPU ISA (SOPP encoding is shared).
-std::vector<uint8_t> make_minimal_amdgpu_elf(uint32_t mach_flag) {
+std::vector<uint8_t> make_minimal_amdgpu_elf(uint32_t mach_flag,
+                                             std::array<uint32_t, 2> text_words = {0xBF800000u,
+                                                                                   0xBF800000u}) {
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_size = 8;
   constexpr uint64_t rodata_size = 4;
@@ -83,7 +86,6 @@ std::vector<uint8_t> make_minimal_amdgpu_elf(uint32_t mach_flag) {
   ehdr.e_shstrndx = 3;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  const std::array<uint32_t, 2> text_words = {0xBF800000u, 0xBF800000u};
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   const uint32_t rodata_word = 0xA5A55A5Au;
@@ -148,10 +150,23 @@ void expect_c_api_accepts_target(uint32_t mach_flag, rj_code_target_id_t target)
   // The returned code-object handle must keep its executable storage alive.
   rj_code_executable_destroy(exec);
 
+  auto pooled_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(pooled_decoder, nullptr);
+  pooled_decoder->enable_pool();
+
+  rj_code_inst_list_t *instructions = nullptr;
+  ASSERT_EQ(rj_code_inst_list_create(obj, target, &instructions), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(instructions, nullptr);
+
   rj_code_basic_block_list_t *blocks = nullptr;
   EXPECT_EQ(rj_code_basic_block_list_create(obj, target, &blocks), ROCJITSU_STATUS_SUCCESS)
       << "rj_code_basic_block_list_create must succeed for a target whose decoder is wired in";
   ASSERT_NE(blocks, nullptr);
+
+  // Both C API list types own their decoded instructions independently of an
+  // unrelated decoder pool that was active while they were constructed.
+  rj_code_inst_list_destroy(instructions);
+  pooled_decoder.reset();
 
   rj_code_basic_block_t *block = nullptr;
   ASSERT_EQ(rj_code_basic_block_list_get(blocks, 0, &block), ROCJITSU_STATUS_SUCCESS);
@@ -239,6 +254,40 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx1201ForBasicBlockList) {
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx1250ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1250, ROCJITSU_CODE_TARGET_GFX1250);
+}
+
+TEST(GfxCodeObjectTargets, CApiContainsInvalidInstructionFromListBuilders) {
+  constexpr std::array<uint32_t, 2> invalid_vopd = {
+      (0x32u << 26) | (12u << 22) | (8u << 17), // Opcode 12 is not an X op.
+      0,
+  };
+  auto image = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1250, invalid_vopd);
+
+  test::ScopedTempFile file("rj-code-object-invalid-inst-");
+  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+
+  rj_code_executable_t *exec = nullptr;
+  ASSERT_EQ(rj_code_executable_create(file.path().c_str(), &exec), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(exec, nullptr);
+
+  rj_code_object_t *obj = nullptr;
+  ASSERT_EQ(rj_code_executable_get_code_object(exec, ROCJITSU_CODE_TARGET_GFX1250, 0, &obj),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(obj, nullptr);
+
+  auto *inst_list = reinterpret_cast<rj_code_inst_list_t *>(static_cast<uintptr_t>(1));
+  EXPECT_EQ(rj_code_inst_list_create(obj, ROCJITSU_CODE_TARGET_GFX1250, &inst_list),
+            ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(inst_list, nullptr);
+
+  auto *block_list = reinterpret_cast<rj_code_basic_block_list_t *>(static_cast<uintptr_t>(1));
+  EXPECT_EQ(rj_code_basic_block_list_create(obj, ROCJITSU_CODE_TARGET_GFX1250, &block_list),
+            ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(block_list, nullptr);
+
+  rj_code_object_destroy(obj);
+  rj_code_object_release(obj);
+  rj_code_executable_destroy(exec);
 }
 
 TEST(KernelSymbolTest, DemanglesMangledKernelSymbol) {
