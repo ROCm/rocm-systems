@@ -26,9 +26,11 @@ struct ConSanMoiCandidate : ConSanAccessInventorySite {
                : static_cast<uint32_t>(range.static_byte_offset.value());
   }
 
-  /// gfx1250 VGPR-bank mode active at this instruction, when analysis could
-  /// establish it for lowering.
-  std::optional<uint16_t> gfx1250_vgpr_msb_mode;
+  /// Target-native selectable-VGPR-bank mode active at this instruction, when
+  /// analysis could establish it for lowering. Targets without selectable
+  /// banks leave this absent; a present zero value records the ordinary low
+  /// bank explicitly.
+  std::optional<uint16_t> incoming_vgpr_bank_mode;
   /// Descriptor selected as the concrete execution owner for this lowering
   /// operation. Shared helper sites may be copied once per reachable owner.
   std::optional<uint64_t> kernel_descriptor_file_offset;

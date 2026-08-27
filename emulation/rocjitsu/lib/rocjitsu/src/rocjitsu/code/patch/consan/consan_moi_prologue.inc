@@ -2012,7 +2012,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
       }
       workgroup_sources = moi_descriptor_workgroup_sources(
           active_bytes, active_kernel->descriptor_file_offset, arch, source_errors,
-          kernel.uses_gfx1250_cluster_workgroup_id, full_payload_user_sgpr_count);
+          kernel.uses_cluster_workgroup_id, full_payload_user_sgpr_count);
       if (!workgroup_sources) {
         result.errors.insert(result.errors.end(), source_errors.begin(), source_errors.end());
         return;
@@ -2582,7 +2582,7 @@ void try_apply_owner_epoch_prologue_patch(
       }
       workgroup_sources = moi_descriptor_workgroup_sources(
           active_bytes, active.descriptor_file_offset, arch, source_errors,
-          kernel.uses_gfx1250_cluster_workgroup_id, full_payload_user_sgpr_count);
+          kernel.uses_cluster_workgroup_id, full_payload_user_sgpr_count);
       if (!workgroup_sources) {
         result.errors.insert(result.errors.end(), source_errors.begin(), source_errors.end());
         return;

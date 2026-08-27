@@ -308,7 +308,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
             resources.owner_descriptor_file_offsets, [&](uint64_t descriptor_offset) {
               const ConSanKernelInfo *kernel =
                   result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
-              return kernel != nullptr && kernel->uses_gfx1250_cluster_workgroup_id;
+              return kernel != nullptr && kernel->uses_cluster_workgroup_id;
             });
     record_replay_workgroup_offset_values = std::array<uint64_t, 4>{
         persistent_end,
@@ -909,7 +909,7 @@ private:
   const bool materialize_direct_to_lds = candidate.origin == ConSanAccessOrigin::DirectToLds;
   const bool load_clobbers_address = moi_load_clobbers_address(candidate);
   const bool capture_high_bank_address =
-      moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+      moi_access_requires_high_bank_address_capture(candidate, arch);
   const bool save_clobbered_address = load_clobbers_address || capture_high_bank_address;
   const bool reserve_two_address_replay_scratch =
       arch == ROCJITSU_CODE_ARCH_CDNA5 &&

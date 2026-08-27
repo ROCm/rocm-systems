@@ -639,7 +639,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
 
 [[nodiscard]] std::optional<ConSanMoiWorkgroupSources> moi_descriptor_workgroup_sources(
     std::span<const uint8_t> image, uint64_t descriptor_file_offset, rj_code_arch_t arch,
-    std::vector<std::string> &errors, bool uses_gfx1250_cluster_workgroup_id = false,
+    std::vector<std::string> &errors, bool uses_cluster_workgroup_id = false,
     std::optional<uint16_t> cdna_full_payload_user_sgpr_count = std::nullopt) {
   const auto descriptor = read_kernel_descriptor(image, descriptor_file_offset);
   if (!descriptor) {
@@ -663,7 +663,7 @@ moi_descriptor_dispatch_id_preload_plan(const KD &desc, rj_code_arch_t arch) {
                                               /*mask_low_16=*/true),
         .z = ConSanMoiWorkgroupSource::scalar(ttmp_scalar_operand(kTtmpRdna4GridYz),
                                               /*shift_right_16=*/true),
-        .cluster_workgroup_id = profile->has_cluster_facilities && uses_gfx1250_cluster_workgroup_id
+        .cluster_workgroup_id = profile->has_cluster_facilities && uses_cluster_workgroup_id
                                     ? ConSanMoiWorkgroupSource::scalar(
                                           ttmp_scalar_operand(kTtmpGfx1250ClusterWorkgroupId))
                                     : ConSanMoiWorkgroupSource{},
@@ -785,11 +785,11 @@ moi_persistent_or_descriptor_workgroup_sources(std::span<const uint8_t> image,
                                                uint64_t descriptor_file_offset,
                                                const ConSanOptions &options, rj_code_arch_t arch,
                                                std::vector<std::string> &errors,
-                                               bool uses_gfx1250_cluster_workgroup_id = false) {
+                                               bool uses_cluster_workgroup_id = false) {
   if (const auto persistent = record_replay_persistent_workgroup_sources(options, arch))
     return persistent;
   return moi_descriptor_workgroup_sources(image, descriptor_file_offset, arch, errors,
-                                          uses_gfx1250_cluster_workgroup_id);
+                                          uses_cluster_workgroup_id);
 }
 
 struct MoiSgprRange {
@@ -1109,8 +1109,8 @@ candidate_payload_vgpr_count_per_address(const ConSanMoiCandidate &candidate) {
 }
 
 [[nodiscard]] bool
-moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &candidate,
-                                                      rj_code_arch_t arch) {
+moi_access_requires_high_bank_address_capture(const ConSanMoiCandidate &candidate,
+                                              rj_code_arch_t arch) {
   // gfx1250 DS encodings carry only the low eight bits of each VGPR operand.
   // The current s_set_vgpr_msb mode supplies the high bank independently for
   // SRC0, SRC1, SRC2, and DST. Native LDS addresses are SRC0, so a nonzero
@@ -1118,7 +1118,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
   // probe subsequently selects bank zero for its own scratch registers.
   return arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.origin != ConSanAccessOrigin::Flat &&
          candidate.operands.address_vgpr &&
-         (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0x3u) != 0u;
+         (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0x3u) != 0u;
 }
 
 // A Sampled store executes its displaced guest instruction before the probe
@@ -1186,7 +1186,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
       inline_shadow_scratch_count(options) + inline_shadow_loop_scratch_count(options, candidate) +
       ((candidate.origin == ConSanAccessOrigin::DirectToLds ||
         moi_load_clobbers_address(candidate) ||
-        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)) &&
+        moi_access_requires_high_bank_address_capture(candidate, arch)) &&
                flat_offset_address_count == 0u
            ? 1u
            : 0u) +
@@ -1226,7 +1226,7 @@ moi_access_requires_gfx1250_high_bank_address_capture(const ConSanMoiCandidate &
            ? gfx12_flat_access_address_scratch_count(candidate, arch)
        : candidate.origin == ConSanAccessOrigin::DirectToLds ||
                moi_load_clobbers_address(candidate) ||
-               moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)
+               moi_access_requires_high_bank_address_capture(candidate, arch)
            ? 1u
            : 0u) +
       (options.automatic_moi_private_epoch
@@ -1778,7 +1778,7 @@ struct MoiOwnerRegisterReferenceSummary {
              ? gfx12_flat_access_address_scratch_count(candidate, arch)
          : candidate.origin == ConSanAccessOrigin::DirectToLds ||
                  moi_load_clobbers_address(candidate) ||
-                 moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)
+                 moi_access_requires_high_bank_address_capture(candidate, arch)
              ? 1u
              : 0u) +
         (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
@@ -3598,13 +3598,16 @@ struct MoiPlannedAccessPatch {
 /// Additional common plan for Record/Replay and Sampled access bodies.
 ///
 /// Both engines relocate a guest access into a replayable body and therefore
-/// share entry-island sizing, CDNA5 high-bank state, private workgroup
+/// share entry-island sizing, target-native selectable-bank state, private workgroup
 /// identity, the relocated guest offset, and operand-overlap handling. Inline
 /// Shadow does not replay the access and intentionally does not inherit this
 /// stronger contract.
 struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
+  /// Reserved entry-island capacity in instruction words.
   uint64_t entry_island_word_count = 0;
-  std::optional<uint16_t> gfx1250_vgpr_msb_mode;
+  /// Selectable-VGPR-bank state that must be restored around the relocated
+  /// guest instruction. Targets without that facility leave it absent.
+  std::optional<uint16_t> incoming_vgpr_bank_mode;
   ConSanMoiPersistentWorkgroupPrivateOffsets private_workgroup_offsets;
   uint32_t probe_guest_instruction_offset = 0;
   bool spill_overlaps_guest_operands = false;
@@ -6063,7 +6066,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
   const bool needs_gfx1250_cluster_workgroup_id =
       needs_record_replay_workgroup_tuple && consan_arch_has_cluster_facilities(arch) &&
       std::ranges::any_of(result.program_inventory.kernels(), [](const ConSanKernelInfo &kernel) {
-        return kernel.uses_gfx1250_cluster_workgroup_id;
+        return kernel.uses_cluster_workgroup_id;
       });
   const bool has_supported_record_replay_access =
       options.moi_engine == ConSanMoiEngine::RecordReplay &&

@@ -3,7 +3,7 @@ struct AtomicRecordCandidate {
   ConSanAtomicSite site;
   std::optional<uint64_t> kernel_descriptor_file_offset;
   ConSanMoiAtomicEventKind event_kind = ConSanMoiAtomicEventKind::Release;
-  bool uses_gfx1250_cluster_workgroup_id = false;
+  bool uses_cluster_workgroup_id = false;
   // Language-level atomic loads and stores can lower to an ordinary memory
   // instruction followed by an ordering cache operation. Keep that semantic
   // distinction explicit: their communication range participates in the
@@ -25,7 +25,7 @@ struct AtomicRecordCandidate {
   const bool lhs_in_kernel = lhs.container_name.starts_with("kernel:");
   const bool rhs_in_kernel = rhs.container_name.starts_with("kernel:");
   return lhs_in_kernel == rhs_in_kernel && lhs.event_kind == rhs.event_kind &&
-         lhs.uses_gfx1250_cluster_workgroup_id == rhs.uses_gfx1250_cluster_workgroup_id &&
+         lhs.uses_cluster_workgroup_id == rhs.uses_cluster_workgroup_id &&
          lhs.is_rmw == rhs.is_rmw &&
          lhs.ordered_sequence_end_text_offset == rhs.ordered_sequence_end_text_offset &&
          lhs.scalar_clause_text_offset == rhs.scalar_clause_text_offset &&
@@ -464,7 +464,7 @@ void append_ordered_ordinary_atomic_candidates(const ConSanTransformArtifacts &r
       candidate.ordered_sequence_end_text_offset = sequence.end_text_offset;
       candidate.scalar_clause_text_offset = sequence.scalar_clause_text_offset;
       if constexpr (std::is_same_v<std::remove_cvref_t<decltype(container)>, ConSanKernelInfo>)
-        candidate.uses_gfx1250_cluster_workgroup_id = container.uses_gfx1250_cluster_workgroup_id;
+        candidate.uses_cluster_workgroup_id = container.uses_cluster_workgroup_id;
       candidates.push_back(std::move(candidate));
     };
     if (communication->in_kernel) {
@@ -604,7 +604,7 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel,
           event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
         descriptor_file_offset.reset();
       candidates.push_back({"kernel:" + kernel.name, normalized, descriptor_file_offset,
-                            *event_kind, kernel.uses_gfx1250_cluster_workgroup_id,
+                            *event_kind, kernel.uses_cluster_workgroup_id,
                             /*is_rmw=*/true, /*ordered_sequence_end_text_offset=*/0,
                             atomic_scalar_clause_for_site(sync_index, kernel.name, true, site)});
     }
@@ -623,7 +623,7 @@ void append_atomic_record_candidates(const ConSanFunctionInfo &function,
         normalize_atomic_record_site(site, allow_ordered_lds_atomic);
     if (is_first_light_atomic_record_candidate(normalized, allow_ordered_lds_atomic) && event_kind)
       candidates.push_back({"function:" + function.name, normalized, std::nullopt, *event_kind,
-                            /*uses_gfx1250_cluster_workgroup_id=*/false, /*is_rmw=*/true,
+                            /*uses_cluster_workgroup_id=*/false, /*is_rmw=*/true,
                             /*ordered_sequence_end_text_offset=*/0,
                             atomic_scalar_clause_for_site(sync_index, function.name, false, site)});
   }
@@ -645,7 +645,7 @@ void append_inline_atomic_candidates(const ConSanKernelInfo &kernel,
           event->execution_owners.front().descriptor_file_offset != kernel.descriptor_file_offset)
         descriptor_file_offset.reset();
       candidates.push_back({"kernel:" + kernel.name, normalized, descriptor_file_offset,
-                            *event_kind, kernel.uses_gfx1250_cluster_workgroup_id,
+                            *event_kind, kernel.uses_cluster_workgroup_id,
                             /*is_rmw=*/true, /*ordered_sequence_end_text_offset=*/0,
                             atomic_scalar_clause_for_site(sync_index, kernel.name, true, site)});
     }
@@ -660,7 +660,7 @@ void append_inline_atomic_candidates(const ConSanFunctionInfo &function,
     if (event_kind)
       candidates.push_back({"function:" + function.name, normalize_atomic_record_site(site, false),
                             std::nullopt, *event_kind,
-                            /*uses_gfx1250_cluster_workgroup_id=*/false, /*is_rmw=*/true,
+                            /*uses_cluster_workgroup_id=*/false, /*is_rmw=*/true,
                             /*ordered_sequence_end_text_offset=*/0,
                             atomic_scalar_clause_for_site(sync_index, function.name, false, site)});
   }

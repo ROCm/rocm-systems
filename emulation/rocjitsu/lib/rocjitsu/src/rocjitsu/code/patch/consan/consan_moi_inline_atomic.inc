@@ -1578,7 +1578,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
     return std::nullopt;
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors,
-      candidate.uses_gfx1250_cluster_workgroup_id);
+      candidate.uses_cluster_workgroup_id);
   if (!workgroup_sources || candidate.site.file_offset > bytes.size() ||
       candidate.site.size > bytes.size() - candidate.site.file_offset)
     return std::nullopt;
@@ -1879,7 +1879,7 @@ append_sampled_atomic_address_snapshot(std::vector<uint32_t> &words, const VgprS
   }
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors,
-      candidate.uses_gfx1250_cluster_workgroup_id);
+      candidate.uses_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;
   if (candidate.site.file_offset > bytes.size() ||

@@ -326,8 +326,10 @@ struct ConSanProgramContainerRef {
   bool code_size_inferred_from_zero = false;
   /// Descriptor file offset for a kernel; absent for a function.
   std::optional<uint64_t> kernel_descriptor_file_offset;
-  /// Whether this container's code observes the gfx1250 cluster workgroup ID.
-  bool uses_gfx1250_cluster_workgroup_id = false;
+  /// Whether this container's code observes the target-provided cluster
+  /// workgroup coordinate. This is decoded program behavior, not a product
+  /// test; targets without cluster facilities always leave it false.
+  bool uses_cluster_workgroup_id = false;
 
   /// Return whether this attribution record names a dispatchable kernel. The
   /// result is derived from `kind`, so no parallel boolean can disagree.
@@ -419,7 +421,7 @@ struct ConSanKernelInfo {
   std::optional<uint16_t> sgpr_count;
   std::optional<std::array<uint32_t, 3>> required_workgroup_size;
   bool decoded = false;
-  bool uses_gfx1250_cluster_workgroup_id = false;
+  bool uses_cluster_workgroup_id = false;
   ConSanKernelStats stats;
   std::vector<ConSanOrdinaryMemorySite> ordinary_memory_sites;
   std::vector<ConSanBarrierSite> barrier_sites;
@@ -436,7 +438,7 @@ struct ConSanFunctionInfo {
   uint64_t code_size = 0;
   bool code_size_inferred_from_zero = false;
   bool decoded = false;
-  bool uses_gfx1250_cluster_workgroup_id = false;
+  bool uses_cluster_workgroup_id = false;
   ConSanKernelStats stats;
   std::vector<ConSanOrdinaryMemorySite> ordinary_memory_sites;
   std::vector<ConSanBarrierSite> barrier_sites;
@@ -456,7 +458,7 @@ consan_program_container_ref(const ConSanKernelInfo &kernel) {
       .text_file_offset = kernel.text_file_offset,
       .code_size_inferred_from_zero = kernel.code_size_inferred_from_zero,
       .kernel_descriptor_file_offset = kernel.descriptor_file_offset,
-      .uses_gfx1250_cluster_workgroup_id = kernel.uses_gfx1250_cluster_workgroup_id,
+      .uses_cluster_workgroup_id = kernel.uses_cluster_workgroup_id,
   };
 }
 
@@ -472,7 +474,7 @@ consan_program_container_ref(const ConSanFunctionInfo &function) {
       .text_file_offset = function.text_file_offset,
       .code_size_inferred_from_zero = function.code_size_inferred_from_zero,
       .kernel_descriptor_file_offset = std::nullopt,
-      .uses_gfx1250_cluster_workgroup_id = function.uses_gfx1250_cluster_workgroup_id,
+      .uses_cluster_workgroup_id = function.uses_cluster_workgroup_id,
   };
 }
 

@@ -2494,7 +2494,7 @@
   const bool materialize_flat_address =
       candidate_requires_gfx12_flat_address_materialization(candidate, arch);
   const bool capture_high_bank_address =
-      moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+      moi_access_requires_high_bank_address_capture(candidate, arch);
   const auto source_is_spilled = [&](uint16_t source) {
     return spill != nullptr && source >= spill->vgpr_base &&
            source < static_cast<uint32_t>(spill->vgpr_base) + spill->vgpr_count;

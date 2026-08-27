@@ -381,6 +381,27 @@ products. It is that shared semantic, placement, resource, and orchestration
 algorithms no longer select behavior from product names, and every remaining
 direct reference outside a target-owned component has an explicit justification.
 
+#### Stage 1 foundation exit evidence
+
+The first Record/Replay vertical slice and the target-boundary foundation are
+complete. All 18 Record/Replay-owned direct target references from the Stage 0
+ledger have moved to existing typed profile facts, generic program/allocation
+state, or target-native instruction builders; the Record/Replay-owned source
+now has no direct product/family vocabulary. The detailed migration ledger is
+in [`REIMPLEMENTATION_MAP.md`](REIMPLEMENTATION_MAP.md#stage-1-target-boundary-foundation).
+
+Focused coverage passed 160/160 host checks and 28/28 paired Record/Replay
+device checks across all five emulated targets. The required full gate was:
+
+```sh
+ctest -j64 --output-on-failure -R 'ConSan|consan'
+```
+
+All **5,245/5,245** tests passed, including 3,501 checked-in device tests and
+593 physical-gfx950 tests, in 568.71 seconds of wall time. Stage 1 remains an
+active cross-cutting gate through Stage 8; its broader final exit is audited
+after the domain migrations rather than claimed by this foundation slice.
+
 ### Stage 2: replace mutable MOI placement state with one operating point
 
 Placement/admission is 7,219 lines, and `consan_moi_placement.inc` alone has 191

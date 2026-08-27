@@ -2385,7 +2385,7 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
         // classes, so identify this architectural launch input by its decoded
         // operand name rather than treating it as an SGPR.
         if (operand && operand->name() == "TTMP6") {
-          kernel.uses_gfx1250_cluster_workgroup_id = true;
+          kernel.uses_cluster_workgroup_id = true;
           break;
         }
       }
@@ -2452,7 +2452,7 @@ void decode_function_stats(
                       entry_tracker, call_targets, call_states);
 
   function.decoded = range.decoded;
-  function.uses_gfx1250_cluster_workgroup_id = range.uses_gfx1250_cluster_workgroup_id;
+  function.uses_cluster_workgroup_id = range.uses_cluster_workgroup_id;
   function.stats = range.stats;
   function.ordinary_memory_sites = std::move(range.ordinary_memory_sites);
   function.barrier_sites = std::move(range.barrier_sites);

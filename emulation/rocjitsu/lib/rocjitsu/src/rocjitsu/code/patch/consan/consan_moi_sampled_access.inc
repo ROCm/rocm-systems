@@ -213,7 +213,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id.has_value() ||
       options.moi_record_replay_workgroup_private_offsets.cluster_workgroup_id.has_value() ||
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
-        return candidate->container.uses_gfx1250_cluster_workgroup_id;
+        return candidate->container.uses_cluster_workgroup_id;
       });
   const uint64_t sampled_access_island_words = moi_runtime_workgroup_gate_reserved_words(
       static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)),
@@ -573,20 +573,20 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                      : 0u;
     const uint64_t scalar_spill_guard_bytes = scalar_spill ? sizeof(uint32_t) : 0u;
     const bool capture_high_bank_address =
-        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+        moi_access_requires_high_bank_address_capture(candidate, arch);
     const bool wrap_embedded_guest_vgpr_bank =
         (use_indirect_appended || capture_high_bank_address) && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-        candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+        candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
     const uint64_t high_bank_capture_bytes =
         capture_high_bank_address
-            ? (1u + (spill                                                          ? 2u
-                     : (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0xfcu) != 0u ? 1u
-                                                                                    : 0u)) *
+            ? (1u + (spill                                                            ? 2u
+                     : (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0xfcu) != 0u ? 1u
+                                                                                      : 0u)) *
                   sizeof(uint32_t)
             : 0u;
     const uint64_t vgpr_msb_bytes = (use_indirect_appended || capture_high_bank_address)
-                                        ? moi_appended_body_vgpr_msb_transition_word_count(
-                                              arch, candidate.gfx1250_vgpr_msb_mode,
+                                        ? moi_appended_body_vgpr_bank_transition_word_count(
+                                              arch, candidate.incoming_vgpr_bank_mode,
                                               spill.has_value(), wrap_embedded_guest_vgpr_bank) *
                                                   sizeof(uint32_t) +
                                               high_bank_capture_bytes
@@ -705,7 +705,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
     planned.resources = *resources;
     planned.spill = spill;
     planned.scalar_spill = scalar_spill;
-    planned.gfx1250_vgpr_msb_mode = candidate.gfx1250_vgpr_msb_mode;
+    planned.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
     planned.runtime_fast_gate = runtime_fast_gate;
     planned.dense_runtime_fast_gate = dense_runtime_fast_gate;
     planned.runtime_workgroup_gate_in_body = runtime_workgroup_gate_in_body;
@@ -894,17 +894,17 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       const uint64_t displaced_tail_bytes =
           planned_patch.displaced_tail_words.size() * sizeof(uint32_t);
       const bool capture_high_bank_address =
-          moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+          moi_access_requires_high_bank_address_capture(candidate, arch);
       const uint64_t high_bank_capture_bytes =
           capture_high_bank_address
-              ? (1u + (planned_patch.spill                                                ? 2u
-                       : (planned_patch.gfx1250_vgpr_msb_mode.value_or(0u) & 0xfcu) != 0u ? 1u
-                                                                                          : 0u)) *
+              ? (1u + (planned_patch.spill                                                  ? 2u
+                       : (planned_patch.incoming_vgpr_bank_mode.value_or(0u) & 0xfcu) != 0u ? 1u
+                                                                                            : 0u)) *
                     sizeof(uint32_t)
               : 0u;
       const uint64_t vgpr_msb_bytes =
-          moi_appended_body_vgpr_msb_transition_word_count(
-              arch, planned_patch.gfx1250_vgpr_msb_mode, planned_patch.spill.has_value(),
+          moi_appended_body_vgpr_bank_transition_word_count(
+              arch, planned_patch.incoming_vgpr_bank_mode, planned_patch.spill.has_value(),
               planned_patch.wrap_embedded_guest_vgpr_bank) *
               sizeof(uint32_t) +
           high_bank_capture_bytes;
@@ -1039,7 +1039,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
         body_options.scalar_restore_words = planned_patch.scalar_spill
                                                 ? planned_patch.scalar_spill->restore_words
                                                 : std::span<const uint32_t>{};
-        body_options.gfx1250_vgpr_msb_mode = planned_patch.gfx1250_vgpr_msb_mode;
+        body_options.incoming_vgpr_bank_mode = planned_patch.incoming_vgpr_bank_mode;
         body_options.entry_prefix_words = entry_prefix_words;
         body_options.probe_guest_instruction_offset = planned_patch.probe_guest_instruction_offset;
         body_options.guest_instruction_word_count = planned_patch.guest_instruction_word_count;
@@ -1050,8 +1050,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
               (candidate_options.moi_sampled_check ? 7u : 5u) +
               (candidate_options.moi_runtime_sample_stride > 1u || window_bank_count > 1u ? 1u
                                                                                           : 0u));
-          body_options.gfx1250_high_bank_address_source = candidate.operands.address_vgpr;
-          body_options.gfx1250_high_bank_address_destination =
+          body_options.high_bank_address_source = candidate.operands.address_vgpr;
+          body_options.high_bank_address_destination =
               static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
         }
         auto cave_words = assemble_moi_appended_body(planned_patch, *words, "sampled probe",

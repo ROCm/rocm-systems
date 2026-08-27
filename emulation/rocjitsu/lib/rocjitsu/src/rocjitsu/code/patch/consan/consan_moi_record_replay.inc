@@ -1,15 +1,10 @@
-void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
-                                               const ConSanOptions &options, rj_code_arch_t arch,
-                                               MoiResourcePlanningState &resource_state,
-                                               MoiRecordReplayAccessOutput &access_output,
-                                               std::span<const ConSanMoiCandidate> admitted,
-                                               ConSanTransformArtifacts &result) {
+void try_apply_first_light_access_record_patch(
+    std::span<const uint8_t> bytes, const ConSanOptions &options, const ConSanTargetProfile &target,
+    MoiResourcePlanningState &resource_state, MoiRecordReplayAccessOutput &access_output,
+    std::span<const ConSanMoiCandidate> admitted, ConSanTransformArtifacts &result) {
+  const rj_code_arch_t arch = target.arch;
   if (!options.moi_report_buffer_address)
     return;
-  if (!consan_is_capability_arch(arch)) {
-    result.warnings.emplace_back("ConSan MOI first-light probe does not support this architecture");
-    return;
-  }
   if (options.moi_report_buffer_size < consan_moi_report_buffer_min_bytes(1, 0, 0, 0)) {
     result.warnings.emplace_back(
         "ConSan MOI first-light probe requires room for the report header and one access record");
@@ -104,7 +99,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   }
   const bool has_cluster_workgroup_id =
       std::ranges::any_of(candidates, [](const ConSanMoiCandidate *candidate) {
-        return candidate->container.uses_gfx1250_cluster_workgroup_id;
+        return candidate->container.uses_cluster_workgroup_id;
       });
   const uint64_t runtime_gate_island_words = moi_runtime_workgroup_gate_reserved_words(
       static_cast<uint32_t>(max_candidate_instruction_words * sizeof(uint32_t)),
@@ -117,15 +112,17 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                           &ConSanMoiTransientSgprAssignment::branch_only_scalar_spill);
   // Spill-backed groups need room for the extra scalar-save arm, while truly
   // large generated objects need a conservative envelope to keep every
-  // routing target reachable. Applying that spacing to every ordinary RDNA4
+  // routing target reachable. Applying that spacing to every ordinary
   // object needlessly displaces access bodies from their compact entry and
   // return layout. Retain the compact envelope for moderate objects.
-  constexpr size_t kLargeRdna4RelayCandidateCount = 1024u;
-  const bool needs_large_rdna4_relay =
-      candidates.size() >= kLargeRdna4RelayCandidateCount ||
+  constexpr size_t kLargeObjectRelayCandidateCount = 1024u;
+  const bool needs_large_object_relay =
+      candidates.size() >= kLargeObjectRelayCandidateCount ||
       (has_spill_backed_scalar_assignment && candidates.size() <= 2u);
   const uint64_t ordinary_access_relay_words =
-      (arch == ROCJITSU_CODE_ARCH_CDNA5 ? 24u : (needs_large_rdna4_relay ? 20u : 10u)) +
+      (target.direct_call_form == ConSanDirectCallForm::SCallI64
+           ? 24u
+           : (needs_large_object_relay ? 20u : 10u)) +
       (has_spill_backed_scalar_assignment ? 1u : 0u);
   const uint64_t access_relay_words =
       options.moi_runtime_sample_stride > 1u
@@ -178,7 +175,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
   }
   MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
       result, options, arch, resource_state, original_text, candidates,
-      consan_arch_has_selectable_vgpr_bank(arch) ? 0u : 64u, access_island_begin, access_slot_words,
+      target.has_selectable_vgpr_bank ? 0u : 64u, access_island_begin, access_slot_words,
       use_indirect_appended, MoiDenseAccessRouteAbi::RecordReplay,
       local_entry_islands ? &*local_entry_islands : nullptr);
   const auto &dense_candidates = dense_routes.partition;
@@ -705,20 +702,20 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                            sizeof(uint32_t)
                      : 0u;
     const bool wrap_embedded_guest_vgpr_bank = options.moi_dynamic_access_records &&
-                                               arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-                                               candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+                                               target.has_selectable_vgpr_bank &&
+                                               candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
     const bool capture_high_bank_address =
-        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
-    const uint64_t vgpr_msb_bytes =
-        moi_appended_body_vgpr_msb_transition_word_count(arch, candidate.gfx1250_vgpr_msb_mode,
-                                                         spill.has_value(),
-                                                         wrap_embedded_guest_vgpr_bank) *
+        moi_access_requires_high_bank_address_capture(candidate, arch);
+    const uint64_t vgpr_bank_transition_bytes =
+        moi_appended_body_vgpr_bank_transition_word_count(arch, candidate.incoming_vgpr_bank_mode,
+                                                          spill.has_value(),
+                                                          wrap_embedded_guest_vgpr_bank) *
             sizeof(uint32_t) +
         (capture_high_bank_address ? sizeof(uint32_t) : 0u) +
         (capture_high_bank_address
-             ? (spill                                                          ? 2u
-                : (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0xfcu) != 0u ? 1u
-                                                                               : 0u) *
+             ? (spill                                                            ? 2u
+                : (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0xfcu) != 0u ? 1u
+                                                                                 : 0u) *
                    sizeof(uint32_t)
              : 0u);
     std::vector<uint32_t> displaced_tail_words;
@@ -772,7 +769,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         const uint64_t patch_bytes =
             static_cast<uint64_t>((words->size() + displaced_tail_words.size()) *
                                   sizeof(uint32_t)) +
-            spill_bytes + scalar_spill_bytes + vgpr_msb_bytes + borrowed_body_prefix_bytes;
+            spill_bytes + scalar_spill_bytes + vgpr_bank_transition_bytes +
+            borrowed_body_prefix_bytes;
         const uint64_t reserved_body_bytes =
             patch_bytes + (1u + kBranchOnlyAppendedRelayWords) * sizeof(uint32_t);
         if (!ensure_branch_only_appended_spine(reserved_body_bytes))
@@ -888,11 +886,11 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
           has_probe_entry_runtime_workgroup_gate;
       const uint64_t patch_bytes =
           static_cast<uint64_t>((words->size() + displaced_tail_words.size()) * sizeof(uint32_t)) +
-          spill_bytes + scalar_spill_bytes + vgpr_msb_bytes +
+          spill_bytes + scalar_spill_bytes + vgpr_bank_transition_bytes +
           (dense_runtime_workgroup_gate ? runtime_gate_island_words * sizeof(uint32_t) : 0u);
       if (!branch_only_scalar_spill) {
         const uint64_t return_words =
-            use_dense_call ? (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
+            use_dense_call ? (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
                                       candidate_options.automatic_moi_record_replay_sgpr_spill
                                   ? 7u
                                   : 1u)
@@ -921,7 +919,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       }
     } else {
       const uint64_t patch_bytes = static_cast<uint64_t>(words->size() * sizeof(uint32_t)) +
-                                   spill_bytes + scalar_spill_bytes + vgpr_msb_bytes;
+                                   spill_bytes + scalar_spill_bytes + vgpr_bank_transition_bytes;
       DbiPatchPlacementRequest placement_request;
       placement_request.anchor_offset = candidate.anchor();
       placement_request.original_size = candidate.size();
@@ -938,7 +936,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     }
     if (capture_high_bank_address && placement->kind != DbiPatchPlacementKind::AppendedCave) {
       result.warnings.emplace_back(
-          "ConSan MOI first-light probe skipped a gfx1250 high-bank LDS address without an "
+          "ConSan MOI first-light probe skipped a high-bank LDS address without an "
           "appended capture body");
       continue;
     }
@@ -973,7 +971,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
     planned.resources = *resources;
     planned.spill = spill;
     planned.scalar_spill = scalar_spill;
-    planned.gfx1250_vgpr_msb_mode = candidate.gfx1250_vgpr_msb_mode;
+    planned.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
     if (private_layout) {
       planned.private_epoch_offset = private_layout->epoch_offset;
       planned.private_owner_offset = private_layout->owner_offset;
@@ -1375,15 +1373,15 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         body_options.scalar_restore_words = planned_patch.scalar_spill
                                                 ? planned_patch.scalar_spill->restore_words
                                                 : std::span<const uint32_t>{};
-        body_options.gfx1250_vgpr_msb_mode = planned_patch.gfx1250_vgpr_msb_mode;
-        if (moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)) {
+        body_options.incoming_vgpr_bank_mode = planned_patch.incoming_vgpr_bank_mode;
+        if (moi_access_requires_high_bank_address_capture(candidate, arch)) {
           const uint16_t base_scratch_count =
               record_replay_uses_automatic_banked_capture(
                   candidate_options, layout.record_replay_dispatch_token_capacity)
                   ? 10u
                   : 6u;
-          body_options.gfx1250_high_bank_address_source = candidate.operands.address_vgpr;
-          body_options.gfx1250_high_bank_address_destination =
+          body_options.high_bank_address_source = candidate.operands.address_vgpr;
+          body_options.high_bank_address_destination =
               static_cast<uint16_t>(planned_patch.resources.base + base_scratch_count);
         }
         body_options.entry_prefix_words = dense_gate_words;
@@ -1430,7 +1428,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
               cave_text_offset + displaced_tail_begin * sizeof(uint32_t);
         }
         if (planned_patch.dense_call_anchor) {
-          if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
+          if (target.direct_call_form != ConSanDirectCallForm::SCallI64 ||
               candidate_options.automatic_moi_record_replay_sgpr_spill) {
             const MoiSpecialStateSgprs special_state = *moi_special_state_sgprs(candidate_options);
             const size_t return_begin = cave_words->size();

@@ -150,6 +150,46 @@ profile/ABI/emission operations they require. Later stages reduce both the
 in lexical matches is not sufficient if branches merely move into an
 unstructured switch.
 
+### Stage 1 target-boundary foundation
+
+The table above is the Stage 0 snapshot. The first Stage 1 vertical slice has
+now migrated every one of the 18 Record/Replay-owned references: four native
+ISA references, ten ABI/resource references, and four previously unresolved
+product selections. `consan_moi_record_replay.inc` now contains no direct
+`gfx9`, `gfx11`, `gfx12`, `CDNA`, or `RDNA` vocabulary.
+
+The migrated selections use existing typed facts rather than a second target
+facade:
+
+- target admission resolves one `ConSanTargetProfile` before Record/Replay
+  planning begins;
+- direct-call and compact-return layout use `direct_call_form`;
+- VGPR-bank admission, routing, capture, and restoration use
+  `has_selectable_vgpr_bank` plus generic incoming-bank state;
+- cluster-use inventory is a generic program fact whose target-specific
+  decoder remains in the native classifier; and
+- target-native instruction builders still own the actual encodings.
+
+The former local product branches were deleted rather than wrapped. The exact
+gfx1250 VGPR-bank scanner remains deliberately target-owned, and product names
+in its tests remain validation fixtures. No new target fact or catch-all target
+interface was required: the existing profile and instruction builders were
+sufficient for this slice.
+
+Focused host coverage passed **160/160** target-profile, inventory,
+Record/Replay, cluster, high-bank, Sampled, and InlineShadow checks. The paired
+Record/Replay device slice passed **28/28** checks across gfx942, gfx950,
+gfx1100, gfx1201, and gfx1250, including gfx1250 cluster, wide-cluster, and
+high-bank-address cases. The complete Stage gate passed **5,245/5,245** tests,
+including 3,501 checked-in device tests and 593 serialized physical-gfx950
+tests, in 568.71 seconds of wall time (3,544.48 seconds aggregate user-plus-
+system CPU time).
+
+This completes the foundation required before Stage 2, not the cross-cutting
+Stage 1 final exit. The same rule remains active through Stage 8: as each
+domain moves, its shared algorithms must consume typed facts or semantic target
+operations and its superseded product branches must be deleted immediately.
+
 ## `ConSanOptions` state-ownership inventory
 
 `ConSanOptions` inherits six immutable input contracts, then adds 27 mutable

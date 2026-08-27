@@ -66,7 +66,7 @@ ConSanKernelInfo make_inventory_kernel(std::string name = "inventory_kernel") {
   kernel.entry_text_offset = 32;
   kernel.text_file_offset = 1024;
   kernel.code_size_inferred_from_zero = true;
-  kernel.uses_gfx1250_cluster_workgroup_id = true;
+  kernel.uses_cluster_workgroup_id = true;
   return kernel;
 }
 
@@ -150,7 +150,7 @@ TEST(ConSanProgramInventory, ValueRecordsPreserveTypedFactsAndCompleteness) {
   container.name = "kernel";
   container.entry_text_offset = 64;
   container.kernel_descriptor_file_offset = 128;
-  container.uses_gfx1250_cluster_workgroup_id = true;
+  container.uses_cluster_workgroup_id = true;
   EXPECT_TRUE(container.is_kernel());
   EXPECT_EQ(container, container);
   ConSanProgramContainerRef function = container;
@@ -551,7 +551,7 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_EQ(byte.container.kernel_descriptor_file_offset, 512u);
   EXPECT_EQ(byte.container.text_file_offset, 1024u);
   EXPECT_TRUE(byte.container.code_size_inferred_from_zero);
-  EXPECT_TRUE(byte.container.uses_gfx1250_cluster_workgroup_id);
+  EXPECT_TRUE(byte.container.uses_cluster_workgroup_id);
   EXPECT_EQ(byte.operands.destination_vgpr, 2u);
   EXPECT_EQ(byte.operands.destination_accvgpr, 4u);
   EXPECT_EQ(byte.operands.address_vgpr, 3u);

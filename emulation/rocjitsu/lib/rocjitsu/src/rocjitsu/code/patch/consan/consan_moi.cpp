@@ -558,13 +558,13 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
       build_moi_candidates(result.program_inventory, result.observation_plan, result.errors);
   if (!result.errors.empty())
     return result;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (consan_arch_has_selectable_vgpr_bank(arch)) {
     for (ConSanMoiCandidate &candidate : moi_candidates) {
       if (candidate.anchor() < candidate.container.entry_text_offset ||
           candidate.file_offset < candidate.anchor())
         continue;
       const uint64_t text_file_offset = candidate.file_offset - candidate.anchor();
-      candidate.gfx1250_vgpr_msb_mode =
+      candidate.incoming_vgpr_bank_mode =
           gfx1250_vgpr_msb_mode_at(code_object_bytes, text_file_offset,
                                    candidate.container.entry_text_offset, candidate.file_offset);
     }
@@ -842,10 +842,16 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     try_apply_inline_shadow_patch(code_object_bytes, effective_options, arch,
                                   resource_planning_state, moi_candidates, result);
   MoiRecordReplayAccessOutput record_replay_access_output;
-  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay)
-    try_apply_first_light_access_record_patch(code_object_bytes, effective_options, arch,
-                                              resource_planning_state, record_replay_access_output,
-                                              moi_candidates, result);
+  if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay) {
+    if (const ConSanTargetProfile *target = consan_target_profile(arch)) {
+      try_apply_first_light_access_record_patch(
+          code_object_bytes, effective_options, *target, resource_planning_state,
+          record_replay_access_output, moi_candidates, result);
+    } else if (effective_options.moi_report_buffer_address) {
+      result.warnings.emplace_back(
+          "ConSan MOI first-light probe does not support this architecture");
+    }
+  }
   if (result.errors.empty() && effective_options.moi_engine == ConSanMoiEngine::RecordReplay &&
       !explicit_persistent_state &&
       std::ranges::none_of(result.patches,

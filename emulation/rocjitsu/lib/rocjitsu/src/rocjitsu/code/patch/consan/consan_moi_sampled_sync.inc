@@ -9,7 +9,7 @@ struct SampledBarrierCandidate {
   const ConSanSyncSequence *sequence = nullptr;
   BarrierRecordCandidate barrier;
   std::vector<SampledBarrierWindow> windows;
-  bool uses_gfx1250_cluster_workgroup_id = false;
+  bool uses_cluster_workgroup_id = false;
 };
 
 struct SampledCfgDistance {
@@ -123,7 +123,7 @@ sampled_cfg_forward_distance(const MoiResourcePlanningState &state,
     return std::nullopt;
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
       bytes, *candidate.barrier.kernel_descriptor_file_offset, options, arch, errors,
-      candidate.uses_gfx1250_cluster_workgroup_id);
+      candidate.uses_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;
   if (candidate.barrier.site.file_offset > bytes.size() ||
@@ -801,11 +801,11 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes,
         break;
       }
       if (!first_owner &&
-          uses_cluster_workgroup_id != context->second->kernel->uses_gfx1250_cluster_workgroup_id) {
+          uses_cluster_workgroup_id != context->second->kernel->uses_cluster_workgroup_id) {
         owner_lowering_failure = "incompatible cluster workgroup ABI";
         break;
       }
-      uses_cluster_workgroup_id = context->second->kernel->uses_gfx1250_cluster_workgroup_id;
+      uses_cluster_workgroup_id = context->second->kernel->uses_cluster_workgroup_id;
       first_owner = false;
       const auto workgroup_sources = moi_descriptor_workgroup_sources(
           bytes, owner.descriptor_file_offset, arch, result.errors, uses_cluster_workgroup_id);
@@ -1651,7 +1651,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes,
         descriptor.reset();
       candidates.push_back(
           {{(in_kernel ? "kernel:" : "function:") + std::string(name), normalized, descriptor,
-            *event_kind, /*uses_gfx1250_cluster_workgroup_id=*/false, /*is_rmw=*/true,
+            *event_kind, /*uses_cluster_workgroup_id=*/false, /*is_rmw=*/true,
             /*ordered_sequence_end_text_offset=*/0,
             atomic_scalar_clause_for_site(sync_index, name, in_kernel, site)},
            *semantics,

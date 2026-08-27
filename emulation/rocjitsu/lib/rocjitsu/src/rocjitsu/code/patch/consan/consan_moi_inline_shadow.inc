@@ -622,19 +622,19 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     // the displaced guest instruction (which is itself inert under EXEC=0).
     const uint64_t scalar_spill_guard_bytes = scalar_spill ? sizeof(uint32_t) : 0u;
     const bool capture_high_bank_address =
-        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+        moi_access_requires_high_bank_address_capture(candidate, arch);
     const uint64_t high_bank_capture_bytes =
         capture_high_bank_address
-            ? (1u + (spill                                                          ? 2u
-                     : (candidate.gfx1250_vgpr_msb_mode.value_or(0u) & 0xfcu) != 0u ? 1u
-                                                                                    : 0u)) *
+            ? (1u + (spill                                                            ? 2u
+                     : (candidate.incoming_vgpr_bank_mode.value_or(0u) & 0xfcu) != 0u ? 1u
+                                                                                      : 0u)) *
                   sizeof(uint32_t)
             : 0u;
-    const uint64_t vgpr_msb_bytes =
-        (arch == ROCJITSU_CODE_ARCH_CDNA5 && candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u
-             ? (spill ? 4u : 2u) * sizeof(uint32_t)
-             : 0u) +
-        high_bank_capture_bytes;
+    const uint64_t vgpr_msb_bytes = (consan_arch_has_selectable_vgpr_bank(arch) &&
+                                             candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u
+                                         ? (spill ? 4u : 2u) * sizeof(uint32_t)
+                                         : 0u) +
+                                    high_bank_capture_bytes;
     const uint32_t required_private_bytes =
         std::max({private_layout ? private_layout->ephemeral_base : 0u,
                   spill ? spill->total_private_bytes : 0u,
@@ -1214,10 +1214,10 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         body_options.scalar_restore_words = planned_patch.scalar_spill
                                                 ? planned_patch.scalar_spill->restore_words
                                                 : std::span<const uint32_t>{};
-        body_options.gfx1250_vgpr_msb_mode = candidate.gfx1250_vgpr_msb_mode;
-        if (moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch)) {
-          body_options.gfx1250_high_bank_address_source = candidate.operands.address_vgpr;
-          body_options.gfx1250_high_bank_address_destination = static_cast<uint16_t>(
+        body_options.incoming_vgpr_bank_mode = candidate.incoming_vgpr_bank_mode;
+        if (moi_access_requires_high_bank_address_capture(candidate, arch)) {
+          body_options.high_bank_address_source = candidate.operands.address_vgpr;
+          body_options.high_bank_address_destination = static_cast<uint16_t>(
               consan_detail::inline_shadow_loop_counter_vgpr(
                   planned_patch.resources.base, candidate_options.moi_exec_save_sgpr.has_value(),
                   candidate_options.moi_track_atomics) +
@@ -1980,7 +1980,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   }
   const auto workgroup_sources = moi_persistent_or_descriptor_workgroup_sources(
       bytes, *candidate.kernel_descriptor_file_offset, options, arch, errors,
-      candidate.container.uses_gfx1250_cluster_workgroup_id);
+      candidate.container.uses_cluster_workgroup_id);
   if (!workgroup_sources)
     return std::nullopt;
 
@@ -2083,13 +2083,13 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     words.push_back(*derived_owner_word);
   if (relocate_instruction) {
     const bool capture_high_bank_address =
-        moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+        moi_access_requires_high_bank_address_capture(candidate, arch);
     const bool select_guest_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch) &&
-                                        candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u &&
+                                        candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u &&
                                         !capture_high_bank_address;
     if (select_guest_vgpr_bank)
       words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-          0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
+          0u, static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), arch));
     if (guest_instruction_offset)
       *guest_instruction_offset = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
     // Metadata consumes the low-bank captured address, while the guest still
@@ -2111,7 +2111,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
       return std::nullopt;
     if (select_guest_vgpr_bank)
       words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-          static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch));
+          static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), 0u, arch));
   }
 
   const auto publication_state = moi_sampled_publication_state_sgprs(options);
@@ -2653,9 +2653,9 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
 
   std::vector<uint32_t> words;
   const bool select_guest_vgpr_bank = consan_arch_has_selectable_vgpr_bank(arch) &&
-                                      candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
+                                      candidate.incoming_vgpr_bank_mode.value_or(0u) != 0u;
   const bool capture_high_bank_address =
-      moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
+      moi_access_requires_high_bank_address_capture(candidate, arch);
   if (spill_backed_operand_recovery &&
       (spill == nullptr ||
        !sampled_access_supports_spill_backed_operand_recovery(options, candidate, arch))) {
@@ -2672,7 +2672,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   // the older self-contained transition sequence.
   if (select_guest_vgpr_bank && !capture_high_bank_address)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), 0u, arch));
+        static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), 0u, arch));
   std::optional<uint16_t> preserved_lds_byte_offset_vgpr;
   std::optional<uint16_t> spilled_lds_byte_offset_vgpr;
   const uint16_t base_scratch_count = static_cast<uint16_t>(
@@ -2838,7 +2838,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   }
   if (select_guest_vgpr_bank && !capture_high_bank_address)
     words.push_back(*instrumentation::build_s_set_vgpr_msb_transition(
-        0u, static_cast<uint8_t>(*candidate.gfx1250_vgpr_msb_mode), arch));
+        0u, static_cast<uint8_t>(*candidate.incoming_vgpr_bank_mode), arch));
   return words;
 }
 
