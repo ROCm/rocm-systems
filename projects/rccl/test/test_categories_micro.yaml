@@ -16,6 +16,12 @@ test_categories:
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RmaProxyProgressTest.*"
+      # gtest's '*' does not match across the literal '.', so every devcomm suite needs its own line.
+      - "DevcommMicrotest.*"
+      - "DevcommReqsFilterV22907Microtest.*"
+      - "PropertiesFilter22902Test.*"
+      - "ReqsFilterV22902Microtest.*"
+      - "CopyOldToNewV22902.*"
     exclude_windows:
       - "*"
     labels:
