@@ -11,7 +11,6 @@ set(common_sources
     logging.cpp
     md5sum.cpp
     regex.cpp
-    sha256.cpp
     simple_timer.cpp
     static_object.cpp
     static_tl_object.cpp
@@ -47,6 +46,20 @@ add_library(rocprofiler-sdk-common-library STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-common-library ALIAS
             rocprofiler-sdk-common-library)
 
+# SHA-256 comes from shared/sha256; sha256.hpp here is a shim over it.
+set(ROCM_SHA256_DIR
+    "${PROJECT_SOURCE_DIR}/../../shared/sha256"
+    CACHE PATH "Path to the shared SHA-256 component")
+if(NOT TARGET rocm-sha256)
+    if(NOT EXISTS "${ROCM_SHA256_DIR}/CMakeLists.txt")
+        message(
+            FATAL_ERROR
+                "Shared SHA-256 not found at ${ROCM_SHA256_DIR}. Set ROCM_SHA256_DIR "
+                "when building rocprofiler-sdk outside the rocm-systems tree.")
+    endif()
+    add_subdirectory(${ROCM_SHA256_DIR} ${CMAKE_CURRENT_BINARY_DIR}/rocm-sha256)
+endif()
+
 add_subdirectory(container)
 add_subdirectory(memory)
 
@@ -56,7 +69,8 @@ target_include_directories(rocprofiler-sdk-common-library
 
 target_link_libraries(
     rocprofiler-sdk-common-library
-    PUBLIC $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
+    PUBLIC rocm-sha256
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-headers>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-build-flags>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-threading>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-sanitizer>

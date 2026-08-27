@@ -104,6 +104,7 @@ jobs:
         sparse-checkout: |
           .github/actions/rocprofiler-sdk-util
           projects/rocprofiler-sdk
+          shared/sha256
           projects/clr
           projects/hip
           .github/workflows/rocprofiler-sdk-codeql.yml

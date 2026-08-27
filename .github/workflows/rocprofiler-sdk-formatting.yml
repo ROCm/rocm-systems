@@ -33,7 +33,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -73,7 +75,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -120,7 +124,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -159,7 +165,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Extract branch name
       shell: bash
@@ -186,7 +194,9 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          shared/sha256
 
     - name: Set up Python
       uses: actions/setup-python@v5
