@@ -6,6 +6,7 @@
 *.profraw
 *.profdata
 /coverage/
+compile_commands.json
 build*/
 /build*
 install*/
