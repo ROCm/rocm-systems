@@ -14,7 +14,9 @@
 
 #include <gtest/gtest.h>
 
+#include <initializer_list>
 #include <memory>
+#include <vector>
 
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
 // a single-rank, single-LSA-team comm with GIN and RMA proxy disabled.
@@ -191,4 +193,82 @@ TEST(DevrWindowPredicates, HasSysmemSegment_HasSysmemSegment_ReturnsTrue) {
   memory.globalHasSysmemSegment = true;
   win.memory = &memory;
   EXPECT_TRUE(ncclDevrWindowHasSysmemSegment(&win));
+}
+
+
+// ---------------------------------------------------------------------------
+// computeLsaSize returns the LSA team size by one of three paths:
+//   cached    bigSize != 0                             -> devrState.lsaSize
+//   clique    p2pCrossClique && nvlDomainSize == nRanks -> nRanks
+//   node gcd  otherwise, gcd over runs of equal rankToNode entries
+//
+// File-static, so callable only because this TU #includes dev_runtime.cc. The
+// param stub returns defaults, so ncclParamLsaTeamSize() is 0 and gcd(0, n) == n.
+
+class ComputeLsaSizeTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  std::vector<int> rankToNode;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+  }
+
+  // nodes[r] is the node index of rank r; nRanks follows the list length.
+  void SetTopology(std::initializer_list<int> nodes) {
+    rankToNode.assign(nodes);
+    comm->nRanks = static_cast<int>(rankToNode.size());
+    comm->rankToNode = rankToNode.data();
+  }
+};
+
+// Branch: cached early return. lsaSize differs from nRanks so a recomputing
+// path cannot pass; rankToNode is left null so a regression faults.
+TEST_F(ComputeLsaSizeTest, Cached_ReturnsStoredLsaSize) {
+  comm->nRanks = 8;
+  comm->devrState.bigSize = 1 << 20;
+  comm->devrState.lsaSize = 4;
+  EXPECT_EQ(computeLsaSize(comm), 4);
+}
+
+// Branch: both && arms hold. The topology would give 2, so this pins the override.
+TEST_F(ComputeLsaSizeTest, CrossCliqueFullNvlDomain_ReturnsNRanks) {
+  SetTopology({0, 0, 1, 1});
+  comm->p2pCrossClique = true;
+  comm->nvlDomainSize = comm->nRanks;
+  EXPECT_EQ(computeLsaSize(comm), 4);
+}
+
+// Branch: second && arm fails, falling through to the gcd path.
+TEST_F(ComputeLsaSizeTest, CrossCliquePartialNvlDomain_FallsBackToNodeGcd) {
+  SetTopology({0, 0, 1, 1});
+  comm->p2pCrossClique = true;
+  comm->nvlDomainSize = 2;
+  EXPECT_EQ(computeLsaSize(comm), 2);
+}
+
+// Branch: one node, so the run reaches nRanks and gcd(0, 4) == 4.
+TEST_F(ComputeLsaSizeTest, SingleNode_ReturnsNRanks) {
+  SetTopology({0, 0, 0, 0});
+  EXPECT_EQ(computeLsaSize(comm), 4);
+}
+
+// Branch: node index changes mid-loop; two runs of 2 give gcd(2, 2) == 2.
+TEST_F(ComputeLsaSizeTest, TwoEqualNodes_ReturnsRunLength) {
+  SetTopology({0, 0, 1, 1});
+  EXPECT_EQ(computeLsaSize(comm), 2);
+}
+
+// Uneven runs: gcd(2, 1) == 1.
+TEST_F(ComputeLsaSizeTest, UnevenNodes_ReturnsGcdOfRuns) {
+  SetTopology({0, 0, 1});
+  EXPECT_EQ(computeLsaSize(comm), 1);
+}
+
+// Boundary: nRanks == 1 skips the loop; gcd(0, 1) == 1.
+TEST_F(ComputeLsaSizeTest, SingleRank_ReturnsOne) {
+  SetTopology({0});
+  EXPECT_EQ(computeLsaSize(comm), 1);
 }
