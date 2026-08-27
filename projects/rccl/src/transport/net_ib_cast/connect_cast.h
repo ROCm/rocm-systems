@@ -105,10 +105,14 @@ struct ncclIbConnectionMetadata {
   int sl;
   int isP2p;
   bool isRMA;
-  // Trailing so mixed nSegments<=1 CAST stays compatible with older CAST
-  // binaries that stop at isRMA. nSegments>1 requires this bit on both peers.
-  uint32_t caps;
 };
+static_assert(offsetof(struct ncclIbConnectionMetadata, ndevs) ==
+                offsetof(struct ncclIbConnectionMetadata, addr) +
+                  sizeof(((struct ncclIbConnectionMetadata*)0)->addr),
+              "CAST connection metadata must preserve legacy field offsets");
+static_assert(sizeof(struct ncclIbConnectionMetadata) ==
+                offsetof(struct ncclIbConnectionMetadata, isRMA) + 8,
+              "CAST connection metadata must preserve legacy trailing padding");
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out);
