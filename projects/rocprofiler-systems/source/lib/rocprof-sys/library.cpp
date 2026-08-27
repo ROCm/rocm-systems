@@ -452,13 +452,11 @@ template <typename Clock>
 std::unique_ptr<rocprofsys::control::triggers::time_window<Clock>>
 make_time_window(
     std::shared_ptr<rocprofsys::control::session> session, Clock& clock,
-    rocprofsys::control::clock_duration delay,
-    rocprofsys::control::clock_duration duration,
-    rocprofsys::control::scope          event_scope = rocprofsys::control::scope::global)
+    rocprofsys::control::triggers::time_window_specs specs,
+    rocprofsys::control::scope event_scope = rocprofsys::control::scope::global)
 {
     using window_t = rocprofsys::control::triggers::time_window<Clock>;
-    return std::make_unique<window_t>(std::move(session), clock, delay, duration,
-                                      event_scope);
+    return std::make_unique<window_t>(std::move(session), clock, specs, event_scope);
 }
 
 rocprofsys::control::clocks::steady               g_trace_window_clock;
@@ -788,21 +786,22 @@ rocprofsys_init_tooling_hidden(void)
                 {
                     g_posix_window_clock.emplace(CLOCK_PROCESS_CPUTIME_ID);
                     g_posix_trace_window = make_time_window(
-                        get_control_session(), *g_posix_window_clock, _delay, _dur);
+                        get_control_session(), *g_posix_window_clock, { _delay, _dur });
                 }
                 else
                 {
-                    g_trace_window = make_time_window(get_control_session(),
-                                                      g_trace_window_clock, _delay, _dur);
+                    g_trace_window = make_time_window(
+                        get_control_session(), g_trace_window_clock, { _delay, _dur });
                 }
             }
 
             if(const auto _samp_dur = config::get_sampling_duration(); _samp_dur > 0.0)
             {
                 g_sampling_dur_window = make_time_window(
-                    get_control_session(), g_sampling_dur_window_clock, {},
-                    std::chrono::nanoseconds{
-                        static_cast<std::int64_t>(_samp_dur * units::sec) },
+                    get_control_session(), g_sampling_dur_window_clock,
+                    { {},
+                      std::chrono::nanoseconds{
+                          static_cast<std::int64_t>(_samp_dur * units::sec) } },
                     control::scope::sampling);
             }
 
