@@ -200,6 +200,35 @@ PASSTHROUGH_ONLY: Set[str] = {
 }
 
 # ---------------------------------------------------------------------------
+# Windows exports
+#
+# amdhip.def.in is the export list the Windows amdhip64 DLL is linked with, so
+# an API missing from it has no import library entry and hrr-playback.exe fails
+# to link against it — even though the HIP headers declare it. Read the list
+# rather than hard-coding the gaps, so the guard disappears on its own once clr
+# starts exporting the symbol.
+# ---------------------------------------------------------------------------
+
+_AMDHIP_DEF_IN = Path(__file__).resolve().parent.parent / "amdhip.def.in"
+
+
+def _windows_exported_symbols() -> Set[str]:
+    if not _AMDHIP_DEF_IN.is_file():
+        sys.exit(f"ERROR: Windows export list not found at {_AMDHIP_DEF_IN}. "
+                 f"The playback shims need it to know which APIs cannot be "
+                 f"called on Windows.")
+    out: Set[str] = set()
+    for line in _AMDHIP_DEF_IN.read_text().splitlines():
+        sym = line.strip()
+        if sym and sym != "EXPORTS" and not sym.startswith(";"):
+            out.add(sym)
+    return out
+
+
+WINDOWS_EXPORTED_APIS: Set[str] = _windows_exported_symbols()
+
+
+# ---------------------------------------------------------------------------
 # Playback manual APIs — implemented by hand in hip_playback.cpp
 # ---------------------------------------------------------------------------
 
@@ -3205,7 +3234,36 @@ def generate_playback_shim(entry: ApiEntry) -> str:
 
     lines.append(f"  return {ret_expr};")
     lines.append("}")
+
+    if entry.name not in WINDOWS_EXPORTED_APIS:
+        return _win_unexported_shim(entry.name, lines)
+
     return "\n".join(lines) + "\n"
+
+
+def _win_unexported_shim(api: str, lines: List[str]) -> str:
+    """Wrap a generated playback body so Windows gets a warning instead of a call.
+
+    Same contract as NOOP_PLAYBACK_APIS: warn once per process and report
+    success, so one unexportable API does not abort an otherwise fine replay.
+    """
+    return "\n".join([
+        lines[0],                       # signature and opening brace
+        "#ifdef _WIN32",
+        "  (void)ctx; (void)payload;",
+        "  static bool warned = false;",
+        "  if (!warned) {",
+        "    warned = true;",
+        f"    fprintf(stderr, \"[HRR] {api} is not exported by amdhip64 on \"",
+        "            \"Windows; skipping it during replay, results may differ \"",
+        "            \"from capture.\\n\");",
+        "  }",
+        "  return hipSuccess;",
+        "#else",
+        *lines[1:-1],                   # the real call
+        "#endif",
+        lines[-1],                      # closing brace
+    ]) + "\n"
 
 
 def generate_dispatch_table(entries: List[ApiEntry]) -> str:

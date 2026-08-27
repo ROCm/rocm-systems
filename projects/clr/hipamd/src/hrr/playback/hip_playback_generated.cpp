@@ -5177,6 +5177,17 @@ extern hipError_t playback_hipLaunchKernelExC(PlaybackContext& ctx, const uint8_
 extern hipError_t playback_hipDrvLaunchKernelEx(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemGetHandleForAddressRange(PlaybackContext& ctx, const uint8_t* payload) {
+#ifdef _WIN32
+  (void)ctx; (void)payload;
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    fprintf(stderr, "[HRR] hipMemGetHandleForAddressRange is not exported by amdhip64 on "
+            "Windows; skipping it during replay, results may differ "
+            "from capture.\n");
+  }
+  return hipSuccess;
+#else
   const auto* a = reinterpret_cast<const hrr_args_hipMemGetHandleForAddressRange*>(payload);
   alignas(8) unsigned char _outbuf_handle[8]{};
   hipError_t _r = (hipError_t)hipMemGetHandleForAddressRange((void*)_outbuf_handle, (hipDeviceptr_t)ctx.translate_ptr(a->dptr), (size_t)a->size, (hipMemRangeHandleType)a->handleType, (unsigned long long)a->flags);
@@ -5185,6 +5196,7 @@ static hipError_t playback_hipMemGetHandleForAddressRange(PlaybackContext& ctx, 
     return hipSuccess;
   }
   return _r;
+#endif
 }
 
 static hipError_t playback_hipModuleGetFunctionCount(PlaybackContext& ctx, const uint8_t* payload) {
