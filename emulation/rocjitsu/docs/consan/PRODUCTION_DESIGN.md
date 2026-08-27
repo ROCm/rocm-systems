@@ -6037,6 +6037,43 @@ for nominal line-count reductions.
   and the 26-case physical-gfx950 cross-engine smoke pass. E2E validation
   remains outside this deletion work.
 
+### Slice 5CX: share Record/Replay event resource planning
+
+- **One synchronization-event handoff:** `MoiPlannedRecordEvent` owns the
+  scratch window, VGPR/SGPR preservation, private epoch layout, and private
+  owner load shared by Record/Replay atomics, barriers, and fences. Their local
+  plan types extend it only with event-specific candidate, address, and routing
+  facts.
+- **One planning transaction:** `plan_moi_record_event` performs owner-local
+  transient and persistent assignment, private identity planning, and spill
+  construction once. Fence planning supplies the active post-mutation private
+  segment size without moving descriptor lookup or fence sequencing into the
+  common component.
+- **One descriptor rule:**
+  `note_moi_record_event_private_requirements` derives the kernel private
+  segment requirement from the shared event plan. Atomics, barriers, and
+  fences no longer maintain independent maximum-offset loops.
+- **Explicit remaining seam:** Native event emitters still consume
+  `ConSanOptions`. `bind_moi_record_event_options` is the sole typed-plan to
+  compatibility-options projection for these events and is the deletion point
+  for the later narrow-emitter-input cutover.
+- **Sharing and target boundary:** The common plan and algorithms contain no
+  target discriminator or instruction encoding. Event-specific address
+  qualification, barrier routing, fence sequence identity, and native builders
+  remain outside the resource component.
+- **Test policy:** The cutover changes no behavior and adds no independently
+  configurable mechanism. Existing focused host tests directly cover shared
+  owners, private epoch/owner state, fixed and dynamic spills, descriptor
+  growth, dense barriers, and fence publication across CDNA3/4/5 and RDNA4;
+  the full checked-in device matrix remains the execution contract.
+- **Accounting:** Implementation files add 195 and delete 309 physical lines,
+  a net deletion of 114. No fallback, alternate plan representation, target
+  branch, test, or public option is added.
+- **Checked-in gate:** The complete build, all 1,530 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

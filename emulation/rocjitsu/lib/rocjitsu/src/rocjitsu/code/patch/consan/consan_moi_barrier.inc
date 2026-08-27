@@ -2441,13 +2441,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     result.errors.emplace_back("ConSan MOI barrier record patch found no .text section");
     return;
   }
-  struct PlannedBarrierRecord {
+  struct PlannedBarrierRecord : MoiPlannedRecordEvent {
     BarrierRecordCandidate candidate;
-    ResolvedMoiScratchPlan resources;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<MoiPrivateRecordOwnerPlan> private_owner;
-    std::optional<MoiPrivateEpochLayout> private_layout;
   };
   std::vector<PlannedBarrierRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
@@ -2502,69 +2497,11 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
       if (!planned_candidate.kernel_descriptor_file_offset)
         continue;
     }
-    ConSanOptions candidate_options = options;
-    candidate_options.scratch_vgpr = resources->base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI barrier record patch found no common transient SGPR assignment");
+    auto record_event = plan_moi_record_event(bytes, result, *resources, options, spill_managers,
+                                              arch, "ConSan MOI barrier record patch");
+    if (!record_event)
       continue;
-    }
-    // The code-object-wide marker can cover disconnected owners that use
-    // different persistent representations. Resolve this barrier's owner
-    // before interpreting the marker as a request for private offsets.
-    if (!apply_moi_persistent_vgpr_assignment(candidate_options,
-                                              resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI barrier record patch found no common persistent assignment");
-      continue;
-    }
-    std::optional<MoiPrivateEpochLayout> private_layout;
-    if (candidate_options.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
-                                                      /*include_owner=*/
-                                                      candidate_options.moi_owner_source ==
-                                                          ConSanMoiOwnerSource::WorkitemId,
-                                                      /*include_workgroup_key=*/false,
-                                                      /*include_record_replay_workgroup=*/true);
-      if (!private_layout)
-        continue;
-      candidate_options.moi_record_replay_workgroup_private_offsets =
-          private_layout->record_replay_workgroup_offsets;
-    }
-    if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
-                                                        resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI barrier record patch found no common entry workgroup assignment");
-      continue;
-    }
-    std::optional<MoiPrivateRecordOwnerPlan> private_owner;
-    if (moi_record_uses_private_owner(candidate_options)) {
-      private_owner =
-          resolve_moi_private_record_owner(bytes, *resources, *private_layout, result.warnings);
-      if (!private_owner)
-        continue;
-    }
-    std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
-      spill = build_moi_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt);
-      if (!spill)
-        continue;
-    }
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout ? std::optional<uint32_t>(private_layout->ephemeral_base) : std::nullopt,
-          spill ? &*spill : nullptr);
-      if (!scalar_spill)
-        continue;
-    }
-    selected_candidates.push_back({std::move(planned_candidate), *resources, std::move(spill),
-                                   std::move(scalar_spill), private_owner, private_layout});
+    selected_candidates.push_back({std::move(*record_event), std::move(planned_candidate)});
   }
 
   if (selected_candidates.empty()) {
@@ -2706,21 +2643,8 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     const uint64_t cave_text_offset = placement_planner.appended_end();
     uint64_t return_text_offset = site.text_offset + site.size;
     ConSanOptions candidate_options = options;
-    candidate_options.scratch_vgpr = planned.resources.base;
-    if (planned.private_layout) {
-      candidate_options.moi_record_replay_workgroup_private_offsets =
-          planned.private_layout->record_replay_workgroup_offsets;
-    }
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI barrier record patch lost its transient SGPR assignment");
-      return;
-    }
-    if (!apply_record_replay_entry_workgroup_assignment(
-            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI barrier record patch lost its entry workgroup assignment");
+    if (!bind_moi_record_event_options(candidate_options, planned)) {
+      result.errors.emplace_back("ConSan MOI barrier record patch lost a planned assignment");
       return;
     }
     const bool branch_only_scalar_spill = moi_transient_sgpr_assignment_is_branch_only(
@@ -3002,19 +2926,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     // reachability rejection from changing an uninstrumented owner.
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
-    if (planned.spill)
-      note_spill_descriptor_requirements(private_requirements, planned.resources, *planned.spill);
-    const uint32_t required_private_bytes =
-        std::max(planned.scalar_spill ? planned.scalar_spill->total_private_bytes : 0u,
-                 planned.private_layout ? planned.private_layout->ephemeral_base : 0u);
-    if (required_private_bytes != 0u) {
-      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, required_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, required_private_bytes);
-      }
-    }
+    note_moi_record_event_private_requirements(private_requirements, planned);
     patches.push_back(info);
   }
 

@@ -474,6 +474,14 @@ state remains local. The old representations were deleted in the same slice,
 which is net-negative and gives subsequent resource/emission work one typed
 boundary rather than another wrapper around `ConSanOptions`.
 
+The next cutover gives Record/Replay atomic, barrier, and fence events one
+shared resource transaction and one planned-event representation. Their three
+copies of owner-local assignment, private epoch/owner planning, spill
+construction, mutable-options binding, and private descriptor accounting are
+deleted. Event admission, address semantics, routing, and emission remain
+separate. The surviving mutable-options binding is named as the next emitter
+compatibility seam rather than duplicated invisibly across each event path.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

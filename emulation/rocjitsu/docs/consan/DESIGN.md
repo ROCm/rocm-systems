@@ -653,6 +653,23 @@ artificial getter tests. Their purpose is to give subsequent resource and
 emission cutovers one shared state boundary while deleting three independently
 evolving field lists.
 
+Record/Replay synchronization events now have the corresponding shared
+resource boundary. `MoiPlannedRecordEvent` is the common
+placement-to-emission state for an atomic, barrier, or fence record: resolved
+scratch, VGPR and SGPR preservation, and optional private epoch/owner state.
+`plan_moi_record_event` performs that resource transaction once after the
+event-specific planner has chosen its site and scratch plan. Atomic address
+classification, barrier routing, fence-sequence identity, and native emission
+remain in their semantic components. Descriptor private-memory requirements
+are accumulated from the common event plan, so the three event kinds cannot
+quietly diverge on spill or persistent-state sizing.
+
+The native event emitters still accept the mutable compatibility options.
+`bind_moi_record_event_options` is the one explicit boundary that projects a
+typed event plan into that old interface. It is not a second resource plan:
+its eventual deletion is coupled to replacing the emitter parameters with a
+narrow lowering contract.
+
 ## Invariants and failure model
 
 The following rules hold across every component:

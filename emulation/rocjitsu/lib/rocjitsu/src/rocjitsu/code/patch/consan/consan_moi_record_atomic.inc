@@ -75,14 +75,9 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     result.errors.emplace_back("ConSan MOI atomic record patch found no .text section");
     return;
   }
-  struct PlannedAtomicRecord {
+  struct PlannedAtomicRecord : MoiPlannedRecordEvent {
     AtomicRecordCandidate candidate;
-    ResolvedMoiScratchPlan resources;
     ConSanMoiAtomicAddressPlan address_plan;
-    std::optional<VgprSpillSequence> spill;
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    std::optional<MoiPrivateRecordOwnerPlan> private_owner;
-    std::optional<MoiPrivateEpochLayout> private_layout;
   };
   std::vector<PlannedAtomicRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
@@ -159,70 +154,12 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
       if (!planned_candidate.kernel_descriptor_file_offset)
         continue;
     }
-    ConSanOptions candidate_options = options;
-    candidate_options.scratch_vgpr = resources->base;
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI atomic record patch found no common transient SGPR assignment");
+    auto record_event = plan_moi_record_event(bytes, result, *resources, options, spill_managers,
+                                              arch, "ConSan MOI atomic record patch");
+    if (!record_event)
       continue;
-    }
-    if (!apply_moi_persistent_vgpr_assignment(candidate_options,
-                                              resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI atomic record patch found no common persistent assignment");
-      continue;
-    }
-    std::optional<MoiPrivateEpochLayout> private_layout;
-    if (candidate_options.automatic_moi_private_epoch) {
-      private_layout = build_moi_private_epoch_layout(result, *resources, arch, result.warnings,
-                                                      /*include_owner=*/
-                                                      candidate_options.moi_owner_source ==
-                                                          ConSanMoiOwnerSource::WorkitemId,
-                                                      /*include_workgroup_key=*/false,
-                                                      /*include_record_replay_workgroup=*/true);
-      if (!private_layout)
-        continue;
-      candidate_options.moi_record_replay_workgroup_private_offsets =
-          private_layout->record_replay_workgroup_offsets;
-    }
-    if (!apply_record_replay_entry_workgroup_assignment(candidate_options,
-                                                        resources->owner_descriptor_file_offsets)) {
-      result.warnings.emplace_back(
-          "ConSan MOI atomic record patch found no common entry workgroup assignment");
-      continue;
-    }
-    std::optional<MoiPrivateRecordOwnerPlan> private_owner;
-    if (moi_record_uses_private_owner(candidate_options)) {
-      private_owner =
-          resolve_moi_private_record_owner(bytes, *resources, *private_layout, result.warnings);
-      if (!private_owner)
-        continue;
-    }
-    std::optional<uint32_t> private_layout_base;
-    // Keep this as a separate assignment: GCC 13 otherwise diagnoses the
-    // equivalent conditional optional construction as maybe-uninitialized.
-    if (private_layout)
-      private_layout_base = private_layout->ephemeral_base;
-    std::optional<VgprSpillSequence> spill;
-    if (resources->source == ConSanRegisterAllocationSource::SpillRequired ||
-        moi_scalar_spill_requires_dynamic_vgpr_frame(result, *resources, candidate_options)) {
-      spill = build_moi_spill_sequence(result, *resources, candidate_options, spill_managers, arch,
-                                       result.warnings, private_layout_base);
-      if (!spill)
-        continue;
-    }
-    std::optional<InlineSgprSpillSequence> scalar_spill;
-    if (candidate_options.automatic_moi_record_replay_sgpr_spill) {
-      scalar_spill = build_inline_sgpr_spill_sequence(
-          result, *resources, candidate_options, spill_managers, arch, result.warnings,
-          private_layout_base, spill ? &*spill : nullptr);
-      if (!scalar_spill)
-        continue;
-    }
-    selected_candidates.push_back({std::move(planned_candidate), *resources, address_plan,
-                                   std::move(spill), std::move(scalar_spill), private_owner,
-                                   private_layout});
+    selected_candidates.push_back(
+        {std::move(*record_event), std::move(planned_candidate), address_plan});
   }
   // Do not prune a release based on module-local absence of an acquire. Real
   // applications can split producers and consumers across code objects, and
@@ -232,35 +169,10 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     return;
   }
   for (const PlannedAtomicRecord &planned : selected_candidates) {
-    if (planned.spill) {
-      note_spill_descriptor_requirements(private_requirements, planned.resources, *planned.spill);
-    }
-    if (planned.scalar_spill) {
-      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
-        auto [it, inserted] = private_requirements.emplace(
-            descriptor_offset, planned.scalar_spill->total_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, planned.scalar_spill->total_private_bytes);
-      }
-    }
-    if (planned.private_layout) {
-      for (uint64_t descriptor_offset : planned.resources.owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, planned.private_layout->ephemeral_base);
-        if (!inserted)
-          it->second = std::max(it->second, planned.private_layout->ephemeral_base);
-      }
-    }
+    note_moi_record_event_private_requirements(private_requirements, planned);
     note_descriptor_requirements(descriptor_requirements, planned.resources);
     ConSanOptions candidate_options = options;
-    if (planned.private_layout) {
-      candidate_options.moi_record_replay_workgroup_private_offsets =
-          planned.private_layout->record_replay_workgroup_offsets;
-    }
-    if (apply_moi_transient_sgpr_assignment(candidate_options,
-                                            planned.resources.owner_descriptor_file_offsets) &&
-        apply_record_replay_entry_workgroup_assignment(
-            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
+    if (bind_moi_record_event_options(candidate_options, planned)) {
       note_moi_sgpr_requirements(scalar_requirements, planned.resources, candidate_options, arch);
     }
   }
@@ -298,21 +210,8 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanO
     const uint64_t cave_text_offset = placement_planner.appended_end();
     const uint64_t return_text_offset = physical_anchor_offset + site.size;
     ConSanOptions candidate_options = options;
-    candidate_options.scratch_vgpr = planned.resources.base;
-    if (planned.private_layout) {
-      candidate_options.moi_record_replay_workgroup_private_offsets =
-          planned.private_layout->record_replay_workgroup_offsets;
-    }
-    if (!apply_moi_transient_sgpr_assignment(candidate_options,
-                                             planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI atomic record patch lost its transient SGPR assignment");
-      return;
-    }
-    if (!apply_record_replay_entry_workgroup_assignment(
-            candidate_options, planned.resources.owner_descriptor_file_offsets)) {
-      result.errors.emplace_back(
-          "ConSan MOI atomic record patch lost its entry workgroup assignment");
+    if (!bind_moi_record_event_options(candidate_options, planned)) {
+      result.errors.emplace_back("ConSan MOI atomic record patch lost a planned assignment");
       return;
     }
     uint32_t guest_instruction_offset = 0;
