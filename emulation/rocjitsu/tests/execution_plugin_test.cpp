@@ -3052,6 +3052,38 @@ TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
   EXPECT_EQ(violation.lane, 0);
 }
 
+TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "stdx SIMD is unavailable";
+  } else {
+    constexpr uint32_t M = 16, N = 16, K = 4, B = 1;
+    constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
+    if (width <= 1 || N % width != 0)
+      GTEST_SKIP() << "f32 MFMA shape is not divisible by the native SIMD width";
+
+    ForceScalarOverride force_simd(false);
+    PluginFixture f(/*num_wf_slots=*/1);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *cu = f.cu();
+    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wf, nullptr);
+    ASSERT_EQ(wf->wf_size(), 64u);
+
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+    for (uint32_t reg = 0; reg < 64; ++reg)
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
+
+    amdgpu::exec_f32_mfma_f32_spec<M, N, K, B>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
+                                               amdgpu::ACC_FROM_VGPR,
+                                               /*cbsz=*/0, /*abid=*/0, /*blgp=*/0);
+
+    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                         {S0, S1, ACC + 0, ACC + 1, ACC + 2, ACC + 3}, ~uint64_t{0});
+  }
+}
+
 TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "stdx SIMD is unavailable";
