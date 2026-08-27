@@ -4,6 +4,21 @@
  */
 
 #include "backend/host.h"
+
+#include <hip/hip_runtime_api.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <syslog.h>
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <memory>
+#include <new>
+#include <stdexcept>
+#include <system_error>
+#include <utility>
+#include <variant>
+
 #include "async.h"
 #include "backend.h"
 #include "buffer.h"
@@ -16,21 +31,6 @@
 #include "stream.h"
 #include "sys.h"
 #include "util.h"
-
-#include <algorithm>
-#include <cerrno>
-#include <cstring>
-#include <hip/hip_runtime_api.h>
-#include <hip/driver_types.h>
-#include <linux/io_uring.h>
-#include <memory>
-#include <new>
-#include <stdexcept>
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <syslog.h>
-#include <system_error>
-#include <unistd.h>
 
 using namespace hipFile;
 
@@ -121,47 +121,84 @@ paramsValid(const AsyncOpHost &op)
                        std::get<const hoff_t>(op.buffer_offset));
 }
 
-size_t
-do_copy(IoType type, IFile &file, IBuffer &buffer, size_t size, hoff_t file_offset, hoff_t buffer_offset)
-{
-    int   fd       = file.bufferedFd();
-    auto *host_buf = static_cast<uint8_t *>(buffer.getBuffer()) + buffer_offset;
+template <typename CopyFn> struct CopyOp : CopyFn {
+    CopyOp(IFile &file, IBuffer &buffer, size_t size, hoff_t file_offset, hoff_t buffer_offset);
+    size_t run();
 
+private:
+    using host_buff_t = CopyFn::host_buff_t;
+
+    int         fd;
+    host_buff_t host_buf;
+    size_t      size;
+    size_t      offset;
+};
+
+struct ReadFileFn {
+    static constexpr IoType op_type = IoType::Read;
+
+    using host_buff_t = uint8_t *;
+    Sys *system       = Context<Sys>::get();
+
+    ssize_t run(int fd, host_buff_t host_buf, size_t size, size_t offset)
+    {
+        return system->pread(fd, host_buf, size, offset);
+    }
+
+    void sync(int /*fd: ignored*/)
+    {
+    }
+};
+
+struct WriteFileFn {
+    static constexpr IoType op_type = IoType::Write;
+
+    using host_buff_t = const uint8_t *;
+    Sys *system       = Context<Sys>::get();
+
+    ssize_t run(int fd, host_buff_t host_buf, size_t size, size_t offset)
+    {
+        return system->pwrite(fd, const_cast<uint8_t *>(host_buf), size, offset);
+    }
+    void sync(int fd)
+    {
+        system->fdatasync(fd);
+    }
+};
+
+template <typename CopyFn>
+CopyOp<CopyFn>::CopyOp(IFile &file, IBuffer &buffer, size_t op_size, hoff_t file_offset, hoff_t buffer_offset)
+    : CopyFn{}, fd{file.bufferedFd()}, host_buf{static_cast<host_buff_t>(buffer.getBuffer()) + buffer_offset},
+      size{op_size}, offset{static_cast<size_t>(file_offset)}
+{
+}
+
+template <typename CopyFn>
+size_t
+CopyOp<CopyFn>::run()
+{
     size_t  total_io_bytes = 0;
     ssize_t io_bytes       = 0;
     do {
-        auto count  = size - total_io_bytes;
-        auto offset = file_offset + total_io_bytes;
         try {
-            switch (type) {
-                case IoType::Read:
-                    io_bytes = Context<Sys>::get()->pread(fd, host_buf, count, offset);
-                    break;
-                case IoType::Write:
-                    io_bytes = Context<Sys>::get()->pwrite(fd, host_buf, count, offset);
-                    break;
-                default:
-                    throw std::runtime_error("Invalid IO type");
-            }
+            io_bytes = CopyFn::run(fd, host_buf, size - total_io_bytes, offset);
+            total_io_bytes += io_bytes;
+            host_buf += io_bytes;
         }
         catch (const std::system_error &e) {
             if (e.code().value() == EINTR) {
                 continue;
             }
-            Context<StatsCollection>::get()->error(type, StatsBackend::Host, size);
+            Context<StatsCollection>::get()->error(CopyFn::op_type, StatsBackend::Host, size);
             throw;
         }
         catch (...) {
-            Context<StatsCollection>::get()->error(type, StatsBackend::Host, size);
+            Context<StatsCollection>::get()->error(CopyFn::op_type, StatsBackend::Host, size);
             throw;
         }
-
-        total_io_bytes += io_bytes;
     } while (io_bytes > 0 && total_io_bytes < size);
 
-    if (type == IoType::Write) {
-        Context<Sys>::get()->fdatasync(file.bufferedFd());
-    }
+    CopyFn::sync(fd);
 
     return total_io_bytes;
 }
@@ -184,7 +221,10 @@ async_io_host_do(void *userargs)
         return;
     }
 
-    size_t bytes_transferred = do_copy(op.io_type, *op.file, *op.buffer, size, file_offset, buffer_offset);
+    size_t bytes_transferred =
+        op.io_type == IoType::Read
+            ? CopyOp<ReadFileFn>(*op.file, *op.buffer, size, file_offset, buffer_offset).run()
+            : CopyOp<WriteFileFn>(*op.file, *op.buffer, size, file_offset, buffer_offset).run();
 
     op.bytes_transferred_internal = static_cast<ssize_t>(bytes_transferred);
 }
@@ -207,7 +247,10 @@ Host::_io_impl(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer
         throw std::invalid_argument("The selected file or buffer region is invalid");
     }
 
-    size_t total_io_bytes = do_copy(type, *file, *buffer, size, file_offset, buffer_offset);
+    size_t total_io_bytes =
+        type == IoType::Read
+            ? CopyOp<ReadFileFn>(*file, *buffer, size, file_offset, buffer_offset).run()
+            : CopyOp<WriteFileFn>(*file, *buffer, size, file_offset, buffer_offset).run();
 
     ioTracker.complete(total_io_bytes);
 
