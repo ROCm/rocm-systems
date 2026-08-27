@@ -218,6 +218,53 @@ TEST_F(DevrFinalizeDrainTest, FinalizeDrainsLeftoverMemory) {
 
 
 // ---------------------------------------------------------------------------
+// symBindTeamMemory binds memory into a team's multicast handle, guarded by
+// `comm->nvlsSupport && tm->mcBasePtr != nullptr`. The body is behind
+// `#if CUDART_VERSION >= 12010`, which no HIP build defines, so on this target
+// the guard wraps nothing and the function always returns ncclSuccess. That
+// leaves the two && arms as the only reachable branches.
+
+class SymBindTeamMemoryTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+  // ncclDevrTeam ends in a flexible array member, so it cannot be held by
+  // value here; back it with a zeroed buffer instead.
+  std::vector<unsigned char> teamStorage;
+  ncclDevrTeam* team = nullptr;
+  struct ncclDevrMemory mem{};
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    teamStorage.assign(sizeof(ncclDevrTeam), 0);
+    team = reinterpret_cast<ncclDevrTeam*>(teamStorage.data());
+  }
+};
+
+// Branch: nvlsSupport == 0 short circuits the mcBasePtr check.
+TEST_F(SymBindTeamMemoryTest, NvlsUnsupported_ReturnsSuccess) {
+  comm->nvlsSupport = 0;
+  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
+  EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess);
+}
+
+// Branch: NVLS is available but the team has no multicast mapping.
+TEST_F(SymBindTeamMemoryTest, NoMulticastBase_ReturnsSuccess) {
+  comm->nvlsSupport = 1;
+  team->mcBasePtr = nullptr;
+  EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess);
+}
+
+// Branch: both arms hold, entering the guarded block.
+TEST_F(SymBindTeamMemoryTest, NvlsWithMulticastBase_ReturnsSuccess) {
+  comm->nvlsSupport = 1;
+  team->mcBasePtr = reinterpret_cast<void*>(0x1000);
+  EXPECT_EQ(symBindTeamMemory(comm, team, &mem), ncclSuccess);
+}
+
+
+// ---------------------------------------------------------------------------
 // symMemoryObtain / symMemoryDestroy.
 //
 // Build the smallest ncclComm/ncclDevrState that symMemoryObtain will accept:
