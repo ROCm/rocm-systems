@@ -32,10 +32,36 @@
 
 #include "fakes/comm_fakes.h"    // controllable ncclCommSetAsyncError seam
 #include "fakes/nccl_fakes.h"    // g_loadParam, used by param_redirect.h
+#include "ScopedHook.h"          // RAII install/restore for controllable seams
 
 // Route group.cc's NCCL_PARAM sites through g_loadParam instead of the real
 // ncclLoadParam (see param_redirect.h); must precede the unit under test.
 #include "fakes/param_redirect.h"
+
+// Controllable thread-creation seam. group.cc creates the non-blocking init
+// background thread via STDTHREADCREATE_GOTO; when the seam returns true the
+// macro takes its failure branch (goto fail with ncclSystemError) without
+// actually spawning a thread, so the fail: path can be exercised
+// deterministically. Tests install the failing behaviour via ScopedHook so it
+// is restored automatically. checks.h is included first (with its own guard)
+// so the real STDTHREADCREATE_IMPL stays available; only the _GOTO wrapper is
+// replaced, and the redefinition survives into the textual include of group.cc
+// below.
+static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
+#include "checks.h"
+#undef STDTHREADCREATE_GOTO
+#define STDTHREADCREATE_GOTO(var, func, RES, label, ...) \
+  do { \
+    if (g_threadCreateShouldFail && g_threadCreateShouldFail()) { \
+      (RES) = ncclSystemError; \
+      goto label; \
+    } else { \
+      STDTHREADCREATE_IMPL( \
+          var, func, \
+          do { (RES) = ncclSystemError; goto label; } while (0), \
+          __VA_ARGS__); \
+    } \
+  } while (0)
 
 // Pull in the unit under test so its file-static helpers (groupLaunch,
 // asyncJobLaunch, groupLaunchNonBlocking, ...) are visible. Must come after the
@@ -80,7 +106,9 @@ class GroupEndInternalTest : public ::testing::Test {
 
   void TearDown() override {
     // If a non-blocking init spawned a background job, join it and release the
-    // group job before the fixture (and its comm) go away.
+    // group job before the fixture (and its comm) go away. A comm that reached
+    // the fail: path has had its groupJob nulled by group.cc, so this is skipped
+    // for it (and must be -- that groupJob is already deleted).
     if (comm_ && comm_->groupJob) {
       ncclGroupJobComplete(comm_->groupJob);
       comm_->groupJob = nullptr;
@@ -129,6 +157,23 @@ TEST_F(GroupEndInternalTest, NonBlockingGroupWithPendingJob_PublishesGroupJobOnC
   (void)ncclGroupEndInternal();
 
   EXPECT_NE(nullptr, comm_->groupJob);
+}
+
+// If the background thread fails to launch, ncclGroupEndInternal takes the fail:
+// path and destroys the group job. Every comm that adopted that job (an init
+// comm is reachable only via the async-jobs list, never the groupCommHead
+// chains) must have comm->groupJob cleared, otherwise a later ncclCommAbort ->
+// ncclCommEnsureReady -> ncclGroupJobAbort dereferences freed memory.
+TEST_F(GroupEndInternalTest, ThreadCreateFailure_LeavesNoDanglingGroupJob) {
+  EnterGroupWithOnePendingJob(/*blocking=*/0);
+  ScopedHook failThreadCreate(g_threadCreateShouldFail, [] { return true; });
+
+  // The fail: path really ran (system error), and the comm's groupJob -- which
+  // the non-blocking branch published before the thread create -- was cleared
+  // rather than left dangling into the just-deleted group job.
+  EXPECT_EQ(ncclSystemError, ncclGroupEndInternal());
+  EXPECT_EQ(nullptr, comm_->groupJob);
+  EXPECT_EQ(1, failThreadCreate.calls);
 }
 
 // Contrast: a blocking group runs its jobs on the caller and reports the final
