@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #pragma once
+#include <type_traits>
+
 #include "PtrUnion.hpp"
 #include "PrepDataFuncs.hpp"
 #include "rccl/rccl.h"
@@ -97,6 +99,11 @@ namespace RcclUnitTesting
     size_t          recvcounts[MAX_RANKS*MAX_RANKS];
     size_t          rdispls[MAX_RANKS*MAX_RANKS];
   };
+  // Shipped by value over the parent<->child pipe: fixed-size fields only, a
+  // heap pointer would be meaningless in the child.
+  static_assert(std::is_trivially_copyable<OptionalColArgs>::value,
+                "OptionalColArgs is sent by value over the IPC pipe; "
+                "keep it trivially copyable");
 
   // Function pointer for functions that operate on CollectiveArgs
   // e.g. For filling input / computing expected results
