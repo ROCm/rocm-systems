@@ -31,6 +31,7 @@ namespace RcclUnitTesting
     bool useInteractive; // Run in interactive mode                [UT_INTERACTIVE]
     int  timeoutUs;      // Set timeout for child in microseconds  [UT_TIMEOUT_US]
     bool useMultithreading; // Multi-thread single-process ranks   [UT_MULTITHREAD]
+    bool commPool;       // Reuse child processes across configs    [UT_COMM_POOL]
 
     bool isGfx94;        // Detects if architecture is gfx94
     bool isGfx95;        // Detects if architecture is gfx95
@@ -46,6 +47,8 @@ namespace RcclUnitTesting
     std::vector<int>            const& GetNumGpusList();
     std::vector<int>            const& GetIsMultiProcessList();
     std::vector<int>            const& GetGpuPriorityOrder();   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
+    // Detected device count (computed HIP-clean via a forked probe)
+    int GetNumDetectedGpus() const { return numDetectedGpus; }
     void ShowConfig();
 
   protected:
@@ -59,5 +62,16 @@ namespace RcclUnitTesting
     // Helper functions to parse environment variables
     int GetEnvVar(std::string const varname, int defaultValue);
     std::vector<std::string> GetEnvVarsList(std::string const varname);
+
+    // Profiler-safe GPU detection.
+    // rocprofv3 --hip-trace (rocprofiler-sdk) cannot trace HIP across a bare
+    // fork(): a forked child that calls HIP deadlocks. DetectGpuInfo() therefore
+    // runs the HIP probes (count/arch/CPX/priority) in a fork()+execv()'d fresh
+    // process image and reads the results back over a pipe.
+    // RunGpuProbeChildIfRequested() is that image's entrypoint, keyed off the
+    // RCCL_UT_GPU_PROBE_FD environment variable; it is a no-op in every other
+    // process.
+    void DetectGpuInfo(bool* isCpxOut, std::vector<int>* priorityOut);
+    static void RunGpuProbeChildIfRequested();
   };
 }

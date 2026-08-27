@@ -337,6 +337,15 @@ and looking for the ``Name:`` field under each agent, for example
   may cause device bitcode load failures at runtime. Match the suffix to the actual
   configuration of the target system.
 
+.. note::
+
+  Requesting more than one feature variant of the same base architecture (for example
+  ``-DGPU_TARGETS="gfx90a:xnack+;gfx90a:xnack-"``) builds a fat binary containing both
+  variants into the main library. However, the installed device bitcode
+  (``librocshmem_device_gfx90a.bc``) is a single file and can only embed one variant's
+  feature metadata. The chosen variant is reported at configure time, for example:
+  ``Multiple feature variants requested for gfx90a (...); device bitcode will embed gfx90a:xnack+``.
+
 Installation prefix
 ^^^^^^^^^^^^^^^^^^^
 

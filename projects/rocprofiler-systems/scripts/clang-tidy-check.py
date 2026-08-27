@@ -73,6 +73,27 @@ def in_line_ranges(line: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= line <= end for start, end in ranges)
 
 
+def classify_diagnostic(diagnostic: Diagnostic, changed_file: ChangedFile) -> str | None:
+    """Classify `diagnostic` as belonging to `changed_file`, or not at all.
+
+    clang-tidy analyzes the whole translation unit, so scanning one file can
+    also emit diagnostics located in headers it includes (per
+    HeaderFilterRegex in .clang-tidy). Those are a different file's concern
+    and are picked up when that file is scanned instead, so only diagnostics
+    actually located in `changed_file.path` are classified here.
+
+    Returns "in_diff", "preexisting", or None if the diagnostic is in a
+    different file.
+    """
+    if os.path.normpath(diagnostic.file) != os.path.normpath(changed_file.path):
+        return None
+    return (
+        "in_diff"
+        if in_line_ranges(diagnostic.line, changed_file.line_ranges)
+        else "preexisting"
+    )
+
+
 def _git(git_args: list[str], cwd: str | None = None) -> str:
     """Run a git command, returning stdout; exit with git's own error on failure.
 
@@ -223,9 +244,9 @@ def run_clang_tidy(
     return proc.stdout + proc.stderr, True
 
 
-def get_enabled_checks(args: argparse.Namespace, sample_file: str) -> list[str]:
-    """Resolve the effective check list clang-tidy will apply to `sample_file`."""
-    result = _clang_tidy(args, "-list-checks", sample_file)
+def get_enabled_checks(args: argparse.Namespace) -> list[str]:
+    """Resolve the effective check list clang-tidy will apply."""
+    result = _clang_tidy(args, "-list-checks")
 
     if result.returncode != 0:
         detail = result.stderr.strip() or "clang-tidy -list-checks failed"
@@ -291,6 +312,7 @@ def print_rule_diagnostics(
     print(_color(title, "bold"))
     if not rule_diagnostics:
         print(f"  {_color('No issues found.', 'green')}")
+        print()
         return
     for check_name, diagnostics in sorted(
         rule_diagnostics.items(), key=lambda kv: len(kv[1]), reverse=True
@@ -300,6 +322,20 @@ def print_rule_diagnostics(
             location = f"{diagnostic.file}:{diagnostic.line}:{diagnostic.col}"
             color = "red" if diagnostic.severity == "error" else "yellow"
             print(f"        {_color(location, color)}: {diagnostic.message}")
+    print()
+
+
+def print_timed_out_files(paths: list[str], timeout: float | None) -> None:
+    """Report files clang-tidy could not finish, which make the run fail."""
+    if not paths:
+        return
+    print(_color(f"Timed out after {timeout}s ({len(paths)}):", "bold"))
+    for path in paths:
+        print(f"  {_color(path, 'red')}")
+    print(
+        "  These files were not fully checked, so the run is reported as "
+        "failed; raise --timeout to give them more time."
+    )
     print()
 
 
@@ -356,8 +392,7 @@ def main() -> int:
         print("No relevant changes found.")
         return 0
 
-    sample_file = os.path.join(repo_root, changed_files[0].path)
-    enabled_checks = get_enabled_checks(args, sample_file)
+    enabled_checks = get_enabled_checks(args)
 
     if not enabled_checks:
         print("No checks enabled.")
@@ -370,7 +405,7 @@ def main() -> int:
 
     rule_diagnostics: dict[str, list[Diagnostic]] = {}
     preexisting_rule_diagnostics: dict[str, list[Diagnostic]] = {}
-    any_timed_out = False
+    timed_out_files: list[str] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
         futures = {
             pool.submit(
@@ -384,12 +419,16 @@ def main() -> int:
         for future in concurrent.futures.as_completed(futures):
             changed_file = futures[future]
             output, succeeded = future.result()
-            any_timed_out = any_timed_out or not succeeded
+            if not succeeded:
+                timed_out_files.append(changed_file.path)
 
             for diagnostic in parse_diagnostics(output, repo_root):
+                classification = classify_diagnostic(diagnostic, changed_file)
+                if classification is None:
+                    continue
                 target = (
                     rule_diagnostics
-                    if in_line_ranges(diagnostic.line, changed_file.line_ranges)
+                    if classification == "in_diff"
                     else preexisting_rule_diagnostics
                 )
                 for check_name in diagnostic.checks:
@@ -399,8 +438,9 @@ def main() -> int:
     print_rule_diagnostics(
         "Pre-existing issues (outside this diff):", preexisting_rule_diagnostics
     )
+    print_timed_out_files(timed_out_files, args.timeout)
 
-    return 1 if rule_diagnostics or any_timed_out else 0
+    return 1 if rule_diagnostics or timed_out_files else 0
 
 
 if __name__ == "__main__":

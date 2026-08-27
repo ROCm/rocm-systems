@@ -31,15 +31,25 @@ target_include_directories(
     rocprofiler-systems-dl-library
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocprof-sys-user>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../rocprof-sys-causal-api>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../rocprof-sys>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+# SYSTEM so the ROCm prefix is searched after every -I directory. It can contain
+# an older installed rocprofiler-systems whose rocprofiler-systems/categories.h
+# still defines the annotation types that now live in annotation.h, which would
+# otherwise shadow rocprof-sys-common-api and break dl.cpp with redefinitions.
+target_include_directories(
+    rocprofiler-systems-dl-library
+    SYSTEM
     PRIVATE ${rocprofiler-sdk_INCLUDE_DIR}
 )
 target_link_libraries(
     rocprofiler-systems-dl-library
     PUBLIC
         $<BUILD_INTERFACE:${dl_LIBRARY}>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-api-library>
         $<BUILD_INTERFACE:rocprofiler-systems::common-library>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:Threads::Threads>
