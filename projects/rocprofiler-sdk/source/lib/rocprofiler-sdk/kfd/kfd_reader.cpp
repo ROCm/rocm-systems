@@ -1423,6 +1423,15 @@ start_kfd_reader()
     // the ring, so a first-use allocation there cannot cause an overrun.)
     overrun_reported();
 
+    // Same reasoning for the env-backed knobs: each caches its read in a
+    // function-local static on first use, and common::get_env* scans `environ`,
+    // which races a concurrent setenv. Populate them all HERE, on the one
+    // serialized start path under setup_mu with no worker thread yet in existence,
+    // instead of letting a processor/producer/teardown thread do it lazily.
+    start_max_age_ns();
+    pending_starts_cap();
+    signal_less_prime_env();
+
     // Processor first: it must be ready to consume before the reader can publish,
     // otherwise the first batches are dropped for no reason.
     internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);

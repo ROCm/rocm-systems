@@ -328,6 +328,22 @@ quiesce_budget_ns()
 }
 
 void
+signal_less_prime_env()
+{
+    // Every knob below caches its env read in a function-local static on FIRST USE,
+    // and common::get_env* scans `environ`, which is not safe against a concurrent
+    // setenv. Left lazy, that first use lands on whichever worker, producer or
+    // teardown thread happens to reach it first. Calling them here -- from the one
+    // serialized reader-start path, before any worker thread exists and before the
+    // application is dispatching -- makes the cached value deterministic and takes
+    // the environ scan off every concurrent thread.
+    signal_less_feature_enabled();
+    hub_max_pending_per_gpu();
+    close_drain_budget_ns();
+    quiesce_budget_ns();
+}
+
+void
 signal_less_disable_permanently()
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
