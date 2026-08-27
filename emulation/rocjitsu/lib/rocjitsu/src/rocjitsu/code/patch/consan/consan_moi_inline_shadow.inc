@@ -874,7 +874,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                 }
                 return kernel->uses_dynamic_stack.value_or(false) ||
                        options.automatic_moi_persistent_vgprs ||
-                       options.automatic_moi_persistent_sgprs;
+                       moi_uses_scalar_persistent_state(options);
               });
       DbiPatchPlacementRequest placement_request;
       placement_request.anchor_offset = candidate.anchor();

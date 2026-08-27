@@ -1201,7 +1201,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       });
     }
   }
-  if (options.automatic_moi_persistent_sgprs) {
+  if (moi_uses_scalar_persistent_state(options)) {
     // The owner-kernel entry prologue grows each descriptor for this scalar
     // tuple after all emitted patch ownership is known.
   } else if (options.automatic_moi_persistent_vgprs) {

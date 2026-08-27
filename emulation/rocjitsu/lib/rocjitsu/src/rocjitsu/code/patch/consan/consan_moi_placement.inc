@@ -6300,7 +6300,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
         }
         assign_scalar_persistent_state(static_cast<uint16_t>(base));
         options.moi_init_owner_epoch = true;
-        options.automatic_moi_persistent_sgprs = true;
         prologue_scratch_assignments = std::move(prologue_scratch);
         result.warnings.emplace_back(
             "ConSan MOI assigned persistent scalar " +
@@ -6400,7 +6399,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
         }
         assign_scalar_persistent_state(*persistent_hole);
         options.moi_init_owner_epoch = true;
-        options.automatic_moi_persistent_sgprs = true;
         prologue_scratch_assignments = std::move(prologue_scratch);
         result.warnings.emplace_back(
             "ConSan MOI assigned persistent scalar " +
@@ -6638,7 +6636,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
         options.moi_persistent_vgpr_assignments.clear();
         assign_scalar_persistent_state(static_cast<uint16_t>(base));
         options.moi_init_owner_epoch = true;
-        options.automatic_moi_persistent_sgprs = true;
         prologue_scratch_assignments = std::move(*prologue_scratch);
         result.warnings.emplace_back("ConSan MOI assigned persistent scalar owner/epoch" +
                                      std::string(needs_workgroup_key ? "/workgroup-key" : "") +
@@ -6998,7 +6995,6 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
       const uint16_t base = *scalar_base;
       assign_scalar_persistent_state(base);
       options.moi_init_owner_epoch = true;
-      options.automatic_moi_persistent_sgprs = true;
       prologue_scratch_assignments = std::move(*prologue_scratch);
       result.warnings.emplace_back(
           "ConSan MOI assigned persistent scalar " +
@@ -7086,7 +7082,7 @@ configure_automatic_moi_dispatch_id_sgprs(ConSanOptions &options, ConSanTransfor
 }
 
 [[nodiscard]] bool automatic_moi_persistent_state(const ConSanOptions &options) {
-  return options.automatic_moi_persistent_vgprs || options.automatic_moi_persistent_sgprs ||
+  return options.automatic_moi_persistent_vgprs || moi_uses_scalar_persistent_state(options) ||
          options.automatic_moi_private_epoch;
 }
 

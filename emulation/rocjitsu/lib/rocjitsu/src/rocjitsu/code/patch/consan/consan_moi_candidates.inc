@@ -195,8 +195,8 @@ void note_moi_persistent_vgpr_state(ConSanPatchInfo &patch, const ConSanOptions 
   patch.persistent_workgroup_key_vgpr = options.moi_workgroup_key_vgpr;
   patch.persistent_record_replay_workgroup_vgprs = options.moi_record_replay_workgroup_vgprs;
   patch.persistent_vgpr_state_owner_local = !options.moi_persistent_vgpr_assignments.empty();
-  patch.persistent_vgpr_state_is_abi =
-      options.moi_owner_vgpr && options.moi_epoch_vgpr && !options.automatic_moi_persistent_sgprs;
+  patch.persistent_vgpr_state_is_abi = options.moi_owner_vgpr && options.moi_epoch_vgpr &&
+                                       !moi_uses_scalar_persistent_state(options);
 }
 
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {

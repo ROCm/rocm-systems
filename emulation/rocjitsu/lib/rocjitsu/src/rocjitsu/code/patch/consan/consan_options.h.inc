@@ -772,9 +772,6 @@ struct ConSanOptions : ConSanRequest,
   /// Internal per-owner assignments used when one CDNA4 code-object-wide
   /// tuple cannot remain below every compiler-defined AccVGPR boundary.
   std::vector<ConSanMoiPersistentVgprAssignment> moi_persistent_vgpr_assignments;
-  /// Internal marker set when a full CDNA ordinary-VGPR bank forces
-  /// persistent MOI wave identity into uniform scalar state instead.
-  bool automatic_moi_persistent_sgprs = false;
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;

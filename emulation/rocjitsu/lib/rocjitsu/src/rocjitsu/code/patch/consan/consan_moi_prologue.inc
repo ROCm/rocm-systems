@@ -2410,7 +2410,7 @@ void try_apply_owner_epoch_prologue_patch(
     // descriptor/entry that merely owns one of those speculative plans can
     // perturb otherwise untouched kernels and, on real multi-kernel modules,
     // can make execution hang before the selected probe is reached.
-    if ((options.automatic_moi_persistent_vgprs || options.automatic_moi_persistent_sgprs) &&
+    if ((options.automatic_moi_persistent_vgprs || moi_uses_scalar_persistent_state(options)) &&
         !owns_emitted_patch)
       continue;
     if (moi_has_runtime_hardware_dispatch_id(options) && !owns_emitted_patch &&
@@ -2458,7 +2458,7 @@ void try_apply_owner_epoch_prologue_patch(
                                  kernel.name + "'");
       return;
     }
-    if (options.automatic_moi_persistent_sgprs) {
+    if (moi_uses_scalar_persistent_state(options)) {
       const auto scratch =
           std::ranges::find(prologue_scratch_assignments, kernel.descriptor_file_offset,
                             &ConSanMoiPrologueScratchVgprAssignment::descriptor_file_offset);
@@ -2763,7 +2763,7 @@ void try_apply_owner_epoch_prologue_patch(
     bool instrument_entry_in_place =
         requires_in_place_entry ||
         (options.moi_engine == ConSanMoiEngine::InlineShadow &&
-         (options.automatic_moi_persistent_vgprs || options.automatic_moi_persistent_sgprs));
+         (options.automatic_moi_persistent_vgprs || moi_uses_scalar_persistent_state(options)));
     if (instrument_entry_in_place && item.has_kernarg_preload) {
       // A kernarg-preload descriptor exposes the ordinary firmware entry and
       // a preloaded entry exactly 256 bytes later. Redirect the descriptor to
