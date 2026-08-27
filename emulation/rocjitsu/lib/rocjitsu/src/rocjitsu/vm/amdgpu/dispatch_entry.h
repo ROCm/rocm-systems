@@ -14,7 +14,6 @@
 
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
-#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cassert>

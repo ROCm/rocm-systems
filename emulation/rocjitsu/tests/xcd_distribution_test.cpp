@@ -412,9 +412,8 @@ TEST(XcdDistributionTest, FanoutReplicatesNonKernelPacketsButSignalsThemOnce) {
       << "a replicated packet must still signal once, not once per XCD";
 }
 
-// The replication itself. Every XCD must accept the IB entry after its share of
-// the kernel ahead of it, so the ordering each XCD reads from the entries in front
-// of a barrier'd packet is the owner's ordering and not a shortened one.
+// The replication itself. Every XCD must accept its share of the kernel and then
+// the following IB.
 //
 // The acceptance count and first two packet kinds are read from each CP AFTER the
 // run. Together they prove that the kernel and then the IB reached each queue
