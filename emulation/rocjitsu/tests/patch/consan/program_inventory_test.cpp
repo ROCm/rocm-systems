@@ -445,6 +445,8 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
 
   const ProgramInventory inventory = builder.view();
   const SynchronizationInventoryView graph = inventory.sync();
+  EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, first.semantic_id.physical),
+            nullptr);
   EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, "first-container", true, 12),
             &graph.sync_events[0]);
   EXPECT_EQ(graph.find_unique_event(ConSanSyncEventKind::Atomic, "alias-container", true, 12),
@@ -458,6 +460,12 @@ TEST(ConSanProgramInventory, SynchronizationQueriesRejectAmbiguousGraphEdges) {
   ProgramInventoryBuilder duplicate_sequence(builder.view());
   duplicate_sequence.synchronization().sync_sequences[1].identity = "sequence";
   EXPECT_EQ(duplicate_sequence.view().sync().find_unique_sequence("sequence"), nullptr);
+
+  ProgramInventoryBuilder unique_event(builder.view());
+  unique_event.synchronization().sync_events.pop_back();
+  EXPECT_EQ(unique_event.view().sync().find_unique_event(ConSanSyncEventKind::Atomic,
+                                                         first.semantic_id.physical),
+            &unique_event.view().sync().sync_events.front());
 }
 
 TEST(ConSanProgramInventory, MutableRevisionIsDeepCopiedFromPublishedInventory) {

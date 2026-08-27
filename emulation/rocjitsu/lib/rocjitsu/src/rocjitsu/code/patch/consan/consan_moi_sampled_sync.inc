@@ -7,7 +7,7 @@ struct SampledBarrierWindow {
 
 struct SampledBarrierCandidate {
   const ConSanSyncSequence *sequence = nullptr;
-  BarrierRecordCandidate barrier;
+  MoiBarrierEvidenceSitePlan barrier;
   std::vector<SampledBarrierWindow> windows;
   bool uses_cluster_workgroup_id = false;
 };
@@ -739,54 +739,20 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
     }
   }
 
-  std::unordered_map<std::string_view, const ConSanKernelInfo *> kernel_by_name;
-  kernel_by_name.reserve(result.program_inventory.kernels().size());
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    kernel_by_name.try_emplace(kernel.name, &kernel);
-  std::unordered_map<std::string_view, const ConSanFunctionInfo *> function_by_name;
-  function_by_name.reserve(result.program_inventory.functions().size());
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    function_by_name.try_emplace(function.name, &function);
-
+  const std::vector<MoiBarrierEvidenceSitePlan> barrier_plans =
+      build_moi_barrier_evidence_site_plans(result, ConSanProbeIntentKind::SampledBarrierEpoch,
+                                            result.errors);
+  if (!result.errors.empty())
+    return;
   std::vector<SampledBarrierCandidate> candidates;
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
-    if (!consan_moi_sampled_qualifies_barrier_sequence(sequence))
-      continue;
-    const std::vector<ConSanBarrierSite> *barrier_sites = nullptr;
-    uint64_t container_entry_text_offset = 0;
-    uint64_t container_code_size = 0;
-    uint64_t container_text_file_offset = 0;
-    if (sequence.in_kernel) {
-      const auto found = kernel_by_name.find(sequence.container_name);
-      if (found == kernel_by_name.end())
-        continue;
-      barrier_sites = &found->second->barrier_sites;
-      container_entry_text_offset = found->second->entry_text_offset;
-      container_code_size = found->second->code_size;
-      container_text_file_offset = found->second->text_file_offset;
-    } else {
-      const auto found = function_by_name.find(sequence.container_name);
-      if (found == function_by_name.end())
-        continue;
-      barrier_sites = &found->second->barrier_sites;
-      container_entry_text_offset = found->second->entry_text_offset;
-      container_code_size = found->second->code_size;
-      container_text_file_offset = found->second->text_file_offset;
+  for (const MoiBarrierEvidenceSitePlan &barrier_plan : barrier_plans) {
+    const ConSanSyncSequence *sequence_ptr =
+        result.program_inventory.sync().find_unique_sequence(barrier_plan.association.value);
+    if (sequence_ptr == nullptr || !consan_moi_sampled_qualifies_barrier_sequence(*sequence_ptr)) {
+      result.errors.emplace_back("ConSan MOI sampled barrier evidence lost its qualified sequence");
+      return;
     }
-    std::vector<ConSanBarrierSite> completing_sites;
-    std::ranges::copy_if(*barrier_sites, std::back_inserter(completing_sites),
-                         [&](const ConSanBarrierSite &site) {
-                           return site.text_offset + site.size == sequence.end_text_offset;
-                         });
-    if (completing_sites.size() != 1u) {
-      result.warnings.emplace_back("ConSan MOI sampled barrier sync rejected ambiguous completing "
-                                   "site in " +
-                                   sequence.container_name);
-      continue;
-    }
-    if (!plan_admits_barrier_insertion(result.observation_plan,
-                                       completing_sites.front().text_offset))
-      continue;
+    const ConSanSyncSequence &sequence = *sequence_ptr;
     std::vector<SampledBarrierWindow> windows;
     bool every_owner_has_window = true;
     std::string owner_lowering_failure;
@@ -876,15 +842,15 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
           sequence.container_name);
       continue;
     }
-    const uint64_t representative_descriptor =
+    if (sequence.execution_owners.empty()) {
+      result.errors.emplace_back("ConSan MOI sampled barrier evidence has no execution owner");
+      return;
+    }
+    MoiBarrierEvidenceSitePlan lowering_plan = barrier_plan;
+    lowering_plan.kernel_descriptor_file_offset =
         sequence.execution_owners.front().descriptor_file_offset;
     candidates.push_back(
-        {&sequence,
-         {(sequence.in_kernel ? "kernel:" : "function:") + sequence.container_name,
-          sequence.in_kernel, completing_sites.front(), representative_descriptor,
-          container_entry_text_offset, container_code_size, container_text_file_offset},
-         std::move(windows),
-         uses_cluster_workgroup_id});
+        {&sequence, std::move(lowering_plan), std::move(windows), uses_cluster_workgroup_id});
   }
   if (candidates.empty()) {
     result.warnings.emplace_back(
@@ -894,22 +860,6 @@ void try_apply_sampled_barrier_sync_patch(std::span<const uint8_t> bytes, const 
   std::ranges::sort(candidates, {}, [](const SampledBarrierCandidate &candidate) {
     return candidate.barrier.site.text_offset;
   });
-  std::vector<SampledBarrierCandidate> unambiguous;
-  for (size_t begin = 0; begin < candidates.size();) {
-    size_t end = begin + 1u;
-    while (end < candidates.size() &&
-           candidates[end].barrier.site.text_offset == candidates[begin].barrier.site.text_offset)
-      ++end;
-    if (end == begin + 1u) {
-      unambiguous.push_back(std::move(candidates[begin]));
-    } else {
-      result.warnings.emplace_back(
-          "ConSan MOI sampled barrier sync rejected ambiguous sequence ownership at offset " +
-          std::to_string(candidates[begin].barrier.site.text_offset));
-    }
-    begin = end;
-  }
-  candidates = std::move(unambiguous);
   if (candidates.size() > options.max_patches)
     candidates.resize(options.max_patches);
 
@@ -2965,7 +2915,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_fence_record_cave_words(
-    std::span<const uint8_t> bytes, const FenceRecordCandidate &candidate,
+    std::span<const uint8_t> bytes, const MoiFenceEvidenceSitePlan &candidate,
     const ConSanMoiAtomicAddressPlan &address_plan, const MoiOptions &options,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t record_capacity_or_count,
@@ -2980,9 +2930,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
   }
   const bool requires_raw_th = !consan_uses_gfx9_cdna_encoding(arch);
   if (!address_plan.supported() || !candidate.communication_site.raw_scope ||
-      (requires_raw_th && !candidate.communication_site.raw_th) ||
-      candidate.association == nullptr || !candidate.association->communication_event ||
-      candidate.fence_event == nullptr) {
+      (requires_raw_th && !candidate.communication_site.raw_th) || !candidate.is_well_formed()) {
     errors.emplace_back("ConSan MOI fence record patch requires qualified address semantics");
     return std::nullopt;
   }
@@ -3117,10 +3065,9 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
 
   const uint64_t base = *options.moi_report_buffer_address;
   const uint64_t record_base = base + fence_records_offset;
-  const ConSanMoiFenceEventKind kind =
-      candidate.association->memory_role == ConSanSyncMemoryRole::Release
-          ? ConSanMoiFenceEventKind::Release
-          : ConSanMoiFenceEventKind::Acquire;
+  const ConSanMoiFenceEventKind kind = candidate.memory_role == ConSanSyncMemoryRole::Release
+                                           ? ConSanMoiFenceEventKind::Release
+                                           : ConSanMoiFenceEventKind::Acquire;
   if (!options.moi_exec_save_sgpr) {
     errors.emplace_back("ConSan MOI dynamic fence record requires scalar EXEC state");
     return std::nullopt;
@@ -3215,7 +3162,7 @@ void try_apply_sampled_atomic_sync_patch(std::span<const uint8_t> bytes, const M
         !append_dynamic_record_store_u32_literal(
             record_words, kFenceRecordLayout,
             record_base + offsetof(ConSanMoiFenceRecord, instruction_offset),
-            static_cast<uint32_t>(candidate.fence_event->text_offset), slot_vgpr,
+            static_cast<uint32_t>(candidate.semantic_site.physical.original_text_offset), slot_vgpr,
             *options.scratch_vgpr, arch) ||
         !append_dynamic_record_store_u32_literal(
             record_words, kFenceRecordLayout, record_base + offsetof(ConSanMoiFenceRecord, kind),

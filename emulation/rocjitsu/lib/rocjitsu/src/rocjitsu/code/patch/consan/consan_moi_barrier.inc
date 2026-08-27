@@ -1,96 +1,120 @@
-struct BarrierRecordCandidate {
-  std::string container_name;
-  bool in_kernel = true;
-  ConSanBarrierSite site;
-  std::optional<uint64_t> kernel_descriptor_file_offset;
-  uint64_t container_entry_text_offset = 0;
-  uint64_t container_code_size = 0;
-  uint64_t text_file_offset = 0;
-};
-
-[[nodiscard]] bool barrier_record_candidate_semantics_equal(const BarrierRecordCandidate &lhs,
-                                                            const BarrierRecordCandidate &rhs) {
-  const ConSanBarrierSite &left = lhs.site;
-  const ConSanBarrierSite &right = rhs.site;
-  return lhs.in_kernel == rhs.in_kernel &&
-         lhs.container_entry_text_offset == rhs.container_entry_text_offset &&
-         lhs.container_code_size == rhs.container_code_size &&
-         lhs.text_file_offset == rhs.text_file_offset &&
-         std::tie(left.operation, left.text_offset, left.file_offset, left.size, left.barrier_id,
-                  left.operand_source, left.raw_operand_selector, left.literal_width_bits,
-                  left.literal_value, left.raw_simm16, left.scope, left.participant_encoding,
-                  left.participant_count, left.participant_mask, left.participant_setup_text_offset,
-                  left.participant_setup_file_offset, left.participant_setup_literal,
-                  left.mnemonic) ==
-             std::tie(right.operation, right.text_offset, right.file_offset, right.size,
-                      right.barrier_id, right.operand_source, right.raw_operand_selector,
-                      right.literal_width_bits, right.literal_value, right.raw_simm16, right.scope,
-                      right.participant_encoding, right.participant_count, right.participant_mask,
-                      right.participant_setup_text_offset, right.participant_setup_file_offset,
-                      right.participant_setup_literal, right.mnemonic);
+[[nodiscard]] bool is_rocclr_runtime_kernel_name(std::string_view name) {
+  return name.starts_with("__amd_rocclr_");
 }
 
-[[nodiscard]] bool canonicalize_barrier_record_candidates_by_physical_site(
-    std::vector<BarrierRecordCandidate> &candidates, std::vector<std::string> &errors) {
-  return consan_detail::canonicalize_physical_site_aliases(
-      candidates, errors, "ConSan MOI barrier site",
-      [](const BarrierRecordCandidate &candidate) { return candidate.site.file_offset; },
-      [](const BarrierRecordCandidate &candidate) -> std::string_view {
-        return candidate.container_name;
-      },
-      barrier_record_candidate_semantics_equal,
-      consan_detail::invalidate_physical_site_single_owner_hint);
-}
-
-/// Temporary lowering adapter that prevents legacy barrier discovery from
-/// widening the immutable production plan. Only insertion sites named by a
-/// barrier intent survive; access intents at the same instruction do not grant
-/// barrier admission.
-[[nodiscard]] bool plan_admits_barrier_insertion(const ConSanObservationPlan &plan,
-                                                 uint64_t text_offset) {
-  for (const ConSanProbeIntent &intent : plan.probe_intents) {
-    if (intent.kind == ConSanProbeIntentKind::BarrierRecord ||
-        intent.kind == ConSanProbeIntentKind::SampledBarrierEpoch ||
-        intent.kind == ConSanProbeIntentKind::ExactBarrierEpoch) {
-      if (intent.physical_site.original_text_offset == text_offset)
-        return true;
+/// Project admitted barrier evidence directly into the common MOI lowering
+/// contract shared by Record/Replay, Sampled, and InlineShadow.
+///
+/// Policy may map several barrier-event decisions to one completing intent.
+/// This join therefore starts from intent IDs cited by admitted decisions,
+/// deduplicates coalesced sequences, and resolves exactly one graph event and
+/// decoded instruction per insertion site. Redundant barriers, runtime
+/// kernels, container filters, and engine-specific signal/wait rules have
+/// already been decided by policy and are never rediscovered here.
+[[nodiscard]] std::vector<MoiBarrierEvidenceSitePlan>
+build_moi_barrier_evidence_site_plans(const ConSanTransformArtifacts &result,
+                                      ConSanProbeIntentKind evidence_kind,
+                                      std::vector<std::string> &errors) {
+  const SynchronizationInventoryView graph = result.program_inventory.sync();
+  const ConSanObservationPlan &observation = result.observation_plan;
+  std::vector<ConSanProbeIntentId> admitted_intents;
+  for (const ConSanBarrierSiteDecision &decision : observation.barrier_site_decisions) {
+    if (decision.kind != ConSanSiteDecisionKind::Admitted)
+      continue;
+    for (ConSanProbeIntentId id : decision.intent_ids) {
+      const ConSanProbeIntent *intent = observation.intent(id);
+      if (intent != nullptr && intent->kind == evidence_kind &&
+          std::ranges::find(admitted_intents, id) == admitted_intents.end()) {
+        admitted_intents.push_back(id);
+      }
     }
   }
-  return false;
-}
 
-void retain_admitted_barrier_record_candidates(const ConSanObservationPlan &plan,
-                                               std::vector<BarrierRecordCandidate> &candidates) {
-  std::erase_if(candidates, [&](const BarrierRecordCandidate &candidate) {
-    return !plan_admits_barrier_insertion(plan, candidate.site.text_offset);
-  });
-}
+  std::vector<MoiBarrierEvidenceSitePlan> plans;
+  plans.reserve(admitted_intents.size());
+  for (ConSanProbeIntentId id : admitted_intents) {
+    const ConSanProbeIntent *intent = observation.intent(id);
+    const ConSanSyncEvent *event =
+        intent == nullptr
+            ? nullptr
+            : graph.find_unique_event(ConSanSyncEventKind::Barrier, intent->physical_site);
+    const ConSanSyncSequence *sequence =
+        event == nullptr ? nullptr : graph.find_unique_sequence_containing(event->semantic_id);
+    if (intent == nullptr || event == nullptr || sequence == nullptr ||
+        intent->position != ConSanProbePosition::After) {
+      errors.emplace_back("ConSan MOI admitted barrier evidence lost its synchronization graph");
+      return {};
+    }
+    bool coverage_is_exact = !intent->covered_semantic_sites.empty();
+    for (const SemanticSiteId &covered : intent->covered_semantic_sites) {
+      const ConSanSyncEvent *member = graph.find_event(covered);
+      SemanticSiteId member_id = covered;
+      member_id.domain = ConSanSemanticSiteDomain::SynchronizationSequenceMember;
+      coverage_is_exact &= member != nullptr && member->kind == ConSanSyncEventKind::Barrier &&
+                           std::ranges::find(sequence->member_semantic_ids, member_id) !=
+                               sequence->member_semantic_ids.end();
+    }
+    if (!coverage_is_exact) {
+      errors.emplace_back(
+          "ConSan MOI admitted barrier evidence has inconsistent sequence coverage");
+      return {};
+    }
 
-[[nodiscard]] bool redundant_adjacent_full_barrier(const ConSanBarrierSite &previous,
-                                                   const ConSanBarrierSite &current) {
-  return previous.operation == ConSanBarrierSite::Operation::Full &&
-         current.operation == ConSanBarrierSite::Operation::Full && previous.size != 0u &&
-         previous.text_offset + previous.size == current.text_offset;
-}
+    MoiBarrierEvidenceSitePlan plan;
+    plan.semantic_site = event->semantic_id;
+    plan.association = {.value = sequence->identity};
+    plan.evidence_intent = id;
+    plan.in_kernel = event->in_kernel;
+    const auto complete_from = [&](const auto &container,
+                                   std::optional<uint64_t> descriptor_file_offset) -> bool {
+      const auto site = std::ranges::find(container.barrier_sites, event->text_offset,
+                                          &ConSanBarrierSite::text_offset);
+      if (site == container.barrier_sites.end() ||
+          std::ranges::count(container.barrier_sites, event->text_offset,
+                             &ConSanBarrierSite::text_offset) != 1u) {
+        return false;
+      }
+      if (descriptor_file_offset &&
+          (event->execution_owners.size() != 1u ||
+           event->execution_owners.front().descriptor_file_offset != *descriptor_file_offset)) {
+        descriptor_file_offset.reset();
+      }
+      plan.container_name = (event->in_kernel ? "kernel:" : "function:") + container.name;
+      plan.site = *site;
+      plan.kernel_descriptor_file_offset = descriptor_file_offset;
+      plan.container_entry_text_offset = container.entry_text_offset;
+      plan.container_code_size = container.code_size;
+      plan.text_file_offset = container.text_file_offset;
+      return true;
+    };
 
-void erase_redundant_adjacent_full_barrier_candidates(
-    std::vector<BarrierRecordCandidate> &candidates) {
-  std::vector<BarrierRecordCandidate> retained;
-  retained.reserve(candidates.size());
-  std::optional<ConSanBarrierSite> previous_site;
-  std::string previous_container_name;
-  bool previous_in_kernel = true;
-  for (BarrierRecordCandidate &candidate : candidates) {
-    const bool redundant = previous_site && previous_container_name == candidate.container_name &&
-                           previous_in_kernel == candidate.in_kernel &&
-                           redundant_adjacent_full_barrier(*previous_site, candidate.site);
-    previous_site = candidate.site;
-    previous_container_name = candidate.container_name;
-    previous_in_kernel = candidate.in_kernel;
-    if (!redundant)
-      retained.push_back(std::move(candidate));
+    bool completed = false;
+    if (event->in_kernel) {
+      const ConSanKernelInfo *kernel =
+          result.program_inventory.find_kernel_by_name(event->container_name);
+      if (kernel == nullptr && event->execution_owners.size() == 1u) {
+        kernel = result.program_inventory.find_kernel_by_descriptor(
+            event->execution_owners.front().descriptor_file_offset);
+      }
+      completed = kernel != nullptr && !is_rocclr_runtime_kernel_name(kernel->name) &&
+                  complete_from(*kernel, kernel->descriptor_file_offset);
+      if (completed && !kernel->has_text_range)
+        plan.container_code_size = 0u;
+    } else {
+      const ConSanFunctionInfo *function =
+          result.program_inventory.find_function_by_name(event->container_name);
+      completed = function != nullptr && complete_from(*function, std::nullopt);
+    }
+    if (!completed || !plan.is_well_formed()) {
+      errors.emplace_back("ConSan MOI admitted barrier evidence lost its decoded lowering site");
+      return {};
+    }
+    plans.push_back(std::move(plan));
   }
-  candidates = std::move(retained);
+
+  std::ranges::sort(plans, {},
+                    [](const MoiBarrierEvidenceSitePlan &plan) { return plan.site.text_offset; });
+  return plans;
 }
 
 class MoiPatchAnchorRangeIndex {
@@ -123,28 +147,6 @@ private:
   std::vector<std::pair<uint64_t, uint64_t>> ranges_;
 };
 
-[[nodiscard]] bool is_rocclr_runtime_kernel_name(std::string_view name) {
-  return name.starts_with("__amd_rocclr_");
-}
-
-void append_barrier_epoch_candidates(const ConSanKernelInfo &kernel,
-                                     std::vector<BarrierRecordCandidate> &candidates) {
-  if (is_rocclr_runtime_kernel_name(kernel.name))
-    return;
-  for (const ConSanBarrierSite &site : kernel.barrier_sites)
-    candidates.push_back({"kernel:" + kernel.name, true, site, kernel.descriptor_file_offset,
-                          kernel.entry_text_offset, kernel.has_text_range ? kernel.code_size : 0u,
-                          kernel.text_file_offset});
-}
-
-void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
-                                     std::vector<BarrierRecordCandidate> &candidates) {
-  for (const ConSanBarrierSite &site : function.barrier_sites)
-    candidates.push_back({"function:" + function.name, false, site, std::nullopt,
-                          function.entry_text_offset, function.code_size,
-                          function.text_file_offset});
-}
-
 [[nodiscard]] uint16_t inline_shadow_barrier_scratch_count(const MoiOptions &options) {
   if (options.moi_engine == ConSanMoiEngine::RecordReplay)
     return 6u;
@@ -160,7 +162,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
 }
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_barrier_record_cave_words(
-    std::span<const uint8_t> bytes, const BarrierRecordCandidate &candidate,
+    std::span<const uint8_t> bytes, const MoiBarrierEvidenceSitePlan &candidate,
     const MoiOptions &options, const VgprSpillSequence *spill,
     const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t barrier_record_capacity, size_t barrier_records_offset, uint32_t original_barrier_word,
@@ -969,24 +971,13 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     return;
   }
 
-  std::vector<BarrierRecordCandidate> candidates;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    append_barrier_epoch_candidates(kernel, candidates);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_barrier_epoch_candidates(function, candidates);
-  if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
-    std::erase_if(candidates, [](const BarrierRecordCandidate &candidate) {
-      return candidate.site.operation == ConSanBarrierSite::Operation::Signal;
-    });
-  }
-  apply_test_container_filter(candidates, options);
-  if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result.errors))
+  const ConSanProbeIntentKind evidence_kind = options.moi_engine == ConSanMoiEngine::RecordReplay
+                                                  ? ConSanProbeIntentKind::BarrierRecord
+                                                  : ConSanProbeIntentKind::ExactBarrierEpoch;
+  std::vector<MoiBarrierEvidenceSitePlan> candidates =
+      build_moi_barrier_evidence_site_plans(result, evidence_kind, result.errors);
+  if (!result.errors.empty())
     return;
-  retain_admitted_barrier_record_candidates(result.observation_plan, candidates);
-  std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
-    return lhs.site.text_offset < rhs.site.text_offset;
-  });
-  erase_redundant_adjacent_full_barrier_candidates(candidates);
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI inline-shadow barrier epoch patch found no barriers");
     return;
@@ -1001,11 +992,11 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         "ConSan MOI inline-shadow barrier epoch patch found no .text section");
     return;
   }
-  std::vector<BarrierRecordCandidate> selected_candidates;
+  std::vector<MoiBarrierEvidenceSitePlan> selected_candidates;
   selected_candidates.reserve(options.max_patches);
   std::unordered_set<uint64_t> selected_offsets;
   const MoiPatchAnchorRangeIndex occupied_anchors(result);
-  for (const BarrierRecordCandidate &candidate : candidates) {
+  for (const MoiBarrierEvidenceSitePlan &candidate : candidates) {
     if (selected_candidates.size() == options.max_patches)
       break;
     const ConSanBarrierSite &site = candidate.site;
@@ -1035,7 +1026,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   }
 
   struct PlannedInlineEpochBarrier {
-    BarrierRecordCandidate candidate;
+    MoiBarrierEvidenceSitePlan candidate;
     std::vector<uint64_t> owner_descriptor_file_offsets;
     std::optional<uint16_t> scratch_vgpr;
     std::optional<uint32_t> private_epoch_offset;
@@ -1077,7 +1068,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
   const MoiResourcePlanSiteIndex resource_plan_index(result);
   MoiPatchOwnerIndex patch_owner_index(result);
   if (options.automatic_moi_private_epoch) {
-    for (const BarrierRecordCandidate &candidate : selected_candidates) {
+    for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
       const ConSanCandidateResourcePlan *plan =
           resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
       if (plan == nullptr || plan->owner_descriptor_file_offsets.empty()) {
@@ -1217,7 +1208,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     // The owner-kernel entry prologue grows each descriptor for this scalar
     // tuple after all emitted patch ownership is known.
   } else if (options.automatic_moi_persistent_vgprs) {
-    for (const BarrierRecordCandidate &candidate : selected_candidates) {
+    for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
       const ConSanCandidateResourcePlan *plan =
           resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
       if (plan == nullptr || plan->owner_descriptor_file_offsets.empty()) {
@@ -1239,7 +1230,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           kernel.descriptor_file_offset, static_cast<uint32_t>(*options.moi_epoch_vgpr) + 1u);
     }
   }
-  for (const BarrierRecordCandidate &candidate : selected_candidates) {
+  for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates) {
     std::vector<uint64_t> owners;
     const ConSanCandidateResourcePlan *plan =
         resource_plan_index.find(ConSanResourceSiteKind::Barrier, candidate.site.text_offset);
@@ -1412,7 +1403,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 
   for (size_t planned_index = 0; planned_index < planned_candidates.size(); ++planned_index) {
     const PlannedInlineEpochBarrier &planned = planned_candidates[planned_index];
-    const BarrierRecordCandidate &candidate = planned.candidate;
+    const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
     uint32_t original_barrier_word = 0;
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
@@ -1641,7 +1632,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::vector<consan_detail::MoiDenseRouteSite> route_sites;
     route_sites.reserve(dense_fallback_indices.size());
     for (size_t index : dense_fallback_indices) {
-      const BarrierRecordCandidate &candidate = planned_candidates[index].candidate;
+      const MoiBarrierEvidenceSitePlan &candidate = planned_candidates[index].candidate;
       route_sites.push_back({
           .owner = {candidate.in_kernel ? ConSanProgramContainerKind::Kernel
                                         : ConSanProgramContainerKind::Function,
@@ -1661,7 +1652,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       append_occupied_range(patch.anchor_offset, patch.original_size);
     for (const ConSanPatchInfo &patch : patches)
       append_occupied_range(patch.anchor_offset, patch.original_size);
-    for (const BarrierRecordCandidate &candidate : selected_candidates)
+    for (const MoiBarrierEvidenceSitePlan &candidate : selected_candidates)
       append_occupied_range(candidate.site.text_offset, candidate.site.size);
     const consan_detail::MoiOccupiedTextRanges occupied(std::move(occupied_ranges));
     std::map<uint64_t, uint64_t> claimed_hosts;
@@ -1786,7 +1777,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       uint64_t staged_body_bytes = 0u;
       for (size_t index : indices) {
         const PlannedInlineEpochBarrier &planned = planned_candidates[index];
-        const BarrierRecordCandidate &candidate = planned.candidate;
+        const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
         const ConSanBarrierSite &site = candidate.site;
         uint32_t original_barrier_word = 0;
         std::memcpy(&original_barrier_word, old_text.data() + site.text_offset,
@@ -1915,7 +1906,8 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
       const std::vector<size_t> &indices = group.source_indices;
       if (indices.empty())
         continue;
-      const BarrierRecordCandidate &first_candidate = planned_candidates[indices.front()].candidate;
+      const MoiBarrierEvidenceSitePlan &first_candidate =
+          planned_candidates[indices.front()].candidate;
       if (first_candidate.container_code_size == 0u)
         continue;
       const uint64_t owner_begin = first_candidate.container_entry_text_offset;
@@ -2049,7 +2041,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         uint32_t original_barrier_word = 0;
         std::memcpy(&original_barrier_word, old_text.data() + site.text_offset,
                     sizeof(original_barrier_word));
-        const BarrierRecordCandidate &candidate = planned.candidate;
+        const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
         const std::optional<uint16_t> gfx1250_vgpr_msb_mode =
             arch == ROCJITSU_CODE_ARCH_CDNA5
                 ? gfx1250_vgpr_msb_mode_at(active_bytes, candidate.text_file_offset,
@@ -2400,19 +2392,10 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     return;
   }
 
-  std::vector<BarrierRecordCandidate> candidates;
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-    append_barrier_epoch_candidates(kernel, candidates);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    append_barrier_epoch_candidates(function, candidates);
-  apply_test_container_filter(candidates, options);
-  if (!canonicalize_barrier_record_candidates_by_physical_site(candidates, result.errors))
+  std::vector<MoiBarrierEvidenceSitePlan> candidates = build_moi_barrier_evidence_site_plans(
+      result, ConSanProbeIntentKind::BarrierRecord, result.errors);
+  if (!result.errors.empty())
     return;
-  retain_admitted_barrier_record_candidates(result.observation_plan, candidates);
-  std::sort(candidates.begin(), candidates.end(), [](const auto &lhs, const auto &rhs) {
-    return lhs.site.text_offset < rhs.site.text_offset;
-  });
-  erase_redundant_adjacent_full_barrier_candidates(candidates);
   if (candidates.empty()) {
     result.warnings.emplace_back("ConSan MOI barrier record patch found no barriers");
     return;
@@ -2427,7 +2410,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     return;
   }
   struct PlannedBarrierRecord : MoiPlannedRecordEvent {
-    BarrierRecordCandidate candidate;
+    MoiBarrierEvidenceSitePlan candidate;
   };
   std::vector<PlannedBarrierRecord> selected_candidates;
   selected_candidates.reserve(max_candidates);
@@ -2439,7 +2422,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   MoiDescriptorSgprRequirements scalar_requirements;
   MoiDescriptorPrivateRequirements private_requirements;
   for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
-    const BarrierRecordCandidate &candidate = candidates[candidate_index];
+    const MoiBarrierEvidenceSitePlan &candidate = candidates[candidate_index];
     if (selected_candidates.size() == max_candidates)
       break;
     const ConSanBarrierSite &site = candidate.site;
@@ -2476,7 +2459,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
           candidate.container_name);
       continue;
     }
-    BarrierRecordCandidate planned_candidate = candidate;
+    MoiBarrierEvidenceSitePlan planned_candidate = candidate;
     if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
       if (resources->owner_descriptor_file_offsets.empty()) {
         result.warnings.emplace_back(
@@ -2623,7 +2606,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   branch_only_requests.reserve(selected_candidates.size());
   branch_only_staged_indices.reserve(selected_candidates.size());
   for (const PlannedBarrierRecord &planned : selected_candidates) {
-    const BarrierRecordCandidate &candidate = planned.candidate;
+    const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
     uint32_t original_barrier_word = 0u;
     std::memcpy(&original_barrier_word, new_text.data() + site.text_offset,
@@ -2780,7 +2763,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
   std::vector<ConSanPatchInfo> patches;
   for (StagedBarrierRecord &staged : staged_barriers) {
     const PlannedBarrierRecord &planned = *staged.planned;
-    const BarrierRecordCandidate &candidate = planned.candidate;
+    const MoiBarrierEvidenceSitePlan &candidate = planned.candidate;
     const ConSanBarrierSite &site = candidate.site;
     MoiOptions &candidate_options = staged.candidate_options;
     const uint64_t cave_text_offset = staged.cave_text_offset;

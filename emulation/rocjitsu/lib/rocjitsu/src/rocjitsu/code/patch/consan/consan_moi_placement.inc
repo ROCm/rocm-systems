@@ -3889,15 +3889,6 @@ void apply_test_kernel_filter(std::vector<const ConSanMoiCandidate *> &candidate
   });
 }
 
-template <typename Candidate>
-void apply_test_container_filter(std::vector<Candidate> &candidates, const MoiOptions &options) {
-  if (options.test_kernel_name_filter.empty())
-    return;
-  std::erase_if(candidates, [&](const Candidate &candidate) {
-    return candidate.container_name.find(options.test_kernel_name_filter) == std::string::npos;
-  });
-}
-
 [[nodiscard]] constexpr std::optional<uint16_t>
 moi_dynamic_stack_frame_save_sgpr_offset(ConSanMoiEngine engine) {
   switch (engine) {

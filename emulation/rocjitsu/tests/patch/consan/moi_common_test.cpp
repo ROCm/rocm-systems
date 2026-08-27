@@ -336,6 +336,62 @@ TEST(ConSanMoi, AtomicEvidenceSitePlanRequiresOneCompletePolicyToLoweringJoin) {
   EXPECT_FALSE(missing_guest.is_well_formed());
 }
 
+TEST(ConSanMoi, FenceEvidenceSitePlanRequiresQualifiedEvidenceAndPatchRange) {
+  const std::array<uint8_t, 4> bytes = {5u, 6u, 7u, 8u};
+  consan_detail::MoiFenceEvidenceSitePlan plan;
+  plan.semantic_site = {
+      .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 40u},
+      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+  };
+  plan.association = {.value = "ordinary-acquire-sequence"};
+  plan.evidence_intent = {.value = 7u};
+  plan.container_name = "kernel:fence";
+  plan.communication_site.size = 12u;
+  plan.communication_site.width_bits = 32u;
+  plan.memory_role = ConSanSyncMemoryRole::Acquire;
+  plan.patch_text_offset = 24u;
+  plan.patch_size = 20u;
+  EXPECT_TRUE(plan.is_well_formed());
+
+  consan_detail::MoiFenceEvidenceSitePlan missing_intent = plan;
+  missing_intent.evidence_intent = {};
+  EXPECT_FALSE(missing_intent.is_well_formed());
+  consan_detail::MoiFenceEvidenceSitePlan missing_communication = plan;
+  missing_communication.communication_site.width_bits = 0u;
+  EXPECT_FALSE(missing_communication.is_well_formed());
+  consan_detail::MoiFenceEvidenceSitePlan empty_patch = plan;
+  empty_patch.patch_size = 0u;
+  EXPECT_FALSE(empty_patch.is_well_formed());
+  consan_detail::MoiFenceEvidenceSitePlan overflowing_patch = plan;
+  overflowing_patch.patch_text_offset = std::numeric_limits<uint64_t>::max();
+  EXPECT_FALSE(overflowing_patch.is_well_formed());
+}
+
+TEST(ConSanMoi, BarrierEvidenceSitePlanRequiresOneCompletingGraphEvent) {
+  const std::array<uint8_t, 4> bytes = {9u, 10u, 11u, 12u};
+  consan_detail::MoiBarrierEvidenceSitePlan plan;
+  plan.semantic_site = {
+      .physical = {.code_object = make_consan_code_object_id(bytes), .original_text_offset = 64u},
+      .domain = ConSanSemanticSiteDomain::SynchronizationEvent,
+  };
+  plan.association = {.value = "barrier-sequence"};
+  plan.evidence_intent = {.value = 9u};
+  plan.container_name = "kernel:barrier";
+  plan.site.text_offset = 64u;
+  plan.site.size = 4u;
+  EXPECT_TRUE(plan.is_well_formed());
+
+  consan_detail::MoiBarrierEvidenceSitePlan missing_sequence = plan;
+  missing_sequence.association = {};
+  EXPECT_FALSE(missing_sequence.is_well_formed());
+  consan_detail::MoiBarrierEvidenceSitePlan wrong_site = plan;
+  wrong_site.site.text_offset = 68u;
+  EXPECT_FALSE(wrong_site.is_well_formed());
+  consan_detail::MoiBarrierEvidenceSitePlan missing_decode = plan;
+  missing_decode.site.size = 0u;
+  EXPECT_FALSE(missing_decode.is_well_formed());
+}
+
 TEST(ConSanMoi, WorkitemOwnerDerivationLowersBothSourcesOnEveryTargetProfile) {
   using consan_detail::MoiWorkitemOwnerDerivationPlan;
   using consan_detail::MoiWorkitemOwnerDerivationRequest;

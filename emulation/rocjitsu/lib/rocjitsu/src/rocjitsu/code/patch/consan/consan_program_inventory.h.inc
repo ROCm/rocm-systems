@@ -157,6 +157,26 @@ struct SynchronizationInventoryView {
     return event == sync_events.end() ? nullptr : &*event;
   }
 
+  /// Resolve one unique synchronization event by physical site and kind.
+  ///
+  /// This is the graph-side join used by a target-neutral probe intent, whose
+  /// placement identity deliberately has no engine-specific semantic domain.
+  /// Duplicate physical records fail closed even if their decoded fields are
+  /// otherwise identical; published production inventories canonicalize valid
+  /// aliases before policy observes them.
+  [[nodiscard]] const ConSanSyncEvent *find_unique_event(ConSanSyncEventKind kind,
+                                                         const PhysicalSiteId &physical) const {
+    const ConSanSyncEvent *match = nullptr;
+    for (const ConSanSyncEvent &event : sync_events) {
+      if (event.kind != kind || event.semantic_id.physical != physical)
+        continue;
+      if (match != nullptr)
+        return nullptr;
+      match = &event;
+    }
+    return match;
+  }
+
   /// Resolve one physical synchronization site without rebuilding an
   /// engine-private event index.
   ///

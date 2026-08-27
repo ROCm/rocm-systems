@@ -647,6 +647,126 @@ struct MoiAtomicEvidenceSitePlan {
   }
 };
 
+/// Immutable handoff from Record/Replay fence policy to resource planning and
+/// native fence emission.
+///
+/// A fence record represents one graph-qualified communication sequence, not
+/// every cache instruction that happens to resemble a fence. This value joins
+/// the admitted `FenceRecord` intent to its normalized fence association and
+/// to the operand-rich communication instruction whose effective address must
+/// be reported. The patch range may cover only the fence or, for an acquire
+/// sequence, the complete address-bearing load-through-fence interval. Native
+/// lowering consumes these already-selected facts and must not rescan the
+/// synchronization graph or reinterpret cache ordering.
+struct MoiFenceEvidenceSitePlan {
+  /// Stable identity of the admitted fence event in the original code object.
+  SemanticSiteId semantic_site;
+
+  /// Stable graph identity of the complete qualified communication sequence.
+  ConSanSynchronizationAssociationId association;
+
+  /// After-guest `FenceRecord` intent implemented by this lowering plan.
+  ConSanProbeIntentId evidence_intent;
+
+  /// Diagnostic container spelling, including `kernel:` or `function:`.
+  std::string container_name;
+
+  /// Operand-rich address-bearing atomic or ordinary-memory instruction.
+  /// Ordering meaning remains owned by `association`, not this decode copy.
+  ConSanAtomicSite communication_site;
+
+  /// Release or acquire role already established by the graph association.
+  ConSanSyncMemoryRole memory_role = ConSanSyncMemoryRole::Unknown;
+
+  /// Unique dispatchable owner descriptor when graph ownership proved one.
+  std::optional<uint64_t> kernel_descriptor_file_offset;
+
+  /// Original text entry of the containing kernel or local function.
+  uint64_t container_entry_text_offset = 0;
+
+  /// File offset corresponding to the container's original text section.
+  uint64_t text_file_offset = 0;
+
+  /// Beginning of the exact original byte range replaced by the probe.
+  uint64_t patch_text_offset = 0;
+
+  /// Code-object file offset corresponding to `patch_text_offset`.
+  uint64_t patch_file_offset = 0;
+
+  /// Number of original bytes displaced by fence lowering.
+  uint32_t patch_size = 0;
+
+  /// Whether the communication address must be copied before guest execution.
+  bool capture_address_before_guest = false;
+
+  /// Scalar scheduling hint neutralized before inserting control flow.
+  std::optional<uint64_t> scalar_clause_text_offset;
+
+  /// Verify that policy, graph association, decode, and replacement range all
+  /// name one complete lowering operation.
+  [[nodiscard]] bool is_well_formed() const {
+    return semantic_site.valid() &&
+           semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&
+           association.valid() && evidence_intent.valid() && !container_name.empty() &&
+           communication_site.size != 0u && communication_site.width_bits != 0u &&
+           (memory_role == ConSanSyncMemoryRole::Release ||
+            memory_role == ConSanSyncMemoryRole::Acquire) &&
+           patch_size != 0u &&
+           patch_text_offset <= std::numeric_limits<uint64_t>::max() - patch_size;
+  }
+};
+
+/// Immutable handoff from barrier evidence policy to common MOI resource
+/// planning and an engine's barrier emitter.
+///
+/// Barrier policy may coalesce a signal/wait pair or a longer lifecycle into
+/// one intent placed at its completing instruction. This plan names exactly
+/// that admitted placement event and the unique normalized graph sequence it
+/// completes, while retaining only the decoded instruction and container
+/// coordinates required by lowering. Record/Replay, Sampled, and InlineShadow
+/// share this selection contract even though their evidence bodies remain
+/// intentionally different.
+struct MoiBarrierEvidenceSitePlan {
+  /// Stable identity of the barrier instruction where evidence is inserted.
+  SemanticSiteId semantic_site;
+
+  /// Stable identity of the normalized barrier sequence completed here.
+  ConSanSynchronizationAssociationId association;
+
+  /// Engine-specific barrier evidence intent implemented by this plan.
+  ConSanProbeIntentId evidence_intent;
+
+  /// Diagnostic container spelling, including `kernel:` or `function:`.
+  std::string container_name;
+
+  /// Whether the containing symbol is a dispatchable kernel.
+  bool in_kernel = true;
+
+  /// Decoded completing barrier instruction used only for native lowering.
+  ConSanBarrierSite site;
+
+  /// Unique dispatchable owner descriptor when graph ownership proved one.
+  std::optional<uint64_t> kernel_descriptor_file_offset;
+
+  /// Original text entry of the containing kernel or local function.
+  uint64_t container_entry_text_offset = 0;
+
+  /// Original byte extent of the containing symbol when statically known.
+  uint64_t container_code_size = 0;
+
+  /// File offset corresponding to the container's original text section.
+  uint64_t text_file_offset = 0;
+
+  /// Verify that the policy intent, graph event, and decoded insertion site
+  /// form one complete barrier lowering operation.
+  [[nodiscard]] bool is_well_formed() const {
+    return semantic_site.valid() &&
+           semantic_site.domain == ConSanSemanticSiteDomain::SynchronizationEvent &&
+           association.valid() && evidence_intent.valid() && !container_name.empty() &&
+           site.size != 0u && site.text_offset == semantic_site.physical.original_text_offset;
+  }
+};
+
 /// Append the target sequence that derives one planned workitem owner.
 ///
 /// A private-state source is reloaded and waited for before the shift; a live
