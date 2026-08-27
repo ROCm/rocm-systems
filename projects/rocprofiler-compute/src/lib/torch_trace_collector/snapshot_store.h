@@ -18,9 +18,7 @@
 namespace torch_trace_collector::detail
 {
 
-// Identifies one autograd node. PyTorch draws sequence numbers from a
-// thread-local counter that restarts at zero on each thread, so the owning
-// thread is part of the identity.
+// Forward-stack snapshot key: sequence number and RecordFunction thread id.
 struct SnapshotKey
 {
     std::int64_t  seq_nr    = 0;
@@ -32,8 +30,6 @@ struct SnapshotKey
     }
 };
 
-// Sequence numbers are dense and thread ids are small, so both fields are mixed
-// to spread keys across buckets and shards.
 constexpr std::size_t hash_snapshot_key(const SnapshotKey& key) noexcept
 {
     constexpr std::uint64_t kGoldenRatio = 0x9e3779b97f4a7c15ULL;
@@ -87,8 +83,6 @@ public:
     void        clear();
 
 private:
-    // Every key in snapshots also holds a place in lru_order and an iterator to
-    // it in lru_idx, so eviction always has a key to remove.
     struct Shard
     {
         std::unordered_map<SnapshotKey, std::vector<StackEntry>>          snapshots;

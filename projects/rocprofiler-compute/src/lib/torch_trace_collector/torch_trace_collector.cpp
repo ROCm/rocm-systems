@@ -1,15 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "gsl_assert.h"
 #include "leaf_context.h"
 #include "marker_stack.h"
 #include "process_state.h"
-#include "record_function_callback.h"
 #include "record_function_installation.h"
-#include "snapshot_store.h"
 #include "stack_entry.h"
-#include "stats.h"
 #include "user_scope.h"
 #include "wire_format.h"
 
@@ -31,21 +27,31 @@ extern "C"
 #include <rocprofiler-sdk-roctx/roctx.h>
 }
 
-namespace torch_trace_collector::detail
-{
 namespace
 {
+using namespace torch_trace_collector::detail;
 
 constexpr std::string_view kRoctxUserScopeKindName = "rocprofiler-compute.user_scope";
+const c10::DebugInfoKind   kRoctxUserScopeKind{&kRoctxUserScopeKindName};
+constexpr const char*      kRecordFnBackend = "torch";
 
-}  // namespace
-
-const c10::DebugInfoKind kRoctxUserScopeKind{&kRoctxUserScopeKindName};
-
-namespace
+class RoctxUserScopeChain : public c10::DebugInfoBase
 {
+public:
+    explicit RoctxUserScopeChain(std::vector<StackEntry> chain)
+        : chain(std::move(chain))
+    {
+    }
 
-constexpr const char* kRecordFnBackend = "torch";
+    std::vector<StackEntry> chain;
+};
+
+struct RoctxObserverContext : public at::ObserverContext
+{
+    bool        pushed_roctx_range  = false;
+    bool        pushed_leaf         = false;
+    std::size_t pushed_extra_frames = 0;
+};
 
 void encode_marker_segment(const std::string& name, std::string& out)
 {
@@ -60,7 +66,7 @@ void encode_marker_segment(const std::string& name, std::string& out)
     }
 }
 
-std::unique_ptr<c10::DebugInfoGuard> publish_userscope_chain(const std::vector<StackEntry>& stack)
+std::unique_ptr<c10::DebugInfoGuard> publish_user_scope_chain(const std::vector<StackEntry>& stack)
 {
     try
     {
@@ -88,32 +94,18 @@ void unwind_observer_context(const RoctxObserverContext& observer_ctx, bool coun
     {
         stack.pop_back();
     }
-    for (std::size_t i = 0; i < observer_ctx.pushed_snapshot_frames && !stack.empty(); ++i)
+    for (std::size_t i = 0; i < observer_ctx.pushed_extra_frames && !stack.empty(); ++i)
     {
         stack.pop_back();
     }
 }
 
-}  // namespace
-
-ProcessState& process_state()
-{
-    static ProcessState state;
-    return state;
-}
-
-ThreadState& thread_state()
-{
-    static thread_local ThreadState state;
-    return state;
-}
-
 std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
 {
     std::vector<StackEntry>& stack  = thread_state().stack;
-    const std::size_t        maxc   = std::min(chain.size(), stack.size());
+    const std::size_t        limit  = std::min(chain.size(), stack.size());
     std::size_t              common = 0;
-    for (; common < maxc; ++common)
+    for (; common < limit; ++common)
     {
         if (chain[common].marker != stack[common].marker || chain[common].context != stack[common].context)
         {
@@ -129,38 +121,7 @@ std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
     return pushed;
 }
 
-std::string build_marker_string(const std::vector<StackEntry>& stack)
-{
-    std::size_t marker_len = 0;
-    std::size_t ctx_len    = 0;
-    for (const auto& entry : stack)
-    {
-        marker_len += entry.marker.size() + 1;
-        for (char c : entry.marker)
-            if (c == '%' || c == '/')
-                marker_len += 2;
-        ctx_len += entry.context.size() + 1;
-    }
-    std::string out;
-    out.reserve(marker_len + ctx_len + 1);
-
-    for (std::size_t i = 0; i < stack.size(); ++i)
-    {
-        if (i != 0)
-            out += '/';
-        encode_marker_segment(stack[i].marker, out);
-    }
-    out += ':';
-    for (std::size_t i = 0; i < stack.size(); ++i)
-    {
-        if (i != 0)
-            out += '/';
-        out += stack[i].context;
-    }
-    return out;
-}
-
-std::size_t apply_userscope_overlay()
+std::size_t apply_user_scope_overlay()
 {
     auto* chain_info = dynamic_cast<const RoctxUserScopeChain*>(
         c10::ThreadLocalDebugInfo::get(kRoctxUserScopeKind));
@@ -175,72 +136,6 @@ std::size_t apply_userscope_overlay()
         process_state().stats.user_scope_inherits.fetch_add(1, std::memory_order_relaxed);
     }
     return pushed;
-}
-
-void push_user_scope(const std::string& marker, const std::string& context, const std::string& backend)
-{
-    ProcessState& state        = process_state();
-    ThreadState&  thread       = thread_state();
-    bool          pushed_frame = false;
-    bool          pushed_guard = false;
-    try
-    {
-        StackEntry entry;
-        entry.marker  = marker;
-        entry.context = context;
-        thread.stack.push_back(std::move(entry));
-        pushed_frame = true;
-
-        thread.guards.push_back(publish_userscope_chain(thread.stack));
-        pushed_guard = true;
-
-        std::string wire_string = build_marker_string(thread.stack);
-        if (!backend.empty())
-        {
-            wire_string += '|';
-            wire_string += backend;
-        }
-        roctxRangePushA(wire_string.c_str());
-        state.stats.user_scope_pushes.fetch_add(1, std::memory_order_relaxed);
-        state.stats.pushes.fetch_add(1, std::memory_order_relaxed);
-    }
-    catch (...)
-    {
-        if (pushed_guard && !thread.guards.empty())
-        {
-            thread.guards.pop_back();
-        }
-        if (pushed_frame && !thread.stack.empty())
-        {
-            thread.stack.pop_back();
-        }
-        state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
-        throw;
-    }
-}
-
-void pop_user_scope()
-{
-    try
-    {
-        ProcessState& state  = process_state();
-        ThreadState&  thread = thread_state();
-
-        if (thread.stack.empty() || thread.guards.empty())
-        {
-            state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
-            return;
-        }
-        roctxRangePop();
-        state.stats.user_scope_pops.fetch_add(1, std::memory_order_relaxed);
-        state.stats.pops.fetch_add(1, std::memory_order_relaxed);
-        thread.stack.pop_back();
-        thread.guards.pop_back();
-    }
-    catch (...)
-    {
-        process_state().stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
-    }
 }
 
 std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_fn)
@@ -266,8 +161,8 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
 
         if (stack_was_empty)
         {
-            const std::size_t overlay_frames = apply_userscope_overlay();
-            observer_ctx->pushed_snapshot_frames += overlay_frames;
+            const std::size_t overlay_frames = apply_user_scope_overlay();
+            observer_ctx->pushed_extra_frames += overlay_frames;
             if (overlay_frames > 0)
             {
                 stack_was_empty_for_leaf = false;
@@ -280,7 +175,7 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_f
             std::vector<StackEntry> snapshot;
             if (forward_thread_id != 0 && state.snapshots.consume(seq_nr, forward_thread_id, &snapshot))
             {
-                observer_ctx->pushed_snapshot_frames += push_with_prefix_dedup(snapshot);
+                observer_ctx->pushed_extra_frames += push_with_prefix_dedup(snapshot);
             }
         }
 
@@ -341,19 +236,130 @@ void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext* obs_ct
     }
 }
 
+}  // namespace
+
+namespace torch_trace_collector::detail
+{
+
+ProcessState& process_state()
+{
+    static ProcessState state;
+    return state;
+}
+
+ThreadState& thread_state()
+{
+    static thread_local ThreadState state;
+    return state;
+}
+
+std::string build_marker_string(const std::vector<StackEntry>& stack)
+{
+    std::size_t marker_len = 0;
+    std::size_t ctx_len    = 0;
+    for (const auto& entry : stack)
+    {
+        marker_len += entry.marker.size() + 1;
+        for (char c : entry.marker)
+            if (c == '%' || c == '/')
+                marker_len += 2;
+        ctx_len += entry.context.size() + 1;
+    }
+    std::string out;
+    out.reserve(marker_len + ctx_len + 1);
+
+    for (std::size_t i = 0; i < stack.size(); ++i)
+    {
+        if (i != 0)
+            out += '/';
+        encode_marker_segment(stack[i].marker, out);
+    }
+    out += ':';
+    for (std::size_t i = 0; i < stack.size(); ++i)
+    {
+        if (i != 0)
+            out += '/';
+        out += stack[i].context;
+    }
+    return out;
+}
+
+void push_user_scope(const std::string& marker, const std::string& context, const std::string& backend)
+{
+    ProcessState& state        = process_state();
+    ThreadState&  thread       = thread_state();
+    bool          pushed_frame = false;
+    bool          pushed_guard = false;
+    try
+    {
+        StackEntry entry;
+        entry.marker  = marker;
+        entry.context = context;
+        thread.stack.push_back(std::move(entry));
+        pushed_frame = true;
+
+        thread.guards.push_back(publish_user_scope_chain(thread.stack));
+        pushed_guard = true;
+
+        std::string wire_string = build_marker_string(thread.stack);
+        if (!backend.empty())
+        {
+            wire_string += '|';
+            wire_string += backend;
+        }
+        roctxRangePushA(wire_string.c_str());
+        state.stats.user_scope_pushes.fetch_add(1, std::memory_order_relaxed);
+        state.stats.pushes.fetch_add(1, std::memory_order_relaxed);
+    }
+    catch (...)
+    {
+        if (pushed_guard && !thread.guards.empty())
+        {
+            thread.guards.pop_back();
+        }
+        if (pushed_frame && !thread.stack.empty())
+        {
+            thread.stack.pop_back();
+        }
+        state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
+        throw;
+    }
+}
+
+void pop_user_scope()
+{
+    ProcessState& state  = process_state();
+    ThreadState&  thread = thread_state();
+    try
+    {
+        if (thread.stack.empty() || thread.guards.empty())
+        {
+            state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        roctxRangePop();
+        state.stats.user_scope_pops.fetch_add(1, std::memory_order_relaxed);
+        state.stats.pops.fetch_add(1, std::memory_order_relaxed);
+        thread.stack.pop_back();
+        thread.guards.pop_back();
+    }
+    catch (...)
+    {
+        state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
 std::int64_t install()
 {
     return process_state().install.wlock(
         [](InstallState& state)
         {
-            if (state.handle != at::INVALID_CALLBACK_HANDLE)
+            if (state.handle == at::INVALID_CALLBACK_HANDLE)
             {
-                return static_cast<std::int64_t>(state.handle);
+                state.handle = at::addGlobalCallback(
+                    at::RecordFunctionCallback(start_cb, end_cb)
+                        .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
             }
-            state.handle = at::addGlobalCallback(
-                at::RecordFunctionCallback(start_cb, end_cb)
-                    .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
-            state.installed = true;
             return static_cast<std::int64_t>(state.handle);
         });
 }
@@ -364,7 +370,6 @@ void uninstall()
         [](InstallState& state)
         {
             const auto handle = std::exchange(state.handle, at::INVALID_CALLBACK_HANDLE);
-            state.installed   = false;
             if (handle != at::INVALID_CALLBACK_HANDLE)
             {
                 at::removeCallback(handle);
@@ -375,107 +380,8 @@ void uninstall()
 
 bool is_installed()
 {
-    return process_state().install.rlock([](const InstallState& state) { return state.installed; });
-}
-
-synchronized_t<SnapshotStore::Shard>& SnapshotStore::shard_for(const SnapshotKey& key)
-{
-    return shards_[shard_index(key)];
-}
-
-void SnapshotStore::lru_remove(Shard& shard, const SnapshotKey& key)
-{
-    auto it = shard.lru_idx.find(key);
-    if (it == shard.lru_idx.end())
-        return;
-    shard.lru_order.erase(it->second);
-    shard.lru_idx.erase(it);
-}
-
-void SnapshotStore::lru_touch(Shard& shard, const SnapshotKey& key)
-{
-    lru_remove(shard, key);
-    shard.lru_order.push_back(key);
-    auto tail = shard.lru_order.end();
-    --tail;
-    shard.lru_idx.emplace(key, tail);
-}
-
-void SnapshotStore::evict_oldest(Shard& shard)
-{
-    Expects(!shard.lru_order.empty());
-    const SnapshotKey oldest = shard.lru_order.front();
-    shard.lru_order.pop_front();
-    shard.lru_idx.erase(oldest);
-    shard.snapshots.erase(oldest);
-    stats_.snapshots_dropped.fetch_add(1, std::memory_order_relaxed);
-}
-
-void SnapshotStore::save(std::int64_t seq_nr, std::uint64_t thread_id, const std::vector<StackEntry>& stack)
-{
-    const SnapshotKey key = {seq_nr, thread_id};
-    shard_for(key).wlock(
-        [&](Shard& shard)
-        {
-            auto it = shard.snapshots.find(key);
-            if (it != shard.snapshots.end())
-            {
-                it->second = stack;
-                lru_touch(shard, key);
-                stats_.snapshots_overwritten.fetch_add(1, std::memory_order_relaxed);
-                stats_.snapshots_saved.fetch_add(1, std::memory_order_relaxed);
-                return;
-            }
-            while (shard.snapshots.size() >= kShardSoftCap)
-            {
-                evict_oldest(shard);
-            }
-            shard.snapshots.emplace(key, stack);
-            lru_touch(shard, key);
-            stats_.snapshots_saved.fetch_add(1, std::memory_order_relaxed);
-        });
-}
-
-bool SnapshotStore::consume(std::int64_t seq_nr, std::uint64_t thread_id, std::vector<StackEntry>* out_stack)
-{
-    const SnapshotKey key = {seq_nr, thread_id};
-    return shard_for(key).wlock(
-        [&](Shard& shard)
-        {
-            auto it = shard.snapshots.find(key);
-            if (it == shard.snapshots.end())
-                return false;
-            Expects(shard.lru_idx.find(key) != shard.lru_idx.end());
-            *out_stack = std::move(it->second);
-            shard.snapshots.erase(it);
-            lru_remove(shard, key);
-            stats_.snapshots_consumed.fetch_add(1, std::memory_order_relaxed);
-            return true;
-        });
-}
-
-std::size_t SnapshotStore::pending() const
-{
-    std::size_t total = 0;
-    for (const auto& guarded_shard : shards_)
-    {
-        total += guarded_shard.rlock([](const Shard& shard) { return shard.snapshots.size(); });
-    }
-    return total;
-}
-
-void SnapshotStore::clear()
-{
-    for (auto& guarded_shard : shards_)
-    {
-        guarded_shard.wlock(
-            [](Shard& shard)
-            {
-                shard.snapshots.clear();
-                shard.lru_order.clear();
-                shard.lru_idx.clear();
-            });
-    }
+    return process_state().install.rlock([](const InstallState& state)
+                                         { return state.handle != at::INVALID_CALLBACK_HANDLE; });
 }
 
 }  // namespace torch_trace_collector::detail

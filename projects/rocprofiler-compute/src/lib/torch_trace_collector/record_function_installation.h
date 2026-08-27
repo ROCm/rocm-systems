@@ -1,9 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Registration of the callback pair with ATen. at::addGlobalCallback registers
-// process-wide, so install() is idempotent and its state lives in
-// process_state().
+// Global RecordFunction callback registration.
 
 #pragma once
 
