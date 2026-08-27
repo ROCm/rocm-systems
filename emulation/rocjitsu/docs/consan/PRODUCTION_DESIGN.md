@@ -4038,6 +4038,27 @@ analysis completed.
   3.72 seconds). All 587 physical cases are therefore qualified. E2E validation
   remains outside this work.
 
+### Slice 5AD: delete unconsumed access-fact formatters
+
+- **No API for unreachable diagnostics:** The LDS-access-kind and FLAT
+  address-space-hint string formatters had no production caller. Their only
+  callers were assertions that tested those two functions in isolation; no
+  diagnostic, hook, policy, planner, or lowerer consumed their output.
+- **Completed prototype deletion:** Both declarations and switch
+  implementations are gone, together with the three self-justifying test
+  lines. The underlying typed facts remain part of normalized inventory and
+  continue to drive policy and lowering; only the unused string projection was
+  removed.
+- **Deletion result:** Production source is 34 physical lines smaller and test
+  source is three lines smaller. No replacement formatter, generic enum
+  printer, or compatibility API was introduced.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 75.72
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate immediately
+  before this non-device formatter deletion. E2E validation remains outside
+  this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

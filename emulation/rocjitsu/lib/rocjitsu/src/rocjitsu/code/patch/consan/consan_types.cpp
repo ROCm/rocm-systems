@@ -192,38 +192,6 @@ const char *consan_barrier_scope_name(ConSanBarrierSite::Scope scope) {
   return "unknown";
 }
 
-const char *consan_lds_access_kind_name(ConSanLdsAccessKind kind) {
-  switch (kind) {
-  case ConSanLdsAccessKind::Read:
-    return "read";
-  case ConSanLdsAccessKind::Write:
-    return "write";
-  case ConSanLdsAccessKind::Atomic:
-    return "atomic";
-  case ConSanLdsAccessKind::Other:
-    return "other";
-  }
-  return "unknown";
-}
-
-const char *consan_flat_address_space_hint_name(ConSanFlatAddressSpaceHint hint) {
-  switch (hint) {
-  case ConSanFlatAddressSpaceHint::Unknown:
-    return "unknown";
-  case ConSanFlatAddressSpaceHint::Group:
-    return "group";
-  case ConSanFlatAddressSpaceHint::Private:
-    return "private";
-  case ConSanFlatAddressSpaceHint::MaybeGroup:
-    return "maybe-group";
-  case ConSanFlatAddressSpaceHint::MaybePrivate:
-    return "maybe-private";
-  case ConSanFlatAddressSpaceHint::Global:
-    return "global";
-  }
-  return "unknown";
-}
-
 const char *consan_register_plan_reason_name(ConSanRegisterPlanReason reason) {
   switch (reason) {
   case ConSanRegisterPlanReason::None:
