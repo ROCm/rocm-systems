@@ -55,6 +55,7 @@ TEST_F(HipFileBuffer, register_internal_supported_hip_memory)
         StrictMock<MHip> mhip;
         expect_buffer_registration(mhip, memoryType);
         Context<DriverState>::get()->registerBuffer(nonnull_ptr, 0, 0);
+        Context<DriverState>::get()->deregisterBuffer(nonnull_ptr);
     }
 }
 
@@ -64,6 +65,7 @@ TEST_F(HipFileBuffer, register_supported_hip_memory)
         StrictMock<MHip> mhip;
         expect_buffer_registration(mhip, memoryType);
         ASSERT_EQ(hipFileBufRegister(nonnull_ptr, 0, 0), HIPFILE_SUCCESS);
+        ASSERT_EQ(hipFileBufDeregister(nonnull_ptr), HIPFILE_SUCCESS);
     }
 }
 
