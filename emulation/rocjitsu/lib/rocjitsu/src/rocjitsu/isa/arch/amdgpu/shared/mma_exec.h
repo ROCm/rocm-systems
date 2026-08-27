@@ -317,37 +317,16 @@ inline InputLoc wmma_packed_input_loc(uint32_t lane, uint32_t slot, uint32_t dat
 
 /// Compute an input element location for CDNA4 block-scale F8F6F4 MFMA.
 ///
-/// The sub-byte physical layout depends on whether the other operand is an
-/// eight-bit or sub-byte format. The supported scaled MFMA shapes both use one
-/// matrix block distributed across a wave64.
+/// Scaled MFMA uses the same dense operand layout as the corresponding
+/// unscaled F8F6F4 operation. The supported shapes both use one matrix block
+/// distributed across a wave64.
 inline InputLoc mfma_scale_f8f6f4_input_loc(uint32_t dim, uint32_t K, uint32_t index, uint32_t k,
-                                            uint32_t data_bits, uint32_t other_data_bits) {
+                                            uint32_t data_bits) {
   if (!((dim == 16 && K == 128) || (dim == 32 && K == 64)))
     throw util::UnimplementedInst("unsupported CDNA4 block-scale MFMA input shape");
-  if (data_bits == 8)
-    return input_loc(dim, K, /*B=*/1, index, k, /*b=*/0, data_bits);
-  if ((data_bits != 4 && data_bits != 6) ||
-      (other_data_bits != 4 && other_data_bits != 6 && other_data_bits != 8))
+  if (data_bits != 4 && data_bits != 6 && data_bits != 8)
     throw util::UnimplementedInst("unsupported CDNA4 block-scale MFMA input format");
-
-  uint32_t lane;
-  uint32_t slot;
-  if (other_data_bits == 8) {
-    if (dim == 16) {
-      lane = 16u * (k / 32u) + index;
-      slot = 16u * ((k / 16u) & 1u) + (k & 15u);
-    } else {
-      lane = 32u * (k / 32u) + index;
-      slot = k & 31u;
-    }
-  } else if (dim == 16) {
-    lane = 16u * ((k % 64u) / 16u) + index;
-    slot = 16u * (k / 64u) + (k & 15u);
-  } else {
-    lane = 32u * ((k % 32u) / 16u) + index;
-    slot = 16u * (k / 32u) + (k & 15u);
-  }
-  return wmma_packed_input_loc(lane, slot, data_bits);
+  return input_loc(dim, K, /*B=*/1, index, k, /*b=*/0, data_bits);
 }
 
 inline InputLoc gfx12_wmma_input_loc(uint32_t wave_size, uint32_t dim, uint32_t K, uint32_t i,
@@ -3175,8 +3154,8 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
             uint32_t k_start = blk * BLOCK_K;
             uint32_t k_end = std::min(k_start + BLOCK_K, K);
             for (uint32_t k = k_start; k < k_end; ++k) {
-              auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits, b_bits);
-              auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits, a_bits);
+              auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits);
+              auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits);
               const float a = ea(cu, s0, physicalize_loc(al, wf));
               const float b_val = eb(cu, s1, physicalize_loc(bl, wf));
               block_sum = std::fma(a, b_val, block_sum);
@@ -3220,12 +3199,12 @@ void exec_f32_scaled_impl(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t
       for (uint32_t b = 0; b < B; ++b) {
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
-            auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits, b_bits);
+            auto al = mfma_scale_f8f6f4_input_loc(M, K, row, k, a_bits);
             Abuf[row * K + k] = ea(reads.a, s0, physicalize_loc(al, wf));
           }
         for (uint32_t k = 0; k < K; ++k)
           for (uint32_t col = 0; col < N; ++col) {
-            auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits, a_bits);
+            auto bl = mfma_scale_f8f6f4_input_loc(N, K, col, k, b_bits);
             Bbuf[k * stride + col] = eb(reads.b, s1, physicalize_loc(bl, wf));
           }
         for (uint32_t row = 0; row < M; ++row)

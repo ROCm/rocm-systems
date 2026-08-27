@@ -29,7 +29,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
@@ -705,6 +705,9 @@ struct ncclComm {
 
   // Force PAT algorithm for this communicator
   bool forcePatEnable;
+
+  // PAT ReduceScatter and AllGather share one connection set; must match on every rank
+  bool patSharedQps;
 
   // MNNVL: Multi-Node NVLink
   int MNNVL; // true when MNNVL is available

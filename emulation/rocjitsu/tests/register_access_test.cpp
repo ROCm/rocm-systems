@@ -12,9 +12,12 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
@@ -109,8 +112,9 @@ struct Fixture {
   Wavefront *wf = nullptr;
 
   explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t wave_size = 0)
-      : execution_backend_scope(arch == ROCJITSU_CODE_ARCH_RDNA4 ? &rdna4::execution_backend()
-                                                                 : &cdna4::execution_backend()) {
+      : execution_backend_scope(arch == ROCJITSU_CODE_ARCH_CDNA5   ? &cdna5::execution_backend()
+                                : arch == ROCJITSU_CODE_ARCH_RDNA4 ? &rdna4::execution_backend()
+                                                                   : &cdna4::execution_backend()) {
     ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.num_wf_slots = 1;
@@ -466,6 +470,78 @@ TEST(RegisterAccessTest, Sgpr64ReadObservesBothRegisters) {
   fx.plugin->sgpr_reads.clear();
   EXPECT_EQ(fx.cu->read_sgpr(base + 19), 0x23456789u);
   EXPECT_EQ(fx.cu->read_sgpr(base + 20), 0xABCDEF01u);
+}
+
+TEST(ScalarOperandSelectorsTest, ClassifiesRegisterPairLowWords) {
+  EXPECT_TRUE(is_src_scalar_register_pair(0));
+  EXPECT_TRUE(is_src_scalar_register_pair(106));
+  EXPECT_TRUE(is_src_scalar_register_pair(108));
+  EXPECT_TRUE(is_src_scalar_register_pair(126));
+  EXPECT_TRUE(is_src_scalar_register_pair(230));
+
+  EXPECT_FALSE(is_src_scalar_register_pair(107));
+  EXPECT_FALSE(is_src_scalar_register_pair(124));
+  EXPECT_FALSE(is_src_scalar_register_pair(128));
+  EXPECT_FALSE(is_src_scalar_register_pair(231));
+  EXPECT_FALSE(is_src_scalar_register_pair(242));
+}
+
+TEST(RegisterAccessTest, LanePair32PreservesRegisterPairsAndSplatsSingleWords) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  RegisterAccess regs(*fx.wf);
+
+  const uint32_t sgpr_base = fx.sgpr_base();
+  fx.cu->write_sgpr(sgpr_base + 8, 0x11111111u);
+  fx.cu->write_sgpr(sgpr_base + 9, 0x22222222u);
+  cdna4::Operand sgpr_pair(64, cdna4::OperandType::OPR_SRC_SIMPLE, 8);
+  OperandPair32 pair = regs.read_lane_pair32(sgpr_pair, 0);
+  EXPECT_EQ(pair.lo, 0x11111111u);
+  EXPECT_EQ(pair.hi, 0x22222222u);
+
+  fx.wf->set_vcc_raw(0x4444444433333333ull);
+  cdna4::Operand vcc_pair(64, cdna4::OperandType::OPR_SRC_SIMPLE, 106);
+  pair = regs.read_lane_pair32(vcc_pair, 0);
+  EXPECT_EQ(pair.lo, 0x33333333u);
+  EXPECT_EQ(pair.hi, 0x44444444u);
+
+  fx.wf->set_ttmp(0, 0x55555555u);
+  fx.wf->set_ttmp(1, 0x66666666u);
+  cdna4::Operand ttmp_pair(64, cdna4::OperandType::OPR_SRC_SIMPLE, 108);
+  pair = regs.read_lane_pair32(ttmp_pair, 0);
+  EXPECT_EQ(pair.lo, 0x55555555u);
+  EXPECT_EQ(pair.hi, 0x66666666u);
+
+  cdna4::Operand inline_one(64, cdna4::OperandType::OPR_SRC_SIMPLE, 242);
+  pair = regs.read_lane_pair32(inline_one, 0);
+  EXPECT_EQ(pair.lo, 0x3F800000u);
+  EXPECT_EQ(pair.hi, 0x3F800000u);
+
+  fx.wf->set_m0(0x77777777u);
+  cdna4::Operand m0(64, cdna4::OperandType::OPR_SRC_SIMPLE, 124);
+  pair = regs.read_lane_pair32(m0, 0);
+  EXPECT_EQ(pair.lo, 0x77777777u);
+  EXPECT_EQ(pair.hi, 0x77777777u);
+
+  cdna4::Operand literal64(64, cdna4::OperandType::OPR_SRC_SIMPLE, 0x9999999988888888ull, true);
+  pair = regs.read_lane_pair32(literal64, 0);
+  EXPECT_EQ(pair.lo, 0x88888888u);
+  EXPECT_EQ(pair.hi, 0x99999999u);
+}
+
+TEST(RegisterAccessTest, LanePair32ReadsGfx1250FlatScratchBase) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(fx.wf, nullptr);
+
+  constexpr uint64_t kScratchBase = 0x7777777766666666ull;
+  fx.wf->set_scratch_base(kScratchBase);
+  cdna5::Operand flat_scratch_base(
+      64, cdna5::OperandType::OPR_SRC,
+      static_cast<int>(cdna5::OpSelSrc::OPR_SRC_SRC_FLAT_SCRATCH_BASE_LO));
+
+  const OperandPair32 pair = RegisterAccess(*fx.wf).read_lane_pair32(flat_scratch_base, 0);
+  EXPECT_EQ(pair.lo, 0x66666666u);
+  EXPECT_EQ(pair.hi, 0x77777777u);
 }
 
 TEST(RegisterAccessTest, PublicOperandChunkReadObservesReadWindow) {

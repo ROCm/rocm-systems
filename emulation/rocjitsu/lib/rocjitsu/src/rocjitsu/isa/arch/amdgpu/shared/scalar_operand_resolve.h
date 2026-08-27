@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -140,33 +141,36 @@ inline bool can_resolve_src_scalar(int ev, int m0_ev) {
 }
 
 inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
-  if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102)
-    return wf.scratch_base();
-  if (ev <= 105) {
-    uint32_t lo = RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
-    uint32_t hi =
-        RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
-    return static_cast<uint64_t>(hi) << 32 | lo;
-  }
-  if (ev == 106)
-    return wf.vcc();
-  if (ev >= 108 && ev <= 122) { // TTMP pair; see resolve_src_scalar()
-    uint32_t lo = wf.ttmp(static_cast<uint32_t>(ev - 108));
-    uint32_t hi = wf.ttmp(static_cast<uint32_t>(ev - 107));
-    return static_cast<uint64_t>(hi) << 32 | lo;
+  if (is_src_scalar_register_pair(ev)) {
+    if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) && ev == 102)
+      return wf.scratch_base();
+    if (ev <= 105) {
+      uint32_t lo = RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));
+      uint32_t hi =
+          RegisterAccess(wf).read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));
+      return static_cast<uint64_t>(hi) << 32 | lo;
+    }
+    if (ev == 106)
+      return wf.vcc();
+    if (ev >= 108 && ev <= 122) { // TTMP pair; see resolve_src_scalar()
+      uint32_t lo = wf.ttmp(static_cast<uint32_t>(ev - 108));
+      uint32_t hi = wf.ttmp(static_cast<uint32_t>(ev - 107));
+      return static_cast<uint64_t>(hi) << 32 | lo;
+    }
+    if (ev == 126)
+      return wf.exec_raw();
+    if (ev == 230)
+      return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE
+    throw std::logic_error("Scalar register-pair selector is not resolved: " + std::to_string(ev));
   }
   if (m0_ev == 125 && ev == 124)
     return 0u; // NULL
   if (ev == m0_ev)
     return wf.m0();
-  if (ev == 126)
-    return wf.exec_raw();
   if (ev >= 128 && ev <= 192)
     return static_cast<uint64_t>(ev - 128);
   if (ev >= 193 && ev <= 208)
     return static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(-(ev - 192))));
-  if (ev == 230)
-    return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE
   if (ev == 240)
     return 0x3FE0000000000000ULL; // 0.5
   if (ev == 241)
