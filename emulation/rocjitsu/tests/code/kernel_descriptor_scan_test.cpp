@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -26,6 +27,23 @@ namespace {
 
 using namespace rocjitsu::test;
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+TEST(KernelDescriptorBytes, ReadAndWriteRejectPartialRangesWithoutMutation) {
+  KD expected{};
+  expected.private_segment_fixed_size = 384u;
+  std::vector<uint8_t> image(sizeof(KD) + 3u, 0x5au);
+
+  EXPECT_TRUE(write_kernel_descriptor(image, 3u, expected));
+  const auto decoded = read_kernel_descriptor(image, 3u);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->private_segment_fixed_size, 384u);
+
+  const std::vector<uint8_t> before_failure = image;
+  EXPECT_FALSE(write_kernel_descriptor(image, 4u, expected));
+  EXPECT_EQ(image, before_failure);
+  EXPECT_FALSE(read_kernel_descriptor(image, 4u).has_value());
+  EXPECT_FALSE(read_kernel_descriptor(image, std::numeric_limits<uint64_t>::max()).has_value());
+}
 
 // scan the fixture image using its own .text section coordinates.
 std::vector<KernelDescriptorInfo> scan_via_text_section(const std::vector<uint8_t> &image) {

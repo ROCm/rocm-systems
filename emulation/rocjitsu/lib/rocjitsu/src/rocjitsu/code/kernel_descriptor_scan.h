@@ -30,6 +30,33 @@ struct KernelDescriptorInfo {
   rocr::llvm::amdhsa::kernel_descriptor_t descriptor{}; ///< Raw descriptor bytes.
 };
 
+/// @brief Read one AMDHSA kernel descriptor from raw ELF image bytes.
+///
+/// @details The descriptor file offset is untrusted input. This operation
+/// validates the complete fixed-size descriptor range before forming a pointer
+/// and copies the bytes into an aligned value, so callers never need to repeat
+/// overflow-prone offset arithmetic or dereference an unaligned image address.
+///
+/// @returns The copied descriptor, or `std::nullopt` when any descriptor byte
+/// would fall outside @p image. No ELF symbol or section ownership validation
+/// is performed; callers that need discovery must use
+/// `scan_kernel_descriptors` first.
+[[nodiscard]] std::optional<rocr::llvm::amdhsa::kernel_descriptor_t>
+read_kernel_descriptor(std::span<const uint8_t> image, uint64_t descriptor_file_offset);
+
+/// @brief Write one AMDHSA kernel descriptor into raw ELF image bytes.
+///
+/// @details This is the mutation counterpart of `read_kernel_descriptor`. It
+/// validates the complete destination range before copying, and therefore
+/// never partially writes a descriptor. It deliberately does not update ELF
+/// metadata or validate descriptor semantics.
+///
+/// @returns `true` after writing the complete descriptor, or `false` when the
+/// destination range does not fit. Failure leaves @p image unchanged.
+[[nodiscard]] bool
+write_kernel_descriptor(std::span<uint8_t> image, uint64_t descriptor_file_offset,
+                        const rocr::llvm::amdhsa::kernel_descriptor_t &descriptor);
+
 /// @brief Locate every ".kd" descriptor whose entry lands in .text.
 ///
 /// @details Walks .symtab/.dynsym, decodes each descriptor's file offset and

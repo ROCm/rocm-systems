@@ -78,6 +78,23 @@ text_vaddr_for_section(uint64_t text_offset, uint64_t text_size, const Elf64_Ehd
 
 } // namespace
 
+std::optional<KD> read_kernel_descriptor(std::span<const uint8_t> image,
+                                         uint64_t descriptor_file_offset) {
+  if (!range_in_bounds(descriptor_file_offset, sizeof(KD), image.size()))
+    return std::nullopt;
+  KD descriptor{};
+  std::memcpy(&descriptor, image.data() + descriptor_file_offset, sizeof(descriptor));
+  return descriptor;
+}
+
+bool write_kernel_descriptor(std::span<uint8_t> image, uint64_t descriptor_file_offset,
+                             const KD &descriptor) {
+  if (!range_in_bounds(descriptor_file_offset, sizeof(KD), image.size()))
+    return false;
+  std::memcpy(image.data() + descriptor_file_offset, &descriptor, sizeof(descriptor));
+  return true;
+}
+
 std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
                         std::optional<size_t> text_section_index) {

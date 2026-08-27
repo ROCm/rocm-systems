@@ -329,31 +329,6 @@ shifted_load_delta_alignment(std::span<const Elf64_Phdr> phdrs, uint64_t file_of
   return file_offset <= limit && size <= limit - file_offset;
 }
 
-/// @brief Read a kernel descriptor struct out of the in-memory image.
-///
-/// @returns nullopt if the descriptor does not fit within the image. Shared by
-/// DBT's resource translation and DBI's narrower scratch-grow so both agree on
-/// bounds checking and struct-sized copy.
-[[nodiscard]] std::optional<KD> read_kernel_descriptor(std::span<const uint8_t> image,
-                                                       uint64_t file_offset) {
-  if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
-    return std::nullopt;
-  KD desc;
-  std::memcpy(&desc, image.data() + file_offset, sizeof(desc));
-  return desc;
-}
-
-/// @brief Write a kernel descriptor struct back into the in-memory image.
-///
-/// @returns false if the descriptor does not fit within the image.
-[[nodiscard]] bool write_kernel_descriptor(std::span<uint8_t> image, uint64_t file_offset,
-                                           const KD &desc) {
-  if (!image_contains_range(image.size(), file_offset, sizeof(KD)))
-    return false;
-  std::memcpy(image.data() + file_offset, &desc, sizeof(desc));
-  return true;
-}
-
 /// @brief Write the translated resource fields into a descriptor.
 ///
 /// @returns False when the request cannot be encoded without changing what the
