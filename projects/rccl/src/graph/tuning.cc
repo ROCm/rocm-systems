@@ -1796,7 +1796,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     1ULL*1024*1024,      // [2] AllGather       -- 1 MiB (DDA wins <=1M; Ring LL128 wins 4M-32M, Ring Simple 64M-128M)
-    128ULL*1024*1024,    // [3] ReduceScatter   -- 128 MiB per-rank shard (placeholder)
+    2ULL*1024*1024,      // [3] ReduceScatter   -- 2 MiB total (DDA wins <=2M; Ring LL128 wins 4M-32M)
     16ULL*1024*1024,     // [4] AllReduce       -- 16 MiB (Ring/Simple wins above; CE wins R2 4-256 MiB)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
