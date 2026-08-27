@@ -240,9 +240,9 @@ if(BUILD_TESTS)
   # commSetUnrollFactor and rcclCommSetP2pShiftSize for init.cc's benefit, both
   # of which rccl_wrap.cc defines for real, so linking them together would be
   # a duplicate-symbol error. See wrap_stubs.cc's header comment for the full
-  # rationale and wrap-test.cc for scope (this batch: nine low-dependency
-  # helpers; rcclOverrideChannels/rcclSetPipelining/WarpSpeed/rcclSelectXxx
-  # are out of scope here, for a future batch).
+  # rationale and wrap-test.cc for scope (17 low-dependency helpers so far;
+  # rcclOverrideChannels/rcclSetPipelining/WarpSpeed/rcclSelectXxx are out of
+  # scope here, for a future batch).
   # ---------------------------------------------------------------------------
   set(TEST_MICRO_WRAP_SOURCE_FILES
     wrap-test.cc
@@ -264,6 +264,14 @@ if(BUILD_TESTS)
     ${RCCL_COMMON_INCLUDE_DIRS})
   target_compile_definitions(rccl-UnitTestsMicroWrap PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
     WRAP_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc"
+    # Real paths for the ParamDefaults_MatchProductionSource test, which reads
+    # these at run time to catch a hardcoded fakes/wrap_stubs.cc RCCL_PARAM
+    # default (e.g. rcclParamForceCe) silently drifting from the real
+    # NCCL_PARAM/RCCL_PARAM invocation -- there's no importable constant for
+    # these the way NCCL_NUM_ALGORITHMS etc. is, since the default is an
+    # inline macro-argument literal, not a separately declared symbol.
+    CONNECT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/graph/connect.cc"
+    ENQUEUE_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc"
     # Makes WrapMicrotestIsolated's process-isolated tests flush their
     # coverage counters in the forked child (see the standalone build's
     # RCCL_TEST_CODE_COVERAGE comment below); without it those tests run
@@ -728,6 +736,10 @@ target_compile_definitions(rccl-UnitTestsMicroWrap PRIVATE
   NCCL_OS_LINUX
   ROCM_VERSION=70000
   WRAP_CC_PATH="${RCCL_HIPIFY_DIR}/src/rccl_wrap.cc"
+  # See the in-build block's comment: real paths for the
+  # ParamDefaults_MatchProductionSource drift check.
+  CONNECT_CC_PATH="${RCCL_HIPIFY_DIR}/src/graph/connect.cc"
+  ENQUEUE_CC_PATH="${RCCL_HIPIFY_DIR}/src/enqueue.cc"
   $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
   $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
   # RCCL_TEST_CODE_COVERAGE: makes WrapMicrotestIsolated's process-isolated

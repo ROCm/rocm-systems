@@ -11,18 +11,22 @@
 // callable, links NO librccl/HIP, and satisfies every external symbol via
 // fakes/wrap_stubs.cc.
 //
-// Scope of this first pass: nine low-dependency helpers at the top of the
-// file that take no ncclComm* at all, or touch only a handful of plain
-// fields -- no RCCL_PARAM, no getenv, no DDA/CE/symmetric-kernel machinery.
-// Everything past rcclUseAlltoAllGda in the file (rcclOverrideChannels,
-// rcclSetPipelining, the WarpSpeed helpers, rcclSelectAllReduce/AllGather/
-// ReduceScatter, ...) is unreached by design here; each depends on seams
-// this pass doesn't build. Mutation-tested directly against this file;
-// residuals are documented at their own test below rather than here.
+// Covers 17 low-dependency helpers: nine that take no ncclComm* at all, or
+// touch only a handful of plain fields, plus eight more that need a real
+// one-GPU comm+topology (MakeCommWithArch below) but still avoid RCCL_PARAM/
+// getenv/DDA/CE/symmetric-kernel machinery beyond a cached fast-return path.
+// rcclOverrideChannels, rcclSetPipelining, the WarpSpeed helpers, and
+// rcclSelectAllReduce/AllGather/ReduceScatter are unreached by design; each
+// depends on seams this file doesn't build. Mutation-tested directly against
+// this file; residuals are documented at their own test below rather than
+// here.
 
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 #include "../common/LogCapture.hpp"                 // RcclUnitTesting::CaptureLog
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
@@ -690,4 +694,46 @@ TEST(WrapMicrotest, FuncMaxSendRecvCount_OtherFuncsReturnCountUnscaled) {
   size_t maxCount = 0;
   EXPECT_EQ(ncclSuccess, rcclFuncMaxSendRecvCount(ncclFuncAllReduce, /*nRanks=*/8, /*count=*/100, maxCount));
   EXPECT_EQ(100u, maxCount);
+}
+
+// ===========================================================================
+// ParamDefaults_MatchProductionSource -- run-time counterpart to
+// wrap_stubs.cc's static_asserts above. ncclParamMinNchannels/MaxNchannels,
+// rcclParamForceCe, and ncclParamLaunchOrderImplicit hardcode the real
+// NCCL_PARAM/RCCL_PARAM default they copy (see wrap_stubs.cc), but that
+// default is an inline macro-argument literal with no separately importable
+// constant -- unlike NCCL_NUM_ALGORITHMS or ncclNumFuncs, there's nothing a
+// static_assert could check. Instead, this test reads the real
+// graph/connect.cc / enqueue.cc source (via CMake-provided CONNECT_CC_PATH /
+// ENQUEUE_CC_PATH, the same pattern as WRAP_CC_PATH) at run time and confirms
+// the exact macro invocation text is still there: name, env var string, and
+// default value all together, so renaming any part of it or changing the
+// default both fail this test instead of going unnoticed.
+// ===========================================================================
+
+namespace {
+std::string ReadFileOrDie(const char* path) {
+  std::ifstream f(path);
+  if (!f) {
+    ADD_FAILURE() << "couldn't open " << path << " -- CONNECT_CC_PATH/ENQUEUE_CC_PATH stale vs the hipify tree?";
+    return "";
+  }
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+}  // namespace
+
+TEST(WrapMicrotest, ParamDefaults_MatchProductionSource) {
+  const std::string connectCc = ReadFileOrDie(CONNECT_CC_PATH);
+  const std::string enqueueCc = ReadFileOrDie(ENQUEUE_CC_PATH);
+
+  EXPECT_NE(std::string::npos, connectCc.find(R"(NCCL_PARAM(MinNchannels, "MIN_NCHANNELS", -2))"))
+      << "graph/connect.cc's NCCL_PARAM(MinNchannels...) changed -- update ncclParamMinNchannels() in wrap_stubs.cc";
+  EXPECT_NE(std::string::npos, connectCc.find(R"(NCCL_PARAM(MaxNchannels, "MAX_NCHANNELS", -2))"))
+      << "graph/connect.cc's NCCL_PARAM(MaxNchannels...) changed -- update ncclParamMaxNchannels() in wrap_stubs.cc";
+  EXPECT_NE(std::string::npos, enqueueCc.find(R"(RCCL_PARAM(ForceCe, "FORCE_CE", 1))"))
+      << "enqueue.cc's RCCL_PARAM(ForceCe...) changed -- update rcclParamForceCe() in wrap_stubs.cc";
+  EXPECT_NE(std::string::npos, enqueueCc.find(R"(NCCL_PARAM(LaunchOrderImplicit, "LAUNCH_ORDER_IMPLICIT", 0))"))
+      << "enqueue.cc's NCCL_PARAM(LaunchOrderImplicit...) changed -- update ncclParamLaunchOrderImplicit() in wrap_stubs.cc";
 }

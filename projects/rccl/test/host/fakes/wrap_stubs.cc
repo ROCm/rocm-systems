@@ -81,6 +81,15 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/, unsigned long /*flags*/, const ch
 // are read on essentially every call into the file's channel/DDA tuning
 // paths, so an abort-floor here would make even unrelated tests crash before
 // reaching the function they actually meant to exercise.
+//
+// Unlike NCCL_NUM_ALGORITHMS/ncclNumFuncs above, there's no importable
+// constant for "the current default" here -- NCCL_PARAM/RCCL_PARAM bakes
+// deftVal directly as an inline macro-argument literal (see param.h), not a
+// separately declared symbol, so a static_assert can't check it. Instead,
+// wrap-test.cc's ParamDefaults_MatchProductionSource test reads the real
+// graph/connect.cc / enqueue.cc source at run time and confirms the exact
+// NCCL_PARAM/RCCL_PARAM(...) invocation text below still matches -- a
+// run-time tripwire where a compile-time one isn't possible.
 // ---------------------------------------------------------------------------
 int64_t ncclParamMinNchannels() { return -2; }              // graph/connect.cc:832
 int64_t ncclParamMaxNchannels() { return -2; }              // graph/connect.cc:833
@@ -136,6 +145,14 @@ static_assert(NCCL_NUM_ALGORITHMS == 7,
               "NCCL_NUM_ALGORITHMS changed -- update ncclAlgoToString's switch below to match collectives.cc:115");
 static_assert(NCCL_NUM_PROTOCOLS == 3,
               "NCCL_NUM_PROTOCOLS changed -- update ncclProtoToString's switch below to match collectives.cc:136");
+//
+// ncclFunc_t / ncclDataType_t ARE real enums, each with its own trailing
+// count sentinel (ncclNumFuncs, ncclNumTypes -- nccl_common.h / nccl.h.in),
+// so unlike NCCL_ALGO_*/NCCL_PROTO_* there's a real symbol to check here too.
+static_assert(ncclNumFuncs == 19,
+              "ncclFunc_t changed -- update ncclFuncToString's switch below to match collectives.cc:32");
+static_assert(ncclNumTypes == 12,
+              "ncclDataType_t changed -- update ncclDatatypeToString's switch below to match collectives.cc:86");
 // ---------------------------------------------------------------------------
 const char* ncclFuncToString(ncclFunc_t fn) {  // collectives.cc:32
   switch (fn) {
