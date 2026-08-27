@@ -103,8 +103,9 @@ structured report to `/tmp/hazards.json`.
 
 The JSON report is an array with one object per hazard. Each entry carries the
 message and suggestion, the `consumer` (the instruction that hit the hazard) and
-the `producer` (the asynchronous operation it raced), both identified by
-dispatch, workgroup, wave, PC, disassembly text and raw ISA words.
+the `producer` (the asynchronous operation it raced, or the writing wave of a
+cross-wave race), both identified by dispatch, workgroup, wave, PC, disassembly
+text and raw ISA words.
 
 The report is written when the run ends, which for a launched application means
 process exit. While a run is still going the sink is the only output.

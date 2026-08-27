@@ -5,6 +5,7 @@
 
 #include "data_hazard_engine.h"
 
+#include <array>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -2895,4 +2896,75 @@ TEST(GenericDataHazardEngineTest, ShutdownFlushesOutstandingWorkgroupEpochs) {
   ASSERT_EQ(warnings.size(), 1u);
   EXPECT_EQ(warnings[0].finding.kind, HazardKind::LocalMemoryRace);
   EXPECT_EQ(warnings[0].finding.instruction.execution.dispatch_id, 1u);
+}
+
+TEST(GenericDataHazardEngineTest, LdsRaceIdentifiesTheWritingInstruction) {
+  FakeFormatter formatter;
+  auto &engine = reset_generic_engine(formatter);
+
+  const std::array<uint32_t, 4> write_isa{0xd8000000u, 0x00000100u, 0u, 0u};
+  const std::array<uint32_t, 4> read_isa{0xd9000000u, 0x00000200u, 0u, 0u};
+
+  engine.on_workgroup_begin(1, 0, 0);
+
+  ExecutionKey writer_wave{1, 0, 0, 0};
+  ExecutionKey reader_wave{1, 0, 0, 1};
+  engine.on_wave_begin(writer_wave);
+  engine.on_wave_begin(reader_wave);
+
+  InstructionEvent write_inst;
+  write_inst.instruction = make_instruction(7, 0x300);
+  write_inst.instruction.execution = writer_wave;
+  write_inst.instruction.raw_isa = write_isa;
+  engine.on_instruction(write_inst);
+
+  ResourceAccessEvent write_access;
+  write_access.instruction = write_inst.instruction;
+  write_access.resource_kind = ResourceKind::LocalMemory;
+  write_access.address = 0x80;
+  write_access.size_bytes = 4;
+  write_access.is_write = true;
+  engine.on_resource_access(write_access);
+
+  InstructionEvent read_inst;
+  read_inst.instruction = make_instruction(9, 0x340);
+  read_inst.instruction.execution = reader_wave;
+  read_inst.instruction.raw_isa = read_isa;
+  engine.on_instruction(read_inst);
+
+  ResourceAccessEvent read_access;
+  read_access.instruction = read_inst.instruction;
+  read_access.resource_kind = ResourceKind::LocalMemory;
+  read_access.address = 0x80;
+  read_access.size_bytes = 4;
+  read_access.is_read = true;
+  engine.on_resource_access(read_access);
+
+  engine.on_workgroup_end(1, 0, 0);
+
+  const auto warnings = engine.warning_snapshot();
+  ASSERT_EQ(warnings.size(), 1u);
+  const auto &warning = warnings[0];
+  ASSERT_EQ(warning.finding.kind, HazardKind::LocalMemoryRace);
+
+  EXPECT_EQ(warning.finding.instruction.instruction_id, 9u);
+  EXPECT_EQ(warning.finding.instruction.pc, 0x340u);
+  EXPECT_EQ(warning.finding.instruction.execution.wave_id, 1u);
+  EXPECT_EQ(warning.finding.instruction.raw_isa, read_isa);
+
+  // Both halves of the race have to be identifiable from the report structure,
+  // not only from the message text.
+  ASSERT_TRUE(warning.finding.has_source_instruction);
+  EXPECT_EQ(warning.finding.source_instruction.instruction_id, 7u);
+  EXPECT_EQ(warning.finding.source_instruction.pc, 0x300u);
+  EXPECT_EQ(warning.finding.source_instruction.raw_isa, write_isa);
+  EXPECT_EQ(warning.finding.source_instruction.execution.dispatch_id, 1u);
+  EXPECT_EQ(warning.finding.source_instruction.execution.cluster_id, 0u);
+  EXPECT_EQ(warning.finding.source_instruction.execution.workgroup_id, 0u);
+  EXPECT_EQ(warning.finding.source_instruction.execution.wave_id, 0u);
+
+  // The FFM adapter copies the producer only when this flag is set.
+  EXPECT_TRUE(warning.has_source);
+  EXPECT_EQ(warning.source_pc, 0x300u);
+  EXPECT_EQ(warning.source_raw_isa, write_isa);
 }
