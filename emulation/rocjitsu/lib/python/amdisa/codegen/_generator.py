@@ -383,8 +383,13 @@ class CodeGenerator:
 
     @property
     def generated_dir_name(self) -> str:
-        """Filesystem directory for this ISA's generated and handwritten files."""
+        """Filesystem directory for this ISA's generated files."""
         return self.isa_spec.generated_dir_name
+
+    @property
+    def handwritten_dir_name(self) -> str:
+        """Profile directory containing this ISA's handwritten files."""
+        return self.isa_spec.arch_name
 
     @property
     def cpp_namespace(self) -> str:
@@ -911,6 +916,12 @@ class CodeGenerator:
         ):
             return 'amdgpu::sdwa::SourceModifierFormat::NONE'
 
+        # GFX9 accepts the SDWA modifier bits for V_PK_FMAC_F16, but its packed
+        # operation ignores source negate and absolute-value modifiers. Source
+        # selection and sign extension remain active through the NONE format.
+        if sem.name == 'V_PK_FMAC_F16':
+            return 'amdgpu::sdwa::SourceModifierFormat::NONE'
+
         suffix = {
             'FMT_NUM_F16': 'F16',
             'FMT_NUM_BF16': 'BF16',
@@ -1322,7 +1333,14 @@ class CodeGenerator:
         )
 
     def _instruction_supports_sdwa(self, inst: Instruction, enc_name: str) -> bool:
-        return self._instruction_supports_modifier_encoding(inst, enc_name, 'sdwa')
+        has_modifier_encoding = self._instruction_supports_modifier_encoding(
+            inst, enc_name, 'sdwa'
+        )
+        return self.isa_spec.profile.supports_sdwa_opcode(
+            enc_name,
+            inst.name,
+            has_modifier_encoding=has_modifier_encoding,
+        )
 
     def _instruction_supports_literal_encoding(
         self, inst: Instruction, parent_enc_name: str, width: int
@@ -1455,7 +1473,7 @@ class CodeGenerator:
 
         arch = self.cpp_namespace
         generated_arch = self.config.generated_include(self.generated_dir_name)
-        handwritten_arch = self.config.handwritten_include(self.generated_dir_name)
+        handwritten_arch = self.config.handwritten_include(self.handwritten_dir_name)
         execution_ids = ''.join(
             f'  {class_name},\n' for class_name in self._split_execution_classes
         )
@@ -2901,6 +2919,51 @@ class CodeGenerator:
                     )
                 else:
                     modifier_lines += f'if ({field_ref}) modifiers_ += "{mod.display}";'
+            if (
+                enc_upper == 'ENC_DS'
+                and {'offset0', 'offset1', 'gds'} <= enc_field_names
+            ):
+                split_offset_opcodes = []
+                for inst in inst_enc.insts:
+                    sem = (
+                        self.semantics.instructions.get(inst.name)
+                        if self.semantics
+                        else None
+                    )
+                    if sem is not None and sem.semantic_class in (
+                        'ds_read2',
+                        'ds_write2',
+                        'ds_atomic2',
+                    ):
+                        split_offset_opcodes.append(inst.opcode)
+                if split_offset_opcodes:
+                    public_members.append(
+                        cgen.Line('bool uses_split_ds_offsets() const;')
+                    )
+                    class_func_impls.append(
+                        cgen.Line(
+                            self._opcode_predicate_helper_impl(
+                                inst_enc,
+                                'uses_split_ds_offsets',
+                                sorted(set(split_offset_opcodes)),
+                            )
+                        )
+                    )
+                split_offset_condition = (
+                    'uses_split_ds_offsets()' if split_offset_opcodes else 'false'
+                )
+                modifier_lines += (
+                    f'if ({split_offset_condition}) {{'
+                    'if (inst->offset0) modifiers_ += " offset0:"'
+                    ' + std::to_string(inst->offset0);'
+                    'if (inst->offset1) modifiers_ += " offset1:"'
+                    ' + std::to_string(inst->offset1);'
+                    '} else {'
+                    'const uint32_t offset = inst->offset0 | (inst->offset1 << 8);'
+                    'if (offset) modifiers_ += " offset:" + std::to_string(offset);'
+                    '}'
+                    'if (inst->gds) modifiers_ += " gds";'
+                )
             dpp8_modifier_line = ''
             if dpp8_struct is not None:
                 dpp8_modifier_line = (
@@ -3477,7 +3540,7 @@ class CodeGenerator:
             True,
             [
                 (
-                    self.config.handwritten_include(self.generated_dir_name, 'isa.h'),
+                    self.config.handwritten_include(self.handwritten_dir_name, 'isa.h'),
                     False,
                 ),
                 (
@@ -4207,8 +4270,9 @@ class CodeGenerator:
         if opnd_name == 'src0':
             fmt_expr = 'reinterpret_cast<const OpEncoding *>(inst)->opsel'
         else:
+            opsel_hi_2 = self._op_sel_hi_2_field('ENC_VOP3P')
             fmt_expr = (
-                '((reinterpret_cast<const OpEncoding *>(inst)->pad_14 << 2) | '
+                f'((reinterpret_cast<const OpEncoding *>(inst)->{opsel_hi_2} << 2) | '
                 'reinterpret_cast<const OpEncoding *>(inst)->opsel_hi)'
             )
         return f'cdna5_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
@@ -4317,8 +4381,7 @@ class CodeGenerator:
             }
             } // namespace''')
 
-    @staticmethod
-    def _emit_cdna5_matrix_fmt_helpers() -> _ImplOutputs:
+    def _emit_cdna5_matrix_fmt_helpers(self) -> _ImplOutputs:
         """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
         execution = textwrap.dedent('''\
             namespace {
@@ -4418,11 +4481,11 @@ class CodeGenerator:
                 '  const auto *high = reinterpret_cast<const Vop3pMachineInst *>(inst + 2);\n'
                 '  if (cdna5_scaled_wmma_is_f4_32x16x128(inst))\n'
                 '    return 256;\n'
-                '  return cdna5_matrix_fmt_operand_size_bits((high->pad_14 << 2) | high->opsel_hi, 16, 128);\n'
+                '  return cdna5_matrix_fmt_operand_size_bits((high->@OPSEL_HI_2@ << 2) | high->opsel_hi, 16, 128);\n'
                 '}\n'
             )
             + '\n} // namespace'
-        )
+        ).replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
         execution += '\n' + (
             'uint16_t read_fma_mix_f16_bits(uint32_t raw, uint32_t src_selector, bool high_half) {\n'
             '  switch (src_selector) {\n'
@@ -4505,7 +4568,8 @@ class CodeGenerator:
 
     def _emit_cdna5_scaled_wmma_vop3px2_impls(self) -> _ImplOutputs:
         exec_fn = self._split_execute_expr('VWmmaScaleF32Vop3px2')
-        model = textwrap.dedent('''\
+        model = (
+            textwrap.dedent('''\
             VWmmaScaleF32Vop3px2::VWmmaScaleF32Vop3px2(const MachineInst *inst)
                 : Vop3p(cdna5_scaled_wmma_mnemonic(inst), reinterpret_cast<const OpEncoding *>(inst + 2),
                         @EXEC_FN@, Vop3p::ExtensionDecodePolicy::Skip),
@@ -4549,7 +4613,7 @@ class CodeGenerator:
             void VWmmaScaleF32Vop3px2::build_modifiers(std::string &out) const {
               if (inst_.op != 0x88) {
                 const uint32_t matrix_a_fmt = inst_.opsel;
-                const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
+                const uint32_t matrix_b_fmt = (inst_.@OPSEL_HI_2@ << 2) | inst_.opsel_hi;
                 if (matrix_a_fmt != 0) {
                   out += " matrix_a_fmt:";
                   out += cdna5_matrix_fmt_name(matrix_a_fmt);
@@ -4575,10 +4639,13 @@ class CodeGenerator:
               }
               if ((scale_inst_.opsel >> 2) & 0x1u)
                 out += " matrix_a_reuse";
-              if (scale_inst_.pad_14)
+              if (scale_inst_.@OPSEL_HI_2@)
                 out += " matrix_b_reuse";
             }
-            ''').replace('@EXEC_FN@', exec_fn)
+            ''')
+            .replace('@EXEC_FN@', exec_fn)
+            .replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+        )
 
         execution = textwrap.dedent('''\
             void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
@@ -4602,11 +4669,11 @@ class CodeGenerator:
               }
 
               const uint32_t matrix_a_fmt = inst_.opsel;
-              const uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;
+              const uint32_t matrix_b_fmt = (inst_.@OPSEL_HI_2@ << 2) | inst_.opsel_hi;
               const uint32_t matrix_a_scale =
                   (scale_inst_.opsel & 0x1u) | (((scale_inst_.opsel >> 2u) & 0x1u) << 1u);
               const uint32_t matrix_b_scale =
-                  (scale_inst_.opsel_hi & 0x1u) | ((scale_inst_.pad_14 & 0x1u) << 1u);
+                  (scale_inst_.opsel_hi & 0x1u) | ((scale_inst_.@OPSEL_HI_2@ & 0x1u) << 1u);
               const uint32_t matrix_a_scale_fmt = scale_inst_.neg & 0x3u;
               const uint32_t matrix_b_scale_fmt = scale_inst_.neg_hi & 0x3u;
               const bool scale16 = scale_inst_.op == 0x3a;
@@ -4660,11 +4727,10 @@ class CodeGenerator:
               if (!dispatched)
                 throw util::UnimplementedInst(mnemonic());
             }
-            ''')
+            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
         return _ImplOutputs(model=[model], execution=[execution])
 
-    @staticmethod
-    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers() -> str:
+    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers(self) -> str:
         return textwrap.dedent('''\
             namespace {
 
@@ -4713,13 +4779,13 @@ class CodeGenerator:
               if (matrix->op == 0x88u)
                 return isGfx1250WmmaScaleFormatPairLegal(4u, 4u, scale_a_fmt, scale_b_fmt);
               const uint32_t matrix_a_fmt = matrix->opsel;
-              const uint32_t matrix_b_fmt = (matrix->pad_14 << 2u) | matrix->opsel_hi;
+              const uint32_t matrix_b_fmt = (matrix->@OPSEL_HI_2@ << 2u) | matrix->opsel_hi;
               return isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_a_fmt,
                                                        scale_b_fmt);
             }
 
             } // namespace
-            ''')
+            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
 
     def _execute_operand_roles(
         self, inst: Instruction, sem: InstructionSemantics
@@ -4876,9 +4942,24 @@ class CodeGenerator:
         """
         if sem.name in self._TRAP_RETURN_NAMES:
             # Return from exception: restore the PC the trap handler saved in
-            # ssrc0. The 48-bit mask drops the status bits the hardware packs
-            # into the high half, and the instruction size is subtracted
-            # because the interpreter advances the PC after execute() returns.
+            # ssrc0. gfx12.5 has a 57-bit PC; older targets use 48 address bits.
+            # The instruction size is subtracted because the interpreter
+            # advances the PC after execute() returns.
+            pc_mask = (
+                '0x01FFFFFFFFFFFFFFULL'
+                if sem.name == 'S_RFE_I64'
+                else '0x0000FFFFFFFFFFFFULL'
+            )
+            split_state_status_restore = (
+                '  // GFX12 returns the interrupted wave state while preserving the handler\'s\n'
+                '  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.\n'
+                '  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {\n'
+                '    uint32_t restored_status = wf.trap_saved_status();\n'
+                '    restored_status = keep_halted ? (restored_status | kStatusHalt)\n'
+                '                                   : (restored_status & ~kStatusHalt);\n'
+                '    wf.set_status_raw(restored_status);\n'
+                '  }\n'
+            )
             return (
                 # Bare operand and size_ spellings: that is the arch-local form
                 # every generated execute_impl() uses, and
@@ -4887,8 +4968,12 @@ class CodeGenerator:
                 # here instead compiles only on the ISAs that happen to share
                 # the body -- S_RFE_I64 is gfx1250-only, so it does not.
                 '  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);\n'
-                '  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;\n'
+                f'  constexpr uint64_t kPcAddressMask = {pc_mask};\n'
                 '  wf.pc = (saved_pc & kPcAddressMask) - size_;\n'
+                '\n'
+                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
+                '  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;\n'
+                f'{split_state_status_restore}'
                 '\n'
                 '  // Returning from the handler puts the interrupted EXEC back. The handler runs\n'
                 '  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to\n'
@@ -4904,8 +4989,7 @@ class CodeGenerator:
                 '\n'
                 '  // The handler sets STATUS.HALT when it wants the wave to stay\n'
                 '  // stopped for the debugger; honour that on the way out.\n'
-                '  constexpr uint32_t kStatusHalt = 1u << 13;\n'
-                '  if ((wf.status_raw() & kStatusHalt) != 0) {\n'
+                '  if (keep_halted) {\n'
                 '    wf.set_debug_single_step(false);\n'
                 '    wf.set_debug_halted(true);\n'
                 '  } else {\n'
@@ -6279,6 +6363,9 @@ class CodeGenerator:
                 '    l2->flush_all(wf.process_id());'
             )
 
+        if cls == 'icache_inv':
+            return '  wf.cu().instruction_cache().invalidate_all();'
+
         if cls == 'gl2_wb':
             return (
                 '  if (auto *l2 = wf.cu().l2())\n' '    l2->flush_all(wf.process_id());'
@@ -7002,7 +7089,6 @@ class CodeGenerator:
         L.append('    d->lane_mask = exec; d->exec_mask = exec;')
         L.append('    d->wf_size = wf.wf_size();')
         L.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
-        L.append('    d->cu_path = wf.cu().full_path();')
         L.append('    uint64_t base = amdgpu::RegisterAccess(wf).read_scalar64(saddr);')
         offset_expr = (
             'signed_ioffset(inst_.ioffset)'
@@ -7200,17 +7286,18 @@ class CodeGenerator:
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         esz = sem.elem_size or 4
         data_dwords = sem.num_elems or 1
+        returns_data = 'vdst' in dst
 
         L = []
         is_cmpswap = sem.operation == 'cmpswap'
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
-        L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
+        if returns_data:
+            L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
-        # DS atomics always return the old value (like GLC=1).
-        L.append('  d->is_load = true;')
+        L.append(f'  d->is_load = {str(returns_data).lower()};')
         L.append(f'  d->atomic_op = {op_enum};')
         self._append_wait_counter_type(L, 'ds_atomic')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
@@ -7389,7 +7476,6 @@ class CodeGenerator:
         L.append('  d->lane_mask = exec;')
         L.append('  d->wg_id = wf.wg_id();')
         L.append('  d->wf_id = wf.wf_id();')
-        L.append('  d->cu_path = wf.cu().full_path();')
         L.append('  uint32_t offset = inst_.offset0 | (inst_.offset1 << 8);')
         L.append('  uint32_t addr = wf.lds_base() + wf.m0() + offset;')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -7599,7 +7685,6 @@ class CodeGenerator:
         lines.append('    uint64_t exec = wf.exec();')
         lines.append('    d->lane_mask = exec; d->exec_mask = exec;')
         lines.append('    d->wg_id = wf.wg_id(); d->wf_id = wf.wf_id();')
-        lines.append('    d->cu_path = wf.cu().full_path();')
         lines.append(
             '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
         )
@@ -7677,8 +7762,8 @@ class CodeGenerator:
         raw read.
         """
         # amdgpu::TransposeKind: TR_B4=1, TR_B6=2, B64_TR_B8=3,
-        # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6. Defaults describe the
-        # B64 (num_elems=2) forms.
+        # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6,
+        # CDNA5_DS_TR_B8=7. Defaults describe the B64 (num_elems=2) forms.
         tr_map = {
             'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
             'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2
@@ -8179,6 +8264,8 @@ class CodeGenerator:
     def _can_force_shared_simd_probe(
         self, inst: Instruction | None, enc_name: str | None = None
     ) -> bool:
+        if not self.config.use_shared_execute_helpers:
+            return False
         if inst is None or self._requires_arch_local_execute(inst, enc_name):
             return False
         if self._shared_execute_key_denied(inst.mnemonic, inst, enc_name):
@@ -8507,7 +8594,7 @@ class CodeGenerator:
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
-        When ``shared_plan`` is set (``--multi`` mode), universal instructions
+        When ``shared_plan`` is set, universal instructions
         are emitted into ``shared/<enc>.h/.cpp`` in the ``rocjitsu::amdgpu``
         namespace.  Per-ISA files include the shared header and emit
         ``using amdgpu::<ClassName>;`` aliases for universals, plus full
@@ -8596,13 +8683,18 @@ class CodeGenerator:
                     # XML operand position to preserve the architectural source
                     # order (e.g. s_addk_i32/s_mulk_i32 read sdst as src0).
                     _enc_upper_for_defer = enc.enc_name.upper()
-                    defer_readwrite_outputs = _enc_upper_for_defer in (
-                        'ENC_VOP1',
-                        'ENC_VOP2',
-                    ) or (
-                        _enc_upper_for_defer
-                        in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
-                        and self._supports_vop_dpp_encoding(_enc_upper_for_defer)
+                    # V_PK_FMAC_F16 is the VOP2 exception: its accumulator is
+                    # architecturally the first source, and its generated
+                    # DPP/SDWA paths operate on the named src0/vsrc1 operands.
+                    # Keep vdst first even when a snapshot models it as
+                    # output-only and read/write inference supplies the use.
+                    defer_readwrite_outputs = inst.name.upper() != 'V_PK_FMAC_F16' and (
+                        _enc_upper_for_defer in ('ENC_VOP1', 'ENC_VOP2')
+                        or (
+                            _enc_upper_for_defer
+                            in ('ENC_VOP3', 'ENC_VOP3P', 'VOP3_SDST_ENC')
+                            and self._supports_vop_dpp_encoding(_enc_upper_for_defer)
+                        )
                     )
                     readwrite_output_sources = []
                     vgpr_msb_role_body = []
@@ -8706,13 +8798,28 @@ class CodeGenerator:
                             enc.enc_name.upper() in ('ENC_VFLAT', 'ENC_VGLOBAL')
                             and opnd.name == 'saddr'
                         )
-                        if (
-                            opnd.is_input or _is_buffer_atomic_payload
-                        ) and not _is_optional_vflat_saddr:
+                        _is_optional_flat_scratch = (
+                            enc.enc_name.upper() == 'ENC_FLAT'
+                            and opnd.fieldless
+                            and opnd.operand_type == 'OPR_FLAT_SCRATCH'
+                        )
+                        if (opnd.is_input or _is_buffer_atomic_payload) and not (
+                            _is_optional_vflat_saddr or _is_optional_flat_scratch
+                        ):
                             opnd_body.append(
                                 f'src_operands_[{src_idx}] = &{opnd.name};'
                             )
                             src_idx += 1
+                        elif opnd.is_input and _is_optional_flat_scratch:
+                            # The generic FLAT encoding can select FLAT,
+                            # SCRATCH, or GLOBAL at runtime.  GLOBAL does not
+                            # consume the flat-scratch base; the public XML's
+                            # GPUMEM pseudo-operand remains its sole fieldless
+                            # memory source.
+                            conditional_src_body.append(
+                                'if (inst_.seg != 2) '
+                                'src_operands_[num_src_++] = &flat_scratch;'
+                            )
                         elif opnd.is_input and _is_optional_vflat_saddr:
                             conditional_src_body.append(
                                 f'if (inst_.saddr != {self._saddr_null_expr(enc.enc_name)}) '
@@ -10057,7 +10164,11 @@ class CodeGenerator:
                             _src_input_ops = [
                                 o
                                 for o in inst.operands
-                                if o.is_input and not o.fieldless
+                                # Read/write destinations such as V_FMAC's
+                                # accumulator are semantic inputs, but they are
+                                # not the encoded src0/src1 fields modified by
+                                # DPP or SDWA.
+                                if o.is_input and not o.is_output and not o.fieldless
                             ]
                             _src0_name = (
                                 _src_input_ops[0].name if _src_input_ops else None
@@ -10801,7 +10912,7 @@ class CodeGenerator:
                                 f'  out += " matrix_a_fmt:";\n'
                                 f'  out += cdna5_matrix_fmt_name(inst_.opsel);\n'
                                 f'  out += " matrix_b_fmt:";\n'
-                                f'  out += cdna5_matrix_fmt_name((inst_.pad_14 << 2) | inst_.opsel_hi);\n'
+                                f'  out += cdna5_matrix_fmt_name((inst_.{self._op_sel_hi_2_field("ENC_VOP3P")} << 2) | inst_.opsel_hi);\n'
                                 f'}}'
                             )
                         )
@@ -10813,7 +10924,7 @@ class CodeGenerator:
                                 f'    out += " index_key:1";\n'
                                 f'  if (inst_.opsel & 0x4)\n'
                                 f'    out += " matrix_a_reuse";\n'
-                                f'  if (inst_.pad_14)\n'
+                                f'  if (inst_.{self._op_sel_hi_2_field("ENC_VOP3P")})\n'
                                 f'    out += " matrix_b_reuse";\n'
                                 f'}}'
                             )
@@ -10995,7 +11106,7 @@ class CodeGenerator:
                         [
                             (
                                 self.config.handwritten_include(
-                                    self.generated_dir_name, 'addr_calc.h'
+                                    self.handwritten_dir_name, 'addr_calc.h'
                                 ),
                                 False,
                             ),
@@ -11034,7 +11145,7 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             self.config.handwritten_include(
-                                self.generated_dir_name, 'mma_exec.h'
+                                self.handwritten_dir_name, 'mma_exec.h'
                             ),
                             False,
                         )
@@ -11059,6 +11170,17 @@ class CodeGenerator:
                     'RegisterAccess' in str(impl)
                     for impl in class_func_impls.model + class_func_impls.execution
                 )
+                uses_pseudo_scalar = any(
+                    'pseudo_scalar::' in str(impl)
+                    for impl in class_func_impls.model + class_func_impls.execution
+                )
+                if uses_pseudo_scalar:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h',
+                            False,
+                        )
+                    )
                 if has_sem:
                     cpp_includes.extend(
                         [
@@ -11140,8 +11262,8 @@ class CodeGenerator:
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
-                # Portable SIMD probes can delegate even outside --multi mode,
-                # so this cannot be gated solely on shared_plan.
+                # Portable SIMD probes can delegate even without a shared
+                # plan, so this cannot be gated solely on shared_plan.
                 def _delegates_to_shared(i: Instruction) -> bool:
                     if not self.semantics or i.name not in self.semantics.instructions:
                         return False
@@ -11153,7 +11275,7 @@ class CodeGenerator:
                 if has_shared:
                     cpp_includes.append(
                         (
-                            self.config.generated_include('shared', 'execute_shared.h'),
+                            self.config.shared_generated_include('execute_shared.h'),
                             False,
                         )
                     )
@@ -11168,7 +11290,7 @@ class CodeGenerator:
                     ),
                     (
                         self.config.handwritten_include(
-                            self.generated_dir_name, 'isa.h'
+                            self.handwritten_dir_name, 'isa.h'
                         ),
                         False,
                     ),
@@ -11300,7 +11422,9 @@ class CodeGenerator:
                             '  if (enc->imm)\n'
                             '    return Operand(32, OperandType::OPR_SIMM32, '
                             'static_cast<int>(enc->offset));\n'
-                            '  return Operand(32, OperandType::OPR_SIMM32, 0);\n'
+                            # IMM=0, SOFFSET_EN=0: OFFSET[6:0] is the offset SGPR.
+                            '  return Operand(32, OperandType::OPR_SMEM_OFFSET, '
+                            'static_cast<int>(enc->offset & 0x7F));\n'
                             '}\n'
                             '} // namespace'
                         )
@@ -11395,7 +11519,7 @@ class CodeGenerator:
         with open(insts_h_path, 'w') as f:
             f.write(''.join(insts_h_lines))
 
-        # Shared execute templates are written by _run_multi after all ISAs
+        # Shared execute templates are written by the CLI after all ISAs
         # are processed, using the accumulated _shared_execute_bodies dict.
         # Individual ISA codegens just collect; they don't write.
 
@@ -11482,6 +11606,7 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
+                'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h': 'pseudo_scalar::',
             }
             result: list[tuple[str, bool]] = []
             for include, system in cpp_includes:
@@ -11994,7 +12119,7 @@ class CodeGenerator:
                 if classifier is None:
                     lines.append(probe)
                 else:
-                    lines.append('  if (!(wf.mode_raw() & kAluExceptionModeMask)) {')
+                    lines.append('  if (!alu_exception_trap_enables(wf)) {')
                     lines.append(probe.replace('  ', '    ', 1))
                     lines.append('  }')
             lines.append(prefixed_body)
@@ -13956,7 +14081,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         ).append(resolve_code)
 
         operand_header_includes = [
-            (self.config.handwritten_include(self.generated_dir_name, 'isa.h'), False),
+            (
+                self.config.handwritten_include(self.handwritten_dir_name, 'isa.h'),
+                False,
+            ),
             (
                 self.config.generated_include(
                     self.generated_dir_name, 'operand_types.h'

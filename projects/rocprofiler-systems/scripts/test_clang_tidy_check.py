@@ -145,8 +145,8 @@ def test_parse_diagnostics_ignores_fatal_error_line():
 def test_clang_tidy_command_without_checks(monkeypatch):
     run = _CaptureRun()
     monkeypatch.setattr(ctc.subprocess, "run", run)
-    ctc._clang_tidy(_args(checks=""), "-list-checks", "/f.cpp")
-    assert run.cmd == ["clang-tidy", "-p=/build", "-list-checks", "/f.cpp"]
+    ctc._clang_tidy(_args(checks=""), "-list-checks")
+    assert run.cmd == ["clang-tidy", "-p=/build", "-list-checks"]
     # check=False is behavioral: clang-tidy exits nonzero when it finds issues,
     # so check=True would raise on any file with diagnostics and break the tool.
     assert run.kwargs["check"] is False
@@ -197,9 +197,9 @@ def test_run_clang_tidy_timeout_returns_false(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# get_enabled_checks
+# has_enabled_checks
 # --------------------------------------------------------------------------- #
-def test_get_enabled_checks_parses_list(monkeypatch):
+def test_has_enabled_checks_true_when_list_populated(monkeypatch):
     out = (
         "Enabled checks:\n"
         "    misc-const-correctness\n"
@@ -210,18 +210,33 @@ def test_get_enabled_checks_parses_list(monkeypatch):
     monkeypatch.setattr(
         ctc, "_clang_tidy", lambda a, *e, timeout=None: _completed(list(e), 0, out, "")
     )
-    assert ctc.get_enabled_checks(_args(), "/f.cpp") == [
-        "misc-const-correctness",
-        "modernize-use-auto",
-    ]
+    assert ctc.has_enabled_checks(_args()) is True
 
 
-def test_get_enabled_checks_failure_warns_and_returns_empty(monkeypatch, capsys):
+def test_has_enabled_checks_failure_warns_and_returns_false(monkeypatch, capsys):
     monkeypatch.setattr(
         ctc, "_clang_tidy", lambda a, *e, timeout=None: _completed(list(e), 1, "", "boom")
     )
-    assert ctc.get_enabled_checks(_args(), "/f.cpp") == []
+    assert ctc.has_enabled_checks(_args()) is False
     assert "could not resolve check list" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# print_timed_out_files
+# --------------------------------------------------------------------------- #
+def test_print_timed_out_files_lists_each_file(capsys):
+    ctc.print_timed_out_files(["a.cpp", "b.cpp"], 600)
+    out = capsys.readouterr().out
+    # A timeout is otherwise a silent failure: it makes the run exit nonzero
+    # while the diff section still reports "No issues found."
+    assert "Timed out after 600s (2)" in out
+    assert "a.cpp" in out
+    assert "b.cpp" in out
+
+
+def test_print_timed_out_files_prints_nothing_when_empty(capsys):
+    ctc.print_timed_out_files([], 600)
+    assert capsys.readouterr().out == ""
 
 
 # --------------------------------------------------------------------------- #

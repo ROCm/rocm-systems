@@ -34,6 +34,31 @@ use std::fmt;
 use std::mem::offset_of;
 use std::os::raw::{c_char, c_int, c_void};
 
+type FnGetVersionString = unsafe extern "C" fn() -> *const c_char;
+
+/// Load and copy the formatted build identity exported by `librocjitsu.so`.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the library cannot be loaded, predates the version
+/// API, or violates the API's non-null string contract.
+pub fn version_string(path: impl AsRef<OsStr>) -> Result<String, String> {
+    // SAFETY: Mirage's RocJITsu discovery selects the library. The resolved
+    // symbol has the C signature declared in rj_version.h, and its static string
+    // is copied while the library remains loaded.
+    unsafe {
+        let library = libloading::Library::new(path.as_ref()).map_err(|error| error.to_string())?;
+        let get_version = *library
+            .get::<FnGetVersionString>(b"rj_get_version_string\0")
+            .map_err(|error| error.to_string())?;
+        let version = get_version();
+        if version.is_null() {
+            return Err("rj_get_version_string returned null".to_string());
+        }
+        Ok(CStr::from_ptr(version).to_string_lossy().into_owned())
+    }
+}
+
 /// Status codes returned by the rocjitsu C API (`rj_status_t`).
 pub type RjStatus = c_int;
 

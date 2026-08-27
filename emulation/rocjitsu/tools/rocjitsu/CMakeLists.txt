@@ -45,6 +45,7 @@ target_link_libraries(
         flatbuffers
         Threads::Threads
         rocjitsu_cli_launch_preload
+        rocjitsu_version
 )
 
 set_target_properties(rocjitsu_bin PROPERTIES OUTPUT_NAME rocjitsu)
