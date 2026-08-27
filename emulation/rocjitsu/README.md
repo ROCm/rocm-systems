@@ -133,6 +133,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Plugins](docs/plugins.md) | Execution plugin system and sink API |
 | [VM Design](docs/vm-design.md) | GPU hardware model (CP, CU, caches, KMD) |
 | [Simdojo Engine](docs/simdojo.md) | PDES simulation framework |
+| [Timing Model](docs/timing.md) | Clocked components, guest clock interception, calibration |
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
 | [CDNA5 Tensor DMA](docs/tensor-dma.md) | gfx1250 tensor descriptor, bounds, iteration, gather, and padding model |
