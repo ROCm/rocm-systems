@@ -1034,8 +1034,11 @@ class StaticCommands:
 
                 # Get vram type string
                 vram_type_enum = vram_info["vram_type"]
+                # AMDSMI_VRAM_TYPE__MAX aliases the highest real type (LPDDR5);
+                # the auto-generated enum-value map resolves this shared value
+                # to the "__MAX" label, so translate it to the real type here.
                 if vram_type_enum == amdsmi_interface.amdsmi_wrapper.AMDSMI_VRAM_TYPE__MAX:
-                    vram_type = "GDDR7"
+                    vram_type = "LPDDR5"
                 else:
                     vram_type = amdsmi_interface.amdsmi_wrapper.amdsmi_vram_type_t__enumvalues[
                         vram_type_enum
