@@ -138,7 +138,8 @@ pending_starts_cap()
 {
     static const size_t _cached = []() -> size_t {
         constexpr long _dflt = 2'000'000;
-        auto _v = env_long_in_range("ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS", 1, 4'194'304);
+        auto           _v =
+            env_long_in_range("ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS", 1, 4'194'304);
         return static_cast<size_t>(_v.value_or(_dflt));
     }();
     return _cached;
@@ -1170,7 +1171,8 @@ reader_loop()
             // session would stay `ready`, handing out correlation keys nothing can
             // ever deliver. Restricted to the backstop's poll TIMEOUT so the extra
             // ioctl runs at the poll-timeout cadence, not per wake.
-            const bool _probe_fatal = (_act == terminal_action::keep_live) || (_backstop && rc == 0);
+            const bool _probe_fatal =
+                (_act == terminal_action::keep_live) || (_backstop && rc == 0);
             if(_probe_fatal && (read_stream_status_flags(_s) & KFD_DLOG_STATUS_FATAL) != 0)
             {
                 // Drain-first: defer while records remain (the top-of-loop drain

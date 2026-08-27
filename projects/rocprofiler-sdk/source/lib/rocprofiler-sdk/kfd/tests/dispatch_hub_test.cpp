@@ -972,7 +972,8 @@ TEST(EnvBoolOptIn, only_explicit_true_enables)
         set(_yes);
         EXPECT_TRUE(env_bool_opt_in(var)) << _yes << " enables";
     }
-    for(const char* _no : {"0", "false", "no", "off", "", "flase", "2", "TRUE", "99999999999999999"})
+    for(const char* _no :
+        {"0", "false", "no", "off", "", "flase", "2", "TRUE", "99999999999999999"})
     {
         set(_no);
         EXPECT_FALSE(env_bool_opt_in(var)) << "'" << _no << "' must not enable";
