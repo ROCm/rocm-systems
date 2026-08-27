@@ -62,7 +62,7 @@ For **mat_exp CPX**, perfmon pass assignment shows ratio partners are **never co
 | Metric pair | Numerator counter | Denominator counter | Pass file (numerator) | Pass file (denominator) |
 |-------------|-------------------|---------------------|------------------------|-------------------------|
 | HBM Read | `TCC_EA0_RDREQ_DRAM_sum` | `TCC_EA0_RDREQ_sum` | `SQ_INST_LEVEL_LDS_ACCUM` | `SQ_INST_LEVEL_SMEM_ACCUM` |
-| Workgroup Manager | `GRBM_SPI_BUSY` | `GRBM_GUI_ACTIVE` | `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM` | `SQC_DCACHE_INFLIGHT_LEVEL_ACCUM` |
+| Workgroup Manager Utilization | `GRBM_SPI_BUSY` | `GRBM_GUI_ACTIVE` | `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM` | `SQC_DCACHE_INFLIGHT_LEVEL_ACCUM` |
 | CPF Utilization | `CPF_CPF_STAT_BUSY` | `CPF_CPF_STAT_IDLE` | `SQC_DCACHE_INFLIGHT_LEVEL_ACCUM` | `SQC_ICACHE_INFLIGHT_LEVEL_ACCUM` |
 
 After analyze merges passes into one table, per-dispatch ratios can exceed 100% even when each counter is valid in isolation.
@@ -72,7 +72,7 @@ After analyze merges passes into one table, per-dispatch ratios can exceed 100% 
 | Metric | Dispatches | Rows with `a > b` | % bad | Max ratio | `SUM(a)/SUM(b)` avg |
 |--------|------------|-------------------|-------|-----------|---------------------|
 | HBM Read | 208 | 15 | 7.2% | 188.2% | 99.11% |
-| Workgroup Manager | 206 | 2 | 1.0% | **739.6%** | 40.06% |
+| Workgroup Manager Utilization | 206 | 2 | 1.0% | **739.6%** | 40.06% |
 
 Example HBM outlier (dispatch 13): `a=192`, `b=102` → 188% (GEMM kernel).
 
