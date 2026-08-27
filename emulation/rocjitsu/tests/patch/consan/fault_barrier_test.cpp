@@ -52,17 +52,18 @@ TEST(ConSan, BarrierDropCarriesDistinctPristinePerturbationIdentityAcrossReinven
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
+  ConSanPerturbationPlanningState perturbation;
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options, &perturbation);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             4u);
   const auto perturb = std::ranges::find_if(
-      inventory.perturbation_candidates, [](const ConSanPerturbationCandidate &candidate) {
+      perturbation.candidates, [](const ConSanPerturbationCandidate &candidate) {
         return candidate.eligible && candidate.kind == ConSanPerturbationKind::Barrier &&
                candidate.edge == ConSanPerturbationEdge::Release &&
                candidate.anchor_text_offset == 2u * sizeof(uint32_t);
       });
-  ASSERT_NE(perturb, inventory.perturbation_candidates.end());
+  ASSERT_NE(perturb, perturbation.candidates.end());
 
   ConSanOptions options = inventory_options;
   options.fault_drop_barrier = true;
@@ -107,19 +108,20 @@ TEST(ConSan, BarrierMoveCarriesSelectedEdgeIntoOwnedWholePairTrampoline) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
+  ConSanPerturbationPlanningState perturbation;
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options, &perturbation);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 0u,
                                              &ConSanBarrierMoveDestination::text_offset);
   const auto perturb = std::ranges::find_if(
-      inventory.perturbation_candidates, [](const ConSanPerturbationCandidate &candidate) {
+      perturbation.candidates, [](const ConSanPerturbationCandidate &candidate) {
         return candidate.eligible && candidate.kind == ConSanPerturbationKind::Barrier &&
                candidate.edge == ConSanPerturbationEdge::Release;
       });
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
-  ASSERT_NE(perturb, inventory.perturbation_candidates.end());
+  ASSERT_NE(perturb, perturbation.candidates.end());
 
   ConSanOptions options = inventory_options;
   options.fault_move_barrier = true;

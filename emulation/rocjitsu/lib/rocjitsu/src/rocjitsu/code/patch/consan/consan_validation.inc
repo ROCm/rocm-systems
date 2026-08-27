@@ -2625,7 +2625,8 @@ validate_mutation_semantics(const AmdGpuCodeObject &original, const AmdGpuCodeOb
 validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
                                    const AmdGpuCodeObject &original,
                                    const AmdGpuCodeObject &replacement, const ConSanResult &result,
-                                   bool validating_carried_composite_stage) {
+                                   bool validating_carried_composite_stage,
+                                   const ConSanPerturbationPlanningState *carried_perturbation) {
   std::vector<std::string> errors;
   const size_t perturbation_patch_count = static_cast<size_t>(std::ranges::count(
       result.patches, ConSanPatchKind::TrampolineScPerturbation, &ConSanPatchInfo::kind));
@@ -2659,10 +2660,16 @@ validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanResult pristine = try_patch_consan_impl(original_image, inventory_options);
+  ConSanPerturbationPlanningState pristine_perturbation;
+  const ConSanResult pristine = try_patch_consan_impl(original_image, inventory_options, {},
+                                                      std::nullopt, &pristine_perturbation);
   if (!validating_carried_composite_stage && !pristine.errors.empty()) {
     errors.emplace_back(
         "ConSan SC perturbation proof could not rederive pristine synchronization semantics");
+    return errors;
+  }
+  if (validating_carried_composite_stage && carried_perturbation == nullptr) {
+    errors.emplace_back("ConSan SC perturbation proof is missing carried planning evidence");
     return errors;
   }
 
@@ -2735,6 +2742,9 @@ validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
     }
 
     const ConSanResult &semantic_inventory = validating_carried_composite_stage ? result : pristine;
+    const std::span<const ConSanPerturbationCandidate> semantic_candidates =
+        validating_carried_composite_stage ? carried_perturbation->candidates
+                                           : pristine_perturbation.candidates;
     const auto candidate_matches = [&](const ConSanPerturbationCandidate &candidate) {
       return candidate.eligible && candidate.sequence_identity == proof_sequence_identity &&
              candidate.edge == *patch.perturbation_edge &&
@@ -2742,11 +2752,10 @@ validate_sc_perturbation_semantics(std::span<const uint8_t> original_image,
                              candidate.container_name == patch.perturbation_source_container_name &&
                              candidate.in_kernel == patch.perturbation_source_in_kernel));
     };
-    const size_t candidate_count = static_cast<size_t>(
-        std::ranges::count_if(semantic_inventory.perturbation_candidates, candidate_matches));
-    const auto candidate =
-        std::ranges::find_if(semantic_inventory.perturbation_candidates, candidate_matches);
-    if (candidate_count != 1u || candidate == semantic_inventory.perturbation_candidates.end()) {
+    const size_t candidate_count =
+        static_cast<size_t>(std::ranges::count_if(semantic_candidates, candidate_matches));
+    const auto candidate = std::ranges::find_if(semantic_candidates, candidate_matches);
+    if (candidate_count != 1u || candidate == semantic_candidates.end()) {
       errors.emplace_back(
           "ConSan SC perturbation proof could not match one pristine admitted sequence edge");
       continue;
@@ -4393,7 +4402,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
 [[nodiscard]] std::vector<std::string>
 validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanResult &result,
                           uint64_t expected_moi_report_dispatch_id,
-                          bool validating_carried_composite_stage = false) {
+                          bool validating_carried_composite_stage = false,
+                          const ConSanPerturbationPlanningState *carried_perturbation = nullptr) {
   const major_image_ownership::ScopedPhase validation_phase(
       major_image_ownership::Phase::FinalValidation, /*only_if_none=*/true);
   std::vector<std::string> errors;
@@ -4484,8 +4494,9 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
       validate_mutation_semantics(original, replacement, result);
   errors.insert(errors.end(), std::make_move_iterator(mutation_errors.begin()),
                 std::make_move_iterator(mutation_errors.end()));
-  std::vector<std::string> perturbation_errors = validate_sc_perturbation_semantics(
-      original_bytes, original, replacement, result, validating_carried_composite_stage);
+  std::vector<std::string> perturbation_errors =
+      validate_sc_perturbation_semantics(original_bytes, original, replacement, result,
+                                         validating_carried_composite_stage, carried_perturbation);
   errors.insert(errors.end(), std::make_move_iterator(perturbation_errors.begin()),
                 std::make_move_iterator(perturbation_errors.end()));
   std::vector<std::string> resource_errors =
@@ -4511,10 +4522,11 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
   return errors;
 }
 
-[[nodiscard]] ConSanResult finalize_consan_result(ConSanResult result,
-                                                  std::span<const uint8_t> original_bytes,
-                                                  uint64_t expected_moi_report_dispatch_id,
-                                                  bool validating_carried_composite_stage) {
+[[nodiscard]] ConSanResult
+finalize_consan_result(ConSanResult result, std::span<const uint8_t> original_bytes,
+                       uint64_t expected_moi_report_dispatch_id,
+                       bool validating_carried_composite_stage,
+                       const ConSanPerturbationPlanningState *carried_perturbation) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   if (result.program_inventory.empty()) {
@@ -4550,7 +4562,7 @@ validate_final_consan_elf(std::span<const uint8_t> original_bytes, const ConSanR
     } else {
       std::vector<std::string> validation_errors =
           validate_final_consan_elf(original_bytes, result, expected_moi_report_dispatch_id,
-                                    validating_carried_composite_stage);
+                                    validating_carried_composite_stage, carried_perturbation);
       result.errors.insert(result.errors.end(), std::make_move_iterator(validation_errors.begin()),
                            std::make_move_iterator(validation_errors.end()));
       if (result.errors.empty()) {

@@ -34,6 +34,12 @@ struct ConSanMoiCandidate : ConSanAccessInventorySite {
   std::optional<uint64_t> kernel_descriptor_file_offset;
 };
 
+/// One synchronization-sequence edge considered for scheduling perturbation.
+///
+/// Analysis derives these records from the immutable synchronization
+/// inventory. They are temporary evidence for selecting a perturbation, not a
+/// transform result: emitted patches retain the stable semantic identity and
+/// source coordinates required by final validation.
 struct ConSanPerturbationCandidate {
   ConSanPerturbationKind kind = ConSanPerturbationKind::None;
   ConSanPerturbationEdge edge = ConSanPerturbationEdge::Release;
@@ -50,6 +56,12 @@ struct ConSanPerturbationCandidate {
   std::string rejection_reason;
 };
 
+/// One admitted scheduling perturbation ready for byte-level lowering.
+///
+/// The plan binds a candidate's semantic identity to its selected sleep
+/// policy. Composite fault/perturbation lowering also records the pristine
+/// identity and its translated anchor. This is temporary planner-to-emitter
+/// input; mutation tallies and patch metadata are the durable output.
 struct ConSanPerturbationPlan {
   std::string candidate_identity;
   std::string sequence_identity;
@@ -69,6 +81,21 @@ struct ConSanPerturbationPlan {
   std::optional<uint64_t> source_owner_descriptor_file_offset;
   bool overlaps_atomic_mutation = false;
   bool removed_cache_boundary = false;
+};
+
+/// Temporary workspace shared only by perturbation analysis, selection, and
+/// emission during one lowering attempt.
+///
+/// Keeping this state outside `ConSanTransformArtifacts` prevents callers and
+/// later pipeline stages from treating candidates or pre-emission plans as a
+/// lasting behavioral result. The optional inspection path used by unit tests
+/// observes this workspace without extending its production lifetime.
+struct ConSanPerturbationPlanningState {
+  /// All release and acquire edges derived from synchronization sequences,
+  /// including rejected edges whose reason is useful to planner unit tests.
+  std::vector<ConSanPerturbationCandidate> candidates;
+  /// The bounded subset selected for emission under the current options.
+  std::vector<ConSanPerturbationPlan> plans;
 };
 
 /// Counts one validation-only mutation domain as it moves from a user request
@@ -198,8 +225,6 @@ struct ConSanResult : ConSanTransformArtifacts {
   std::vector<ConSanMoiTransientSgprAssignment> resolved_moi_transient_sgpr_assignments;
   std::optional<uint16_t> resolved_moi_dispatch_id_sgpr;
   std::optional<uint16_t> resolved_moi_dispatch_id_vgpr;
-  std::vector<ConSanPerturbationCandidate> perturbation_candidates;
-  std::vector<ConSanPerturbationPlan> perturbation_plans;
 };
 
 /// Whether a semantic claim is at least as strong as the weakest confidence a

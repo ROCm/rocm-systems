@@ -2471,7 +2471,8 @@ void associate_ordinary_release_sync_sequences(
 
 void associate_ordinary_acquire_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventIdentityIndex &events,
-    rj_code_arch_t arch, SynchronizationInventoryBuildView inventory, const ConSanTransformArtifacts &result) {
+    rj_code_arch_t arch, SynchronizationInventoryBuildView inventory,
+    const ConSanTransformArtifacts &result) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   struct Association {
     size_t cache_index = 0;
@@ -2787,11 +2788,12 @@ void associate_ordinary_acquire_sync_sequences(
   return "no-perturbation-kind";
 }
 
-void build_perturbation_candidate_inventory(ConSanResult &result) {
-  result.perturbation_candidates.clear();
+void build_perturbation_candidate_inventory(const ProgramInventory &program_inventory,
+                                            ConSanPerturbationPlanningState &planning) {
+  planning.candidates.clear();
   const SyncEventIdentityIndex events =
-      build_sync_event_identity_index(result.program_inventory.sync().sync_events);
-  for (const ConSanSyncSequence &sequence : result.program_inventory.sync().sync_sequences) {
+      build_sync_event_identity_index(program_inventory.sync().sync_events);
+  for (const ConSanSyncSequence &sequence : program_inventory.sync().sync_sequences) {
     const ConSanPerturbationKind kind =
         sequence.kind == ConSanSyncSequenceKind::Barrier  ? ConSanPerturbationKind::Barrier
         : sequence.kind == ConSanSyncSequenceKind::Atomic ? ConSanPerturbationKind::Atomic
@@ -2823,7 +2825,7 @@ void build_perturbation_candidate_inventory(ConSanResult &result) {
       candidate.ordered_member_identities = sequence.member_event_identities;
       candidate.eligible = rejection.empty() && anchor != nullptr;
       candidate.rejection_reason = anchor == nullptr ? "missing-anchor-event" : rejection;
-      result.perturbation_candidates.push_back(std::move(candidate));
+      planning.candidates.push_back(std::move(candidate));
     }
   }
 }
@@ -2848,7 +2850,8 @@ struct CarriedPerturbationPlan {
   bool sequence_semantics_weakened = false;
 };
 
-void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
+void build_perturbation_plan(const ConSanOptions &options,
+                             ConSanPerturbationPlanningState &planning, ConSanResult &result,
                              std::span<const CarriedPerturbationPlan> carried_plans = {}) {
   result.mutation.perturbation.requested =
       options.sc_perturb_kind == ConSanPerturbationKind::None ? 0u : options.sc_perturb_max;
@@ -2896,12 +2899,12 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
                candidate.anchor_text_offset == carried.translated_anchor_text_offset &&
                candidate.anchor_size == carried.anchor_size;
       };
-      const size_t match_count = static_cast<size_t>(
-          std::ranges::count_if(result.perturbation_candidates, matches_carried));
-      auto candidate = std::ranges::find_if(result.perturbation_candidates, matches_carried);
+      const size_t match_count =
+          static_cast<size_t>(std::ranges::count_if(planning.candidates, matches_carried));
+      auto candidate = std::ranges::find_if(planning.candidates, matches_carried);
       if ((carried.removed_cache_boundary || carried.sequence_semantics_weakened) &&
           match_count == 0u) {
-        result.perturbation_candidates.push_back(
+        planning.candidates.push_back(
             {.kind = carried.kind,
              .edge = carried.edge,
              .identity = carried.source_candidate_identity,
@@ -2915,13 +2918,13 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
              .ordered_member_identities = carried.ordered_member_identities,
              .eligible = true,
              .rejection_reason = {}});
-        candidate = std::prev(result.perturbation_candidates.end());
-      } else if (match_count != 1u || candidate == result.perturbation_candidates.end()) {
+        candidate = std::prev(planning.candidates.end());
+      } else if (match_count != 1u || candidate == planning.candidates.end()) {
         result.errors.emplace_back(
             "ConSan could not recover exactly one carried perturbation edge with its owner");
         continue;
       }
-      result.perturbation_plans.push_back(
+      planning.plans.push_back(
           {.candidate_identity = candidate->identity,
            .sequence_identity = candidate->sequence_identity,
            .kind = candidate->kind,
@@ -2941,7 +2944,7 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
            .overlaps_atomic_mutation = carried.overlaps_atomic_mutation,
            .removed_cache_boundary = carried.removed_cache_boundary});
     }
-    result.mutation.perturbation.planned = result.perturbation_plans.size();
+    result.mutation.perturbation.planned = planning.plans.size();
     if (options.sc_perturb_required_count != 0u &&
         result.mutation.perturbation.planned != options.sc_perturb_required_count) {
       result.errors.emplace_back(
@@ -2952,7 +2955,7 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
   }
 
   std::vector<const ConSanPerturbationCandidate *> matching;
-  for (const ConSanPerturbationCandidate &candidate : result.perturbation_candidates) {
+  for (const ConSanPerturbationCandidate &candidate : planning.candidates) {
     if (!candidate.eligible || candidate.kind != options.sc_perturb_kind ||
         candidate.edge != options.sc_perturb_edge ||
         (!options.test_kernel_name_filter.empty() &&
@@ -2964,29 +2967,29 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
   }
 
   const size_t begin = options.sc_perturb_identity.empty() ? options.sc_perturb_index : 0u;
-  for (size_t i = begin;
-       i < matching.size() && result.perturbation_plans.size() < options.sc_perturb_max; ++i) {
+  for (size_t i = begin; i < matching.size() && planning.plans.size() < options.sc_perturb_max;
+       ++i) {
     const ConSanPerturbationCandidate &candidate = *matching[i];
-    result.perturbation_plans.push_back({.candidate_identity = candidate.identity,
-                                         .sequence_identity = candidate.sequence_identity,
-                                         .kind = candidate.kind,
-                                         .edge = candidate.edge,
-                                         .anchor_event_identity = candidate.anchor_event_identity,
-                                         .anchor_text_offset = candidate.anchor_text_offset,
-                                         .anchor_size = candidate.anchor_size,
-                                         .sleep_imm = options.sc_perturb_sleep,
-                                         .source_candidate_identity = {},
-                                         .source_sequence_identity = {},
-                                         .source_container_name = {},
-                                         .source_anchor_event_identity = {},
-                                         .source_in_kernel = true,
-                                         .source_anchor_text_offset = 0,
-                                         .source_anchor_size = 0,
-                                         .source_owner_descriptor_file_offset = std::nullopt,
-                                         .overlaps_atomic_mutation = false,
-                                         .removed_cache_boundary = false});
+    planning.plans.push_back({.candidate_identity = candidate.identity,
+                              .sequence_identity = candidate.sequence_identity,
+                              .kind = candidate.kind,
+                              .edge = candidate.edge,
+                              .anchor_event_identity = candidate.anchor_event_identity,
+                              .anchor_text_offset = candidate.anchor_text_offset,
+                              .anchor_size = candidate.anchor_size,
+                              .sleep_imm = options.sc_perturb_sleep,
+                              .source_candidate_identity = {},
+                              .source_sequence_identity = {},
+                              .source_container_name = {},
+                              .source_anchor_event_identity = {},
+                              .source_in_kernel = true,
+                              .source_anchor_text_offset = 0,
+                              .source_anchor_size = 0,
+                              .source_owner_descriptor_file_offset = std::nullopt,
+                              .overlaps_atomic_mutation = false,
+                              .removed_cache_boundary = false});
   }
-  result.mutation.perturbation.planned = result.perturbation_plans.size();
+  result.mutation.perturbation.planned = planning.plans.size();
   if (options.sc_perturb_required_count != 0u &&
       result.mutation.perturbation.planned != options.sc_perturb_required_count) {
     result.errors.emplace_back("ConSan SC perturb required " +
@@ -2996,8 +2999,10 @@ void build_perturbation_plan(const ConSanOptions &options, ConSanResult &result,
 }
 
 void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                    const ConSanOptions &options, ConSanResult &result) {
-  if (result.perturbation_plans.empty())
+                                    const ConSanOptions &options,
+                                    const ConSanPerturbationPlanningState &planning,
+                                    ConSanResult &result) {
+  if (planning.plans.empty())
     return;
   if (code_object.text_sections().size() != 1u) {
     result.outcome = ConSanTransformOutcome::Unsupported;
@@ -3043,14 +3048,13 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     std::vector<uint32_t> body_words;
   };
   std::vector<PlannedPatch> planned;
-  planned.reserve(result.perturbation_plans.size());
+  planned.reserve(planning.plans.size());
   const uint32_t nop = build_s_nop(0, arch);
 
-  for (const ConSanPerturbationPlan &plan : result.perturbation_plans) {
-    const auto candidate =
-        std::ranges::find(result.perturbation_candidates, plan.candidate_identity,
-                          &ConSanPerturbationCandidate::identity);
-    if (candidate == result.perturbation_candidates.end() || !candidate->eligible ||
+  for (const ConSanPerturbationPlan &plan : planning.plans) {
+    const auto candidate = std::ranges::find(planning.candidates, plan.candidate_identity,
+                                             &ConSanPerturbationCandidate::identity);
+    if (candidate == planning.candidates.end() || !candidate->eligible ||
         candidate->sequence_identity != plan.sequence_identity ||
         candidate->anchor_event_identity != plan.anchor_event_identity ||
         candidate->anchor_text_offset != plan.anchor_text_offset ||
@@ -3427,7 +3431,8 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                                rj_code_arch_t arch, const ConSanOptions &options,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
                                std::span<ConSanAccessInventorySite> access_sites,
-                               SynchronizationInventoryBuildView inventory, ConSanTransformArtifacts &result) {
+                               SynchronizationInventoryBuildView inventory,
+                               ConSanTransformArtifacts &result) {
   std::vector<uint64_t> leaders;
   std::vector<uint64_t> kernel_entries;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
@@ -3541,9 +3546,9 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   }
 }
 
-[[nodiscard]] const ConSanFaultSite *find_fault_site_by_identity(const ConSanTransformArtifacts &result,
-                                                                 std::string_view identity,
-                                                                 ConSanFaultSiteKind kind) {
+[[nodiscard]] const ConSanFaultSite *
+find_fault_site_by_identity(const ConSanTransformArtifacts &result, std::string_view identity,
+                            ConSanFaultSiteKind kind) {
   const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &candidate) {
     return candidate.kind == kind && candidate.identity == identity;
   });
@@ -3586,10 +3591,9 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                            &ConSanExecutionOwner::descriptor_file_offset) != owners.end();
 }
 
-[[nodiscard]] const ConSanFaultSite *select_fault_site_for_plan(const ConSanTransformArtifacts &result,
-                                                                const ConSanOptions &options,
-                                                                ConSanFaultSiteKind kind,
-                                                                uint32_t legacy_index) {
+[[nodiscard]] const ConSanFaultSite *
+select_fault_site_for_plan(const ConSanTransformArtifacts &result, const ConSanOptions &options,
+                           ConSanFaultSiteKind kind, uint32_t legacy_index) {
   if (!options.fault_site_identity.empty()) {
     const ConSanFaultSite *site =
         find_fault_site_by_identity(result, options.fault_site_identity, kind);

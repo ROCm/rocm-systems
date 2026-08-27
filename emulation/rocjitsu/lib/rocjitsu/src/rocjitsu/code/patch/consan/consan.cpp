@@ -308,7 +308,7 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
     }
     if (inventory.modified() || !inventory.replacement.empty() ||
         inventory.mutation.fault.applied != 0u || inventory.mutation.perturbation.applied != 0u ||
-        !inventory.fault_plans.empty() || !inventory.perturbation_plans.empty()) {
+        !inventory.fault_plans.empty()) {
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry requires an unmodified semantic inventory");
     }
@@ -385,18 +385,20 @@ ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
   }
 }
 
-ConSanResult complete_consan_lowering(std::span<const uint8_t> code_object_bytes,
-                                      const ConSanOptions &options) {
+ConSanResult
+complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
     ConSanOptions effective_options = options;
     effective_options.patched_image_growth_input_bytes = code_object_bytes.size();
-    ConSanResult result = try_patch_consan_impl(code_object_bytes, effective_options);
+    ConSanResult result = try_patch_consan_impl(code_object_bytes, effective_options, {},
+                                                std::nullopt, inspected_perturbation);
     try_apply_unmatched_barrier_wait_abort(code_object_bytes, effective_options, result);
     result = finalize_consan_result(std::move(result), code_object_bytes,
-                                    options.moi_report_dispatch_id);
+                                    options.moi_report_dispatch_id, false, inspected_perturbation);
     return result;
   } catch (const std::exception &error) {
     ConSanResult result;

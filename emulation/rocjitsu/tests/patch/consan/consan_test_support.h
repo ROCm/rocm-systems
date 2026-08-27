@@ -52,11 +52,13 @@ namespace rocjitsu {
 
 /// Explicitly test-only access to compatibility-lowering working state. No
 /// production header declares this symbol.
-[[nodiscard]] ConSanResult complete_consan_lowering(std::span<const uint8_t> code_object_bytes,
-                                                    const ConSanOptions &options);
-[[nodiscard]] inline ConSanResult test_lower_consan(std::span<const uint8_t> code_object_bytes,
-                                                    const ConSanOptions &options) {
-  return complete_consan_lowering(code_object_bytes, options);
+[[nodiscard]] ConSanResult
+complete_consan_lowering(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                         ConSanPerturbationPlanningState *inspected_perturbation = nullptr);
+[[nodiscard]] inline ConSanResult
+test_lower_consan(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
+                  ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
+  return complete_consan_lowering(code_object_bytes, options, inspected_perturbation);
 }
 namespace {
 

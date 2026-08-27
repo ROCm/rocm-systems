@@ -36,10 +36,11 @@ using ConSanDescriptorOwnerIndex = std::unordered_map<uint64_t, uint64_t>;
                         amdgpu_code_object_detail::kAssociativeEntryBookkeepingBytes);
 }
 
-[[nodiscard]] ConSanResult finalize_consan_result(ConSanResult result,
-                                                  std::span<const uint8_t> original_bytes,
-                                                  uint64_t expected_moi_report_dispatch_id = 0,
-                                                  bool validating_carried_composite_stage = false);
+[[nodiscard]] ConSanResult
+finalize_consan_result(ConSanResult result, std::span<const uint8_t> original_bytes,
+                       uint64_t expected_moi_report_dispatch_id = 0,
+                       bool validating_carried_composite_stage = false,
+                       const ConSanPerturbationPlanningState *carried_perturbation = nullptr);
 
 template <typename Site>
 void move_sites_in_range(std::vector<Site> &source, std::vector<Site> &destination, uint64_t begin,
@@ -143,15 +144,15 @@ void prepend_stage_diagnostics(ConSanResult &result, ConSanFaultTransformStage &
 
 [[nodiscard]] std::optional<std::vector<CarriedPerturbationPlan>>
 carry_perturbation_plans_across_mutation(const ConSanResult &pristine_plan,
+                                         const ConSanPerturbationPlanningState &planning,
                                          const ConSanFaultTransformStage &mutation_stage,
                                          std::string *error) {
   std::vector<CarriedPerturbationPlan> carried;
-  carried.reserve(pristine_plan.perturbation_plans.size());
-  for (const ConSanPerturbationPlan &plan : pristine_plan.perturbation_plans) {
-    const auto candidate =
-        std::ranges::find(pristine_plan.perturbation_candidates, plan.candidate_identity,
-                          &ConSanPerturbationCandidate::identity);
-    if (candidate == pristine_plan.perturbation_candidates.end() || !candidate->eligible ||
+  carried.reserve(planning.plans.size());
+  for (const ConSanPerturbationPlan &plan : planning.plans) {
+    const auto candidate = std::ranges::find(planning.candidates, plan.candidate_identity,
+                                             &ConSanPerturbationCandidate::identity);
+    if (candidate == planning.candidates.end() || !candidate->eligible ||
         candidate->sequence_identity != plan.sequence_identity ||
         candidate->anchor_text_offset != plan.anchor_text_offset ||
         candidate->anchor_size != plan.anchor_size || candidate->container_name.empty()) {
@@ -331,10 +332,15 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 [[nodiscard]] ConSanResult
 try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOptions &options,
                       std::span<const CarriedPerturbationPlan> carried_plans = {},
-                      std::optional<ConSanResult> pristine_inventory = std::nullopt) {
+                      std::optional<ConSanResult> pristine_inventory = std::nullopt,
+                      ConSanPerturbationPlanningState *inspected_perturbation = nullptr) {
   const major_image_ownership::ScopedPhase incremental_phase(
       major_image_ownership::Phase::IncrementalPatch, /*only_if_none=*/true);
   ConSanResult result;
+  ConSanPerturbationPlanningState local_perturbation;
+  ConSanPerturbationPlanningState &perturbation =
+      inspected_perturbation == nullptr ? local_perturbation : *inspected_perturbation;
+  perturbation = {};
   result.mutation.fault.requested = requested_fault_mutation_count(options);
   ProgramInventoryBuilder inventory_builder(code_object_bytes);
   result.program_inventory = inventory_builder.view();
@@ -374,20 +380,25 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     if (!has_perturbation)
       planning_options.fault_require_exactly_one = false;
     ConSanResult pristine_mutation_plan;
+    ConSanPerturbationPlanningState pristine_perturbation;
     if (pristine_inventory) {
       pristine_mutation_plan = std::move(*pristine_inventory);
       reset_inventory_for_fault_planning(planning_options, pristine_mutation_plan);
+      build_perturbation_candidate_inventory(pristine_mutation_plan.program_inventory,
+                                             pristine_perturbation);
       build_fault_mutation_plan(planning_options, pristine_mutation_plan.program_inventory.arch(),
                                 pristine_mutation_plan);
+      build_perturbation_plan(planning_options, pristine_perturbation, pristine_mutation_plan);
     } else {
-      pristine_mutation_plan = try_patch_consan_impl(code_object_bytes, planning_options);
+      pristine_mutation_plan = try_patch_consan_impl(code_object_bytes, planning_options, {},
+                                                     std::nullopt, &pristine_perturbation);
     }
     const size_t retained_planned_faults = pristine_mutation_plan.mutation.fault.planned;
     const std::vector<ConSanFaultMutationPlan> retained_fault_plans =
         pristine_mutation_plan.fault_plans;
     if (has_perturbation &&
         (!pristine_mutation_plan.errors.empty() || pristine_mutation_plan.fault_plans.empty() ||
-         pristine_mutation_plan.perturbation_plans.empty())) {
+         pristine_perturbation.plans.empty())) {
       pristine_mutation_plan.outcome = ConSanTransformOutcome::Unsupported;
       pristine_mutation_plan.warnings.emplace_back(
           has_perturbation
@@ -486,8 +497,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     std::vector<CarriedPerturbationPlan> staged_carried;
     if (has_perturbation) {
       std::string carry_error;
-      auto carried = carry_perturbation_plans_across_mutation(pristine_mutation_plan,
-                                                              mutation_stage, &carry_error);
+      auto carried = carry_perturbation_plans_across_mutation(
+          pristine_mutation_plan, pristine_perturbation, mutation_stage, &carry_error);
       if (!carried)
         return rollback_composite_mutation(std::move(fault_result), std::move(carry_error));
       instrument_options.sc_perturb_identity.clear();
@@ -496,9 +507,10 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     }
     const std::span<const CarriedPerturbationPlan> instrument_carried = staged_carried;
     ConSanResult instrument_result = finalize_consan_result(
-        try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried),
+        try_patch_consan_impl(mutation_stage.image, instrument_options, instrument_carried, {},
+                              &perturbation),
         mutation_stage.image, instrument_options.moi_report_dispatch_id,
-        /*validating_carried_composite_stage=*/!instrument_carried.empty());
+        /*validating_carried_composite_stage=*/!instrument_carried.empty(), &perturbation);
     const major_image_ownership::ScopedOwner instrument_result_owner(
         major_image_ownership::OwnerKind::ResultImage, instrument_result.replacement);
     // Resource ownership is a logical kernel identity, but instrumentation of
@@ -808,7 +820,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
                                               synchronization_inventory, result);
     build_moi_fence_candidate_inventory(synchronization_inventory);
     result.program_inventory = inventory_builder.view();
-    build_perturbation_candidate_inventory(result);
+    build_perturbation_candidate_inventory(result.program_inventory, perturbation);
     annotate_fault_sites_with_sync_sequences(result);
   } else if (std::ranges::any_of(result.program_inventory.access_sites(),
                                  [](const ConSanAccessInventorySite &site) {
@@ -824,11 +836,11 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   result.program_inventory = inventory_builder.view();
   if (options.fault_dry_run) {
     build_fault_mutation_plan(options, arch, result);
-    build_perturbation_plan(options, result, carried_plans);
+    build_perturbation_plan(options, perturbation, result, carried_plans);
     return result;
   }
   if (has_perturbation) {
-    build_perturbation_plan(options, result, carried_plans);
+    build_perturbation_plan(options, perturbation, result, carried_plans);
     if (!result.errors.empty())
       return result;
   }
@@ -852,13 +864,13 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
 
   const bool has_redundant_access = options.probe_lds_check_trap || options.probe_flat_check_trap;
   const uint32_t overall_patch_budget = std::max<uint32_t>(options.max_patches, 1u);
-  if (result.perturbation_plans.size() > overall_patch_budget) {
+  if (perturbation.plans.size() > overall_patch_budget) {
     result.errors.emplace_back("ConSan SC perturbation exceeds the shared patch budget");
     return result;
   }
   ConSanOptions redundant_options = options;
   redundant_options.max_patches =
-      overall_patch_budget - static_cast<uint32_t>(result.perturbation_plans.size());
+      overall_patch_budget - static_cast<uint32_t>(perturbation.plans.size());
 
   if (has_redundant_access) {
     if (options.probe_lds_check_trap)
@@ -916,8 +928,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     try_apply_proof_nop_patch(*code_object, arch, options.probe_trampoline_nop, result);
 
   if (has_perturbation && result.errors.empty()) {
-    try_apply_perturbation_patches(*code_object, arch, options, result);
-    if (result.mutation.perturbation.applied != result.perturbation_plans.size()) {
+    try_apply_perturbation_patches(*code_object, arch, options, perturbation, result);
+    if (result.mutation.perturbation.applied != perturbation.plans.size()) {
       if (result.outcome == ConSanTransformOutcome::ModifiedValid)
         result.outcome = result.errors.empty() ? ConSanTransformOutcome::Unchanged
                                                : ConSanTransformOutcome::Invalid;

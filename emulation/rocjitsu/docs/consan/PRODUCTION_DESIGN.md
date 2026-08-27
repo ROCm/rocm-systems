@@ -5698,6 +5698,35 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CK: bound perturbation planning to one lowering attempt
+
+- **Candidates and plans are not transform output:** Synchronization analysis
+  now writes perturbation candidates and selected plans into a focused
+  `ConSanPerturbationPlanningState`. The state lives only across candidate
+  construction, selection, emission, and the final validation of that lowering
+  attempt; `ConSanResult` no longer retains either vector.
+- **Composite evidence crosses one explicit boundary:** Fault/perturbation
+  composition carries the pristine planning state only while translating its
+  chosen edge. The instrumented intermediate image passes that same temporary
+  evidence explicitly to final validation, including the case where mutation
+  intentionally removed the boundary that reinventory would otherwise find.
+  Durable results remain the mutation tally and the emitted patch's semantic
+  identity, owner, source anchor, and composition facts.
+- **Tests inspect planner state deliberately:** Planner-focused unit tests use
+  an explicit test-only inspection parameter. Ordinary callers and final
+  transform consumers cannot observe or depend on the workspace. Existing
+  tests still cover stable selection, rejection reasons, bounded controls,
+  byte emission, rollback, and pristine-to-mutated composition.
+- **Structural accounting:** Two more mutable vectors leave `ConSanResult`.
+  Explicit lifetime and intermediate-validation plumbing adds 155 and deletes
+  100 implementation lines, a temporary net increase of 55; this is a
+  prerequisite to deleting the compatibility result rather than a line-count
+  reduction on its own.
+- **Checked-in gate:** All 1,530 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

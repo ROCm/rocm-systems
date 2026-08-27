@@ -21,15 +21,16 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   select.sc_perturb_kind = ConSanPerturbationKind::Atomic;
   select.sc_perturb_edge = ConSanPerturbationEdge::Release;
   select.sc_perturb_required_count = 1;
-  const ConSanResult selected = test_lower_consan(bytes, select);
-  ASSERT_EQ(selected.perturbation_plans.size(), 1u);
+  ConSanPerturbationPlanningState selected_perturbation;
+  const ConSanResult selected = test_lower_consan(bytes, select, &selected_perturbation);
+  ASSERT_EQ(selected_perturbation.plans.size(), 1u);
   ConSanOptions options = select;
   options.fault_dry_run = false;
   options.fault_atomic_wrong_address = true;
   options.fault_atomic_address_delta = 4;
   options.fault_require_exactly_one = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
-  options.sc_perturb_identity = selected.perturbation_plans.front().candidate_identity;
+  options.sc_perturb_identity = selected_perturbation.plans.front().candidate_identity;
   const ConSanResult result = test_lower_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
@@ -47,7 +48,7 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   ASSERT_NE(perturbation, result.patches.end());
   EXPECT_NE(mutation->anchor_offset, perturbation->anchor_offset);
   EXPECT_EQ(perturbation->perturbation_source_candidate_identity,
-            selected.perturbation_plans.front().candidate_identity);
+            selected_perturbation.plans.front().candidate_identity);
   ASSERT_EQ(perturbation->owner_descriptor_file_offsets.size(), 1u);
   EXPECT_EQ(perturbation->owner_descriptor_file_offsets.front(),
             result.program_inventory.kernels().front().descriptor_file_offset);
