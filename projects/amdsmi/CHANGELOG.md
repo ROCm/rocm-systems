@@ -92,6 +92,17 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - After (`--json`): `{"error": "[AMDSMI_STATUS_NOT_SUPPORTED] Command not supported", "code": 2}`
   - `amd-smi ras` no longer prints a Python traceback when a CPER file can't be read or decoded (`--afid --cper-file`, `--afid --folder`, `--cper`). It reports the failure and exits with the matching status code.
 
+- **Unified `amd-smi ras --afid` output across human/JSON/CSV, and made its exit codes truthful.**
+  - `--afid --folder <DIR>` and `--afid --cper-file <FILE>` now render the same per-file schema.
+  - A file that fails to decode shows `[AMDSMI_STATUS_<name>] <message>` in place of its AFIDs, replacing the previous `decode failed` placeholder.
+  - JSON and CSV emit a structured per-file record with the fields `cper_file, afids, status, message, code` (`afids` is `N/A` when a file has no AFIDs or fails to decode).
+  - The command now exits with the underlying `AMDSMI_STATUS_*` (e.g. `43`), or `205` when files fail with differing codes. Previously decode failures in `--folder` silently exited `0`, `--csv` emitted the human table instead of CSV, and a failed `--json` record carried an ad-hoc `decode_status` object instead of the status fields above.
+
+- **`amd-smi set --compute-partition` / `-C` now attempts each GPU individually.**
+  - An unsupported GPU reports `NOT_SUPPORTED` on its own, instead of the whole command aborting up front.
+  - Input is validated against the static partition type names when profiles cannot be enumerated.
+  - The `-C` help now lists `SPX, DPX, TPX, QPX, CPX` instead of `N/A`.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -367,11 +378,6 @@ GPU: 0
   - The module is additionally staged under `share/amd_smi` (its historical location) for consumers that resolve it via `ROCM_PATH/share/amd_smi` rather than `site-packages` (e.g. rocprofiler-compute, omnistat) and for the TheRock artifact layout, whose manifest captures `share/amd_smi` but not the interpreter's `site-packages`. `site-packages` remains the primary importable location.
   - Added new CMake option `-DBUILD_PYTHON_WHEEL=ON` (default `OFF`) which builds the standalone Python wheel and an isolated `libamd_smi_python.so` (distinct SONAME) bundled inside it, so the wheel-shipped library can coexist in-process with the system `libamd_smi.so` without symbol collisions. With `-DBUILD_PYTHON_WHEEL=OFF` (the default used by ROCm CI) only the system-package layout is built; no wheel artifact is produced.
   - `py-interface/amdsmi_wrapper.py` now loads the shared library in this order: the `AMDSMI_LIB_OVERRIDE` env var (development / ABI-test escape hatch), a `libamd_smi_python.so` bundled next to the wrapper (pip wheel), then the system `libamd_smi.so` via the dynamic linker. A `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable, so import-time tooling (docs, lint) still works without a runtime library.
-
-- **`amd-smi set --compute-partition` / `-C` now attempts each GPU individually.**  
-  - An unsupported GPU reports `NOT_SUPPORTED` on its own, instead of the whole command aborting up front.
-  - Input is validated against the static partition type names when profiles cannot be enumerated.
-  - The `-C` help now lists `SPX, DPX, TPX, QPX, CPX` instead of `N/A`.
 
 - **Normalized JSON/CSV key casing in `amd-smi metric` clock and temperature sections**.  
   - The `uclk_aid`, `socclks_mid`, and temperature `xcd` keys are now lowercase (`aid_<N>`, `mid_<N>`, `xcp_<N>`) in JSON and CSV output, matching the existing `xcp_<N>` usage keys; they were previously uppercase (`AID_<N>`, `MID_<N>`, `XCP_<N>`).
