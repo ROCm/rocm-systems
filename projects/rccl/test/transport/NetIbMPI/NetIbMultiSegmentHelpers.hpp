@@ -13,8 +13,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <cstdlib>
 #include <unistd.h>
 #include <vector>
 
@@ -105,7 +103,7 @@ inline void FreeMultiSegmentVmm(MultiSegmentVmmBuffer& b) {
 // composite handle. Returns ncclInvalidUsage (without touching *mhandle) if the
 // dma-buf export API is unavailable at build time (older HIP). Callers must not
 // treat that as a successful cap reject.
-inline ncclResult_t RegisterMultiSegmentMr(void* comm, const MultiSegmentVmmBuffer& b, void** mhandle) {
+inline ncclResult_t RegisterMultiSegmentMr(void* comm, const MultiSegmentVmmBuffer& b, bool isCast, void** mhandle) {
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
     std::vector<void*>    segAddrs(b.nSegments);
     std::vector<size_t>   segLens(b.nSegments);
@@ -113,10 +111,6 @@ inline ncclResult_t RegisterMultiSegmentMr(void* comm, const MultiSegmentVmmBuff
     std::vector<int>      segFds(b.nSegments, -1);
 
     ncclResult_t ret = ncclSuccess;
-    // Same selection as GetPlugin(): CAST comms use IbCastRegMrDmaBufMultiSeg.
-    // Computed before the fd-export loop so a goto cleanup does not skip init.
-    const char* netEnv = getenv("NCCL_NET");
-    const bool isCast = (netEnv != nullptr && strcmp(netEnv, "IB-CAST") == 0);
     for (int s = 0; s < b.nSegments; s++) {
         uintptr_t segVa = reinterpret_cast<uintptr_t>(b.base) + static_cast<uintptr_t>(s) * b.segSize;
         int fd = -1;
@@ -137,7 +131,7 @@ cleanup:
     for (int s = 0; s < b.nSegments; s++) if (segFds[s] != -1) (void)close(segFds[s]);
     return ret;
 #else
-    (void)comm; (void)b; (void)mhandle;
+    (void)comm; (void)b; (void)isCast; (void)mhandle;
     return ncclInvalidUsage; // dma-buf export API unavailable at build time
 #endif
 }

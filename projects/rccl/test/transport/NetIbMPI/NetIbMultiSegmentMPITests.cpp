@@ -127,12 +127,14 @@ protected:
             PostSingleRecv(pair.recvComm, buf, size, tag, recvMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+            EXPECT_EQ(sz, static_cast<int>(size));
         } else {
             FillDevice(static_cast<uint8_t*>(sBuf) + srcOff, size, seed);
             void* buf = static_cast<uint8_t*>(sBuf) + srcOff;
             PostSendWithRetry(pair.sendComm, buf, size, tag, sendMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+            EXPECT_EQ(sz, static_cast<int>(size));
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0)
@@ -192,7 +194,7 @@ protected:
         const int rank = MPIEnvironment::world_rank;
         *comm = (rank == 0) ? pair.recvComm : pair.sendComm;
         *mh = nullptr;
-        ncclResult_t r = RegisterMultiSegmentMr(*comm, *buf, mh);
+        ncclResult_t r = RegisterMultiSegmentMr(*comm, *buf, net_ == &netIbCast, mh);
         EXPECT_EQ(r, ncclSuccess) << "multi-segment registration failed (the AIRUNTIME-2351 bug)";
         EXPECT_NE(*mh, nullptr);
         const bool ok = (r == ncclSuccess && *mh != nullptr);
@@ -323,7 +325,7 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
     void* mh = nullptr;
-    ncclResult_t r = RegisterMultiSegmentMr(comm, *big, &mh);
+    ncclResult_t r = RegisterMultiSegmentMr(comm, *big, net_ == &netIbCast, &mh);
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
     EXPECT_EQ(r, ncclInvalidUsage) << "over-cap segment buffer must be rejected";
     EXPECT_EQ(mh, nullptr) << "no handle should be produced for an over-cap buffer";
@@ -451,7 +453,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
     MultiSegmentVmmBuffer* buf1 = AllocSym(kNumSegments);
     if (SyncSkip(buf1 == nullptr)) GTEST_SKIP() << "second multi-segment VMM allocation unavailable";
     void* mh1 = nullptr;
-    ASSERT_EQ(RegisterMultiSegmentMr(comm, *buf1, &mh1), ncclSuccess);
+    ASSERT_EQ(RegisterMultiSegmentMr(comm, *buf1, net_ == &netIbCast, &mh1), ncclSuccess);
     ASSERT_NE(mh1, nullptr);
     NetMHandleGuard mhGuard1(mh1, NetMHandleDeleter(net_, comm));
 

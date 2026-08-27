@@ -155,9 +155,11 @@ extern bool IbCastUseInline;
 #define WR_IMM_RX_REQ_IDX_MASK 0xff
 #define WR_IMM_RX_REQ_IDX_SHIFT 24
 #define WR_IMM_SPLIT_DATA_FLAG 0x00800000
-#define WR_IMM_SIZE_MASK 0x007fffff
+#define WR_IMM_SEGMENTED_FLAG 0x00400000
+#define WR_IMM_SIZE_MASK 0x003fffff
 // QP sharing BY_ID imm_data layout: reqId in bits[7:0], receiver commId in bits[23:8].
 // reqId fits in 8 bits (NET_IB_MAX_REQUESTS <= 256); commId fits in 16 bits.
+// Mutually exclusive with the BY_INDEX size/flag encoding above.
 #define WR_IMM_BYID_REQ_ID_MASK   0xff
 #define WR_IMM_BYID_COMM_ID_SHIFT 8
 #define WR_IMM_BYID_COMM_ID_MASK  0xffff
@@ -349,6 +351,9 @@ struct ncclIbRequest {
       // resolve the per-segment local lkey. NULL/single-segment handles use
       // lkeys[] directly on the fast path.
       struct ncclIbMrHandle* mh;
+      // At most one segmented multi-recv group is active per communicator so
+      // its worst-case WR chain cannot overrun the data QP send queue.
+      bool segmented;
       // Tracks whether data was transmitted on a QP for this request.
       bool sentData[NCCL_IB_MAX_QPS];
     } send;
@@ -399,11 +404,6 @@ struct alignas(32) ncclIbSendFifoCtsInline {
   char padding[8];
 } __attribute__((packed));
 
-// Connect-time capability: peer registered a side table immediately after the
-// 64-byte CTS FIFO. Mixed nSegments<=1 traffic stays bit-compatible with stock
-// CAST; nSegments>1 requires this bit. Same value as classic net_ib.
-#define NCCL_IB_CAP_MULTISEG 0x1u
-
 // Receiver layout for nSegments>1. Same [slot][recv] indexing as CTS. idx must
 // equal the CTS slot's idx so a later single-segment reuse of the same CTS
 // index ignores a stale side slot.
@@ -419,6 +419,9 @@ struct alignas(64) ncclIbSegLayout {
 // request's chunk may be split at every local and remote segment boundary it
 // spans. Single-segment sends use exactly one WR per request.
 #define NCCL_IB_MAX_WRS_PER_SEND (NCCL_NET_IB_MAX_RECVS * 2 * NCCL_IB_MAX_SEGMENTS)
+// Reserve the legacy two-WQE budget for every request plus one worst-case
+// segmented group. The data path admits only one such group at a time.
+#define NCCL_IB_MAX_SEND_WRS (2 * NET_IB_MAX_REQUESTS + NCCL_IB_MAX_WRS_PER_SEND + 1)
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
