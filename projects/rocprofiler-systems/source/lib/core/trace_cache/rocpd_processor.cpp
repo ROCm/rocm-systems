@@ -968,9 +968,22 @@ rocpd_processor_t::try_insert_pmc_event(
         m_writer->insert_pmc_event_data(event_event, unique_id);
     } catch(const std::runtime_error& e)
     {
-        LOG_WARNING("{} skipped: PMC info not registered for name={}: {}. "
+        auto key = std::string{ unique_id.name};
+
+        // Build the key for the PMC info. Two agents missing the same PMC info will
+        // warn separately.
+        if(unique_id.agent_id.has_value())
+        {
+            const auto& agent_id = unique_id.agent_id.value();
+            key += fmt::format(" [{}:{}]", agent_id.agent_type.value_or("unknown"),
+                                agent_id.type_index);
+        }
+
+        if (m_unregistered_pmcs_already_warned.emplace(std::move(key)).second) {
+            LOG_WARNING("{} skipped: PMC info not registered for name={} - {}. "
                     "Further samples for this PMC will be dropped without warning.",
                     context, unique_id.name, e.what());
+        }
     }
 }
 
