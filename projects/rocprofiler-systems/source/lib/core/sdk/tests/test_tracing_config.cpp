@@ -72,6 +72,8 @@ enum backend_tag : int
     callback_domains_buffer_only_no_warning     = 105,
     buffered_domains_callback_only_no_warning   = 106,
     operation_settings_marker_core_api_skip     = 107,
+    buffered_domains_kfd_below_boundary_version = 108,
+    buffered_domains_kfd_at_boundary_version    = 109,
 };
 
 // tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -131,6 +133,25 @@ struct tagged_backend<buffered_domains_page_migration>
 : cached_backend_methods<buffered_domains_page_migration, mock_backend>
 {
     static constexpr std::uint32_t compile_time_version = 500;
+};
+
+// The KFD gate is s_sdk_version_1_2_2 (10202): SDK versions below 1.2.2 have a
+// fatal bug parsing KFD events with undefined node IDs. 10201 (1.2.1) is one
+// patch below the boundary, so KFD domains must stay unsupported.
+template <>
+struct tagged_backend<buffered_domains_kfd_below_boundary_version>
+: cached_backend_methods<buffered_domains_kfd_below_boundary_version, mock_backend>
+{
+    static constexpr std::uint32_t compile_time_version = 10201U;
+};
+
+// 10202 (1.2.2) is the exact KFD gate boundary: KFD domains must be supported
+// here, proving the gate is inclusive (">=", not ">").
+template <>
+struct tagged_backend<buffered_domains_kfd_at_boundary_version>
+: cached_backend_methods<buffered_domains_kfd_at_boundary_version, mock_backend>
+{
+    static constexpr std::uint32_t compile_time_version = 10202U;
 };
 
 // ROCSHMEM_API (>= 1.3.4) and HIPFILE_API (>= 1.3.5) are gated by compile-time
@@ -1024,6 +1045,63 @@ TEST_F(tracing_config_domains_test,
                 gtest::UnorderedElementsAre(
                     tagged_backend<
                         buffered_domains_page_migration>::BUFFER_TRACING_PAGE_MIGRATION));
+}
+
+// SDK 1.2.1 (10201) is one patch below the KFD gate (s_sdk_version_1_2_2 = 10202):
+// kfd_page_fault is a known, valid domain name (present in the raw name table),
+// but get_supported_buffer_domains() excludes it below the gate, so it must
+// resolve to nothing rather than to BUFFER_TRACING_KFD_PAGE_FAULT.
+TEST_F(tracing_config_domains_test,
+       get_buffered_domains_kfd_domain_unsupported_below_version_gate)
+{
+    using backend_t = tagged_backend<buffered_domains_kfd_below_boundary_version>;
+    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "kfd_page_fault" }));
+
+    EXPECT_THAT(sut::get_buffered_domains(), gtest::IsEmpty());
+}
+
+// SDK 1.2.2 (10202) is exactly the KFD gate boundary: the "kfd_events" alias
+// becomes a valid domain choice and all KFD_* kinds become supported, proving
+// the gate is inclusive.
+TEST_F(tracing_config_domains_test,
+       get_buffered_domains_kfd_events_supported_at_version_gate)
+{
+    using backend_t = tagged_backend<buffered_domains_kfd_at_boundary_version>;
+    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_callback_name_info()));
+
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .Times(1)
+        .WillOnce(gtest::Return(std::string{ "kfd_events" }));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .Times(1)
+        .WillOnce(gtest::Return(false));
+
+    EXPECT_THAT(
+        sut::get_buffered_domains(),
+        gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
+                                    backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                                    backend_t::BUFFER_TRACING_KFD_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                    backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
 }
 
 // ─── get_operations ───────────────────────────────────────────────────────────
