@@ -250,10 +250,12 @@ GPU: 0
 
 - **Removed `amdsmi_set_gpu_clk_range()`** (breaking). Use `amdsmi_set_gpu_clk_limit()` instead.
 
-- **Restructured AMD SMI C++ tests into unit and functional suites**.  
-  - The `amdsmitst` source tree now separates unit tests from hardware-backed functional tests under `tests/amd_smi_test/unit/` and `tests/amd_smi_test/functional/`.
+- **Restructured AMD SMI C++ tests into unit, integration and functional suites**.  
+  - The `amdsmitst` source tree now splits into three tiers under `tests/amd_smi_test/`: `unit/` (no device, no `amdsmi_init`), `integration/` (every API's invalid-input cases plus getters on valid input), and `functional/` (setters and multi-API workflows).
   - GTest suite names now follow a `<Component><Type>[<Operation>]` scheme: functional tests are `<Component>FunctionalReadOnly`/`<Component>FunctionalReadWrite` (e.g. `GpuFunctionalReadOnly`) and unit tests are `<Component>Unit` (e.g. `GpuUnit`). This replaces the old `amdsmitstReadOnly`/`amdsmitstReadWrite` and `AmdSmiDynamicMetricTest` names.
+  - Integration tests use `<Component>Integration` (e.g. `GpuIntegration`). Most suites previously named `<Component>Unit` are now `<Component>Integration`; `*Unit` is reserved for tests that need no device.
   - Consumers that pass explicit `--gtest_filter` values should update those filters to the new suite names.
+  - Destructive writes in `*FunctionalReadWrite` suites are now opt-in: set `AMDSMI_TEST_ALLOW_MUTATION` (and run as root) to enable them. A default run never mutates device state.
   - See the [AMD SMI test design](docs/conceptual/test-design.md#naming-conventions) for the suite naming convention and `--gtest_filter` usage.
 
 ### Optimized
