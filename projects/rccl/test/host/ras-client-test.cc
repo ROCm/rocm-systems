@@ -1518,3 +1518,225 @@ TEST_F(RasClientMicrotest, SetOutputFormat_FormatOverflowsMsgBuf_TruncatesComman
   EXPECT_EQ('z', g_writtenData.back());
   EXPECT_EQ(std::string::npos, g_writtenData.find('\n'));
 }
+
+
+// ===========================================================================
+// getNCCLStatus: the STATUS command, the streaming read loop, and every
+// failure arm (short write, read error, short fwrite, fflush error).
+// ===========================================================================
+
+namespace {
+
+// Chunks with no '\n' and three different lengths. The absence of a newline is
+// load-bearing: it is what makes the untilNewline=false argument observable.
+constexpr const char kChunk1[] = "alpha";         // 5 bytes
+constexpr const char kChunk2[] = "bravocharlie";  // 12 bytes
+constexpr const char kChunk3[] = "delta7";        // 6 bytes
+
+struct FwriteCall {
+  size_t size;
+  size_t nmemb;
+  FILE* stream;
+};
+
+std::vector<FwriteCall> g_fwriteCalls;
+
+// Records (size, nmemb, stream) then behaves like the default fwrite. Without the (size, nmemb)
+// record the fwrite(buf,1,bytes) vs fwrite(buf,bytes,1) swap is invisible to g_stdoutData.
+size_t RecordingFwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
+  g_fwriteCalls.push_back(FwriteCall{size, nmemb, stream});
+  g_stdoutData.append(static_cast<const char*>(ptr), size * nmemb);
+  return nmemb;
+}
+
+void ScriptThreeChunks() {
+  ScriptReadData(kChunk1);
+  ScriptReadData(kChunk2);
+  ScriptReadData(kChunk3);
+}
+
+}  // namespace
+
+// Derived fixture solely so g_fwriteCalls is cleared alongside the shared fakes;
+// suite name RasClientMicrotestGetStatus needs its own registration line.
+class RasClientMicrotestGetStatus : public RasClientMicrotest {
+ protected:
+  void SetUp() override {
+    RasClientMicrotest::SetUp();
+    g_fwriteCalls.clear();
+    sock = 17;  // distinctive, so the fd the client forwards is provably its own
+  }
+  void TearDown() override {
+    g_fwriteCalls.clear();
+    RasClientMicrotest::TearDown();
+  }
+};
+
+// Command arm, verbose off: exactly "STATUS\n" on the wire, and the empty read
+// script makes the first rasRead return 0, taking the EOF break to return 0.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_NonVerbose_SendsPlainStatusAndReturnsZeroOnEof) {
+  verbose = false;
+  int writeFd = -1;
+  ScopedHook writeHook(g_write, [&](int fd, const void* buf, size_t count) -> ssize_t {
+    writeFd = fd;
+    g_writtenData.append(static_cast<const char*>(buf), count);
+    return static_cast<ssize_t>(count);
+  });
+  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
+  ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
+
+  EXPECT_EQ("STATUS\n", g_writtenData);
+  EXPECT_EQ(17, writeFd);
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ(0, fflushHook.calls);
+  EXPECT_EQ("", g_stdoutData);
+  EXPECT_EQ("", log);
+}
+
+// Command arm, verbose on: the prefix is "VERBOSE " with its trailing space.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_Verbose_SendsVerbosePrefixedStatusAndReturnsZero) {
+  verbose = true;
+  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
+
+  EXPECT_EQ("VERBOSE STATUS\n", g_writtenData);
+  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ("", log);
+}
+
+// Loop body: three reads of different lengths each become their own
+// fwrite(buf, 1, bytes, stdout) + fflush, in order, then EOF returns 0.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ThreeChunks_StreamsEachToStdoutInOrder) {
+  ScriptThreeChunks();
+  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
+  ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(0, getNCCLStatus()); });
+
+  EXPECT_EQ("STATUS\n", g_writtenData);
+  EXPECT_EQ("alphabravocharliedelta7", g_stdoutData);
+  EXPECT_EQ(3, fwriteHook.calls);
+  EXPECT_EQ(3, fflushHook.calls);
+  EXPECT_EQ(3u, g_readScriptPos);  // every scripted read was consumed, then past-the-end EOF
+  ASSERT_EQ(3u, g_fwriteCalls.size());
+  EXPECT_EQ(1u, g_fwriteCalls[0].size);
+  EXPECT_EQ(5u, g_fwriteCalls[0].nmemb);
+  EXPECT_EQ(1u, g_fwriteCalls[1].size);
+  EXPECT_EQ(12u, g_fwriteCalls[1].nmemb);
+  EXPECT_EQ(1u, g_fwriteCalls[2].size);
+  EXPECT_EQ(6u, g_fwriteCalls[2].nmemb);
+  EXPECT_EQ(stdout, g_fwriteCalls[0].stream);
+  EXPECT_EQ("", log);
+}
+
+// Write arm, EAGAIN: socketWrite returns -1 with a timeout errno.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEagain_ReportsTimeoutAndReturnsOne) {
+  ScriptThreeChunks();  // never consumed: the command write fails first
+  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
+  ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
+    errno = EAGAIN;
+    return -1;
+  });
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_EQ(0u, g_readScriptPos);
+  EXPECT_TRUE(LogHas(log, "Connection timed out\n")) << log;
+  EXPECT_FALSE(LogHas(log, "write to socket"));
+}
+
+// Write arm, non-EAGAIN: perror prints the label, ": " and the strerror text.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_WriteFailsWithEpipe_ReportsWriteToSocketAndReturnsOne) {
+  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
+  ScopedHook writeHook(g_write, [](int, const void*, size_t) -> ssize_t {
+    errno = EPIPE;
+    return -1;
+  });
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ(0, fwriteHook.calls);
+  EXPECT_TRUE(LogHas(log, "write to socket: Broken pipe\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+}
+
+// Read arm, EWOULDBLOCK: the first chunk has already been streamed, so the
+// "Connection timed out" here is provably the read site, not the write site.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEwouldblock_ReportsTimeoutAndReturnsOne) {
+  ScriptReadData(kChunk1);
+  ScriptRead(-1, EWOULDBLOCK, "");
+  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+
+  EXPECT_EQ("STATUS\n", g_writtenData);
+  EXPECT_EQ("alpha", g_stdoutData);
+  EXPECT_EQ(1, fwriteHook.calls);
+  EXPECT_TRUE(LogHas(log, "Connection timed out\n")) << log;
+  EXPECT_FALSE(LogHas(log, "read socket"));
+}
+
+// Read arm, non-EAGAIN errno.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ReadFailsWithEio_ReportsReadSocketAndReturnsOne) {
+  ScriptReadData(kChunk1);
+  ScriptRead(-1, EIO, "");
+  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+
+  EXPECT_EQ("alpha", g_stdoutData);
+  EXPECT_EQ(1, fwriteHook.calls);
+  EXPECT_TRUE(LogHas(log, "read socket: Input/output error\n")) << log;
+  EXPECT_FALSE(LogHas(log, "Connection timed out"));
+}
+
+// fwrite arm: the second chunk is short-written, so the loop must abort there
+// without fflushing it and without touching the third chunk.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_ShortFwrite_ReportsFailureAndReturnsOne) {
+  ScriptThreeChunks();
+  ScopedHook fflushHook(g_fflush, [](FILE*) { return 0; });
+  int fwriteSeq = 0;  // sequencing only; fwriteHook.calls stays the assertion surface
+  ScopedHook fwriteHook(g_fwrite, [&](const void* ptr, size_t size, size_t nmemb, FILE* stream) -> size_t {
+    if (++fwriteSeq == 2) return nmemb - 1;
+    return RecordingFwrite(ptr, size, nmemb, stream);
+  });
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+
+  EXPECT_EQ("alpha", g_stdoutData);
+  EXPECT_EQ(2, fwriteHook.calls);
+  EXPECT_EQ(1, fflushHook.calls);
+  EXPECT_EQ(2u, g_readScriptPos);
+  EXPECT_TRUE(LogHas(log, "fwrite to stdout failed!\n")) << log;
+  EXPECT_FALSE(LogHas(log, "fflush stdout"));
+}
+
+// fflush arm: the second flush fails, after its chunk already reached stdout.
+TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_FflushFails_ReportsPerrorAndReturnsOne) {
+  ScriptThreeChunks();
+  ScopedHook fwriteHook(g_fwrite, RecordingFwrite);
+  int fflushSeq = 0;  // sequencing only; fflushHook.calls stays the assertion surface
+  ScopedHook fflushHook(g_fflush, [&](FILE*) {
+    if (++fflushSeq == 2) {
+      errno = ENOSPC;
+      return EOF;
+    }
+    return 0;
+  });
+
+  const std::string log = CaptureLog([]() { EXPECT_EQ(1, getNCCLStatus()); });
+
+  EXPECT_EQ("alphabravocharlie", g_stdoutData);
+  EXPECT_EQ(2, fwriteHook.calls);
+  EXPECT_EQ(2, fflushHook.calls);
+  EXPECT_EQ(2u, g_readScriptPos);
+  EXPECT_TRUE(LogHas(log, "fflush stdout: No space left on device\n")) << log;
+  EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
+}

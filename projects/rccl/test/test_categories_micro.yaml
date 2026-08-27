@@ -19,6 +19,7 @@ test_categories:
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "RasClientMicrotest.*"
       - "RasClientMicrotestDeathTest.*"
+      - "RasClientMicrotestGetStatus.*"
     exclude_windows:
       - "*"
     labels:
