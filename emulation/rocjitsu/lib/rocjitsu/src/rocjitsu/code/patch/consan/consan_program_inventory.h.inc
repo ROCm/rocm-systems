@@ -444,6 +444,28 @@ public:
       append_container_accesses(function, code_object_bytes);
   }
 
+  /// Transfer normalized accesses in a staged executable range to their
+  /// dispatchable owner and merge access instructions decoded only after that
+  /// range was installed.
+  ///
+  /// Fault composition may place a trampoline outside its source kernel's
+  /// symbol range. Existing records can therefore have been decoded through
+  /// an overlapping symbol, while instructions introduced by the trampoline
+  /// do not occur in the pristine inventory at all. This operation resolves
+  /// both cases without mutating the legacy per-container access vectors.
+  void reattribute_access_range(uint64_t begin, uint32_t size, const ConSanKernelInfo &owner,
+                                const ConSanKernelInfo &decoded_range,
+                                std::span<const uint8_t> code_object_bytes) {
+    const uint64_t end = begin + size;
+    const ConSanProgramContainerRef reference = container_ref(owner);
+    for (ConSanAccessInventorySite &access : storage_->access_sites) {
+      if (access.physical_id.original_text_offset >= begin &&
+          access.physical_id.original_text_offset < end)
+        access.container = reference;
+    }
+    append_container_accesses(decoded_range, reference, code_object_bytes, true);
+  }
+
 private:
   [[nodiscard]] static bool is_two_address_lds(std::string_view mnemonic) {
     return mnemonic == "ds_store_2addr_b32" || mnemonic == "ds_store_2addr_b64" ||
@@ -695,13 +717,29 @@ private:
   template <typename Container>
   void append_container_accesses(const Container &container,
                                  std::span<const uint8_t> code_object_bytes) {
-    const ConSanProgramContainerRef reference = container_ref(container);
+    append_container_accesses(container, container_ref(container), code_object_bytes, false);
+  }
+
+  template <typename Container>
+  void append_container_accesses(const Container &container,
+                                 const ConSanProgramContainerRef &reference,
+                                 std::span<const uint8_t> code_object_bytes, bool unique) {
     storage_->access_sites.reserve(storage_->access_sites.size() + container.lds_sites.size() +
                                    container.flat_sites.size());
+    const auto append = [&](ConSanAccessInventorySite access) {
+      const bool duplicate =
+          unique && std::ranges::any_of(storage_->access_sites, [&](const auto &existing) {
+            return existing.container == reference && existing.physical_id == access.physical_id &&
+                   (existing.origin == ConSanAccessOrigin::Flat) ==
+                       (access.origin == ConSanAccessOrigin::Flat);
+          });
+      if (!duplicate)
+        storage_->access_sites.push_back(std::move(access));
+    };
     for (const ConSanLdsSite &site : container.lds_sites)
-      storage_->access_sites.push_back(make_access_site(reference, site, code_object_bytes));
+      append(make_access_site(reference, site, code_object_bytes));
     for (const ConSanFlatSite &site : container.flat_sites)
-      storage_->access_sites.push_back(make_access_site(reference, site));
+      append(make_access_site(reference, site));
   }
 
   std::shared_ptr<ConSanProgramInventoryStorage> storage_;

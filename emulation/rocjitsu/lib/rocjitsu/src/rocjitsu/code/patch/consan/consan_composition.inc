@@ -69,9 +69,9 @@ void append_unique_sites(std::vector<Site> &source, std::vector<Site> &destinati
 void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_bytes,
                                         Decoder &decoder, rj_code_arch_t arch,
                                         const ConSanOptions &options,
-                                        std::span<ConSanKernelInfo> kernels,
-                                        std::span<ConSanFunctionInfo> functions,
-                                        ConSanResult &result) {
+                                        ProgramInventoryBuilder &inventory, ConSanResult &result) {
+  std::span<ConSanKernelInfo> kernels = inventory.kernels();
+  std::span<ConSanFunctionInfo> functions = inventory.functions();
   for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
     const auto kernel = std::ranges::find_if(
         kernels, [&](const ConSanKernelInfo &item) { return item.name == range.kernel_name; });
@@ -82,8 +82,6 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
     for (ConSanKernelInfo &other : kernels) {
       if (&other == &*kernel)
         continue;
-      move_sites_in_range(other.lds_sites, kernel->lds_sites, range.text_offset, range.size);
-      move_sites_in_range(other.flat_sites, kernel->flat_sites, range.text_offset, range.size);
       move_sites_in_range(other.ordinary_memory_sites, kernel->ordinary_memory_sites,
                           range.text_offset, range.size);
       move_sites_in_range(other.barrier_sites, kernel->barrier_sites, range.text_offset,
@@ -92,8 +90,6 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
       move_sites_in_range(other.atomic_sites, kernel->atomic_sites, range.text_offset, range.size);
     }
     for (ConSanFunctionInfo &function : functions) {
-      move_sites_in_range(function.lds_sites, kernel->lds_sites, range.text_offset, range.size);
-      move_sites_in_range(function.flat_sites, kernel->flat_sites, range.text_offset, range.size);
       move_sites_in_range(function.ordinary_memory_sites, kernel->ordinary_memory_sites,
                           range.text_offset, range.size);
       move_sites_in_range(function.barrier_sites, kernel->barrier_sites, range.text_offset,
@@ -110,8 +106,8 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
     decoded_range.code_size = range.size;
     decoded_range.has_text_range = true;
     decode_kernel_stats(code_object_bytes, decoder, arch, decoded_range, result.warnings);
-    append_unique_sites(decoded_range.lds_sites, kernel->lds_sites);
-    append_unique_sites(decoded_range.flat_sites, kernel->flat_sites);
+    inventory.reattribute_access_range(range.text_offset, range.size, *kernel, decoded_range,
+                                       code_object_bytes);
     append_unique_sites(decoded_range.ordinary_memory_sites, kernel->ordinary_memory_sites);
     append_unique_sites(decoded_range.barrier_sites, kernel->barrier_sites);
     append_unique_sites(decoded_range.fence_sites, kernel->fence_sites);
@@ -768,19 +764,17 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   relay_flat_pointer_provenance_across_calls(code_object_bytes, *code_object, arch,
                                              inventory_builder.kernels(),
                                              inventory_builder.functions(), result.warnings);
+  publish_access_inventory();
   if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
       options.sc_perturb_kind == ConSanPerturbationKind::None) {
     for (ConSanKernelInfo &kernel : inventory_builder.kernels())
       preflight_kernel(kernel, result.warnings);
   }
-  reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, options,
-                                     inventory_builder.kernels(), inventory_builder.functions(),
+  reattribute_preapplied_code_ranges(code_object_bytes, *decoder, arch, options, inventory_builder,
                                      result);
   if (!result.errors.empty()) {
-    publish_access_inventory();
     return result;
   }
-  publish_access_inventory();
   prune_unreachable_inferred_ranges(*code_object, *decoder, arch, options,
                                     inventory_builder.kernels(), inventory_builder.functions(),
                                     inventory_builder.access_sites());

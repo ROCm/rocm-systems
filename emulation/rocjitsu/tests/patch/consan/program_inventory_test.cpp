@@ -514,6 +514,47 @@ TEST(ConSanProgramInventory, NativeLdsFactsAndSubwordRangesAreNormalizedWithoutP
   EXPECT_TRUE(sites[2].complete());
 }
 
+TEST(ConSanProgramInventory, StagedRangeReattributesAndMergesNormalizedAccesses) {
+  const std::array<uint8_t, 128> bytes = {};
+  ProgramInventoryBuilder builder(bytes);
+  ConSanKernelInfo owner = make_inventory_kernel("owner");
+  owner.descriptor_file_offset = 512;
+  builder.kernels().push_back(std::move(owner));
+  ConSanKernelInfo overlapping = make_inventory_kernel("overlapping");
+  overlapping.descriptor_file_offset = 768;
+  overlapping.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
+  overlapping.flat_sites.push_back(make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 88));
+  overlapping.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 120));
+  builder.kernels().push_back(std::move(overlapping));
+  builder.rebuild_access_inventory(bytes);
+
+  ConSanKernelInfo decoded_range = make_inventory_kernel("temporary_range");
+  decoded_range.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 80));
+  decoded_range.lds_sites.push_back(make_inventory_lds_site("ds_store_b32", 96));
+  decoded_range.flat_sites.push_back(
+      make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 88));
+  decoded_range.flat_sites.push_back(
+      make_inventory_flat_site(ConSanFlatAddressSpaceHint::Group, 104));
+  builder.reattribute_access_range(80, 32, builder.kernels().front(), decoded_range, bytes);
+
+  const auto accesses = builder.view().access_sites();
+  ASSERT_EQ(accesses.size(), 5u);
+  for (const uint64_t offset : {80u, 88u, 96u, 104u}) {
+    const auto access = std::ranges::find(accesses, offset, [](const auto &candidate) {
+      return candidate.physical_id.original_text_offset;
+    });
+    ASSERT_NE(access, accesses.end());
+    EXPECT_EQ(access->container.name, "owner");
+    EXPECT_EQ(access->container.kernel_descriptor_file_offset, 512u);
+  }
+  const auto outside = std::ranges::find(accesses, 120u, [](const auto &candidate) {
+    return candidate.physical_id.original_text_offset;
+  });
+  ASSERT_NE(outside, accesses.end());
+  EXPECT_EQ(outside->container.name, "overlapping");
+  EXPECT_EQ(outside->container.kernel_descriptor_file_offset, 768u);
+}
+
 TEST(ConSanProgramInventory, SingleRangeNativeOffsetsPreserveArchitectureSpecificEncoding) {
   const std::array<uint8_t, 8> bytes = {0x34, 0x12, 0, 0, 0, 0, 0, 0};
   for (const auto [arch, kind, expected] : {

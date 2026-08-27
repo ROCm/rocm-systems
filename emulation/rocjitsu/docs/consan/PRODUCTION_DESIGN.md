@@ -4373,6 +4373,34 @@ analysis completed.
   seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
   validation remains outside this work.
 
+### Slice 5AO: reattribute staged accesses in normalized inventory
+
+- **One staged-access authority:** Fault-composition ranges now transfer their
+  existing access records to the dispatchable owner directly in the normalized
+  inventory. Composition no longer moves legacy LDS or FLAT records among
+  kernel and function containers.
+- **Late-code merge:** The same builder operation normalizes instructions that
+  exist only in an installed trampoline and merges them without duplicating a
+  physical access already decoded through an overlapping symbol. A focused
+  unit test covers owner transfer, preservation outside the staged range,
+  native-LDS and FLAT additions, and duplicate suppression.
+- **Single publication boundary:** Initial normalized publication now follows
+  call-provenance relay and precedes staged-range reattribution. No later raw
+  rebuild can overwrite the transferred owner.
+- **Temporary size cost and deletion point:** This step adds 32 production
+  lines and brings the short legacy-access-removal series to 65 net-added
+  lines. The new builder operation replaces composition's legacy movement but
+  still accepts a temporary decoded container. Decode must publish normalized
+  records directly next; then the legacy LDS/FLAT types, all four container
+  vectors, and the conversion bridge must be deleted before this tranche is
+  complete.
+- **Completed checked-in gate:** The focused inventory and representative
+  preapplied composition gate passes all four cases. The complete host gate
+  passes 1,511 tests with the two expected benchmark-object skips; all 194
+  HSA-hook tests pass; and all 2,908 simulator-device tests across the five
+  supported targets pass in 69.01 seconds. Slice 5AC completed the periodic
+  physical-gfx950 gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
