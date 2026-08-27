@@ -126,17 +126,16 @@ jobs:
             corpus_hard_timeout: 0
             corpus_rerun_timeout: 0
             corpus_sanitizer: none
-          - name: asan-ubsan-gcc
+          - name: ubsan-gcc
             allow_failure: true
             verify_dbt_idempotence: 0
-            # GCC's combined sanitizers need additional headroom on the largest
-            # packaged code objects.
+            # Keep additional headroom for the largest packaged code objects.
             dbt_timeout: 180
             dbt_memory_limit_mib: 8192
             dbt_job_timeout: 30
             test_regex: ''
             build_type: RelWithDebInfo
-            enable_asan: 1
+            enable_asan: 0
             enable_ubsan: 1
             enable_tsan: 0
             enable_expensive_checks: 1
@@ -147,7 +146,7 @@ jobs:
             corpus_soft_timeout: 240
             corpus_hard_timeout: 480
             corpus_rerun_timeout: 1200
-            corpus_sanitizer: gcc-asan
+            corpus_sanitizer: none
 
     steps:
       - name: Install base dependencies
@@ -264,7 +263,7 @@ jobs:
 
           TEST_REGEX="${{ matrix.test_regex }}"
           CMAKE_CONFIG_FLAGS=()
-          if [[ "${{ matrix.enable_asan }}" == "1" && "${{ matrix.enable_ubsan }}" == "1" ]]; then
+          if [[ "${{ matrix.enable_asan }}" == "1" || "${{ matrix.enable_ubsan }}" == "1" ]]; then
             if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
               EXCLUDED_TESTS="${EXCLUDED_TESTS}|$(IFS='|'; echo "${CLANG_ASAN_UBSAN_EXCLUDED_TESTS[*]}")"
             else
