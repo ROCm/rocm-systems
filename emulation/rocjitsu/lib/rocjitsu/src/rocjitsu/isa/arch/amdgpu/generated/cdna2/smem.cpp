@@ -23,7 +23,7 @@ Operand make_smem_offset(const Smem::OpEncoding *enc) {
     return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->soffset));
   if (enc->imm)
     return Operand(32, OperandType::OPR_SIMM32, static_cast<int>(enc->offset));
-  return Operand(32, OperandType::OPR_SIMM32, 0);
+  return Operand(32, OperandType::OPR_SMEM_OFFSET, static_cast<int>(enc->offset & 0x7F));
 }
 } // namespace
 

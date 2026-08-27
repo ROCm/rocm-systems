@@ -1471,6 +1471,30 @@ INSTANTIATE_TEST_SUITE_P(
       return name;
     });
 
+// SMEM IMM=0, SOE=0: OFFSET[6:0] is an SGPR and must decode as a register operand.
+TEST(CdnaSmemDecodeTest, SgprOffsetFormExposesOffsetRegister) {
+  const struct {
+    uint32_t words[2];
+    const char *text;
+  } cases[] = {
+      {{0xC0000101u, 0x00000005u}, "s_load_dword s4, s[2:3], s5"},
+      {{0xC0140101u, 0x00000005u}, "s_scratch_load_dword s4, s[2:3], s5"},
+  };
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                              ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr) << arch;
+    for (const auto &tc : cases) {
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words));
+      ASSERT_NE(inst, nullptr) << arch;
+      EXPECT_EQ(inst->disassemble(), tc.text) << arch;
+
+      InstDefUse def_use(*inst);
+      EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 5, 1})) << arch << " " << tc.text;
+    }
+  }
+}
+
 TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
   const uint32_t words[] = {
       0xDA704746u,
