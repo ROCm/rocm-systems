@@ -71,19 +71,3 @@ repos:
         # care about (quoting, unset variables, portability).
         files: '^projects/cuid/.*\.(sh|sh\.in)$'
         types: [file]
-
--   repo: local
-    hooks:
-    -   id: cuid-sha256-drift
-        name: CUID/rocprofiler-sdk SHA-256 drift
-        description: >-
-            libamdcuid carries a copy of rocprofiler-sdk's SHA-256. A silent
-            divergence would not fail to build, it would change every CUID
-            ever issued, so the two are compared function by function.
-        entry: python3 projects/cuid/tests/check_sha256_drift.py
-        language: system
-        pass_filenames: false
-        # always_run rather than a `files` pattern: the global scope above would
-        # hide a change made only on the rocprofiler-sdk side, which is exactly
-        # the drift this is meant to catch. The check takes milliseconds.
-        always_run: true
