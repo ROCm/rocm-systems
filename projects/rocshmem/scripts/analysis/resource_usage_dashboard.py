@@ -149,7 +149,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
     font-size: 14px;
     padding: 24px;
   }}
-  .dash-root {{ max-width: 1100px; margin: 0 auto; }}
+  .dash-root {{ max-width: 1800px; margin: 0 auto; }}
   header {{
     background: var(--surface-1);
     border-radius: 8px;
@@ -370,11 +370,10 @@ if (DIFF_ROWS.length) {{
   function buildDiffHeader() {{
     const tr = document.querySelector("#diffTable thead tr");
     tr.textContent = "";
-    const cols = [...DIFF_COLUMNS, "baseline", "branch", "delta"];
-    const labels = [...DIFF_HEAD_LABELS, "Baseline", "Branch", "Δ"];
-    cols.forEach(c => {{
+    const labels = [...DIFF_HEAD_LABELS, ...METRICS.map(m => m.label)];
+    labels.forEach(label => {{
       const th = document.createElement("th");
-      th.textContent = labels[cols.indexOf(c)];
+      th.textContent = label;
       tr.appendChild(th);
     }});
   }}
@@ -393,20 +392,22 @@ if (DIFF_ROWS.length) {{
     const tbody = document.querySelector("#diffTable tbody");
     tbody.textContent = "";
     for (const r of rows) {{
-      const bv = r[diffMetric + "_baseline"] || "-";
-      const nv = r[diffMetric + "_branch"] || "-";
-      const delta = toNum(r[diffMetric + "_delta"]);
-      const sign = delta > 0 ? "+" : "";
       const tr = document.createElement("tr");
       const nameTd = document.createElement("td"); nameTd.textContent = r.demangled_name; tr.appendChild(nameTd);
       const statusTd = document.createElement("td"); statusTd.textContent = r.status; tr.appendChild(statusTd);
-      const bTd = document.createElement("td"); bTd.textContent = bv; tr.appendChild(bTd);
-      const nTd = document.createElement("td"); nTd.textContent = nv; tr.appendChild(nTd);
-      const dTd = document.createElement("td");
-      dTd.textContent = sign + delta;
-      dTd.style.color = deltaColor(diffMetric, delta);
-      dTd.style.fontWeight = "600";
-      tr.appendChild(dTd);
+      for (const m of METRICS) {{
+        const bv = r[m.key + "_baseline"] || "-";
+        const nv = r[m.key + "_branch"] || "-";
+        const delta = toNum(r[m.key + "_delta"]);
+        const sign = delta > 0 ? "+" : "";
+        const td = document.createElement("td");
+        td.textContent = `${{nv}} (${{sign}}${{delta}})`;
+        td.title = `${{bv}} → ${{nv}}`;
+        td.style.backgroundColor = deltaColor(m.key, delta);
+        td.style.color = "#fff";
+        td.style.fontWeight = "600";
+        tr.appendChild(td);
+      }}
       tbody.appendChild(tr);
     }}
   }}
