@@ -1,5 +1,5 @@
 void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
-                                   rj_code_arch_t arch, ConSanResult &result) {
+                                   rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics)
     return;
   if (options.moi_engine != ConSanMoiEngine::RecordReplay)

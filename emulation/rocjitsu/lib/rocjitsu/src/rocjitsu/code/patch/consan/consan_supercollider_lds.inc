@@ -1,5 +1,5 @@
 void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                         const ConSanOptions &options, ConSanResult &result) {
+                                         const ConSanOptions &options, ConSanTransformArtifacts &result) {
   if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back("ConSan LDS check/trap proof has unsupported architecture");
     return;

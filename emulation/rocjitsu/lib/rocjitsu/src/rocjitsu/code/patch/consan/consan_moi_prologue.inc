@@ -1583,7 +1583,8 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
   return kernel_contains_patch_anchor(kernel, patch);
 }
 
-[[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch, ConSanResult &result) {
+[[nodiscard]] bool enable_moi_full_workgroup_id_payload(rj_code_arch_t arch,
+                                                        ConSanTransformArtifacts &result) {
   if (result.replacement.empty() ||
       (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
        arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
@@ -1593,7 +1594,8 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
 
   std::unordered_set<std::string_view> owner_names;
   for (const ConSanPatchInfo &patch : result.patches) {
-    if (!consan_detail::patch_requires_full_workgroup_id_payload(result, arch, patch))
+    if (!consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan.engine,
+                                                                 arch, patch))
       continue;
     for (uint64_t descriptor_offset : patch.owner_descriptor_file_offsets) {
       const ConSanKernelInfo *owner =
@@ -1762,7 +1764,7 @@ grow_moi_kernel_descriptor_registers(CodeObjectPatcher &patcher, const ConSanKer
   return true;
 }
 
-void rollback_moi_dispatch_id_as_unsupported(ConSanResult &result, std::string reason) {
+void rollback_moi_dispatch_id_as_unsupported(ConSanTransformArtifacts &result, std::string reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.discard_candidate_modification();
   result.warnings.emplace_back("ConSan MOI dispatch-ID capture is unsupported: " +
@@ -1806,7 +1808,7 @@ void note_dispatch_id_patch_info(ConSanPatchInfo &info, const ConSanMoiDispatchI
 }
 
 void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_code_arch_t arch,
-                                            ConSanResult &result) {
+                                            ConSanTransformArtifacts &result) {
   if (!result.modified() || result.replacement.empty()) {
     result.warnings.emplace_back(
         "ConSan MOI private-epoch prologue skipped because no private-epoch access probe was "
@@ -2339,7 +2341,7 @@ moi_entry_scalar_backup_preserves_persistent_outputs(const ConSanOptions &option
 
 void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                                           const ConSanOptions &options, rj_code_arch_t arch,
-                                          ConSanResult &result) {
+                                          ConSanTransformArtifacts &result) {
   if (!options.moi_init_owner_epoch)
     return;
   if (!consan_is_capability_arch(arch)) {

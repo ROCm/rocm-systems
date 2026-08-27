@@ -51,7 +51,7 @@ struct MoiReservedBarrierIslandLayout {
 // Carries only the access-placement facts needed by the immediately following
 // Record/Replay synchronization lowering. Keeping this value local to the MOI
 // pipeline makes the stage dependency explicit and prevents temporary layout
-// state from becoming part of ConSanResult's externally visible transform
+// state from becoming part of ConSanTransformArtifacts's externally visible transform
 // result. Relay ranges are half-open and contain generated storage that the
 // synchronization stage may use only while each word remains pristine.
 struct MoiRecordReplayAccessOutput {
@@ -59,7 +59,7 @@ struct MoiRecordReplayAccessOutput {
   std::vector<std::pair<uint64_t, uint64_t>> generated_branch_relay_ranges;
 };
 
-[[nodiscard]] uint64_t moi_reserved_barrier_island_count(const ConSanResult &result,
+[[nodiscard]] uint64_t moi_reserved_barrier_island_count(const ConSanTransformArtifacts &result,
                                                          const ConSanOptions &options) {
   const auto count_all = [](const auto &container) {
     return static_cast<uint64_t>(container.barrier_sites.size());
@@ -90,8 +90,9 @@ struct MoiRecordReplayAccessOutput {
   return std::min<uint64_t>(count, options.max_patches);
 }
 
-[[nodiscard]] uint64_t moi_reserved_record_replay_sync_island_count(const ConSanResult &result,
-                                                                    const ConSanOptions &options) {
+[[nodiscard]] uint64_t
+moi_reserved_record_replay_sync_island_count(const ConSanTransformArtifacts &result,
+                                             const ConSanOptions &options) {
   const uint64_t barrier_count =
       options.moi_track_barriers ? moi_reserved_barrier_island_count(result, options) : 0u;
   const uint64_t fence_count =
@@ -129,7 +130,7 @@ constexpr uint32_t kMoiRecordReplayBorrowedEntryIslandWords = 20u;
 
 class MoiLocalNopIslandAllocator {
 public:
-  MoiLocalNopIslandAllocator(std::span<const uint8_t> text, const ConSanResult &result,
+  MoiLocalNopIslandAllocator(std::span<const uint8_t> text, const ConSanTransformArtifacts &result,
                              rj_code_arch_t arch, uint32_t island_words,
                              std::span<const ConSanPreappliedReservedRange> reserved_ranges = {})
       : text_(text), nop_(build_s_nop(0, arch)), island_words_(island_words) {
@@ -1487,7 +1488,7 @@ find_moi_transient_sgpr_assignment(const ConSanOptions &options, uint64_t descri
 /// for ordinary owners that can keep their transient state in registers.
 [[nodiscard]] bool
 automatic_moi_scalar_spill_needs_dynamic_stack_planning(const ConSanOptions &options,
-                                                        const ConSanResult &result) {
+                                                        const ConSanTransformArtifacts &result) {
   const auto owner_uses_dynamic_stack = [&](uint64_t descriptor_offset) {
     const ConSanKernelInfo *kernel =
         result.program_inventory.find_kernel_by_descriptor(descriptor_offset);
@@ -1929,7 +1930,7 @@ struct MoiResourcePlanningState {
   bool valid = false;
 
   MoiResourcePlanningState(std::span<const uint8_t> input, rj_code_arch_t arch,
-                           const ConSanOptions &options, const ConSanResult &result)
+                           const ConSanOptions &options, const ConSanTransformArtifacts &result)
       : bytes(input), arch(arch), code_object(input.data(), input.size()),
         decoder(Decoder::create(arch)) {
     if (!code_object.is_valid() || !decoder)
@@ -2238,7 +2239,8 @@ summarize_moi_complete_text_register_references(const MoiResourcePlanningState &
           (plan.reason == ConSanRegisterPlanReason::ForbiddenOverlap && !options.scratch_vgpr));
 }
 
-[[nodiscard]] std::vector<uint64_t> moi_scalar_owner_descriptors(const ConSanResult &result) {
+[[nodiscard]] std::vector<uint64_t>
+moi_scalar_owner_descriptors(const ConSanTransformArtifacts &result) {
   std::vector<uint64_t> owners;
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
     // Scalar persistent state is code-object-wide and must be proven against
@@ -2296,7 +2298,7 @@ struct MoiScalarOwnerContextGroupsResolution {
 
 [[nodiscard]] MoiScalarOwnerContextGroupsResolution
 resolve_moi_resource_plan_scalar_owner_contexts(const MoiResourcePlanningState &state,
-                                                const ConSanResult &result) {
+                                                const ConSanTransformArtifacts &result) {
   MoiScalarOwnerContextGroupsResolution resolved;
   resolved.planning_state_valid = state.valid;
   if (!state.valid)
@@ -2795,14 +2797,16 @@ find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
 /// owner and prevents two independently planned groups from claiming the same
 /// original instructions. Engine-specific callers retain control of whether a
 /// host is needed, its word count, and the scalar bootstrap ABI.
-[[nodiscard]] std::optional<MoiDenseRelayHost> claim_moi_dense_owner_relay_host(
-    const ConSanResult &result, const consan_detail::MoiDenseCandidatePartition &partition,
-    const consan_detail::MoiDenseCandidateGroup &group, const ConSanOptions &options,
-    const ConSanOptions &group_options, rj_code_arch_t arch,
-    MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
-    const ConSanCandidateResourcePlan &group_resource, size_t host_word_count,
-    std::span<const uint64_t> anchors,
-    std::vector<std::pair<uint64_t, uint64_t>> &claimed_host_ranges) {
+[[nodiscard]] std::optional<MoiDenseRelayHost>
+claim_moi_dense_owner_relay_host(const ConSanTransformArtifacts &result,
+                                 const consan_detail::MoiDenseCandidatePartition &partition,
+                                 const consan_detail::MoiDenseCandidateGroup &group,
+                                 const ConSanOptions &options, const ConSanOptions &group_options,
+                                 rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
+                                 std::span<const uint8_t> original_text,
+                                 const ConSanCandidateResourcePlan &group_resource,
+                                 size_t host_word_count, std::span<const uint64_t> anchors,
+                                 std::vector<std::pair<uint64_t, uint64_t>> &claimed_host_ranges) {
   const std::vector<MoiSgprRange> bootstrap_ranges = moi_relocatable_host_scalar_ranges(
       group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
   MoiDenseOwnerLivenessProof owner_proof = resource_state.prepare_dense_liveness_for_owners(
@@ -3514,7 +3518,7 @@ resource_plan_for_candidate(const ConSanResult &result, const ConSanMoiCandidate
 }
 
 [[nodiscard]] const ConSanCandidateResourcePlan *
-resource_plan_for_site(const ConSanResult &result, ConSanResourceSiteKind site_kind,
+resource_plan_for_site(const ConSanTransformArtifacts &result, ConSanResourceSiteKind site_kind,
                        uint64_t text_offset) {
   const auto it = std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
     return plan.site_kind == site_kind &&
@@ -3540,7 +3544,7 @@ struct MoiResourcePlanSiteKeyHash {
 
 class MoiResourcePlanSiteIndex {
 public:
-  explicit MoiResourcePlanSiteIndex(const ConSanResult &result) : result_(result) {
+  explicit MoiResourcePlanSiteIndex(const ConSanTransformArtifacts &result) : result_(result) {
     indices_.reserve(result.resource_plans.size());
     for (size_t index = 0; index < result.resource_plans.size(); ++index) {
       const ConSanCandidateResourcePlan &plan = result.resource_plans[index];
@@ -3555,13 +3559,13 @@ public:
   }
 
 private:
-  const ConSanResult &result_;
+  const ConSanTransformArtifacts &result_;
   std::unordered_map<MoiResourcePlanSiteKey, size_t, MoiResourcePlanSiteKeyHash> indices_;
 };
 
 class MoiPatchOwnerIndex {
 public:
-  explicit MoiPatchOwnerIndex(const ConSanResult &result) {
+  explicit MoiPatchOwnerIndex(const ConSanTransformArtifacts &result) {
     for (const ConSanPatchInfo &patch : result.patches) {
       if (patch.workgroup_shadow_size != 0u) {
         workgroup_shadow_owners_.insert(patch.owner_descriptor_file_offsets.begin(),

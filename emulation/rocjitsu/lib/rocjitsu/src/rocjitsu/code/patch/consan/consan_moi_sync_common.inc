@@ -46,7 +46,7 @@ struct AtomicRecordCandidate {
 }
 
 [[nodiscard]] bool canonicalize_atomic_record_candidates_by_physical_site(
-    std::vector<AtomicRecordCandidate> &candidates, ConSanResult &result) {
+    std::vector<AtomicRecordCandidate> &candidates, ConSanTransformArtifacts &result) {
   return consan_detail::canonicalize_physical_site_aliases(
       candidates, result.errors, "ConSan MOI atomic site",
       [](const AtomicRecordCandidate &candidate) { return candidate.site.file_offset; },
@@ -77,7 +77,7 @@ void retain_admitted_atomic_record_candidates(const ConSanObservationPlan &plan,
 }
 
 [[nodiscard]] std::optional<consan_detail::SampledAtomicSemantics>
-sampled_atomic_semantics_for_site(const ConSanResult &result,
+sampled_atomic_semantics_for_site(const ConSanTransformArtifacts &result,
                                   const MoiSyncInventoryIndex &sync_index,
                                   std::string_view container_name, bool in_kernel,
                                   const ConSanAtomicSite &site, std::string &unsupported_reason) {
@@ -205,7 +205,7 @@ sampled_atomic_semantics_for_site(const ConSanResult &result,
 /// Short-lived operand-rich lowering view for one admitted Record/Replay fence.
 ///
 /// Association and fence-event pointers borrow the immutable program inventory
-/// owned by the enclosing `ConSanResult`; copies of this value remain valid only
+/// owned by the enclosing `ConSanTransformArtifacts`; copies of this value remain valid only
 /// during that result's lowering. Concrete communication operands and patch
 /// coordinates are lowering facts, not another semantic inventory.
 struct FenceRecordCandidate {
@@ -278,7 +278,7 @@ normalize_ordinary_fence_communication(const ConSanOrdinaryMemorySite &site) {
   return normalized;
 }
 
-void append_fence_record_candidates(const ConSanResult &result,
+void append_fence_record_candidates(const ConSanTransformArtifacts &result,
                                     std::vector<FenceRecordCandidate> &candidates) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   for (const ConSanMoiFenceCandidate &fence : sync.moi_fence_candidates) {
@@ -387,7 +387,7 @@ void append_fence_record_candidates(const ConSanResult &result,
 // same address-bearing input shape used by the MOI engines. This does not
 // reclassify the decoded instruction as an ISA atomic: is_rmw remains false,
 // and the complete ordered suffix remains part of the candidate contract.
-void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
+void append_ordered_ordinary_atomic_candidates(const ConSanTransformArtifacts &result,
                                                const MoiSyncInventoryIndex &sync_index,
                                                std::vector<AtomicRecordCandidate> &candidates) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
@@ -482,7 +482,7 @@ void append_ordered_ordinary_atomic_candidates(const ConSanResult &result,
 }
 
 [[nodiscard]] bool
-ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanResult &result,
+ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanTransformArtifacts &result,
                                                        const AtomicRecordCandidate &candidate) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   return std::ranges::any_of(sync.moi_fence_candidates, [&](const ConSanMoiFenceCandidate &fence) {
@@ -611,7 +611,7 @@ atomic_scalar_clause_for_site(const MoiSyncInventoryIndex &sync_index,
   return sequence == nullptr ? std::nullopt : sequence->scalar_clause_text_offset;
 }
 
-void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSanResult &result,
+void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSanTransformArtifacts &result,
                                      const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
   if (is_rocclr_runtime_kernel_name(kernel.name))
@@ -638,7 +638,7 @@ void append_atomic_record_candidates(const ConSanKernelInfo &kernel, const ConSa
   }
 }
 
-void append_atomic_record_candidates(const ConSanFunctionInfo &function, const ConSanResult &result,
+void append_atomic_record_candidates(const ConSanFunctionInfo &function, const ConSanTransformArtifacts &result,
                                      const MoiSyncInventoryIndex &sync_index,
                                      std::vector<AtomicRecordCandidate> &candidates) {
   const bool allow_ordered_lds_atomic = consan_arch_supports_capability_form(

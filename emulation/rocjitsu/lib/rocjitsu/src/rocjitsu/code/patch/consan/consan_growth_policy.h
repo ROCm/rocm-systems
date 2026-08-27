@@ -35,7 +35,7 @@ consan_patched_image_growth_policy_description(const ConSanPatchedImageGrowthLim
 [[nodiscard]] inline bool replace_consan_text(CodeObjectPatcher &patcher,
                                               std::span<const uint8_t> new_text,
                                               const ConSanOptions &options,
-                                              std::string_view operation, ConSanResult &result) {
+                                              std::string_view operation, ConSanTransformArtifacts &result) {
   const size_t current_image_bytes = patcher.image_bytes().size();
   const size_t input_image_bytes =
       options.patched_image_growth_input_bytes.value_or(current_image_bytes);

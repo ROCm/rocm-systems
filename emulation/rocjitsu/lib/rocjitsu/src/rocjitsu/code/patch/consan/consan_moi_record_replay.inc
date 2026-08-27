@@ -1916,6 +1916,6 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             }
             return info;
           },
-          [](std::vector<uint8_t> &, ConSanResult &) { return true; }, result))
+          [](std::vector<uint8_t> &, ConSanTransformArtifacts &) { return true; }, result))
     return;
 }

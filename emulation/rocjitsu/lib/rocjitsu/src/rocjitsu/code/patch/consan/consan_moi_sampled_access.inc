@@ -2,7 +2,7 @@
 atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
                            bool in_kernel, const ConSanAtomicSite &site);
 
-[[nodiscard]] uint64_t sampled_reserved_barrier_island_count(const ConSanResult &result,
+[[nodiscard]] uint64_t sampled_reserved_barrier_island_count(const ConSanTransformArtifacts &result,
                                                              const ConSanOptions &options) {
   if (!options.moi_track_barriers)
     return 0u;
@@ -14,8 +14,9 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
   return std::min<uint64_t>(count, options.max_patches);
 }
 
-[[nodiscard]] uint32_t sampled_qualified_atomic_sequence_count(const ConSanResult &result,
-                                                               const ConSanOptions &options) {
+[[nodiscard]] uint32_t
+sampled_qualified_atomic_sequence_count(const ConSanTransformArtifacts &result,
+                                        const ConSanOptions &options) {
   if (!options.moi_track_atomics)
     return 0u;
   uint32_t count = 0u;
@@ -78,7 +79,7 @@ atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_
   return count;
 }
 
-[[nodiscard]] uint32_t sampled_reserved_atomic_island_count(const ConSanResult &result,
+[[nodiscard]] uint32_t sampled_reserved_atomic_island_count(const ConSanTransformArtifacts &result,
                                                             const ConSanOptions &options) {
   const ConSanMoiReportBufferLayout layout = resolve_sampled_report_layout(options);
   const uint32_t patch_budget = options.max_patches_is_expert_limit
@@ -1459,6 +1460,6 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
                                                                              : nullptr);
             return info;
           },
-          [](std::vector<uint8_t> &, ConSanResult &) { return true; }, result))
+          [](std::vector<uint8_t> &, ConSanTransformArtifacts &) { return true; }, result))
     return;
 }

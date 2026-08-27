@@ -6,7 +6,7 @@ struct OrdinaryAcquireMutationTarget {
 };
 
 [[nodiscard]] std::optional<OrdinaryAcquireMutationTarget>
-select_ordinary_acquire_mutation_target(const ConSanResult &result, const ConSanOptions &options) {
+select_ordinary_acquire_mutation_target(const ConSanTransformArtifacts &result, const ConSanOptions &options) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   const auto same_owners = [](std::span<const ConSanExecutionOwner> lhs,
                               std::span<const ConSanExecutionOwner> rhs) {
@@ -66,7 +66,7 @@ select_ordinary_acquire_mutation_target(const ConSanResult &result, const ConSan
   return std::nullopt;
 }
 
-[[nodiscard]] bool is_member_of_qualified_logical_barrier_pair(const ConSanResult &result,
+[[nodiscard]] bool is_member_of_qualified_logical_barrier_pair(const ConSanTransformArtifacts &result,
                                                                const ConSanFaultSite &site) {
   if (!site.sync_event_identity)
     return false;
@@ -85,7 +85,7 @@ struct ExactBarrierDropPair {
 };
 
 [[nodiscard]] std::optional<ExactBarrierDropPair>
-resolve_exact_barrier_drop_pair(const ConSanResult &result, const ConSanOptions &options,
+resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result, const ConSanOptions &options,
                                 std::string *reason) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   if (options.fault_site_identity.empty() || options.fault_barrier_sequence_identity.empty()) {
@@ -155,7 +155,7 @@ resolve_exact_barrier_drop_pair(const ConSanResult &result, const ConSanOptions 
 }
 
 [[nodiscard]] std::optional<ExactBarrierDropPair>
-resolve_exact_barrier_drop_pair(const ConSanResult &result, const ConSanOptions &options,
+resolve_exact_barrier_drop_pair(const ConSanTransformArtifacts &result, const ConSanOptions &options,
                                 std::string_view site_identity, std::string_view sequence_identity,
                                 std::string *reason) {
   ConSanOptions selection = options;
@@ -194,7 +194,7 @@ exact_barrier_drop_pair_range(const ExactBarrierDropPair &pair) {
 }
 
 [[nodiscard]] std::optional<ExactBarrierDropGroup>
-resolve_exact_barrier_drop_group(const ConSanResult &result, const ConSanOptions &options,
+resolve_exact_barrier_drop_group(const ConSanTransformArtifacts &result, const ConSanOptions &options,
                                  std::string *reason) {
   if (options.fault_barrier_companion_site_identity.empty() ||
       options.fault_barrier_companion_sequence_identity.empty()) {
@@ -234,7 +234,7 @@ resolve_exact_barrier_drop_group(const ConSanResult &result, const ConSanOptions
 }
 
 [[nodiscard]] const ConSanBarrierLifecycleGroup *
-find_lifecycle_group_for_sequence(const ConSanResult &result, const ConSanSyncSequence &sequence) {
+find_lifecycle_group_for_sequence(const ConSanTransformArtifacts &result, const ConSanSyncSequence &sequence) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   const auto group = std::ranges::find_if(sync.barrier_lifecycle_groups, [&](const auto &item) {
     return std::ranges::all_of(sequence.member_event_identities, [&](const std::string &identity) {
@@ -246,7 +246,7 @@ find_lifecycle_group_for_sequence(const ConSanResult &result, const ConSanSyncSe
 }
 
 [[nodiscard]] const ConSanBarrierSite *
-find_static_participant_init(const ConSanResult &result, const ConSanBarrierLifecycleGroup &group) {
+find_static_participant_init(const ConSanTransformArtifacts &result, const ConSanBarrierLifecycleGroup &group) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   const auto init_event = std::ranges::find_if(sync.sync_events, [&](const auto &event) {
     return event.operation == ConSanSyncOperation::BarrierInit &&
@@ -271,7 +271,7 @@ find_static_participant_init(const ConSanResult &result, const ConSanBarrierLife
                          : find_in(result.program_inventory.functions());
 }
 
-void mark_participant_mutation_unsupported(ConSanResult &result, std::string_view reason) {
+void mark_participant_mutation_unsupported(ConSanTransformArtifacts &result, std::string_view reason) {
   result.outcome = ConSanTransformOutcome::Unsupported;
   result.warnings.emplace_back("ConSan barrier participant mutation is unsupported: " +
                                std::string(reason));
@@ -291,7 +291,7 @@ void mark_participant_mutation_unsupported(ConSanResult &result, std::string_vie
          static_cast<size_t>(options.fault_ordinary_weaken_scope);
 }
 
-[[nodiscard]] size_t applied_fault_mutation_count(const ConSanResult &result) {
+[[nodiscard]] size_t applied_fault_mutation_count(const ConSanTransformArtifacts &result) {
   size_t count = 0;
   size_t move_targets = 0;
   size_t barrier_id_scope_members = 0;
@@ -349,7 +349,7 @@ void mark_participant_mutation_unsupported(ConSanResult &result, std::string_vie
 }
 
 void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch,
-                               ConSanResult &result) {
+                               ConSanTransformArtifacts &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   auto append_primary = [&](ConSanFaultMutationKind kind, const ConSanFaultSite *site) {
     if (site == nullptr) {
@@ -808,7 +808,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
   }
 }
 
-[[nodiscard]] bool has_proof_nop_candidate(const ConSanResult &result) {
+[[nodiscard]] bool has_proof_nop_candidate(const ConSanTransformArtifacts &result) {
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
     if (kernel.preflight_action == ConSanPreflightAction::Candidate)
       return true;
@@ -817,7 +817,7 @@ void build_fault_mutation_plan(const ConSanOptions &options, rj_code_arch_t arch
 }
 
 void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               bool force_trampoline, ConSanResult &result) {
+                               bool force_trampoline, ConSanTransformArtifacts &result) {
   if (has_only_rocclr_runtime_kernels(result)) {
     result.warnings.emplace_back(
         "ConSan proof NOP patch skipped ROCclr runtime helper code object");
@@ -881,7 +881,7 @@ void try_apply_proof_nop_patch(const AmdGpuCodeObject &code_object, rj_code_arch
 }
 
 void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanOptions &options, ConSanResult &result) {
+                                        const ConSanOptions &options, ConSanTransformArtifacts &result) {
   if (has_only_rocclr_runtime_kernels(result)) {
     result.warnings.emplace_back("ConSan barrier fault skipped ROCclr runtime helper code object");
     return;
@@ -1011,7 +1011,7 @@ void try_apply_barrier_drop_fault_patch(const AmdGpuCodeObject &code_object, rj_
 }
 
 void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
-                                            const ConSanOptions &options, ConSanResult &result) {
+                                            const ConSanOptions &options, ConSanTransformArtifacts &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   if (options.fault_barrier_sequence_identity.empty() || !options.fault_barrier_target_id) {
     result.errors.emplace_back(
@@ -1166,7 +1166,7 @@ void try_apply_barrier_id_scope_fault_patch(const AmdGpuCodeObject &code_object,
 }
 
 void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_object,
-                                               const ConSanOptions &options, ConSanResult &result) {
+                                               const ConSanOptions &options, ConSanTransformArtifacts &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   const auto selected = std::ranges::find(
       sync.sync_sequences, options.fault_barrier_sequence_identity, &ConSanSyncSequence::identity);
@@ -1232,7 +1232,7 @@ void try_apply_barrier_participant_fault_patch(const AmdGpuCodeObject &code_obje
 }
 
 void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                        const ConSanOptions &options, ConSanResult &result) {
+                                        const ConSanOptions &options, ConSanTransformArtifacts &result) {
   if (has_only_rocclr_runtime_kernels(result)) {
     result.warnings.emplace_back(
         "ConSan barrier move fault skipped ROCclr runtime helper code object");
@@ -1575,7 +1575,7 @@ void try_apply_barrier_move_fault_patch(const AmdGpuCodeObject &code_object, rj_
 }
 
 void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                  const ConSanOptions &options, ConSanResult &result) {
+                                  const ConSanOptions &options, ConSanTransformArtifacts &result) {
   const SynchronizationInventoryView sync = result.program_inventory.sync();
   const ConSanFaultSite *selected = select_fault_site_for_plan(
       result, options, ConSanFaultSiteKind::Atomic, options.fault_atomic_index);
@@ -1838,7 +1838,7 @@ void try_apply_atomic_fault_patch(const AmdGpuCodeObject &code_object, rj_code_a
 }
 
 void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               const ConSanOptions &options, ConSanResult &result) {
+                               const ConSanOptions &options, ConSanTransformArtifacts &result) {
   if (!lds_address_fault_arch_supported(arch)) {
     result.errors.emplace_back("ConSan LDS address fault is unsupported for the selected target");
     return;
@@ -1936,7 +1936,7 @@ void try_apply_lds_fault_patch(const AmdGpuCodeObject &code_object, rj_code_arch
 }
 
 void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
-                                    const ConSanOptions &options, ConSanResult &result) {
+                                    const ConSanOptions &options, ConSanTransformArtifacts &result) {
   const auto target = select_ordinary_acquire_mutation_target(result, options);
   if (!target) {
     if (!options.fault_site_identity.empty()) {
@@ -2058,7 +2058,7 @@ void try_apply_ordinary_fault_patch(const AmdGpuCodeObject &code_object,
 }
 
 void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                  ConSanResult &result) {
+                                  ConSanTransformArtifacts &result) {
   auto site = find_preferred_in_place_instruction_site(code_object, arch);
   if (!site) {
     result.errors.emplace_back(
@@ -2079,7 +2079,7 @@ void try_apply_proof_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_a
 }
 
 [[nodiscard]] const ConSanAccessInventorySite *
-find_first_supported_lds_read_b32_site(const ConSanResult &result) {
+find_first_supported_lds_read_b32_site(const ConSanTransformArtifacts &result) {
   const ConSanAccessInventorySite *best = nullptr;
   for (const ConSanAccessInventorySite &site : result.program_inventory.access_sites()) {
     if (!site.container.is_kernel() || !site.container.kernel_descriptor_file_offset ||
@@ -2097,7 +2097,7 @@ find_first_supported_lds_read_b32_site(const ConSanResult &result) {
 }
 
 void try_apply_lds_endpgm_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                ConSanResult &result) {
+                                ConSanTransformArtifacts &result) {
   const ConSanAccessInventorySite *site = find_first_supported_lds_read_b32_site(result);
   if (site == nullptr) {
     result.warnings.emplace_back("ConSan LDS endpgm proof found no supported ds_read_b32 site");

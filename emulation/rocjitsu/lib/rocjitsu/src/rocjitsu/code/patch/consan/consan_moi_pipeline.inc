@@ -1,5 +1,5 @@
 void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
-                                  rj_code_arch_t arch, ConSanResult &result) {
+                                  rj_code_arch_t arch, ConSanTransformArtifacts &result) {
   if (!options.moi_track_atomics || options.moi_engine != ConSanMoiEngine::RecordReplay)
     return;
   const bool has_eligible = std::ranges::any_of(
@@ -638,7 +638,8 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const ConSanOp
 }
 
 void append_moi_operational_resource_plans(MoiResourcePlanningState &state,
-                                           const ConSanOptions &options, ConSanResult &result) {
+                                           const ConSanOptions &options,
+                                           ConSanTransformArtifacts &result) {
   const MoiSyncInventoryIndex sync_index(result);
   if (options.moi_track_barriers) {
     std::vector<BarrierRecordCandidate> candidates;
@@ -784,7 +785,7 @@ moi_instrumentation_patch_site_kind(const ConSanPatchInfo &patch) {
   }
 }
 
-void finalize_moi_site_lowering_outcomes(ConSanResult &result) {
+void finalize_moi_site_lowering_outcomes(ConSanTransformArtifacts &result) {
   struct SiteKey {
     ConSanResourceSiteKind kind = ConSanResourceSiteKind::Access;
     uint64_t text_offset = 0;

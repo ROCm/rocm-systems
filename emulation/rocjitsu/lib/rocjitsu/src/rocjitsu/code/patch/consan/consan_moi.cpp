@@ -377,7 +377,7 @@ struct MoiPhysicalSyncSiteKeyHash {
 /// duplicate site or sequence membership never silently selects one match.
 class MoiSyncInventoryIndex {
 public:
-  explicit MoiSyncInventoryIndex(const ConSanResult &result) {
+  explicit MoiSyncInventoryIndex(const ConSanTransformArtifacts &result) {
     const SynchronizationInventoryView sync = result.program_inventory.sync();
     events_by_identity_.reserve(sync.sync_events.size());
     events_by_site_.reserve(sync.sync_events.size());
@@ -442,7 +442,7 @@ private:
 };
 
 [[nodiscard]] std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
-                                                        const ConSanResult &result) {
+                                                        const ConSanTransformArtifacts &result) {
   return result.modified() ? std::span<const uint8_t>(result.replacement) : original;
 }
 

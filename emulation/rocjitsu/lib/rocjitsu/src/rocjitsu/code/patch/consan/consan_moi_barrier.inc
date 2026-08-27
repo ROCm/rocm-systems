@@ -31,7 +31,7 @@ struct BarrierRecordCandidate {
 }
 
 [[nodiscard]] bool canonicalize_barrier_record_candidates_by_physical_site(
-    std::vector<BarrierRecordCandidate> &candidates, ConSanResult &result) {
+    std::vector<BarrierRecordCandidate> &candidates, ConSanTransformArtifacts &result) {
   return consan_detail::canonicalize_physical_site_aliases(
       candidates, result.errors, "ConSan MOI barrier site",
       [](const BarrierRecordCandidate &candidate) { return candidate.site.file_offset; },
@@ -95,7 +95,7 @@ void erase_redundant_adjacent_full_barrier_candidates(
 
 class MoiPatchAnchorRangeIndex {
 public:
-  explicit MoiPatchAnchorRangeIndex(const ConSanResult &result) {
+  explicit MoiPatchAnchorRangeIndex(const ConSanTransformArtifacts &result) {
     for (const ConSanPatchInfo &patch : result.patches) {
       if (patch.original_size != 0u)
         ranges_.emplace_back(patch.anchor_offset, patch.anchor_offset + patch.original_size);
@@ -686,7 +686,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
 // relocations in the final image.
 [[nodiscard]] bool prune_unused_record_replay_direct_reservoirs(std::vector<uint8_t> &text,
                                                                 rj_code_arch_t arch,
-                                                                ConSanResult &result,
+                                                                ConSanTransformArtifacts &result,
                                                                 std::vector<std::string> &errors) {
   const uint32_t nop = build_s_nop(0u, arch);
   const auto is_direct_reservoir = [](const ConSanPatchInfo &patch) {
@@ -760,7 +760,7 @@ build_inline_shadow_private_epoch_barrier_cave_words(
 
 [[nodiscard]] std::optional<MoiReservedBarrierIslandLayout>
 find_record_replay_reserved_barrier_island_begin(std::span<const uint8_t> text,
-                                                 const ConSanResult &result, rj_code_arch_t arch,
+                                                 const ConSanTransformArtifacts &result, rj_code_arch_t arch,
                                                  const MoiRecordReplayAccessOutput &access_output,
                                                  size_t barrier_count,
                                                  uint64_t reserved_barrier_count) {
@@ -936,7 +936,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                                  const ConSanOptions &options, rj_code_arch_t arch,
                                                  MoiResourcePlanningState &resource_state,
                                                  const MoiRecordReplayAccessOutput &access_output,
-                                                 ConSanResult &result) {
+                                                 ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
   if (!consan_is_capability_arch(arch)) {
@@ -2324,12 +2324,12 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
                                                   const ConSanOptions &options, rj_code_arch_t arch,
                                                   const MoiRecordReplayAccessOutput &access_output,
-                                                  ConSanResult &result);
+                                                  ConSanTransformArtifacts &result);
 
 void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanOptions &options,
                                    rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
                                    const MoiRecordReplayAccessOutput &access_output,
-                                   ConSanResult &result) {
+                                   ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers || options.moi_engine == ConSanMoiEngine::Sampled)
     return;
   if (options.moi_engine == ConSanMoiEngine::InlineShadow) {
@@ -2380,7 +2380,7 @@ void try_apply_barrier_epoch_patch(std::span<const uint8_t> bytes, const ConSanO
 void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes,
                                                   const ConSanOptions &options, rj_code_arch_t arch,
                                                   const MoiRecordReplayAccessOutput &access_output,
-                                                  ConSanResult &result) {
+                                                  ConSanTransformArtifacts &result) {
   if (!options.moi_track_barriers)
     return;
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA4 &&

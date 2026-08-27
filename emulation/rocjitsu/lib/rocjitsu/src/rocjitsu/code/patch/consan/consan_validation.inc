@@ -3189,7 +3189,8 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
       continue;
     }
     const bool has_semantic_system_sgpr_restore =
-        consan_detail::patch_requires_full_workgroup_id_payload(result, arch, patch);
+        consan_detail::patch_requires_full_workgroup_id_payload(result.observation_plan.engine,
+                                                                arch, patch);
     validate_entry(patch,
                    patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
                    owner->name, has_semantic_system_sgpr_restore);
@@ -3975,8 +3976,8 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     }
   }
   for (const ConSanPatchInfo &patch : result.patches) {
-    const bool requires_full_workgroup_id =
-        consan_detail::patch_requires_full_workgroup_id_payload(result, arch, patch);
+    const bool requires_full_workgroup_id = consan_detail::patch_requires_full_workgroup_id_payload(
+        result.observation_plan.engine, arch, patch);
     if (patch.persistent_dispatch_id_private_offset) {
       const uint32_t offset = *patch.persistent_dispatch_id_private_offset;
       if (!patch.persistent_epoch_private_offset || !patch.persistent_private_state_end ||

@@ -44,7 +44,7 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
     ranges.push_back({begin, end});
 }
 
-[[nodiscard]] std::vector<TextRange> covered_text_ranges(const ConSanResult &result,
+[[nodiscard]] std::vector<TextRange> covered_text_ranges(const ConSanTransformArtifacts &result,
                                                          uint64_t text_size) {
   std::vector<TextRange> ranges;
   ranges.reserve(result.program_inventory.kernels().size() +
@@ -83,7 +83,7 @@ void add_covered_text_range(std::vector<TextRange> &ranges, uint64_t begin, uint
   return false;
 }
 
-[[nodiscard]] std::vector<LocalCaveOwnerRange> local_cave_owner_ranges(const ConSanResult &result,
+[[nodiscard]] std::vector<LocalCaveOwnerRange> local_cave_owner_ranges(const ConSanTransformArtifacts &result,
                                                                        uint64_t text_size) {
   std::vector<LocalCaveOwnerRange> owners;
   owners.reserve(result.program_inventory.kernels().size() +
@@ -132,7 +132,7 @@ owner_of_uncovered_text_range(uint64_t begin, uint64_t end,
 }
 
 [[nodiscard]] std::vector<LocalNopCave>
-find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ConSanResult &result,
+find_uncovered_nop_caves(const AmdGpuCodeObject &code_object, const ConSanTransformArtifacts &result,
                          rj_code_arch_t arch) {
   if (code_object.text_sections().size() != 1)
     return {};
@@ -232,7 +232,7 @@ find_preferred_in_place_instruction_site(const AmdGpuCodeObject &obj, rj_code_ar
 }
 
 [[nodiscard]] bool rewrite_word_in_place(const AmdGpuCodeObject &code_object, uint64_t file_offset,
-                                         uint32_t replacement, ConSanResult &result) {
+                                         uint32_t replacement, ConSanTransformArtifacts &result) {
   result.replacement.assign(reinterpret_cast<const uint8_t *>(code_object.image_data()),
                             reinterpret_cast<const uint8_t *>(code_object.image_data()) +
                                 code_object.image_size());
@@ -725,7 +725,7 @@ choose_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allo
   return std::nullopt;
 }
 
-[[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(const ConSanResult &result) {
+[[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(const ConSanTransformArtifacts &result) {
   std::vector<uint64_t> offsets;
   offsets.reserve(result.program_inventory.kernels().size());
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
@@ -862,7 +862,7 @@ void append_words(std::vector<uint8_t> &bytes, std::span<const uint32_t> words) 
   return name.starts_with("__amd_rocclr_");
 }
 
-[[nodiscard]] bool has_only_rocclr_runtime_kernels(const ConSanResult &result) {
+[[nodiscard]] bool has_only_rocclr_runtime_kernels(const ConSanTransformArtifacts &result) {
   if (result.program_inventory.kernels().empty())
     return false;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {

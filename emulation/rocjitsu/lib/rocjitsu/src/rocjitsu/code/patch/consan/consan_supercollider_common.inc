@@ -4,7 +4,7 @@ struct ByteRange {
 };
 
 [[nodiscard]] std::unordered_set<uint64_t>
-sc_admitted_access_file_offsets(const ConSanResult &result, ConSanAccessOrigin origin) {
+sc_admitted_access_file_offsets(const ConSanTransformArtifacts &result, ConSanAccessOrigin origin) {
   std::unordered_set<uint64_t> admitted_text_offsets;
   admitted_text_offsets.reserve(result.observation_plan.probe_intents.size());
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
@@ -32,7 +32,7 @@ sc_execution_owner_descriptor_file_offsets(const ConSanAccessInventorySite &acce
 }
 
 [[nodiscard]] bool initialize_sc_access_coverage(const ConSanOptions &options,
-                                                 ConSanResult &result) {
+                                                 ConSanTransformArtifacts &result) {
   const ConSanAccessPolicyRequest request{
       .engine = ConSanCapabilityEngine::SuperCollider,
       .native_lds_enabled = options.probe_lds_check_trap,
@@ -99,7 +99,7 @@ sc_execution_owner_descriptor_file_offsets(const ConSanAccessInventorySite &acce
 }
 
 template <typename Supported>
-void publish_sc_access_coverage_support(ConSanResult &result, ConSanAccessOrigin origin,
+void publish_sc_access_coverage_support(ConSanTransformArtifacts &result, ConSanAccessOrigin origin,
                                         Supported &&supported) {
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents) {
     const auto site = std::ranges::find_if(result.program_inventory.access_sites(),
@@ -118,7 +118,7 @@ void publish_sc_access_coverage_support(ConSanResult &result, ConSanAccessOrigin
   }
 }
 
-void publish_sc_access_resource_rejection(ConSanResult &result, ConSanAccessOrigin origin,
+void publish_sc_access_resource_rejection(ConSanTransformArtifacts &result, ConSanAccessOrigin origin,
                                           uint64_t file_offset, std::string detail) {
   const auto site = std::ranges::find_if(
       result.program_inventory.access_sites(), [&](const ConSanAccessInventorySite &candidate) {
@@ -133,7 +133,7 @@ void publish_sc_access_resource_rejection(ConSanResult &result, ConSanAccessOrig
 /// Project final current-lowerer results into the production ledger. Patch
 /// kinds remain a temporary compatibility input; policy applicability has
 /// already been fixed by `ConSanObservationPlan` and is never inferred here.
-void finalize_sc_access_coverage_ledger(ConSanResult &result) {
+void finalize_sc_access_coverage_ledger(ConSanTransformArtifacts &result) {
   const auto is_access_patch = [](ConSanPatchKind kind) {
     switch (kind) {
     case ConSanPatchKind::InlineLdsLoadCheckTrap:
@@ -296,7 +296,7 @@ text_offset_to_file_offset(const AmdGpuCodeObject &code_object, uint64_t text_of
 
 [[nodiscard]] std::optional<std::vector<ByteRange>>
 reserved_ranges_for_existing_patches(const AmdGpuCodeObject &code_object,
-                                     const ConSanResult &result) {
+                                     const ConSanTransformArtifacts &result) {
   std::vector<ByteRange> ranges;
   for (const ConSanPatchInfo &patch : result.patches) {
     // Some structural records describe appended dispatch machinery without

@@ -184,7 +184,7 @@ void append_lds_address_fault_sites(std::span<const uint8_t> bytes, std::string_
 }
 
 void build_fault_site_inventory(std::span<const uint8_t> bytes, rj_code_arch_t arch,
-                                ConSanResult &result) {
+                                ConSanTransformArtifacts &result) {
   const std::string fingerprint = code_object_fingerprint(bytes);
   result.fault_sites.clear();
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
@@ -454,7 +454,7 @@ void append_sync_events_for_container(const ConSanCodeObjectId &code_object_id,
 
 void build_sync_event_inventory(std::span<const uint8_t> bytes,
                                 SynchronizationInventoryBuildView inventory,
-                                const ConSanResult &result) {
+                                const ConSanTransformArtifacts &result) {
   const ConSanCodeObjectId code_object_id = make_consan_code_object_id(bytes);
   inventory.sync_events.clear();
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
@@ -487,7 +487,7 @@ void build_sync_event_inventory(std::span<const uint8_t> bytes,
 
 [[nodiscard]] bool
 canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inventory,
-                                          ConSanResult &result) {
+                                          ConSanTransformArtifacts &result) {
   std::unordered_map<std::string_view, uint64_t> kernel_entries;
   std::unordered_map<std::string_view, uint64_t> function_entries;
   kernel_entries.reserve(result.program_inventory.kernels().size());
@@ -535,7 +535,7 @@ canonicalize_sync_events_by_physical_site(SynchronizationInventoryBuildView inve
 
 [[nodiscard]] std::vector<std::unique_ptr<BasicBlock>>
 build_sync_basic_blocks(const AmdGpuCodeObject &code_object, Decoder &decoder, rj_code_arch_t arch,
-                        const ConSanResult &result) {
+                        const ConSanTransformArtifacts &result) {
   std::vector<uint64_t> leaders;
   leaders.reserve(result.program_inventory.kernels().size() +
                   result.program_inventory.functions().size());
@@ -1320,7 +1320,7 @@ prove_completing_structured_diamond(const std::vector<std::unique_ptr<BasicBlock
 void build_barrier_move_destination_inventory(
     const AmdGpuCodeObject &code_object, const std::vector<std::unique_ptr<BasicBlock>> &blocks,
     const SyncEventIdentityIndex &events, rj_code_arch_t arch,
-    std::span<const ConSanSyncSequence> sync_sequences, ConSanResult &result) {
+    std::span<const ConSanSyncSequence> sync_sequences, ConSanTransformArtifacts &result) {
   result.barrier_move_destinations.clear();
   if (code_object.text_sections().size() != 1u)
     return;
@@ -1492,7 +1492,7 @@ template <typename Container>
   return false;
 }
 
-[[nodiscard]] bool is_workgroup_flat_communication(const ConSanResult &result,
+[[nodiscard]] bool is_workgroup_flat_communication(const ConSanTransformArtifacts &result,
                                                    const ConSanSyncEvent &event) {
   if (event.address_source != ConSanSyncAddressSource::FlatVector)
     return false;
@@ -1542,7 +1542,7 @@ template <typename Container>
   return false;
 }
 
-[[nodiscard]] bool exact_workgroup_flat_acquire_encoding(const ConSanResult &result,
+[[nodiscard]] bool exact_workgroup_flat_acquire_encoding(const ConSanTransformArtifacts &result,
                                                          const ConSanSyncEvent &event,
                                                          rj_code_arch_t arch) {
   if (event.in_kernel) {
@@ -1957,7 +1957,7 @@ atomic_release_wait_boundary(const ConSanSyncSequence &atomic,
 void associate_atomic_sync_sequences(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                      rj_code_arch_t arch, const SyncEventIdentityIndex &events,
                                      SynchronizationInventoryBuildView inventory,
-                                     const ConSanResult &result) {
+                                     const ConSanTransformArtifacts &result) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   std::vector<ConSanSyncSequence> associated;
   associated.reserve(sync_sequences.size());
@@ -2471,7 +2471,7 @@ void associate_ordinary_release_sync_sequences(
 
 void associate_ordinary_acquire_sync_sequences(
     const std::vector<std::unique_ptr<BasicBlock>> &blocks, const SyncEventIdentityIndex &events,
-    rj_code_arch_t arch, SynchronizationInventoryBuildView inventory, const ConSanResult &result) {
+    rj_code_arch_t arch, SynchronizationInventoryBuildView inventory, const ConSanTransformArtifacts &result) {
   std::vector<ConSanSyncSequence> &sync_sequences = inventory.sync_sequences;
   struct Association {
     size_t cache_index = 0;
@@ -2693,7 +2693,7 @@ void associate_ordinary_acquire_sync_sequences(
          role == ConSanSyncMemoryRole::SequentiallyConsistent;
 }
 
-[[nodiscard]] bool sequence_has_exact_members(const ConSanResult &result,
+[[nodiscard]] bool sequence_has_exact_members(const ConSanTransformArtifacts &result,
                                               const ConSanSyncSequence &sequence) {
   uint64_t prior_end = sequence.begin_text_offset;
   for (const std::string &identity : sequence.member_event_identities) {
@@ -3226,7 +3226,7 @@ void try_apply_perturbation_patches(const AmdGpuCodeObject &code_object, rj_code
     result.mark_modified();
 }
 
-void annotate_fault_sites_with_sync_sequences(ConSanResult &result) {
+void annotate_fault_sites_with_sync_sequences(ConSanTransformArtifacts &result) {
   struct EventKey {
     ConSanSyncEventKind kind;
     bool in_kernel;
@@ -3427,7 +3427,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                                rj_code_arch_t arch, const ConSanOptions &options,
                                const std::vector<std::unique_ptr<BasicBlock>> *reusable_blocks,
                                std::span<ConSanAccessInventorySite> access_sites,
-                               SynchronizationInventoryBuildView inventory, ConSanResult &result) {
+                               SynchronizationInventoryBuildView inventory, ConSanTransformArtifacts &result) {
   std::vector<uint64_t> leaders;
   std::vector<uint64_t> kernel_entries;
   for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
@@ -3541,7 +3541,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
   }
 }
 
-[[nodiscard]] const ConSanFaultSite *find_fault_site_by_identity(const ConSanResult &result,
+[[nodiscard]] const ConSanFaultSite *find_fault_site_by_identity(const ConSanTransformArtifacts &result,
                                                                  std::string_view identity,
                                                                  ConSanFaultSiteKind kind) {
   const auto site = std::ranges::find_if(result.fault_sites, [&](const ConSanFaultSite &candidate) {
@@ -3558,7 +3558,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
           .mnemonic = site.mnemonic};
 }
 
-[[nodiscard]] const ConSanKernelInfo *requested_kernel_owner(const ConSanResult &result,
+[[nodiscard]] const ConSanKernelInfo *requested_kernel_owner(const ConSanTransformArtifacts &result,
                                                              std::string_view filter) {
   if (filter.empty())
     return nullptr;
@@ -3576,7 +3576,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
 }
 
 [[nodiscard]] bool owned_by_requested_kernel(std::span<const ConSanExecutionOwner> owners,
-                                             const ConSanResult &result,
+                                             const ConSanTransformArtifacts &result,
                                              const ConSanOptions &options) {
   if (options.test_kernel_name_filter.empty())
     return true;
@@ -3586,7 +3586,7 @@ void annotate_execution_owners(const AmdGpuCodeObject &code_object, Decoder &dec
                            &ConSanExecutionOwner::descriptor_file_offset) != owners.end();
 }
 
-[[nodiscard]] const ConSanFaultSite *select_fault_site_for_plan(const ConSanResult &result,
+[[nodiscard]] const ConSanFaultSite *select_fault_site_for_plan(const ConSanTransformArtifacts &result,
                                                                 const ConSanOptions &options,
                                                                 ConSanFaultSiteKind kind,
                                                                 uint32_t legacy_index) {

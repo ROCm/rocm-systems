@@ -5,7 +5,7 @@ template <typename PlannedPatch, typename BuildWords, typename MakePatchInfo,
     const MoiDescriptorVgprRequirements &descriptor_requirements,
     const MoiDescriptorSgprRequirements &scalar_requirements, std::string_view probe_name,
     rj_code_arch_t arch, BuildWords build_words, MakePatchInfo make_patch_info,
-    ApplyExtraRequirements apply_extra_requirements, ConSanResult &result) {
+    ApplyExtraRequirements apply_extra_requirements, ConSanTransformArtifacts &result) {
   result.replacement.assign(bytes.begin(), bytes.end());
   for (const PlannedPatch &planned_patch : planned_patches) {
     const ConSanMoiCandidate &candidate = *planned_patch.candidate;

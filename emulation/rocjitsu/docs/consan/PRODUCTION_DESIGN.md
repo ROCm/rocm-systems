@@ -5617,6 +5617,34 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CH: remove false dependencies on compatibility lowering state
+
+- **Typed artifacts are sufficient for ordinary consumers:** Access, fault,
+  synchronization, SuperCollider, MOI emission, placement, descriptor, and
+  coverage helpers that read or update only production transform artifacts now
+  accept `ConSanTransformArtifacts` directly. The compatibility result is no
+  longer their accidental API merely because the current top-level lowerer
+  happens to derive from that value.
+- **A patch owns its payload requirement:** Full-workgroup-ID descriptor
+  mutation now consumes the observation engine and the emitted patch. CDNA
+  entry-capture patches already record their selected persistent workgroup
+  SGPRs or private offsets; the deleted fallback to a result-wide resolved-SGPR
+  mirror could disagree with a per-owner patch and made an unrelated mutable
+  field part of descriptor policy.
+- **Focused contract coverage:** The direct payload-requirement test covers
+  RDNA4, CDNA5, CDNA4, CDNA3, invalid targets, non-MOI patches, indirect
+  islands, register-backed and private-backed CDNA entry capture, engine
+  exclusion, and missing ownership using only patch-local facts.
+- **Boundary accounting:** Production `ConSanResult` references fall from 200
+  to 85. The signature narrowing and explicit engine argument add 139 and
+  delete 132 physical implementation lines after formatting, a temporary net
+  increase of seven lines; it introduces no state or wrapper and is the direct
+  prerequisite for deleting the remaining three focused workspaces.
+- **Checked-in gate:** All 1,530 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

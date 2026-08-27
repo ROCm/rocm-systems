@@ -201,7 +201,7 @@ choose_flat_check_trap_indirect_scalar_scratch(
 }
 
 void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                                     const ConSanOptions &options, ConSanResult &result,
+                                     const ConSanOptions &options, ConSanTransformArtifacts &result,
                                      std::span<const ByteRange> initial_reserved_ranges = {}) {
   if (!consan_is_capability_arch(arch)) {
     result.warnings.emplace_back("ConSan flat check/trap proof has unsupported architecture");
@@ -1927,7 +1927,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
 }
 
 void try_apply_flat_trap_patch(const AmdGpuCodeObject &code_object, rj_code_arch_t arch,
-                               const ConSanOptions &options, ConSanResult &result) {
+                               const ConSanOptions &options, ConSanTransformArtifacts &result) {
   if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
     result.warnings.emplace_back("ConSan flat trap proof currently supports only RDNA4");
     return;

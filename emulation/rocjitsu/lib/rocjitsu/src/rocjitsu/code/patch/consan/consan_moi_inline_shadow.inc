@@ -1,7 +1,7 @@
 using InlineSgprSpillSequence = SgprSpillSequence;
 
 [[nodiscard]] bool
-moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanResult &result,
+moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanTransformArtifacts &result,
                                              const ResolvedMoiScratchPlan &resources,
                                              const ConSanOptions &options) {
   if (!options.automatic_moi_inline_sgpr_spill && !options.automatic_moi_record_replay_sgpr_spill) {
@@ -14,7 +14,7 @@ moi_scalar_spill_requires_dynamic_vgpr_frame(const ConSanResult &result,
 }
 
 [[nodiscard]] std::optional<InlineSgprSpillSequence> build_inline_sgpr_spill_sequence(
-    const ConSanResult &result, const ResolvedMoiScratchPlan &resources,
+    const ConSanTransformArtifacts &result, const ResolvedMoiScratchPlan &resources,
     const ConSanOptions &options, MoiSpillManagers &managers, rj_code_arch_t arch,
     std::vector<std::string> &warnings, std::optional<uint32_t> private_layout_base,
     const VgprSpillSequence *vgpr_spill = nullptr) {
@@ -1745,7 +1745,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             }
             return info;
           },
-          [&](std::vector<uint8_t> &image, ConSanResult &current_result) {
+          [&](std::vector<uint8_t> &image, ConSanTransformArtifacts &current_result) {
             return apply_lds_descriptor_requirements(image, current_result, lds_requirements,
                                                      options, arch, current_result.errors);
           },
