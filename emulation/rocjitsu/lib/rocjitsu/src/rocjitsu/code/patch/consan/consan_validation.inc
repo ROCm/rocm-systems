@@ -2941,17 +2941,20 @@ validate_entry_scalar_backup_semantics(const AmdGpuCodeObject &original,
         std::ranges::find_if(original.kernels(), [&](const AmdGpuKernelInfo &kernel) {
           return kernel.entry_text_offset == patch.anchor_offset;
         });
-    if (owner == original.kernels().end() ||
-        owner->descriptor_file_offset > original.image_size() ||
-        sizeof(KD) > original.image_size() - owner->descriptor_file_offset) {
+    if (owner == original.kernels().end()) {
       errors.emplace_back("ConSan final validation could not resolve an entry scalar backup owner");
       continue;
     }
-    KD descriptor{};
-    std::memcpy(&descriptor, original.image_data() + owner->descriptor_file_offset,
-                sizeof(descriptor));
+    const auto descriptor = read_kernel_descriptor(
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(original.image_data()),
+                                 original.image_size()),
+        owner->descriptor_file_offset);
+    if (!descriptor) {
+      errors.emplace_back("ConSan final validation could not resolve an entry scalar backup owner");
+      continue;
+    }
     const bool has_kernarg_preload =
-        AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
+        AMDHSA_BITS_GET(descriptor->kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
 
     std::vector<uint32_t> expected_save;
     std::vector<uint32_t> expected_restore;
@@ -3198,11 +3201,16 @@ validate_dispatch_id_prologue_semantics(const AmdGpuCodeObject &original,
     validate_entry(patch,
                    patch.dispatch_id_primary_prologue_offset.value_or(patch.trampoline_offset),
                    owner->name, has_semantic_system_sgpr_restore);
-    KD descriptor{};
-    std::memcpy(&descriptor, original.image_data() + owner->descriptor_file_offset,
-                sizeof(descriptor));
+    const auto descriptor = read_kernel_descriptor(
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(original.image_data()),
+                                 original.image_size()),
+        owner->descriptor_file_offset);
+    if (!descriptor) {
+      errors.emplace_back("ConSan final validation could not read a dispatch-ID prologue owner");
+      continue;
+    }
     const bool has_kernarg_preload =
-        AMDHSA_BITS_GET(descriptor.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
+        AMDHSA_BITS_GET(descriptor->kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH) != 0;
     if (has_kernarg_preload) {
       validate_entry(
           patch,
@@ -4147,14 +4155,21 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     if (replacement_it == replacement_kernels_by_name.end())
       continue;
     const AmdGpuKernelInfo &replacement_kernel = *replacement_it->second;
-    KernelDescriptor original_descriptor{};
-    KernelDescriptor replacement_descriptor{};
-    std::memcpy(&original_descriptor,
-                original.image_data() + original_kernel.descriptor_file_offset,
-                sizeof(original_descriptor));
-    std::memcpy(&replacement_descriptor,
-                replacement.image_data() + replacement_kernel.descriptor_file_offset,
-                sizeof(replacement_descriptor));
+    const auto original_descriptor_value = read_kernel_descriptor(
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(original.image_data()),
+                                 original.image_size()),
+        original_kernel.descriptor_file_offset);
+    const auto replacement_descriptor_value = read_kernel_descriptor(
+        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(replacement.image_data()),
+                                 replacement.image_size()),
+        replacement_kernel.descriptor_file_offset);
+    if (!original_descriptor_value || !replacement_descriptor_value) {
+      errors.emplace_back("ConSan final validation could not read descriptor pair for kernel '" +
+                          original_kernel.name + "'");
+      continue;
+    }
+    const KernelDescriptor &original_descriptor = *original_descriptor_value;
+    const KernelDescriptor &replacement_descriptor = *replacement_descriptor_value;
     DescriptorRequirement requirement = requirements[original_kernel.name];
     const bool descriptor_resources_changed =
         replacement_descriptor.compute_pgm_rsrc1 != original_descriptor.compute_pgm_rsrc1 ||
@@ -4361,7 +4376,10 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
     std::vector<uint8_t> descriptor_probe(sizeof(replacement_descriptor));
     const major_image_ownership::ScopedOwner descriptor_probe_owner(
         major_image_ownership::OwnerKind::DescriptorProbe, descriptor_probe);
-    std::memcpy(descriptor_probe.data(), &replacement_descriptor, sizeof(replacement_descriptor));
+    if (!write_kernel_descriptor(descriptor_probe, 0u, replacement_descriptor)) {
+      errors.emplace_back("ConSan final validation could not construct its descriptor probe");
+      continue;
+    }
     const SpillDescriptorUpdate descriptor_update = update_kernel_descriptor_for_spills(
         descriptor_probe, /*descriptor_file_offset=*/0, requirement.required_private_bytes);
     if (descriptor_update != SpillDescriptorUpdate::Unchanged) {

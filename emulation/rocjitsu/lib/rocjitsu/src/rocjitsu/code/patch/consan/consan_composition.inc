@@ -655,14 +655,9 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     ConSanKernelInfo info;
     info.name = kernel.name;
     info.descriptor_file_offset = kernel.descriptor_file_offset;
-    if (kernel.descriptor_file_offset <= code_object_bytes.size() &&
-        sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) <=
-            code_object_bytes.size() - kernel.descriptor_file_offset) {
-      rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
-      std::memcpy(&descriptor, code_object_bytes.data() + kernel.descriptor_file_offset,
-                  sizeof(descriptor));
-      info.declared_group_segment_bytes = descriptor.group_segment_fixed_size;
-    }
+    if (const auto descriptor =
+            read_kernel_descriptor(code_object_bytes, kernel.descriptor_file_offset))
+      info.declared_group_segment_bytes = descriptor->group_segment_fixed_size;
     info.entry_text_offset = kernel.entry_text_offset;
     info.text_file_offset = kernel.text_file_offset;
     info.code_size = kernel.code_size;

@@ -199,12 +199,17 @@ validate_consan_input_layout(const AmdGpuCodeObject &code_object,
       errors.emplace_back("ConSan kernel '" + kernel.name +
                           "' descriptor is not contained in a read-only data section");
     } else if (kernel.has_text_range && !allow_descriptor_entry_redirect) {
-      rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
-      std::memcpy(&descriptor, code_object.image_data() + kernel.descriptor_file_offset,
-                  sizeof(descriptor));
+      const auto descriptor = read_kernel_descriptor(
+          std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(code_object.image_data()),
+                                   code_object.image_size()),
+          kernel.descriptor_file_offset);
+      if (!descriptor) {
+        errors.emplace_back("ConSan kernel '" + kernel.name + "' descriptor exceeds ELF bytes");
+        continue;
+      }
       const uint64_t descriptor_address = code_object.kernel_descriptor_offset(kernel.name);
       const std::optional<uint64_t> descriptor_entry =
-          add_signed_offset(descriptor_address, descriptor.kernel_code_entry_byte_offset);
+          add_signed_offset(descriptor_address, descriptor->kernel_code_entry_byte_offset);
       const Section *text_section = nullptr;
       for (const Section *section : code_object.text_sections()) {
         if (section->sectionOffset() == kernel.text_file_offset) {
