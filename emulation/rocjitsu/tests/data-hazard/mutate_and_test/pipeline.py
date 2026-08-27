@@ -282,8 +282,8 @@ def _run_baseline(
 ) -> bool:
     """Build and run the unmodified (baseline) shader.
 
-    Returns ``True`` if the baseline built and ran successfully enough
-    to proceed with mutation testing.
+    Returns ``True`` only when the baseline built and then ran to a clean exit,
+    which is the reference every mutant is compared against.
     """
     config = kernel_builder.config
     baseline_exe, err = kernel_builder.build_from_asm()
@@ -331,6 +331,20 @@ def _run_baseline(
 
     if verbose:
         print(f"  Baseline: exit={ec}  {'PASS' if ec == 0 else 'FAIL'}")
+
+    if not report.baseline_ok:
+        # Every mutant is judged against the baseline's output and hazard count,
+        # so a baseline that timed out or failed leaves nothing to judge them by.
+        reason = (
+            "TIMEOUT"
+            if ec == -1
+            else (stderr or "could not be started")
+            if ec < 0
+            else f"exit {ec}"
+        )
+        report.error = f"baseline run failed: {reason}"
+        print(f"  [SKIP] {report.error}", file=sys.stderr)
+        return False
 
     return True
 
