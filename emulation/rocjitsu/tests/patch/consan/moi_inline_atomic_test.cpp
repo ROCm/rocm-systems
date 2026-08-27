@@ -927,7 +927,6 @@ TEST(ConSanMoi, Cdna4FarInlineAtomicUsesDenseRelayWithAliasedKeyAndScc) {
   options.moi_inline_indirect_scc_sgpr = kKeyAndSccSgpr;
   options.moi_inline_dispatch_key_sgpr = kKeyAndSccSgpr;
   options.moi_inline_call_return_sgpr = kIndirectPcSgpr;
-  options.automatic_moi_exec_save_sgprs = true;
   options.automatic_moi_partial_exec_save_sgprs = true;
   options.automatic_moi_inline_sgpr_spill = true;
   options.moi_transient_sgpr_assignments.push_back(
@@ -4791,7 +4790,6 @@ TEST(ConSanMoi, InlineAtomicUsesAutomaticScalarSpillAtFullScalarPressure) {
   atomic_only_options.moi_owner_vgpr = 80u;
   atomic_only_options.moi_epoch_vgpr = 81u;
   atomic_only_options.moi_exec_save_sgpr = 4u;
-  atomic_only_options.automatic_moi_exec_save_sgprs = true;
   atomic_only_options.automatic_moi_inline_sgpr_spill = true;
   atomic_only_options.moi_inline_visible_evidence_sgpr = 40u;
   atomic_only_options.moi_inline_dispatch_key_sgpr = 41u;
@@ -4834,7 +4832,6 @@ TEST(ConSanMoi, InlineAtomicScalarSpillRejectsAliasedGuestScalarAddress) {
   // VGLOBAL reads its address from s[4:5]. An automatic scalar spill may
   // surround a vector-only FLAT atomic, but it must not clobber this pair.
   options.moi_exec_save_sgpr = 4u;
-  options.automatic_moi_exec_save_sgprs = true;
   options.automatic_moi_inline_sgpr_spill = true;
   options.moi_inline_visible_evidence_sgpr = 40u;
   options.moi_inline_dispatch_key_sgpr = 41u;

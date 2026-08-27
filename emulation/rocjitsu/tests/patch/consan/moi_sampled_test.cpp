@@ -2685,7 +2685,6 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverrideRetainsLivenessDeadGlobalExecWindow)
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kGlobalExecSaveSgpr;
-  options.automatic_moi_exec_save_sgprs = true;
   options.moi_dispatch_id_sgpr = 96u;
   options.automatic_moi_dispatch_id_sgprs = true;
   options.moi_owner_vgpr = 40u;
@@ -2757,7 +2756,6 @@ TEST(ConSanMoi, Cdna4SampledDispatchOverridePreservesPriorOwnerLocalExecWindow) 
   ConSanOptions options = moi_options(ConSanMoiEngine::Sampled);
   options.scratch_vgpr = 8u;
   options.moi_exec_save_sgpr = kGlobalExecSaveSgpr;
-  options.automatic_moi_exec_save_sgprs = true;
   options.moi_dispatch_id_sgpr = 96u;
   options.automatic_moi_dispatch_id_sgprs = true;
   options.moi_owner_vgpr = 40u;

@@ -4731,7 +4731,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       continue;
     }
     options.moi_exec_save_sgpr = base;
-    options.automatic_moi_exec_save_sgprs = true;
     options.moi_exec_save_sgprs_persistent = options.moi_inline_workgroup_shadow;
     result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
     result.warnings.emplace_back("ConSan MOI automatically assigned EXEC-save SGPRs s" +
@@ -4830,7 +4829,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       if (!admits_owner || !excludes_owner)
         continue;
       options.moi_exec_save_sgpr = candidate;
-      options.automatic_moi_exec_save_sgprs = true;
       options.automatic_moi_partial_exec_save_sgprs = true;
       options.moi_exec_save_sgprs_persistent = true;
       options.moi_dispatch_id_sgpr = component_dispatch_sgpr;
@@ -4861,7 +4859,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       options.moi_transient_sgpr_assignments.clear();
       result.resolved_moi_transient_sgpr_assignments.clear();
       options.moi_exec_save_sgpr.reset();
-      options.automatic_moi_exec_save_sgprs = false;
       options.automatic_moi_partial_exec_save_sgprs = false;
       options.moi_exec_save_sgprs_persistent = false;
       options.moi_dispatch_id_sgpr = prior_dispatch_sgpr;
@@ -4944,7 +4941,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
         continue;
       }
       options.moi_exec_save_sgpr = static_cast<uint16_t>(base);
-      options.automatic_moi_exec_save_sgprs = true;
       result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
       result.warnings.emplace_back(
           "ConSan MOI automatically assigned liveness-dead EXEC-save SGPRs s" +
@@ -5074,7 +5070,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
         dispatch_key = scc;
       if (pc && call_return && dispatch_key && scc) {
         options.moi_exec_save_sgpr = spill_base;
-        options.automatic_moi_exec_save_sgprs = true;
         options.automatic_moi_inline_sgpr_spill = true;
         options.moi_inline_visible_evidence_sgpr = visible;
         options.moi_inline_indirect_pc_sgpr = pc;
@@ -5123,7 +5118,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       if (!admits_owner)
         continue;
       options.moi_exec_save_sgpr = candidate;
-      options.automatic_moi_exec_save_sgprs = true;
       options.automatic_moi_partial_exec_save_sgprs = true;
       options.moi_exec_save_sgprs_persistent = true;
       result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
@@ -5141,7 +5135,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   // liveness-dead window or a spill-backed access-probe layout.
   if (moi_supports_full_pressure_component_state(arch, options.moi_engine)) {
     options.moi_exec_save_sgpr = 0u;
-    options.automatic_moi_exec_save_sgprs = true;
     options.automatic_moi_partial_exec_save_sgprs = true;
     if (configure_automatic_moi_transient_sgpr_assignments(options, result, state)) {
       result.resolved_moi_exec_save_sgpr = options.moi_exec_save_sgpr;
@@ -5150,7 +5143,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       return true;
     }
     options.moi_exec_save_sgpr.reset();
-    options.automatic_moi_exec_save_sgprs = false;
     options.automatic_moi_partial_exec_save_sgprs = false;
   }
 
@@ -6605,7 +6597,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
     if (assigned_persistent_dispatch_vgprs) {
       if (!assigned_private_component)
         options.automatic_moi_private_dispatch_id = false;
-      options.automatic_moi_dispatch_id_vgprs = true;
     }
     result.resolved_moi_persistent_vgpr_assignments = options.moi_persistent_vgpr_assignments;
     result.warnings.emplace_back(
@@ -6865,7 +6856,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
     options.moi_dispatch_id_vgpr = next_persistent_vgpr;
     next_persistent_vgpr = static_cast<uint16_t>(next_persistent_vgpr + 2u);
     options.automatic_moi_private_dispatch_id = false;
-    options.automatic_moi_dispatch_id_vgprs = true;
   }
   options.moi_init_owner_epoch = true;
   options.automatic_moi_persistent_vgprs = true;

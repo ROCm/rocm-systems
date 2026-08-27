@@ -4683,6 +4683,29 @@ analysis completed.
   73.83 seconds. Slice 5AS remains the latest periodic physical-gfx950 gate;
   E2E validation remains outside this work.
 
+### Slice 5AY: delete write-only automatic-allocation flags
+
+- **Selected resources remain the state:** The removed
+  `automatic_moi_exec_save_sgprs` and `automatic_moi_dispatch_id_vgprs` booleans
+  were set or cleared after register placement but never read by production.
+  The actual optional EXEC-save and dispatch-ID registers, component-local
+  assignments, spill modes, persistence proofs, and published resolved choices
+  remain authoritative wherever later planning or emission needs them.
+- **No mechanism-only test setup:** Twelve host fixtures set the EXEC-save flag,
+  but no implementation consumed it and no assertion inspected it. Those
+  assignments therefore could not select a path or strengthen coverage. The
+  fixtures retain all concrete register, spill, owner, patch-byte, and
+  diagnostic assertions that exercise their intended paths.
+- **Deletion accounting:** Production deletes fifteen physical lines, including
+  both fields, their comments, and ten writes. Tests delete twelve no-op setup
+  lines. No replacement state or derived predicate is needed.
+- **Checked-in gate:** The host gate passes all 1,508 runnable tests with the
+  two expected benchmark-object skips; all 172 HSA-hook and hook-lifecycle
+  tests pass; and all 2,908 simulator-device tests across `gfx942`, `gfx950`,
+  `gfx1100`, `gfx1201`, and `gfx1250` pass in 81.33 seconds. Slice 5AS remains
+  the latest periodic physical-gfx950 gate; E2E validation remains outside this
+  work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -432,8 +432,6 @@ struct ConSanOptions {
   /// Internal marker set when inline shadow derives owner at each probe and
   /// keeps epoch in per-lane private memory.
   bool automatic_moi_private_epoch = false;
-  /// Internal marker set after ConSan assigns the scalar EXEC-save window.
-  bool automatic_moi_exec_save_sgprs = false;
   /// Per-owner overrides used when an automatic code-object-wide transient
   /// window is unsafe for only a subset of independent owner components.
   std::vector<ConSanMoiTransientSgprAssignment> moi_transient_sgpr_assignments;
@@ -480,9 +478,6 @@ struct ConSanOptions {
   /// its hardware dispatch identity in private entry state because no
   /// code-object-wide persistent SGPR pair survives the guest program.
   bool automatic_moi_private_dispatch_id = false;
-  /// Internal marker set after ConSan assigns an entry-captured persistent
-  /// hardware dispatch-ID VGPR pair.
-  bool automatic_moi_dispatch_id_vgprs = false;
   /// Internal metadata used only by the mutation-then-instrument composition
   /// path. It prevents appended fault code from being attributed to an
   /// unrelated tail function merely because that FUNC covers the cave bytes.
