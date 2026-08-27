@@ -34,8 +34,9 @@ class DevcommMicrotest : public ::testing::Test {
   std::unique_ptr<ncclComm> comm_;
 
   void SetUp() override {
+    // make_unique value-initializes: ncclComm's default ctor is implicit, so the whole object is
+    // zeroed first. Do not memset over it -- rmaState.rmaProxyState holds a live thread/mutex/condvar.
     comm_ = std::make_unique<ncclComm>();
-    std::memset(comm_.get(), 0, sizeof(*comm_));
     comm_->rank = 0;
     comm_->nRanks = 8;
   }
