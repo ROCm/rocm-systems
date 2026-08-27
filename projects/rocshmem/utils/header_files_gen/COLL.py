@@ -47,7 +47,7 @@ def alltoall_ctx_wg_api(T, TNAME):
         f"    const {T} *source, int nelems);\n\n"
     )
 
-def alltoall_api(T, TNAME):
+def alltoall_ctx_wg_api(T, TNAME):
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_alltoall_wg(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
@@ -91,7 +91,7 @@ def generate_alltoall_wg_api():
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.    
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -143,6 +143,26 @@ def generate_alltoall_wave_api():
  */\n"""
     for type_, tname_ in types:
         expanded_code += alltoall_wave_api(type_, tname_)
+    expanded_code += """/**
+ * @name ROCSHMEM_ALLTOALLMEM_WAVE
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a wave collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int; zero on success, non-zero otherwise
+ */
+__device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+"""
 
     for type_, tname_ in types:
         expanded_code += alltoall_wave_non_ctx_api(type_, tname_)
@@ -246,12 +266,12 @@ def generate_broadcast_api():
  *                         heap.
  * @param[in] nelems       Size of the buffer to participate in the broadcast.
  * @param[in] PE_root      Zero-based ordinal of the PE, with respect to the
- *                         active set, from which the data is copied
+                           active set, from which the data is copied
  * @param[in] PE_start     PE to start the reduction.
  * @param[in] logPE_stride Stride of PEs participating in the reduction.
  * @param[in] PE_size      Number PEs participating in the reduction.
  * @param[in] pSync        Temporary sync buffer provided to ROCSHMEM. Must
- *                         be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
+                           be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
  *
  * @return void
  */\n"""
@@ -506,7 +526,6 @@ def generate_reducescatter_wg_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-
     int_types = [
         ("short", "short"),
         ("int", "int"),
@@ -553,7 +572,6 @@ def generate_reducescatter_wave_api():
  * Only the wave (wavefront) participates. Returns ROCSHMEM_SUCCESS on success.
  */\n"""
 
-
     int_types = [
         ("short", "short"),
         ("int", "int"),
@@ -598,7 +616,6 @@ def generate_reducescatter_host_api():
  * @brief Host-side reduce-scatter: PE i receives the element-wise reduction
  * of source[i*nreduce..(i+1)*nreduce-1] across all PEs.
  */\n"""
-
 
     int_types = [
         ("short", "short"),
