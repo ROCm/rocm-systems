@@ -528,6 +528,12 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
   MoiOptions effective_options = options;
+  if (!result.moi_operating_point.owner_transient_sgprs.empty()) {
+    effective_options.owner_transient_sgprs = result.moi_operating_point.owner_transient_sgprs;
+  }
+  if (!result.moi_operating_point.owner_persistent_vgprs.empty()) {
+    effective_options.owner_persistent_vgprs = result.moi_operating_point.owner_persistent_vgprs;
+  }
   if (effective_options.moi_owner_source == ConSanMoiOwnerSource::Automatic) {
     effective_options.moi_owner_source =
         effective_options.moi_engine == ConSanMoiEngine::InlineShadow
@@ -701,7 +707,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // chosen. The code bytes, decoded CFG, ownership scopes, and liveness facts
   // do not change during those iterations; retain one analysis state instead
   // of rebuilding the full instruction graph for every option refinement.
-  MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, result);
+  MoiResourcePlanningState resource_planning_state(code_object_bytes, arch, result,
+                                                   effective_options);
   rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
   effective_options.moi_dynamic_stack_spill =
       moi_supports_dynamic_stack_spill(arch, effective_options.moi_engine) &&
@@ -723,8 +730,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
   // fresh registers and make dispatch identity spuriously impossible.
   if (configure_automatic_moi_dispatch_id_sgprs(effective_options, result, resource_planning_state))
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
-  const ConSanMoiOperatingPoint exec_planning_base =
-      capture_moi_operating_point(effective_options, result.moi_operating_point);
+  const ConSanMoiOperatingPoint exec_planning_base = capture_moi_operating_point(effective_options);
   const size_t warnings_before_exec_planning = result.warnings.size();
   bool exec_planning_changed = configure_automatic_moi_exec_save_sgprs(
       effective_options, result, resource_planning_state, moi_candidates);
@@ -734,7 +740,7 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     // search. Re-run that search with the dynamic frame ABI visible so its
     // stack registers, scalar width, and any architecture-specific scratch
     // demand participate in the same resource proof.
-    restore_moi_operating_point(effective_options, result, exec_planning_base);
+    restore_moi_operating_point(effective_options, exec_planning_base);
     effective_options.moi_dynamic_stack_spill = true;
     result.warnings.resize(warnings_before_exec_planning);
     rebuild_moi_resource_plans(resource_planning_state, effective_options, moi_candidates, result);
@@ -866,7 +872,8 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
     effective_options.moi_record_replay_workgroup_vgprs = {};
     effective_options.moi_persistent_sgprs.record_replay_workgroup = {};
     effective_options.moi_dispatch_id_vgpr.reset();
-    result.moi_operating_point.owner_persistent_vgprs.clear();
+    effective_options.owner_persistent_vgprs.clear();
+    freeze_moi_operating_point(effective_options, result);
     result.warnings.emplace_back(
         "ConSan MOI record/replay dropped unconsumed automatic state after all access probes "
         "failed placement");
