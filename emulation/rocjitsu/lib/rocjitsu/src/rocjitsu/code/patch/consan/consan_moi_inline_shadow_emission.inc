@@ -2475,7 +2475,7 @@
     return std::nullopt;
   }
 
-  const auto &access_ranges = candidate.access_ranges;
+  const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI inline-shadow probe requires a supported LDS access range");
     return std::nullopt;
@@ -2832,20 +2832,21 @@
   const uint16_t local_old_value_vgpr =
       static_cast<uint16_t>(old_value_vgpr + (consan_uses_gfx9_cdna_encoding(arch) ? 1u : 0u));
 
-  for (const ConSanMoiAccessRange &range : access_ranges) {
+  for (const ConSanAccessRange &range : access_ranges) {
     ConSanMoiLdsCellRange cell_range;
     if (workgroup_shadow || !byte_granular_external_shadow) {
-      cell_range = consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
+      cell_range =
+          consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
       // The register-sourced LDS base can have any byte alignment even when
       // the instruction's static offset is aligned. Emit the target-neutral
       // maximum and let the exact mask remove empty per-lane iterations before
       // coverage accounting and publication.
-      cell_range.cell_count = consan_moi_maximum_cell_count_for_unaligned_bytes(range.byte_count);
+      cell_range.cell_count = consan_moi_maximum_cell_count_for_unaligned_bytes(range.byte_width);
     } else {
       // A byte-addressed shadow has no runtime alignment expansion: every
       // accessed byte maps to exactly one independent external slot.
-      cell_range.start_cell = range.static_byte_offset;
-      cell_range.cell_count = range.byte_count;
+      cell_range.start_cell = candidate.lowering_offset(range);
+      cell_range.cell_count = range.byte_width;
     }
     const bool use_cell_loop =
         cell_range.cell_count > 1u && inline_shadow_loop_scratch_count(options, candidate) != 0u;
@@ -2869,12 +2870,12 @@
                 "ConSan MOI inline-shadow probe could not recover its spilled LDS address");
             return std::nullopt;
           }
-          if (range.static_byte_offset == 0u) {
+          if (candidate.lowering_offset(range) == 0u) {
             words.push_back(build_v_mov_b32_e32(loop_offset_vgpr,
                                                 vector_source_vgpr(*lds_byte_offset_vgpr), arch));
-          } else if (!append_compute_effective_lds_byte_offset(words, loop_offset_vgpr,
-                                                               *lds_byte_offset_vgpr,
-                                                               range.static_byte_offset, arch)) {
+          } else if (!append_compute_effective_lds_byte_offset(
+                         words, loop_offset_vgpr, *lds_byte_offset_vgpr,
+                         candidate.lowering_offset(range), arch)) {
             errors.emplace_back(
                 "ConSan MOI inline-shadow probe could not initialize its local cell loop");
             return std::nullopt;
@@ -2885,8 +2886,9 @@
           if (!append_workgroup_local_exact_shadow_swap(
                   words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
                   low_vgpr, high_vgpr, local_old_value_vgpr, loop_offset_vgpr,
-                  /*static_byte_offset=*/0u, /*cell_index=*/0u, range.byte_count,
-                  *lds_byte_offset_vgpr, range.static_byte_offset, loop_counter_vgpr, errors)) {
+                  /*static_byte_offset=*/0u, /*cell_index=*/0u, range.byte_width,
+                  *lds_byte_offset_vgpr, candidate.lowering_offset(range), loop_counter_vgpr,
+                  errors)) {
             errors.emplace_back(
                 "ConSan MOI inline-shadow probe could not encode looped local LDS shadow publish");
             return std::nullopt;
@@ -2943,8 +2945,8 @@
                    !append_workgroup_local_exact_shadow_swap(
                        words, candidate, options, arch, layout, *workgroup_shadow, address_lo_vgpr,
                        low_vgpr, high_vgpr, local_old_value_vgpr, *lds_byte_offset_vgpr,
-                       range.static_byte_offset, cell_index, range.byte_count,
-                       *lds_byte_offset_vgpr, range.static_byte_offset,
+                       candidate.lowering_offset(range), cell_index, range.byte_width,
+                       *lds_byte_offset_vgpr, candidate.lowering_offset(range),
                        /*relative_cell_index_vgpr=*/std::nullopt, errors)) {
           errors.emplace_back(
               "ConSan MOI inline-shadow probe could not encode local LDS shadow publish");
@@ -3040,9 +3042,9 @@
         return std::nullopt;
       }
       uint16_t effective_lds_byte_offset_vgpr = *lds_byte_offset_vgpr;
-      if (range.static_byte_offset != 0) {
+      if (candidate.lowering_offset(range) != 0) {
         if (!append_compute_effective_lds_byte_offset(words, tmp_vgpr, *lds_byte_offset_vgpr,
-                                                      range.static_byte_offset, arch)) {
+                                                      candidate.lowering_offset(range), arch)) {
           errors.emplace_back("ConSan MOI inline-shadow probe could not encode LDS byte offset");
           return std::nullopt;
         }
@@ -3100,8 +3102,8 @@
       }
       if (!append_wave_coalesced_exact_shadow_swap(
               words, candidate, options, arch, layout, address_lo_vgpr, low_vgpr, high_vgpr,
-              old_value_vgpr, *lds_byte_offset_vgpr, range.static_byte_offset, range.byte_count,
-              external_shadow_granule_bytes, cell_index,
+              old_value_vgpr, *lds_byte_offset_vgpr, candidate.lowering_offset(range),
+              range.byte_width, external_shadow_granule_bytes, cell_index,
               loop_external_cells ? std::optional<uint16_t>(loop_counter_vgpr) : std::nullopt,
               spill, spill_backed_lds_byte_offset_source, errors)) {
         errors.emplace_back(

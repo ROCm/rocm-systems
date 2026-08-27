@@ -750,16 +750,15 @@ TEST(ConSanMoi, Gfx1250TwoAddressLoadUsesNormalizedRangesAndSafeScratch) {
   const ConSanAccessInventorySite &site = result.program_inventory.access_sites().front();
   const ConSanMoiCandidate &candidate = result.moi_candidates.front();
   ASSERT_EQ(site.ranges.size(), 2u);
-  ASSERT_EQ(candidate.access_ranges.size(), site.ranges.size());
+  EXPECT_EQ(candidate.ranges, site.ranges);
   for (size_t range_index = 0; range_index < site.ranges.size(); ++range_index) {
     SCOPED_TRACE(range_index);
     ASSERT_TRUE(site.ranges[range_index].static_byte_offset);
-    EXPECT_EQ(candidate.access_ranges[range_index].static_byte_offset,
+    EXPECT_EQ(candidate.lowering_offset(candidate.ranges[range_index]),
               *site.ranges[range_index].static_byte_offset);
-    EXPECT_EQ(candidate.access_ranges[range_index].byte_count, site.ranges[range_index].byte_width);
   }
-  EXPECT_EQ(candidate.access_ranges[0].static_byte_offset, 3u * 256u);
-  EXPECT_EQ(candidate.access_ranges[1].static_byte_offset, 5u * 256u);
+  EXPECT_EQ(candidate.lowering_offset(candidate.ranges[0]), 3u * 256u);
+  EXPECT_EQ(candidate.lowering_offset(candidate.ranges[1]), 5u * 256u);
   ASSERT_EQ(result.resource_plans.size(), 1u);
   ASSERT_TRUE(result.resource_plans.front().scratch_vgpr);
   EXPECT_GE(*result.resource_plans.front().scratch_vgpr, 3u);
@@ -1125,6 +1124,17 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
   EXPECT_EQ(result.resource_plans.front().source, ConSanRegisterAllocationSource::Unsupported);
   EXPECT_EQ(result.resource_plans.front().reason, ConSanRegisterPlanReason::MissingOwner);
   EXPECT_EQ(test_resource_plan_summary(result).unsupported_plans, 1u);
+}
+
+TEST(ConSanMoi, LoweringOffsetsPreserveNativeRangesAndDoNotReapplyFlatImmediate) {
+  ConSanMoiCandidate candidate;
+  ConSanAccessRange range{.id = {}, .static_byte_offset = -8, .byte_width = 4u};
+  candidate.origin = ConSanAccessOrigin::Flat;
+  EXPECT_EQ(candidate.lowering_offset(range), 0u);
+
+  candidate.origin = ConSanAccessOrigin::NativeLds;
+  range.static_byte_offset = 3u * 256u;
+  EXPECT_EQ(candidate.lowering_offset(range), 3u * 256u);
 }
 
 TEST(ConSanMoi, SharedHelperPlanUsesCommonDeadWindowAcrossTwoOwners) {
@@ -2266,14 +2276,6 @@ TEST(ConSanMoi, LoweringCandidatesAreExactlyTheAdmittedAccessIntents) {
           });
       ASSERT_NE(site, result.program_inventory.access_sites().end());
       EXPECT_EQ(static_cast<const ConSanAccessInventorySite &>(candidate), *site);
-      ASSERT_EQ(candidate.access_ranges.size(), site->ranges.size());
-      for (size_t range_index = 0; range_index < site->ranges.size(); ++range_index) {
-        ASSERT_TRUE(site->ranges[range_index].static_byte_offset);
-        EXPECT_EQ(candidate.access_ranges[range_index].static_byte_offset,
-                  *site->ranges[range_index].static_byte_offset);
-        EXPECT_EQ(candidate.access_ranges[range_index].byte_count,
-                  site->ranges[range_index].byte_width);
-      }
     }
 
     EXPECT_EQ(candidate_offsets, intended_offsets);

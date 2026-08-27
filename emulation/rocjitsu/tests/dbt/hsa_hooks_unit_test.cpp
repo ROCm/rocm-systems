@@ -5157,7 +5157,7 @@ rocjitsu::ConSanResult auto_report_replay_transform_result(
   candidate.kind = rocjitsu::ConSanLdsAccessKind::Write;
   candidate.instruction_size = sizeof(uint32_t);
   candidate.decoded_width_bits = 32u;
-  candidate.access_ranges.push_back({.static_byte_offset = 0u, .byte_count = sizeof(uint32_t)});
+  candidate.ranges.push_back({.id = {}, .static_byte_offset = 0u, .byte_width = sizeof(uint32_t)});
   candidate.file_offset = 0u;
   candidate.physical_id.original_text_offset = 0u;
   candidate.container.kind = rocjitsu::ConSanProgramContainerKind::Kernel;

@@ -1,15 +1,3 @@
-/// One normalized byte range retained by the temporary MOI lowering operand.
-///
-/// This is a compact projection of `ConSanAccessRange`: policy and inventory
-/// have already validated the semantic identity, while current emitters need
-/// only the nonnegative displacement and width used by device evidence.
-struct ConSanMoiAccessRange {
-  uint32_t static_byte_offset = 0;
-  uint32_t byte_count = 0;
-
-  bool operator==(const ConSanMoiAccessRange &) const = default;
-};
-
 /// Temporary lowering state for one access admitted by semantic policy.
 ///
 /// Its `ConSanAccessInventorySite` base is the exact normalized record selected
@@ -28,6 +16,15 @@ struct ConSanMoiCandidate : ConSanAccessInventorySite {
   [[nodiscard]] uint32_t size() const { return instruction_size; }
   /// Return the normalized width in bits of each semantic access range.
   [[nodiscard]] uint32_t width_bits() const { return decoded_width_bits; }
+  /// Return the nonnegative displacement consumed by native emission. FLAT
+  /// lowering first materializes its complete effective address, so its
+  /// inventory displacement must not be applied a second time. Admitted
+  /// native sites always carry a representable decoded displacement.
+  [[nodiscard]] uint32_t lowering_offset(const ConSanAccessRange &range) const {
+    return origin == ConSanAccessOrigin::Flat
+               ? 0u
+               : static_cast<uint32_t>(range.static_byte_offset.value());
+  }
 
   /// gfx1250 VGPR-bank mode active at this instruction, when analysis could
   /// establish it for lowering.
@@ -35,9 +32,6 @@ struct ConSanMoiCandidate : ConSanAccessInventorySite {
   /// Descriptor selected as the concrete execution owner for this lowering
   /// operation. Shared helper sites may be copied once per reachable owner.
   std::optional<uint64_t> kernel_descriptor_file_offset;
-  /// Normalized ranges copied from the admitted `ProgramInventory` site.
-  /// Lowering must not reopen pristine bytes to classify or decode them.
-  std::vector<ConSanMoiAccessRange> access_ranges;
 };
 
 struct ConSanPerturbationCandidate {

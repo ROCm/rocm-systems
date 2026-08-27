@@ -177,7 +177,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   for (uint32_t i = 0; i < candidates.size(); ++i) {
     if (i % options.moi_sample_stride == options.moi_sample_offset) {
       ++sampled_filter_candidate_count;
-      const auto &ranges = candidates[i]->access_ranges;
+      const auto &ranges = candidates[i]->ranges;
       if (ranges.size() <= std::numeric_limits<uint32_t>::max() - sampled_filter_range_count)
         sampled_filter_range_count += static_cast<uint32_t>(ranges.size());
     }
@@ -592,7 +592,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
           "ConSan MOI sampled probe skipped load/store site inside a relocated prefix");
       continue;
     }
-    const auto &access_ranges = candidate.access_ranges;
+    const auto &access_ranges = candidate.ranges;
     if (access_ranges.empty())
       continue;
     const uint32_t range_count = static_cast<uint32_t>(access_ranges.size());

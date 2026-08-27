@@ -971,7 +971,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
         continue;
       required_private_bytes = std::max(required_private_bytes, scalar_spill->total_private_bytes);
     }
-    const auto &access_ranges = candidate.access_ranges;
+    const auto &access_ranges = candidate.ranges;
     if (access_ranges.empty()) {
       result.warnings.emplace_back(
           "ConSan MOI first-light probe could not recover an admitted access range");

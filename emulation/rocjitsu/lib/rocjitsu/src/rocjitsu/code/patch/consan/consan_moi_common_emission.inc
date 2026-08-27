@@ -821,7 +821,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 || !two_address_scale)
     return copy_original();
 
-  const auto &ranges = candidate.access_ranges;
+  const auto &ranges = candidate.ranges;
   const uint16_t element_dwords = static_cast<uint16_t>(candidate.width_bits() / 32u);
   if (ranges.size() != 2u ||
       (candidate.kind != ConSanLdsAccessKind::Read &&
@@ -848,21 +848,21 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint16_t op = load ? (element_dwords == 1u ? cdna5::kDsLoadB32Vds : cdna5::kDsLoadB64Vds)
                            : (element_dwords == 1u ? cdna5::kDsStoreB32Vds : cdna5::kDsStoreB64Vds);
   std::vector<uint32_t> words;
-  const auto append_access = [&](const ConSanMoiAccessRange &range, uint16_t data_vgpr) {
+  const auto append_access = [&](const ConSanAccessRange &range, uint16_t data_vgpr) {
     uint16_t address_vgpr = replay_address_vgpr;
     uint16_t immediate = 0u;
-    if (range.static_byte_offset > UINT16_MAX) {
+    if (candidate.lowering_offset(range) > UINT16_MAX) {
       if (!adjusted_address_vgpr || *adjusted_address_vgpr > 255u)
         return false;
       const auto adjust = instrumentation::build_v_add_u32_literal(
-          *adjusted_address_vgpr, *adjusted_address_vgpr, range.static_byte_offset,
+          *adjusted_address_vgpr, *adjusted_address_vgpr, candidate.lowering_offset(range),
           replay_address_vgpr, arch);
       if (!adjust)
         return false;
       words.insert(words.end(), adjust->begin(), adjust->end());
       address_vgpr = *adjusted_address_vgpr;
     } else {
-      immediate = static_cast<uint16_t>(range.static_byte_offset);
+      immediate = static_cast<uint16_t>(candidate.lowering_offset(range));
     }
     cdna5::VdsBuilderFields fields{
         .offset0 = static_cast<uint8_t>(immediate),
@@ -970,7 +970,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
           options.moi_record_replay_workgroup_vgprs.cluster_workgroup_id, *options.scratch_vgpr,
           scratch_count, "MOI Record/Replay cluster workgroup ID", errors))
     return std::nullopt;
-  const auto &access_ranges = candidate.access_ranges;
+  const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI first-light probe requires a supported LDS access range");
     return std::nullopt;
@@ -1119,12 +1119,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
   const uint32_t access_dispatch_bank_count = layout.record_replay_access_dispatch_bank_count;
   const uint32_t access_owner_bank_count = layout.record_replay_access_owner_bank_count;
   const auto kind = consan_moi_shadow_kind_from_access_kind(candidate.kind);
-  auto append_effective_range_offset = [&](const ConSanMoiAccessRange &range,
+  auto append_effective_range_offset = [&](const ConSanAccessRange &range,
                                            uint16_t value_vgpr) -> std::optional<uint16_t> {
-    if (range.static_byte_offset == 0)
+    if (candidate.lowering_offset(range) == 0)
       return *lds_byte_offset_vgpr;
     if (!append_compute_effective_lds_byte_offset(words, value_vgpr, *lds_byte_offset_vgpr,
-                                                  range.static_byte_offset, arch)) {
+                                                  candidate.lowering_offset(range), arch)) {
       return std::nullopt;
     }
     return value_vgpr;
@@ -1135,7 +1135,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
     const uint64_t dynamic_record_base = base + layout.access_records_offset;
 
-    for (const ConSanMoiAccessRange &range : access_ranges) {
+    for (const ConSanAccessRange &range : access_ranges) {
       if (!append_save_moi_special_state(words, options, arch)) {
         errors.emplace_back("ConSan MOI dynamic access-record probe could not save VCC/SCC");
         return std::nullopt;
@@ -1275,13 +1275,13 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       }
       words.push_back(*start_cell_shift);
       const ConSanMoiLdsCellRange static_range =
-          consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
+          consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
       if (!append_dynamic_access_store_u32_vgpr(
               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, start_cell), value_vgpr,
               slot_vgpr, *options.scratch_vgpr, arch) ||
           !append_dynamic_access_store_u32_literal(
               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, lds_byte_count),
-              range.byte_count, slot_vgpr, *options.scratch_vgpr, arch) ||
+              range.byte_width, slot_vgpr, *options.scratch_vgpr, arch) ||
           !append_dynamic_access_store_u32_literal(
               words, dynamic_record_base + offsetof(ConSanMoiAccessRecord, cell_count),
               static_range.cell_count, slot_vgpr, *options.scratch_vgpr, arch)) {
@@ -1833,7 +1833,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     const auto owner_saturation_label = sequence.make_label();
     const auto publication_observe_label = sequence.make_label();
     const auto publication_incomplete_label = sequence.make_label();
-    const ConSanMoiAccessRange &range = access_ranges[range_index];
+    const ConSanAccessRange &range = access_ranges[range_index];
     const uint32_t site_token =
         automatic_banked_capture ? logical_range_index + static_cast<uint32_t>(range_index) : 0u;
     const uint64_t access_record_base =
@@ -2003,7 +2003,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
       return std::nullopt;
     }
     const ConSanMoiLdsCellRange static_range =
-        consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
+        consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
     if (!record.store_vgpr(offsetof(ConSanMoiAccessRecord, lds_byte_offset),
                            *effective_lds_byte_offset_vgpr)) {
       errors.emplace_back("ConSan MOI first-light probe could not encode range offset");
@@ -2018,7 +2018,7 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
     }
     words.push_back(*start_cell);
     if (!record.store_vgpr(offsetof(ConSanMoiAccessRecord, start_cell), record_value_vgpr) ||
-        !record.store_literal(offsetof(ConSanMoiAccessRecord, lds_byte_count), range.byte_count) ||
+        !record.store_literal(offsetof(ConSanMoiAccessRecord, lds_byte_count), range.byte_width) ||
         !record.store_literal(offsetof(ConSanMoiAccessRecord, cell_count),
                               static_range.cell_count)) {
       errors.emplace_back("ConSan MOI first-light probe could not encode range fields");
@@ -2307,9 +2307,9 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
         return std::nullopt;
       }
       words.push_back(build_v_mov_b32_e32(record_compare_vgpr, address_key_sgpr, arch));
-      if (range.static_byte_offset != 0u) {
+      if (candidate.lowering_offset(range) != 0u) {
         const auto materialize_static_offset = instrumentation::build_v_mov_b32_literal(
-            record_compare_high_vgpr, range.static_byte_offset, arch);
+            record_compare_high_vgpr, candidate.lowering_offset(range), arch);
         const auto add_static_offset = instrumentation::build_v_add_u32(
             record_compare_vgpr, vector_source_vgpr(record_compare_vgpr), record_compare_high_vgpr,
             arch);
@@ -2630,12 +2630,12 @@ apply_lds_descriptor_requirements(std::vector<uint8_t> &image, const ConSanResul
 }
 
 [[nodiscard]] bool is_inline_shadow_access_candidate(const ConSanMoiCandidate &candidate) {
-  const auto &ranges = candidate.access_ranges;
+  const auto &ranges = candidate.ranges;
   if (ranges.empty())
     return false;
-  for (const ConSanMoiAccessRange &range : ranges) {
+  for (const ConSanAccessRange &range : ranges) {
     const ConSanMoiLdsCellRange cell_range =
-        consan_moi_lds_cell_range_for_bytes(range.static_byte_offset, range.byte_count);
+        consan_moi_lds_cell_range_for_bytes(candidate.lowering_offset(range), range.byte_width);
     if (cell_range.cell_count == 0)
       return false;
   }

@@ -4091,6 +4091,38 @@ analysis completed.
   representation cutover preserves the admitted sites and emitted byte ranges.
   E2E validation remains outside this work.
 
+### Slice 5AF: lower directly from normalized access ranges
+
+- **One range representation:** The temporary `ConSanMoiAccessRange` type and
+  the candidate-owned `access_ranges` vector are deleted. Record/Replay,
+  Sampled, and Inline Shadow now consume the `ConSanAccessRange` values already
+  owned by the inherited inventory site. Candidate construction no longer
+  allocates, filters, or copies a second range collection.
+- **Semantic fact versus lowering interpretation:** Inventory preserves the
+  optional signed displacement encoded by the original access. Native LDS
+  emission consumes that decoded displacement directly. FLAT emission first
+  materializes the instruction's complete effective address and therefore
+  uses lowering displacement zero instead of applying the encoded immediate a
+  second time. `ConSanMoiCandidate::lowering_offset` documents that narrow
+  mechanism rule without storing another value.
+- **Contract coverage:** A focused host test proves both sides of the lowering
+  rule, including a negative FLAT semantic displacement and a scaled native
+  two-address displacement. Existing two-address tests now compare the
+  candidate's inherited range vector directly with inventory and exercise the
+  lowering query. The complete device matrix continues to cover subword, wide,
+  two-address, group-FLAT, CDNA, RDNA, and gfx1250 high-bank forms across every
+  applicable engine.
+- **Deletion result:** Production source is 17 physical lines smaller and
+  source plus tests is 15 lines smaller. The second range type, its vector
+  allocation, conversion loop, and duplicate range-equality scaffolding are
+  gone; no cached offset or compatibility view replaces them.
+- **Completed checked-in gate:** The complete host gate passes 1,511 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 65.70
+  seconds. Slice 5AC completed the periodic physical-gfx950 gate; this cutover
+  emits the same normalized byte widths and lowering displacements. E2E
+  validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

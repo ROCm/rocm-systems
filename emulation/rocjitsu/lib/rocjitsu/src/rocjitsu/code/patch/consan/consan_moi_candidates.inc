@@ -354,30 +354,15 @@ is_ordered_ordinary_sync_site(const std::set<OrderedOrdinarySyncSiteKey> &ordere
       OrderedOrdinarySyncSiteKey{in_kernel, std::string(container_name), text_offset});
 }
 
-/// Temporary Slice-3A compatibility projection from normalized access facts
-/// to the current lowering candidate. Semantic discovery is owned by
-/// `ProgramInventory`; this adapter may only copy facts and must not reclassify
-/// address space, confidence, or logical ranges.
+/// Construct temporary lowering state from one admitted normalized access.
+/// The exact inventory record remains the candidate's base; construction only
+/// selects its unambiguous execution-owner descriptor.
 [[nodiscard]] ConSanMoiCandidate make_moi_candidate(const ConSanAccessInventorySite &access) {
   ConSanMoiCandidate candidate;
   static_cast<ConSanAccessInventorySite &>(candidate) = access;
   if (access.execution_owner_descriptor_file_offsets.size() == 1u) {
     candidate.kernel_descriptor_file_offset =
         access.execution_owner_descriptor_file_offsets.front();
-  }
-  for (const ConSanAccessRange &range : access.ranges) {
-    if (access.origin == ConSanAccessOrigin::Flat) {
-      candidate.access_ranges.push_back({.static_byte_offset = 0u, .byte_count = range.byte_width});
-      continue;
-    }
-    if (!range.static_byte_offset || *range.static_byte_offset < 0 ||
-        static_cast<uint64_t>(*range.static_byte_offset) > std::numeric_limits<uint32_t>::max()) {
-      continue;
-    }
-    candidate.access_ranges.push_back({
-        .static_byte_offset = static_cast<uint32_t>(*range.static_byte_offset),
-        .byte_count = range.byte_width,
-    });
   }
   return candidate;
 }

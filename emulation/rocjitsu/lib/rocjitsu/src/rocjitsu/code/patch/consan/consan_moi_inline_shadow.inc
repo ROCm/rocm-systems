@@ -124,8 +124,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
   // retaining independent provenance for every byte.
   const bool requires_wave_partitioned_exact_shadow =
       std::ranges::any_of(candidates, [&](const ConSanMoiCandidate *candidate) {
-        return std::ranges::any_of(candidate->access_ranges, [](const ConSanMoiAccessRange &range) {
-          return range.byte_count < consan_moi_exact_shadow::granule_bytes;
+        return std::ranges::any_of(candidate->ranges, [](const ConSanAccessRange &range) {
+          return range.byte_width < consan_moi_exact_shadow::granule_bytes;
         });
       });
   if (options.moi_inline_workgroup_shadow && requires_wave_partitioned_exact_shadow) {
@@ -2515,7 +2515,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
 
 [[nodiscard]] std::optional<std::vector<uint32_t>> build_direct_sampled_watchpoint_range_words(
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
-    const ConSanMoiAccessRange &access_range, const ConSanOptions &options, rj_code_arch_t arch,
+    const ConSanAccessRange &access_range, const ConSanOptions &options, rj_code_arch_t arch,
     uint32_t record_index, std::span<const uint32_t> prior_record_indices,
     uint32_t window_bank_count, bool relocate_instruction,
     uint32_t pending_acquire_owner_bank_count,
@@ -2634,7 +2634,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
       consan_moi_sampled_watchpoint::valid_mask |
       (static_cast<uint64_t>(kind) << consan_moi_sampled_watchpoint::access_kind_shift) |
       generation_field);
-  const uint32_t encoded_byte_count = encode_consan_moi_sampled_byte_count(access_range.byte_count)
+  const uint32_t encoded_byte_count = encode_consan_moi_sampled_byte_count(access_range.byte_width)
                                       << (consan_moi_sampled_watchpoint::count_shift - 32u);
   const uint32_t encoded_generation_high = static_cast<uint32_t>(generation_field >> 32u);
   const uint64_t sampled_entry_address = *options.moi_report_buffer_address +
@@ -2652,7 +2652,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
                          !preserved_lds_byte_offset_vgpr
                      ? 1u
                      : 0u) +
-                (access_range.static_byte_offset != 0u ? 3u : 0u));
+                (candidate.lowering_offset(access_range) != 0u ? 3u : 0u));
   InstructionSequence sequence(words);
   const auto collision_label = sequence.make_label();
   const auto different_identity_label = sequence.make_label();
@@ -2799,17 +2799,18 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     // cell. Selecting owners here would discard the cross-wave evidence that
     // the sampled checker needs in order to identify a race.
     if (spilled_lds_byte_offset_vgpr) {
-      const uint16_t recovered_vgpr = access_range.static_byte_offset == 0u ? low_vgpr : high_vgpr;
+      const uint16_t recovered_vgpr =
+          candidate.lowering_offset(access_range) == 0u ? low_vgpr : high_vgpr;
       if (!reload_spilled_lds_byte_offset(recovered_vgpr))
         return std::nullopt;
-      if (access_range.static_byte_offset != 0u &&
-          !append_compute_effective_lds_byte_offset(words, low_vgpr, recovered_vgpr,
-                                                    access_range.static_byte_offset, arch)) {
+      if (candidate.lowering_offset(access_range) != 0u &&
+          !append_compute_effective_lds_byte_offset(
+              words, low_vgpr, recovered_vgpr, candidate.lowering_offset(access_range), arch)) {
         return std::nullopt;
       }
-    } else if (access_range.static_byte_offset != 0u) {
+    } else if (candidate.lowering_offset(access_range) != 0u) {
       if (!append_compute_effective_lds_byte_offset(words, low_vgpr, *lds_byte_offset_vgpr,
-                                                    access_range.static_byte_offset, arch))
+                                                    candidate.lowering_offset(access_range), arch))
         return std::nullopt;
     } else {
       words.push_back(
@@ -3021,20 +3022,21 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   }
   uint16_t effective_lds_byte_offset_vgpr = *lds_byte_offset_vgpr;
   if (spilled_lds_byte_offset_vgpr) {
-    const uint16_t recovered_vgpr = access_range.static_byte_offset == 0u ? tmp_vgpr : high_vgpr;
+    const uint16_t recovered_vgpr =
+        candidate.lowering_offset(access_range) == 0u ? tmp_vgpr : high_vgpr;
     if (!reload_spilled_lds_byte_offset(recovered_vgpr)) {
       return std::nullopt;
     }
-    if (access_range.static_byte_offset != 0u &&
+    if (candidate.lowering_offset(access_range) != 0u &&
         !append_compute_effective_lds_byte_offset(words, tmp_vgpr, recovered_vgpr,
-                                                  access_range.static_byte_offset, arch)) {
+                                                  candidate.lowering_offset(access_range), arch)) {
       errors.emplace_back("ConSan MOI sampled probe could not encode effective LDS byte offset");
       return std::nullopt;
     }
     effective_lds_byte_offset_vgpr = tmp_vgpr;
-  } else if (access_range.static_byte_offset != 0u) {
+  } else if (candidate.lowering_offset(access_range) != 0u) {
     if (!append_compute_effective_lds_byte_offset(words, tmp_vgpr, *lds_byte_offset_vgpr,
-                                                  access_range.static_byte_offset, arch)) {
+                                                  candidate.lowering_offset(access_range), arch)) {
       errors.emplace_back("ConSan MOI sampled probe could not encode effective LDS byte offset");
       return std::nullopt;
     }
@@ -3259,7 +3261,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint16_t> private_owner_shift, bool runtime_workgroup_gate_in_body,
     std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
-  const auto &access_ranges = candidate.access_ranges;
+  const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
     errors.emplace_back("ConSan MOI sampled probe requires at least one LDS access range");
     return std::nullopt;
