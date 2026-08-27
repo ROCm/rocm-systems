@@ -49,7 +49,7 @@ on:
         description: 'ROCm/TheRock git ref to check out for build_tools + setup_test_environment.'
         type: string
         required: false
-        default: '2e7c190b99caa226a8644eda6eca720b3db102d5'
+        default: 'b45a06045cbb29c85e221748e653ac2521c6e1bf'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
@@ -114,7 +114,7 @@ on:
         description: 'ROCm/TheRock git ref to check out for build_tools + setup_test_environment.'
         type: string
         required: false
-        default: '2e7c190b99caa226a8644eda6eca720b3db102d5'
+        default: 'b45a06045cbb29c85e221748e653ac2521c6e1bf'
       amdgpu_targets:
         description: 'GPU arch for rocSHMEM/RCCL/rccl-tests (must match the ROCm family ARCH).'
         type: string
