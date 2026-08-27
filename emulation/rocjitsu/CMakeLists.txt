@@ -58,13 +58,33 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 # The standard spelling is `#pragma STDC FENV_ACCESS ON`; GCC does not implement
 # it, so the flag is what is portable between the two. It only forbids
 # optimisations that assume a rounding mode, so it cannot make arithmetic less
-# correct. It has to be global because fp_mode.h is header-only and inlines into
-# every ISA translation unit.
+# correct.
+#
+# It is carried as a variable rather than applied here, because the contract it
+# imposes is only needed where fp_mode.h's ScopedFenv actually inlines. Applying
+# it at this scope would reach googletest, flatbuffers, simdojo, util, the VM,
+# the DBT and every tool as well, constraining code that never touches the host
+# rounding mode. Two places consume it, and they are the closure of the header:
+#
+#   - rocjitsu_isa_<arch>_exec (isa/CMakeLists.txt), the object libraries that
+#     own the generated *_exec*.cpp sources. Those are the only translation
+#     units that include fp_mode.h or simd_glue.h; the sibling _model libraries
+#     and the RISC-V ISA do not.
+#   - tests/ (directory scope). fp_mode.h's helpers are `inline`, so a test that
+#     includes it emits its own copy and the linker keeps one of the two. A test
+#     compiled without the flag could therefore supply the copy the library
+#     calls, which is the miscompile this flag exists to prevent.
+#
+# Moving fma_f64/finish_f64/scale_u53_f64_rtz out of line into a single strict
+# translation unit would narrow this to one file and drop the ODR concern, but
+# simd_glue.h holds a ScopedFenv inside a template that cannot follow them.
 if(
     CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"
 )
-    add_compile_options(-frounding-math)
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS -frounding-math)
+else()
+    set(RJ_STRICT_FP_ROUNDING_OPTIONS "")
 endif()
 
 find_package(Threads REQUIRED)
