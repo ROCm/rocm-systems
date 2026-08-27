@@ -278,6 +278,37 @@ bool consan_detail::append_moi_global_atomic_completion(std::vector<uint32_t> &w
   return true;
 }
 
+bool consan_detail::append_moi_atomic_counter_increment(
+    std::vector<uint32_t> &words, const MoiAtomicCounterIncrementRequest &request,
+    const ConSanTargetProfile &target) {
+  if (request.address_vgpr > 254u || request.result_vgpr > 255u ||
+      request.result_vgpr == request.address_vgpr ||
+      request.result_vgpr == static_cast<uint16_t>(request.address_vgpr + 1u)) {
+    return false;
+  }
+  const auto address_lo = instrumentation::build_v_mov_b32_literal(
+      request.address_vgpr, static_cast<uint32_t>(request.counter_address), target.arch);
+  const auto address_hi = instrumentation::build_v_mov_b32_literal(
+      static_cast<uint16_t>(request.address_vgpr + 1u),
+      static_cast<uint32_t>(request.counter_address >> 32u), target.arch);
+  const auto one = instrumentation::build_v_mov_b32_literal(request.result_vgpr, 1u, target.arch);
+  const auto atomic = instrumentation::build_flat_atomic_add_u32(
+      request.address_vgpr, request.result_vgpr, request.result_vgpr,
+      /*return_old_value=*/true, /*scope=*/2u, target.arch);
+  if (!address_lo || !address_hi || !one || !atomic)
+    return false;
+
+  std::vector<uint32_t> emitted;
+  emitted.insert(emitted.end(), address_lo->begin(), address_lo->end());
+  emitted.insert(emitted.end(), address_hi->begin(), address_hi->end());
+  emitted.insert(emitted.end(), one->begin(), one->end());
+  emitted.insert(emitted.end(), atomic->begin(), atomic->end());
+  if (!append_moi_global_atomic_completion(emitted, target))
+    return false;
+  words.insert(words.end(), emitted.begin(), emitted.end());
+  return true;
+}
+
 bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
                                                   const MoiDynamicRecordAddressRequest &request,
                                                   const ConSanTargetProfile &target) {

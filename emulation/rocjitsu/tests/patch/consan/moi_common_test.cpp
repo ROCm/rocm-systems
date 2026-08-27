@@ -223,6 +223,64 @@ TEST(ConSanMoi, GlobalAtomicCompletionRejectsInvalidTargetTransactionally) {
   EXPECT_EQ(words, prefix);
 }
 
+TEST(ConSanMoi, AtomicCounterIncrementLowersEveryTargetProfile) {
+  constexpr consan_detail::MoiAtomicCounterIncrementRequest kRequest{
+      .counter_address = 0x1234567800000040ull,
+      .result_vgpr = 42u,
+      .address_vgpr = 40u,
+  };
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    const auto address_lo = instrumentation::build_v_mov_b32_literal(
+        kRequest.address_vgpr, static_cast<uint32_t>(kRequest.counter_address), target.arch);
+    const auto address_hi = instrumentation::build_v_mov_b32_literal(
+        static_cast<uint16_t>(kRequest.address_vgpr + 1u),
+        static_cast<uint32_t>(kRequest.counter_address >> 32u), target.arch);
+    const auto one =
+        instrumentation::build_v_mov_b32_literal(kRequest.result_vgpr, 1u, target.arch);
+    const auto atomic = instrumentation::build_flat_atomic_add_u32(
+        kRequest.address_vgpr, kRequest.result_vgpr, kRequest.result_vgpr,
+        /*return_old_value=*/true, /*scope=*/2u, target.arch);
+    ASSERT_TRUE(address_lo && address_hi && one && atomic);
+    std::vector<uint32_t> expected;
+    expected.insert(expected.end(), address_lo->begin(), address_lo->end());
+    expected.insert(expected.end(), address_hi->begin(), address_hi->end());
+    expected.insert(expected.end(), one->begin(), one->end());
+    expected.insert(expected.end(), atomic->begin(), atomic->end());
+    ASSERT_TRUE(consan_detail::append_moi_global_atomic_completion(expected, target));
+
+    std::vector<uint32_t> words;
+    EXPECT_TRUE(consan_detail::append_moi_atomic_counter_increment(words, kRequest, target));
+    EXPECT_EQ(words, expected);
+  }
+}
+
+TEST(ConSanMoi, AtomicCounterIncrementRejectsInvalidRegistersTransactionally) {
+  const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(target, nullptr);
+  const auto rejects = [&](uint16_t result_vgpr, uint16_t address_vgpr,
+                           const ConSanTargetProfile *request_target = nullptr) {
+    const std::vector<uint32_t> prefix = {0x12345678u};
+    std::vector<uint32_t> words = prefix;
+    EXPECT_FALSE(consan_detail::append_moi_atomic_counter_increment(
+        words,
+        {
+            .counter_address = 0x1234567800000040ull,
+            .result_vgpr = result_vgpr,
+            .address_vgpr = address_vgpr,
+        },
+        request_target != nullptr ? *request_target : *target));
+    EXPECT_EQ(words, prefix);
+  };
+  rejects(/*result_vgpr=*/40u, /*address_vgpr=*/40u);
+  rejects(/*result_vgpr=*/41u, /*address_vgpr=*/40u);
+  rejects(/*result_vgpr=*/256u, /*address_vgpr=*/40u);
+  rejects(/*result_vgpr=*/42u, /*address_vgpr=*/255u);
+  ConSanTargetProfile invalid_target = *target;
+  invalid_target.arch = ROCJITSU_CODE_ARCH_INVALID;
+  rejects(/*result_vgpr=*/42u, /*address_vgpr=*/40u, &invalid_target);
+}
+
 TEST(ConSanMoi, WorkgroupShadowClearPlanCoversEveryTargetProfile) {
   for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(target.target));

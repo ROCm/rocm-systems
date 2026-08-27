@@ -225,6 +225,34 @@ struct MoiEncodedSccRestoreRequest {
 [[nodiscard]] bool append_moi_global_atomic_completion(std::vector<uint32_t> &words,
                                                        const ConSanTargetProfile &target);
 
+/// Semantic request to reserve the next slot from a device-visible report
+/// counter and return its previous value.
+///
+/// `counter_address` identifies the 32-bit counter. `address_vgpr` names a
+/// consecutive pair used to materialize that address, while `result_vgpr`
+/// carries the increment operand and receives the prior counter value. The
+/// result must not overlap the address pair. This request is shared by access,
+/// synchronization, diagnostic, and visibility publications; record meaning
+/// remains outside the target operation.
+struct MoiAtomicCounterIncrementRequest {
+  uint64_t counter_address = 0;
+  uint16_t result_vgpr = 0;
+  uint16_t address_vgpr = 0;
+
+  bool operator==(const MoiAtomicCounterIncrementRequest &) const = default;
+};
+
+/// Append one returning device-scope atomic increment and its completion
+/// waits.
+///
+/// Invalid or overlapping register assignments and unsupported target
+/// encodings return false without partial output. On success, the result VGPR
+/// contains the pre-increment counter value and can be used as a record slot.
+[[nodiscard]] bool
+append_moi_atomic_counter_increment(std::vector<uint32_t> &words,
+                                    const MoiAtomicCounterIncrementRequest &request,
+                                    const ConSanTargetProfile &target);
+
 /// Names the concrete store shape selected for one parallel workgroup-shadow
 /// clear loop.
 ///

@@ -763,20 +763,15 @@ append_store_moi_report_dispatch_id_pair(ConSanMoiRecordEmitter &record, const M
 [[nodiscard]] bool append_atomic_fetch_add_one_u32(std::vector<uint32_t> &words,
                                                    uint64_t counter_address, uint16_t result_vgpr,
                                                    uint16_t scratch_vgpr, rj_code_arch_t arch) {
-  const uint16_t address_lo_vgpr = scratch_vgpr;
-  const uint16_t address_hi_vgpr = static_cast<uint16_t>(scratch_vgpr + 1u);
-
-  const auto mov_address_lo = instrumentation::build_v_mov_b32_literal(
-      address_lo_vgpr, static_cast<uint32_t>(counter_address), arch);
-  const auto mov_address_hi = instrumentation::build_v_mov_b32_literal(
-      address_hi_vgpr, static_cast<uint32_t>(counter_address >> 32u), arch);
-  const auto mov_one = instrumentation::build_v_mov_b32_literal(result_vgpr, 1u, arch);
-  const auto atomic_add = instrumentation::build_flat_atomic_add_u32(
-      address_lo_vgpr, result_vgpr, result_vgpr,
-      /*return_old_value=*/true, kRdna4ScopeDevice, arch);
-  InstructionSequence sequence(words);
-  return sequence.emit_all(mov_address_lo, mov_address_hi, mov_one, atomic_add) &&
-         append_moi_global_atomic_wait(words, arch);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return target != nullptr &&
+         consan_detail::append_moi_atomic_counter_increment(words,
+                                                            {
+                                                                .counter_address = counter_address,
+                                                                .result_vgpr = result_vgpr,
+                                                                .address_vgpr = scratch_vgpr,
+                                                            },
+                                                            *target);
 }
 
 [[nodiscard]] bool append_atomic_or_u32_literal(std::vector<uint32_t> &words, uint64_t address,
