@@ -94,7 +94,7 @@ TEST(posix_clock_test, time_window_with_posix_clock_drives_session)
     posix          clk{ CLOCK_REALTIME };
     constexpr auto delay = clock_duration{ 20'000'000 };  // 20 ms
     constexpr auto dur   = clock_duration{ 40'000'000 };  // 40 ms
-    time_window_t  window{ s_ptr, clk, delay, dur };
+    time_window_t  window{ s_ptr, clk, { delay, dur } };
 
     EXPECT_FALSE(sess.is_active()) << "initial action should be paused when delay > 0";
 
