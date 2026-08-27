@@ -177,7 +177,7 @@ static void runUnsafeAtomicAddHalfAndBfloatTest() {
   HIP_CHECK(hipFree(out));
 }
 
-TEST_CASE(Unit_unsafe_atomic_add_half_and_bfloat) {
+HIP_TEST_CASE(Unit_unsafe_atomic_add_half_and_bfloat) {
   SECTION("__half2") { runUnsafeAtomicAddHalfAndBfloatTest<__half2>(); }
   SECTION("__hip_bfloat162") { runUnsafeAtomicAddHalfAndBfloatTest<__hip_bfloat162>(); }
   SECTION("__half") { runUnsafeAtomicAddHalfAndBfloatTest<__half>(); }

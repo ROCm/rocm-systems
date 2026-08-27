@@ -35,7 +35,7 @@
 #endif
 
 /**
- * @brief Check if running at quick level (level_0).
+ * @brief Check if r1ning at quick level (level_0).
  * Use this to reduce test parameters for faster execution.
  */
 inline bool isQuickLevel() {
