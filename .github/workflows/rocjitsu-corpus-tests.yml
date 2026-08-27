@@ -259,6 +259,15 @@ jobs:
             # This test has a five-second wall-clock assertion that becomes
             # load-sensitive at the TSan job's CI-level parallelism.
             "DaemonApi\.FullListenerQueueDoesNotBlockOrRemoveSocket"
+            # The DBI dispatch cases run a full simulator in-process against the
+            # client's own AQL ring and buffers, so they hit the MAP_SHARED alias
+            # limitation described below: every race is GpuMemory::read_mapped
+            # reading a host buffer the test thread wrote. Their gtest assertions
+            # pass. The two non-dispatching HsaDbiNop*Sim cases stay covered.
+            "HsaDbiNopAsmSim\.PatchedKernelDispatchMatchesOriginal"
+            "HsaDbiNopAsmSim\.TrampolineIsActuallyExecutedByGpu"
+            "HsaDbiNopProbeSim\.PatchedKernelDispatchMatchesOriginal"
+            "HsaDbiNopProbeSim\.ProbeBodyIsActuallyCalledByGpu"
           )
 
           TEST_REGEX="${{ matrix.test_regex }}"
