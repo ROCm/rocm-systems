@@ -60,6 +60,11 @@
 #                         charts) to. Default:
 #                         $PROJECTS_DIR/resource-usage/<gpu>-<config>-<sha1>-vs-<sha2>/
 #
+# Also generates one self-contained interactive HTML dashboard per commit
+# (dashboard-<sha>.html, always on -- no flag needed): kernel stats, a
+# sortable/searchable table, a top-N chart, and (for two-commit runs) a
+# delta-vs-counterpart section per resource type.
+#
 # Example: compare two explicit commits (reusing cached builds if present)
 #   ./resource_usage_compare.sh --commit1 d48c64f6e --commit2 3caf8d080 \
 #     --build-config all_backends
@@ -311,6 +316,24 @@ measure_commit() {
   echo "$csv"
 }
 
+# generate_dashboards <csv1> <csv2> <sha1> <sha2> <outdir> <diff_prefix> <dash_suffix>
+# Reads the res_diff_*.csv files a prior diff loop already wrote (named
+# "${diff_prefix}_${sort_by}.csv" in $outdir) so the dashboards' delta numbers
+# always match the CSV/PNG report exactly -- never recomputes the diff itself.
+generate_dashboards() {
+  local csv1="$1" csv2="$2" sha1="$3" sha2="$4" outdir="$5" diff_prefix="$6" dash_suffix="$7"
+  local diff_args=()
+  for sort_by in "${SORT_BY_TYPE[@]}"; do
+    diff_args+=(--diff "${sort_by}:${outdir}/${diff_prefix}_${sort_by}.csv")
+  done
+  python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
+    --csv "$csv1" --commit "$sha1" --role baseline --counterpart-commit "$sha2" \
+    --top "$TOP_N" --out "$outdir/dashboard-${sha1}${dash_suffix}.html" "${diff_args[@]}" >&2
+  python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
+    --csv "$csv2" --commit "$sha2" --role branch --counterpart-commit "$sha1" \
+    --top "$TOP_N" --out "$outdir/dashboard-${sha2}${dash_suffix}.html" "${diff_args[@]}" >&2
+}
+
 if [[ -n "$PR_NUM" ]]; then
   echo "  Fetching PR #${PR_NUM}..." >&2
   git -C "$ROCSHMEM_DIR" fetch origin "pull/${PR_NUM}/head"
@@ -342,8 +365,12 @@ SHA_1="$(git rev-parse --short=12 "$COMMIT_1")"
 CSV_1="$(measure_commit "$COMMIT_1" "$SHA_1")"
 
 if [[ -z "$COMMIT_2" ]]; then
+  DASHBOARD_1="$(dirname "$CSV_1")/dashboard-${SHA_1}.html"
+  python3 "$TOOLS_DIR/resource_usage_dashboard.py" \
+    --csv "$CSV_1" --commit "$SHA_1" --role snapshot --top "$TOP_N" --out "$DASHBOARD_1" >&2
   echo ""
   echo "Single-commit snapshot -> $CSV_1"
+  echo "  Dashboard -> $DASHBOARD_1"
   exit 0
 fi
 
@@ -364,6 +391,8 @@ for sort_by in "${SORT_BY_TYPE[@]}"; do
     --top "$TOP_N" --sort-by "$sort_by" \
     ${MATCH:+--match "$MATCH"}
 done
+generate_dashboards "$OUTDIR/res-${SHA_1}.csv" "$OUTDIR/res-${SHA_2}.csv" \
+  "$SHA_1" "$SHA_2" "$OUTDIR" "res_diff" ""
 
 # Device-bitcode (whole-program opt -O3) numbers, when both sides have them --
 # this inliner has no cost model/per-TU boundary, so a change that's
@@ -383,6 +412,8 @@ if [[ -f "$BITCODE_CSV_1" && -f "$BITCODE_CSV_2" ]]; then
       --top "$TOP_N" --sort-by "$sort_by" \
       ${MATCH:+--match "$MATCH"}
   done
+  generate_dashboards "$OUTDIR/res-${SHA_1}-bitcode.csv" "$OUTDIR/res-${SHA_2}-bitcode.csv" \
+    "$SHA_1" "$SHA_2" "$OUTDIR" "res_diff_bitcode" "-bitcode"
 else
   echo "  note: device-bitcode resource-usage CSV missing for one or both commits" >&2
   echo "  ($BITCODE_CSV_1, $BITCODE_CSV_2) -- skipping bitcode diff." >&2
@@ -391,7 +422,9 @@ fi
 echo ""
 echo "Done. Self-contained report -> $OUTDIR/"
 echo "  Production library: res-${SHA_1}.csv, res-${SHA_2}.csv, res_diff_<Column>.{csv,png}"
+echo "  Dashboards:          dashboard-${SHA_1}.html, dashboard-${SHA_2}.html"
 if [[ -f "$OUTDIR/res-${SHA_1}-bitcode.csv" ]]; then
   echo "  Device bitcode:      res-${SHA_1}-bitcode.csv, res-${SHA_2}-bitcode.csv, res_diff_bitcode_<Column>.{csv,png}"
+  echo "  Bitcode dashboards:  dashboard-${SHA_1}-bitcode.html, dashboard-${SHA_2}-bitcode.html"
 fi
 echo "  (each report set covers: ${SORT_BY_TYPE[*]})"
