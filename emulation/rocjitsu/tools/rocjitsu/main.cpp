@@ -11,11 +11,11 @@
 
 #include "rocjitsu/daemon/rj_daemon.h"
 
+#include "rocjitsu/base/rj_version.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
-#include "rocjitsu/version.h"
 
 #include "embedded_schema.h"
 #include "launch_preload.h"
@@ -414,7 +414,7 @@ int main(int argc, char *argv[]) {
       print_usage();
       return 0;
     } else if (arg == "--version" || arg == "-v") {
-      std::cout << "rocjitsu " << ROCJITSU_VERSION << "\n";
+      std::cout << rj_get_version_string() << "\n";
       return 0;
     } else {
       std::cerr << std::format("rocjitsu: unknown option: {}\n", arg);

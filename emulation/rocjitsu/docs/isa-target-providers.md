@@ -49,6 +49,12 @@ std::unique_ptr<rocjitsu::Decoder> create_target_decoder() {
 }
 ```
 
+`VendorIsa::Decoder` must publish a nonzero `kMaxInstructionWords`, measured in
+32-bit words, that bounds both every raw-pointer read performed while decoding
+and the size of every successfully decoded instruction. Providers that implement
+`rocjitsu::Decoder` directly must return the same bound from
+`max_instruction_words()`.
+
 Mark the ISA implementation target as a provider. The provider source is
 compiled with that existing target; CMake records only its declaration header.
 
@@ -70,8 +76,8 @@ list:
 
 ```cmake
 rj_add_isa_target_registry(
-    errata_isa_registry
-    PROVIDERS rocjitsu_isa_gfx1250_model
+    model_isa_registry
+    PROVIDERS rocjitsu_isa_cdna5_model
 )
 ```
 
@@ -122,14 +128,21 @@ selected subset by name with
 `rj_code_decoder_create_for_target("gfx1250", &decoder)`. An unavailable target
 returns a recoverable error.
 
-## Model-only gfx1250
+## Model-only AMDGPU targets
 
-gfx1250 supplies separate full and model-only providers. Select exactly one in
-each registry. The model-only provider links the decoder/model objects without
-the execution objects, and decoded instructions have a null execution
-callback. `ModelOnlyIsaTest.SymbolBoundary` and
-`Gfx1250B0ToA0Library.SymbolBoundary` verify that execution and VM symbols do
-not enter those final binaries.
+Every AMDGPU target supplies separate full and model-only providers. Select
+exactly one for a target in each registry. The model-only provider links the
+decoder/model objects without the execution objects, and decoded instructions
+have a null execution callback. The aggregate
+`rocjitsu_amdgpu_isa_model_registry` composes all of the model-only providers
+for decoder-only consumers such as the fuzz target. The existing target names
+continue to compose both model and execution objects for simulator consumers.
+
+`rj_decode_fuzz` is the reference consumer of the aggregate registry.
+`DecodeFuzzModelOnly.SymbolBoundary` verifies that all ten model factories are
+present without execution or VM symbols. `ModelOnlyIsaTest.SymbolBoundary` and
+`Gfx1250B0ToA0Library.SymbolBoundary` retain the equivalent checks for the
+gfx1250-only binaries.
 
 ## Adding an NPI target
 

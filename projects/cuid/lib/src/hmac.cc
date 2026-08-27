@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 // Backend selection (compile-time):
 //   _WIN32                               -> Windows CNG  (BCrypt)
@@ -26,6 +7,8 @@
 //   OpenSSL <  3.0 (all other platforms) -> HMAC_CTX API
 
 #include "hmac.h"
+
+#include <stdlib.h>
 
 #include <cerrno>
 #include <cstdio>
@@ -65,7 +48,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
-  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = (env_path && env_path[0]) ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
@@ -85,6 +69,11 @@ cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), vali
   }
   key_file_stream.seekg(0, std::ios::end);
   key_len = static_cast<size_t>(key_file_stream.tellg());
+  if (key_len == 0 || key_len != key_length) {  // sanity check on key length
+    std::cerr << "Invalid key length in key file" << std::endl;
+    key_file_stream.close();
+    return;
+  }
   key_file_stream.seekg(0, std::ios::beg);
   key = new uint8_t[key_len];
   key_file_stream.read(reinterpret_cast<char*>(key), key_len);
@@ -264,7 +253,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
-  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = (env_path && env_path[0]) ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->mac = nullptr;
@@ -402,7 +392,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac() : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
-  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
+  const char* env_path = std::getenv("AMDCUID_HMAC_KEY_PATH");
+  key_file_path = (env_path && env_path[0]) ? env_path : AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->ctx = HMAC_CTX_new();

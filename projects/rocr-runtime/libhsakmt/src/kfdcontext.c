@@ -24,6 +24,7 @@
  */
 
 #include "kfdcontext.h"
+#include "libhsakmt.h"
 #include <stdlib.h>
 #include <stddef.h>
 #include <assert.h>
@@ -65,6 +66,10 @@ void hsakmt_kfdcontext_clear_context(HsaKFDContext *ctx)
         ctx->queue_context = NULL;
     }
     if (ctx->fmm_context) {
+        /* The AlwaysMapped tracker owns heap records and a mutex, neither of
+         * which the free() below reclaims.
+         */
+        hsakmt_fmm_destroy_always_mapped_tracker(ctx);
         free(ctx->fmm_context);
         ctx->fmm_context = NULL;
     }

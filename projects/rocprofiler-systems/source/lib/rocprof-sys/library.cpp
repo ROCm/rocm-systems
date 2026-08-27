@@ -10,6 +10,7 @@
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
+#include "common/path.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
 #include "core/agent.hpp"
@@ -54,7 +55,6 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
@@ -314,10 +314,10 @@ struct set_env_s  // NOLINT
 extern "C" void
 rocprofsys_set_env_hidden(const char* env_name, const char* env_val)
 {
-    tim::auto_lock_t _lk{ tim::type_mutex<set_env_s>() };
+    const tim::auto_lock_t _lk{ tim::type_mutex<set_env_s>() };
 
     static auto _set_envs = std::set<std::string_view>{};
-    bool        _success  = _set_envs.emplace(env_name).second;
+    const bool  _success  = _set_envs.emplace(env_name).second;
 
     // just search env to avoid initializing the settings
     if(get_debug_init())
@@ -405,7 +405,7 @@ std::vector<callback_t> external_resume_callbacks;
 void
 invoke_external_pause_callbacks()
 {
-    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    const std::lock_guard<std::mutex> lock{ external_pause_resume_callbacks_mutex };
     for(auto* _fn : external_pause_callbacks)
         _fn();
 }
@@ -413,7 +413,7 @@ invoke_external_pause_callbacks()
 void
 invoke_external_resume_callbacks()
 {
-    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    const std::lock_guard<std::mutex> lock{ external_pause_resume_callbacks_mutex };
     for(auto* _fn : external_resume_callbacks)
         _fn();
 }
@@ -423,7 +423,7 @@ invoke_external_resume_callbacks()
 extern "C" void
 rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_fn)())
 {
-    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    const std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
 
     if(pause_fn)
     {
@@ -439,8 +439,8 @@ rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_f
 extern "C" void
 rocprofsys_set_mpi_hidden(bool use)
 {
-    static bool _once = false;
-    static bool _arg  = use;
+    static bool       _once = false;
+    const static bool _arg  = use;
 
     // this function may be called multiple times if multiple libraries are instrumented
     // we want to guard against multiple calls which with different arguments
@@ -563,7 +563,7 @@ rocprofsys_init_library_hidden()
 
     auto _debug_value = get_debug();
     if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
-    scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
+    const scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
         if(_debug_init)
             config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
@@ -917,7 +917,7 @@ rocprofsys_finalize_hidden(void)
     // disable initialization callback
     threading::remove_callback(&ensure_initialization);
 
-    bool _is_child = is_child_process();
+    const bool _is_child = is_child_process();
     state::thread::set(state::thread::Completed);
 
     // return if not active
@@ -987,7 +987,7 @@ rocprofsys_finalize_hidden(void)
     auto _debug_init  = get_debug_finalize();
     auto _debug_value = get_debug();
     if(_debug_init) config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, true);
-    scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
+    const scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
         if(_debug_init)
             config::set_setting_value(std::string{ env_vars::DEBUG_MODE }, _debug_value);
     } };
@@ -1120,7 +1120,7 @@ rocprofsys_finalize_hidden(void)
     // if they are still running (e.g. thread-pool still alive), the
     // thread-specific data will be wrong if try to stop them from
     // the main thread.
-    auto _thr_verbose = (config::get_use_causal()) ? 1 : 0;
+    const bool _thr_verbose = config::get_use_causal() || config::get_verbose() > 0;
     if(thread_data<thread_bundle_t>::get())
     {
         for(auto& itr : *thread_data<thread_bundle_t>::get())
@@ -1131,7 +1131,7 @@ rocprofsys_finalize_hidden(void)
                 std::string _msg = itr->as_string();
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-                if(_thr_verbose >= 0)
+                if(_thr_verbose)
                 {
                     LOG_INFO("{}", _msg);
                 }
@@ -1214,7 +1214,7 @@ rocprofsys_finalize_hidden(void)
             for(auto& itr : _maps)
             {
                 auto&& _path = itr.pathname;
-                if(!_path.empty() && _path.at(0) != '[' && filepath::exists(_path))
+                if(!_path.empty() && _path.at(0) != '[' && path::is_regular_file(_path))
                     _libs.emplace(_path);
             }
             ar(tim::cereal::make_nvp("memory_maps_files", _libs),

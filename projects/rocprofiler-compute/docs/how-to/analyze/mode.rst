@@ -20,7 +20,10 @@ choose.
 
 .. note::
 
-   Analyze mode merges separate counter collection files (pmc_perf_*.csv or results_*.csv) into a unified pmc_perf.csv for analysis.
+   Analyze mode concatenates the per-pass ``results_*.csv`` files written by
+   ``rocpd`` profiling into a unified ``pmc_perf.csv`` for analysis. If the
+   workload directory already contains a ``pmc_perf.csv``, that file is used
+   as-is.
 
 .. note::
 

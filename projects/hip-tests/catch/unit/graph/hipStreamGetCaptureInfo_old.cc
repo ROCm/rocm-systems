@@ -184,15 +184,15 @@ static void thread_func(hipStream_t stream, unsigned long long capSequenceID1,  
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
   unsigned long long capSequenceID3, capSequenceID4;  // NOLINT
   SECTION("hipStreamGetCaptureInfo CaptureStatus in Thread") {
-    HIP_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, &capSequenceID3));
-    REQUIRE(capSequenceID1 == capSequenceID3);
-    REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+    HIP_CHECK_THREAD(hipStreamGetCaptureInfo(stream, &captureStatus, &capSequenceID3));
+    REQUIRE_THREAD(capSequenceID1 == capSequenceID3);
+    REQUIRE_THREAD(captureStatus == hipStreamCaptureStatusActive);
   }
   SECTION("hipStreamGetCaptureInfo_v2 CaptureStatus in Thread") {
-    HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &captureStatus, &capSequenceID4, nullptr, nullptr,
-                                         nullptr));
-    REQUIRE(capSequenceID2 == capSequenceID4);
-    REQUIRE(captureStatus == hipStreamCaptureStatusActive);
+    HIP_CHECK_THREAD(hipStreamGetCaptureInfo_v2(stream, &captureStatus, &capSequenceID4, nullptr,
+                                                nullptr, nullptr));
+    REQUIRE_THREAD(capSequenceID2 == capSequenceID4);
+    REQUIRE_THREAD(captureStatus == hipStreamCaptureStatusActive);
   }
 }
 /*
@@ -219,6 +219,7 @@ HIP_TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread) {
   // Thread launch
   std::thread t(thread_func, stream, capSequenceID1, capSequenceID2);
   t.join();
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   REQUIRE(graph != nullptr);
