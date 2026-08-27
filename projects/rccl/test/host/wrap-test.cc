@@ -26,6 +26,7 @@
 
 #include "../common/LogCapture.hpp"                 // RcclUnitTesting::CaptureLog
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
+#include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
 
 // RCCL_PARAM redirector. rccl_wrap.cc's RCCL_PARAM(...) invocations are not
 // exercised by this first test batch (none of the nine units below read a
@@ -55,6 +56,33 @@ ncclComm* MakeZeroedComm() {
   ncclComm* comm = new ncclComm();
   std::memset(comm, 0, sizeof(ncclComm));
   return comm;
+}
+
+// Comm with a real one-GPU topology wired up, arch string settable -- mirrors
+// test/common/MockComm.hpp's CreateMockComm without its <rccl/rccl.h> include
+// (targets the installed-package layout, not this target's hipify-tree
+// headers). archName is pointed at the same buffer as the topology node's gcn
+// field -- both name the same GPU on a real comm, and this keeps the two
+// consistent without a second allocation. Caller must DeleteCommWithArch.
+ncclComm* MakeCommWithArch(const char* arch) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->nRanks = 1;
+  comm->nNodes = 1;
+  comm->pxnDisable = RCCL_VALUE_UNSET;
+  comm->p2pNetChunkSize = RCCL_VALUE_UNSET;
+  auto* topo = new ncclTopoSystem();
+  std::memset(topo, 0, sizeof(*topo));
+  comm->topo = topo;
+  topo->nodes[GPU].count = 1;
+  std::strncpy(topo->nodes[GPU].nodes[0].gpu.gcn, arch, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn) - 1);
+  topo->nodes[GPU].nodes[0].gpu.gcn[sizeof(topo->nodes[GPU].nodes[0].gpu.gcn) - 1] = '\0';
+  comm->archName = topo->nodes[GPU].nodes[0].gpu.gcn;
+  return comm;
+}
+
+void DeleteCommWithArch(ncclComm* comm) {
+  delete comm->topo;
+  delete comm;
 }
 
 }  // namespace
@@ -432,4 +460,210 @@ TEST(WrapMicrotestIsolated, GetAlgoProtoIndex_SecondUnmatchedCallStaysSilent) {
         ASSERT_EQ(ncclInvalidUsage, r);
         EXPECT_TRUE(err.empty()) << "expected the warn-once latch to suppress this WARN, got: " << err;
       });
+}
+
+// ===========================================================================
+// rcclHierarchicalTempBufferSize -- pure function of (nNodes, allGather,
+// reduceScatter), no ncclComm at all. rccl_wrap.cc:680-702.
+// ===========================================================================
+
+TEST(WrapMicrotest, HierarchicalTempBufferSize_AllGatherThresholds) {
+  EXPECT_EQ(0u, rcclHierarchicalTempBufferSize(7, /*allGather=*/true, /*reduceScatter=*/false));
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE / 4, rcclHierarchicalTempBufferSize(8, true, false));
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE / 4, rcclHierarchicalTempBufferSize(15, true, false));
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE / 2, rcclHierarchicalTempBufferSize(16, true, false));
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE / 2, rcclHierarchicalTempBufferSize(31, true, false));
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE, rcclHierarchicalTempBufferSize(32, true, false));
+}
+
+TEST(WrapMicrotest, HierarchicalTempBufferSize_ReduceScatterThresholds) {
+  EXPECT_EQ(0u, rcclHierarchicalTempBufferSize(7, /*allGather=*/false, /*reduceScatter=*/true));
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE / 2, rcclHierarchicalTempBufferSize(8, false, true));
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE / 2, rcclHierarchicalTempBufferSize(15, false, true));
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE, rcclHierarchicalTempBufferSize(16, false, true));
+}
+
+// nNodes=9: the allGather arm alone gives 32MB (>=8,<16); the reduceScatter arm
+// alone gives 64MB (>=8). Only if BOTH arms actually ran and std::max compared
+// them does the result come out as reduceScatter's 64MB -- a test that only
+// ever set one flag could not tell max() from "last write wins".
+TEST(WrapMicrotest, HierarchicalTempBufferSize_TakesMaxOfBoth) {
+  EXPECT_EQ(HIERARCHICAL_TEMP_BUFFER_SIZE / 2, rcclHierarchicalTempBufferSize(9, true, true));
+}
+
+TEST(WrapMicrotest, HierarchicalTempBufferSize_NeitherFlagIsZero) {
+  EXPECT_EQ(0u, rcclHierarchicalTempBufferSize(64, false, false));
+}
+
+// ===========================================================================
+// rcclCeAllReduceGraphLatchTick / rcclCeAllReduceAllowed -- plain ncclComm
+// field access, no topology. rccl_wrap.cc:834-857.
+// ===========================================================================
+
+TEST(WrapMicrotest, CeAllReduceGraphLatchTick_CapturingSetsLatch) {
+  ncclComm* comm = MakeZeroedComm();
+  rcclCeAllReduceGraphLatchTick(comm, /*ceCapturing=*/true);
+  EXPECT_TRUE(comm->ceColl.graphModeSeen);
+  delete comm;
+}
+
+// Latch must stay set while still capturing even if localPersistentRefs has
+// already dropped to 0 -- the clear-condition's other half (!ceCapturing) is
+// what actually gates it, not localPersistentRefs alone.
+TEST(WrapMicrotest, CeAllReduceGraphLatchTick_CapturingStaysLatchedRegardlessOfRefs) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->ceColl.graphModeSeen = true;
+  comm->localPersistentRefs = 0;
+  rcclCeAllReduceGraphLatchTick(comm, /*ceCapturing=*/true);
+  EXPECT_TRUE(comm->ceColl.graphModeSeen);
+  delete comm;
+}
+
+TEST(WrapMicrotest, CeAllReduceGraphLatchTick_ClearsWhenNotCapturingAndNoRefs) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->ceColl.graphModeSeen = true;
+  comm->localPersistentRefs = 0;
+  rcclCeAllReduceGraphLatchTick(comm, /*ceCapturing=*/false);
+  EXPECT_FALSE(comm->ceColl.graphModeSeen);
+  delete comm;
+}
+
+TEST(WrapMicrotest, CeAllReduceGraphLatchTick_StaysLatchedWhileRefsLive) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->ceColl.graphModeSeen = true;
+  comm->localPersistentRefs = 1;
+  rcclCeAllReduceGraphLatchTick(comm, /*ceCapturing=*/false);
+  EXPECT_TRUE(comm->ceColl.graphModeSeen);
+  delete comm;
+}
+
+TEST(WrapMicrotest, CeAllReduceAllowed_TrueWhenLatchClear) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->ceColl.graphModeSeen = false;
+  EXPECT_TRUE(rcclCeAllReduceAllowed(comm));
+  delete comm;
+}
+
+TEST(WrapMicrotest, CeAllReduceAllowed_FalseWhenLatchSet) {
+  ncclComm* comm = MakeZeroedComm();
+  comm->ceColl.graphModeSeen = true;
+  EXPECT_FALSE(rcclCeAllReduceAllowed(comm));
+  delete comm;
+}
+
+// ===========================================================================
+// rcclSetPxn / rcclSetP2pNetChunkSize -- rccl_wrap.cc:1368-1413. Both read a
+// real environment variable via plain getenv() on the "not yet cached" path.
+// This batch covers only the already-cached fast return (comm->pxnDisable /
+// comm->p2pNetChunkSize already != RCCL_VALUE_UNSET), which never touches
+// getenv at all -- the env-reading arch/rank computation is Structural,
+// deferred to a future batch that adds a real env-controlling seam rather
+// than letting this test read whatever is actually set in the environment.
+// ===========================================================================
+
+TEST(WrapMicrotest, SetPxn_AlreadyCachedReturnsStoredValueUnchanged) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->pxnDisable = 1;  // already resolved by a prior call; not RCCL_VALUE_UNSET
+  int rcclPxnDisable = -100;
+  rcclSetPxn(comm, rcclPxnDisable);
+  EXPECT_EQ(1, rcclPxnDisable);
+  EXPECT_EQ(1, comm->pxnDisable);  // untouched: the cached-value arm never reassigns it
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, SetP2pNetChunkSize_AlreadyCachedReturnsStoredValueUnchanged) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->p2pNetChunkSize = 1 << 17;
+  int rcclP2pNetChunkSize = -100;
+  rcclSetP2pNetChunkSize(comm, rcclP2pNetChunkSize);
+  EXPECT_EQ(1 << 17, rcclP2pNetChunkSize);
+  EXPECT_EQ(1 << 17, comm->p2pNetChunkSize);
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclGetMaxNthreads -- rccl_wrap.cc:1605-1612.
+// ===========================================================================
+
+// RCCL_GFX950_MAX_NTHREADS and RCCL_DEFAULT_MAX_NTHREADS are both 256 today,
+// so a value assertion alone cannot distinguish "took the gfx950 arm" from
+// "took the else arm and the constants just happen to match" -- documented,
+// not fixed: an equivalent-by-current-constants situation like the residuals
+// below, not a gap in this test. Both calls are still made, so llvm-cov shows
+// both arms as reached; NCCL_PROTO_LL's assignment is arch-independent and IS
+// a real oracle either way.
+TEST(WrapMicrotest, GetMaxNthreads_Gfx950Arch) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
+  rcclGetMaxNthreads(comm, maxNthreads);
+  EXPECT_EQ(RCCL_GFX950_MAX_NTHREADS, maxNthreads[NCCL_PROTO_SIMPLE]);
+  EXPECT_EQ(RCCL_GFX950_MAX_NTHREADS, maxNthreads[NCCL_PROTO_LL128]);
+  EXPECT_EQ(RCCL_LL_MAX_NTHREADS, maxNthreads[NCCL_PROTO_LL]);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, GetMaxNthreads_NonGfx950Arch) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
+  rcclGetMaxNthreads(comm, maxNthreads);
+  EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, maxNthreads[NCCL_PROTO_SIMPLE]);
+  EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, maxNthreads[NCCL_PROTO_LL128]);
+  EXPECT_EQ(RCCL_LL_MAX_NTHREADS, maxNthreads[NCCL_PROTO_LL]);
+  DeleteCommWithArch(comm);
+}
+
+// ===========================================================================
+// rcclSetDefaultBuffSizes -- rccl_wrap.cc:1644-1652. Isolated: its own
+// maxNthreads[] is a function-local static, computed once per process and
+// reused by every later call regardless of arch -- an ordinary (non-isolated)
+// second test with a different arch would silently read the first test's
+// cached values instead of recomputing. RUN_ISOLATED_TEST forks a fresh
+// process so this is the only call in that image.
+// ===========================================================================
+
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx942Arch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_Gfx942Arch",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        int defaultBuffSizes[NCCL_NUM_PROTOCOLS] = {0};
+        rcclSetDefaultBuffSizes(comm, defaultBuffSizes);
+        // gfx942 is not gfx950, so rcclGetMaxNthreads gives RCCL_DEFAULT_MAX_NTHREADS
+        // for LL128/SIMPLE and RCCL_LL_MAX_NTHREADS for LL; gfx942 is also not
+        // gfx1250, so rcclLL128ElemsPerThreadFromArch's linesPerThread is 4.
+        const int linesPerThread = 4;
+        const int ll128DataElems = rcclLL128ElemsPerThreadFromArch("gfx942") / linesPerThread;
+        EXPECT_EQ(NCCL_LL_LINES_PER_THREAD * RCCL_LL_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(union ncclLLFifoLine),
+                  defaultBuffSizes[NCCL_PROTO_LL]);
+        EXPECT_EQ(linesPerThread * ll128DataElems * RCCL_DEFAULT_MAX_NTHREADS * NCCL_STEPS * (int)sizeof(uint64_t),
+                  defaultBuffSizes[NCCL_PROTO_LL128]);
+        EXPECT_EQ(1 << 22, defaultBuffSizes[NCCL_PROTO_SIMPLE]);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ===========================================================================
+// rcclFuncMaxSendRecvCount -- rccl_wrap.cc:1654-1658. Thin wrapper delegating
+// to the header-inline ncclFuncMaxSendRecvCount (enqueue.h); RCCL_EXPOSE_STATIC
+// is unconditionally defined by rccl_vars.h unless something upstream already
+// defined it otherwise, so RCCL_STATIC_EXPOSE_CHECK() compiles to a no-op here
+// and the real computation always runs.
+// ===========================================================================
+
+TEST(WrapMicrotest, FuncMaxSendRecvCount_AllGatherMultipliesByNRanks) {
+  size_t maxCount = 0;
+  EXPECT_EQ(ncclSuccess, rcclFuncMaxSendRecvCount(ncclFuncAllGather, /*nRanks=*/8, /*count=*/100, maxCount));
+  EXPECT_EQ(800u, maxCount);
+}
+
+TEST(WrapMicrotest, FuncMaxSendRecvCount_ReduceScatterMultipliesByNRanks) {
+  size_t maxCount = 0;
+  EXPECT_EQ(ncclSuccess, rcclFuncMaxSendRecvCount(ncclFuncReduceScatter, /*nRanks=*/4, /*count=*/50, maxCount));
+  EXPECT_EQ(200u, maxCount);
+}
+
+TEST(WrapMicrotest, FuncMaxSendRecvCount_OtherFuncsReturnCountUnscaled) {
+  size_t maxCount = 0;
+  EXPECT_EQ(ncclSuccess, rcclFuncMaxSendRecvCount(ncclFuncAllReduce, /*nRanks=*/8, /*count=*/100, maxCount));
+  EXPECT_EQ(100u, maxCount);
 }
