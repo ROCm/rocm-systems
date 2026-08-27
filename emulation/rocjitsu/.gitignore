@@ -42,3 +42,5 @@ __pycache__
 .claude
 .codex
 .agents
+
+/build-*/
