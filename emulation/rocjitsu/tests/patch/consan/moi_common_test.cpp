@@ -12,11 +12,71 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <limits>
 #include <set>
 #include <string_view>
 
 namespace rocjitsu {
 namespace {
+
+TEST(ConSanMoi, ResidentWaveOwnerTargetOperationLowersEverySupportedProfile) {
+  constexpr uint16_t destination_sgpr = 20u;
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    const auto hwreg = build_hwreg_imm(target.resident_wave_identity.hwreg_id,
+                                       target.resident_wave_identity.bit_offset,
+                                       target.resident_wave_identity.bit_width);
+    const auto read =
+        hwreg ? instrumentation::build_s_getreg_b32(destination_sgpr, *hwreg, target.arch)
+              : std::nullopt;
+    const auto delay = instrumentation::build_salu_dependency_delay(target.arch);
+    const auto wait = instrumentation::build_salu_to_valu_dependency_wait(target.arch);
+    ASSERT_TRUE(read);
+    ASSERT_TRUE(delay);
+    ASSERT_TRUE(wait);
+
+    for (bool one_based : {false, true}) {
+      SCOPED_TRACE(one_based ? "one-based" : "zero-based");
+      const consan_detail::MoiResidentWaveOwnerRequest request{
+          .destination_sgpr = destination_sgpr,
+          .one_based = one_based,
+      };
+      EXPECT_EQ(request, (consan_detail::MoiResidentWaveOwnerRequest{
+                             .destination_sgpr = destination_sgpr,
+                             .one_based = one_based,
+                         }));
+      std::vector<uint32_t> words;
+      ASSERT_TRUE(consan_detail::append_moi_resident_wave_owner(words, request, target));
+      std::vector<uint32_t> expected = {*read, *delay};
+      if (one_based) {
+        expected.push_back(build_s_add_u32(destination_sgpr, destination_sgpr,
+                                           scalar_positive_inline_u32(1), target.arch));
+        expected.push_back(*delay);
+      }
+      expected.push_back(*wait);
+      EXPECT_EQ(words, expected);
+    }
+  }
+}
+
+TEST(ConSanMoi, ResidentWaveOwnerTargetOperationRejectsWithoutPartialOutput) {
+  ASSERT_FALSE(kConSanTargetProfiles.empty());
+  const ConSanTargetProfile &target = kConSanTargetProfiles.front();
+  const std::vector<uint32_t> prefix = {0x12345678u};
+
+  std::vector<uint32_t> invalid_destination_words = prefix;
+  EXPECT_FALSE(consan_detail::append_moi_resident_wave_owner(
+      invalid_destination_words,
+      {.destination_sgpr = std::numeric_limits<uint16_t>::max(), .one_based = true}, target));
+  EXPECT_EQ(invalid_destination_words, prefix);
+
+  ConSanTargetProfile invalid_target = target;
+  invalid_target.resident_wave_identity.bit_width = 0u;
+  std::vector<uint32_t> invalid_target_words = prefix;
+  EXPECT_FALSE(consan_detail::append_moi_resident_wave_owner(
+      invalid_target_words, {.destination_sgpr = 20u, .one_based = true}, invalid_target));
+  EXPECT_EQ(invalid_target_words, prefix);
+}
 
 [[nodiscard]] constexpr bool sgpr_ranges_overlap(uint16_t base, uint16_t width, uint16_t other_base,
                                                  uint16_t other_width) {

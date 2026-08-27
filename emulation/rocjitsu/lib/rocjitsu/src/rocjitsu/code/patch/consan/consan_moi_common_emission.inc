@@ -26,46 +26,6 @@ struct MoiPrivateEpochLayout {
   return static_cast<uint8_t>(encoded + 1u);
 }
 
-struct MoiResidentWaveHwreg {
-  uint16_t id = 0;
-  uint16_t bits = 0;
-};
-
-[[nodiscard]] constexpr std::optional<MoiResidentWaveHwreg>
-moi_resident_wave_hwreg(rj_code_arch_t arch) {
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return MoiResidentWaveHwreg{.id = kLegacyHwRegHwId, .bits = kLegacyHwIdResidentWaveBits};
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return MoiResidentWaveHwreg{.id = kGfx11HwRegHwId1, .bits = kGfx11HwIdResidentWaveBits};
-  if (consan_uses_gfx12_encoding(arch))
-    return MoiResidentWaveHwreg{.id = kGfx12HwRegHwId1, .bits = kGfx12HwIdResidentWaveBits};
-  return std::nullopt;
-}
-
-[[nodiscard]] bool append_moi_resident_wave_owner(std::vector<uint32_t> &words, uint16_t owner_sgpr,
-                                                  bool one_based, rj_code_arch_t arch) {
-  const auto encoding = moi_resident_wave_hwreg(arch);
-  const auto hwreg =
-      encoding ? build_hwreg_imm(encoding->id, /*offset=*/0, encoding->bits) : std::nullopt;
-  const auto read =
-      hwreg ? instrumentation::build_s_getreg_b32(owner_sgpr, *hwreg, arch) : std::nullopt;
-  const auto delay = instrumentation::build_salu_dependency_delay(arch);
-  const auto wait = instrumentation::build_salu_to_valu_dependency_wait(arch);
-  if (!read || !delay || !wait)
-    return false;
-  words.push_back(*read);
-  words.push_back(*delay);
-  if (!one_based) {
-    words.push_back(*wait);
-    return true;
-  }
-
-  words.push_back(build_s_add_u32(owner_sgpr, owner_sgpr, scalar_positive_inline_u32(1), arch));
-  words.push_back(*delay);
-  words.push_back(*wait);
-  return true;
-}
-
 [[nodiscard]] std::optional<uint16_t>
 common_moi_private_owner_shift(std::span<const uint8_t> image,
                                const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
@@ -2581,8 +2541,13 @@ private:
       }
       words.insert(words.end(), save->begin(), save->end());
     }
-    if (!append_moi_resident_wave_owner(words, *options.moi_owner_sgpr,
-                                        /*one_based=*/true, arch)) {
+    const ConSanTargetProfile *target = consan_target_profile(arch);
+    const consan_detail::MoiResidentWaveOwnerRequest request{
+        .destination_sgpr = *options.moi_owner_sgpr,
+        .one_based = true,
+    };
+    if (target == nullptr ||
+        !consan_detail::append_moi_resident_wave_owner(words, request, *target)) {
       errors.emplace_back(
           "ConSan MOI inline-shadow probe could not encode its resident-wave owner");
       return false;

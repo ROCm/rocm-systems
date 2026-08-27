@@ -170,6 +170,25 @@ enum class ConSanDirectCallForm : uint8_t {
   SCallI64,
 };
 
+/// Describes the target HWREG field that uniquely identifies one resident
+/// wave for the lifetime of that residency.
+///
+/// ConSan uses this field as an owner identity when an engine does not need a
+/// dispatch-global identity. `hwreg_id` is the architectural register number
+/// encoded by `s_getreg_b32`; `bit_offset` and `bit_width` select the identity
+/// field within that register. This is a target fact, not an emitted
+/// instruction or an engine policy: the target operation that consumes it is
+/// responsible for validating registers and constructing the instruction
+/// sequence, while the engine decides whether a resident-wave owner is the
+/// right semantic identity for a particular observation.
+struct ConSanResidentWaveIdentityEncoding {
+  uint16_t hwreg_id = 0;
+  uint8_t bit_offset = 0;
+  uint8_t bit_width = 0;
+
+  bool operator==(const ConSanResidentWaveIdentityEncoding &) const = default;
+};
+
 /// Describes the strength of the stable contract for one
 /// target/engine/capability-form combination.
 ///
@@ -219,6 +238,7 @@ struct ConSanTargetProfile {
       ConSanWorkgroupIdentitySource::DescriptorSystemSgprs;
   ConSanWaitCounterFamily wait_counter_family = ConSanWaitCounterFamily::Gfx9;
   ConSanDirectCallForm direct_call_form = ConSanDirectCallForm::SCallB64;
+  ConSanResidentWaveIdentityEncoding resident_wave_identity;
 
   bool supports_wave32 = false;
   bool supports_wave64 = true;
@@ -304,6 +324,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -338,6 +359,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -372,6 +394,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx11,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -406,6 +429,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -440,6 +464,7 @@ inline constexpr std::array<ConSanTargetProfile, 5> kConSanTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallI64,
+        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -541,6 +566,13 @@ consan_target_profiles_are_valid(const std::array<ConSanTargetProfile, N> &profi
         profile.max_group_segment_bytes == 0u ||
         profile.direct_branch_min_displacement_bytes >= 0 ||
         profile.direct_branch_max_displacement_bytes <= 0 ||
+        profile.resident_wave_identity.hwreg_id > 63u ||
+        profile.resident_wave_identity.bit_offset > 31u ||
+        profile.resident_wave_identity.bit_width == 0u ||
+        profile.resident_wave_identity.bit_width > 32u ||
+        static_cast<uint16_t>(profile.resident_wave_identity.bit_offset) +
+                profile.resident_wave_identity.bit_width >
+            32u ||
         (profile.semantic_form_mask & static_cast<uint16_t>(~all_form_bits)) != 0u ||
         profile.semantic_form_mask == 0u ||
         (profile.has_selectable_vgpr_bank !=

@@ -67,6 +67,30 @@ std::optional<uint16_t> ConSanMoiWorkgroupSource::operand() const {
   return scalar_src ? *scalar_src : vector_source_vgpr(*vector_src);
 }
 
+bool consan_detail::append_moi_resident_wave_owner(std::vector<uint32_t> &words,
+                                                   const MoiResidentWaveOwnerRequest &request,
+                                                   const ConSanTargetProfile &target) {
+  const ConSanResidentWaveIdentityEncoding &encoding = target.resident_wave_identity;
+  const auto hwreg = build_hwreg_imm(encoding.hwreg_id, encoding.bit_offset, encoding.bit_width);
+  const auto read =
+      hwreg ? instrumentation::build_s_getreg_b32(request.destination_sgpr, *hwreg, target.arch)
+            : std::nullopt;
+  const auto delay = instrumentation::build_salu_dependency_delay(target.arch);
+  const auto wait = instrumentation::build_salu_to_valu_dependency_wait(target.arch);
+  if (!read || !delay || !wait)
+    return false;
+
+  words.push_back(*read);
+  words.push_back(*delay);
+  if (request.one_based) {
+    words.push_back(build_s_add_u32(request.destination_sgpr, request.destination_sgpr,
+                                    scalar_positive_inline_u32(1), target.arch));
+    words.push_back(*delay);
+  }
+  words.push_back(*wait);
+  return true;
+}
+
 bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
                                                   uint64_t field_address, uint32_t stride_bytes,
                                                   uint16_t address_vgpr, uint16_t slot_vgpr,

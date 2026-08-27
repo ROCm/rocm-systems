@@ -1124,8 +1124,13 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
       break;
     }
     case ConSanMoiOwnerSource::HwId: {
-      if (!append_moi_resident_wave_owner(words, *persistent_owner_sgpr, one_based_owner_ids,
-                                          arch)) {
+      const ConSanTargetProfile *target = consan_target_profile(arch);
+      const consan_detail::MoiResidentWaveOwnerRequest request{
+          .destination_sgpr = *persistent_owner_sgpr,
+          .one_based = one_based_owner_ids,
+      };
+      if (target == nullptr ||
+          !consan_detail::append_moi_resident_wave_owner(words, request, *target)) {
         errors.emplace_back(
             "ConSan MOI scalar owner prologue could not encode resident-wave identity");
         return std::nullopt;
@@ -1337,7 +1342,13 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
         errors.emplace_back("ConSan MOI hw_id owner source requires RJ_CONSAN_MOI_OWNER_SGPR");
         return std::nullopt;
       }
-      if (!append_moi_resident_wave_owner(words, *owner_sgpr, one_based_owner_ids, arch)) {
+      const ConSanTargetProfile *target = consan_target_profile(arch);
+      const consan_detail::MoiResidentWaveOwnerRequest request{
+          .destination_sgpr = *owner_sgpr,
+          .one_based = one_based_owner_ids,
+      };
+      if (target == nullptr ||
+          !consan_detail::append_moi_resident_wave_owner(words, request, *target)) {
         errors.emplace_back(
             "ConSan MOI owner/epoch prologue could not encode resident-wave identity");
         return std::nullopt;

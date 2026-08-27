@@ -23,24 +23,6 @@ inline constexpr uint16_t kTtmpRdna4GridX = 9;
 inline constexpr uint16_t kTtmpGfx1250ClusterWorkgroupId = 6;
 inline constexpr uint32_t kMaxVgprs = kConSanOrdinaryVgprLimit;
 inline constexpr uint32_t kMaxSgprs = 106;
-inline constexpr uint16_t kLegacyHwRegHwId = 4;
-inline constexpr uint16_t kLegacyHwIdResidentWaveBits = 6;
-inline constexpr uint16_t kLegacyMaxResidentWaveOwner = (1u << kLegacyHwIdResidentWaveBits) - 1u;
-// Keep gfx11 and gfx12 fields separate even while their current values match:
-// they are independently qualified architectural facts and may diverge.
-inline constexpr uint16_t kGfx11HwRegHwId1 = 23;
-inline constexpr uint16_t kGfx11HwIdResidentWaveBits = 10;
-inline constexpr uint16_t kGfx11HwIdWaveMask = 0x1f;
-inline constexpr uint16_t kGfx11HwIdSimdMask = 0x300;
-inline constexpr uint16_t kGfx11MaxResidentWaveOwner = kGfx11HwIdWaveMask | kGfx11HwIdSimdMask;
-inline constexpr uint16_t kGfx12HwRegHwId1 = 23;
-inline constexpr uint16_t kGfx12HwIdResidentWaveBits = 10;
-inline constexpr uint16_t kGfx12HwIdWaveMask = 0x1f;
-inline constexpr uint16_t kGfx12HwIdSimdMask = 0x300;
-inline constexpr uint16_t kGfx12MaxResidentWaveOwner = kGfx12HwIdWaveMask | kGfx12HwIdSimdMask;
-static_assert(kLegacyMaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
-static_assert(kGfx11MaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
-static_assert(kGfx12MaxResidentWaveOwner + 1u <= consan_moi_exact_shadow::max_owner);
 inline constexpr uint8_t kRdna4ScopeDevice = 2;
 inline constexpr uint32_t kRdna4VectorFlatNoSaddr = static_cast<uint32_t>(rdna4::OPR_SREG_NULL);
 inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna5::OPR_SREG_NULL);

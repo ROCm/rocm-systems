@@ -85,6 +85,34 @@ struct ConSanMoiWorkgroupSource {
 
 namespace consan_detail {
 
+/// Semantic request to materialize the current resident wave's owner identity
+/// in one scalar register.
+///
+/// `destination_sgpr` names the register selected by resource planning.
+/// `one_based` requests the representation used by packed ConSan shadows,
+/// where zero denotes an empty cell and architectural identity N is stored as
+/// N+1. The request deliberately contains no architecture or HWREG numbers:
+/// those belong to `ConSanTargetProfile` and are lowered by the target
+/// operation below.
+struct MoiResidentWaveOwnerRequest {
+  uint16_t destination_sgpr = 0;
+  bool one_based = false;
+
+  bool operator==(const MoiResidentWaveOwnerRequest &) const = default;
+};
+
+/// Append the target instruction sequence implementing one resident-wave
+/// owner request.
+///
+/// The operation is transactional: an invalid destination or target encoding
+/// returns false without changing `words`. Successful output ends with the
+/// target's required scalar-to-vector dependency wait, so later vector
+/// consumers observe the completed identity. The target profile supplies all
+/// architectural selection; callers supply only semantic intent.
+[[nodiscard]] bool append_moi_resident_wave_owner(std::vector<uint32_t> &words,
+                                                  const MoiResidentWaveOwnerRequest &request,
+                                                  const ConSanTargetProfile &target);
+
 /// Canonical set of occupied half-open ranges in pristine executable text.
 ///
 /// Dense relay placement must reject original instructions already owned by

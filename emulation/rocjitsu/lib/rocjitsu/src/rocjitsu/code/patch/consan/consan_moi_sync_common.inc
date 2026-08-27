@@ -3382,8 +3382,13 @@ inline_atomic_scalar_spill_aliases_guest_address(const ConSanMoiAtomicAddressPla
         }
         words.insert(words.end(), save_owner->begin(), save_owner->end());
       }
-      if (!append_moi_resident_wave_owner(words, *options.moi_owner_sgpr,
-                                          /*one_based=*/true, arch)) {
+      const ConSanTargetProfile *target = consan_target_profile(arch);
+      const consan_detail::MoiResidentWaveOwnerRequest request{
+          .destination_sgpr = *options.moi_owner_sgpr,
+          .one_based = true,
+      };
+      if (target == nullptr ||
+          !consan_detail::append_moi_resident_wave_owner(words, request, *target)) {
         errors.emplace_back("ConSan MOI inline atomic patch could not derive resident-wave owner");
         return std::nullopt;
       }

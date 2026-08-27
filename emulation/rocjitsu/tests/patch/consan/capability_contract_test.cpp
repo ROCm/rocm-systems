@@ -32,6 +32,7 @@ struct ExpectedTargetProfile {
   ConSanWorkgroupIdentitySource workgroup_identity;
   ConSanWaitCounterFamily wait_counter_family;
   ConSanDirectCallForm direct_call_form;
+  ConSanResidentWaveIdentityEncoding resident_wave_identity;
   bool supports_wave32;
   bool supports_wave64;
   uint8_t exec_register_width_bits;
@@ -68,6 +69,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -102,6 +104,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx9,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .resident_wave_identity = {.hwreg_id = 4, .bit_offset = 0, .bit_width = 6},
         .supports_wave32 = false,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -136,6 +139,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::DescriptorSystemSgprs,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx11,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -170,6 +174,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallB64,
+        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -204,6 +209,7 @@ constexpr std::array<ExpectedTargetProfile, 5> kExpectedTargetProfiles = {{
         .workgroup_identity = ConSanWorkgroupIdentitySource::CommandProcessorTtmps,
         .wait_counter_family = ConSanWaitCounterFamily::Gfx12,
         .direct_call_form = ConSanDirectCallForm::SCallI64,
+        .resident_wave_identity = {.hwreg_id = 23, .bit_offset = 0, .bit_width = 10},
         .supports_wave32 = true,
         .supports_wave64 = true,
         .exec_register_width_bits = 64,
@@ -241,6 +247,7 @@ void expect_profile_matches(const ConSanTargetProfile &actual,
   EXPECT_EQ(actual.workgroup_identity, expected.workgroup_identity);
   EXPECT_EQ(actual.wait_counter_family, expected.wait_counter_family);
   EXPECT_EQ(actual.direct_call_form, expected.direct_call_form);
+  EXPECT_EQ(actual.resident_wave_identity, expected.resident_wave_identity);
   EXPECT_EQ(actual.supports_wave32, expected.supports_wave32);
   EXPECT_EQ(actual.supports_wave64, expected.supports_wave64);
   EXPECT_EQ(actual.exec_register_width_bits, expected.exec_register_width_bits);
@@ -322,6 +329,18 @@ TEST(ConSanCapabilityContract, TargetProfileValidatorRejectsEveryMalformedInvari
                  [](auto &profiles) { profiles[0].direct_branch_min_displacement_bytes = 0; });
   expect_invalid("nonpositive maximum branch displacement",
                  [](auto &profiles) { profiles[0].direct_branch_max_displacement_bytes = 0; });
+  expect_invalid("resident-wave HWREG ID outside encoding",
+                 [](auto &profiles) { profiles[0].resident_wave_identity.hwreg_id = 64u; });
+  expect_invalid("resident-wave HWREG offset outside encoding",
+                 [](auto &profiles) { profiles[0].resident_wave_identity.bit_offset = 32u; });
+  expect_invalid("empty resident-wave identity",
+                 [](auto &profiles) { profiles[0].resident_wave_identity.bit_width = 0u; });
+  expect_invalid("oversized resident-wave identity",
+                 [](auto &profiles) { profiles[0].resident_wave_identity.bit_width = 33u; });
+  expect_invalid("resident-wave identity extends past its HWREG", [](auto &profiles) {
+    profiles[0].resident_wave_identity.bit_offset = 31u;
+    profiles[0].resident_wave_identity.bit_width = 2u;
+  });
   expect_invalid("semantic form bit outside the enum", [](auto &profiles) {
     profiles[0].semantic_form_mask = static_cast<uint16_t>(
         profiles[0].semantic_form_mask | (1u << static_cast<uint8_t>(ConSanCapabilityForm::Count)));
