@@ -50,9 +50,18 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   arm. init.cc compiles the *real* `argcheck.cc`/`archinfo.cc`/`utils.cc` ("oracle"
   TUs) from the hipify tree rather than stubbing them; `--gc-sections` drops the
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
+- **`rccl-UnitTestsMicroWrap`** — `rccl_wrap.cc` (via `WRAP_CC_PATH`); suites
+  `WrapMicrotest.*`, `WrapMicrotestIsolated.*`. Its own dedicated stub floor
+  (`fakes/wrap_stubs.cc`) rather than the init/p2p fakes: rccl_wrap.cc defines
+  `commSetUnrollFactor` and `rcclCommSetP2pShiftSize` for real, and both are
+  abort()-stubbed in `fakes/nccl_stubs.cc` for init.cc's benefit, so linking
+  the two together is a duplicate-symbol error. Currently covers a first,
+  low-dependency batch of helpers (no `RCCL_PARAM`, no `getenv`, no DDA/CE/
+  symmetric-kernel machinery); see the header comment in `wrap-test.cc` for
+  scope and what's deferred to a later rung. See `test_categories_micro_wrap.yaml`.
 
-Everything below (seams, fakes, coverage) applies to both; the concrete examples
-use `p2p.cc`.
+Everything below (seams, fakes, coverage) applies to all three; the concrete
+examples use `p2p.cc`.
 
 
 ## Why a separate test binary
