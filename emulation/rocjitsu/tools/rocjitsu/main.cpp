@@ -536,6 +536,12 @@ int main(int argc, char *argv[]) {
 
   pid_t my_pid = getpid();
 
+  // Set only where this process forked the daemon itself. A client authorizes
+  // that process to reach into its address space, so which PID it is has to
+  // come from whoever started it rather than from the socket, and this exec
+  // is the last point that still knows.
+  std::optional<pid_t> launched_daemon_pid;
+
   if (attach_mode) {
     auto sock_path = rpc_default_socket_path();
     if (!std::filesystem::exists(sock_path)) {
@@ -590,6 +596,7 @@ int main(int argc, char *argv[]) {
       cleanup_runtime_files(my_pid);
       return 1;
     }
+    launched_daemon_pid = daemon_pid;
   } else {
     if (!rocjitsu::config::write_dbt_runtime_config_handoff(abs_config, dbt_guest_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
@@ -624,6 +631,8 @@ int main(int argc, char *argv[]) {
   // holding config_path/daemon.sock. Attach mode creates no such dir.
   if (!attach_mode)
     launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
+  if (launched_daemon_pid)
+    launch_environment.set(rocjitsu::kRpcDaemonPidEnv, std::to_string(*launched_daemon_pid));
   rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, launch_environment);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
