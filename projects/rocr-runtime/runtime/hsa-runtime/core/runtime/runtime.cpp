@@ -1890,7 +1890,10 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       gpu_node_id = allocation->second.thunk_node_id;
       peerImports = std::move(allocation->second.thunk_peer_imports);
     }
-    
+
+    // Releasing a buffer object unmaps its CPU mapping and closes its GEM handle, which
+    // drops the VA maps taken from it, so the maps that succeeded above need no explicit
+    // unmap here.
     auto errCleanup = [&]() {
       ReleaseImportHandles(bo, peerImports);
       std::lock_guard<std::shared_mutex> lock(memory_lock_);
