@@ -26,7 +26,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from .assets import CSS, JS
+from .assets import CSS, JS, favicon, logo
 from .graph import (
     Graph,
     capability_groups,
@@ -901,11 +901,12 @@ def render(site: Site) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{E(title)} openspec</title>
+<link rel="icon" href="{favicon()}">
 <style>{CSS}</style>
 </head><body{' class="multi"' if multi else ""}>
 <div class="shell">
 <aside class="rail">
-  <a class="brand" href="{home}"><b>openspec</b><span>viewer</span></a>
+  <a class="brand" href="{home}">{logo()}<span class="txt"><b>openspec</b><span>viewer</span></span></a>
   {switch}
   <div class="search">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/>

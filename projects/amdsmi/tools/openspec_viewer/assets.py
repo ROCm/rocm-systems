@@ -44,6 +44,52 @@ _DARK = """
   --mark:#6a5312; --mark-fg:#ffe9a8; --shadow:none;
 """
 
+# ---------------------------------------------------------------------------
+# the mark
+# ---------------------------------------------------------------------------
+
+# A bracket pair enclosing a requirement and its two scenarios.
+#
+# The brackets are the corpus's own syntax -- a cross reference is written
+# [capability-id] -- and the three rules inside are the structure every spec
+# page has: a requirement, then WHEN, then THEN, narrowing as they nest. The
+# lower two carry the same blue and green those steps carry in the body, so the
+# mark is the page in miniature rather than decoration. Drawn on a 24 grid, so
+# it still reads at 16px, which is the only size a favicon gets.
+
+_LOGO = (
+    '<svg class="mark" viewBox="0 0 24 24" aria-hidden="true" width="{w}" height="{w}">'
+    '<path class="mk-b" d="M8 3.5H4.6v17H8"/>'
+    '<path class="mk-b" d="M16 3.5h3.4v17H16"/>'
+    '<path class="mk-r" d="M8.6 8.4h7"/>'
+    '<path class="mk-w" d="M8.6 12h5.2"/>'
+    '<path class="mk-t" d="M8.6 15.6h3.4"/>'
+    "</svg>"
+)
+
+
+def logo(size: int = 22) -> str:
+    """The mark at a given pixel size."""
+    return _LOGO.format(w=size)
+
+
+def favicon() -> str:
+    """The same mark as a data-URI favicon: no file, no request."""
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' "
+        "fill='none' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+        "<path stroke='%235b3fd4' d='M8 3.5H4.6v17H8'/>"
+        "<path stroke='%235b3fd4' d='M16 3.5h3.4v17H16'/>"
+        "<path stroke='%2364748b' d='M8.6 8.4h7'/>"
+        "<path stroke='%230b5fa8' d='M8.6 12h5.2'/>"
+        "<path stroke='%23166f3f' d='M8.6 15.6h3.4'/>"
+        "</svg>"
+    )
+    return "data:image/svg+xml," + (
+        svg.replace("<", "%3C").replace(">", "%3E").replace('"', "%22").replace("#", "%23")
+    )
+
+
 CSS = (
     """
 :root{
@@ -95,6 +141,16 @@ section{scroll-margin-top:18px}
 .brand b{font-weight:600}
 .brand span{color:var(--faint);display:block;font-size:10.5px;letter-spacing:.18em;
   text-transform:uppercase;margin-top:3px}
+
+/* ---- the mark ---- */
+.mark{flex:0 0 auto;fill:none;stroke-width:2;stroke-linecap:round;
+  stroke-linejoin:round;display:block}
+.mark .mk-b{stroke:var(--cap)}
+.mark .mk-r{stroke:var(--fg)}
+.mark .mk-w{stroke:var(--when)}
+.mark .mk-t{stroke:var(--ok)}
+.brand{display:flex;align-items:center;gap:9px}
+.brand .txt{display:block}
 
 /* ---- project switcher: obvious, not loud ---- */
 .switch{display:flex;flex-direction:column;gap:2px;margin:16px 0 4px;
