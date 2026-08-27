@@ -17,7 +17,7 @@ from utils.utils_common import load_yaml
 _VALID_OPS = frozenset({"gte", "gt", "lt", "lte"})
 _VALID_LEVELS = frozenset({"GL1", "GL2", "EA"})
 
-_KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset({"8b5c67d5c4e18966"})
+_KNOWN_SCHEMA_HASHES: frozenset[str] = frozenset({"4e164575e9d1fc51"})
 
 
 def load_tree_spec(arch: str) -> TreeSpec:
