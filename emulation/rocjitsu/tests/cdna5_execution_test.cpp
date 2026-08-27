@@ -1495,30 +1495,22 @@ TEST(Gfx1251PackedU64ExecutionTest, AddAndSubtractReadOverlappingSourcesBeforeDe
   }
 }
 
-TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublicSpecialAndInlineScalarSources) {
-  // LLVM's fixed VSrc_v2b64 profile and 64-bit inline-constant values:
+TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublicInlineScalarSources) {
+  // LLVM's fixed VSrc_v2b64 profile admits inline constants but no special
+  // register source other than null:
   // https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/VOP3PInstructions.td#L147-L151
-  // https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L1856-L1876
+  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2133-L2143
   constexpr uint64_t kInv2Pi = 0x3fc45f306dc9c882ULL;
-  constexpr uint64_t kScratchBase = 0x123456789abcdef0ULL;
   struct SourceCase {
     std::string_view name;
     uint32_t opcode;
     uint16_t src0;
     uint16_t src1;
-    bool scc;
     PackedU64Pair expected;
   };
   constexpr std::array kCases{
-      SourceCase{"add-src-scc", cdna5::kVPkAddNcU64Vop3p, 253, 124, true, {1u, 1u}},
-      SourceCase{"sub-src-scc", cdna5::kVPkSubNcU64Vop3p, 264, 253, true, {9u, 19u}},
-      SourceCase{"src-flat-scratch-base-hi",
-                 cdna5::kVPkAddNcU64Vop3p,
-                 231,
-                 124,
-                 false,
-                 {kScratchBase, kScratchBase}},
-      SourceCase{"inline-inv-2pi", cdna5::kVPkAddNcU64Vop3p, 248, 124, false, {kInv2Pi, kInv2Pi}},
+      SourceCase{"add-inline-inv-2pi", cdna5::kVPkAddNcU64Vop3p, 248, 124, {kInv2Pi, kInv2Pi}},
+      SourceCase{"sub-inline-inv-2pi", cdna5::kVPkSubNcU64Vop3p, 248, 124, {kInv2Pi, kInv2Pi}},
   };
 
   auto decoder =
@@ -1529,12 +1521,9 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublicSpecialAndInlineScalarSources)
   auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1u);
-  wf->set_scratch_base(kScratchBase);
-  write_vgpr_packed_u64(*cu, *wf, 8, 0, {10u, 20u});
 
   for (const auto &test_case : kCases) {
     SCOPED_TRACE(test_case.name);
-    wf->write_scc(test_case.scc);
     const auto words = cdna5::build_vop3p(test_case.opcode, {.vdst = 4,
                                                              .opsel_hi_2 = 1,
                                                              .src0 = test_case.src0,
@@ -1546,7 +1535,6 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublicSpecialAndInlineScalarSources)
     ASSERT_NE(decoded->execute, nullptr);
     cu->execute_instruction(decoded.get(), *wf);
     EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
-    EXPECT_EQ(wf->read_scc(), test_case.scc);
   }
 }
 
@@ -1609,8 +1597,9 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
     EXPECT_EQ(decode_valid(*decoder, words.data()), nullptr);
   }
 
-  constexpr std::array<uint16_t, 16> kInvalidV2B64Selectors{
-      106, 107, 125, 126, 127, 209, 229, 232, 234, 237, 238, 239, 249, 251, 252, 254,
+  constexpr std::array<uint16_t, 21> kInvalidV2B64Selectors{
+      106, 107, 125, 126, 127, 209, 229, 230, 231, 232, 234,
+      235, 236, 237, 238, 239, 249, 251, 252, 253, 254,
   };
   for (const uint16_t selector : kInvalidV2B64Selectors) {
     for (const bool use_src1 : {false, true}) {
@@ -1627,8 +1616,8 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
     }
   }
 
-  constexpr std::array<uint16_t, 14> kInvalidB64Selectors{
-      107, 125, 127, 209, 229, 232, 234, 237, 238, 239, 249, 251, 252, 254,
+  constexpr std::array<uint16_t, 13> kInvalidB64Selectors{
+      107, 125, 127, 209, 229, 231, 232, 234, 239, 249, 251, 252, 254,
   };
   for (const uint16_t selector : kInvalidB64Selectors) {
     SCOPED_TRACE(selector);
@@ -1650,26 +1639,52 @@ TEST(Gfx1251PackedU64ExecutionTest, ValidatesLayoutsRegisterTuplesAndSourceSelec
     EXPECT_NE(decoded, nullptr);
   }
 
-  constexpr std::array<uint16_t, 11> kValidV2B64Selectors{
-      124, 128, 208, 230, 231, 235, 236, 240, 248, 253, 255,
+  // Always provide a third word: selector 255 consumes it as a literal, and
+  // shorter buffers make this boundary loop undefined under ASan.
+  constexpr std::array<uint16_t, 6> kValidV2B64Selectors{
+      124, 128, 208, 240, 248, 255,
   };
   for (const uint16_t selector : kValidV2B64Selectors) {
     SCOPED_TRACE(selector);
-    const auto words = cdna5::build_vop3p(
+    const auto encoding = cdna5::build_vop3p(
         cdna5::kVPkAddNcU64Vop3p,
         {.vdst = 4, .opsel_hi_2 = 1, .src0 = selector, .src1 = 268, .src2 = 128, .opsel_hi = 3});
+    const std::array<uint32_t, 3> words{encoding[0], encoding[1], 0x65u};
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     EXPECT_NE(decoded, nullptr);
   }
 
-  constexpr std::array<uint16_t, 13> kValidB64Selectors{
-      106, 124, 126, 128, 208, 230, 231, 235, 236, 240, 248, 253, 255,
+  constexpr std::array<uint16_t, 14> kValidB64Selectors{
+      106, 124, 126, 128, 208, 230, 235, 236, 237, 238, 240, 248, 253, 255,
   };
   for (const uint16_t selector : kValidB64Selectors) {
     SCOPED_TRACE(selector);
-    const auto words = cdna5::build_vop3p(
+    const auto encoding = cdna5::build_vop3p(
         cdna5::kVPkLshlAddU64Vop3p,
         {.vdst = 4, .opsel_hi_2 = 1, .src0 = 264, .src1 = selector, .src2 = 272, .opsel_hi = 3});
+    const std::array<uint32_t, 3> words{encoding[0], encoding[1], 0x65u};
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    EXPECT_NE(decoded, nullptr);
+  }
+
+  // Raw words exercise the width-specific decoder contract independently of
+  // the assembler's permissive operand spelling. VSrc_v2b64 rejects special
+  // scalar selectors, while VSrc_b64 admits the documented 64-bit sources.
+  constexpr std::array<std::array<uint32_t, 2>, 4> kInvalidRawWords{{
+      {0xcc4c4004u, 0x1a0218e7u}, // VSrc_v2b64 selector 231
+      {0xcc4c4004u, 0x1a0218ebu}, // VSrc_v2b64 selector 235
+      {0xcc4c4004u, 0x1a0218fdu}, // VSrc_v2b64 selector 253
+      {0xcc7e4004u, 0x1c41cf08u}, // VSrc_b64 selector 231
+  }};
+  for (const auto &words : kInvalidRawWords)
+    EXPECT_EQ(decode_valid(*decoder, words.data()), nullptr);
+
+  constexpr std::array<std::array<uint32_t, 2>, 3> kValidRawB64Words{{
+      {0xcc7e4004u, 0x1c41cd08u}, // flat_scratch
+      {0xcc7e4004u, 0x1c41db08u}, // private_base
+      {0xcc7e4004u, 0x1c41dd08u}, // private_limit
+  }};
+  for (const auto &words : kValidRawB64Words) {
     std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
     EXPECT_NE(decoded, nullptr);
   }
@@ -1916,19 +1931,21 @@ TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {
   }
 }
 
-TEST(Gfx1251PackedU64ExecutionTest, SplitsVccAndExecShiftSourcesIntoLowAndHighDwords) {
+TEST(Gfx1251PackedU64ExecutionTest, ExecutesPublic64BitSpecialShiftSources) {
   struct SpecialSourceCase {
     std::string_view name;
     std::array<uint32_t, 2> words;
-    bool use_exec;
+    PackedU64Pair expected;
   };
-  // Public LLVM MC accepts both special-register forms for gfx1251:
-  //   v_pk_lshl_add_u64 v[4:7], v[8:11], vcc,  v[16:19]
-  //   v_pk_lshl_add_u64 v[4:7], v[8:11], exec, v[16:19]
-  // https://github.com/llvm/llvm-project/blob/3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L875-L920
+  // LLVM's VSrc_b64 class and 64-bit special-register decoder define these
+  // selectors at this permanent revision:
+  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/SIRegisterInfo.td#L887-L917
+  // https://github.com/llvm/llvm-project/blob/551d5172dd3902efbce5f4720b75bfc4e6441dc8/llvm/lib/Target/AMDGPU/Disassembler/AMDGPUDisassembler.cpp#L2215-L2259
   constexpr std::array kCases{
-      SpecialSourceCase{"vcc", {0xCC7E4004u, 0x1C40D508u}, false},
-      SpecialSourceCase{"exec", {0xCC7E4004u, 0x1C40FD08u}, true},
+      SpecialSourceCase{"vcc", {0xcc7e4004u, 0x1c40d508u}, {11u, 23u}},
+      SpecialSourceCase{"exec", {0xcc7e4004u, 0x1c40fd08u}, {11u, 23u}},
+      SpecialSourceCase{"flat-scratch", {0xcc7e4004u, 0x1c41cd08u}, {11u, 23u}},
+      SpecialSourceCase{"scc", {0xcc7e4004u, 0x1c41fb08u}, {11u, 17u}},
   };
 
   auto decoder =
@@ -1941,12 +1958,11 @@ TEST(Gfx1251PackedU64ExecutionTest, SplitsVccAndExecShiftSourcesIntoLowAndHighDw
 
   for (const auto &test_case : kCases) {
     SCOPED_TRACE(test_case.name);
-    wf->set_exec_raw(1u);
-    wf->set_vcc_raw(0u);
-    if (test_case.use_exec)
-      wf->set_exec_raw(0x0000000200000001ULL);
-    else
-      wf->set_vcc_raw(0x0000000200000001ULL);
+    constexpr uint64_t kShiftPair = 0x0000000200000001ULL;
+    wf->set_exec_raw(kShiftPair);
+    wf->set_vcc_raw(kShiftPair);
+    wf->set_scratch_base(kShiftPair);
+    wf->write_scc(true);
     write_vgpr_packed_u64(*cu, *wf, 8, 0, {2u, 3u});
     write_vgpr_packed_u64(*cu, *wf, 16, 0, {7u, 11u});
     write_vgpr_packed_u64(*cu, *wf, 4, 0, {0u, 0u});
@@ -1955,7 +1971,7 @@ TEST(Gfx1251PackedU64ExecutionTest, SplitsVccAndExecShiftSourcesIntoLowAndHighDw
     ASSERT_NE(decoded, nullptr);
     ASSERT_NE(decoded->execute, nullptr);
     cu->execute_instruction(decoded.get(), *wf);
-    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), (PackedU64Pair{11u, 23u}));
+    EXPECT_EQ(read_vgpr_packed_u64(*cu, *wf, 4, 0), test_case.expected);
   }
 }
 

@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/big_int.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include <algorithm>
@@ -3000,7 +3001,7 @@ void VPkAddNcU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     const auto rhs = read_pk_u64_pair(src1, wf, lane);
     const auto apply = [&](uint64_t lhs_value, uint64_t rhs_value, bool negate_lhs,
                            bool negate_rhs) -> uint64_t {
-      using Wide = __int128;
+      using Wide = util::int128_t;
       Wide lhs_wide = static_cast<Wide>(lhs_value);
       Wide rhs_wide = static_cast<Wide>(rhs_value);
       if (negate_lhs)
@@ -3009,7 +3010,7 @@ void VPkAddNcU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
         rhs_wide = -rhs_wide;
       const Wide result = lhs_wide + rhs_wide;
       if (inst_.clamp) {
-        if (result < 0)
+        if (result < Wide{})
           return 0;
         constexpr Wide kMax = static_cast<Wide>(std::numeric_limits<uint64_t>::max());
         if (result > kMax)
@@ -3033,7 +3034,7 @@ void VPkSubNcU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     const auto rhs = read_pk_u64_pair(src1, wf, lane);
     const auto apply = [&](uint64_t lhs_value, uint64_t rhs_value, bool negate_lhs,
                            bool negate_rhs) -> uint64_t {
-      using Wide = __int128;
+      using Wide = util::int128_t;
       Wide lhs_wide = static_cast<Wide>(lhs_value);
       Wide rhs_wide = static_cast<Wide>(rhs_value);
       if (negate_lhs)
@@ -3042,7 +3043,7 @@ void VPkSubNcU64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
         rhs_wide = -rhs_wide;
       const Wide result = lhs_wide - rhs_wide;
       if (inst_.clamp) {
-        if (result < 0)
+        if (result < Wide{})
           return 0;
         constexpr Wide kMax = static_cast<Wide>(std::numeric_limits<uint64_t>::max());
         if (result > kMax)

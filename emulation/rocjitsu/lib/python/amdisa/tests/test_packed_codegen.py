@@ -332,10 +332,10 @@ def test_pk_u64_add_sub_generate_per_element_negation_and_integer_clamp():
     for cpp in (add, sub):
         assert 'const auto lhs = read_pk_u64_pair(src0, wf, lane);' in cpp
         assert 'const auto rhs = read_pk_u64_pair(src1, wf, lane);' in cpp
-        assert 'using Wide = __int128;' in cpp
+        assert 'using Wide = util::int128_t;' in cpp
         assert 'if (negate_lhs) lhs_wide = -lhs_wide;' in cpp
         assert 'if (negate_rhs) rhs_wide = -rhs_wide;' in cpp
-        assert 'if (result < 0) return 0;' in cpp
+        assert 'if (result < Wide{}) return 0;' in cpp
         assert 'if (result > kMax) return std::numeric_limits<uint64_t>::max();' in cpp
         assert '(inst_.neg & 1u) != 0' in cpp
         assert '(inst_.neg_hi & 2u) != 0' in cpp

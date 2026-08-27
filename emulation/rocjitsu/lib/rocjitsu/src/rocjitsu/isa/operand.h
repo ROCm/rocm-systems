@@ -405,6 +405,18 @@ protected:
 
   void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
 
+  /// @brief Accept a selector already checked by a narrower instruction-level
+  /// validator.
+  ///
+  /// Some encoded operand types cover several width-specific LLVM register
+  /// classes. Their generated constructor can only apply the common selector
+  /// set, while an instruction factory can validate the exact class. Keep this
+  /// protected so only an ISA Operand factory can bridge that validation.
+  void accept_instruction_validated_selector() {
+    if (encoding_error_ == EncodingError::InvalidSelector)
+      encoding_error_ = EncodingError::None;
+  }
+
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
   /// operands get their (reads_value, writable, is_vgpr) triple from

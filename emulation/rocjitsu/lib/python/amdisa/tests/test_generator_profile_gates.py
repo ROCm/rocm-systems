@@ -5010,13 +5010,14 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
         assert 'invalid src0 packed U64 source selector' in body
         assert 'invalid src1 packed U64 source selector' in body
         for operand_name in ('src0', 'src1'):
-            assert f'{operand_name} == 107u' in body
-            assert f'{operand_name} == 125u' in body
-            assert f'{operand_name} >= 209u' in body
-            assert f'{operand_name} >= 237u' in body
-            assert f'{operand_name} >= 249u' in body
+            assert f'{operand_name} == 124u' in body
+            assert f'{operand_name} >= 240u' in body
+            assert f'{operand_name} <= 248u' in body
+            assert f'{operand_name} == 255u' in body
+            assert f'{operand_name} == 230u' not in body
 
     lshl = _generated_decode_body(source, 'VPkLshlAddU64Vop3p')
+    lshl_constructor = _generated_constructor_body(source, 'VPkLshlAddU64Vop3p')
     assert 'has an invalid packed U64 element layout' in lshl
     assert 'does not support source modifiers or clamp' in lshl
     assert 'vdst register tuple that exceeds the selector range' in lshl
@@ -5030,9 +5031,14 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
     assert 'invalid src0 packed U64 source selector' in lshl
     assert 'invalid src1 packed U64 source selector' in lshl
     assert 'invalid src2 packed U64 source selector' in lshl
-    assert 'src1 == 107u' in lshl
-    assert 'src1 == 125u' in lshl
-    assert 'src1 == 127u' in lshl
+    assert 'src1 == 230u' in lshl
+    assert 'src1 >= 235u' in lshl
+    assert 'src1 <= 238u' in lshl
+    assert 'src1 == 253u' in lshl
+    assert 'src1 == 231u' not in lshl
+    assert 'src1(Operand::make_after_selector_validation(' in lshl_constructor
+    assert '64, OperandType::OPR_SRC,' in lshl_constructor
+    assert lshl_constructor.count('Operand::make_after_selector_validation') == 1
 
 
 def test_gfx1250_matrix_codegen_uses_public_opsel_hi_2_field(

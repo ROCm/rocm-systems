@@ -23,6 +23,9 @@ public:
           bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
           bool packed_16bit_source, bool packed_16bit_dst = false);
+  /// Construct after an instruction factory validates the exact selector class.
+  static Operand make_after_selector_validation(int size_bits, OperandType opr_type,
+                                                int encoding_value);
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
           bool has_literal16_display);
   Operand(int size_bits, OperandType opr_type, uint64_t literal64_value, bool is_literal64);
