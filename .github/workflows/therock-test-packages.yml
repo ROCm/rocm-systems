@@ -148,7 +148,7 @@ jobs:
           (matrix.components.multi_gpu_runner != '' &&
             matrix.components.multi_gpu_runner) ||
           (matrix.components.linux_cpu_runner == true &&
-            'azure-linux-scale-rocm') ||
+            'aws-linux-scale-rocm-prod') ||
           matrix.components.test_runner
         }}
       platform: ${{ needs.configure_test_matrix.outputs.platform }}
