@@ -564,3 +564,221 @@ TEST_F(RasClientMicrotest, ParseArgsVerbose_LongFormBeforeAnotherOption_DoesNotC
   EXPECT_STREQ("31337", port);
   EXPECT_STREQ(kDefaultHost, hostName);
 }
+
+
+// ===========================================================================
+// rasRead (src/ras/client.cc:139-155)
+//
+// Every test below drives the g_read seam with a recording hook so the unit's
+// own arithmetic -- the destination offset (bufChar + done) and the requested
+// size (count - 1 - done) -- is observable, and pre-fills the caller's buffer
+// with a non-zero sentinel so a missing or misplaced '\0' store is visible.
+// ===========================================================================
+
+namespace {
+
+// Not 0x00 (which cannot see a missing NUL store) and not any payload byte.
+constexpr char kSentinel = static_cast<char>(0xAA);
+
+// One (destination offset, requested size) pair as rasRead computed it.
+struct ReadRequest {
+  long offset;
+  size_t count;
+};
+
+// One scripted read outcome: ret < 0 fails with `err`, ret == 0 is EOF.
+struct ReadStep {
+  ssize_t ret;
+  int err;
+  std::string data;
+};
+
+// Records every request and serves `steps` front-to-back; past the end, and for
+// a zero-length request, it returns 0 exactly as a real read(2) would. It never
+// writes more than the caller asked for, so an overflow seen in a test is the
+// unit's, not the fake's.
+class RecordingReader {
+ public:
+  RecordingReader(const char* base, std::vector<ReadStep> steps) : base_(base), steps_(std::move(steps)) {}
+
+  ssize_t operator()(int, void* buf, size_t count) {
+    requests.push_back(ReadRequest{static_cast<const char*>(buf) - base_, count});
+    if (count == 0 || pos_ >= steps_.size()) return 0;
+    const ReadStep& step = steps_[pos_++];
+    if (step.ret < 0) {
+      errno = step.err;
+      return step.ret;
+    }
+    if (step.ret == 0) return 0;
+    const size_t n = step.data.size() < count ? step.data.size() : count;
+    memcpy(buf, step.data.data(), n);
+    return static_cast<ssize_t>(n);
+  }
+
+  std::vector<ReadRequest> requests;
+
+ private:
+  const char* base_;
+  std::vector<ReadStep> steps_;
+  size_t pos_ = 0;
+};
+
+void ExpectRequests(const std::vector<ReadRequest>& got, const std::vector<ReadRequest>& want) {
+  ASSERT_EQ(want.size(), got.size());
+  for (size_t i = 0; i < want.size(); ++i) {
+    EXPECT_EQ(want[i].offset, got[i].offset) << "request " << i << " destination offset";
+    EXPECT_EQ(want[i].count, got[i].count) << "request " << i << " requested size";
+  }
+}
+
+}  // namespace
+
+// Arms: ret > 0 three times, `done += ret`, the `bufChar[done-1] != '\n'` retry
+// twice then exit, and the shrinking `count - 1 - done` request.
+TEST_F(RasClientMicrotest, RasRead_UntilNewline_NewlineInLastChunk_ReassemblesAndTerminates) {
+  char backing[40];
+  memset(backing, kSentinel, sizeof(backing));
+  char* buf = backing + 4;
+  RecordingReader reader(buf, {{5, 0, "abcde"}, {4, 0, "fghi"}, {2, 0, "j\n"}});
+  ScopedHook readHook(g_read, [&](int fd, void* b, size_t n) { return reader(fd, b, n); });
+
+  EXPECT_EQ(11, rasRead(9, buf, 32));
+
+  EXPECT_EQ(3, readHook.calls);
+  ExpectRequests(reader.requests, {{0, 31}, {5, 26}, {9, 22}});
+  EXPECT_EQ("abcdefghij\n", std::string(buf, 11));
+  EXPECT_EQ('\0', buf[11]);
+  EXPECT_EQ(kSentinel, buf[12]);
+  EXPECT_EQ(kSentinel, backing[3]);
+}
+
+// Arm: ret == -1 with errno != EINTR returns before bufChar[done] = '\0', so the
+// caller's buffer keeps its prior contents. Benign: every call site in client.cc
+// checks `bytes < 0` before touching msgBuf.
+TEST_F(RasClientMicrotest, RasRead_NonEintrError_ReturnsMinusOneAndLeavesBufferUntouched) {
+  char buf[16];
+  memset(buf, kSentinel, sizeof(buf));
+  RecordingReader reader(buf, {{-1, EIO, ""}});
+  ScopedHook readHook(g_read, [&](int fd, void* b, size_t n) { return reader(fd, b, n); });
+
+  EXPECT_EQ(-1, rasRead(9, buf, sizeof(buf)));
+
+  EXPECT_EQ(EIO, errno);
+  EXPECT_EQ(1, readHook.calls);
+  ExpectRequests(reader.requests, {{0, 15}});
+  for (size_t i = 0; i < sizeof(buf); ++i) {
+    EXPECT_EQ(kSentinel, buf[i]) << "byte " << i << " was written on the error path";
+  }
+}
+
+// Arms: EINTR retries at the same offset, and the `done == 0` guard keeps the
+// retry from reading bufChar[-1]. The byte below the buffer is '\n' on purpose:
+// without the guard the loop would exit immediately and return 0.
+TEST_F(RasClientMicrotest, RasRead_EintrOnFirstRead_RetriesAtSameOffsetAndSucceeds) {
+  char backing[40];
+  memset(backing, kSentinel, sizeof(backing));
+  backing[7] = '\n';
+  char* buf = backing + 8;
+  RecordingReader reader(buf, {{-1, EINTR, ""}, {4, 0, "xyz\n"}});
+  ScopedHook readHook(g_read, [&](int fd, void* b, size_t n) { return reader(fd, b, n); });
+
+  EXPECT_EQ(4, rasRead(9, buf, 16));
+
+  EXPECT_EQ(2, readHook.calls);
+  ExpectRequests(reader.requests, {{0, 15}, {0, 15}});
+  EXPECT_EQ("xyz\n", std::string(buf, 4));
+  EXPECT_EQ('\0', buf[4]);
+  EXPECT_EQ(kSentinel, buf[5]);
+  EXPECT_EQ('\n', backing[7]);
+}
+
+// Arm: ret == 0 breaks out of the loop and the partial message is still
+// terminated at exactly `done`.
+TEST_F(RasClientMicrotest, RasRead_EofBeforeNewline_BreaksAndTerminatesAtBytesRead) {
+  char backing[40];
+  memset(backing, kSentinel, sizeof(backing));
+  char* buf = backing + 4;
+  RecordingReader reader(buf, {{4, 0, "part"}, {0, 0, ""}});
+  ScopedHook readHook(g_read, [&](int fd, void* b, size_t n) { return reader(fd, b, n); });
+
+  EXPECT_EQ(4, rasRead(9, buf, 32));
+
+  EXPECT_EQ(2, readHook.calls);
+  ExpectRequests(reader.requests, {{0, 31}, {4, 27}});
+  EXPECT_EQ("part", std::string(buf, 4));
+  EXPECT_EQ('\0', buf[4]);
+  EXPECT_EQ(kSentinel, buf[5]);
+}
+
+// Arm: untilNewline == false (how getNCCLStatus calls this) does exactly one
+// read and returns whatever arrived, newline or not.
+TEST_F(RasClientMicrotest, RasRead_NotUntilNewline_NoNewlineInData_DoesExactlyOneRead) {
+  char backing[40];
+  memset(backing, kSentinel, sizeof(backing));
+  char* buf = backing + 4;
+  RecordingReader reader(buf, {{4, 0, "wxyz"}, {5, 0, "never"}});
+  ScopedHook readHook(g_read, [&](int fd, void* b, size_t n) { return reader(fd, b, n); });
+
+  EXPECT_EQ(4, rasRead(9, buf, 16, /*untilNewline=*/false));
+
+  EXPECT_EQ(1, readHook.calls);
+  ExpectRequests(reader.requests, {{0, 15}});
+  EXPECT_EQ("wxyz", std::string(buf, 4));
+  EXPECT_EQ('\0', buf[4]);
+  EXPECT_EQ(kSentinel, buf[5]);
+}
+
+// Arm: `continue` on EINTR with untilNewline == false falls straight out of the
+// do-while, so a mere signal is reported to the caller as a clean zero-byte
+// read -- which getNCCLStatus treats as EOF and stops the stream on.
+TEST_F(RasClientMicrotest, RasRead_NotUntilNewlineEintr_ReturnsZeroAndTerminatesEmpty) {
+  char backing[40];
+  memset(backing, kSentinel, sizeof(backing));
+  char* buf = backing + 4;
+  RecordingReader reader(buf, {{-1, EINTR, ""}, {4, 0, "late"}});
+  ScopedHook readHook(g_read, [&](int fd, void* b, size_t n) { return reader(fd, b, n); });
+
+  EXPECT_EQ(0, rasRead(9, buf, 16, /*untilNewline=*/false));
+
+  EXPECT_EQ(1, readHook.calls);
+  ExpectRequests(reader.requests, {{0, 15}});
+  EXPECT_EQ('\0', buf[0]);
+  EXPECT_EQ(kSentinel, buf[1]);
+}
+
+// Arm: the `count - 1 - done` reservation. A full buffer holds count-1 payload
+// bytes; the next request is zero-length, which reads as EOF, so the '\0' lands
+// at count-1 and never one past the caller's buffer.
+TEST_F(RasClientMicrotest, RasRead_PayloadFillsBuffer_ReservesNulAndNeverWritesPastCount) {
+  char backing[40];
+  memset(backing, kSentinel, sizeof(backing));
+  char* buf = backing + 4;
+  RecordingReader reader(buf, {{10, 0, "ABCDEFGHIJ"}});
+  ScopedHook readHook(g_read, [&](int fd, void* b, size_t n) { return reader(fd, b, n); });
+
+  EXPECT_EQ(7, rasRead(9, buf, 8));
+
+  EXPECT_EQ(2, readHook.calls);
+  ExpectRequests(reader.requests, {{0, 7}, {7, 0}});
+  EXPECT_EQ("ABCDEFG", std::string(buf, 7));
+  EXPECT_EQ('\0', buf[7]);
+  EXPECT_EQ(kSentinel, buf[8]);
+}
+
+// Arm: count == 0 underflows `count - 1 - done` to SIZE_MAX. Unreachable from
+// client.cc (every caller passes sizeof of a real array); pinned so a future
+// caller that can pass 0 shows up as a changed expectation here.
+TEST_F(RasClientMicrotest, RasRead_ZeroCount_UnderflowsRequestToSizeMax) {
+  char backing[40];
+  memset(backing, kSentinel, sizeof(backing));
+  char* buf = backing + 4;
+  RecordingReader reader(buf, {});
+  ScopedHook readHook(g_read, [&](int fd, void* b, size_t n) { return reader(fd, b, n); });
+
+  EXPECT_EQ(0, rasRead(9, buf, 0));
+
+  EXPECT_EQ(1, readHook.calls);
+  ExpectRequests(reader.requests, {{0, static_cast<size_t>(-1)}});
+  EXPECT_EQ('\0', buf[0]);
+  EXPECT_EQ(kSentinel, buf[1]);
+}
