@@ -17,6 +17,8 @@ set(RJ_OBJECT_LIBS
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_timing_clock
+    rocjitsu_timing
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
@@ -454,6 +456,7 @@ add_executable(
     patch/probe_clobber_test.cpp
     patch/error_report_test.cpp
     dbi/dbi_spill_sim_test.cpp
+    timing/timing_model_test.cpp
     code/code_object_target_id_test.cpp
     code/amdgpu_code_object_test.cpp
     code/relocation_function_table_test.cpp

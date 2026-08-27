@@ -4,6 +4,8 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 
+#include "rocjitsu/vm/timing/simulated_clock.h"
+
 namespace {
 
 using namespace rocjitsu;
@@ -172,25 +174,32 @@ TEST(Gfx1250SimulationTest, SBitreplicateB64B32DuplicatesEachSourceBit) {
   EXPECT_EQ(wf->sgpr64(4), 0xC000000000000003ULL);
 }
 
-TEST(Gfx1250SimulationTest, SGetShaderCyclesU64ReadsSimulationTime) {
+// The engine's tick counts host-side scheduling steps and is not a clock the
+// guest can see; these instructions report SimulatedClock, which is also what
+// the HIP event timestamps and the KFD clock counters report. Bracketing the
+// dispatch with two reads of that clock pins the value to the right domain
+// without assuming anything about its rate.
+TEST(Gfx1250SimulationTest, SGetShaderCyclesU64ReadsTheGuestShaderClock) {
   const uint32_t code[] = {
       0xBE840600u, // s_get_shader_cycles_u64 s[4:5]
       S_ENDPGM_GFX12,
   };
 
   Gfx1250Sim sim;
-  sim.engine->schedule_event_async(sim.cp()->doorbell_event(), 17);
-  ASSERT_TRUE(sim.engine->step());
-  ASSERT_EQ(sim.engine->global_time(), 17u);
-
+  const uint64_t before = amdgpu::SimulatedClock::instance().shader_cycles();
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  const uint64_t after = amdgpu::SimulatedClock::instance().shader_cycles();
   ASSERT_NE(wf, nullptr);
   const auto observed_time = wf->sgpr64(4);
-  EXPECT_GE(observed_time, 17u);
-  EXPECT_LE(observed_time, sim.engine->global_time());
+  EXPECT_GE(observed_time, before);
+  EXPECT_LE(observed_time, after);
 }
 
-TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
+// MSG_RTN_GET_REALTIME is how gfx11+ lowers readsteadycounter, so it must
+// report the constant-rate wall clock rather than shader cycles. The two run at
+// different rates, so the upper bound below is what catches a regression to the
+// wrong counter.
+TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsWallClockAndB32UsesPlaceholder) {
   const uint32_t code[] = {
       0xBE844D83u, // s_sendmsg_rtn_b64 s[4:5], sendmsg(MSG_RTN_GET_REALTIME)
       0xBE864C80u, // s_sendmsg_rtn_b32 s6, sendmsg(MSG_RTN_GET_DOORBELL)
@@ -198,15 +207,13 @@ TEST(Gfx1250SimulationTest, SSendmsgRtnB64ReadsRealtimeAndB32UsesPlaceholder) {
   };
 
   Gfx1250Sim sim;
-  sim.engine->schedule_event_async(sim.cp()->doorbell_event(), 23);
-  ASSERT_TRUE(sim.engine->step());
-  ASSERT_EQ(sim.engine->global_time(), 23u);
-
+  const uint64_t before = amdgpu::SimulatedClock::instance().wall_clock_ticks();
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  const uint64_t after = amdgpu::SimulatedClock::instance().wall_clock_ticks();
   ASSERT_NE(wf, nullptr);
   const auto observed_time = wf->sgpr64(4);
-  EXPECT_GE(observed_time, 23u);
-  EXPECT_LE(observed_time, sim.engine->global_time());
+  EXPECT_GE(observed_time, before);
+  EXPECT_LE(observed_time, after);
   EXPECT_EQ(wf->sgpr(6), 0u);
 }
 
