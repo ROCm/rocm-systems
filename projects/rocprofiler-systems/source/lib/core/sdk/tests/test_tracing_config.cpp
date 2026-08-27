@@ -31,13 +31,9 @@ using mock_backend = ::rocprofsys::mock::rocprofiler_sdk::wrapper;
 // mock_backend, whose get_version()/get_callback_tracing_names()/
 // get_buffer_tracing_names() all forward to g_mock_wrapper.
 //
-// Each distinct Tag gives tracing_config<tagged_backend<Tag>>::get_version() its own
-// static _version cache, so tests that verify first-call behaviour don't
-// interfere with one another.
-
-// Each enumerator maps to a distinct Backend type, giving
-// tracing_config<tagged_backend<N>> its own static caches (get_version cache,
-// operation option maps, tracing info tables).
+// Each enumerator maps to a distinct tagged_backend<Tag> type (see
+// cached_backend_methods below), so tests that verify first-call caching behaviour
+// don't interfere with one another.
 enum backend_tag : int
 {
     version_fields                              = 1,

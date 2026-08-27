@@ -14,9 +14,17 @@ namespace rocprofsys::policies::rocprofiler_sdk
 
 /// @brief Structural requirements for the SdkBackend parameter of
 /// rocprofsys::rocprofiler_sdk::tracing_config. Only covers members tracing_config
-/// relies on unconditionally; extension points gated behind an SDK version check
-/// (RCCL, OMPT, KFD, ...) are probed with `if constexpr` at the call site instead of
-/// being required here, since they are not present in every supported SDK version.
+/// relies on unconditionally; version-gated extension points (OMPT, ROCDECODE,
+/// ROCJPEG, ROCSHMEM, HIPFILE, KFD_*, MEMORY_ALLOCATION, PAGE_MIGRATION) are
+/// accessed directly at the call site behind an `if constexpr(T::compile_time_version
+/// >= ...)` check, not a `requires` probe — this concept does NOT verify that T
+/// actually defines those members for the version it declares. Each SdkBackend
+/// implementation must keep `compile_time_version` and its member set in lockstep
+/// itself; the production backend (backends/rocprofiler_sdk/backend.hpp) does this by
+/// deriving both from the same ROCPROFILER_VERSION preprocessor macro. A backend that
+/// breaks this contract still satisfies this concept, but fails with a hard compile
+/// error the first time tracing_config instantiates the branch using the missing
+/// member, rather than a concept-not-satisfied diagnostic at the call site.
 template <typename T>
 concept tracing_config_backend =
     requires(std::uint32_t* major, std::uint32_t* minor, std::uint32_t* patch) {
