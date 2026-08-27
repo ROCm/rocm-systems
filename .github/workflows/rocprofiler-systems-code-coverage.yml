@@ -59,7 +59,7 @@ jobs:
           apt-get remove -y --purge 'libopenmpi-dev' 'libopenmpi3' 'openmpi-bin' 'openmpi-common' &&
           apt-get autoremove -y --purge &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev libtbb-dev \
+          apt-get install -y libomp-dev \
             libdw-dev libdwarf-dev libelf-dev libiberty-dev \
             libmpich-dev mpich &&
           apt-get autoclean

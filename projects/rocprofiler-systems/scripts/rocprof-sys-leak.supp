@@ -1,7 +1,5 @@
 leak:Dyninst::
 leak:dyninst
-leak:tbb::
-leak:libtbb
 leak:boost::
 leak:libdw
 leak:libamd_comgr

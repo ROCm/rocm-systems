@@ -125,7 +125,7 @@ get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
     if(_scopes.count(sf::BINARY_FILTER) > 0)
         _filters.emplace_back(sf{ sf::FILTER_EXCLUDE, sf::BINARY_FILTER,
                                   "lib(rocprof-sys[-\\.]|dyninst|"
-                                  "tbbmalloc|gotcha\\.|unwind\\.so\\.99)" });
+                                  "gotcha\\.|unwind\\.so\\.99)" });
 
     // in function mode, it generally doesn't help to experiment on main function since
     // telling the user to "make the main function" faster is literally useless since it

@@ -74,7 +74,6 @@ jobs:
         -DROCPROFSYS_BUILD_EXAMPLES=ON
         -DROCPROFSYS_USE_PYTHON=ON
         -DROCPROFSYS_BUILD_DYNINST=ON
-        -DROCPROFSYS_BUILD_TBB=ON
         -DROCPROFSYS_BUILD_ELFUTILS=ON
         -DROCPROFSYS_BUILD_LIBIBERTY=ON
         -DROCPROFSYS_MAX_THREADS=64
@@ -369,7 +368,7 @@ jobs:
 
   # ──────────────────────────────────────────────────────────────────────────
   # System-dependency builds: validate that system-provided libs substitute
-  # for the bundled ones (BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF).
+  # for the bundled ones (BUILD_{ELFUTILS,LIBIBERTY}=OFF).
   # Matrix entries are filtered to the selected distro group.
   # ──────────────────────────────────────────────────────────────────────────
   system-deps:
@@ -403,7 +402,6 @@ jobs:
         -DROCPROFSYS_BUILD_EXAMPLES=ON
         -DROCPROFSYS_USE_PYTHON=ON
         -DROCPROFSYS_BUILD_DYNINST=ON
-        -DROCPROFSYS_BUILD_TBB=OFF
         -DROCPROFSYS_BUILD_ELFUTILS=OFF
         -DROCPROFSYS_BUILD_LIBIBERTY=OFF
         -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=ON
@@ -469,7 +467,6 @@ jobs:
           max_attempts: 5
           shell: bash
           command: |
-            dnf install -y --enablerepo=crb tbb-devel
             dnf install -y binutils-devel
             dnf clean all
 
@@ -496,7 +493,7 @@ jobs:
           git config --global --add safe.directory ${PWD}
           echo "CMake: $(cmake --version | head -n 1)"
           echo "Compiler: $(${{ matrix.compiler }} --version | head -n 1)"
-          echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_{TBB,ELFUTILS,LIBIBERTY}=OFF)"
+          echo "Testing build with SYSTEM dependencies (ROCPROFSYS_BUILD_{ELFUTILS,LIBIBERTY}=OFF)"
           python3 ./scripts/run-ci.py --stage generate \
             --name "${{ github.repository_owner }}-${{ github.ref_name }}-${{ matrix.cdash_suffix }}" \
             --build-jobs $(nproc) \
