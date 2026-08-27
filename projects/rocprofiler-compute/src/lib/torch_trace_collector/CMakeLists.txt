@@ -149,7 +149,6 @@ set(_ttc_headers
     leaf_context.h
     marker_stack.h
     process_state.h
-    record_function_callback.h
     record_function_installation.h
     snapshot_store.h
     stack_entry.h
@@ -157,7 +156,13 @@ set(_ttc_headers
     user_scope.h
     wire_format.h
 )
-add_library(torch-trace-collector STATIC torch_trace_collector.cpp ${_ttc_headers})
+add_library(
+    torch-trace-collector
+    STATIC
+    torch_trace_collector.cpp
+    snapshot_store.cpp
+    ${_ttc_headers}
+)
 
 target_include_directories(
     torch-trace-collector

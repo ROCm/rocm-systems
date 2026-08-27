@@ -14,6 +14,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
+#include <ATen/ThreadLocalState.h>
+#include <ATen/record_function.h>
 #include <gtest/gtest.h>
 
 extern "C"
@@ -25,7 +27,6 @@ extern "C"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -35,7 +36,7 @@ using namespace torch_trace_collector::detail;
 namespace
 {
 
-// Shorthands for the process-wide state these tests drive directly.
+// Process-wide state used by these tests.
 Stats& stats()
 {
     return process_state().stats;
@@ -493,40 +494,59 @@ TEST_F(TorchTraceCollectorTest, InstallAfterUninstallReinstalls)
 
 TEST_F(TorchTraceCollectorTest, EmptyParentChainIsNoOp)
 {
+    install();
     ASSERT_TRUE(thread_state().stack.empty());
-    EXPECT_EQ(apply_userscope_overlay(), 0u);
+
+    {
+        at::RecordFunction rec(at::RecordScope::FUNCTION);
+        rec.before("probe");
+    }
+
     EXPECT_TRUE(thread_state().stack.empty());
     EXPECT_EQ(stats().user_scope_inherits.load(), 0u);
 }
 
 TEST_F(TorchTraceCollectorTest, CopiesParentChain)
 {
-    auto info = std::make_shared<RoctxUserScopeChain>(
-        std::vector<StackEntry>{{"P1", "c1"}, {"P2", "c2"}});
-    c10::DebugInfoGuard guard(kRoctxUserScopeKind, info);
+    install();
+    push_user_scope("P1", "c1", "gtest");
+    push_user_scope("P2", "c2", "gtest");
 
-    ASSERT_TRUE(thread_state().stack.empty());
-    EXPECT_EQ(apply_userscope_overlay(), 2u);
-    ASSERT_EQ(thread_state().stack.size(), 2u);
-    EXPECT_EQ(thread_state().stack[0].marker, "P1");
-    EXPECT_EQ(thread_state().stack[0].context, "c1");
-    EXPECT_EQ(thread_state().stack[1].marker, "P2");
-    EXPECT_EQ(thread_state().stack[1].context, "c2");
-    EXPECT_EQ(stats().user_scope_inherits.load(), 1u);
-}
+    const at::ThreadLocalState tls;
+    std::uint64_t              inherits = 0;
+    std::vector<std::string>   recorded;
+    bool                       worker_stack_was_empty = false;
 
-TEST_F(TorchTraceCollectorTest, DedupesIdenticalPrefix)
-{
-    auto info = std::make_shared<RoctxUserScopeChain>(
-        std::vector<StackEntry>{{"P1", "c1"}, {"P2", "c2"}});
-    c10::DebugInfoGuard guard(kRoctxUserScopeKind, info);
+    std::thread worker(
+        [&]
+        {
+            at::ThreadLocalStateGuard guard(tls);
+            worker_stack_was_empty = thread_state().stack.empty();
+            roctx_range_intercept::start_recording();
+            {
+                at::RecordFunction rec(at::RecordScope::FUNCTION);
+                rec.before("probe");
+            }
+            recorded = roctx_range_intercept::stop_recording();
+            inherits = stats().user_scope_inherits.load();
+        });
+    worker.join();
 
-    thread_state().stack.push_back(StackEntry{"P1", "c1"});
-    thread_state().stack.push_back(StackEntry{"P2", "c2"});
+    pop_user_scope();
+    pop_user_scope();
 
-    EXPECT_EQ(apply_userscope_overlay(), 0u);
-    EXPECT_EQ(thread_state().stack.size(), 2u);
-    EXPECT_EQ(stats().user_scope_inherits.load(), 0u);
+    EXPECT_TRUE(worker_stack_was_empty);
+    EXPECT_EQ(inherits, 1u);
+    bool saw_overlay = false;
+    for (const auto& message : recorded)
+    {
+        if (message.rfind("P1/P2/probe", 0) == 0)
+        {
+            saw_overlay = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(saw_overlay);
 }
 
 TEST_F(TorchTraceCollectorRealOpsTest, ForwardBackwardCountersStayBalanced)

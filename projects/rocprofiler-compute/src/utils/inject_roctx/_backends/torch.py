@@ -1,14 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ROCTX instrumentation backend for PyTorch.
+"""ROCTX instrumentation for PyTorch.
 
-ATen operators are traced with ``torch_trace_collector`` when it is
-installed, and with ``TorchDispatchMode`` otherwise. The process
-exits if no collector matches this PyTorch version or the collector
-fails to load. Inductor static-launcher kernels are recorded here.
-This module is imported as ``utils.inject_roctx._backends.torch``
-and does not modify the ``torch`` package.
+ATen operators use torch_trace_collector when it is installed, otherwise
+TorchDispatchMode. No collector for the workload PyTorch version, or a
+failure to load the collector, terminates the process.
 """
 
 import importlib.util
@@ -264,7 +261,6 @@ def _initialize_c_tier() -> bool:
         module = _STATE.load_torch_trace_collector()
     except UnsupportedTorchVersionError as exc:
         console_error("ml api trace", str(exc))
-        module = None
     except Exception as exc:
         console_warning(
             "ml api trace",

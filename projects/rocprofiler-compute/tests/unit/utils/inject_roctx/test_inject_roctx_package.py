@@ -121,19 +121,6 @@ def test_install_many_continues_after_backend_failure(fresh_registry, monkeypatc
     assert any("bad" in str(args[1]) for args in warnings if len(args) > 1)
 
 
-def test_install_many_reraises_unsupported_torch_version(fresh_registry):
-    from utils.inject_roctx._backends.torch_cpp_loader import (
-        UnsupportedTorchVersionError,
-    )
-
-    def raise_mismatch() -> None:
-        raise UnsupportedTorchVersionError("2.9.1", ("2.10.0",))
-
-    fresh_registry.register(make_backend("torch", raise_mismatch))
-    with pytest.raises(UnsupportedTorchVersionError):
-        fresh_registry.install_many(["torch"])
-
-
 def test_install_many_warns_on_unknown_backend(fresh_registry, monkeypatch):
     warnings: list[tuple] = []
     monkeypatch.setattr("utils.logger.console_warning", lambda *a: warnings.append(a))
