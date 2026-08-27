@@ -1540,6 +1540,91 @@ def render_html_nodes(nodes: Sequence[Node]) -> list[str]:
     return out
 
 
+def notes_html(text: str) -> str:
+    """Render the narrative's markdown subset: headings, tables, lists, prose.
+
+    Deliberately small. The alternative is a markdown dependency for the one
+    part of the report a person wrote, and a report that will not build without
+    a library is a report that stops being generated.
+    """
+    out: list[str] = []
+    rows: list[str] = []
+
+    def flush_table() -> None:
+        if not rows:
+            return
+        cells = [
+            [cell.strip() for cell in row.strip().strip("|").split("|")] for row in rows
+        ]
+        body = [row for row in cells[1:] if not all(set(c) <= set(":- ") for c in row)]
+        out.append(
+            "<table><thead><tr>"
+            + "".join(f"<th>{inline(c)}</th>" for c in cells[0])
+            + "</tr></thead><tbody>"
+            + "".join(
+                "<tr>" + "".join(f"<td>{inline(c)}</td>" for c in row) + "</tr>"
+                for row in body
+            )
+            + "</tbody></table>"
+        )
+        rows.clear()
+
+    paragraph: list[str] = []
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            out.append("<p>" + inline(" ".join(paragraph)) + "</p>")
+            paragraph.clear()
+
+    items: list[str] = []
+
+    def flush_list() -> None:
+        if items:
+            out.append(
+                "<ul>" + "".join(f"<li>{inline(i)}</li>" for i in items) + "</ul>"
+            )
+            items.clear()
+
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            flush_paragraph()
+            flush_list()
+            rows.append(stripped)
+            continue
+        flush_table()
+        if not stripped:
+            flush_paragraph()
+            flush_list()
+        elif stripped.startswith("#"):
+            flush_paragraph()
+            flush_list()
+            level = len(stripped) - len(stripped.lstrip("#"))
+            out.append(f"<h{level}>{inline(stripped.lstrip('#').strip())}</h{level}>")
+        elif stripped.startswith("- "):
+            flush_paragraph()
+            items.append(stripped[2:])
+        elif items:
+            items[-1] += " " + stripped
+        else:
+            paragraph.append(stripped)
+    flush_table()
+    flush_paragraph()
+    flush_list()
+    return "\n".join(out)
+
+
+def inline(text: str) -> str:
+    """Escape, then re-apply the inline markers the narrative uses."""
+    import re as _re
+
+    escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    escaped = _re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    escaped = _re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = _re.sub(r"(?<![*\w])\*([^*]+)\*(?![*\w])", r"<em>\1</em>", escaped)
+    return escaped
+
+
 def render_html(title: str, subtitle: str, nodes: Sequence[Node]) -> str:
     headings = [n[2] for n in nodes if n[0] == "h" and n[1] == 2]
     nav = "".join(
@@ -1603,6 +1688,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--out", metavar="DIR", help="directory the report is written to"
     )
     parser.add_argument("--title", default="rocjitsu timing model report")
+    parser.add_argument(
+        "--notes",
+        default="",
+        help=(
+            "markdown file appended to both outputs. The generated tables say "
+            "what the numbers are; a report also has to say what they mean, and "
+            "keeping that in a file the generator reads is what stops it being "
+            "hand-patched onto one output and lost from the other."
+        ),
+    )
     parser.add_argument(
         "--basename",
         default="meter-report",
@@ -1689,17 +1784,27 @@ def main(argv: list[str] | None = None) -> int:
         f"log2(model / measured)"
     )
 
+    notes = ""
+    if args.notes:
+        with open(args.notes, encoding="utf-8") as handle:
+            notes = handle.read()
+
     os.makedirs(args.out, exist_ok=True)
     written: list[str] = []
     if args.formats in ("md", "both"):
         path = os.path.join(args.out, args.basename + ".md")
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(render_markdown(args.title, nodes))
+            if notes:
+                handle.write("\n" + notes.rstrip() + "\n")
         written.append(path)
     if args.formats in ("html", "both"):
         path = os.path.join(args.out, args.basename + ".html")
+        page = render_html(args.title, subtitle, nodes)
+        if notes:
+            page = page.replace("</main>", notes_html(notes) + "\n</main>", 1)
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write(render_html(args.title, subtitle, nodes))
+            handle.write(page)
         written.append(path)
     for path in written:
         print(path)
