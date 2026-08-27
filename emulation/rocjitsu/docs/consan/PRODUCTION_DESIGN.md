@@ -3639,6 +3639,27 @@ analysis completed.
   device tests across the five supported targets pass in 76.24 seconds. E2E
   validation remains outside this work.
 
+### Slice 5P: delete uncalled hook diagnostic formatters
+
+- **Narrow diagnostic ownership:** The hook retains only formatting functions
+  that contribute to an emitted diagnostic or report. Stable shared names for
+  typed ConSan vocabulary remain in the core, while hook-local names remain
+  only where the hook actually presents hook-owned policy or mechanism state.
+- **Completed deletion:** Seven hook-local functions with no callers are gone:
+  the preflight-action, perturbation-kind, perturbation-edge,
+  synchronization-event-kind, MOI-candidate-source, LDS-access-kind, and flat
+  address-space-hint formatters. Four of these were complete enum switches;
+  three merely forwarded to already-tested shared vocabulary. No diagnostic,
+  configuration, test seam, or external API used them.
+- **Deletion result:** Production source is 64 lines smaller. No replacement
+  helper, compatibility adapter, or test-only observation was added. Existing
+  shared-vocabulary tests continue to cover the names that are actually
+  presented by live diagnostics.
+- **Completed checked-in gate:** The complete host gate passes 1,509 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 67.44
+  seconds. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -104,20 +104,6 @@ constexpr uint32_t kMoiRecordReplayStandardRuntimeStride = 65536u;
 // bounded workloads statistically likely to publish no evidence at all.
 constexpr uint32_t kMoiSampledStandardRuntimeStride = 256u;
 
-[[nodiscard]] inline const char *preflight_action_name(rocjitsu::ConSanPreflightAction action) {
-  switch (action) {
-  case rocjitsu::ConSanPreflightAction::NotRun:
-    return "not-run";
-  case rocjitsu::ConSanPreflightAction::Candidate:
-    return "candidate";
-  case rocjitsu::ConSanPreflightAction::Skip:
-    return "skip";
-  case rocjitsu::ConSanPreflightAction::Reject:
-    return "reject";
-  }
-  return "unknown";
-}
-
 [[nodiscard]] inline const char *patch_kind_name(rocjitsu::ConSanPatchKind kind) {
   switch (kind) {
   case rocjitsu::ConSanPatchKind::InlineNopRewrite:
@@ -223,11 +209,6 @@ constexpr uint32_t kMoiSampledStandardRuntimeStride = 256u;
 }
 
 [[nodiscard]] inline const char *
-moi_candidate_source_name(rocjitsu::ConSanMoiCandidateSource source) {
-  return rocjitsu::consan_moi_candidate_source_name(source);
-}
-
-[[nodiscard]] inline const char *
 moi_resource_site_kind_name(rocjitsu::ConSanResourceSiteKind site_kind) {
   return rocjitsu::consan_resource_site_kind_name(site_kind);
 }
@@ -299,28 +280,6 @@ ordinary_memory_support_reason_name(rocjitsu::ConSanOrdinaryMemorySupportReason 
   return "unknown";
 }
 
-[[nodiscard]] inline const char *perturbation_kind_name(rocjitsu::ConSanPerturbationKind kind) {
-  switch (kind) {
-  case rocjitsu::ConSanPerturbationKind::None:
-    return "none";
-  case rocjitsu::ConSanPerturbationKind::Barrier:
-    return "barrier";
-  case rocjitsu::ConSanPerturbationKind::Atomic:
-    return "atomic";
-  }
-  return "unknown";
-}
-
-[[nodiscard]] inline const char *perturbation_edge_name(rocjitsu::ConSanPerturbationEdge edge) {
-  switch (edge) {
-  case rocjitsu::ConSanPerturbationEdge::Release:
-    return "release";
-  case rocjitsu::ConSanPerturbationEdge::Acquire:
-    return "acquire";
-  }
-  return "unknown";
-}
-
 [[nodiscard]] inline const char *
 barrier_move_direction_name(rocjitsu::ConSanBarrierMoveDirection direction) {
   switch (direction) {
@@ -343,20 +302,6 @@ barrier_move_cfg_contract_name(rocjitsu::ConSanBarrierMoveCfgContract contract) 
     return "completing-structured-diamond";
   case rocjitsu::ConSanBarrierMoveCfgContract::DestructiveStructuredExecDiamond:
     return "destructive-structured-exec-diamond";
-  }
-  return "unknown";
-}
-
-[[nodiscard]] inline const char *sync_event_kind_name(rocjitsu::ConSanSyncEventKind kind) {
-  switch (kind) {
-  case rocjitsu::ConSanSyncEventKind::Barrier:
-    return "barrier";
-  case rocjitsu::ConSanSyncEventKind::Fence:
-    return "fence";
-  case rocjitsu::ConSanSyncEventKind::Atomic:
-    return "atomic";
-  case rocjitsu::ConSanSyncEventKind::OrdinaryMemory:
-    return "ordinary-memory";
   }
   return "unknown";
 }
@@ -600,15 +545,6 @@ flat_provenance_mode_name(rocjitsu::ConSanFlatProvenanceMode mode) {
 
 [[nodiscard]] inline const char *hook_policy_name(HookPolicy policy) {
   return policy == HookPolicy::Default ? "default" : "strict";
-}
-
-[[nodiscard]] inline const char *lds_access_kind_name(rocjitsu::ConSanLdsAccessKind kind) {
-  return rocjitsu::consan_lds_access_kind_name(kind);
-}
-
-[[nodiscard]] inline const char *
-flat_address_space_hint_name(rocjitsu::ConSanFlatAddressSpaceHint hint) {
-  return rocjitsu::consan_flat_address_space_hint_name(hint);
 }
 
 struct AutoMoiReportSummary {
