@@ -235,7 +235,7 @@ TEST(ConSan, DisabledModeDoesNotParseCodeObject) {
   options.flavor = ConSanFlavor::None;
   options.delay_nops = 32;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified());
@@ -420,7 +420,7 @@ TEST(ConSan, EnabledModeRejectsInvalidCodeObject) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified());
@@ -457,7 +457,7 @@ TEST(ConSan, RejectsTargetsOutsideDocumentedSupport) {
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
     EXPECT_TRUE(result.program_inventory.code_object_parsed());
@@ -500,7 +500,7 @@ TEST(ConSan, StubRejectsEmptyCodeObject) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
   EXPECT_FALSE(result.modified());
@@ -583,7 +583,7 @@ TEST(ConSan, MalformedCodeObjectsNeverProduceReplacementBytes) {
   for (const auto &profile : all_consan_transform_profiles()) {
     for (const auto &[name, bytes] : cases) {
       SCOPED_TRACE(::testing::Message() << profile.name << ": " << name);
-      const ConSanResult result = try_patch_consan(bytes, profile.options);
+      const ConSanResult result = test_lower_consan(bytes, profile.options);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -666,7 +666,7 @@ TEST(ConSan, RejectsCodeObjectWithMalformedKernelMetadataNote) {
 
     for (const auto &profile : all_consan_transform_profiles()) {
       SCOPED_TRACE(::testing::Message() << damage.description << ": " << profile.name);
-      const ConSanResult result = try_patch_consan(damage.bytes, profile.options);
+      const ConSanResult result = test_lower_consan(damage.bytes, profile.options);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
       EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -712,7 +712,7 @@ TEST(ConSan, ReportsMultipleMalformedKernelMetadataNotes) {
 
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(result.program_inventory.kernel_metadata_trustworthy());
   EXPECT_EQ(result.program_inventory.malformed_kernel_metadata_note_count(), 2u);
@@ -732,7 +732,7 @@ TEST(ConSan, InfersZeroSizedKernelFunctionThroughTextEnd) {
 
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -757,7 +757,7 @@ TEST(ConSan, UsesExplicitAliasedFunctionSizeForZeroSizedKernelSymbol) {
 
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -821,7 +821,7 @@ TEST(ConSan, SkipsEmptyTargetSelectionKernelAtTextEnd) {
 
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 2u);
@@ -860,7 +860,7 @@ TEST(ConSan, ExcessiveAllocatedSectionAlignmentCannotDriveTextGrowthAllocation) 
   for (const auto &profile : all_consan_replacement_profiles()) {
     for (const auto &[name, bytes] : cases) {
       SCOPED_TRACE(::testing::Message() << profile.name << ": " << name);
-      const ConSanResult result = try_patch_consan(bytes, profile.options);
+      const ConSanResult result = test_lower_consan(bytes, profile.options);
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_FALSE(result.modified());
       EXPECT_NE(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -880,7 +880,7 @@ TEST(ConSan, BoundedElfMutationsOnlyProduceValidatedReplacementOrOriginal) {
   const std::vector<uint8_t> valid = make_rdna4_lds_code_object(text_words);
   auto expect_transactional_result = [&](std::span<const uint8_t> input,
                                          const ConSanTransformProfile &profile) {
-    const ConSanResult result = try_patch_consan(input, profile.options);
+    const ConSanResult result = test_lower_consan(input, profile.options);
     EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(input));
     if (result.modified()) {
       EXPECT_TRUE(result.modified());
@@ -921,7 +921,7 @@ TEST(ConSan, FinalStructuralValidationRediscoversReplacementIdentity) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   for (const auto &profile : all_consan_replacement_profiles()) {
     SCOPED_TRACE(profile.name);
-    const ConSanResult valid = try_patch_consan(bytes, profile.options);
+    const ConSanResult valid = test_lower_consan(bytes, profile.options);
     ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
     EXPECT_TRUE(validate_consan_modified_elf(bytes, valid).empty());

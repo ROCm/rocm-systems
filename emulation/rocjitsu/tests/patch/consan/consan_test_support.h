@@ -4,7 +4,6 @@
 #pragma once
 
 #include "rocjitsu/code/patch/consan/consan.h"
-#include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -49,6 +48,15 @@ RJ_DIAGNOSTIC_POP
 #endif
 
 namespace rocjitsu {
+
+/// Explicitly test-only access to compatibility-lowering working state. No
+/// production header declares this symbol.
+[[nodiscard]] ConSanResult complete_consan_lowering(std::span<const uint8_t> code_object_bytes,
+                                                    const ConSanOptions &options);
+[[nodiscard]] inline ConSanResult test_lower_consan(std::span<const uint8_t> code_object_bytes,
+                                                    const ConSanOptions &options) {
+  return complete_consan_lowering(code_object_bytes, options);
+}
 namespace {
 
 inline constexpr uint8_t kElfSymbolBindLocal = 0;
@@ -2828,7 +2836,7 @@ void expect_moi_first_light_width(uint32_t word0, uint32_t word1, uint32_t expec
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.modified());

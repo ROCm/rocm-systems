@@ -3731,8 +3731,8 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
         config->fault_load_occurrence) {
       rocjitsu::MutationRequest probe_mutation = mutation_request;
       rocjitsu::BoundRuntimeResources probe_resources = runtime_resources;
-      // Keep the configured flavor: try_patch_consan intentionally skips all
-      // ConSan planning for flavor=None, including dry-run fault planning.
+      // Keep the configured flavor so compatibility lowering performs dry-run
+      // planning; flavor=None intentionally skips every ConSan planning step.
       // The probe result is discarded, so retaining the flavor cannot install
       // instrumentation but does let the exact fault resolver identify this
       // dynamic code-object load.

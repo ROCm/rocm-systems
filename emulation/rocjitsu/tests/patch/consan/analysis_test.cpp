@@ -43,7 +43,7 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncToLdsWidthAsAnLdsWrite)
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
   const ConSanResult result =
-      try_patch_consan(make_gfx1250_code_object(words, "global_async_to_lds_inventory"), options);
+      test_lower_consan(make_gfx1250_code_object(words, "global_async_to_lds_inventory"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -100,8 +100,8 @@ TEST(ConSan, InventoriesEveryZeroOffsetGfx1250GlobalAsyncFromLdsWidthAsAnLdsRead
   };
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
-  const ConSanResult result =
-      try_patch_consan(make_gfx1250_code_object(words, "global_async_from_lds_inventory"), options);
+  const ConSanResult result = test_lower_consan(
+      make_gfx1250_code_object(words, "global_async_from_lds_inventory"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -150,7 +150,7 @@ TEST(ConSan, InventoriesCdnaDirectGlobalToLdsAsAnLdsWrite) {
   ConSanOptions options = moi_options(ConSanMoiEngine::RecordReplay);
 
   const ConSanResult result =
-      try_patch_consan(make_cdna4_lds_code_object(words, "direct_to_lds_inventory"), options);
+      test_lower_consan(make_cdna4_lds_code_object(words, "direct_to_lds_inventory"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -185,7 +185,7 @@ TEST(ConSan, InventoriesGfx1250VflatRawFields) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -214,7 +214,7 @@ TEST(ConSan, RecoversGfx1250DirectCallOwnerForSharedVflatHelper) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(
+  const ConSanResult result = test_lower_consan(
       make_gfx1250_code_object_with_local_function(kernel_words, function_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
@@ -246,7 +246,7 @@ TEST(ConSan, RecoversGfx1250WideLiteralIndirectCallOwnerForSharedVflatHelper) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(
+  const ConSanResult result = test_lower_consan(
       make_gfx1250_code_object_with_local_function(kernel_words, function_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
@@ -278,7 +278,7 @@ TEST(ConSan, Gfx1250SuperColliderPreflightAllowsInventoriedCacheOperations) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanResult result =
-      try_patch_consan(make_gfx1250_code_object(text_words, "cache_and_lds"), options);
+      test_lower_consan(make_gfx1250_code_object(text_words, "cache_and_lds"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.warnings);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -298,7 +298,7 @@ TEST(ConSan, Gfx1250PreflightIgnoresRegisterLaneBpermute) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -330,7 +330,7 @@ TEST(ConSan, Gfx1100InventoriesEveryClaimedNativeLdsWidth) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(
+  const ConSanResult result = test_lower_consan(
       make_rdna3_lds_code_object(text_words, "gfx1100_native_lds_widths"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -353,7 +353,7 @@ TEST(ConSan, CountsFlatGlobalAndScratchMemoryInstructions) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_FALSE(result.warnings.empty());
@@ -441,7 +441,7 @@ TEST(ConSan, ClassifiesObviousSharedBaseFlatLoad) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_FALSE(result.warnings.empty());
@@ -482,7 +482,7 @@ TEST(ConSan, ClassifiesExactSharedApertureWithIndependentLowHalfAsGroup) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_FALSE(result.warnings.empty());
@@ -514,7 +514,7 @@ TEST(ConSan, PropagatesSharedBaseThroughVectorAddCarryAddressConstruction) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -550,7 +550,7 @@ TEST(ConSan, ClassifiesCdnaSharedBaseAfterLowHalfVectorAdd) {
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "cdna_low_half_add")
             : make_cdna4_lds_code_object(text_words, "cdna_low_half_add");
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -580,7 +580,7 @@ TEST(ConSan, CdnaDppLowHalfArithmeticRetainsExactSharedAperture) {
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "cdna_dpp_low_half_add")
             : make_cdna4_lds_code_object(text_words, "cdna_dpp_low_half_add");
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -605,7 +605,7 @@ TEST(ConSan, PropagatesSharedPointerThroughExactScratchSlot) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -636,7 +636,7 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughExactScratchSlot) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -673,7 +673,7 @@ TEST(ConSan, PropagatesCdnaSharedPointerThroughExactScratchSlot) {
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "cdna_scratch_slot")
             : make_cdna4_lds_code_object(text_words, "cdna_scratch_slot");
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -703,7 +703,7 @@ TEST(ConSan, PropagatesGfx1250SharedHighHalfThroughVectorAddU64) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -733,7 +733,7 @@ TEST(ConSan, PropagatesSharedHighHalfThroughD128ScratchSequence) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -772,7 +772,7 @@ TEST(ConSan, PropagatesSharedHighHalfThroughD128AddressConstruction) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -800,7 +800,7 @@ TEST(ConSan, PropagatesSharedPointerThroughExactPrivateFrameSlot) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -829,7 +829,7 @@ TEST(ConSan, PropagatesSharedPointerThroughScalarLaneReservoir) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -859,7 +859,7 @@ TEST(ConSan, PropagatesGfx1250SharedPointerThroughScalarLaneReservoir) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -884,7 +884,7 @@ TEST(ConSan, InventoriesLocalFunctionFlatSharedAccesses) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -950,7 +950,7 @@ TEST(ConSan, PropagatesCdna4LaneStateThroughAccVgpr) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanResult result =
-      try_patch_consan(make_cdna4_lds_code_object(text_words, "accvgpr_lane_state"), options);
+      test_lower_consan(make_cdna4_lds_code_object(text_words, "accvgpr_lane_state"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -987,7 +987,7 @@ TEST(ConSan, RejectsCdnaDynamicLaneSelectorProvenance) {
         arch == ROCJITSU_CODE_ARCH_CDNA3
             ? make_cdna3_lds_code_object(text_words, "cdna_dynamic_lane")
             : make_cdna4_lds_code_object(text_words, "cdna_dynamic_lane");
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -1025,7 +1025,7 @@ TEST(ConSan, RejectsRdna4AndGfx1250DynamicLaneSelectorProvenance) {
         arch == ROCJITSU_CODE_ARCH_RDNA4
             ? make_rdna4_lds_code_object(text_words, "rdna4_dynamic_lane")
             : make_gfx1250_code_object(text_words, "gfx1250_dynamic_lane");
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -1069,7 +1069,7 @@ TEST(ConSan, ClearsRdna4AndGfx1250LaneProvenanceOnWideLiteralWrite) {
         arch == ROCJITSU_CODE_ARCH_RDNA4
             ? make_rdna4_lds_code_object(text_words, "rdna4_wide_lane")
             : make_gfx1250_code_object(text_words, "gfx1250_wide_lane");
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result));
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -1098,7 +1098,7 @@ TEST(ConSan, SelectsCdnaSemanticValueForVectorShift) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanResult result =
-      try_patch_consan(make_cdna4_lds_code_object(text_words, "cdna_vector_shift"), options);
+      test_lower_consan(make_cdna4_lds_code_object(text_words, "cdna_vector_shift"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -1126,7 +1126,7 @@ TEST(ConSan, SelectsCdnaSemanticValueForVectorLeftShift) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanResult result =
-      try_patch_consan(make_cdna4_lds_code_object(text_words, "cdna_vector_left_shift"), options);
+      test_lower_consan(make_cdna4_lds_code_object(text_words, "cdna_vector_left_shift"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -1167,7 +1167,7 @@ TEST(ConSan, PropagatesCdna4AccVgprPointerAcrossHelperCall) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(
+  const ConSanResult result = test_lower_consan(
       make_cdna4_code_object_with_local_function(kernel_words, function_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
@@ -1239,7 +1239,7 @@ TEST(ConSan, RelaysCdna4SharedPointerThroughPrivateHelperFrame) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
@@ -1261,7 +1261,7 @@ TEST(ConSan, CountsRdna4LdsAndSynchronizationInstructions) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty());
@@ -1463,7 +1463,7 @@ TEST(ConSan, RetainsTypedIdentityForEverySupportedTarget) {
   for (const TargetCase &target_case : cases) {
     SCOPED_TRACE(rj_code_target_name(target_case.target));
     EXPECT_EQ(consan_arch_for_target(target_case.target), target_case.arch);
-    const ConSanResult result = try_patch_consan(target_case.bytes, options);
+    const ConSanResult result = test_lower_consan(target_case.bytes, options);
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     EXPECT_TRUE(result.program_inventory.code_object_parsed());
     EXPECT_EQ(result.program_inventory.target(), target_case.target);
@@ -1491,7 +1491,7 @@ TEST(ConSan, CountsCdna4LdsAccessesFromNativeInstructionShapes) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.target(), ROCJITSU_CODE_TARGET_GFX950);
@@ -1553,7 +1553,7 @@ TEST(ConSan, InventoriesCdna4HistogramLdsAtomics) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(
+  const ConSanResult result = test_lower_consan(
       make_cdna4_lds_code_object(text_words, "cdna4_histogram_lds_atomics"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
@@ -1601,7 +1601,7 @@ TEST(ConSan, InventoriesCdna4FlatRawFieldsAndExplicitSharedBase) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::Moi;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2030,7 +2030,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       options.report_marker = kFlatMismatchReportMarker;
       options.max_patches = 1;
 
-      const ConSanResult result = try_patch_consan(bytes, options);
+      const ConSanResult result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2080,7 +2080,7 @@ TEST(ConSan, SuperColliderHighHalfGroupFlatMismatchActionExecutesOnEveryTarget) 
       options.report_marker = kFlatMismatchReportMarker;
       options.max_patches = 1;
 
-      const ConSanResult result = try_patch_consan(bytes, options);
+      const ConSanResult result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2143,7 +2143,7 @@ TEST(ConSan, SuperColliderSupportsEveryD16GroupFlatLoadOnEveryTarget) {
       options.report_buffer_address = 0x100000000ull;
       options.max_patches = 1;
 
-      const ConSanResult result = try_patch_consan(bytes, options);
+      const ConSanResult result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2236,7 +2236,7 @@ TEST(ConSanMoi, EveryEngineSupportsEveryD16GroupFlatLoadOnEveryTarget) {
         options.moi_track_atomics = false;
         options.max_patches = 1;
 
-        const ConSanResult result = try_patch_consan(bytes, options);
+        const ConSanResult result = test_lower_consan(bytes, options);
 
         ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
         ASSERT_EQ(result.moi_candidates.size(), 1u);
@@ -2271,7 +2271,7 @@ TEST(ConSan, SuperColliderSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
       options.report_buffer_address = 0x100000000ull;
       options.max_patches = 1;
 
-      const ConSanResult result = try_patch_consan(bytes, options);
+      const ConSanResult result = test_lower_consan(bytes, options);
 
       ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
       ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2375,7 +2375,7 @@ TEST(ConSanMoi, EveryEngineSupportsEverySubwordGroupFlatStoreOnEveryTarget) {
         options.moi_track_atomics = false;
         options.max_patches = 1;
 
-        const ConSanResult result = try_patch_consan(bytes, options);
+        const ConSanResult result = test_lower_consan(bytes, options);
 
         ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
         ASSERT_EQ(result.moi_candidates.size(), 1u);
@@ -2411,7 +2411,7 @@ TEST(ConSanMoi, UnsupportedGroupFlatLoadRemainsInPolicyButNotLoweringCandidates)
   options.flat_provenance_mode = ConSanFlatProvenanceMode::Strict;
   options.max_patches = 1;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   EXPECT_FALSE(result.modified());
@@ -2437,7 +2437,7 @@ TEST(ConSan, Cdna4SuperColliderEmitsGroupFlatCheckAndReport) {
   options.report_marker = 0x51c0u;
   options.max_patches = 1;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2504,7 +2504,7 @@ TEST(ConSan, Cdna4SuperColliderComparesGroupFlatShortValuesAsU16) {
     options.report_buffer_address = 0x100000000ull;
     options.max_patches = 1;
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2570,7 +2570,7 @@ TEST(ConSan, Cdna4SuperColliderFarGroupFlatFallsBackToDeadScalarWindow) {
       {.text_offset = sizeof(uint32_t) + kFunctionDelta + 10u * sizeof(uint32_t),
        .size = static_cast<uint32_t>((function_words.size() - 11u) * sizeof(uint32_t))});
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2620,7 +2620,7 @@ TEST(ConSanMoi, Cdna4RecordAndInlineEmitStronglyClassifiedGroupFlatAccess) {
                                          ? kInlineShadowFullLdsReportBufferSize
                                          : consan_moi_report_buffer_min_bytes(1, 0, 0, 0);
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
     ASSERT_EQ(result.moi_candidates.size(), 1u);
@@ -2676,7 +2676,7 @@ TEST(ConSanMoi, Cdna4RecordReplayEmitsGroupFlatShortAccesses) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.moi_candidates.size(), 2u);
@@ -2733,7 +2733,7 @@ TEST(ConSanMoi, Gfx1250RecordReplayEmitsGroupFlatShortAccesses) {
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.moi_candidates.size(), 2u);
@@ -2780,7 +2780,7 @@ TEST(ConSan, Gfx1250SuperColliderChecksGroupFlatShortValues) {
     options.report_buffer_address = 0x100000000ull;
     options.max_patches = 1;
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -2803,7 +2803,7 @@ TEST(ConSan, InventoriesCdna4FlatAtomicAddressShape) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2861,7 +2861,7 @@ TEST(ConSan, AssociatesCdna4CompilerAtomicAcquireReleaseShape) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
@@ -2886,7 +2886,7 @@ TEST(ConSan, InventoriesRdna4GlobalAtomicScopeAndReturnBits) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2953,7 +2953,7 @@ TEST(ConSan, SyncInventoryRetainsUnsupportedFlatAtomicWithoutProvenance) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -2981,7 +2981,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const auto result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
@@ -3010,7 +3010,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
       0x00000002u, // global_atomic_add_f32 v0, v2, v1, s[4:5]
       0xBFB00000u, // s_endpgm
   };
-  const auto release = try_patch_consan(make_rdna4_lds_code_object(release_words), options);
+  const auto release = test_lower_consan(make_rdna4_lds_code_object(release_words), options);
   ASSERT_TRUE(release.errors.empty()) << (release.errors.empty() ? "" : release.errors.front());
   ASSERT_EQ(release.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(release.program_inventory.sync().sync_sequences.front().memory_role,
@@ -3022,7 +3022,7 @@ TEST(ConSan, SyncSequencesAssociatePinnedGlobalAtomicCachePattern) {
       0xEE0AC000u, 0x00000000u, 0x00000000u, // global_inv
       0xBFB00000u,                           // s_endpgm
   };
-  const auto acquire = try_patch_consan(make_rdna4_lds_code_object(acquire_words), options);
+  const auto acquire = test_lower_consan(make_rdna4_lds_code_object(acquire_words), options);
   ASSERT_TRUE(acquire.errors.empty()) << (acquire.errors.empty() ? "" : acquire.errors.front());
   ASSERT_EQ(acquire.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(acquire.program_inventory.sync().sync_sequences.front().memory_role,
@@ -3060,7 +3060,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedBoundedAtomicAcquireShapes) {
 
   for (size_t index = 0; index < fixtures.size(); ++index) {
     SCOPED_TRACE(index);
-    const ConSanResult result = try_patch_consan(fixtures[index], options);
+    const ConSanResult result = test_lower_consan(fixtures[index], options);
     ASSERT_TRUE(consan_patch_succeeded(result));
     const auto sequence =
         std::ranges::find_if(result.program_inventory.sync().sync_sequences, [](const auto &item) {
@@ -3079,7 +3079,7 @@ TEST(ConSan, SyncSequencesAssociateBoundedAtomicAcquireAtFallthroughJoin) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanResult result =
-      try_patch_consan(make_rdna4_atomic_acquire_fallthrough_join_code_object(), options);
+      test_lower_consan(make_rdna4_atomic_acquire_fallthrough_join_code_object(), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   const auto sequence =
@@ -3100,7 +3100,7 @@ TEST(ConSan, BoundedAtomicAcquireAssociationRejectsUnprovenShapes) {
   const auto acquire_count = [](const std::vector<uint8_t> &bytes) {
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
     return std::ranges::count_if(result.program_inventory.sync().sync_sequences,
                                  [](const auto &item) {
                                    return item.kind == ConSanSyncSequenceKind::Atomic &&
@@ -3134,7 +3134,7 @@ TEST(ConSan, SyncSequencesAssociateExactReleaseWaitWithNoReturnAtomic) {
   options.flavor = ConSanFlavor::SuperCollider;
 
   const ConSanResult result =
-      try_patch_consan(make_rdna4_release_wait_no_return_bitwise_code_object(), options);
+      test_lower_consan(make_rdna4_release_wait_no_return_bitwise_code_object(), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
@@ -3154,8 +3154,8 @@ TEST(ConSan, SyncSequencesAssociateExactReleaseWaitWithNoReturnAtomic) {
             result.program_inventory.sync().sync_events.front().identity);
   EXPECT_NE(sequence.identity.find("|release-wait=pc=0x"), std::string::npos);
 
-  const ConSanResult nonzero =
-      try_patch_consan(make_rdna4_release_wait_no_return_bitwise_code_object(0xbfc90001u), options);
+  const ConSanResult nonzero = test_lower_consan(
+      make_rdna4_release_wait_no_return_bitwise_code_object(0xbfc90001u), options);
   ASSERT_TRUE(nonzero.errors.empty()) << testing::PrintToString(nonzero.errors);
   ASSERT_EQ(nonzero.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(nonzero.program_inventory.sync().sync_sequences.front().memory_role,
@@ -3176,7 +3176,7 @@ TEST(ConSan, SyncSequencesUpgradeAcquireWithExactReleaseWaitToAcquireRelease) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
@@ -3205,7 +3205,7 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(make_rdna3_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna3_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
@@ -3223,7 +3223,7 @@ TEST(ConSan, Gfx1100SyncSequencesUpgradeAcquireWithExactVscntReleaseWait) {
   std::array<uint32_t, 8> nonzero = text_words;
   nonzero[0] |= 1u;
   const ConSanResult rejected =
-      try_patch_consan(make_rdna3_lds_code_object(nonzero, "nonzero_vscnt"), options);
+      test_lower_consan(make_rdna3_lds_code_object(nonzero, "nonzero_vscnt"), options);
   ASSERT_TRUE(rejected.errors.empty()) << testing::PrintToString(rejected.errors);
   ASSERT_EQ(rejected.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(rejected.program_inventory.sync().sync_sequences.front().memory_role,
@@ -3240,7 +3240,7 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     ConSanOptions options;
     options.flavor = ConSanFlavor::SuperCollider;
 
-    const ConSanResult result = try_patch_consan(fixture.bytes, options);
+    const ConSanResult result = test_lower_consan(fixture.bytes, options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     const auto sequence =
@@ -3260,7 +3260,7 @@ TEST(ConSan, AssociatesWorkgroupReleaseThroughLeadingScalarClauseAcrossRdnaTarge
     const RdnaWorkgroupClauseReleaseFixture interrupted =
         make_rdna_workgroup_clause_release_code_object(arch, /*contiguous_wait_prefix=*/false);
     ASSERT_FALSE(interrupted.bytes.empty());
-    const ConSanResult rejected = try_patch_consan(interrupted.bytes, options);
+    const ConSanResult rejected = test_lower_consan(interrupted.bytes, options);
     ASSERT_TRUE(consan_patch_succeeded(rejected)) << testing::PrintToString(rejected.errors);
     const auto rejected_sequence = std::ranges::find_if(
         rejected.program_inventory.sync().sync_sequences, [&](const auto &item) {
@@ -3285,7 +3285,7 @@ TEST(ConSan, MoiFenceSelectionCarriesUniqueAtomicCommunicationEvent) {
   };
   ConSanOptions options = moi_options();
 
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 3u);
@@ -3330,7 +3330,7 @@ TEST(ConSan, AssociatesCdna4ReleaseCasWithOrdinaryAcquireLoad) {
   options.moi_track_atomics = true;
 
   const ConSanResult result =
-      try_patch_consan(make_cdna4_lds_code_object(text_words, "cas_ordinary_acquire"), options);
+      test_lower_consan(make_cdna4_lds_code_object(text_words, "cas_ordinary_acquire"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 4u)
@@ -3375,7 +3375,7 @@ TEST(ConSan, AssociatesCdna4BufferWbl2WithOrdinaryReleaseStore) {
   options.fault_dry_run = true;
 
   const ConSanResult result =
-      try_patch_consan(make_cdna4_lds_code_object(text_words, "ordinary_release_store"), options);
+      test_lower_consan(make_cdna4_lds_code_object(text_words, "ordinary_release_store"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u)
@@ -3417,7 +3417,7 @@ TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA3),
   };
   const ConSanResult rdna3 =
-      try_patch_consan(make_rdna3_lds_code_object(rdna3_words, "rdna3_release_store"), options);
+      test_lower_consan(make_rdna3_lds_code_object(rdna3_words, "rdna3_release_store"), options);
   ASSERT_TRUE(consan_patch_succeeded(rdna3)) << testing::PrintToString(rdna3.errors);
   const auto rdna3_release =
       std::ranges::find(rdna3.program_inventory.sync().sync_sequences,
@@ -3437,7 +3437,7 @@ TEST(ConSan, AssociatesCompilerReleaseWaitsWithOrdinaryStoresAcrossTargets) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4),
   };
   const ConSanResult rdna4 =
-      try_patch_consan(make_rdna4_lds_code_object(rdna4_words, "rdna4_release_store"), options);
+      test_lower_consan(make_rdna4_lds_code_object(rdna4_words, "rdna4_release_store"), options);
   ASSERT_TRUE(consan_patch_succeeded(rdna4)) << testing::PrintToString(rdna4.errors);
   const auto rdna4_release =
       std::ranges::find(rdna4.program_inventory.sync().sync_sequences,
@@ -3475,7 +3475,7 @@ TEST(ConSan, AssociatesGfx1250GlobalWritebackOrdinaryReleaseLowering) {
   options.moi_track_atomics = true;
 
   const ConSanResult result =
-      try_patch_consan(make_gfx1250_code_object(words, "gfx1250_release_store"), options);
+      test_lower_consan(make_gfx1250_code_object(words, "gfx1250_release_store"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -3525,7 +3525,7 @@ TEST(ConSan, AssociatesRdna3OrdinaryAcquireWithCompleteCachePair) {
   ConSanOptions options = moi_options();
   options.moi_track_atomics = true;
 
-  const ConSanResult result = try_patch_consan(
+  const ConSanResult result = test_lower_consan(
       make_rdna3_lds_code_object(text_words, "ordinary_acquire_cache_pair"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
@@ -3570,7 +3570,7 @@ TEST(ConSan, MoiFenceSelectionRejectsUnassociatedCacheOperations) {
   };
   ConSanOptions options = moi_options();
 
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().moi_fence_candidates.size(), 2u);
@@ -3596,7 +3596,7 @@ TEST(ConSan, SyncSequencesRejectNonWaitInsideAtomicCachePattern) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const auto result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
@@ -3622,7 +3622,7 @@ TEST(ConSan, SyncSequencesDoNotPairBarrierAcrossAtomic) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
@@ -3655,7 +3655,7 @@ TEST(ConSan, SyncSequencesDoNotAssociateCacheOperationAcrossBarrier) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
@@ -3691,7 +3691,7 @@ TEST(ConSan, SyncSequencesRetainAtomicCacheAssociationBeforeBarrier) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
@@ -3720,7 +3720,7 @@ TEST(ConSan, SyncSequencesKeepCacheOperationsSeparateAroundBarrier) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 3u);
@@ -3756,7 +3756,7 @@ TEST(ConSan, SyncInventoryMarksMaybeGroupFlatAtomicAmbiguous) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -3783,7 +3783,7 @@ TEST(ConSan, Gfx1250AtomicInventoryPreservesAddressAndOrderingFields) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -3816,7 +3816,7 @@ TEST(ConSan, SyncSequencesPreserveBasicBlockBoundaryBetweenAdjacentEvents) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
@@ -3841,7 +3841,7 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const auto paired = try_patch_consan(make_rdna4_lds_code_object(paired_words), options);
+  const auto paired = test_lower_consan(make_rdna4_lds_code_object(paired_words), options);
 
   ASSERT_TRUE(paired.errors.empty()) << (paired.errors.empty() ? "" : paired.errors.front());
   ASSERT_EQ(paired.program_inventory.sync().sync_events.size(), 2u);
@@ -3869,7 +3869,7 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
   EXPECT_NE(paired.fault_sites[0].decoded_operands.find("operand_source=immediate"),
             std::string::npos);
   EXPECT_NE(paired.fault_sites[0].decoded_operands.find("scope=workgroup"), std::string::npos);
-  const auto repeated = try_patch_consan(make_rdna4_lds_code_object(paired_words), options);
+  const auto repeated = test_lower_consan(make_rdna4_lds_code_object(paired_words), options);
   ASSERT_EQ(repeated.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(repeated.program_inventory.sync().sync_sequences.front().identity, barrier.identity);
 
@@ -3879,7 +3879,7 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
       0xBF94FFFFu, // s_barrier_wait -1
       0xBFB00000u, // s_endpgm
   };
-  const auto intervened = try_patch_consan(make_rdna4_lds_code_object(intervened_words), options);
+  const auto intervened = test_lower_consan(make_rdna4_lds_code_object(intervened_words), options);
   ASSERT_TRUE(intervened.errors.empty())
       << (intervened.errors.empty() ? "" : intervened.errors.front());
   ASSERT_EQ(intervened.program_inventory.sync().sync_sequences.size(), 2u);
@@ -3897,7 +3897,7 @@ TEST(ConSan, SyncSequencesAssociateOnlyImmediateSameBlockBarrierPair) {
       0xBE804EC1u, // s_barrier_signal -1
       0xBFB00000u, // s_endpgm
   };
-  const auto reversed = try_patch_consan(make_rdna4_lds_code_object(reversed_words), options);
+  const auto reversed = test_lower_consan(make_rdna4_lds_code_object(reversed_words), options);
   ASSERT_TRUE(reversed.errors.empty()) << (reversed.errors.empty() ? "" : reversed.errors.front());
   ASSERT_EQ(reversed.program_inventory.sync().sync_sequences.size(), 2u);
   EXPECT_EQ(reversed.program_inventory.sync().sync_sequences[0].operation,
@@ -3923,7 +3923,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedNonadjacentBarrierPairConservatively)
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   const ConSanResult retained =
-      try_patch_consan(make_rdna4_lds_code_object(retained_words), options);
+      test_lower_consan(make_rdna4_lds_code_object(retained_words), options);
 
   ASSERT_TRUE(retained.errors.empty()) << testing::PrintToString(retained.errors);
   ASSERT_EQ(retained.program_inventory.sync().sync_sequences.size(), 1u);
@@ -3937,7 +3937,7 @@ TEST(ConSan, SyncSequencesAssociateRetainedNonadjacentBarrierPairConservatively)
   EXPECT_NE(pair.confidence_reason.find("bounded same-block"), std::string::npos);
 
   const auto full_pair_count = [&](std::span<const uint32_t> words) {
-    const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(words), options);
+    const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(words), options);
     return std::ranges::count(result.program_inventory.sync().sync_sequences,
                               ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
   };
@@ -4000,7 +4000,7 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
     if (profile != 0)
       options.moi_engine = engines[profile - 1];
     options.abort_unmatched_barrier_wait = true;
-    const ConSanResult result = try_patch_consan(unmatched, options);
+    const ConSanResult result = test_lower_consan(unmatched, options);
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << profile << testing::PrintToString(result.errors)
         << testing::PrintToString(result.warnings);
@@ -4030,7 +4030,7 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
   matched_options.flavor = ConSanFlavor::SuperCollider;
   matched_options.abort_unmatched_barrier_wait = true;
   const ConSanResult matched =
-      try_patch_consan(make_rdna4_lds_code_object(matched_words, "matched_wait"), matched_options);
+      test_lower_consan(make_rdna4_lds_code_object(matched_words, "matched_wait"), matched_options);
   EXPECT_EQ(matched.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_TRUE(matched.patches.empty());
 
@@ -4038,7 +4038,7 @@ TEST(ConSan, AllProfilesAbortOnlyStaticallyUnmatchedImmediateBarrierWait) {
       0xBE804EC1u, // unmatched signal is completing and must not be rewritten
       0xBFB00000u,
   };
-  const ConSanResult signal_only = try_patch_consan(
+  const ConSanResult signal_only = test_lower_consan(
       make_rdna4_lds_code_object(signal_only_words, "unmatched_signal"), matched_options);
   EXPECT_EQ(signal_only.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_TRUE(signal_only.patches.empty());
@@ -4052,7 +4052,7 @@ TEST(ConSan, SyncSequencesRejectAdjacentBarrierPairWithMismatchedIds) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
@@ -4085,7 +4085,7 @@ TEST(ConSan, SyncInventoryDecodesTrapAndNamedWorkgroupBarrierIds) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 2u);
@@ -4115,7 +4115,7 @@ TEST(ConSan, SyncSequencesAssociateClusterBarrierAcrossConditionalTriangle) {
       build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5),
   };
   const ConSanResult result =
-      try_patch_consan(make_gfx1250_code_object(text_words, "cluster_triangle"), moi_options());
+      test_lower_consan(make_gfx1250_code_object(text_words, "cluster_triangle"), moi_options());
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.program_inventory.sync().sync_sequences.size(), 1u);
@@ -4143,7 +4143,7 @@ TEST(ConSan, SyncSequencesRejectClusterTriangleWithNontrivialSignalArm) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(
+  const ConSanResult result = test_lower_consan(
       make_gfx1250_code_object(text_words, "nontrivial_cluster_triangle"), options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
@@ -4166,7 +4166,7 @@ TEST(ConSan, SyncSequencesRejectDynamicM0BarrierSignal) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_rdna4_lds_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_rdna4_lds_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 2u);
@@ -4202,7 +4202,7 @@ TEST(ConSan, SyncInventoryClassifiesGfx1250BarrierLifecycleWithoutOrderingClaims
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -4275,7 +4275,7 @@ TEST(ConSan, SyncInventoryPreservesGfx1250ValidBarrierOperandEncodingForms) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
@@ -4328,7 +4328,7 @@ TEST(ConSan, SyncInventoryAdmitsStaticBarrierLifecycleGroupViaJoinAssociation) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_dry_run = true;
-  const ConSanResult result = try_patch_consan(make_gfx1250_code_object(text_words), options);
+  const ConSanResult result = test_lower_consan(make_gfx1250_code_object(text_words), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
@@ -4358,7 +4358,7 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
       0xBF950000u, // s_barrier_leave
       0xBFB00000u,
   };
-  const ConSanResult dynamic = try_patch_consan(make_gfx1250_code_object(dynamic_words), options);
+  const ConSanResult dynamic = test_lower_consan(make_gfx1250_code_object(dynamic_words), options);
   ASSERT_EQ(dynamic.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_NE(dynamic.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
                 "no proven static ID"),
@@ -4373,7 +4373,7 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
       0xBFB00000u,
   };
   const ConSanResult mismatched =
-      try_patch_consan(make_gfx1250_code_object(mismatched_words), options);
+      test_lower_consan(make_gfx1250_code_object(mismatched_words), options);
   ASSERT_EQ(mismatched.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_NE(mismatched.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
                 "do not have one matching"),
@@ -4389,7 +4389,7 @@ TEST(ConSan, SyncInventoryRejectsDynamicMismatchedAndCrossBlockLifecycles) {
       0xBFB00000u,
   };
   const ConSanResult cross_block =
-      try_patch_consan(make_gfx1250_code_object(cross_block_words), options);
+      test_lower_consan(make_gfx1250_code_object(cross_block_words), options);
   ASSERT_EQ(cross_block.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_NE(cross_block.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
                 "crosses a block"),
@@ -4408,7 +4408,7 @@ TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
       0xBF950000u, // s_barrier_leave
       0xBFB00000u,
   };
-  const ConSanResult no_join = try_patch_consan(make_gfx1250_code_object(no_join_words), options);
+  const ConSanResult no_join = test_lower_consan(make_gfx1250_code_object(no_join_words), options);
   ASSERT_EQ(no_join.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_FALSE(no_join.program_inventory.sync().barrier_lifecycle_groups[0].admissible);
   EXPECT_NE(no_join.program_inventory.sync().barrier_lifecycle_groups[0].rejection_reason.find(
@@ -4424,7 +4424,7 @@ TEST(ConSan, SyncInventoryRejectsLifecycleWithoutJoinOrFixedZeroLeave) {
       0xBFB00000u,
   };
   const ConSanResult nonzero_leave =
-      try_patch_consan(make_gfx1250_code_object(nonzero_leave_words), options);
+      test_lower_consan(make_gfx1250_code_object(nonzero_leave_words), options);
   ASSERT_EQ(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups.size(), 1u);
   EXPECT_FALSE(nonzero_leave.program_inventory.sync().barrier_lifecycle_groups[0].admissible);
   EXPECT_NE(
@@ -4447,7 +4447,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   const auto barrier =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
@@ -4458,7 +4458,7 @@ TEST(ConSan, FinalValidationExhaustivelyProvesExactBarrierLifecycleRewrite) {
   options.fault_barrier_sequence_identity = barrier->identity;
   options.fault_barrier_target_id = 16;
   options.fault_require_exactly_one = true;
-  const ConSanResult valid = try_patch_consan(bytes, options);
+  const ConSanResult valid = test_lower_consan(bytes, options);
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
       << (valid.errors.empty() ? "" : valid.errors.front());
   ASSERT_EQ(valid.patches.size(), 5u);
@@ -4594,8 +4594,8 @@ TEST(ConSan, SyncSequencesInventoryUnmatchedBarrierComponentsWithoutPairing) {
   };
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult signal = try_patch_consan(make_rdna4_lds_code_object(signal_words), options);
-  const ConSanResult wait = try_patch_consan(make_rdna4_lds_code_object(wait_words), options);
+  const ConSanResult signal = test_lower_consan(make_rdna4_lds_code_object(signal_words), options);
+  const ConSanResult wait = test_lower_consan(make_rdna4_lds_code_object(wait_words), options);
 
   ASSERT_EQ(signal.program_inventory.sync().sync_sequences.size(), 1u);
   EXPECT_EQ(signal.program_inventory.sync().sync_sequences.front().operation,
@@ -4637,7 +4637,7 @@ TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
       make_rdna4_lds_code_object(text_words, "validate_structured_divergent_move");
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   const auto destination = std::ranges::find(inventory.barrier_move_destinations, 12u,
                                              &ConSanBarrierMoveDestination::text_offset);
   ASSERT_NE(destination, inventory.barrier_move_destinations.end());
@@ -4648,7 +4648,7 @@ TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
   options.fault_site_identity = inventory.fault_sites.front().identity;
   options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Earlier;
   options.fault_barrier_destination_identity = destination->identity;
-  const ConSanResult valid = try_patch_consan(bytes, options);
+  const ConSanResult valid = test_lower_consan(bytes, options);
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
 
   ConSanResult stale_inventory = valid;
@@ -4711,7 +4711,7 @@ TEST(ConSan, FinalValidationRejectsMissingMovedBarrierTarget) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_move_barrier = true;
-  const ConSanResult valid = try_patch_consan(bytes, options);
+  const ConSanResult valid = test_lower_consan(bytes, options);
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid);
   ASSERT_EQ(valid.patches.size(), 4u);
 
@@ -4733,7 +4733,7 @@ TEST(ConSan, MarksSupportedLdsKernelAsPreflightCandidate) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.warnings.empty()) << (result.warnings.empty() ? "" : result.warnings.front());
@@ -4773,7 +4773,7 @@ TEST(ConSan, PreflightBlockerProducesPolicyNeutralUnsupportedOutcome) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_TRUE(result.errors.empty());
@@ -4791,7 +4791,7 @@ TEST(ConSan, PreflightAdmitsOrdinaryLdsAlongsideExcludedAtomic) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   EXPECT_TRUE(result.errors.empty());
   EXPECT_NE(result.outcome, ConSanTransformOutcome::Unsupported);

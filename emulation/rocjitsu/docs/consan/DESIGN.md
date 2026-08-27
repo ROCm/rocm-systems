@@ -311,11 +311,12 @@ caves, dense dispatchers, branch islands, or relays. It updates code and kernel
 resource metadata together, reparses and validates the result, and publishes
 replacement bytes only after final validation.
 
-Most of this mechanism is currently reached through compatibility lowering
-inside `TransformResult` construction. That implementation is the sole place
-allowed to adapt typed inputs back to one fresh `ConSanOptions` and invoke
-`try_patch_consan`; there is no longer a public legacy-lowering object or raw
-production result entry point.
+Most of this mechanism is currently reached through `lower_consan` inside
+`TransformResult` construction. That implementation is the sole place allowed
+to adapt typed inputs back to one fresh `ConSanOptions`, and it returns only
+`ConSanTransformArtifacts`. No library header exposes the private complete
+working result. The transform fuzzer and explicitly mechanism-level host tests
+declare that private entry locally while the lowerer is decomposed.
 
 ### Transformation result
 
@@ -519,7 +520,7 @@ Paths below are relative to `emulation/rocjitsu/`.
 | Shared semantic policy | `consan_access_policy.cpp`, `consan_barrier_policy.cpp`, `consan_atomic_fence_policy.cpp` |
 | Evidence schemas and host models | `consan_moi_abi.h`, `consan_moi_report_layout.h.inc`, `consan_moi_report_plan.cpp`, `consan_moi_model.cpp` |
 | Resource planning | `consan_resource.{h,cpp}`, shared liveness and `code/patch/spill_manager.*` |
-| Current compatibility lowering | `consan_legacy_lowering.h`, `consan.cpp` plus `consan_*.inc`, `consan_moi.cpp` plus `consan_moi_*.inc` |
+| Current compatibility lowering | `consan_lowering.h`, `consan.cpp` plus `consan_*.inc`, `consan_moi.cpp` plus `consan_moi_*.inc` |
 | Target-native emission | `code/patch/instrumentation_builder.h` and `{cdna3,cdna4,rdna3,rdna4,gfx1250}_instrumentation_builder.h` |
 | Shared patch mechanism | `code/patch/instruction_sequence.*`, `trampoline_builder.*`, `kernel_text_layout.*`, `code_object_patcher.*`, `spill_manager.*` |
 | HSA runtime adapter | `lib/rocjitsu/src/rocjitsu/hooks/consan/rj_hsa_dbi_hook_config.cpp`, `rj_hsa_dbi_hook_moi_report.cpp`, `rj_hsa_dbi_hooks.cpp` |

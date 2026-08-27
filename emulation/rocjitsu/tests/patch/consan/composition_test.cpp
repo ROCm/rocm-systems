@@ -46,7 +46,7 @@ TEST(ConSanMoi, FaultRetryRejectsDryRunFaultRequest) {
   ConSanOptions inventory_options = release_last_record_replay_options(/*with_atomic_fault=*/false);
   inventory_options.moi_report_buffer_address.reset();
   inventory_options.moi_report_buffer_size = 0;
-  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
 
   ConSanOptions dry_run = release_last_record_replay_options(/*with_atomic_fault=*/true);
@@ -70,14 +70,14 @@ TEST(ConSanMoi, AtomicWrongAddressRetryFromInventoryMatchesFreshLiveTransform) {
   inventory_options.moi_report_buffer_size = 0;
   inventory_options.fault_atomic_wrong_address = false;
   inventory_options.fault_require_exactly_one = false;
-  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_FALSE(inventory.modified());
 
   // A sizing outcome is not fault-planning state. Exercise the reset contract
   // explicitly instead of relying only on the ordinary Unchanged case.
   inventory.outcome = ConSanTransformOutcome::Unsupported;
-  const ConSanResult fresh = try_patch_consan(bytes, live);
+  const ConSanResult fresh = test_lower_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
 
@@ -102,12 +102,12 @@ TEST(ConSanMoi, UnsatisfiedLateFaultRetryMatchesFreshRejection) {
   ConSanOptions inventory_options = release_last_record_replay_options(/*with_atomic_fault=*/false);
   inventory_options.moi_report_buffer_address.reset();
   inventory_options.moi_report_buffer_size = 0;
-  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
 
   ConSanOptions live = release_last_record_replay_options(/*with_atomic_fault=*/true);
   live.fault_site_identity = "missing-site";
-  const ConSanResult fresh = try_patch_consan(bytes, live);
+  const ConSanResult fresh = test_lower_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
 
@@ -121,7 +121,7 @@ TEST(ConSanMoi, UnsatisfiedLateFaultRetryMatchesFreshRejection) {
 TEST(ConSanMoi, DisabledTypedFaultUsesReportOnlyRetryPath) {
   const std::vector<uint8_t> bytes = make_rdna4_supported_lds_code_object();
   ConSanOptions inventory_options = moi_options(ConSanMoiEngine::RecordReplay);
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
 
   ConSanOptions live = inventory_options;
@@ -167,7 +167,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   ConSanOptions probe_options = live;
   probe_options.fault_dry_run = true;
   probe_options.fault_require_exactly_one = false;
-  const auto [probe, probe_ms] = timed([&] { return try_patch_consan(bytes, probe_options); });
+  const auto [probe, probe_ms] = timed([&] { return test_lower_consan(bytes, probe_options); });
   ASSERT_TRUE(probe.errors.empty()) << testing::PrintToString(probe.errors);
   ASSERT_EQ(probe.mutation.fault.planned, 1u)
       << "benchmark object needs one default atomic wrong-address target";
@@ -176,7 +176,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   inventory_options.fault_atomic_wrong_address = false;
   inventory_options.fault_require_exactly_one = false;
   const auto [inventory, inventory_ms] =
-      timed([&] { return try_patch_consan(bytes, inventory_options); });
+      timed([&] { return test_lower_consan(bytes, inventory_options); });
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_FALSE(inventory.modified());
   const ConSanMoiAutoReportInventory capacity =
@@ -189,7 +189,7 @@ TEST(ConSanMoiBenchmark, LiveFaultInventoryRetryFromObject) {
   live.moi_report_buffer_size = plan.required_bytes;
   live.moi_report_layout = *layout;
 
-  const auto [fresh, fresh_ms] = timed([&] { return try_patch_consan(bytes, live); });
+  const auto [fresh, fresh_ms] = timed([&] { return test_lower_consan(bytes, live); });
   ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(fresh.errors) << testing::PrintToString(fresh.warnings);
   const ConSanMoiInventoryRetryConfig retry_config = moi_inventory_retry_config(live);
@@ -243,7 +243,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
   inventory_options.max_patches_is_expert_limit = false;
   inventory_options.moi_runtime_sample_stride = engine == ConSanMoiEngine::Sampled ? 256u : 65'536u;
   const auto [inventory, inventory_ms] =
-      timed([&] { return try_patch_consan(bytes, inventory_options); });
+      timed([&] { return test_lower_consan(bytes, inventory_options); });
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_FALSE(inventory.modified());
   const ConSanMoiAutoReportInventory capacity =
@@ -258,7 +258,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
   live.moi_report_buffer_size = plan.required_bytes;
   live.moi_report_layout = *layout;
   ConSanResult retry_inventory = inventory;
-  const auto [fresh, fresh_ms] = timed([&] { return try_patch_consan(bytes, live); });
+  const auto [fresh, fresh_ms] = timed([&] { return test_lower_consan(bytes, live); });
   const auto [retried, retry_ms] = timed([&] {
     return retry_patch_consan_moi_from_inventory(std::move(retry_inventory), inventory_options,
                                                  moi_inventory_retry_config(live), bytes);
@@ -288,7 +288,7 @@ TEST(ConSanMoiBenchmark, ReportInventoryRetryFromObject) {
 TEST(ConSanMoi, AtomicWrongAddressComposesWithReleaseLastRecordProbe) {
   const std::vector<uint8_t> bytes = make_rdna4_release_wait_no_return_bitwise_code_object();
   const ConSanOptions options = release_last_record_replay_options(/*with_atomic_fault=*/true);
-  const ConSanResult valid = try_patch_consan(bytes, options);
+  const ConSanResult valid = test_lower_consan(bytes, options);
 
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(valid.errors) << testing::PrintToString(valid.warnings);
@@ -333,7 +333,7 @@ TEST(ConSanOwnership, CompositePeakFitsAdmissionAcrossAllPhases) {
   const ConSanOptions options = release_last_record_replay_options(/*with_atomic_fault=*/true);
 
   major_image_ownership::ScopedMeasurement measurement;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
   const major_image_ownership::Measurement observed = measurement.snapshot();
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
@@ -423,7 +423,7 @@ TEST(ConSanOwnership, OrdinaryIncrementalPeakFitsAdmission) {
   const ConSanOptions options = release_last_record_replay_options(/*with_atomic_fault=*/false);
 
   major_image_ownership::ScopedMeasurement measurement;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
   const major_image_ownership::Measurement observed = measurement.snapshot();
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
@@ -472,7 +472,7 @@ TEST(ConSanMoi, AtomicWrongAddressComposesWithRetainedInlineShadowProbe) {
   options.fault_require_exactly_one = true;
   options.max_patches = 2;
 
-  const ConSanResult valid = try_patch_consan(bytes, options);
+  const ConSanResult valid = test_lower_consan(bytes, options);
 
   ASSERT_EQ(valid.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(valid.errors) << testing::PrintToString(valid.warnings);
@@ -529,7 +529,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   const std::vector<uint8_t> bytes = make_rdna4_lds_code_object(text_words);
   ConSanOptions selection_options;
   selection_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult selection = try_patch_consan(bytes, selection_options);
+  const ConSanResult selection = test_lower_consan(bytes, selection_options);
   ASSERT_EQ(std::ranges::count(selection.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -554,11 +554,11 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
   pristine_options.fault_require_exactly_one = false;
   pristine_options.moi_report_buffer_address.reset();
   pristine_options.moi_report_buffer_size = 0;
-  const ConSanResult pristine = try_patch_consan(bytes, pristine_options);
+  const ConSanResult pristine = test_lower_consan(bytes, pristine_options);
   const ConSanMoiAutoReportInventory pristine_inventory =
       plan_test_moi_evidence_inventory(pristine, pristine_options);
 
-  const ConSanResult live = try_patch_consan(bytes, live_options);
+  const ConSanResult live = test_lower_consan(bytes, live_options);
   ASSERT_EQ(live.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(live.errors) << testing::PrintToString(live.warnings);
   ASSERT_EQ(live.mutation.fault.applied, 1u);
@@ -599,7 +599,7 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
   live.moi_report_buffer_size = 64u * 1024u * 1024u;
   live.max_patches = 16;
   live.fault_drop_barrier = true;
-  const ConSanResult selection = try_patch_consan(bytes, [&] {
+  const ConSanResult selection = test_lower_consan(bytes, [&] {
     ConSanOptions options = live;
     options.fault_dry_run = true;
     return options;
@@ -619,11 +619,11 @@ TEST(ConSanMoi, ExtendedBarrierInventoryPreservesIncompleteDropSafety) {
   inventory_options.moi_report_buffer_size = 0;
   inventory_options.fault_drop_barrier = false;
   inventory_options.qualify_extended_barrier_pairs = true;
-  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.program_inventory.sync().sync_sequences,
                                ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
             1u);
-  const ConSanResult fresh = try_patch_consan(bytes, live);
+  const ConSanResult fresh = test_lower_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
 
@@ -648,7 +648,7 @@ TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
   ConSanOptions selection_options = moi_options(ConSanMoiEngine::RecordReplay);
   selection_options.fault_drop_barrier = true;
   selection_options.fault_dry_run = true;
-  const ConSanResult selection = try_patch_consan(bytes, selection_options);
+  const ConSanResult selection = test_lower_consan(bytes, selection_options);
   const auto sequence =
       std::ranges::find(selection.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
@@ -672,12 +672,12 @@ TEST(ConSanMoi, MissingExtendedBarrierInventoryFallsBackToFreshWholePairDrop) {
   inventory_options.moi_report_buffer_size = 0;
   inventory_options.fault_drop_barrier = false;
   inventory_options.fault_require_exactly_one = false;
-  ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.program_inventory.sync().sync_sequences,
                                ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation),
             0u);
 
-  const ConSanResult fresh = try_patch_consan(bytes, live);
+  const ConSanResult fresh = test_lower_consan(bytes, live);
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options, moi_inventory_retry_config(live), bytes);
   ASSERT_EQ(fresh.outcome, ConSanTransformOutcome::ModifiedValid)
@@ -713,7 +713,7 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.test_kernel_name_filter = "lds_probe";
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
                                &ConSanFaultSite::kind),
             2u);
@@ -733,7 +733,7 @@ TEST(ConSanMoi, FaultBarrierMarkerlessUncoveredLocalCaveComposesWithInlineShadow
   options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Later;
   options.fault_barrier_destination_identity = destination->identity;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << (result.errors.empty() ? "" : result.errors.front());
@@ -866,7 +866,7 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   const auto sequence =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
@@ -903,7 +903,7 @@ TEST(ConSanMoi, Rdna4DenseMoiRelaysRespectPreappliedBarrierMoveContinuation) {
     options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Later;
     options.fault_barrier_destination_identity = destination->identity;
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
         << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
@@ -963,7 +963,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   const auto sequence =
       std::ranges::find(inventory.program_inventory.sync().sync_sequences,
                         ConSanSyncOperation::BarrierFull, &ConSanSyncSequence::operation);
@@ -996,7 +996,7 @@ TEST(ConSanMoi, Rdna4SampledDenseBarrierHostFailurePreservesIndependentAccessPat
   options.fault_barrier_move_direction = ConSanBarrierMoveDirection::Later;
   options.fault_barrier_destination_identity = destination->identity;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);
@@ -1047,7 +1047,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_drop_barrier = true;
   inventory_options.fault_dry_run = true;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(inventory.errors.empty()) << testing::PrintToString(inventory.errors);
   ASSERT_EQ(inventory.program_inventory.sync().sync_sequences.size(), 2u);
   ASSERT_EQ(std::ranges::count(inventory.fault_sites, ConSanFaultSiteKind::Barrier,
@@ -1070,7 +1070,7 @@ TEST(ConSanMoi, Gfx1250DenseInlineHostPreservesPreappliedBarrierDrop) {
   options.fault_barrier_sequence_identity =
       inventory.program_inventory.sync().sync_sequences.front().identity;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors) << testing::PrintToString(result.warnings);

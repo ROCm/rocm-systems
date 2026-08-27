@@ -15,13 +15,13 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
   inventory_options.fault_dry_run = true;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_EQ(inventory.fault_sites.size(), 1u);
   ConSanOptions select = inventory_options;
   select.sc_perturb_kind = ConSanPerturbationKind::Atomic;
   select.sc_perturb_edge = ConSanPerturbationEdge::Release;
   select.sc_perturb_required_count = 1;
-  const ConSanResult selected = try_patch_consan(bytes, select);
+  const ConSanResult selected = test_lower_consan(bytes, select);
   ASSERT_EQ(selected.perturbation_plans.size(), 1u);
   ConSanOptions options = select;
   options.fault_dry_run = false;
@@ -30,7 +30,7 @@ TEST(ConSan, AtomicAddressFaultCarriesPristinePerturbationPlan) {
   options.fault_require_exactly_one = true;
   options.fault_site_identity = inventory.fault_sites.front().identity;
   options.sc_perturb_identity = selected.perturbation_plans.front().candidate_identity;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   EXPECT_EQ(result.mutation.fault.planned, 1u);
@@ -93,7 +93,7 @@ TEST(ConSan, AtomicOrderFaultComposesWithRemovedReleaseBoundary) {
   options.sc_perturb_edge = ConSanPerturbationEdge::Release;
   options.sc_perturb_required_count = 1;
   options.sc_perturb_sleep = 6;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
       << testing::PrintToString(result.errors);
   const auto mutation = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
@@ -144,7 +144,7 @@ TEST(ConSan, AtomicFaultRollsBackWhenCarriedPerturbationIsUnreachable) {
   options.sc_perturb_edge = ConSanPerturbationEdge::Release;
   options.sc_perturb_required_count = 1;
   const ConSanResult result =
-      try_patch_consan(make_rdna4_lds_code_object(words, "atomic_composite_far"), options);
+      test_lower_consan(make_rdna4_lds_code_object(words, "atomic_composite_far"), options);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unsupported);
   EXPECT_FALSE(result.modified());
   EXPECT_TRUE(result.replacement.empty());
@@ -164,7 +164,7 @@ TEST(ConSan, AtomicAddressFaultComposesWithExactFlatUnknownCasReleaseEdge) {
   options.sc_perturb_required_count = 1;
   options.max_patches = 2;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -183,7 +183,7 @@ TEST(ConSan, FaultInventoryIncludesAtomicOperandsAndRoles) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_EQ(result.fault_sites.size(), 2u);
   EXPECT_EQ(result.fault_sites[0].kind, ConSanFaultSiteKind::Atomic);
@@ -205,7 +205,7 @@ TEST(ConSan, FaultAtomicExactIdentitySupersedesGlobalIndex) {
   const std::vector<uint8_t> bytes = make_rdna4_flat_atomic_release_acquire_code_object();
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_EQ(inventory.fault_sites.size(), 2u);
 
   ConSanOptions options = inventory_options;
@@ -213,7 +213,7 @@ TEST(ConSan, FaultAtomicExactIdentitySupersedesGlobalIndex) {
   options.fault_atomic_address_delta = 8;
   options.fault_atomic_index = 0;
   options.fault_site_identity = inventory.fault_sites[1].identity;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.patches.size(), 1u);
@@ -235,7 +235,7 @@ TEST(ConSan, FaultAtomicWrongAddressRejectsUnalignedDelta) {
   options.fault_atomic_wrong_address = true;
   options.fault_atomic_address_delta = 2;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_EQ(result.mutation.fault.applied, 0u);
@@ -249,7 +249,7 @@ TEST(ConSan, FaultAtomicDryRunPreservesBytesAndReportsExactPlans) {
   const std::vector<uint8_t> original = bytes;
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_EQ(inventory.fault_sites.size(), 2u);
 
   ConSanOptions options = inventory_options;
@@ -257,7 +257,7 @@ TEST(ConSan, FaultAtomicDryRunPreservesBytesAndReportsExactPlans) {
   options.fault_atomic_weaken_order = true;
   options.fault_dry_run = true;
   options.fault_site_identity = inventory.fault_sites[1].identity;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   EXPECT_EQ(bytes, original);
   EXPECT_FALSE(result.modified());
@@ -286,7 +286,7 @@ TEST(ConSan, FaultAtomicWeakenOrderDryRunRejectsThAsOrderingField) {
   options.fault_atomic_weaken_order = true;
   options.fault_dry_run = true;
   options.fault_atomic_index = 1;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
   EXPECT_FALSE(result.modified());
@@ -303,7 +303,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSelectsExplicitReleaseAndAcquireEdges) {
   release_options.fault_atomic_weaken_order = true;
   release_options.fault_atomic_order_edge = ConSanAtomicOrderEdge::Release;
   release_options.fault_atomic_index = 0;
-  const ConSanResult release = try_patch_consan(bytes, release_options);
+  const ConSanResult release = test_lower_consan(bytes, release_options);
   ASSERT_TRUE(release.errors.empty()) << testing::PrintToString(release.errors);
   EXPECT_EQ(release.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(release.warnings, [](const std::string &warning) {
@@ -313,7 +313,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSelectsExplicitReleaseAndAcquireEdges) {
   ConSanOptions acquire_options = release_options;
   acquire_options.fault_atomic_order_edge = ConSanAtomicOrderEdge::Acquire;
   acquire_options.fault_atomic_index = 1;
-  const ConSanResult acquire = try_patch_consan(bytes, acquire_options);
+  const ConSanResult acquire = test_lower_consan(bytes, acquire_options);
   ASSERT_TRUE(acquire.errors.empty()) << testing::PrintToString(acquire.errors);
   EXPECT_EQ(acquire.mutation.fault.applied, 1u);
   EXPECT_TRUE(std::ranges::any_of(acquire.warnings, [](const std::string &warning) {
@@ -340,7 +340,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(consan_patch_succeeded(inventory));
   ASSERT_EQ(inventory.fault_sites.size(), 1u);
 
@@ -349,7 +349,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   order_options.fault_atomic_order_edge = ConSanAtomicOrderEdge::Release;
   order_options.fault_site_identity = inventory.fault_sites.front().identity;
   order_options.fault_require_exactly_one = true;
-  const ConSanResult order = try_patch_consan(bytes, order_options);
+  const ConSanResult order = test_lower_consan(bytes, order_options);
   ASSERT_TRUE(order.errors.empty()) << testing::PrintToString(order.errors);
   EXPECT_EQ(order.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(order.mutation.fault.applied, 1u);
@@ -376,14 +376,14 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   scope_options.fault_atomic_weaken_scope = true;
   scope_options.fault_dry_run = true;
   scope_options.fault_site_identity = inventory.fault_sites.front().identity;
-  const ConSanResult scope = try_patch_consan(bytes, scope_options);
+  const ConSanResult scope = test_lower_consan(bytes, scope_options);
   EXPECT_TRUE(scope.fault_plans.empty());
   EXPECT_TRUE(std::ranges::any_of(scope.warnings, [](const std::string &warning) {
     return warning.find("cannot weaken scope") != std::string::npos;
   }));
 
   scope_options.fault_dry_run = false;
-  const ConSanResult live_scope = try_patch_consan(bytes, scope_options);
+  const ConSanResult live_scope = test_lower_consan(bytes, scope_options);
   EXPECT_EQ(live_scope.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(live_scope.modified());
   EXPECT_TRUE(std::ranges::any_of(live_scope.errors, [](const std::string &error) {
@@ -394,7 +394,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerSequence) {
   address_options.fault_atomic_wrong_address = true;
   address_options.fault_atomic_address_delta = 4;
   address_options.fault_site_identity = inventory.fault_sites.front().identity;
-  const ConSanResult address = try_patch_consan(bytes, address_options);
+  const ConSanResult address = test_lower_consan(bytes, address_options);
   EXPECT_EQ(address.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(address.modified());
   EXPECT_TRUE(std::ranges::any_of(address.errors, [](const std::string &error) {
@@ -420,7 +420,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerGlobalSequence) {
 
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_TRUE(consan_patch_succeeded(inventory));
   ASSERT_EQ(inventory.fault_sites.size(), 1u);
   EXPECT_EQ(inventory.fault_sites.front().kind, ConSanFaultSiteKind::Atomic);
@@ -431,7 +431,7 @@ TEST(ConSan, FaultAtomicWeakenOrderSupportsCdna4CompilerGlobalSequence) {
   options.fault_atomic_order_edge = ConSanAtomicOrderEdge::Release;
   options.fault_site_identity = inventory.fault_sites.front().identity;
   options.fault_require_exactly_one = true;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(result.errors.empty()) << testing::PrintToString(result.errors);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -457,7 +457,7 @@ TEST(ConSan, FaultAtomicWeakenOrderExplicitEdgeFailsClosedWhenAbsent) {
   options.fault_atomic_order_edge = ConSanAtomicOrderEdge::Acquire;
   options.fault_atomic_index = 0;
   options.fault_dry_run = true;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   EXPECT_TRUE(consan_patch_succeeded(result));
   EXPECT_TRUE(result.fault_plans.empty());
@@ -472,14 +472,14 @@ TEST(ConSan, FaultAtomicWeakenScopeDryRunPreservesBytesAndIdentity) {
   const std::vector<uint8_t> original = bytes;
   ConSanOptions inventory_options;
   inventory_options.flavor = ConSanFlavor::SuperCollider;
-  const ConSanResult inventory = try_patch_consan(bytes, inventory_options);
+  const ConSanResult inventory = test_lower_consan(bytes, inventory_options);
   ASSERT_EQ(inventory.fault_sites.size(), 2u);
 
   ConSanOptions options = inventory_options;
   options.fault_atomic_weaken_scope = true;
   options.fault_dry_run = true;
   options.fault_site_identity = inventory.fault_sites[1].identity;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   EXPECT_EQ(bytes, original);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Unchanged);
@@ -502,7 +502,7 @@ TEST(ConSan, FaultAtomicWrongAddressIsVisibleToSubsequentInventory) {
   options.fault_atomic_wrong_address = true;
   options.fault_atomic_index = 1;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.patches.size(), 1u);
@@ -523,7 +523,7 @@ TEST(ConSan, FaultAtomicWeakenOrderLeavesThReturnBehaviorUntouched) {
   options.fault_atomic_weaken_order = true;
   options.fault_atomic_index = 1;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -553,7 +553,7 @@ TEST(ConSan, FaultAtomicWeakenOrderPreservesReturningCasDataOperation) {
   options.fault_atomic_weaken_order = true;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -589,7 +589,7 @@ TEST(ConSan, FaultAtomicWeakenScopeLeavesThReturnAndAddressUntouched) {
   options.fault_atomic_index = 1;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -618,7 +618,7 @@ TEST(ConSan, FaultGlobalAtomicWrongAddressIsVisibleToSubsequentInventory) {
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_atomic_wrong_address = true;
 
-  const auto result = try_patch_consan(bytes, options);
+  const auto result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.patches.size(), 1u);
@@ -641,7 +641,7 @@ TEST(ConSan, FaultGlobalAtomicWeakenScopePreservesReturnedValueAndAddress) {
   options.fault_atomic_weaken_scope = true;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -666,7 +666,7 @@ TEST(ConSan, FaultGlobalAtomicWeakenOrderPreservesReturnedValue) {
   options.fault_atomic_weaken_order = true;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -693,7 +693,7 @@ TEST(ConSan, FaultNoReturnAtomicWeakenOrderRemovesExactReleaseWait) {
   options.fault_atomic_weaken_order = true;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -730,7 +730,7 @@ TEST(ConSan, FaultAtomicWeakenOrderRemovesReleaseWaitBeforeWaitAlu) {
   options.fault_atomic_order_edge = ConSanAtomicOrderEdge::Release;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -760,7 +760,7 @@ TEST(ConSan, FaultGlobalAtomicExactIdentityNoTargetFailsCardinalityWithoutMutati
   options.fault_site_identity = "fnv1a64:missing|kernel=missing|kind=atomic";
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
   EXPECT_FALSE(result.modified());
@@ -775,7 +775,7 @@ TEST(ConSan, FaultInventoryIncludesBufferAndDsAtomicEncodings) {
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
 
-  const ConSanResult buffer = try_patch_consan(make_rdna4_buffer_atomic_code_object(), options);
+  const ConSanResult buffer = test_lower_consan(make_rdna4_buffer_atomic_code_object(), options);
   ASSERT_TRUE(buffer.errors.empty()) << testing::PrintToString(buffer.errors);
   ASSERT_EQ(buffer.fault_sites.size(), 1u);
   EXPECT_EQ(buffer.fault_sites.front().mnemonic, "buffer_atomic_add_u32");
@@ -785,7 +785,7 @@ TEST(ConSan, FaultInventoryIncludesBufferAndDsAtomicEncodings) {
   EXPECT_NE(buffer.fault_sites.front().decoded_operands.find("raw_scope=2"), std::string::npos);
   EXPECT_NE(buffer.fault_sites.front().decoded_operands.find("returns_old=1"), std::string::npos);
 
-  const ConSanResult ds = try_patch_consan(make_rdna4_ds_atomic_code_object(), options);
+  const ConSanResult ds = test_lower_consan(make_rdna4_ds_atomic_code_object(), options);
   ASSERT_TRUE(ds.errors.empty()) << testing::PrintToString(ds.errors);
   ASSERT_EQ(ds.fault_sites.size(), 1u);
   EXPECT_EQ(ds.fault_sites.front().mnemonic, "ds_add_u32");
@@ -802,7 +802,7 @@ TEST(ConSan, FaultBufferAtomicWrongAddressPreservesScopeAndReturnedValue) {
   options.fault_atomic_address_delta = 8;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -828,7 +828,7 @@ TEST(ConSan, FaultBufferAtomicWeakenScopePreservesAddressAndReturnedValue) {
   options.fault_atomic_weaken_scope = true;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -852,7 +852,7 @@ TEST(ConSan, FaultBufferAtomicWeakenOrderPreservesDataOperationAndReturnedValue)
   options.fault_atomic_weaken_order = true;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -883,7 +883,7 @@ TEST(ConSan, FaultDsAtomicWrongAddressUsesAlignedOffset0AndExactCardinality) {
   options.fault_atomic_address_delta = 4;
   options.fault_require_exactly_one = true;
 
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
@@ -906,7 +906,7 @@ TEST(ConSan, FaultDsAtomicScopeAndOrderFailClosedBeforeStagingBytes) {
     options.fault_atomic_weaken_scope = weaken_scope;
     options.fault_atomic_weaken_order = !weaken_scope;
 
-    const ConSanResult result = try_patch_consan(bytes, options);
+    const ConSanResult result = test_lower_consan(bytes, options);
 
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
     EXPECT_FALSE(result.modified());

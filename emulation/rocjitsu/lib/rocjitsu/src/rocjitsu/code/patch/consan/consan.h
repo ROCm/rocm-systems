@@ -4,9 +4,9 @@
 /// @file consan.h
 /// @brief Shared ConSan contracts and prototype mechanism data.
 ///
-/// Production transformation enters through `consan_pipeline.h`. The
-/// historical mutable-options patcher is intentionally declared only by the
-/// internal `consan_legacy_lowering.h` compatibility header.
+/// Production transformation enters through `consan_pipeline.h`. No library
+/// header exposes the mutable compatibility result entry used by explicitly
+/// mechanism-level tests while the lowerer is decomposed.
 
 #pragma once
 

@@ -54,8 +54,8 @@ TEST_P(MoiEngineConformanceTest, UsesBranchIslandsForManyLargeAccessBodies) {
   }
   text_words.push_back(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4));
 
-  const auto result = try_patch_consan(make_rdna4_lds_code_object(text_words),
-                                       conformance_options(test_case, kAccessCount));
+  const auto result = test_lower_consan(make_rdna4_lds_code_object(text_words),
+                                        conformance_options(test_case, kAccessCount));
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -82,11 +82,11 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100NativeLdsAccess) {
   for (bool wave32 : std::array{false, true}) {
     SCOPED_TRACE(wave32 ? "wave32" : "wave64");
     const ConSanResult result =
-        try_patch_consan(make_rdna3_lds_code_object(text_words, "gfx1100_native_lds",
-                                                    kRdna4Wave64AllVgprsGranulated, wave32,
-                                                    /*uses_dynamic_stack=*/false,
-                                                    /*workgroup_id_dimension_mask=*/7u),
-                         conformance_options(test_case, /*access_count=*/1u));
+        test_lower_consan(make_rdna3_lds_code_object(text_words, "gfx1100_native_lds",
+                                                     kRdna4Wave64AllVgprsGranulated, wave32,
+                                                     /*uses_dynamic_stack=*/false,
+                                                     /*workgroup_id_dimension_mask=*/7u),
+                          conformance_options(test_case, /*access_count=*/1u));
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -118,11 +118,11 @@ TEST_P(MoiEngineConformanceTest, InstrumentsGfx1100SingletonWorkgroupBarrier) {
   for (bool wave32 : std::array{false, true}) {
     SCOPED_TRACE(wave32 ? "wave32" : "wave64");
     const ConSanResult result =
-        try_patch_consan(make_rdna3_lds_code_object(text_words, "gfx1100_workgroup_barrier",
-                                                    kRdna4Wave64AllVgprsGranulated, wave32,
-                                                    /*uses_dynamic_stack=*/false,
-                                                    /*workgroup_id_dimension_mask=*/7u),
-                         options);
+        test_lower_consan(make_rdna3_lds_code_object(text_words, "gfx1100_workgroup_barrier",
+                                                     kRdna4Wave64AllVgprsGranulated, wave32,
+                                                     /*uses_dynamic_stack=*/false,
+                                                     /*workgroup_id_dimension_mask=*/7u),
+                          options);
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -158,7 +158,7 @@ TEST_P(MoiEngineConformanceTest, MaterializesGfx12ScalarVectorGroupFlatAddress) 
             : make_gfx1250_code_object(text_words, "gfx1250_scalar_vector_group_flat");
 
     const ConSanResult result =
-        try_patch_consan(bytes, conformance_options(test_case, /*access_count=*/1u));
+        test_lower_consan(bytes, conformance_options(test_case, /*access_count=*/1u));
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -244,7 +244,7 @@ TEST_P(MoiEngineConformanceTest, RelocatesStraightLinePrefixWhenNoEntryIslandIsR
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words, tail_words);
 
-  const auto result = try_patch_consan(bytes, conformance_options(test_case, 1));
+  const auto result = test_lower_consan(bytes, conformance_options(test_case, 1));
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
@@ -283,7 +283,7 @@ TEST_P(MoiEngineConformanceTest, InstrumentsEveryAdjacentAccessInsideRelocationR
   const std::vector<uint8_t> bytes =
       make_rdna4_code_object_with_local_function(kernel_words, function_words, tail_words);
 
-  const auto result = try_patch_consan(bytes, conformance_options(test_case, 2));
+  const auto result = test_lower_consan(bytes, conformance_options(test_case, 2));
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
   ASSERT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid)
@@ -323,7 +323,7 @@ TEST_P(MoiEngineConformanceTest, Gfx1250RoutesSparseAccessesWithStrandedAppended
     options.moi_epoch_vgpr = 81;
     options.moi_exec_save_sgpr = 60;
   }
-  const ConSanResult result = try_patch_consan(
+  const ConSanResult result = test_lower_consan(
       make_gfx1250_code_object(text_words, "gfx1250_sparse_stranded_accesses"), options);
 
   ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);

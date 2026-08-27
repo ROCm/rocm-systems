@@ -13,7 +13,7 @@
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/consan/consan_branch_only_relay_router.h"
 #include "rocjitsu/code/patch/consan/consan_growth_policy.h"
-#include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
+#include "rocjitsu/code/patch/consan/consan_lowering.h"
 #include "rocjitsu/code/patch/consan/consan_moi.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
@@ -381,8 +381,8 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
   }
 }
 
-ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
-                              const ConSanOptions &options) {
+ConSanResult complete_consan_lowering(std::span<const uint8_t> code_object_bytes,
+                                      const ConSanOptions &options) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
@@ -403,6 +403,11 @@ ConSanResult try_patch_consan(std::span<const uint8_t> code_object_bytes,
     result.errors.emplace_back("ConSan transform threw a non-standard exception");
     return finalize_consan_result(std::move(result), code_object_bytes);
   }
+}
+
+ConSanTransformArtifacts lower_consan(std::span<const uint8_t> code_object_bytes,
+                                      const ConSanOptions &options) {
+  return complete_consan_lowering(code_object_bytes, options);
 }
 
 } // namespace rocjitsu

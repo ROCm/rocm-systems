@@ -431,7 +431,7 @@ TEST(ConSanProgramInventory, RealSynchronizationInventoryUsesTypedStableMemberId
   ConSanOptions options;
   options.flavor = ConSanFlavor::SuperCollider;
   options.fault_dry_run = true;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_FALSE(result.program_inventory.sync().sync_events.empty());
@@ -795,7 +795,7 @@ TEST(ConSanProgramInventory, RealCodeObjectPublishesDecodedContainersAndNormaliz
   options.flavor = ConSanFlavor::Moi;
   options.moi_engine = ConSanMoiEngine::RecordReplay;
   options.fault_dry_run = true;
-  const ConSanResult result = try_patch_consan(bytes, options);
+  const ConSanResult result = test_lower_consan(bytes, options);
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   EXPECT_EQ(result.program_inventory.code_object_id(), make_consan_code_object_id(bytes));

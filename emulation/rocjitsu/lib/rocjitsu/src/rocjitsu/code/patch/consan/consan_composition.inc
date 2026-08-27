@@ -118,9 +118,15 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
   }
 }
 
-[[nodiscard]] ConSanFaultTransformStage take_modified_stage(ConSanResult &result) {
+[[nodiscard]] ConSanFaultTransformStage take_modified_stage(ConSanTransformArtifacts &result) {
   return {std::move(result.replacement), std::move(result.patches), std::move(result.warnings),
           result.mutation.fault, std::move(result.mutation.applied_fault_logical_identity)};
+}
+
+[[nodiscard]] ConSanResult resume_composite_lowering(ConSanTransformArtifacts artifacts) {
+  ConSanResult result;
+  static_cast<ConSanTransformArtifacts &>(result) = std::move(artifacts);
+  return result;
 }
 
 void prepend_stage_diagnostics(ConSanResult &result, ConSanFaultTransformStage &stage) {
@@ -425,7 +431,7 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
     fault_options.faults_preapplied = true;
     ConSanResult fault_result;
     if (has_perturbation) {
-      fault_result = try_patch_consan(code_object_bytes, fault_options);
+      fault_result = resume_composite_lowering(lower_consan(code_object_bytes, fault_options));
     } else {
       // Planning already built the complete pristine semantic inventory.
       // Reuse it to apply the selected mutation instead of decoding and
@@ -437,8 +443,8 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
       AmdGpuCodeObject code_object(code_object_bytes.data(), code_object_bytes.size());
       const rj_code_arch_t arch = consan_arch_for_target(code_object.target_id());
       apply_fault_mutation_to_inventory(code_object, arch, fault_options, fault_result);
-      fault_result = finalize_consan_result(std::move(fault_result), code_object_bytes,
-                                            fault_options.moi_report_dispatch_id);
+      fault_result = resume_composite_lowering(finalize_consan_result(
+          std::move(fault_result), code_object_bytes, fault_options.moi_report_dispatch_id));
     }
     if (fault_result.outcome != ConSanTransformOutcome::ModifiedValid)
       return fault_result;

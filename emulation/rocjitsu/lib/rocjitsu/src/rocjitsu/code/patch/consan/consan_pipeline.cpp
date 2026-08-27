@@ -3,7 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/consan_pipeline.h"
 
-#include "rocjitsu/code/patch/consan/consan_legacy_lowering.h"
+#include "rocjitsu/code/patch/consan/consan_lowering.h"
 
 #include <algorithm>
 #include <map>
@@ -307,7 +307,7 @@ TransformResult transform_consan_pristine_moi_inventory(
   legacy_options.qualify_extended_barrier_pairs = preserve_extended_barrier_pairs;
   TransformResult result = TransformResult::publish_optional(
       code_object_bytes, request, transform_policy, runtime_policy, debug, disabled_mutation,
-      capabilities, unbound_resources, try_patch_consan(code_object_bytes, legacy_options));
+      capabilities, unbound_resources, lower_consan(code_object_bytes, legacy_options));
   result.moi_retry_inventory_available_ = true;
   result.moi_retry_preserves_extended_barrier_pairs_ = preserve_extended_barrier_pairs;
   return result;
@@ -403,7 +403,7 @@ TransformResult TransformResult::publish_optional(
   } else {
     const ConSanOptions lowering_options(request, transform_policy, debug, mutation, capabilities,
                                          resources);
-    lowering = try_patch_consan(code_object_bytes, lowering_options);
+    lowering = lower_consan(code_object_bytes, lowering_options);
   }
   static_cast<ConSanTransformArtifacts &>(result) = std::move(lowering);
   if (result.outcome == ConSanTransformOutcome::ModifiedValid) {

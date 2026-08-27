@@ -5261,6 +5261,32 @@ analysis completed.
   this artifact-state tranche; the complete serialized physical matrix remains
   reserved for the final gate. E2E validation remains outside this work.
 
+### Slice 5BU: remove raw lowering from the production boundary
+
+- **Typed production output:** The remaining compatibility lowerer is declared
+  by `consan_lowering.h` as `lower_consan`, whose result is only
+  `ConSanTransformArtifacts`. Both ordinary publication and the pristine MOI
+  inventory pass use this boundary. Recursive fault/perturbation composition
+  also re-enters it and explicitly resumes private composite working state;
+  mutable planner fields cannot escape with its result.
+- **Delete the legacy entry:** `consan_legacy_lowering.h` and the historical
+  `try_patch_consan` symbol are gone. The complete mutable working result has no
+  library-header declaration. Seventeen mechanism-test translation units name
+  their bypass `test_lower_consan`, and the transform fuzzer declares the
+  complete entry locally, making every remaining non-production use explicit.
+- **Deletion accounting:** Implementation files add 44 and delete 40 physical
+  lines, a net addition of four. This replaces a 25-line raw-result header with
+  an 18-line artifact-only header; the small balance is the explicit typed-to-
+  private conversion used by recursive composition. Tests add 1,222 and delete
+  1,204 lines, a net addition of eighteen; almost all of that diff is the
+  mechanical call-site rename and its formatting, not duplicated behavior.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in about 67
+  seconds. Slice 5BM's physical-gfx950 smoke remains the physical gate for this
+  tranche; the complete serialized physical matrix remains reserved for the
+  final gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
@@ -5319,8 +5345,9 @@ analysis completed.
 
 - **Completed public boundary:** `consan.h` no longer declares any transform
   overload. Production code includes `consan_pipeline.h` and receives
-  `TransformResult`; the historical mutable-options patcher is declared only
-  in `consan_legacy_lowering.h`. The redundant typed-to-`ConSanResult` overload
+  `TransformResult`; the compatibility lowerer exposes only artifact output
+  through `consan_lowering.h`. Its complete mutable working entry has no
+  library-header declaration. The redundant typed-to-`ConSanResult` overload
   and its temporary comparison test are deleted. The stronger pipeline
   projection test retains exact compatibility coverage.
 - **Completed production routing:** Every ordinary or mutated installable HSA
@@ -5331,9 +5358,8 @@ analysis completed.
   between the two phases. One documented extended-barrier preservation fact
   remains, and its focused unit test proves that it controls only incomplete
   extended-barrier-pair inventory. Raw mutable options remain reachable only
-  to the lowerer implementation, 17 mechanism-test translation units, one
-  hook-test translation unit, and the transform fuzzer; they are not a
-  production API.
+  inside the lowerer, 17 explicit mechanism-test translation units, and the
+  transform fuzzer; they are not a production API.
 - **Control-plane endpoint:** Configuration, capability validation, immutable
   program identity, observation policy, evidence requirements, runtime-binding
   status, static outcome, and installation policy have typed owners outside the
@@ -5341,13 +5367,14 @@ analysis completed.
   mechanism shape, but may not originate target-neutral admission, report sizing,
   runtime allocation, or trust policy.
 - **Honest deviations from the end-state diagrams:** The HSA adapter consumes
-  `TransformResult` directly, and automatic allocation retry remains typed at
-  that boundary, but fault installation telemetry and reader registration
-  still use its read-only legacy mechanism view. The logical pipeline stages still wrap
-  a monolithic lowerer rather than distinct parser, resource, emitter, and
-  finalizer calls. `consan.h` still exposes prototype data structures used by
-  mechanism helpers even though it exposes no transform function. These are
-  bounded migration seams, not claims that the end state has been reached.
+  `TransformResult` directly and automatic allocation retry is typed at that
+  boundary, but that retry still reconstructs private `ConSanResult` working
+  state because its lowerer has not yet been split. The logical pipeline stages
+  still wrap a monolithic lowerer rather than distinct parser, resource,
+  emitter, and finalizer calls. `consan.h` still exposes prototype data
+  structures used by mechanism helpers even though it exposes no transform
+  function. These are bounded migration seams, not claims that the end state
+  has been reached.
 
 The remaining lowerer responsibilities are explicit:
 
