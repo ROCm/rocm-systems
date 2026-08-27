@@ -69,7 +69,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
   // An empty device list therefore means no snapshot is held (or the machine
   // has no adapter). Say so, rather than letting the loop below fall through
   // and report support for devices nobody has looked at.
-  if (dxg_topology->wdevices_.empty()) return HSAKMT_STATUS_NOT_SUPPORTED;
+  if (dxg_topology->wdevices_.empty()) {
+    pr_warn_once(
+        "DXG system properties must be acquired before checking runtime debug support\n");
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+  }
 
   for (auto&& device : dxg_topology->wdevices_) {
     if (Wkmi::KmdDbgVersion version;

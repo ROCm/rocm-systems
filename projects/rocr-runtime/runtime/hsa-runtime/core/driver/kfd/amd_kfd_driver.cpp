@@ -181,13 +181,13 @@ hsa_status_t KfdDriver::Init() {
 }
 
 hsa_status_t KfdDriver::ShutDown() {
-  hsa_status_t ret = DisableRuntime();
-  if (ret != HSA_STATUS_SUCCESS) return ret;
+  const hsa_status_t disable_status = DisableRuntime();
+  const hsa_status_t release_status = ReleaseTopologySnapshot();
+  const hsa_status_t close_status = Close();
 
-  ret = ReleaseTopologySnapshot();
-  if (ret != HSA_STATUS_SUCCESS) return ret;
-
-  return Close();
+  if (disable_status != HSA_STATUS_SUCCESS) return disable_status;
+  if (release_status != HSA_STATUS_SUCCESS) return release_status;
+  return close_status;
 }
 
 hsa_status_t KfdDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {

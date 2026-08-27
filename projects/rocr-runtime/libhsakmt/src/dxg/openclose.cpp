@@ -504,9 +504,9 @@ static void child_fork_handler(void) {
   /* Sever the references the child inherited but never took, before any public
    * entry point can act on them. CHECK_DXG_OPEN() already rejects calls while
    * is_forked is set, but zeroing the counts means that even a path that
-   * bypasses it cannot decrement the parent's bookkeeping. Both are plain
-   * stores, which is all an atfork child handler may safely do - the heavier
-   * teardown waits for clear_after_fork().
+   * bypasses it cannot decrement the parent's bookkeeping. The inherited open
+   * and snapshot counts are cleared with plain stores; heavier snapshot and
+   * object teardown waits for clear_after_fork().
    */
   dxg_runtime->dxg_open_count = 0;
   topology_clear_snapshot_refs();
