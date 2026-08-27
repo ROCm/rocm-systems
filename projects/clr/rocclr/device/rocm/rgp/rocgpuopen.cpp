@@ -954,10 +954,36 @@ bool RocUberTraceCaptureMgr::BeginSqttTrace(VirtualGPU* gpu) {
   fprintf(stderr, "[CLR-Diag] BeginSqttTrace: aqlprofile_start OK; out_size after start=%u\n",
           sqtt_profile_.output_buffer.size);
 
+  // Pipeline drain BEFORE arming SQTT — mirrors PAL IssueBegin's WriteWaitIdle
+  // (gfx12PerfExperiment.cpp:1902) which precedes WriteStartThreadTraces: "WaitIdle ensures the
+  // work before Begin is not profiled in this experiment."  releaseGpuMemoryFence() dispatches a
+  // full-scope barrier-AND packet (kBarrierPacketHeader, SYSTEM acquire+release) which the CP turns
+  // into an EOP release_mem + cache wb/inv and then CPU-waits its completion signal.  This quiesces
+  // all prior in-flight / neighboring pipelined waves on this compute queue so they retire BEFORE
+  // the SQTT window opens and are therefore NOT swept into the trace.  Without this the aqlprofile
+  // SQTT window is armed too wide and pulls in ~1 extra grid of neighboring wave activity beyond
+  // the single focus dispatch, corrupting the WaveStart census (RGP Issue#2).
+  fprintf(stderr, "[CLR-Ctrl] BeginSqttTrace: pipeline drain (idle) before SQTT start\n");
+  gpu->releaseGpuMemoryFence();
+
   // Submit start packet — blocking so SQTT is active before the next dispatch.
   gpu->dispatchCounterAqlPacket(&sqtt_start_packet_, PerfCounter::ROC_GFX9,
                                 /*blocking=*/true, nullptr);
   fprintf(stderr, "[CLR-Diag] BeginSqttTrace: start packet submitted (blocking)\n");
+
+  // Second pipeline drain immediately AFTER arming SQTT — the window is now quiesced on BOTH sides
+  // of arming.  aqlprofile's gfx12 START PM4 only terminates with a bare CS_PARTIAL_FLUSH
+  // (sqtt_builder.h:427 -> gfx12_cmd_builder.h:279, PACKET3_EVENT_WRITE/CS_PARTIAL_FLUSH), which
+  // waits for CS waves but does NOT do an EOP release_mem or L1/L2 wb/inv.  It is also NOT the
+  // CP_PERFMON_STATE_DISABLE_AND_RESET that PAL IssueBegin issues before arming
+  // (gfx12PerfExperiment.cpp:1910-1914) — aqlprofile only touches CP_PERFMON_CNTL when perfcounters
+  // are present, never in the pure-SQTT path.  Because the drain and the START are separate queue
+  // submissions, edge waves scheduled concurrently with the early START register writes (before the
+  // trailing CS_PARTIAL_FLUSH and COMPUTE_THREAD_TRACE_ENABLE) can still slip into the freshly-armed
+  // window.  A full-scope EOP+cache drain here flushes those out before the focus dispatch begins
+  // recording, further shrinking the WaveStart-census overflow (RGP Issue#2 residual variance).
+  fprintf(stderr, "[CLR-Ctrl] BeginSqttTrace: pipeline drain (idle) after SQTT arm\n");
+  gpu->releaseGpuMemoryFence();
 
   sqtt_state_    = SqttState::Running;
   trace_running_ = true;
@@ -1001,6 +1027,15 @@ void RocUberTraceCaptureMgr::EndSqttTrace(VirtualGPU* gpu) {
           static_cast<unsigned long long>(global_disp_count_));
   if (sqtt_state_ != SqttState::Running) return;
 
+  // Pipeline drain AFTER the focus dispatch and BEFORE stopping SQTT — mirrors PAL IssueEnd, where
+  // WriteStopAndSample WaitIdles (gfx12PerfExperiment.cpp:2006) prior to WriteStopThreadTraces
+  // (:2014).  releaseGpuMemoryFence() forces an EOP drain + CPU wait so the focus grid's waves
+  // complete INSIDE the SQTT window (their WaveEnd tokens are recorded) and no later / neighboring
+  // waves leak in after the window closes.  Together with the idle-before-start drain this brackets
+  // the SQTT window to exactly the focus dispatch (PAL: idle-before-start, idle-before-stop).
+  fprintf(stderr, "[CLR-Ctrl] EndSqttTrace: pipeline drain (idle) before SQTT stop\n");
+  gpu->releaseGpuMemoryFence();
+
   memset(&sqtt_stop_packet_, 0, sizeof(sqtt_stop_packet_));
   const hsa_status_t stop_status =
       sqtt_api_.hsa_ven_amd_aqlprofile_stop(&sqtt_profile_, &sqtt_stop_packet_);
@@ -1016,6 +1051,14 @@ void RocUberTraceCaptureMgr::EndSqttTrace(VirtualGPU* gpu) {
     fprintf(stderr, "[CLR-Diag] EndSqttTrace: aqlprofile_stop FAILED status=%d err=%s\n",
             static_cast<int>(stop_status), err ? err : "(none)");
   }
+
+  // Pipeline drain AFTER stopping SQTT and BEFORE the read — mirrors PAL IssueEnd's post-stop
+  // WriteWaitIdle(false) (gfx12PerfExperiment.cpp:2023), which quiesces the pipeline once the
+  // trace has been stopped before the results are pulled back.  aqlprofile's gfx12 STOP path also
+  // only ends in a CS_PARTIAL_FLUSH (sqtt_builder.h:479), not a full EOP+cache drain, so force one
+  // here to ensure the SQTT buffer writes are globally visible before the read packet copies them.
+  fprintf(stderr, "[CLR-Ctrl] EndSqttTrace: pipeline drain (idle) after SQTT stop\n");
+  gpu->releaseGpuMemoryFence();
 
   memset(&sqtt_read_packet_, 0, sizeof(sqtt_read_packet_));
   const hsa_status_t read_status =
@@ -1923,6 +1966,16 @@ void RocUberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const Kernel& kernel, 
         }
       }
     }
+
+    // [CLR-DIAGPD] Temporary diagnostic: log every in-window dispatch to confirm what
+    // actually dispatches inside the SQTT trace window (Issue#2 wave32/64 mismatch RC).
+    fprintf(stderr,
+            "[CLR-DIAGPD] disp=%llu event_id=%u name=%s internal=%d apiHash=0x%llx "
+            "apiEvent=%d grid=(%zu,%zu,%zu)\n",
+            static_cast<unsigned long long>(global_disp_count_),
+            static_cast<unsigned>(current_event_id_), kernel.name().c_str(),
+            static_cast<int>(kernel.isInternalKernel()),
+            static_cast<unsigned long long>(kernel.ApiHash()), static_cast<int>(apiEvent), x, y, z);
 
     WriteCbStartMarker(gpu);
     WriteComputeBindMarker(gpu, kernel.ApiHash());
