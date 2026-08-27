@@ -337,6 +337,9 @@ private:
 inline Pm4Factory*
 Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent)
 {
+    // Serialize all access to the shared instance map and static mode flags.
+    std::lock_guard<mutex_t> lck(mutex_);
+
     // Check if we have the instance already created
     if(instances_ == nullptr) instances_ = new instances_t;
     const auto            ret = instances_->insert({*agent_info, nullptr});
@@ -380,8 +383,9 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
 inline Pm4Factory*
 Pm4Factory::Create(const hsa_agent_t agent, bool concurrent)
 {
-    std::lock_guard<mutex_t> lck(mutex_);
-    const AgentInfo*         agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
+    // Note: locking is handled by Create(const AgentInfo*, gpu_id_t, bool) below, which is
+    // the single chokepoint that mutates the shared instance map.
+    const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
     // Get GPU id for a given agent
 
     hsa_status_t      status = HSA_STATUS_ERROR;

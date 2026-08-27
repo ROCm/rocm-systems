@@ -16,8 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 
-// busIdToInt64 is an internal helper (declared in utils.h). Forward-declare it
-// here so the test can compute node ids exactly the way the builder does.
+// busIdToInt64 is an internal helper (declared in utils.h).
 ncclResult_t busIdToInt64(const char* busId, int64_t* id);
 
 // ncclTopoAddXGMI is a non-static internal symbol in graph/topo.cc that is not
@@ -96,13 +95,14 @@ protected:
     return pci;
   }
 
-  // GPU-to-GPU link entry (tclass 0x03 -> GPU) connecting to a peer GPU.
+  // GPU-to-GPU link entry connecting to a peer GPU. Default tclass 0x03 (VGA);
+  // xml.cc now also writes PCI_ACCELERATOR_CLASS ("0x120000") for AMD GPUs.
   void addGpuLink(struct ncclXmlNode* holder, const char* targetBusId,
-                  int count) {
+                  int count, const char* tclass = "0x03") {
     struct ncclXmlNode* link = nullptr;
     EXPECT_EQ(xmlAddNode(xml, holder, "xgmi", &link), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(link, "target", targetBusId), ncclSuccess);
-    EXPECT_EQ(xmlSetAttr(link, "tclass", "0x03"), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(link, "tclass", tclass), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(link, "count", count), ncclSuccess);
   }
 
@@ -126,13 +126,21 @@ protected:
   // GPU <pci> node (with nested <gpu>) under a CPU, returning the pci node so
   // callers can attach <xgmi> link entries below it.
   struct ncclXmlNode* addGpuPci(struct ncclXmlNode* parent, const char* busId,
-                                const char* gcn, int rank, int dev) {
+                                const char* gcn, int rank, int dev,
+                                int mloPart = NCCL_TOPO_UNDEF) {
     struct ncclXmlNode* pci = nullptr;
     EXPECT_EQ(xmlAddNode(xml, parent, "pci", &pci), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(pci, "busid", busId), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(pci, "class", "0x03"), ncclSuccess); // 0x03 -> GPU
     EXPECT_EQ(xmlSetAttrInt(pci, "link_width", 16), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(pci, "link_speed", "16.0 GT/s PCIe"), ncclSuccess);
+    addGpuUnderPci(pci, gcn, rank, dev, mloPart);
+    return pci;
+  }
+
+  struct ncclXmlNode* addGpuUnderPci(struct ncclXmlNode* pci, const char* gcn,
+                                     int rank, int dev,
+                                     int mloPart = NCCL_TOPO_UNDEF) {
     struct ncclXmlNode* gpu = nullptr;
     EXPECT_EQ(xmlAddNode(xml, pci, "gpu", &gpu), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(gpu, "sm", 304), ncclSuccess);
@@ -141,7 +149,10 @@ protected:
     EXPECT_EQ(xmlSetAttrInt(gpu, "rank", rank), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(gpu, "dev", dev), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(gpu, "gdr", 1), ncclSuccess);
-    return pci;
+    if (mloPart != NCCL_TOPO_UNDEF) {
+      EXPECT_EQ(xmlSetAttrInt(gpu, "mlopart", mloPart), ncclSuccess);
+    }
+    return gpu;
   }
 
   static struct ncclTopoLink* findLink(struct ncclTopoNode* from,
@@ -158,6 +169,17 @@ protected:
   struct ncclXml* xml = nullptr;
   struct ncclXmlNode* root = nullptr;
 };
+
+// Encoding lives in headers; these run on every platform.
+TEST_F(TopoTest, MloPartBusId_DoesNotClobberPciFunction) {
+  int64_t busFn1 = 0;
+  ASSERT_EQ(busIdToInt64("0000:01:00.1", &busFn1), ncclSuccess);
+  const int64_t enc0 = NCCL_TOPO_MLOPART_BUSID(busFn1, 0);
+  const int64_t enc7 = NCCL_TOPO_MLOPART_BUSID(busFn1, 7);
+  EXPECT_NE(enc7, enc0);
+  EXPECT_EQ(enc0 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
+  EXPECT_EQ(enc7 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
+}
 
 // ncclTopoAddXGMI() is only built on HIP/AMD platforms, so guard these tests
 // with the same macro; the #else branch keeps the suite linkable elsewhere.
@@ -411,6 +433,66 @@ TEST_F(TopoTest, DevModel_IndirectXgmiPath_IsFourHops) {
   struct ncclTopoLinkList* p02 = built->nodes[GPU].nodes[i0].paths[GPU] + i2;
   EXPECT_EQ(p02->count, 4);
   EXPECT_GT(p02->count, 3); // excluded by the direct-XGMI filter
+
+  ncclTopoFree(built);
+}
+
+TEST_F(TopoTest, GetSystemFromXml_MloPartOnNonzeroPhysicalFunction) {
+  const uint64_t host = 0x77;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:03:00.1", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  struct ncclXmlNode* gpu1 = addGpuUnderPci(pci, "gfx942", 1, 1, /*mloPart=*/1);
+  addGpuLink(gpu0, "0000:03:00.1", 1, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpu1, "0000:03:00.0", 1, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 2);
+  EXPECT_NE(findLink(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1), nullptr);
+  EXPECT_NE(findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes), nullptr);
+  ncclTopoFree(built);
+}
+
+// CPX: eight HIP partitions (mlopart 0-7) hang off the physical function-0 PCI
+// node. Overlay bits must stay above the PCI function nibble.
+TEST_F(TopoTest, GetSystemFromXml_CpxEightMlopartsUnderPhysicalPci) {
+  const uint64_t host = 0xc0;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  ASSERT_NE(gpu0, nullptr);
+  struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
+  gpus[0] = gpu0;
+  for (int p = 1; p < NCCL_TOPO_MLOPART_DEV_MAX; p++) {
+    gpus[p] = addGpuUnderPci(pci, "gfx942", p, p, p);
+  }
+  for (int p = 0; p < NCCL_TOPO_MLOPART_DEV_MAX; p++) {
+    char tgt[32];
+    snprintf(tgt, sizeof(tgt), "0000:0c:00.%d", (p + 1) % NCCL_TOPO_MLOPART_DEV_MAX);
+    addGpuLink(gpus[p], tgt, 1, PCI_ACCELERATOR_CLASS);
+  }
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, NCCL_TOPO_MLOPART_DEV_MAX);
+  ASSERT_EQ(built->nodes[GPU].count, NCCL_TOPO_MLOPART_DEV_MAX);
+
+  int64_t bus0 = 0;
+  ASSERT_EQ(busIdToInt64("0000:0c:00.0", &bus0), ncclSuccess);
+  for (int p = 0; p < NCCL_TOPO_MLOPART_DEV_MAX; p++) {
+    struct ncclTopoNode* dev = nullptr;
+    ASSERT_EQ(ncclTopoGetNode(built, &dev, DEV,
+                              NCCL_TOPO_ID(0, NCCL_TOPO_MLOPART_BUSID(bus0, p))),
+              ncclSuccess);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(NCCL_TOPO_ID_LOCAL_ID(dev->id) & 0xf, 0);
+    EXPECT_NE(findLink(dev, built->nodes[DEV].nodes + (p + 1) % NCCL_TOPO_MLOPART_DEV_MAX), nullptr);
+  }
 
   ncclTopoFree(built);
 }

@@ -28,14 +28,34 @@ else
 NCCL_OS_DEFINE := -DNCCL_OS_WINDOWS
 endif
 
+# topo_expl bypasses RCCL's CMake configuration, so reproduce the two
+# compile-time feature probes needed by headers it imports.
+HAVE_HIP_FABRIC_API := $(shell printf '%s\n' \
+  '#include <hip/hip_runtime_api.h>' \
+  'int main() { hipMemFabricHandle_t h{}; (void)h; auto fn = &hipMemImportFromShareableHandle; (void)fn; }' | \
+  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -D__HIP_PLATFORM_AMD__ -I$(ROCM_PATH)/include - \
+  >/dev/null 2>&1 && echo yes || echo no)
+ifeq ($(HAVE_HIP_FABRIC_API),yes)
+FEATURE_DEFINES += -DHIP_FABRIC_API
+endif
+
+HAVE_AMDSMI_FABRIC_API := $(shell printf '%s\n' \
+  '#include <amd_smi/amdsmi.h>' \
+  'int main() { amdsmi_fabric_info_t info{}; (void)info; }' | \
+  $(HIPCC) -x c++ -std=c++17 -fsyntax-only -I$(ROCM_PATH)/include - \
+  >/dev/null 2>&1 && echo yes || echo no)
+ifeq ($(HAVE_AMDSMI_FABRIC_API),yes)
+FEATURE_DEFINES += -DAMDSMI_FABRIC_DIRECT
+endif
+
 CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) \
            -std=c++17 \
            -Wl,--gc-sections -fgpu-rdc \
            -Iinclude -Itest -Ihipify_rccl/include -Ihipify_rccl/include/plugin \
 		   -Ihipify_rccl/include/nccl_device \
-           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I/opt/rocm/include/ \
+           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I$(ROCM_PATH)/include/ \
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
-           $(NCCL_OS_DEFINE) \
+           $(NCCL_OS_DEFINE) $(FEATURE_DEFINES) \
            -lpthread
 
 TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
@@ -52,7 +72,7 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/archinfo.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
-			../../src/rccl_wrap.cc \
+			hipify_rccl/rccl_wrap.cc \
 			hipify_rccl/collectives.cc \
 			hipify_rccl/register.cc \
 			hipify_rccl/enqueue.cc
@@ -98,6 +118,9 @@ hipify:
 	cp -a ../../src/nccl.h.in include/rccl/rccl.h
 	cp -a ../../src/include/ hipify_rccl/
 	cp -a ../../src/graph/ hipify_rccl/
+	mkdir -p hipify_rccl/include
+	(cd ../../src && find algorithms -name '*.h' \
+	    -exec cp --parents -t ../tools/topo_expl/hipify_rccl/include/ {} +)
 	cp -a ../../src/device/*.h hipify_rccl/src/device/include
 	cp -a ../../src/device/network/unpack/*.h hipify_rccl/include/network/unpack
 	# src/include/sym_kernels.h includes "../device/symmetric/gin_scratch.h"
@@ -106,6 +129,7 @@ hipify:
 	cp -a ../../src/enqueue.cc hipify_rccl/
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
+	cp -a ../../src/rccl_wrap.cc hipify_rccl/
 	cp -a ../../src/misc/archinfo.cc hipify_rccl/graph/
 	# Hipify all header and source files (CUDA -> HIP).
 	# Walk every subdirectory under hipify_rccl/include/ recursively so that

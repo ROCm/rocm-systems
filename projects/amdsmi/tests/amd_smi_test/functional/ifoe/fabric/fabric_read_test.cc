@@ -147,8 +147,8 @@ void TestFabricRead::Run(void) {
                        "(no UALoE sysfs content); BDF may still be valid"
                     << std::endl;
         }
-        const auto& v1 = fabric_info.fabric_info.fabric_version.v1;
-        std::cout << "\t\tversion:        " << fabric_info.fabric_info.version << "\n"
+        const auto& v1 = fabric_info.fabric_info.v1;
+        std::cout << "\t\tversion:        " << fabric_info.fabric_version << "\n"
                   << "\t\taccelerator_id: " << v1.accelerator_id << "\n"
                   << "\t\tfabric_type:    " << v1.fabric_type << "\n"
                   << "\t\tbandwidth:      " << v1.bandwidth << " Mb/s" << "\n"
@@ -216,6 +216,7 @@ void TestFabricRead::Run(void) {
     CHK_ERR_ASRT(err)
 
     IF_VERB(STANDARD) {
+      const char* name;
       // Walk datasets and print a sample of telemetry items
       for (uint32_t cat = 0; cat < AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX; ++cat) {
         if (!tel->datasets[cat]) continue;
@@ -232,7 +233,12 @@ void TestFabricRead::Run(void) {
           // ── amdsmi_fabric_telem_id_to_string ─────────────────────────────
           for (uint32_t item = 0; item < in.item_count; ++item) {
             const auto& it = in.items[item];
-            const char* name = amdsmi_fabric_telem_id_to_string(it.id);
+            err = amdsmi_fabric_telem_id_to_string(it.id, &name);
+            // Unmapped telemetry ids return NOT_FOUND with a "UNKNOWN" name;
+            // tolerate them so a single unknown id does not fail the test.
+            if (err != AMDSMI_STATUS_NOT_FOUND) {
+              CHK_ERR_ASRT(err)
+            }
             std::cout << "\t\t    [" << item << "] id=0x" << std::hex << it.id << std::dec
                       << "  name=" << (name ? name : "NULL") << "  value=" << it.value << "\n";
 
@@ -264,4 +270,39 @@ void TestFabricRead::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
+}
+
+// amdsmi_fabric_telem_id_to_string() is a pure lookup over a static id->name
+// table generated from the vendored IFOE_TELEM_ID_* headers, so these run
+// without a device and catch id->name drift when the headers are re-synced.
+
+// Literals (independent of the vendored macros) spanning the table — first,
+// mid-table, and last entry — so a reorder or drop anywhere is caught.
+static constexpr uint64_t kFirstTelemId = 0x1;
+static constexpr uint64_t kMidTelemId = 0x6000001;
+static constexpr uint64_t kLastTelemId = 0x6001011;
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
+  const char* name = nullptr;
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kFirstTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "IFOE_SDP_TX_PACK_WR_REQ");
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kMidTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "NETPORT_LINK_STATUS");
+
+  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kLastTelemId, &name), AMDSMI_STATUS_SUCCESS);
+  ASSERT_STREQ(name, "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE");
+}
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kFirstTelemId, nullptr);
+  ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+}
+
+TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
+  const char* name = nullptr;
+  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(UINT64_MAX, &name);
+  ASSERT_EQ(err, AMDSMI_STATUS_NOT_FOUND);
+  ASSERT_STREQ(name, "UNKNOWN");
 }

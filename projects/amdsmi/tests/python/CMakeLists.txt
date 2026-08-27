@@ -18,3 +18,24 @@ install(
     FILES_MATCHING
     PATTERN "*.py"
 )
+
+# test_abi_compat.py exercises the wheel loader's system-fallback guard by
+# invoking tools/disable_system_fallback.py. In the installed layout the test
+# resolves that tool relative to SHARE_INSTALL_PREFIX (its REPO_ROOT), so it
+# must be shipped alongside the tests -- otherwise the fallback-disabled tests
+# silently skip and the wheel's core safety property goes unverified in CI.
+install(
+    PROGRAMS ${PROJECT_SOURCE_DIR}/tools/disable_system_fallback.py
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tools/
+    COMPONENT ${TESTS_COMPONENT}
+)
+
+# test_dual_copy_guard.py loads run_amdsmi_dual_copy_test.py relative to its
+# REPO_ROOT (SHARE_INSTALL_PREFIX in the installed layout), so the runner must
+# ship under tests/ -- otherwise the guard's four unit tests raise SkipTest and
+# the drift-guard logic is never exercised in the installed test run.
+install(
+    PROGRAMS ${PROJECT_SOURCE_DIR}/tests/run_amdsmi_dual_copy_test.py
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tests/
+    COMPONENT ${TESTS_COMPONENT}
+)

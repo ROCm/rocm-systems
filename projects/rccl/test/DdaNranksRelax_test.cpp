@@ -16,8 +16,8 @@
 
 #include "common/DdaIpcTestHelpers.hpp"
 
-#include "dda_all_reduce.h"
-#include "dda_init_detail.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting

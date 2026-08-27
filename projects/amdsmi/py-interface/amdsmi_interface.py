@@ -21,6 +21,7 @@ import ctypes
 import math
 import os
 import re
+import warnings
 from collections.abc import Iterable
 from ctypes import POINTER, c_void_p
 from enum import IntEnum, Enum
@@ -61,7 +62,7 @@ AMDSMI_MAX_NUM_XCC = 8
 AMDSMI_MAX_NUM_XCP = 8
 
 # max num afids per cper record
-MAX_NUMBER_OF_AFIDS_PER_RECORD = 12
+AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD = 12
 
 # Max number of DPM policies
 AMDSMI_MAX_NUM_PM_POLICIES = 32
@@ -83,8 +84,7 @@ AMDSMI_MAX_CONTAINER_TYPE = 2
 AMDSMI_MAX_CACHE_TYPES = 10
 AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK = 64
 AMDSMI_GPU_UUID_SIZE = 38
-_AMDSMI_STRING_LENGTH = 80
-_AMDSMI_MAX_STRING_LENGTH = 256
+AMDSMI_GPU_CUID_SIZE = AMDSMI_GPU_UUID_SIZE
 
 
 class AmdSmiStatus(IntEnum):
@@ -266,8 +266,8 @@ class AmdSmiClkType(IntEnum):
 
 
 class AmdSmiClkLimitType(IntEnum):
-    MIN = amdsmi_wrapper.CLK_LIMIT_MIN
-    MAX = amdsmi_wrapper.CLK_LIMIT_MAX
+    MIN = amdsmi_wrapper.AMDSMI_CLK_LIMIT_MIN
+    MAX = amdsmi_wrapper.AMDSMI_CLK_LIMIT_MAX
 
 
 class AmdSmiTemperatureType(IntEnum):
@@ -565,6 +565,7 @@ class AmdSmiAcceleratorPartitionType(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_INVALID
 
 
+# This class is deprecated, use AmdSmiAcceleratorPartitionType instead
 class AmdSmiComputePartitionType(IntEnum):
     SPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_SPX
     DPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_DPX
@@ -574,10 +575,17 @@ class AmdSmiComputePartitionType(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_INVALID
 
 
+# This class is deprecated, use AmdSmiAcceleratorPartitionMemAllocModeType instead
 class AmdSmiComputePartitionMemAllocModeType(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID
     CAPPING = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING
     ALL = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL
+
+
+class AmdSmiAcceleratorPartitionMemAllocModeType(IntEnum):
+    INVALID = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_INVALID
+    CAPPING = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING
+    ALL = amdsmi_wrapper.AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL
 
 
 class AmdSmiMemoryPartitionType(IntEnum):
@@ -1171,24 +1179,6 @@ def amdsmi_get_cpu_handles() -> Dict[str, Any]:
         for sock_idx in range(cpu_count.value)
     ]
     return {"cpu_count": len(cpu_handles), "processor_handles": cpu_handles}
-
-
-def amdsmi_get_cpusocket_handles() -> List[c_void_p]:
-    """Deprecated: Use amdsmi_get_cpu_handles() instead.\
-        Will be deprecated in Rocm 8.0.
-
-    Returns:
-        `List[c_void_p]`: List of CPU socket handles (legacy format).
-    """
-    import warnings
-
-    warnings.warn(
-        "amdsmi_get_cpusocket_handles() is deprecated, use amdsmi_get_cpu_handles() instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    result = amdsmi_get_cpu_handles()
-    return result["processor_handles"]
 
 
 def amdsmi_get_socket_info(socket_handle):
@@ -2478,7 +2468,6 @@ def amdsmi_get_gpu_device_bdf_bdf(
     Returns the raw amdsmi_bdf_t struct for a GPU. The same data is available as a
     formatted string from amdsmi_get_gpu_device_bdf().
     """
-    import warnings
 
     warnings.warn(
         "amdsmi_get_gpu_device_bdf_bdf() is deprecated, use amdsmi_get_gpu_device_bdf() "
@@ -2772,6 +2761,35 @@ def amdsmi_get_gpu_device_uuid(processor_handle: processor_handle_t) -> str:
     )
 
     return uuid.value.decode("utf-8")
+
+
+def amdsmi_get_gpu_device_cuid(processor_handle: processor_handle_t) -> str:
+    """
+    Retrieves GPU CUID (Component Unified ID) for a given device.
+
+    Parameters:
+        processor_handle (amdsmi_processor_handle_t): The processor handle for the GPU device whose CUID is to be retrieved.
+
+    Returns:
+        str: The retrieved GPU CUID as a UUIDv8 string.
+
+    Raises:
+        AmdSmiParameterException: If the input parameters are invalid.
+        AmdSmiLibraryException: If the library reports an error retrieving the CUID.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    cuid = ctypes.create_string_buffer(AMDSMI_GPU_CUID_SIZE)
+
+    cuid_length = ctypes.c_uint32()
+    cuid_length.value = AMDSMI_GPU_CUID_SIZE
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_device_cuid(processor_handle, ctypes.byref(cuid_length), cuid)
+    )
+
+    return cuid.value.decode("utf-8")
 
 
 def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
@@ -3578,8 +3596,8 @@ def amdsmi_get_afids_from_cper(cper_afid_data: bytes) -> Tuple[List[int], int]:
         buf = ctypes.create_string_buffer(raw_bytes, record_size)
         buf_ptr = ctypes.cast(buf, POINTER(ctypes.c_char))
 
-        afid_array = (ctypes.c_uint64 * MAX_NUMBER_OF_AFIDS_PER_RECORD)()
-        num_afids_ct = ctypes.c_uint32(MAX_NUMBER_OF_AFIDS_PER_RECORD)
+        afid_array = (ctypes.c_uint64 * AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD)()
+        num_afids_ct = ctypes.c_uint32(AMDSMI_MAX_NUMBER_OF_AFIDS_PER_RECORD)
 
         # Call the wrapper function
         status = amdsmi_wrapper.amdsmi_get_afids_from_cper(
@@ -3798,10 +3816,10 @@ def amdsmi_get_nic_fw_version(processor_handle: amdsmi_wrapper.amdsmi_processor_
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    uuid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    uuid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     uuid_length = ctypes.c_uint32()
-    uuid_length.value = _AMDSMI_MAX_STRING_LENGTH
+    uuid_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_fw_version(processor_handle, ctypes.byref(uuid_length), uuid)
@@ -4076,13 +4094,36 @@ def amdsmi_get_gpu_vendor_name(processor_handle: processor_handle_t) -> str:
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     length = ctypes.c_uint64()
-    length.value = _AMDSMI_STRING_LENGTH
+    length.value = AMDSMI_MAX_STRING_LENGTH
 
-    vendor_name = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    vendor_name = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_vendor_name(processor_handle, vendor_name, length))
 
     return vendor_name.value.decode("utf-8")
+
+
+def amdsmi_get_gpu_vram_vendor(processor_handle: processor_handle_t):
+    """Deprecated: use amdsmi_get_gpu_vram_info() instead.
+
+    This API is slated for removal in a future ROCm release.
+    """
+    warnings.warn(
+        "amdsmi_get_gpu_vram_vendor() is deprecated, use amdsmi_get_gpu_vram_info() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    length = ctypes.c_uint32()
+    length.value = AMDSMI_MAX_STRING_LENGTH
+
+    vram_vendor = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
+
+    _check_res(amdsmi_wrapper.amdsmi_get_gpu_vram_vendor(processor_handle, vram_vendor, length))
+
+    return vram_vendor.value.decode("utf-8")
 
 
 def amdsmi_get_gpu_id(processor_handle: processor_handle_t):
@@ -4093,31 +4134,6 @@ def amdsmi_get_gpu_id(processor_handle: processor_handle_t):
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_id(processor_handle, ctypes.byref(gpu_id_16)))
 
     return gpu_id_16.value
-
-
-def amdsmi_get_gpu_vram_vendor(processor_handle: processor_handle_t):
-    """Deprecated: use amdsmi_get_gpu_vram_info() instead.
-
-    This API is slated for removal in a future ROCm release.
-    """
-    import warnings
-
-    warnings.warn(
-        "amdsmi_get_gpu_vram_vendor() is deprecated, use amdsmi_get_gpu_vram_info() instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    length = ctypes.c_uint32()
-    length.value = _AMDSMI_STRING_LENGTH
-
-    vram_vendor = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
-
-    _check_res(amdsmi_wrapper.amdsmi_get_gpu_vram_vendor(processor_handle, vram_vendor, length))
-
-    return vram_vendor.value.decode("utf-8")
 
 
 def amdsmi_get_gpu_subsystem_id(processor_handle: processor_handle_t):
@@ -4137,9 +4153,9 @@ def amdsmi_get_gpu_subsystem_name(processor_handle: processor_handle_t):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     length = ctypes.c_uint64()
-    length.value = _AMDSMI_STRING_LENGTH
+    length.value = AMDSMI_MAX_STRING_LENGTH
 
-    name = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    name = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(amdsmi_wrapper.amdsmi_get_gpu_subsystem_name(processor_handle, name, length))
 
@@ -4351,13 +4367,21 @@ def amdsmi_is_P2P_accessible(
 
 
 def amdsmi_get_gpu_compute_partition(processor_handle: processor_handle_t):
+    """Deprecated: use amdsmi_get_gpu_accelerator_partition_profile() instead."""
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    length = ctypes.c_uint32()
-    length.value = _AMDSMI_STRING_LENGTH
+    warnings.warn(
+        "amdsmi_get_gpu_compute_partition() is deprecated, "
+        "use amdsmi_get_gpu_accelerator_partition_profile() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
-    compute_partition = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    length = ctypes.c_uint32()
+    length.value = AMDSMI_MAX_STRING_LENGTH
+
+    compute_partition = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_compute_partition(processor_handle, compute_partition, length)
@@ -4369,6 +4393,14 @@ def amdsmi_get_gpu_compute_partition(processor_handle: processor_handle_t):
 def amdsmi_set_gpu_compute_partition(
     processor_handle: processor_handle_t, compute_partition: AmdSmiComputePartitionType
 ):
+    """Deprecated: use amdsmi_set_gpu_accelerator_partition_profile() instead."""
+
+    warnings.warn(
+        "amdsmi_set_gpu_compute_partition() is deprecated, "
+        "use amdsmi_set_gpu_accelerator_partition_profile() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -4380,29 +4412,57 @@ def amdsmi_set_gpu_compute_partition(
 
 
 def amdsmi_get_gpu_compute_partition_mem_alloc_mode(processor_handle: processor_handle_t):
+    """Deprecated: use amdsmi_get_gpu_accelerator_partition_mem_alloc_mode() instead."""
+
+    warnings.warn(
+        "amdsmi_get_gpu_compute_partition_mem_alloc_mode() is deprecated, "
+        "use amdsmi_get_gpu_accelerator_partition_mem_alloc_mode() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    name = amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(processor_handle)
+    return name
+
+
+def amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    mode = amdsmi_wrapper.amdsmi_compute_partition_mem_alloc_mode_t()
+    mode = amdsmi_wrapper.amdsmi_accelerator_partition_mem_alloc_mode_t()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+        amdsmi_wrapper.amdsmi_get_gpu_accelerator_partition_mem_alloc_mode(
             processor_handle, ctypes.byref(mode)
         )
     )
-    return AmdSmiComputePartitionMemAllocModeType(mode.value).name
+    return AmdSmiAcceleratorPartitionMemAllocModeType(mode.value).name
 
 
 def amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     processor_handle: processor_handle_t, mode: AmdSmiComputePartitionMemAllocModeType
 ):
+    """Deprecated: use amdsmi_set_gpu_accelerator_partition_mem_alloc_mode() instead."""
+
+    warnings.warn(
+        "amdsmi_set_gpu_compute_partition_mem_alloc_mode() is deprecated, "
+        "use amdsmi_set_gpu_accelerator_partition_mem_alloc_mode() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    acc_mode = AmdSmiAcceleratorPartitionMemAllocModeType(mode)
+    amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(processor_handle, acc_mode)
+
+
+def amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(
+    processor_handle: processor_handle_t, mode: AmdSmiAcceleratorPartitionMemAllocModeType
+):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    if not isinstance(mode, AmdSmiComputePartitionMemAllocModeType):
-        raise AmdSmiParameterException(mode, AmdSmiComputePartitionMemAllocModeType)
+    if not isinstance(mode, AmdSmiAcceleratorPartitionMemAllocModeType):
+        raise AmdSmiParameterException(mode, AmdSmiAcceleratorPartitionMemAllocModeType)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_compute_partition_mem_alloc_mode(processor_handle, mode)
+        amdsmi_wrapper.amdsmi_set_gpu_accelerator_partition_mem_alloc_mode(processor_handle, mode)
     )
 
 
@@ -4425,9 +4485,9 @@ def amdsmi_get_gpu_memory_partition(processor_handle: processor_handle_t):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     length = ctypes.c_uint32()
-    length.value = _AMDSMI_STRING_LENGTH
+    length.value = AMDSMI_MAX_STRING_LENGTH
 
-    memory_partition = ctypes.create_string_buffer(_AMDSMI_STRING_LENGTH)
+    memory_partition = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_memory_partition(processor_handle, memory_partition, length)
@@ -4474,13 +4534,14 @@ def amdsmi_get_gpu_memory_partition_config(processor_handle: processor_handle_t)
 def amdsmi_set_gpu_memory_partition(
     processor_handle: processor_handle_t, memory_partition: AmdSmiMemoryPartitionType
 ):
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    """Deprecated: Use amdsmi_set_gpu_memory_partition_mode() instead.  Will be deprecated in future ROCM release"""
 
-    if not isinstance(memory_partition, AmdSmiMemoryPartitionType):
-        raise AmdSmiParameterException(memory_partition, AmdSmiMemoryPartitionType)
-
-    _check_res(amdsmi_wrapper.amdsmi_set_gpu_memory_partition(processor_handle, memory_partition))
+    warnings.warn(
+        "amdsmi_set_gpu_memory_partition() is deprecated, use amdsmi_set_gpu_memory_partition_mode() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    amdsmi_set_gpu_memory_partition_mode(processor_handle, memory_partition)
 
 
 def amdsmi_set_gpu_memory_partition_mode(
@@ -4492,7 +4553,9 @@ def amdsmi_set_gpu_memory_partition_mode(
     if not isinstance(memory_partition, AmdSmiMemoryPartitionType):
         raise AmdSmiParameterException(memory_partition, AmdSmiMemoryPartitionType)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_gpu_memory_partition(processor_handle, memory_partition))
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_memory_partition_mode(processor_handle, memory_partition)
+    )
 
 
 def amdsmi_get_gpu_accelerator_partition_profile(
@@ -4774,10 +4837,6 @@ def amdsmi_reset_gpu(processor_handle: processor_handle_t):
     _check_res(amdsmi_wrapper.amdsmi_reset_gpu(processor_handle))
 
 
-def amdsmi_gpu_driver_reload():
-    _check_res(amdsmi_wrapper.amdsmi_gpu_driver_reload())
-
-
 def amdsmi_set_gpu_fan_speed(processor_handle: processor_handle_t, sensor_idx: int, fan_speed: int):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -4983,10 +5042,10 @@ def amdsmi_get_gpu_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_pro
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    gpucpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    gpucpuaffid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     gpucpuaffid_length = ctypes.c_uint32()
-    gpucpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
+    gpucpuaffid_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_topo_cpu_affinity(
@@ -5000,10 +5059,10 @@ def amdsmi_get_nic_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_pro
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    niccpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    niccpuaffid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     niccpuaffid_length = ctypes.c_uint32()
-    niccpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
+    niccpuaffid_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_topo_cpu_affinity(
@@ -5017,10 +5076,10 @@ def amdsmi_get_switch_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    switchcpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    switchcpuaffid = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     switchcpuaffid_length = ctypes.c_uint32()
-    switchcpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
+    switchcpuaffid_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_switch_topo_cpu_affinity(
@@ -5040,10 +5099,10 @@ def amdsmi_get_nic_gpu_topo_info(
     if not isinstance(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle)
 
-    niccgpuinfo = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
+    niccgpuinfo = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
 
     niccgpuinfo_length = ctypes.c_uint32()
-    niccgpuinfo_length.value = _AMDSMI_MAX_STRING_LENGTH
+    niccgpuinfo_length.value = AMDSMI_MAX_STRING_LENGTH
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_gpu_topo_info(
@@ -5116,34 +5175,6 @@ def amdsmi_get_energy_count(processor_handle: processor_handle_t):
     }
 
 
-def amdsmi_set_gpu_clk_range(
-    processor_handle: processor_handle_t,
-    min_clk_value: int,
-    max_clk_value: int,
-    clk_type: AmdSmiClkType,
-) -> None:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-
-    if not isinstance(min_clk_value, int):
-        raise AmdSmiParameterException(min_clk_value, int)
-
-    if not isinstance(max_clk_value, int):
-        raise AmdSmiParameterException(min_clk_value, int)
-
-    if not isinstance(clk_type, AmdSmiClkType):
-        raise AmdSmiParameterException(clk_type, AmdSmiClkType)
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_clk_range(
-            processor_handle,
-            ctypes.c_uint64(min_clk_value),
-            ctypes.c_uint64(max_clk_value),
-            clk_type,
-        )
-    )
-
-
 def amdsmi_set_gpu_clk_limit(
     processor_handle: processor_handle_t, clk_type: str, limit_type: str, value: int
 ) -> None:
@@ -5165,9 +5196,9 @@ def amdsmi_set_gpu_clk_limit(
         raise AmdSmiParameterException(f"Unsupported clock type: {clk_type}", str)
 
     if limit_type.lower() == "min":
-        limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MIN
+        limit_type_conversion = amdsmi_wrapper.AMDSMI_CLK_LIMIT_MIN
     elif limit_type.lower() == "max":
-        limit_type_conversion = amdsmi_wrapper.CLK_LIMIT_MAX
+        limit_type_conversion = amdsmi_wrapper.AMDSMI_CLK_LIMIT_MAX
     else:
         raise AmdSmiParameterException(f"Unsupported limit type: {limit_type}", str)
     _check_res(
@@ -5540,7 +5571,6 @@ def amdsmi_get_xgmi_plpd(processor_handle: processor_handle_t) -> Dict[str, Any]
     return {
         "num_supported": policy.num_supported,
         "current_id": current_id,
-        "plpds": policies,  # Marked for deprecation
         "policies": policies,  # Correct field name
     }
 
@@ -6744,42 +6774,26 @@ def amdsmi_get_rocm_version() -> Tuple[bool, str]:
         else:
             print(f"Error: {version_message}")
     """
-    # librocm-core.so can be located in found using several different methods.
-    # Look for it with below priority:
-    # 1. ROCM_HOME/ROCM_PATH environment variables
-    #    - ROCM_HOME/lib
-    #    - ROCM_PATH/lib (usually set to /opt/rocm/)
-    # 2. Decided by the linker
-    #    - LD_LIBRARY_PATH env var
-    #    - defined path in /etc/ld.so.conf.d/
-    # 3. Relative to amdsmi_wrapper.py in /opt/rocm/share/amd_smi
-    #    - parent directory
-
+    # Resolve librocm-core.so, most specific first. Path 0 mirrors
+    # _load_library() in amdsmi_wrapper.py: this file is staged at
+    # <root>/share/amd_smi/amdsmi and the library at <root>/lib (relocatable
+    # ROCm tree / TheRock rocm-sdk wheel). The rest are best-effort fallbacks
+    # for a system install (ROCM_HOME/ROCM_PATH, /opt/rocm, then the linker).
     try:
         possible_locations = list()
-        # 0. Relative to amdsmi_interface.py in TheRock:
-        #    `amdsmi_interface.py` is located in
-        #    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
-        #    `_rocm_sdk_core/lib`.
-        librocm_core_path = (
-            Path(__file__).resolve().parent.parent.parent.parent / "lib/librocm-core.so.1"
-        )
-        possible_locations.append(librocm_core_path)
-        # 1.
+        # 0. Relocatable tree: <root>/lib relative to this file.
+        here = Path(__file__).resolve()
+        if len(here.parents) > 3:
+            possible_locations.append(here.parents[3] / "lib/librocm-core.so.1")
+        # 1. ROCM_HOME / ROCM_PATH.
         rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
         if rocm_path:
             possible_locations.append(os.path.join(rocm_path, "lib/librocm-core.so"))
-
-        # Check if /opt/rocm/lib/librocm-core.so exists and add it to the list
+        # 2. Default /opt/rocm system install.
         if os.path.exists("/opt/rocm/lib/librocm-core.so"):
             possible_locations.append("/opt/rocm/lib/librocm-core.so")
-        # 2.
+        # 3. Bare SONAME via the dynamic linker (LD_LIBRARY_PATH, ld.so.conf.d).
         possible_locations.append("librocm-core.so")
-        # 3.
-        librocm_core_parent_dir = (
-            Path(__file__).resolve().parent.parent.parent / "lib" / "librocm-core.so"
-        )
-        possible_locations.append(librocm_core_parent_dir)
 
         for librocm_core_file_path in possible_locations:
             try:
@@ -6987,7 +7001,7 @@ _FABRIC_CATEGORY_NAMES = [
     "DERIVED_NETPORT",
 ]
 
-_FABRIC_TYPE_NAMES = {0: "UALOE", 1: "UALLINK", 2: "UNKNOWN"}
+_FABRIC_TYPE_NAMES = {0: "UALOE", 1: "UALINK", 2: "UNKNOWN"}
 _FABRIC_ADDR_MODE_NAMES = {0: "SOURCE_ALIASING", 1: "SOURCE_IDENTIFICATION", 2: "UNKNOWN"}
 _FABRIC_ACCEL_STATE_NAMES = {
     0: "UNCONFIGURED",
@@ -7031,21 +7045,19 @@ def amdsmi_get_fabric_telemetry_data(
                 for item_idx in range(inst.item_count):
                     item = inst.items[item_idx]
                     telem_id = item.id
-                    name_ptr = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(telem_id)
-                    # Handle both c_char_p (string) and POINTER(c_char) (pointer) return types
-                    if name_ptr:
-                        if isinstance(name_ptr, bytes):
-                            name_str = name_ptr.decode("utf-8")
-                        elif hasattr(name_ptr, "value"):
-                            # c_char_p has a .value attribute
-                            name_str = (
-                                name_ptr.value.decode("utf-8") if name_ptr.value else "UNKNOWN"
-                            )
-                        else:
-                            # POINTER(c_char) - dereference and convert to string
-                            name_str = ctypes.string_at(name_ptr).decode("utf-8")
-                    else:
+                    name_ptr = ctypes.POINTER(ctypes.c_char)()
+                    status = amdsmi_wrapper.amdsmi_fabric_telem_id_to_string(
+                        telem_id, ctypes.byref(name_ptr)
+                    )
+                    # Unmapped telemetry ids (newer firmware) return NOT_FOUND;
+                    # tolerate them so one unknown id does not abort the whole
+                    # telemetry read.
+                    if status == amdsmi_wrapper.AMDSMI_STATUS_SUCCESS and name_ptr:
+                        name_str = ctypes.string_at(name_ptr).decode("utf-8")
+                    elif status == amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND:
                         name_str = "UNKNOWN"
+                    else:
+                        _check_res(status)
                     items.append({"id": telem_id, "name": name_str, "value": item.value})
                 instances.append(
                     {
@@ -7081,8 +7093,8 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    info = amdsmi_wrapper.amdsmi_fabric_info_t()
-    ret = amdsmi_wrapper.amdsmi_get_gpu_fabric_info(processor_handle, ctypes.byref(info))
+    fabric_info = amdsmi_wrapper.amdsmi_fabric_info_t()
+    ret = amdsmi_wrapper.amdsmi_get_gpu_fabric_info(processor_handle, ctypes.byref(fabric_info))
     if ret == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
         raise AmdSmiRetryException()
     if ret == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
@@ -7090,10 +7102,10 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     if ret not in (amdsmi_wrapper.AMDSMI_STATUS_SUCCESS, amdsmi_wrapper.AMDSMI_STATUS_NO_DATA):
         raise AmdSmiLibraryException(ret)
 
-    v1 = info.fabric_info.fabric_version.v1
+    v1 = fabric_info.fabric_info.v1
     return {
-        "bdf": _format_bdf(info.bdf),
-        "version": info.fabric_info.version,
+        "bdf": _format_bdf(fabric_info.bdf),
+        "version": fabric_info.fabric_version,
         "accelerator_id": v1.accelerator_id,
         "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
         "bandwidth": v1.bandwidth,

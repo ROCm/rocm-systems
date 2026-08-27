@@ -12,13 +12,16 @@
 #include "nccl.h"
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
-#include "device/hierarchical_ag_shuffle.h"
-#include "dda_all_reduce.h"
-#include "dda_reduce_scatter.h"
-#include "dda_all_gather.h"
-#include "dda_alltoall.h"
+#include "device/hierarchical_shuffle.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "sym_kernels.h"
 #include "dev_runtime.h"
+#include "ce_coll.h"
+#include "alltoallv_meta.h"
+#include "strongstream.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -34,6 +37,8 @@ const char* ncclFuncToString(ncclFunc_t fn) {
     return "AllReduce";
   case ncclFuncAlltoAll:
     return "AlltoAll";
+  case ncclFuncAlltoAllv:
+    return "AlltoAllv";
   case ncclFuncBroadcast:
     return "Broadcast";
   case ncclFuncGather:
@@ -171,40 +176,36 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
   return ncclEnqueueCheck(&info);
 }
 
-RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
-RCCL_PARAM(DdaThreshold, "DDA_THRESHOLD", (size_t)(67108864));
+RCCL_PARAM_DECLARE(ForceCeAllReduce);
 
-// Returns true when the DDA fast path should be attempted for a collective
-// with the given total byte count.  gfx942Default is the per-collective
-// threshold for gfx942 (MI300).  gfx950Default optionally caps MI350; when 0,
-// gfx950 uses the user-configurable rcclParamDdaThreshold().
-// gfx1250 uses the user-configurable rcclParamDdaThreshold().
-// All other architectures return false (threshold 0).
-static bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t gfx942Default, size_t gfx950Default = 0) {
-  if (!rcclParamDdaEnable() || ncclParamLaunchOrderImplicit() || ncclGroupDepth != 0) return false;
-  size_t threshold;
-  if (IsArchMatch(comm->archName, "gfx1250")) {
-    threshold = (size_t)rcclParamDdaThreshold();
-  } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    // Default DDA requires the full 8-rank clique. With RCCL_DDA_NRANKS_RELAX=1,
-    // 2/4-rank comms clear this floor too; per-collective eligibility (only the
-    // IPC AllReduce path is relaxed) still rejects unsupported participant counts.
-    const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : 8;
-    if (comm->nRanks < ddaMinRanks || comm->symmetricSupport) return false;
-    if (IsArchMatch(comm->archName, "gfx942")) {
-      threshold = gfx942Default;
-    } else {
-      threshold = gfx950Default ? gfx950Default : (size_t)rcclParamDdaThreshold();
-    }
-  } else {
-    return false;
-  }
-  return threshold > 0 && totalBytes <= threshold;
+// rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
+
+// Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper
+// (rather than an inline expression) so the dispatch decision is reachable from host unit tests; the
+// logic is identical to the guard at the AllReduce call site below.
+//
+// `ceAllReduceAllowed` is the caller's single source of truth for "will CE AllReduce actually service
+// this call" -- computed once at the call site from rcclUseCeAllReduce() plus whatever additional
+// gating the CE AllReduce implementation requires (graph latch, ncclGroupDepth, force/symReg
+// eligibility, etc). This helper does not re-derive CE eligibility itself: threading the same boolean
+// through both the early CE return and this guard keeps the two decisions from silently drifting apart
+// as CE AllReduce's own eligibility rules evolve.
+bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype, bool symEligible,
+                                    bool ceAllReduceAllowed) {
+  const size_t msgBytes = count * ncclTypeSize(datatype);
+  // gfx1250 DDA fabric AR is bounded by rcclDdaEnabled (RCCL_DDA_THRESHOLD) and the per-tier
+  // thresholds, so it may claim the full range regardless of CE eligibility -- ddaFabricArch1250
+  // forces this branch unconditionally. On other arches, yield to DDA whenever CE won't actually
+  // service this call; yielding on message size alone left comms without CE's prerequisites (e.g.
+  // gfx950 with symmetricSupport off) with no DDA and no CE, falling back to the generic ring/tree
+  // kernel across the whole 4 MiB+ range that DDA still wins.
+  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
+  return !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) && rcclDdaEnabled(comm, msgBytes, 8388608);
 }
 
 // Check if symmteric kernels is requested for this collective
-static bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
-                                       size_t nElts, const void* sendbuff, void* recvbuff) {
+bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype, size_t nElts,
+                                const void* sendbuff, void* recvbuff) {
   if (comm == nullptr || !comm->symmetricSupport) return false;
   if (ncclSymkInitOnce(comm) != ncclSuccess) return false;
   if (!ncclSymkAvailable(comm, coll, symkOp, datatype, nElts)) return false;
@@ -215,22 +216,6 @@ static bool isSymmetricKernelRequested(ncclComm* comm, ncclFunc_t coll, int symk
   ncclDevrFindWindow(comm, recvbuff, &recvWin);
   return sendWin != nullptr && recvWin != nullptr && (sendWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) &&
          (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
-}
-
-enum rcclAllGatherAlgo {
-  RCCL_AG_RING,
-  RCCL_AG_DIRECT,
-  RCCL_AG_HIERARCHICAL
-};
-
-static rcclAllGatherAlgo rcclSelectAllGatherAlgo(struct ncclComm* comm, size_t msgSize) {
-  if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
-    return RCCL_AG_HIERARCHICAL;
-  }
-  if (rcclUseAllGatherDirect(comm, msgSize)) {
-    return RCCL_AG_DIRECT;
-  }
-  return RCCL_AG_RING;
 }
 
 static inline int hierarchicalShuffleNumBlocks(size_t totalBytes) {
@@ -248,7 +233,7 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   int nNodes = interComm->nRanks; // Number of nodes
   size_t typeSize = ncclTypeSize(datatype);
 
-  void* tempBuffer = comm->hierarchicalAGTempBuffer;
+  void* tempBuffer = comm->hierarchicalTempBuffer;
   const void* interSendBuff = sendbuff;
   size_t rankOffset = sendcount * typeSize;
   if (sendbuff == ((char*)recvbuff) + comm->rank * rankOffset) {
@@ -300,12 +285,11 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
     NCCLCHECK(ncclEnqueueCheck(&infoIntraAG));
   }
 
-  // Step 3: Shuffle tempBuffer to recvbuff
+  // Step 3: Shuffle tempBuffer (local-rank-major) -> recvbuff (node-major).
   size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
   int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
-  int threadsPerBlock = 1024;
-  hierarchicalAGShuffle<<<numBlocks, threadsPerBlock, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff, rankOffset,
-                                                                   nNodes, localRanks);
+  hierarchicalShuffle<<<numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream>>>((const char*)tempBuffer, (char*)recvbuff,
+                                                                              rankOffset, nNodes, localRanks);
   CUDACHECK(hipGetLastError());
 
   return ncclSuccess;
@@ -330,43 +314,62 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   NCCLCHECK(Recorder::instance().record(rrAllGather, info));
 
-  // Let the symmetric kernel take priority when the user registered these
-  // buffers as symmetric windows; otherwise fall through to DDA.
-  bool symEligible =
-    isSymmetricKernelRequested(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendbuff, recvbuff);
+  // Select the implementation once, in one place (rccl_wrap.cc). The same function
+  // backs rcclGetCollImplInfo so rccl-tests attributes numbers to the backend that
+  // actually ran. Symmetric-registered buffers are extracted downstream, so DDA is
+  // gated on !symEligible inside the decision, exactly as before.
+  struct rcclCollDecision decision;
+  NCCLCHECK(rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, /*query=*/false,
+                                /*graphCapturingHint=*/false, &decision));
 
-  if (!symEligible && rcclDdaEnabled(comm, nRanks * sendcount * ncclTypeSize(datatype), 8388608)) {
-    if (IsArchMatch(comm->archName, "gfx1250")) {
-      if (ncclAllGatherDdaFabricEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
-        INFO(NCCL_COLL,
-             "AllGather: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype));
-        NCCLCHECK(ncclAllGatherDdaFabric(sendbuff, recvbuff, sendcount, datatype, comm, stream));
-        return ncclSuccess;
-      }
-    } else if (ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
-      NCCLCHECK(ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream));
-      return ncclSuccess;
-    }
+  // Canonical selection line for addon backends (CE / DDA / Direct / Hier /
+  // symmetric). Native kernels report via the enqueue.cc channel{Lo..Hi} tuning
+  // line instead; this names the addon RCCL runs so rcclGetCollImplInfo can be
+  // checked against it.
+  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "AllGather impl selected: algo %s", an ? an : "?");
   }
-  rcclAllGatherAlgo algo = rcclSelectAllGatherAlgo(comm, msgSize);
-  switch (algo) {
-  case RCCL_AG_HIERARCHICAL:
+
+  switch (decision.algo) {
+  case RCCL_DDA_FABRIC_LL:
+    INFO(NCCL_COLL,
+         "AllGather: taking DDA fabric LL path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
+         comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
+    NCCLCHECK(ncclAllGatherDdaFabricLL(sendbuff, recvbuff, sendcount, datatype, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_LL128:
+    INFO(NCCL_COLL,
+         "AllGather: taking DDA fabric LL128 path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
+         comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
+    NCCLCHECK(ncclAllGatherDdaFabricLL128(sendbuff, recvbuff, sendcount, datatype, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_VMM:
+    INFO(NCCL_COLL, "AllGather: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllGatherDdaFabric(sendbuff, recvbuff, sendcount, datatype, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_IPC:
+    NCCLCHECK(ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream));
+    return ncclSuccess;
+  case RCCL_HIERARCHICAL_ALLGATHER:
     return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-  case RCCL_AG_DIRECT:
+  case RCCL_DIRECT_ALLGATHER:
     INFO(NCCL_TUNING,
          "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff "
          "= %p",
          sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
-    // Use direct allgather (only when not in a group; in-group use Ring so
-    // ncclGroupSimulateEnd gets estimatedTime).
     if (sendcount == 0) return ncclSuccess;
     // Mark the info so taskAppend posts this as A2A-style per-peer Send/Recv
     // P2P tasks (no peer rotation, no in-place self skip).
     info.useDirect = true;
     return ncclEnqueueCheck(&info);
-  case RCCL_AG_RING:
+  case RCCL_CE_REGISTERED:
+    // CE dispatch happens in taskAppend(); just enqueue.
+    return ncclEnqueueCheck(&info);
   default:
+    // RCCL_AG_RING / native kernel algorithms go through the standard enqueue path.
     return ncclEnqueueCheck(&info);
   }
 }
@@ -422,9 +425,29 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       return ncclEnqueueCheck(&info);
     }
 #endif // ENABLE_ROCSHMEM
-
-    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), 4194304, 4194304)) {
+    // alltoall does not need symEligible check as symmetric kernel is not supported for alltoall
+    if (rcclDdaEnabled(comm, comm->nRanks * count * ncclTypeSize(datatype), kDdaAlltoAllGfx942ThresholdBytes,
+                       kDdaAlltoAllGfx950ThresholdBytes, kDdaAlltoAllGfx1250ThresholdBytes)) {
       if (IsArchMatch(comm->archName, "gfx1250")) {
+        const size_t a2aBytes = comm->nRanks * count * ncclTypeSize(datatype);
+        const int64_t llThresh = rcclParamDdaLLThreshold();
+        const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
+        // Small-chunk fast lane: LL protocol (no GPU barrier).
+        if (rcclParamDdaLL() && llThresh > 0 && a2aBytes <= (size_t)llThresh &&
+            ncclAllToAllDdaFabricLLEligible(comm, sendbuff, recvbuff, count, datatype)) {
+          INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
+          NCCLCHECK(ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream));
+          return ncclSuccess;
+        }
+        // Mid-chunk fast lane: LL128 protocol (128B lines, no GPU barrier).
+        if (rcclParamDdaLL128() && ll128Thresh > 0 && a2aBytes <= (size_t)ll128Thresh &&
+            ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
+          INFO(NCCL_COLL, "AllToAll: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+               comm->nRanks, comm->nNodes, count, (int)datatype, a2aBytes);
+          NCCLCHECK(ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream));
+          return ncclSuccess;
+        }
         if (ncclAllToAllDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype)) {
           INFO(NCCL_COLL, "AllToAll: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
                comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
@@ -467,14 +490,20 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
   std::vector<size_t> sendcounts1(nRanks);
   std::vector<size_t> recvcounts1(nRanks);
 
-  std::vector<size_t> sizes(4 * nRanks); // 4 for sdispl, rdispl, scount, rcount
-#ifdef ENABLE_ROCSHMEM
+  std::vector<size_t> sizes(4 * nRanks); // [sendSizes, sendDispls, recvSizes, recvDispls] (bytes).
+  std::vector<size_t> gatheredSizes(4 * nRanks * nRanks);
+
   for (int i = 0; i < nRanks; i++) {
     sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
     rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
     sendcounts1[i] = sendcounts[i] * ncclTypeSize(datatype);
     recvcounts1[i] = recvcounts[i] * ncclTypeSize(datatype);
+    sizes[i] = sendcounts1[i];
+    sizes[nRanks + i] = sdispls1[i];
+    sizes[2 * nRanks + i] = recvcounts1[i];
+    sizes[3 * nRanks + i] = rdispls1[i];
   }
+#ifdef ENABLE_ROCSHMEM
 
   size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
 
@@ -482,13 +511,6 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     INFO(
       NCCL_INIT,
       "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");
-
-    for (int i = 0; i < nRanks; i++) {
-      sizes[i] = sendcounts1[i];
-      sizes[nRanks + i] = sdispls1[i];
-      sizes[2 * nRanks + i] = recvcounts1[i];
-      sizes[3 * nRanks + i] = rdispls1[i];
-    }
     count = count / ncclTypeSize(datatype);
 
     // use CU for copy-in/copy-out for small <= 128KB sizes
@@ -524,18 +546,55 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     return ret;
   }
 #endif
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  NCCLCHECK(ncclDevrFindWindow(comm, sendbuff, &sendWin));
+  NCCLCHECK(ncclDevrFindWindow(comm, recvbuff, &recvWin));
+  ncclSymRegType_t winRegType;
+  NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
+  bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(sendWin) || ncclDevrWindowHasSysmemSegment(recvWin);
+  struct ncclCudaGraph ceGraph;
+  NCCLCHECK(ncclCudaGetCapturingGraph(&ceGraph, stream, comm->config.graphUsageMode));
+  bool ceCapturing = ncclCudaGraphValid(ceGraph);
 
-  Recorder::instance().skip(true);
-  NCCLCHECK(ncclGroupStart());
-  for (int r = 0; r < nRanks; r++) {
-    NCCLCHECK(ncclSend(((char*)sendbuff) + sdispls[r] * ncclTypeSize(datatype), sendcounts[r], datatype, r, comm,
-                       stream));
-    NCCLCHECK(ncclRecv(((char*)recvbuff) + rdispls[r] * ncclTypeSize(datatype), recvcounts[r], datatype, r, comm,
-                       stream));
+  // CE AlltoAllv is single-node only (ncclCeAlltoAllvEligible requires nNodes==1).
+  // Multi-node jobs (e.g. 18x4) use the send/recv fallback below for cross-node traffic.
+  if (ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing)) {
+    const size_t nLocal = 4 * (size_t)nRanks;
+    const size_t nGather = nLocal * (size_t)nRanks;
+
+    CUDACHECK(cudaMemcpyAsync(comm->localSizes, sizes.data(), nLocal * sizeof(size_t), cudaMemcpyHostToDevice, stream));
+    NCCLCHECK(ncclGroupStart());
+    for (int r = 0; r < nRanks; r++) {
+      void* recvPtr = (void*)((char*)comm->gatheredSizes + (size_t)r * nLocal * sizeof(size_t));
+      NCCLCHECK(ncclSend(comm->localSizes, nLocal, ncclUint64, r, comm, stream));
+      NCCLCHECK(ncclRecv(recvPtr, nLocal, ncclUint64, r, comm, stream));
+    }
+    NCCLCHECK(ncclGroupEnd());
+    CUDACHECK(cudaMemcpyAsync(gatheredSizes.data(), comm->gatheredSizes, nGather * sizeof(size_t),
+                              cudaMemcpyDeviceToHost, stream));
+    CUDACHECK(cudaStreamSynchronize(stream));
+
+    struct ncclInfo info = {
+      ncclFuncAlltoAllv,   "AlltoAllv",         sendbuff, recvbuff, 0, datatype, ncclSum, 0, comm, stream,
+      ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS, nullptr
+    };
+    info.sizes = gatheredSizes.data();
+
+    return ncclEnqueueCheck(&info);
+  } else {
+    Recorder::instance().skip(true);
+    NCCLCHECK(ncclGroupStart());
+    for (int r = 0; r < nRanks; r++) {
+      NCCLCHECK(ncclSend(((char*)sendbuff) + sdispls[r] * ncclTypeSize(datatype), sendcounts[r], datatype, r, comm,
+                         stream));
+      NCCLCHECK(ncclRecv(((char*)recvbuff) + rdispls[r] * ncclTypeSize(datatype), recvcounts[r], datatype, r, comm,
+                         stream));
+    }
+    NCCLCHECK(ncclGroupEnd());
+    Recorder::instance().skip(false);
+    return ncclSuccess;
   }
-  NCCLCHECK(ncclGroupEnd());
-  Recorder::instance().skip(false);
-  return ncclSuccess;
 }
 
 NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -556,27 +615,57 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-  // Let the symmetric kernel take priority when the user registered these
-  // buffers as symmetric windows; otherwise fall through to DDA.
-  bool symEligible = (op == ncclSum) && isSymmetricKernelRequested(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype,
-                                                                   count, sendbuff, recvbuff);
+  // Select the implementation once, in one place (rccl_wrap.cc). The returned
+  // decision drives dispatch here (CE 2-shot / DDA return early) and is carried
+  // into taskAppend() via info so the CE-vs-kernel choice and graph-capture state
+  // are never recomputed. rcclSelectAllReduce() also performs the CE graph-latch
+  // tick, matching the previous inline behavior. The same function backs the
+  // reporting path (rcclGetCollImplInfo) so rccl-tests attributes numbers to the
+  // backend that actually ran.
+  struct rcclCollDecision decision;
+  NCCLCHECK(rcclSelectAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, /*query=*/false,
+                                /*graphCapturingHint=*/false, &decision));
+  info.decision = decision;
+  info.decisionValid = true;
 
-  if (!symEligible && rcclDdaEnabled(comm, count * ncclTypeSize(datatype), 8388608)) {
-    if (IsArchMatch(comm->archName, "gfx1250")) {
-      if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-        INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-        NCCLCHECK(ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-    } else {
-      if (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-        NCCLCHECK(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-    }
+  // Canonical selection line for addon backends (CE / DDA / symmetric). Native
+  // kernels report via the enqueue.cc channel{Lo..Hi} tuning line instead; this
+  // names the addon RCCL runs so rcclGetCollImplInfo can be checked against it.
+  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "AllReduce impl selected: algo %s", an ? an : "?");
   }
-  return ncclEnqueueCheck(&info);
+
+  switch (decision.algo) {
+  case RCCL_CE_2SHOT:
+    if (count == 0) return ncclSuccess;
+    INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,
+         comm->rank, comm->nRanks);
+    return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream);
+  case RCCL_DDA_FABRIC_LL:
+    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceDdaFabricLL(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_LL128:
+    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_VMM:
+    INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+    NCCLCHECK(ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_IPC:
+    NCCLCHECK(ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream));
+    return ncclSuccess;
+  default:
+    // RCCL_SYMMETRIC / RCCL_CE_REGISTERED / native kernel algorithms all go
+    // through the standard enqueue path; taskAppend() honors info->decision.
+    return ncclEnqueueCheck(&info);
+  }
 }
 
 ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -670,6 +759,124 @@ ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
   return ncclEnqueueCheck(&info);
 }
 
+// Direct ReduceScatter: two-phase pipeline
+//   Phase 1: stage every peer's slice into comm->tempBuff via a single
+//            useDirect=true ncclEnqueueCheck. taskAppend fans this out into
+//            per-peer Send/Recv P2P tasks.
+//   Phase 2: dispatch the local reduce kernel via a second
+//            ncclEnqueueCheck under enableDirectReduceScatter=1. The kernel
+//            reads all N peer slices from tempBuff and writes the reduced
+//            result to recvbuff.
+static ncclResult_t rcclDirectReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                            ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+                                            cudaStream_t stream, int chunkSteps, int sliceSteps) {
+  if (recvcount == 0) return ncclSuccess;
+  void* tempbuff = comm->tempBuff;
+
+  ncclResult_t ret = ncclSuccess;
+
+  struct ncclInfo infoP2P = {ncclFuncReduceScatter,
+                             "ReduceScatter",
+                             sendbuff,
+                             tempbuff,
+                             recvcount,
+                             datatype,
+                             op,
+                             0,
+                             comm,
+                             stream,
+                             chunkSteps,
+                             sliceSteps,
+                             nullptr};
+  infoP2P.useDirect = true;
+
+  struct ncclInfo info = {ncclFuncReduceScatter,
+                          "ReduceScatter",
+                          sendbuff,
+                          recvbuff,
+                          recvcount,
+                          datatype,
+                          op,
+                          0,
+                          comm,
+                          stream,
+                          chunkSteps,
+                          sliceSteps,
+                          nullptr};
+
+  comm->enableDirectReduceScatter = 1;
+  NCCLCHECKGOTO(ncclEnqueueCheck(&infoP2P), ret, cleanup);
+  NCCLCHECKGOTO(ncclEnqueueCheck(&info), ret, cleanup);
+
+cleanup:
+  comm->enableDirectReduceScatter = 0;
+  return ret;
+}
+
+static ncclResult_t ncclHierarchicalReduceScatter_Impl(const void* sendbuff, void* recvbuff, size_t recvcount,
+                                                       ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
+                                                       cudaStream_t stream) {
+  if (recvcount == 0) return ncclSuccess;
+  ncclComm* intraComm = comm->hierarchicalIntraComm;
+  ncclComm* interComm = comm->hierarchicalInterComm;
+  int localRanks = intraComm->nRanks;
+  int nNodes = interComm->nRanks;
+  size_t typeSize = ncclTypeSize(datatype);
+  size_t rankOffset = recvcount * typeSize;
+
+  void* tempBuf = comm->hierarchicalTempBuffer;
+  size_t intraOutCount = recvcount * nNodes; // per-rank intra-RS output
+  void* intraOut = (char*)tempBuf + (size_t)intraComm->rank * intraOutCount * typeSize;
+
+  // Step 1: Pre-shuffle sendbuff (node-major) -> tempBuf (local-rank-major).
+  size_t totalBytes = (size_t)nNodes * localRanks * rankOffset;
+  int numBlocks = hierarchicalShuffleNumBlocks(totalBytes);
+  hierarchicalShuffle<<<numBlocks, HIERARCHICAL_SHUFFLE_THREADS, 0, stream>>>((const char*)sendbuff, (char*)tempBuf,
+                                                                              rankOffset, localRanks, nNodes);
+  CUDACHECK(hipGetLastError());
+
+  // Step 2: Intra-node ReduceScatter, in-place inside tempBuf.
+  struct ncclInfo infoIntraRS = {ncclFuncReduceScatter,
+                                 "HierarchicalReduceScatter-Intra",
+                                 tempBuf,
+                                 intraOut,
+                                 intraOutCount,
+                                 datatype,
+                                 op,
+                                 0,
+                                 intraComm,
+                                 stream,
+                                 REDUCESCATTER_CHUNKSTEPS,
+                                 intraComm->rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE :
+                                                              REDUCESCATTER_SLICESTEPS,
+                                 nullptr};
+  NCCLCHECK(ncclEnqueueCheck(&infoIntraRS));
+
+  // Step 3: Inter-node ReduceScatter  intraOut -> recvbuff.
+  size_t interMsgSize = recvcount * typeSize * (size_t)nNodes;
+  if (rcclUseReduceScatterDirect(interComm, interMsgSize)) {
+    NCCLCHECK(rcclDirectReduceScatter(intraOut, recvbuff, recvcount, datatype, op, interComm, stream,
+                                      REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS));
+  } else {
+    struct ncclInfo infoInterRS = {ncclFuncReduceScatter,
+                                   "HierarchicalReduceScatter-Inter",
+                                   intraOut,
+                                   recvbuff,
+                                   recvcount,
+                                   datatype,
+                                   op,
+                                   0,
+                                   interComm,
+                                   stream,
+                                   REDUCESCATTER_CHUNKSTEPS,
+                                   REDUCESCATTER_SLICESTEPS,
+                                   nullptr};
+    NCCLCHECK(ncclEnqueueCheck(&infoInterRS));
+  }
+
+  return ncclSuccess;
+}
+
 NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
          ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
@@ -706,55 +913,49 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   // Reset value forcing direct reduce scatter algorithm
   comm->enableDirectReduceScatter = 0;
 
-  // Skip DDA IPC and Direct RS if the symmetric path will handle this op, so they don't collide and deadlock.
-  // Symmetric reduce-scatter implements sum and avg (ncclDevSumPostDiv), refer ncclSymkImplemented
-  bool symEligible =
-    (op == ncclSum || op == ncclAvg) &&
-    isSymmetricKernelRequested(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
-                               datatype, recvcount, sendbuff, recvbuff);
+  // Select once in rccl_wrap.cc; the same function backs rcclGetCollImplInfo.
+  struct rcclCollDecision decision;
+  NCCLCHECK(rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, /*query=*/false, &decision));
 
-  if (!symEligible && rcclDdaEnabled(comm, nRanks * recvcount * ncclTypeSize(datatype), 8388608)) {
-    if (IsArchMatch(comm->archName, "gfx1250")) {
-      if (ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-        INFO(NCCL_COLL,
-             "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
-             comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
-        NCCLCHECK(ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-        return ncclSuccess;
-      }
-    } else if (ncclReduceScatterDdaIpcEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
-      NCCLCHECK(ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
-      return ncclSuccess;
-    }
+  // Canonical line for addon backends; native kernels report via the enqueue tuning line.
+  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "ReduceScatter impl selected: algo %s", an ? an : "?");
   }
 
-  if (!symEligible && rcclUseReduceScatterDirect(comm, msgSize)) {
+  switch (decision.algo) {
+  case RCCL_DDA_FABRIC_LL:
+    INFO(NCCL_COLL, "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
+    NCCLCHECK(ncclReduceScatterDdaFabricLL(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_LL128:
+    INFO(NCCL_COLL,
+         "ReduceScatter: taking DDA fabric LL128 path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
+    NCCLCHECK(ncclReduceScatterDdaFabricLL128(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_FABRIC_VMM:
+    INFO(NCCL_COLL,
+         "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
+         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
+    NCCLCHECK(ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_DDA_IPC:
+    NCCLCHECK(ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream));
+    return ncclSuccess;
+  case RCCL_HIERARCHICAL_REDUCESCATTER:
+    return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+  case RCCL_DIRECT_REDUCESCATTER:
     INFO(NCCL_TUNING,
          "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p "
          "sendbuff=%p recvbuff=%p",
          recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
-
-    // Temporary Buffer to store data from each rank
-    void* tempbuff = comm->tempBuff;
-
-    // Use Direct Reduce Scatter Algorithm
-    comm->enableDirectReduceScatter = 1;
-
-    if (recvcount == 0) return ncclSuccess;
-
-    // Calculate offset into buffers
-    size_t offset = recvcount * ncclTypeSize(datatype);
-
-    NCCLCHECK(ncclGroupStart());
-    for (int i = 0; i < nRanks; i++) {
-      int peer = (comm->rank + i) % nRanks;
-      NCCLCHECK(ncclSend((void*)((char*)sendbuff + peer * offset), recvcount, datatype, peer, comm, stream));
-      NCCLCHECK(ncclRecv((void*)((char*)tempbuff + peer * offset), recvcount, datatype, peer, comm, stream));
-    }
-    NCCLCHECK(ncclGroupEnd());
+    return rcclDirectReduceScatter(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, chunkSteps, sliceSteps);
+  default: // RCCL_SYMMETRIC / native go through the standard enqueue path.
+    return ncclEnqueueCheck(&info);
   }
-
-  return ncclEnqueueCheck(&info);
 }
 
 NCCL_API(ncclResult_t, ncclScatter, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -846,6 +1047,7 @@ ncclResult_t ncclPutSignal_impl(const void* localbuff, size_t count, ncclDataTyp
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           peerWinOffset,
                           peerWin,
@@ -875,6 +1077,7 @@ ncclResult_t ncclSignal_impl(int peer, int sigIdx, int ctx, unsigned int flags, 
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           0,
                           NULL,
@@ -904,6 +1107,7 @@ ncclResult_t ncclWaitSignal_impl(int nDesc, ncclWaitSignalDesc_t* signalDescs, n
                           1,
                           1,
                           nullptr, /* chunkSteps, sliceSteps, acc */
+                          nullptr,
                           false, /* useDirect */
                           0,
                           NULL,

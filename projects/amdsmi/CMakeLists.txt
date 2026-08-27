@@ -62,6 +62,18 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
     "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
 )
 
+# PyPI rejects a PEP 440 local version (the +hash suffix), so a published wheel
+# needs a clean MAJOR.MINOR.PATCH. Per-commit CI wheels keep +hash for unique
+# filenames; the commit is always recoverable via amdsmi.__commit__.
+option(AMDSMI_WHEEL_RELEASE "Use a clean PEP 440 version (no +hash) for the wheel" OFF)
+if(AMDSMI_WHEEL_RELEASE)
+    set(${AMD_SMI_LIBS_TARGET}_WHEEL_VERSION
+        "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}"
+    )
+else()
+    set(${AMD_SMI_LIBS_TARGET}_WHEEL_VERSION "${${AMD_SMI_LIBS_TARGET}_VERSION_STRING}")
+endif()
+
 set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
 update_version_in_file("rust-interface/src/amdsmi_wrapper.rs" ${DEFAULT_VERSION} "AMDSMI_LIB_VERSION_" " *: *u32 *= *"
@@ -112,6 +124,10 @@ include(GNUInstallDirs)
 option(BUILD_TESTS "Build test suite" OFF)
 option(ENABLE_ASAN_PACKAGING "" OFF)
 
+# WSL/WDDM GPU backend. Default OFF so native builds and CI are unchanged. When
+# ON, the WSL intercept hooks and mock backend are compiled
+option(ENABLE_WSL_BACKEND "Build the experimental WSL (WDDM/dxg) GPU backend" OFF)
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
 else()
@@ -119,6 +135,17 @@ else()
 endif()
 
 option(BUILD_EXAMPLES "Build examples" OFF)
+option(
+    BUILD_PYTHON_WHEEL
+    "Build the standalone Python wheel and the isolated libamd_smi_python.so it bundles. OFF means only the system-package layout is built (no .whl artifact)."
+    OFF
+)
+if(BUILD_PYTHON_WHEEL AND NOT BUILD_SHARED_LIBS)
+    message(
+        FATAL_ERROR
+        "BUILD_PYTHON_WHEEL=ON requires BUILD_SHARED_LIBS=ON: the wheel ships a .so (libamd_smi_python.so) and the py-interface subdirectory only enters when BUILD_SHARED_LIBS=ON."
+    )
+endif()
 
 # If amdsmi is built as a static library, it should support being embedded in other programs. The setting below essentially enables the -fPIC flag.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Enable position independent code for all targets")
@@ -181,13 +208,13 @@ generic_package()
 
 # Dependencies
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
 # Netlink libraries for network interface functionality (required)
 # TheRock RUNTIME_DEPS automatically configure PKG_CONFIG_PATH for bundled sysdeps
-find_package(PkgConfig REQUIRED)
 
 # Try to use CMake config files first (bundled sysdeps provide these)
 find_package(libnl CONFIG QUIET)
@@ -252,6 +279,11 @@ endif()
 # Security options
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wconversion -Wcast-align")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow")
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-Werror=format-overflow" CXX_SUPPORTS_FORMAT_OVERFLOW)
+if(CXX_SUPPORTS_FORMAT_OVERFLOW)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=format-overflow")
+endif()
 # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder")
 
@@ -467,11 +499,14 @@ add_subdirectory(goamdsmi_shim)
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libdrm-dev, sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel"
-)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8)")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+# The tests package ships amdsmitst, which dynamically links libamd_smi.so from
+# the main package. Keep amd-smi-lib (set by generic_package()) as the first
+# dependency and append the runtime deps, so the tests package is never
+# installable without the library it links against.
+set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${CPACK_PACKAGE_NAME}, ${CPACK_DEBIAN_PACKAGE_DEPENDS}")
 
 # $CURRENT_YEAR is used by copyright.in
 string(TIMESTAMP CURRENT_YEAR "%Y")
@@ -490,11 +525,10 @@ configure_file(
     @ONLY
     FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 )
-list(
-    APPEND CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
-    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst"
-    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm"
-)
+# Deliberately not set as a generic CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA: a
+# component without its own control-extra inherits the generic one, which is
+# how the asan package would end up running the main package's postinst/prerm
+# against shared absolute paths. Each component names its own scripts below.
 
 # Configure pre-rm for tests only
 configure_file(
@@ -505,7 +539,9 @@ configure_file(
 )
 
 # Assign control scripts to the AMDSMI Lib & Tests packages
-set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/postinst;${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm"
+)
 set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm")
 
 # install copyright file into share/doc/amd-smi-lib/copyright
@@ -517,8 +553,25 @@ install(
 )
 
 # RPM package specific variables
+# The Python module installs under an absolute system site-packages path
+# (e.g. /usr/lib64/python3.9/site-packages) that the OS python package already
+# owns. Left alone, CPack's RPM generator declares %dir ownership of that
+# directory and its parents -- co-owning system directories, with the default
+# group-writable (0775) mode. Exclude the sitelib and its ancestors from the
+# auto filelist so the RPM owns only its own <sitelib>/amdsmi subtree, not the
+# shared /usr python directories.
+set(_amdsmi_sitelib_excludes "")
+if(AMDSMI_SYSTEM_PYTHON_SITELIB)
+    set(_amdsmi_walk "${AMDSMI_SYSTEM_PYTHON_SITELIB}")
+    while(_amdsmi_walk AND NOT _amdsmi_walk STREQUAL "/" AND NOT _amdsmi_walk STREQUAL "/usr")
+        list(APPEND _amdsmi_sitelib_excludes "${_amdsmi_walk}")
+        get_filename_component(_amdsmi_walk "${_amdsmi_walk}" DIRECTORY)
+    endwhile()
+endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
-    "${CPACK_PACKAGING_INSTALL_PREFIX} ${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+    "${CPACK_PACKAGING_INSTALL_PREFIX}"
+    "${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+    ${_amdsmi_sitelib_excludes}
 )
 #Set rpm distro
 if(CPACK_RPM_PACKAGE_RELEASE)
@@ -529,11 +582,60 @@ endif()
 set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-amdgpu-devel")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
-# python version gated by rhel8 :(
 # note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
-set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
+#
+# The amdsmi Python module installs into a version-specific site-packages path
+# on RPM distros (e.g. /usr/lib64/python3.9/site-packages). py-interface/
+# CMakeLists.txt detects that path from the system's DEFAULT python3
+# (platform-python on RHEL), so the module lands where a plain `import amdsmi`
+# and the `amd-smi` CLI (#!/usr/bin/python3) actually look. This dependency
+# pins the RPM to that same default interpreter's ABI as defense-in-depth: it
+# makes the interpreter dependency explicit and keeps the RPM from installing
+# onto a host missing that interpreter.
+#
+# On RPM distros there is NO version-independent site-packages location --
+# /usr/lib/python3/site-packages (Debian's version-agnostic dir) is not on any
+# RHEL interpreter's sys.path -- so the install path is intrinsically tied to a
+# python minor and the dependency must be too. The canonical RPM expression is
+# `python(abi) = X.Y` (per the Fedora Python Packaging Guidelines): normally
+# rpmbuild's dependency generator emits this automatically for files under
+# %{python3_sitelib}. That auto-generator does NOT fire here -- CPack installs
+# the module as raw .py files (no .dist-info metadata) and the RHEL8 build image
+# lacks the path-based python.attr generator -- so we set the same requirement
+# by hand. The token that expresses "this python minor" differs by distro
+# family, so pick it from /etc/os-release:
+#   * RHEL/CentOS/Fedora/AlmaLinux/AzureLinux: `python(abi) = X.Y`, provided by
+#     the pythonX.Y packages (dnf pulls the matching interpreter in on install).
+#   * SLES/openSUSE: no python(abi) provide; the versioned package is `pythonXY`
+#     (no dot), e.g. python311 (zypper pulls it in on install).
+# Fall back to the loose `python3 >= 3.6.8` when the ABI could not be derived
+# (version-agnostic Debian path) or the distro family is unrecognized.
+set(_amdsmi_py_req "python3 >= 3.6.8")
+if(AMDSMI_SYSTEM_PYTHON_ABI)
+    set(_amdsmi_os_id "")
+    if(EXISTS "/etc/os-release")
+        file(READ "/etc/os-release" _amdsmi_os_release)
+        # ID_LIKE covers derivatives (e.g. almalinux -> "rhel centos fedora").
+        string(REGEX MATCH "ID_LIKE=[\"']?([^\"'\n]+)" _ "${_amdsmi_os_release}")
+        set(_amdsmi_os_id "${CMAKE_MATCH_1}")
+        string(REGEX MATCH "\nID=[\"']?([^\"'\n]+)" _ "\n${_amdsmi_os_release}")
+        string(APPEND _amdsmi_os_id " ${CMAKE_MATCH_1}")
+    endif()
+    if(_amdsmi_os_id MATCHES "rhel|centos|fedora|almalinux|rocky|mariner|azurelinux")
+        set(_amdsmi_py_req "python(abi) = ${AMDSMI_SYSTEM_PYTHON_ABI}")
+    elseif(_amdsmi_os_id MATCHES "suse|sles")
+        string(REPLACE "." "" _amdsmi_abi_nodot "${AMDSMI_SYSTEM_PYTHON_ABI}")
+        set(_amdsmi_py_req "python${_amdsmi_abi_nodot}")
+    endif()
+endif()
+message(STATUS "amdsmi RPM python interpreter dependency: ${_amdsmi_py_req}")
+set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, ${_amdsmi_py_req}")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
+# amdsmitst dynamically links libamd_smi.so; keep amd-smi-lib (set by
+# generic_package()) first and append the runtime requires so the tests RPM
+# cannot install without the library it links against.
+set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "${CPACK_PACKAGE_NAME}, ${CPACK_RPM_PACKAGE_REQUIRES}")
 
 # don't terminate if bytecompile of python files fails
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
@@ -575,9 +677,27 @@ endif()
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/preun.in" RPM/preun @ONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY)
-set(CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post")
-set(CPACK_RPM_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/preun")
-set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/tests-preun.in" RPM/tests-preun @ONLY)
+# Assign the maintainer scriptlets per component. An unprefixed
+# CPACK_RPM_<KIND>_SCRIPT_FILE is copied into EVERY component RPM, which is how
+# the tests package came to run the main package's ldconfig registration and
+# cleanup and corrupt a still-installed amd-smi-lib. The state those scripts
+# touch (/etc/ld.so.conf.d, /var/log/amd_smi_lib, /etc/logrotate.d) lives at
+# absolute paths shared by every variant, so an inheriting component clobbers
+# the main package even when it installs under a different prefix.
+#
+# Name the owner explicitly instead, matching rocm-core, clr and rdc. Note the
+# name is the component GROUP: generic_package_post() puts dev/runtime/unspecified
+# into the "runtime" group, so CPack emits one package per group and looks up
+# CPACK_*_RUNTIME_* for the main package. A CPACK_*_DEV_* variable is silently
+# ignored. The tests component's group is also called "tests", so that one matches.
+# Anything not listed here ships no scriptlets, so a component added later
+# cannot silently inherit them; the tests package keeps only its own
+# pre-uninstall, which clears the bytecode its installed tests generate.
+set(CPACK_RPM_RUNTIME_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post")
+set(CPACK_RPM_RUNTIME_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/preun")
+set(CPACK_RPM_RUNTIME_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun")
+set(CPACK_RPM_TESTS_PRE_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/tests-preun")
 
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
