@@ -266,30 +266,13 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
   std::unordered_set<uint64_t> failed_owner_contexts;
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   if (decoder) {
-    std::vector<uint64_t> extra_leaders = kernel_entry_offsets(result);
-    extra_leaders.reserve(extra_leaders.size() + result.program_inventory.functions().size());
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-      extra_leaders.push_back(function.entry_text_offset);
-    std::ranges::sort(extra_leaders);
-    extra_leaders.erase(std::ranges::unique(extra_leaders).begin(), extra_leaders.end());
-
-    std::vector<BasicBlock::CodeRange> code_ranges;
-    code_ranges.reserve(code_object.functions().size());
-    for (const AmdGpuFunctionInfo &function : code_object.functions()) {
-      if (function.code_size != 0)
-        code_ranges.push_back(
-            {.start_offset = function.entry_text_offset, .size = function.code_size});
-    }
-    blocks = BasicBlock::build(code_object, *decoder, arch, extra_leaders, code_ranges);
+    const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
+        code_object, result.program_inventory.kernels(), result.program_inventory.functions());
+    blocks = BasicBlock::build(code_object, *decoder, arch, cfg.leaders, cfg.code_ranges);
     block_ptrs = block_ptrs_for(blocks);
 
     block_index = build_block_offset_index(blocks);
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      if (kernel.has_text_range)
-        kernel_entries.push_back(kernel.entry_text_offset);
-    }
-    std::ranges::sort(kernel_entries);
-    kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
+    kernel_entries = cfg.kernel_entries;
     if (code_object.text_sections().size() == 1) {
       const Section *text = code_object.text_sections().front();
       pristine_text =

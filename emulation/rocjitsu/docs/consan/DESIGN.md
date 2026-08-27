@@ -213,6 +213,17 @@ events and the unique sequence containing an event. Absence and ambiguous
 sequence membership fail closed. Engines do not rebuild those joins through a
 raw lowering result or maintain engine-local lookup helpers.
 
+Every consumer that recovers control flow from that inventory also uses
+`ConSanCfgBuildInputs`. This structural contract derives one sorted, unique set
+of block leaders, one kernel-entry ownership boundary set, and one bounded
+decode-range set from the parsed containers. Transactional composition adds
+already-applied body entries and continuations through the same constructor.
+Inventory pruning, synchronization ownership, MOI resource planning,
+SuperCollider placement, and final relay validation therefore cannot build
+different CFGs merely because they live in different engine paths. The target
+decoder and `BasicBlock` remain RocJitsu facilities; this type owns only the
+shared choice of inputs presented to them.
+
 ### Engine policy and observation plan
 
 Policy is split by semantic domain:
@@ -503,6 +514,7 @@ The following concepts and algorithms have one implementation:
 
 - configuration contracts and validation;
 - code-object/site identity and physical-alias canonicalization;
+- canonical CFG leaders, ownership boundaries, and composed-code ranges;
 - normalized access ranges, ownership, provenance, and synchronization
   vocabulary;
 - access, barrier, atomic, and fence policy;

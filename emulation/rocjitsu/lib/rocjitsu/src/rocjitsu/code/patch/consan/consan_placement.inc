@@ -725,18 +725,6 @@ choose_spill_scratch_vgpr(const ConSanAccessInventorySite &access, uint16_t allo
   return std::nullopt;
 }
 
-[[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(const ConSanTransformArtifacts &result) {
-  std::vector<uint64_t> offsets;
-  offsets.reserve(result.program_inventory.kernels().size());
-  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-    if (kernel.has_text_range)
-      offsets.push_back(kernel.entry_text_offset);
-  }
-  std::ranges::sort(offsets);
-  offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
-  return offsets;
-}
-
 [[nodiscard]] std::vector<BasicBlock *>
 block_ptrs_for(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   std::vector<BasicBlock *> ptrs;

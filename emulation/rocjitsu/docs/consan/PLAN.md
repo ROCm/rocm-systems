@@ -541,6 +541,15 @@ and Inline Shadow retain their distinct frontiers, demand rules, planners, and
 evidence behavior. The change deletes the three range/block/router setup loops
 without introducing a callback or an engine-policy facade.
 
+Control-flow recovery now likewise begins from one shared structural contract.
+`ConSanCfgBuildInputs` derives canonical leaders, kernel ownership boundaries,
+function decode ranges, and transactional preapplied ranges for shared
+inventory pruning, synchronization ownership, MOI resource planning, both
+SuperCollider access paths, and final relay validation. Seven consumers and
+the one-purpose `kernel_entry_offsets` helper no longer build private variants;
+the directly tested contract is target-neutral and continues to use
+RocJitsu's decoder and `BasicBlock` implementation.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

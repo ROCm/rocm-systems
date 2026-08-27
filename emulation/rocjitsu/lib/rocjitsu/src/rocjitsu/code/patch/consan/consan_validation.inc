@@ -1324,18 +1324,9 @@ validate_branch_relay_reservoir_semantics(const AmdGpuCodeObject &original,
     return errors;
   }
 
-  std::vector<uint64_t> extra_leaders = kernel_entry_offsets(result);
-  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-    extra_leaders.push_back(function.entry_text_offset);
-  std::ranges::sort(extra_leaders);
-  extra_leaders.erase(std::ranges::unique(extra_leaders).begin(), extra_leaders.end());
-  std::vector<BasicBlock::CodeRange> code_ranges;
-  for (const AmdGpuFunctionInfo &function : original.functions()) {
-    if (function.code_size != 0)
-      code_ranges.push_back(
-          {.start_offset = function.entry_text_offset, .size = function.code_size});
-  }
-  auto blocks = BasicBlock::build(original, *decoder, arch, extra_leaders, code_ranges);
+  const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
+      original, result.program_inventory.kernels(), result.program_inventory.functions());
+  auto blocks = BasicBlock::build(original, *decoder, arch, cfg.leaders, cfg.code_ranges);
   std::vector<BasicBlock *> blocks_by_offset;
   blocks_by_offset.reserve(blocks.size());
   for (const std::unique_ptr<BasicBlock> &block : blocks) {

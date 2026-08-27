@@ -1959,42 +1959,10 @@ struct MoiResourcePlanningState {
     if (!code_object.is_valid() || !decoder)
       return;
 
-    std::vector<uint64_t> leaders;
-    leaders.reserve(result.program_inventory.kernels().size() +
-                    result.program_inventory.functions().size());
-    std::vector<uint64_t> kernel_entries;
-    kernel_entries.reserve(result.program_inventory.kernels().size());
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels()) {
-      if (!kernel.has_text_range)
-        continue;
-      leaders.push_back(kernel.entry_text_offset);
-      kernel_entries.push_back(kernel.entry_text_offset);
-    }
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-      leaders.push_back(function.entry_text_offset);
-    for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
-      leaders.push_back(range.text_offset);
-      if (range.continuation_text_offset)
-        leaders.push_back(*range.continuation_text_offset);
-    }
-    std::ranges::sort(leaders);
-    leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
-    std::ranges::sort(kernel_entries);
-    kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
-
-    std::vector<BasicBlock::CodeRange> code_ranges;
-    code_ranges.reserve(code_object.functions().size());
-    for (const AmdGpuFunctionInfo &function : code_object.functions()) {
-      if (function.code_size != 0)
-        code_ranges.push_back(
-            {.start_offset = function.entry_text_offset, .size = function.code_size});
-    }
-    for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
-      if (range.size != 0)
-        code_ranges.push_back({.start_offset = range.text_offset, .size = range.size});
-    }
-
-    blocks = BasicBlock::build(code_object, *decoder, arch, leaders, code_ranges);
+    const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
+        code_object, result.program_inventory.kernels(), result.program_inventory.functions(),
+        options.preapplied_code_ranges);
+    blocks = BasicBlock::build(code_object, *decoder, arch, cfg.leaders, cfg.code_ranges);
     block_index = build_block_offset_index(blocks);
     CodeObjectPatcher patcher(code_object);
     const std::span<const uint8_t> text = patcher.text_bytes();
@@ -2050,7 +2018,7 @@ struct MoiResourcePlanningState {
           blocks, block_index,
           KernelScopeRequest{.entry_offset = kernel.entry_text_offset,
                              .additional_entry_offsets = additional_entry_offsets},
-          kernel_entries, text);
+          cfg.kernel_entries, text);
       if (!scope)
         continue;
 

@@ -6307,6 +6307,37 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DE: recover every inventory CFG from one structural contract
+
+- **One CFG input authority:** `ConSanCfgBuildInputs` derives sorted unique
+  basic-block leaders, kernel-entry ownership boundaries, and bounded function
+  decode ranges from the shared inventory. Transactional preapplied bodies add
+  their entry, continuation, and nonempty range through the same constructor.
+  It deliberately owns neither decoding nor graph recovery; those remain in
+  RocJitsu's `Decoder` and `BasicBlock` components.
+- **Seven consumers cut over:** zero-sized-symbol inventory pruning,
+  synchronization inventory construction, execution-owner annotation, MOI
+  resource planning, SuperCollider FLAT and LDS placement, and branch-relay
+  final validation now consume the same structural input. The old local loops
+  and one-consumer `kernel_entry_offsets` helper are deleted. SuperCollider's
+  large-library preflight optimization retains its deliberate candidate-only
+  projection after starting from the canonical value.
+- **Contract coverage:** A focused host test checks deterministic ordering,
+  duplicate leader removal, kernel ownership boundaries, composed entry and
+  continuation leaders, nonempty composed ranges, and exclusion of zero-size
+  ranges. Existing CFG ownership, composed mutation, dense placement, and
+  paired device tests exercise every migrated consumer on all supported
+  architectures.
+- **Accounting:** Across the ten affected implementation files, physical lines
+  fall from 27,257 to 27,186, nonblank lines from 26,169 to 26,098, and
+  estimated comment-excluded code lines from 24,793 to 24,698. The slice adds
+  133 and deletes 204 physical implementation lines, a net deletion of 71,
+  including the documented 88-line shared contract.
+- **Checked-in gate:** The complete build, all 1,531 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

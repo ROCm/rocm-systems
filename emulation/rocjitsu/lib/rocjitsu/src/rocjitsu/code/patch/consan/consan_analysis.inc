@@ -2673,37 +2673,9 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
   if (!needs_pruning)
     return;
 
-  std::vector<uint64_t> leaders;
-  std::vector<uint64_t> kernel_entries;
-  for (const ConSanKernelInfo &kernel : kernels) {
-    if (!kernel.has_text_range)
-      continue;
-    leaders.push_back(kernel.entry_text_offset);
-    kernel_entries.push_back(kernel.entry_text_offset);
-  }
-  for (const ConSanFunctionInfo &function : functions)
-    leaders.push_back(function.entry_text_offset);
-  for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
-    leaders.push_back(range.text_offset);
-    if (range.continuation_text_offset)
-      leaders.push_back(*range.continuation_text_offset);
-  }
-  std::ranges::sort(leaders);
-  leaders.erase(std::ranges::unique(leaders).begin(), leaders.end());
-  std::ranges::sort(kernel_entries);
-  kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
-
-  std::vector<BasicBlock::CodeRange> code_ranges;
-  for (const AmdGpuFunctionInfo &function : code_object.functions()) {
-    if (function.code_size != 0)
-      code_ranges.push_back({function.entry_text_offset, function.code_size});
-  }
-  for (const ConSanPreappliedCodeRange &range : options.preapplied_code_ranges) {
-    if (range.size != 0)
-      code_ranges.push_back({range.text_offset, range.size});
-  }
-
-  auto blocks = BasicBlock::build(code_object, decoder, arch, leaders, code_ranges);
+  const consan_detail::ConSanCfgBuildInputs cfg = consan_detail::build_consan_cfg_inputs(
+      code_object, kernels, functions, options.preapplied_code_ranges);
+  auto blocks = BasicBlock::build(code_object, decoder, arch, cfg.leaders, cfg.code_ranges);
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   CodeObjectPatcher patcher(code_object);
   const std::span<const uint8_t> text = patcher.text_bytes();
@@ -2723,8 +2695,8 @@ void prune_unreachable_inferred_ranges(const AmdGpuCodeObject &code_object, Deco
     }
     auto scope = build_kernel_cfg_scope(
         blocks, block_index,
-        KernelScopeRequest{kernel.entry_text_offset, std::move(additional_entries)}, kernel_entries,
-        text);
+        KernelScopeRequest{kernel.entry_text_offset, std::move(additional_entries)},
+        cfg.kernel_entries, text);
     // One kernel's valid scope cannot prove that another kernel's sites are
     // dead. If any owned entry remains unresolved, preserve the complete
     // conservative inventory instead of pruning against a partial owner set.

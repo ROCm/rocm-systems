@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "consan_test_support.h"
+#include "rocjitsu/code/patch/consan/consan_cfg.h"
 #include "rocjitsu/code/patch/consan/consan_moi_internal.h"
 #include "rocjitsu/code/patch/consan/consan_physical_site_alias.h"
 #include "rocjitsu/code/patch/instrumentation_builder.h"
@@ -3228,6 +3229,70 @@ TEST(ConSanMoi, StrictFlatProvenanceExcludesMaybeGroupCandidates) {
   ASSERT_EQ(strict_result.observation_plan.site_decisions.size(), 1u);
   EXPECT_EQ(strict_result.observation_plan.site_decisions.front().reason,
             ConSanAccessPolicyReason::FlatProvenancePolicyExcluded);
+}
+
+TEST(ConSanMoi, CfgBuildInputsCanonicalizeInventoryAndComposedCodeRanges) {
+  constexpr std::array<uint32_t, 1> kernel_words = {
+      0xBFB00000u, // s_endpgm
+  };
+  constexpr std::array<uint32_t, 2> function_words = {
+      0xBF800000u, // s_nop 0
+      0xBFB00000u, // s_endpgm
+  };
+  const std::vector<uint8_t> bytes =
+      make_rdna4_code_object_with_local_function(kernel_words, function_words);
+  const ConSanTransformArtifacts inventory =
+      test_lower_consan(bytes, moi_options(ConSanMoiEngine::RecordReplay));
+  ASSERT_TRUE(inventory.errors.empty());
+  ASSERT_FALSE(inventory.program_inventory.kernels().empty());
+  ASSERT_FALSE(inventory.program_inventory.functions().empty());
+  const AmdGpuCodeObject code_object(bytes.data(), bytes.size());
+  ASSERT_TRUE(code_object.is_valid());
+
+  const uint64_t duplicate_kernel_entry =
+      inventory.program_inventory.kernels().front().entry_text_offset;
+  const uint64_t duplicate_function_entry =
+      inventory.program_inventory.functions().front().entry_text_offset;
+  constexpr uint64_t kComposedEntry = 0x100000u;
+  constexpr uint64_t kComposedContinuation = kComposedEntry + 16u;
+  const std::array preapplied = {
+      ConSanPreappliedCodeRange{.text_offset = duplicate_kernel_entry,
+                                .size = 0u,
+                                .kernel_name = "kernel",
+                                .continuation_text_offset = duplicate_function_entry},
+      ConSanPreappliedCodeRange{.text_offset = kComposedEntry,
+                                .size = 12u,
+                                .kernel_name = "kernel",
+                                .continuation_text_offset = kComposedContinuation},
+  };
+
+  const consan_detail::ConSanCfgBuildInputs cfg =
+      consan_detail::build_consan_cfg_inputs(code_object, inventory.program_inventory.kernels(),
+                                             inventory.program_inventory.functions(), preapplied);
+
+  EXPECT_TRUE(std::ranges::is_sorted(cfg.leaders));
+  EXPECT_TRUE(std::ranges::is_sorted(cfg.kernel_entries));
+  EXPECT_EQ(std::ranges::count(cfg.leaders, duplicate_kernel_entry), 1u);
+  EXPECT_EQ(std::ranges::count(cfg.leaders, duplicate_function_entry), 1u);
+  EXPECT_NE(std::ranges::find(cfg.leaders, kComposedEntry), cfg.leaders.end());
+  EXPECT_NE(std::ranges::find(cfg.leaders, kComposedContinuation), cfg.leaders.end());
+  for (const ConSanKernelInfo &kernel : inventory.program_inventory.kernels()) {
+    if (!kernel.has_text_range)
+      continue;
+    EXPECT_NE(std::ranges::find(cfg.kernel_entries, kernel.entry_text_offset),
+              cfg.kernel_entries.end());
+  }
+  EXPECT_EQ(
+      std::ranges::count(cfg.code_ranges, kComposedEntry, &BasicBlock::CodeRange::start_offset),
+      1u);
+  EXPECT_EQ(std::ranges::count(cfg.code_ranges, duplicate_kernel_entry,
+                               &BasicBlock::CodeRange::start_offset),
+            std::ranges::count(code_object.functions(), duplicate_kernel_entry,
+                               &AmdGpuFunctionInfo::entry_text_offset));
+  const auto composed =
+      std::ranges::find(cfg.code_ranges, kComposedEntry, &BasicBlock::CodeRange::start_offset);
+  ASSERT_NE(composed, cfg.code_ranges.end());
+  EXPECT_EQ(composed->size, 12u);
 }
 
 TEST(ConSanMoi, OccupiedTextRangesCanonicalizeAndUseHalfOpenOverlap) {
