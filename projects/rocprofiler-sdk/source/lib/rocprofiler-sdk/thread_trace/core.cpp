@@ -411,6 +411,18 @@ DispatchThreadTracer::resource_init()
 void
 DispatchThreadTracer::resource_deinit()
 {
+    enabled.store(false, std::memory_order_release);
+
+    if(auto* controller = hsa::get_queue_controller())
+    {
+        client.wlock([&](auto& client_id) {
+            if(!client_id) return;
+            controller->remove_callback(*client_id);
+            client_id = std::nullopt;
+        });
+        controller->disable_serialization();
+    }
+
     ROCP_TRACE << "Clearing agents";
     auto lk = std::unique_lock{agents_map_mut};
     agents.clear();
@@ -435,6 +447,8 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
         rocprof_corr_id.internal = corr_id->internal;
     }
     // TODO: Get external
+
+    if(!enabled.load(std::memory_order_acquire)) return {nullptr, false};
 
     std::shared_lock<std::shared_mutex> lk(agents_map_mut);
 
@@ -494,6 +508,7 @@ DispatchThreadTracer::start_context()
     // Only installs queue-controller callbacks (cached and applied to queues as
     // they are created), so this is safe to call before hsa_init.
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
+    enabled.store(true, std::memory_order_release);
 
     // Only one thread should be attempting to enable/disable this context
     client.wlock([&](auto& client_id) {
@@ -529,18 +544,11 @@ DispatchThreadTracer::start_context()
 void
 DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
-    auto* controller = hsa::get_queue_controller();
-    if(!controller) return;
+    // Stop injecting ATT packets before transitioning serialization. Completion callbacks remain
+    // registered so packets already in the queues can drain through the serializer transition.
+    if(!enabled.exchange(false, std::memory_order_acq_rel)) return;
 
-    client.wlock([&](auto& client_id) {
-        if(!client_id) return;
-
-        // Remove our callbacks from HSA's queue controller
-        controller->remove_callback(*client_id);
-        client_id = std::nullopt;
-    });
-
-    controller->disable_serialization();
+    if(auto* controller = hsa::get_queue_controller()) controller->disable_serialization();
 }
 
 DeviceThreadTracer::DeviceThreadTracer()
