@@ -14,7 +14,7 @@
 
 #include "rocjitsu/vm/amdgpu/xcd_shard.h"
 
-#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -436,13 +436,17 @@ struct HwQueueState {
 
   Status status = Status::IDLE;
   std::deque<DispatchEntry> entries;
-  /// @brief High-water mark of entries.size(), for tests.
-  /// @details A replica's entry list is otherwise unobservable: a packet that runs
-  /// no shader retires in zero time, so once a run finishes every queue is empty
-  /// whether or not those packets were ever placed on the peers at all. Recording
-  /// the peak as entries are pushed lets the assertion happen AFTER the run, so a
-  /// test never has to reach into a peer CP while that peer is running.
-  size_t peak_entries = 0;
+  /// @brief Total entries accepted by this queue, for tests.
+  /// @details A replica's entry list is otherwise unobservable after its packets
+  /// retire. Recording acceptance at the queue's single ordered push site lets a
+  /// test verify delivery AFTER the run without depending on how many entries
+  /// happened to coexist in the queue or reaching into a running peer CP.
+  size_t accepted_entries = 0;
+  /// @brief Kinds of the first two accepted entries, for tests.
+  /// @details Bounded because the replication-order test needs only the submitted
+  /// kernel and the non-kernel packet behind it; production queues must not retain
+  /// an unbounded history after entries retire.
+  std::array<DispatchPacketKind, 2> first_accepted_entry_kinds{};
   bool implicit_barrier_next = false;
   size_t next_dispatch_idx = 0;
   uint64_t queue_desc_va = 0;
@@ -451,12 +455,14 @@ struct HwQueueState {
   /// dispatch shards from the XCD that does.
   bool fanout_replica = false;
 
-  /// @brief Append an entry, maintaining peak_entries.
-  /// @details The single push site, so the high-water mark cannot drift from the
-  /// deque. Callers already hold the CP's queue mutex.
+  /// @brief Append an entry, maintaining accepted_entries.
+  /// @details The single ordered push site, so the acceptance count tracks the number
+  /// of pushed entries. Callers already hold the CP's queue mutex.
   void push_entry(DispatchEntry entry) {
+    if (accepted_entries < first_accepted_entry_kinds.size())
+      first_accepted_entry_kinds[accepted_entries] = entry.kind;
     entries.push_back(std::move(entry));
-    peak_entries = std::max(peak_entries, entries.size());
+    ++accepted_entries;
   }
 };
 
