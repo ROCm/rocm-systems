@@ -782,3 +782,161 @@ TEST_F(RasClientMicrotest, RasRead_ZeroCount_UnderflowsRequestToSizeMax) {
   EXPECT_EQ('\0', buf[0]);
   EXPECT_EQ(kSentinel, buf[1]);
 }
+
+
+// ===========================================================================
+// socketWrite (src/ras/client.cc:121-134)
+//
+// do/while over write(2): retries on EINTR, gives up on any other errno, and
+// advances the buffer offset by the number of bytes each write accepted.
+// ===========================================================================
+
+namespace {
+
+// One (offset, length) pair as socketWrite computed it. The offset is relative
+// to the caller's buffer, so recording it makes the `+ done` arithmetic visible.
+struct WriteCall {
+  long long offset;
+  size_t count;
+};
+
+// One scripted write outcome; ret < 0 makes the write fail with err in errno.
+struct WriteStep {
+  ssize_t ret;
+  int err;
+};
+
+// Records what socketWrite handed each write() and replays a script of results.
+// Once the script is exhausted -- or the hard call cap is hit -- every further
+// call fails with EIO. That cap is load-bearing: several mutants of this loop
+// (dropped `+ done`, `done = ret`, `<=` in the guard) never terminate, and a
+// hook that kept returning success would hang the binary instead of failing.
+class WriteRecorder {
+ public:
+  WriteRecorder(const char* base, std::vector<WriteStep> script) : base_(base), script_(std::move(script)) {}
+
+  ssize_t operator()(int, const void* buf, size_t count) {
+    const char* p = static_cast<const char*>(buf);
+    calls.push_back(WriteCall{static_cast<long long>(p - base_), count});
+    if (calls.size() > kHardCap || step_ >= script_.size()) {
+      errno = EIO;
+      return -1;
+    }
+    const WriteStep step = script_[step_++];
+    if (step.ret < 0) {
+      errno = step.err;
+      return step.ret;
+    }
+    const size_t taken = static_cast<size_t>(step.ret) < count ? static_cast<size_t>(step.ret) : count;
+    data.append(p, taken);
+    return step.ret;
+  }
+
+  std::vector<WriteCall> calls;
+  std::string data;  // the payload as reassembled from the accepted chunks
+
+ private:
+  static const size_t kHardCap = 16;
+  const char* base_;
+  std::vector<WriteStep> script_;
+  size_t step_ = 0;
+};
+
+// "0/19,5/14" -- one offset/count pair per write, in call order.
+std::string FormatWriteCalls(const std::vector<WriteCall>& calls) {
+  std::string out;
+  for (const WriteCall& call : calls) {
+    if (!out.empty()) out += ",";
+    out += std::to_string(call.offset) + "/" + std::to_string(call.count);
+  }
+  return out;
+}
+
+// 19 distinct bytes: not a multiple of any chunk size used below, and no byte
+// repeats, so a dropped offset or a restarted retry changes the reassembly.
+const char kPayload[] = "ABCDEFGHIJKLMNOPQRS";
+const size_t kPayloadLen = sizeof(kPayload) - 1;
+
+}  // namespace
+
+// Arm: write accepts everything on the first call; the loop guard is false at once.
+TEST_F(RasClientMicrotest, SocketWrite_FullWriteFirstTry_WritesWholeBufferOnce) {
+  WriteRecorder rec(kPayload, {{19, 0}});
+  ScopedHook writeHook(g_write, [&rec](int fd, const void* buf, size_t count) { return rec(fd, buf, count); });
+
+  EXPECT_EQ(static_cast<ssize_t>(19), socketWrite(9, kPayload, kPayloadLen));
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ("0/19", FormatWriteCalls(rec.calls));
+  EXPECT_EQ("ABCDEFGHIJKLMNOPQRS", rec.data);
+}
+
+// Arm: several short writes; each call must start at buf + done and ask for count - done.
+TEST_F(RasClientMicrotest, SocketWrite_ShortWrites_AdvancesOffsetAndReturnsTotal) {
+  WriteRecorder rec(kPayload, {{5, 0}, {5, 0}, {5, 0}, {4, 0}});
+  ScopedHook writeHook(g_write, [&rec](int fd, const void* buf, size_t count) { return rec(fd, buf, count); });
+
+  EXPECT_EQ(static_cast<ssize_t>(19), socketWrite(9, kPayload, kPayloadLen));
+  EXPECT_EQ(4, writeHook.calls);
+  EXPECT_EQ("0/19,5/14,10/9,15/4", FormatWriteCalls(rec.calls));
+  EXPECT_EQ("ABCDEFGHIJKLMNOPQRS", rec.data);
+}
+
+// Arm: ret == -1 with errno == EINTR retries; `continue` re-tests done < count,
+// which is still true here, so the retry must resume at the same offset.
+TEST_F(RasClientMicrotest, SocketWrite_EintrMidTransfer_RetriesFromSameOffsetAndReturnsTotal) {
+  WriteRecorder rec(kPayload, {{7, 0}, {-1, EINTR}, {12, 0}});
+  ScopedHook writeHook(g_write, [&rec](int fd, const void* buf, size_t count) { return rec(fd, buf, count); });
+
+  EXPECT_EQ(static_cast<ssize_t>(19), socketWrite(9, kPayload, kPayloadLen));
+  EXPECT_EQ(3, writeHook.calls);
+  EXPECT_EQ("0/19,7/12,7/12", FormatWriteCalls(rec.calls));
+  EXPECT_EQ("ABCDEFGHIJKLMNOPQRS", rec.data);
+}
+
+// Arm: ret == -1 with EINTR on the very first call, before any byte is written.
+TEST_F(RasClientMicrotest, SocketWrite_EintrBeforeAnyProgress_RetriesFromOffsetZero) {
+  WriteRecorder rec(kPayload, {{-1, EINTR}, {19, 0}});
+  ScopedHook writeHook(g_write, [&rec](int fd, const void* buf, size_t count) { return rec(fd, buf, count); });
+
+  EXPECT_EQ(static_cast<ssize_t>(19), socketWrite(9, kPayload, kPayloadLen));
+  EXPECT_EQ(2, writeHook.calls);
+  EXPECT_EQ("0/19,0/19", FormatWriteCalls(rec.calls));
+  EXPECT_EQ("ABCDEFGHIJKLMNOPQRS", rec.data);
+}
+
+// Arm: ret == -1 with any other errno returns -1 and discards the partial progress.
+TEST_F(RasClientMicrotest, SocketWrite_NonEintrError_ReturnsMinusOneAndAbandonsPartialWrite) {
+  WriteRecorder rec(kPayload, {{6, 0}, {-1, EIO}});
+  ScopedHook writeHook(g_write, [&rec](int fd, const void* buf, size_t count) { return rec(fd, buf, count); });
+
+  errno = 0;
+  EXPECT_EQ(static_cast<ssize_t>(-1), socketWrite(9, kPayload, kPayloadLen));
+  EXPECT_EQ(EIO, errno);
+  EXPECT_EQ(2, writeHook.calls);
+  EXPECT_EQ("0/19,6/13", FormatWriteCalls(rec.calls));
+  EXPECT_EQ("ABCDEF", rec.data);
+}
+
+// Arm: count == 0. The do/while body runs unconditionally, so production issues
+// one zero-length write before the guard stops the loop.
+TEST_F(RasClientMicrotest, SocketWrite_ZeroCount_StillIssuesOneZeroLengthWrite) {
+  WriteRecorder rec(kPayload, {{0, 0}});
+  ScopedHook writeHook(g_write, [&rec](int fd, const void* buf, size_t count) { return rec(fd, buf, count); });
+
+  EXPECT_EQ(static_cast<ssize_t>(0), socketWrite(9, kPayload, 0));
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ("0/0", FormatWriteCalls(rec.calls));
+  EXPECT_EQ("", rec.data);
+}
+
+// Arm: EINTR on the mandatory first iteration of a count == 0 write. `continue`
+// re-tests done < count, which is 0 < 0 -- so the retry never happens and the
+// interrupted zero-length write is reported as a success.
+TEST_F(RasClientMicrotest, SocketWrite_ZeroCountEintr_DoesNotRetryAndReturnsZero) {
+  WriteRecorder rec(kPayload, {{-1, EINTR}, {0, 0}});
+  ScopedHook writeHook(g_write, [&rec](int fd, const void* buf, size_t count) { return rec(fd, buf, count); });
+
+  EXPECT_EQ(static_cast<ssize_t>(0), socketWrite(9, kPayload, 0));
+  EXPECT_EQ(1, writeHook.calls);
+  EXPECT_EQ("0/0", FormatWriteCalls(rec.calls));
+}
