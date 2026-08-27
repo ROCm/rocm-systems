@@ -4530,9 +4530,9 @@ TEST(ConSanMoi, Cdna4InlineShadowMovesEmptyAccumulatorBoundaryForDynamicStackSta
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
-  const ConSanMoiPersistentVgprAssignment &assignment =
-      result.resolved_moi_persistent_vgpr_assignments.front();
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  ASSERT_EQ(persistent_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &assignment = persistent_assignments.front();
   EXPECT_EQ(assignment.owner_vgpr, 126u);
   EXPECT_EQ(assignment.epoch_vgpr, 127u);
   ASSERT_TRUE(assignment.workgroup_key_vgpr);
@@ -4597,10 +4597,9 @@ TEST(ConSanMoi, Cdna4InlineShadowMixesPrivateAndEmptyAccumulatorBoundaryState) {
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u)
-      << testing::PrintToString(result.warnings);
-  const ConSanMoiPersistentVgprAssignment &assignment =
-      result.resolved_moi_persistent_vgpr_assignments.front();
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  ASSERT_EQ(persistent_assignments.size(), 1u) << testing::PrintToString(result.warnings);
+  const ConSanMoiPersistentVgprAssignment &assignment = persistent_assignments.front();
   EXPECT_EQ(assignment.descriptor_file_offset, dynamic->descriptor_file_offset);
   EXPECT_EQ(assignment.owner_vgpr, 126u);
   EXPECT_EQ(assignment.epoch_vgpr, 127u);
@@ -4744,11 +4743,11 @@ TEST(ConSanMoi, Cdna4InlineShadowCapturesComponentDispatchWithPersistentOwnerVgp
       &ConSanMoiTransientSgprAssignment::descriptor_file_offset);
   ASSERT_NE(transient, result.resolved_moi_transient_sgpr_assignments.end());
   EXPECT_FALSE(transient->dispatch_id_sgpr);
-  const auto persistent = std::ranges::find(
-      result.resolved_moi_persistent_vgpr_assignments, full_pressure->descriptor_file_offset,
-      &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-  ASSERT_NE(persistent, result.resolved_moi_persistent_vgpr_assignments.end())
-      << testing::PrintToString(result.warnings);
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  const auto persistent =
+      std::ranges::find(persistent_assignments, full_pressure->descriptor_file_offset,
+                        &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+  ASSERT_NE(persistent, persistent_assignments.end()) << testing::PrintToString(result.warnings);
   EXPECT_TRUE(persistent->dispatch_id_vgpr);
   const std::vector<ConSanAccessInventorySite> candidates = test_admitted_accesses(result);
   const auto full_access_candidate =
@@ -4970,7 +4969,7 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " errors=" << testing::PrintToString(result.errors);
-  EXPECT_TRUE(result.resolved_moi_persistent_vgpr_assignments.empty());
+  EXPECT_TRUE(test_moi_persistent_vgpr_assignments(result).empty());
   ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner);
   EXPECT_GE(*test_moi_persistent_sgpr_state(result).owner, 40u);
   // The full-bank owner drives the code-object-wide scalar choice but its
@@ -7753,23 +7752,24 @@ TEST(ConSanMoi, Cdna4InlinePrefersOwnerWideFreshWindowToObjectWideSiteDeadWindow
                               low->descriptor_file_offset,
                               &ConSanMoiTransientSgprAssignment::descriptor_file_offset),
             result.resolved_moi_transient_sgpr_assignments.end());
-  const auto high_persistent = std::ranges::find(
-      result.resolved_moi_persistent_vgpr_assignments, high->descriptor_file_offset,
-      &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-  ASSERT_NE(high_persistent, result.resolved_moi_persistent_vgpr_assignments.end())
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  const auto high_persistent =
+      std::ranges::find(persistent_assignments, high->descriptor_file_offset,
+                        &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+  ASSERT_NE(high_persistent, persistent_assignments.end())
       << testing::PrintToString(result.warnings);
   EXPECT_TRUE(high_persistent->dispatch_id_vgpr);
-  const auto low_persistent = std::ranges::find(
-      result.resolved_moi_persistent_vgpr_assignments, low->descriptor_file_offset,
-      &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-  ASSERT_NE(low_persistent, result.resolved_moi_persistent_vgpr_assignments.end())
+  const auto low_persistent =
+      std::ranges::find(persistent_assignments, low->descriptor_file_offset,
+                        &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+  ASSERT_NE(low_persistent, persistent_assignments.end())
       << testing::PrintToString(result.warnings);
   EXPECT_FALSE(low_persistent->dispatch_id_vgpr);
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiExactShadowStore,
                                &ConSanPatchInfo::kind),
             2u)
       << testing::PrintToString(result.warnings) << "\n"
-      << testing::PrintToString(result.resolved_moi_persistent_vgpr_assignments);
+      << testing::PrintToString(persistent_assignments);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
 }
 

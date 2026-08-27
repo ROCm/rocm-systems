@@ -6654,7 +6654,6 @@ configure_automatic_moi_persistent_vgprs(ConSanOptions &options, ConSanResult &r
       if (!assigned_private_component)
         options.automatic_moi_private_dispatch_id = false;
     }
-    result.resolved_moi_persistent_vgpr_assignments = options.moi_persistent_vgpr_assignments;
     result.warnings.emplace_back(
         assigned_private_component && options.automatic_moi_persistent_vgprs
             ? "ConSan MOI assigned component-local private and persistent VGPR state below CDNA "

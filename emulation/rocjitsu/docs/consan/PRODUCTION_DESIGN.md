@@ -5727,6 +5727,27 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CL: derive owner-local persistent VGPR state from prologues
+
+- **One owner, one emitted initialization contract:** Final validation now
+  resolves an exact-shadow patch's owner-local dispatch VGPR from that owner's
+  entry-prologue patch. It no longer consults a parallel vector populated by
+  register placement before any bytes are emitted.
+- **The reporting view is derived:** Tests that examine the per-owner
+  allocation matrix reconstruct it from prologue owners and their recorded
+  owner, epoch, workgroup, and dispatch registers. This retains focused
+  coverage of mixed private/register components, AccVGPR boundaries, dynamic
+  stacks, and owner-specific dispatch fallbacks without making planning state
+  part of the transform result.
+- **Deletion accounting:** `ConSanResult` loses its persistent-VGPR-assignment
+  vector and placement no longer publishes or clears it. Implementation files
+  add eight and delete nine physical lines, a net deletion of one; the larger
+  benefit is removing one of the final two owner-indexed compatibility
+  workspaces.
+- **Checked-in gate:** All 1,530 ConSan host tests pass. The simulator-device
+  and hook gates remain unchanged from Slice 5CK and are rerun at the next
+  mechanism boundary; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -208,7 +208,8 @@ TEST(ConSanMoi, RecordReplayPatchesAliasedAccessAndBarrierOnceForEveryOwner) {
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   ASSERT_EQ(test_admitted_accesses(result).size(), 1u);
   EXPECT_EQ(test_admitted_accesses(result).front().container.name, "shared_owner_0");
-  EXPECT_NE(test_admitted_accesses(result).front().execution_owner_descriptor_file_offsets.size(), 1u);
+  EXPECT_NE(test_admitted_accesses(result).front().execution_owner_descriptor_file_offsets.size(),
+            1u);
   ASSERT_EQ(result.program_inventory.sync().sync_events.size(), 1u);
   EXPECT_EQ(result.program_inventory.sync().sync_events.front().kind, ConSanSyncEventKind::Barrier);
   ASSERT_EQ(consan_access_decision_count(result, ConSanSiteDecisionKind::Admitted), 1u);
@@ -8441,9 +8442,9 @@ TEST(ConSanMoi, CdnaRecordReplayMovesOnlyEmptyAccumulatorBoundaryForDynamicStack
       ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
       EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-      ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
-      const ConSanMoiPersistentVgprAssignment &assignment =
-          result.resolved_moi_persistent_vgpr_assignments.front();
+      const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+      ASSERT_EQ(persistent_assignments.size(), 1u);
+      const ConSanMoiPersistentVgprAssignment &assignment = persistent_assignments.front();
       EXPECT_EQ(assignment.owner_vgpr, 126u);
       EXPECT_EQ(assignment.epoch_vgpr, 127u);
       ASSERT_TRUE(assignment.record_replay_workgroup_vgprs.complete());
@@ -8500,9 +8501,9 @@ TEST(ConSanMoi, Cdna4RecordReplayMixesPrivateAndDynamicStackPersistentStateByOwn
   ASSERT_TRUE(dynamic->uses_dynamic_stack);
   EXPECT_FALSE(*fixed->uses_dynamic_stack);
   EXPECT_TRUE(*dynamic->uses_dynamic_stack);
-  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
-  const ConSanMoiPersistentVgprAssignment &dynamic_assignment =
-      result.resolved_moi_persistent_vgpr_assignments.front();
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  ASSERT_EQ(persistent_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &dynamic_assignment = persistent_assignments.front();
   EXPECT_EQ(dynamic_assignment.descriptor_file_offset, dynamic->descriptor_file_offset);
   EXPECT_TRUE(dynamic_assignment.record_replay_workgroup_vgprs.complete());
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans) {
@@ -8565,9 +8566,9 @@ TEST(ConSanMoi, Cdna4RecordReplayRecoversDynamicOwnerAfterPrivateAbiResourceFail
   const auto dynamic =
       std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
   ASSERT_NE(dynamic, result.program_inventory.kernels().end());
-  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
-  EXPECT_EQ(result.resolved_moi_persistent_vgpr_assignments.front().descriptor_file_offset,
-            dynamic->descriptor_file_offset);
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  ASSERT_EQ(persistent_assignments.size(), 1u);
+  EXPECT_EQ(persistent_assignments.front().descriptor_file_offset, dynamic->descriptor_file_offset);
   EXPECT_TRUE(std::ranges::any_of(result.warnings, [](const std::string &warning) {
     return warning.find("deferred dynamic-stack Record/Replay state") != std::string::npos;
   })) << testing::PrintToString(result.warnings);
@@ -8621,9 +8622,9 @@ TEST(ConSanMoi, Cdna4RecordReplayCarriesMixedPersistentStateAcrossAtomicAndFence
       std::ranges::find(result.program_inventory.kernels(), "lds_helper", &ConSanKernelInfo::name);
   ASSERT_NE(fixed, result.program_inventory.kernels().end());
   ASSERT_NE(dynamic, result.program_inventory.kernels().end());
-  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
-  EXPECT_EQ(result.resolved_moi_persistent_vgpr_assignments.front().descriptor_file_offset,
-            dynamic->descriptor_file_offset);
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  ASSERT_EQ(persistent_assignments.size(), 1u);
+  EXPECT_EQ(persistent_assignments.front().descriptor_file_offset, dynamic->descriptor_file_offset);
 
   for (const ConSanPatchKind kind :
        {ConSanPatchKind::TrampolineMoiAtomicRecord, ConSanPatchKind::TrampolineMoiFenceRecord}) {

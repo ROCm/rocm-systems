@@ -3432,9 +3432,9 @@ TEST(ConSanMoi, Cdna4SampledMovesEmptyAccumulatorBoundaryForDynamicStackState) {
       << " plans=" << testing::PrintToString(result.resource_plans);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
-  const ConSanMoiPersistentVgprAssignment &assignment =
-      result.resolved_moi_persistent_vgpr_assignments.front();
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  ASSERT_EQ(persistent_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &assignment = persistent_assignments.front();
   EXPECT_EQ(assignment.owner_vgpr, 127u);
   EXPECT_EQ(assignment.epoch_vgpr, 128u);
   EXPECT_FALSE(assignment.dispatch_id_vgpr);
@@ -3488,9 +3488,9 @@ TEST(ConSanMoi, Cdna4SampledMixesPrivateAndEmptyAccumulatorBoundaryState) {
   ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " plans=" << testing::PrintToString(result.resource_plans);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
-  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
-  const ConSanMoiPersistentVgprAssignment &assignment =
-      result.resolved_moi_persistent_vgpr_assignments.front();
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  ASSERT_EQ(persistent_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &assignment = persistent_assignments.front();
   EXPECT_EQ(assignment.descriptor_file_offset, dynamic->descriptor_file_offset);
   EXPECT_EQ(assignment.owner_vgpr, 251u);
   EXPECT_EQ(assignment.epoch_vgpr, 252u);
@@ -3571,9 +3571,9 @@ TEST(ConSanMoi, Cdna4SampledRecoversInitiallyResourceFailedOwnerComponent) {
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::ModifiedValid);
   EXPECT_EQ(test_resource_plan_summary(result).unsupported_plans, 0u);
 
-  ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 1u);
-  const ConSanMoiPersistentVgprAssignment &persistent =
-      result.resolved_moi_persistent_vgpr_assignments.front();
+  const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+  ASSERT_EQ(persistent_assignments.size(), 1u);
+  const ConSanMoiPersistentVgprAssignment &persistent = persistent_assignments.front();
   EXPECT_EQ(persistent.descriptor_file_offset, dynamic->descriptor_file_offset);
   EXPECT_EQ(persistent.owner_vgpr, 251u);
   EXPECT_EQ(persistent.epoch_vgpr, 252u);
@@ -4447,15 +4447,16 @@ TEST(ConSanMoi, CdnaSampledUsesPerOwnerPersistentTuplesAcrossAccvgprBoundaries) 
 
     ASSERT_TRUE(consan_patch_succeeded(result)) << testing::PrintToString(result.errors);
     ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-    ASSERT_EQ(result.resolved_moi_persistent_vgpr_assignments.size(), 2u);
-    const auto probe_assignment = std::ranges::find(
-        result.resolved_moi_persistent_vgpr_assignments, probe_kernel->descriptor_file_offset,
-        &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-    const auto helper_assignment = std::ranges::find(
-        result.resolved_moi_persistent_vgpr_assignments, helper_kernel->descriptor_file_offset,
-        &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-    ASSERT_NE(probe_assignment, result.resolved_moi_persistent_vgpr_assignments.end());
-    ASSERT_NE(helper_assignment, result.resolved_moi_persistent_vgpr_assignments.end());
+    const auto persistent_assignments = test_moi_persistent_vgpr_assignments(result);
+    ASSERT_EQ(persistent_assignments.size(), 2u);
+    const auto probe_assignment =
+        std::ranges::find(persistent_assignments, probe_kernel->descriptor_file_offset,
+                          &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+    const auto helper_assignment =
+        std::ranges::find(persistent_assignments, helper_kernel->descriptor_file_offset,
+                          &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
+    ASSERT_NE(probe_assignment, persistent_assignments.end());
+    ASSERT_NE(helper_assignment, persistent_assignments.end());
     EXPECT_EQ(probe_assignment->owner_vgpr, 12u);
     EXPECT_EQ(probe_assignment->epoch_vgpr, 13u);
     EXPECT_EQ(helper_assignment->owner_vgpr, 24u);

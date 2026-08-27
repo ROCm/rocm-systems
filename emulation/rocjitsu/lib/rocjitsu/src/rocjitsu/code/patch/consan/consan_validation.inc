@@ -3232,14 +3232,16 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
   const auto owner_local_dispatch_vgpr = [&](const ConSanPatchInfo &patch) {
     std::optional<uint16_t> common;
     for (uint64_t owner : patch.owner_descriptor_file_offsets) {
-      const auto assignment =
-          std::ranges::find(result.resolved_moi_persistent_vgpr_assignments, owner,
-                            &ConSanMoiPersistentVgprAssignment::descriptor_file_offset);
-      if (assignment == result.resolved_moi_persistent_vgpr_assignments.end() ||
-          !assignment->dispatch_id_vgpr || (common && *common != *assignment->dispatch_id_vgpr)) {
+      const auto prologue = std::ranges::find_if(result.patches, [&](const ConSanPatchInfo &item) {
+        return item.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue &&
+               std::ranges::find(item.owner_descriptor_file_offsets, owner) !=
+                   item.owner_descriptor_file_offsets.end();
+      });
+      if (prologue == result.patches.end() || !prologue->dispatch_id_capture_vgpr ||
+          (common && *common != *prologue->dispatch_id_capture_vgpr)) {
         return std::optional<uint16_t>{};
       }
-      common = assignment->dispatch_id_vgpr;
+      common = prologue->dispatch_id_capture_vgpr;
     }
     return common;
   };

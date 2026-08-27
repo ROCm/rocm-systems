@@ -220,7 +220,6 @@ struct ConSanResult : ConSanTransformArtifacts {
   std::optional<uint16_t> resolved_moi_epoch_vgpr;
   std::optional<uint16_t> resolved_moi_workgroup_key_vgpr;
   ConSanMoiPersistentWorkgroupRegisters resolved_moi_record_replay_workgroup_vgprs;
-  std::vector<ConSanMoiPersistentVgprAssignment> resolved_moi_persistent_vgpr_assignments;
   std::optional<uint16_t> resolved_moi_exec_save_sgpr;
   std::vector<ConSanMoiTransientSgprAssignment> resolved_moi_transient_sgpr_assignments;
   std::optional<uint16_t> resolved_moi_dispatch_id_sgpr;
