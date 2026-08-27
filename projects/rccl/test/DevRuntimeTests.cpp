@@ -303,3 +303,36 @@ TEST_F(DevrIsOneLsaTeamTest, LsaSizeBelowNRanks_ReturnsFalse) {
   comm->devrState.lsaSize = 4;
   EXPECT_FALSE(ncclDevrIsOneLsaTeam(comm));
 }
+
+
+// ---------------------------------------------------------------------------
+// ncclSymIsHostSegment: true for host-NUMA, and on AMD from ROCm 7.12 also for
+// plain host. The second arm is #if-gated, so the guard is mirrored below to
+// keep the suite passing on either toolchain.
+
+// Branch: the unconditional host-NUMA check.
+TEST(SymIsHostSegment, HostNuma_ReturnsTrue) {
+  EXPECT_TRUE(ncclSymIsHostSegment(hipMemLocationTypeHostNuma));
+}
+
+#if defined(__HIP_PLATFORM_AMD__) && ROCM_VERSION >= 71200
+// Branch: AMD allocates host segments as plain host, so they count as sysmem.
+TEST(SymIsHostSegment, Host_ReturnsTrue) {
+  EXPECT_TRUE(ncclSymIsHostSegment(hipMemLocationTypeHost));
+}
+#else
+// Without the AMD arm compiled in, plain host is not a sysmem segment.
+TEST(SymIsHostSegment, Host_ReturnsFalse) {
+  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeHost));
+}
+#endif
+
+// Falls through every check.
+TEST(SymIsHostSegment, Device_ReturnsFalse) {
+  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeDevice));
+}
+
+// Zero value, as a value-initialised symLsaMessage::type would hold.
+TEST(SymIsHostSegment, Invalid_ReturnsFalse) {
+  EXPECT_FALSE(ncclSymIsHostSegment(hipMemLocationTypeInvalid));
+}
