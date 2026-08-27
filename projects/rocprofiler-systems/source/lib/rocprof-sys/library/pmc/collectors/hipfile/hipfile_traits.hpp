@@ -127,7 +127,9 @@ struct hipfile_traits
         auto type_indices = Settings::get_visible_gpu_type_indices();
         if(type_indices.empty())
         {
-            LOG_DEBUG("No ROCm-visible GPUs; {} sampling disabled", device_name);
+            LOG_DEBUG("{} sampling disabled: no HIP-visible GPUs, or the visibility "
+                      "mask cannot be mapped to profiler GPU indices",
+                      device_name);
             return entries;
         }
 
