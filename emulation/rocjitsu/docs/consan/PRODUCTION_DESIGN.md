@@ -6233,6 +6233,45 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DC: plan dense access routes once
+
+- **One placement transaction:** `plan_moi_dense_access_routes` now owns the
+  access candidate partition, owner-local scalar resolution, direct-island
+  selection, cached liveness-safe relocated-host search, cross-group host
+  reservation, and candidate-to-dispatcher mapping for Record/Replay, Sampled,
+  and Inline Shadow. The three engine-private planning loops and the smaller
+  two-engine host-claim wrapper are deleted.
+- **Policy remains visible:** Callers still supply dispatcher capacity,
+  appended relay-bank coordinates, and the engine ABI. Record/Replay admits
+  GFX11, protects its qualified multi-instruction ordering sequences, and
+  prefers dense routing for spill-backed access bodies. Sampled keeps its GFX11
+  exclusion. Inline Shadow requires its own scalar ABI and fixed eight-word
+  island shape. Candidate evidence, sampling, shadow semantics, and body
+  emission remain engine-owned.
+- **One ownership rule:** The planner caches host candidates by typed owner,
+  host shape, descriptor set, and scalar bootstrap ranges, then applies the
+  shared claimed-range set at selection. Inline Shadow also retires a claimed
+  pristine NOP island from its independent branch-only router inside the same
+  transaction. A placement cannot therefore be published to one mechanism
+  while remaining available to another.
+- **Contract coverage:** Existing focused host tests cover capacity-split
+  owners, direct and relocated islands, pairwise-disjoint hosts, called
+  functions, ordering-sequence exclusion, GFX11 direct routing, RDNA4/CDNA4
+  explicit keys, gfx1250 call relays, scalar spilling, and branch-only
+  coexistence. The paired device matrix exercises Record/Replay, Sampled, and
+  Inline Shadow on all applicable targets. This factoring changes no sanitizer
+  contract, so it relies on those stronger behavioral tests rather than adding
+  a private field-copy test.
+- **Accounting:** Across the four affected implementation files, physical
+  lines fall from 13,665 to 13,531, nonblank lines from 13,266 to 13,126, and
+  estimated comment-excluded code lines from 12,280 to 12,161. The slice adds
+  256 and deletes 390 physical implementation lines, a net deletion of 134;
+  no compatibility route planner remains.
+- **Checked-in gate:** The complete build, all 1,530 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

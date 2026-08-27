@@ -339,14 +339,16 @@ relay width, scalar ABI, admission rule, and decision to use a dense route.
 canonical half-open range set, so every engine excludes access, barrier, fence,
 atomic, and previously patched guest instructions with the same overlap
 semantics.
-`claim_moi_dense_owner_relay_host` additionally owns kernel/function lookup,
-owner-local liveness proof, relocation decoding, and cross-group host
-reservation for Sampled and Inline Shadow. Target policy is therefore explicit
-at the caller while owner partitioning and relocation safety are
-target-independent shared mechanism. Record/Replay uses the same partition and
-range contracts but retains a specialized cached host search because it must
-also exclude qualified multi-instruction ordering sequences in very large
-generated objects.
+
+All three access engines pass their candidate sequence and appended-bank
+geometry to `plan_moi_dense_access_routes`. That transaction owns the
+partition, owner-local scalar resolution, direct-island selection, cached
+liveness-safe relocated-host search, cross-group host ownership, and the final
+candidate-to-dispatcher mapping. Record/Replay additionally asks it to protect
+qualified multi-instruction ordering sequences and to prefer a shared route
+for spill-backed bodies; Sampled excludes GFX11; Inline Shadow selects its own
+scalar ABI and fixed island shape. These are explicit policy inputs to one
+placement mechanism, not three engine-local search loops.
 
 All three access engines also share `emit_moi_dense_access_group`, the
 route-emission mechanism that materializes the entry island, optional relocated

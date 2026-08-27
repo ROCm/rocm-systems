@@ -247,82 +247,19 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     branch_router.retire_range(offset, static_cast<uint64_t>(words) * sizeof(uint32_t));
   };
 
-  std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_entry_islands;
-  std::unordered_map<const ConSanMoiCandidate *, uint64_t> dense_dispatchers;
   const size_t dense_group_capacity =
       arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0u : (consan_uses_gfx9_cdna_encoding(arch) ? 31u : 64u);
-  const auto dense_candidates =
-      consan_detail::partition_moi_dense_candidates(candidates, dense_group_capacity);
-  const auto &candidate_indices = dense_candidates.index_by_candidate;
-  std::map<uint64_t, MoiDenseEntryHost> dense_entry_hosts;
-  // Dense routing is partitioned by owning container, SOPP reach, and a
-  // bounded number of candidates per dispatcher below. Its safety therefore
-  // depends on the local group shape, not the total number of sites in an
-  // unrelated code object. Retain the planning state's pristine CFG and
-  // liveness facts so a relocated relay host cannot clobber transient state.
   const auto &dense_host_blocks = resource_state.blocks;
-  if ((consan_uses_gfx9_cdna_encoding(arch) || consan_uses_gfx12_encoding(arch)) &&
-      use_indirect_appended && local_entry_islands) {
-    std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
-    for (const auto &group : dense_candidates.groups) {
-      const ConSanCandidateResourcePlan *group_resource =
-          group.candidates.empty() ? nullptr
-                                   : resource_plan_for_candidate(result, *group.candidates.front());
-      ConSanOptions group_options = options;
-      if (group_resource != nullptr)
-        (void)apply_moi_transient_sgpr_assignment(group_options,
-                                                  group_resource->owner_descriptor_file_offsets);
-      if (!moi_inline_dense_router_scalar_abi(group_options, arch))
-        continue;
-      const bool has_dense_neighbors =
-          group.has_overlapping_entries(kIndirectIslandWords * sizeof(uint32_t));
-      const bool has_stranded_entry =
-          std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
-            const size_t candidate_index = candidate_indices.at(candidate);
-            const uint64_t default_entry =
-                access_island_begin + candidate_index * access_relay_words * sizeof(uint32_t);
-            return !compute_sopp_branch_simm16(candidate->anchor(), default_entry);
-          });
-      const bool explicit_anchors_fit =
-          arch == ROCJITSU_CODE_ARCH_CDNA5 || group.every_site_has_size(2u * sizeof(uint32_t));
-      const bool singleton_has_direct_island =
-          group.candidates.size() == 1u &&
-          local_entry_islands->has_reachable(group.candidates.front()->anchor(),
-                                             kIndirectIslandWords);
-      // gfx1250 also uses the shared call relay to compact nearby anchors.
-      // CDNA3/4 and RDNA4 use an explicit key plus branch only when the
-      // ordinary per-site relay is stranded.
-      if (!explicit_anchors_fit || singleton_has_direct_island ||
-          (!(arch == ROCJITSU_CODE_ARCH_CDNA5 && has_dense_neighbors) && !has_stranded_entry))
-        continue;
-      const std::vector<uint64_t> anchors = group.anchors();
-      const uint64_t dispatcher =
-          access_island_begin + group.first_candidate_index * access_relay_words * sizeof(uint32_t);
-      auto island = local_entry_islands->claim_reachable_from_all(anchors);
-      if (island)
-        retire_branch_relay_range(*island, kIndirectIslandWords);
-      if (!island && group_resource != nullptr) {
-        constexpr size_t kHostWords = kIndirectIslandWords + 1u;
-        auto best_host = claim_moi_dense_owner_relay_host(
-            result, dense_candidates, group, options, group_options, arch, resource_state,
-            original_text, *group_resource, kHostWords, anchors, claimed_dense_host_ranges);
-        if (best_host) {
-          island = best_host->host_offset + sizeof(uint32_t);
-          dense_entry_hosts.emplace(dispatcher,
-                                    MoiDenseEntryHost{
-                                        .host_offset = best_host->host_offset,
-                                        .displaced_words = std::move(best_host->displaced_words),
-                                    });
-        }
-      }
-      if (!island)
-        continue;
-      for (const ConSanMoiCandidate *candidate : group.candidates) {
-        dense_entry_islands.emplace(candidate, *island);
-        dense_dispatchers.emplace(candidate, dispatcher);
-      }
-    }
-  }
+  MoiDenseAccessRoutePlan dense_routes = plan_moi_dense_access_routes(
+      result, options, arch, resource_state, original_text, candidates, dense_group_capacity,
+      access_island_begin, access_relay_words, use_indirect_appended,
+      MoiDenseAccessRouteAbi::InlineShadow, local_entry_islands ? &*local_entry_islands : nullptr,
+      &branch_router);
+  const auto &dense_candidates = dense_routes.partition;
+  const auto &candidate_indices = dense_candidates.index_by_candidate;
+  auto &dense_entry_islands = dense_routes.entry_islands;
+  auto &dense_dispatchers = dense_routes.dispatchers;
+  auto &dense_entry_hosts = dense_routes.entry_hosts;
   if (use_indirect_appended) {
     // Every ordinary access owns an eight-word entry-island prefix. The
     // remaining per-site bank is explicit branch-relay capacity unless a

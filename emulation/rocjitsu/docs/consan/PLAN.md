@@ -522,6 +522,16 @@ dispatcher placement, deleting three telemetry copies and three private-extent
 loops. This is a consolidation of existing target facts, not a new target
 adapter or a change in supported behavior.
 
+Dense access placement now has one engine-independent transaction across
+Record/Replay, Sampled, and Inline Shadow. Candidate partitioning, owner-local
+scalar resolution, direct-island selection, cached liveness-safe relocated-host
+search, cross-group ownership, and candidate-to-dispatcher publication are no
+longer repeated in the three engine bodies. The common planner receives the
+real engine policies: dispatcher capacity, relay-bank geometry, scalar ABI,
+GFX11 admission, spill-backed route preference, and Record/Replay's stronger
+ordering-sequence exclusion. This deletes the last engine-private dense access
+search loops without merging their evidence semantics.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

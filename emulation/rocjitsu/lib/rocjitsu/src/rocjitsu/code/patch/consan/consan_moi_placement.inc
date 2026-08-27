@@ -2813,61 +2813,238 @@ find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
                                      candidates, search.owner_begin, claimed_host_ranges);
 }
 
-/// Find and reserve one liveness-safe relay host within a dense candidate
-/// group's exact kernel or helper owner.
-///
-/// The shared mechanism protects every access and synchronization site in the
-/// owner and prevents two independently planned groups from claiming the same
-/// original instructions. Engine-specific callers retain control of whether a
-/// host is needed, its word count, and the scalar bootstrap ABI.
-[[nodiscard]] std::optional<MoiDenseRelayHost>
-claim_moi_dense_owner_relay_host(const ConSanTransformArtifacts &result,
-                                 const consan_detail::MoiDenseCandidatePartition &partition,
-                                 const consan_detail::MoiDenseCandidateGroup &group,
-                                 const ConSanOptions &options, const ConSanOptions &group_options,
-                                 rj_code_arch_t arch, MoiResourcePlanningState &resource_state,
-                                 std::span<const uint8_t> original_text,
-                                 const ConSanCandidateResourcePlan &group_resource,
-                                 size_t host_word_count, std::span<const uint64_t> anchors,
-                                 std::vector<std::pair<uint64_t, uint64_t>> &claimed_host_ranges) {
-  const std::vector<MoiSgprRange> bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-      group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
-  MoiDenseOwnerLivenessProof owner_proof = resource_state.prepare_dense_liveness_for_owners(
-      group_resource.owner_descriptor_file_offsets, bootstrap_ranges);
-  const auto find_in = [&](const auto &container) {
-    const auto occupied = collect_moi_dense_owner_occupied_ranges(
-        container, partition.candidates_by_owner.at(group.owner));
-    return find_moi_dense_relay_host(
-        resource_state, original_text,
-        {
-            .owner_begin = container.entry_text_offset,
-            .owner_end = container.entry_text_offset + container.code_size,
-            .host_word_count = host_word_count,
-            .anchors = anchors,
-            .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
-            .owner_proof = owner_proof,
-            .bootstrap_ranges = bootstrap_ranges,
-        },
-        [&](uint64_t begin, uint64_t end) { return occupied.overlaps(begin, end); },
-        claimed_host_ranges);
-  };
+/// Scalar/control-flow contract used while planning a shared access-entry
+/// dispatcher. Record-like probes use the common Record/Replay entry-island
+/// shape, including its spill-backed variant. Inline Shadow instead requires
+/// the complete Inline dispatcher ABI and its fixed entry-island shape.
+enum class MoiDenseAccessRouteAbi {
+  RecordReplay,
+  Sampled,
+  InlineShadow,
+};
 
-  std::optional<MoiDenseRelayHost> host;
-  if (group.owner.kind == ConSanProgramContainerKind::Kernel) {
-    const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(group.owner.name);
-    if (kernel != nullptr)
-      host = find_in(*kernel);
-  } else {
-    const ConSanFunctionInfo *function =
-        result.program_inventory.find_function_by_name(group.owner.name);
-    if (function != nullptr)
-      host = find_in(*function);
+/// Complete placement result for the dense access-entry mechanism.
+///
+/// The partition is retained because later emission must visit exactly the
+/// same owner groups and relay-bank indices chosen here. The two candidate
+/// maps identify sites admitted to a shared dispatcher; entry hosts own any
+/// pristine instructions displaced to make a common entry reachable.
+struct MoiDenseAccessRoutePlan {
+  consan_detail::MoiDenseCandidatePartition partition;
+  std::unordered_map<const ConSanMoiCandidate *, uint64_t> entry_islands;
+  std::unordered_map<const ConSanMoiCandidate *, uint64_t> dispatchers;
+  std::map<uint64_t, MoiDenseEntryHost> entry_hosts;
+};
+
+[[nodiscard]] const ConSanCandidateResourcePlan *
+resource_plan_for_candidate(const ConSanTransformArtifacts &result,
+                            const ConSanMoiCandidate &candidate);
+
+/// Plan the dense access-entry mechanism shared by Record/Replay, Sampled, and
+/// Inline Shadow.
+///
+/// Engine policy supplies the dispatcher capacity and appended-bank geometry.
+/// This common transaction owns grouping, owner-local scalar resolution,
+/// direct-island selection, safe relocated-host selection, and publication of
+/// the candidate-to-dispatcher mapping. When `relay_ownership` is present,
+/// claimed pristine NOP islands are retired from the engine's independent
+/// branch-only router as part of the same ownership transaction.
+[[nodiscard]] MoiDenseAccessRoutePlan plan_moi_dense_access_routes(
+    const ConSanTransformArtifacts &result, const ConSanOptions &options, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
+    std::span<const ConSanMoiCandidate *const> candidates, size_t max_candidates_per_group,
+    uint64_t access_island_begin, uint64_t access_slot_words, bool use_indirect_appended,
+    MoiDenseAccessRouteAbi abi, MoiLocalNopIslandAllocator *local_entry_islands,
+    BranchOnlyRelayRouter *relay_ownership = nullptr) {
+  MoiDenseAccessRoutePlan plan{
+      .partition =
+          consan_detail::partition_moi_dense_candidates(candidates, max_candidates_per_group),
+      .entry_islands = {},
+      .dispatchers = {},
+      .entry_hosts = {},
+  };
+  const bool is_record_replay = abi == MoiDenseAccessRouteAbi::RecordReplay;
+  if (!consan_is_capability_arch(arch) || (!is_record_replay && consan_uses_gfx11_encoding(arch)) ||
+      !use_indirect_appended || local_entry_islands == nullptr) {
+    return plan;
   }
-  if (host) {
-    claimed_host_ranges.emplace_back(host->host_offset,
-                                     host->host_offset + host_word_count * sizeof(uint32_t));
+
+  std::vector<std::pair<uint64_t, uint64_t>> global_access_ranges;
+  if (is_record_replay) {
+    global_access_ranges.reserve(candidates.size());
+    for (const ConSanMoiCandidate *candidate : candidates) {
+      if (candidate->size() != 0u)
+        global_access_ranges.emplace_back(candidate->anchor(),
+                                          candidate->anchor() + candidate->size());
+    }
   }
-  return host;
+  const consan_detail::MoiOccupiedTextRanges occupied_accesses(std::move(global_access_ranges));
+  using DenseHostCandidateCacheKey =
+      std::tuple<ConSanProgramContainerKind, std::string, uint64_t, std::vector<uint64_t>,
+                 std::vector<std::pair<uint16_t, uint16_t>>>;
+  std::map<DenseHostCandidateCacheKey, std::vector<uint64_t>> dense_host_candidate_cache;
+  std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
+  for (const auto &group : plan.partition.groups) {
+    const ConSanCandidateResourcePlan *group_resource =
+        group.candidates.empty() ? nullptr
+                                 : resource_plan_for_candidate(result, *group.candidates.front());
+    ConSanOptions group_options = options;
+    if (group_resource != nullptr)
+      (void)apply_moi_transient_sgpr_assignment(group_options,
+                                                group_resource->owner_descriptor_file_offsets);
+
+    uint32_t entry_island_words = kMoiInlineShadowIndirectIslandWords;
+    if (abi == MoiDenseAccessRouteAbi::InlineShadow) {
+      if (!moi_inline_dense_router_scalar_abi(group_options, arch))
+        continue;
+    } else {
+      if (group_resource != nullptr &&
+          moi_transient_sgpr_assignment_is_branch_only(
+              options, group_resource->owner_descriptor_file_offsets)) {
+        continue;
+      }
+      entry_island_words = moi_record_replay_entry_island_words(
+          group_options.automatic_moi_record_replay_sgpr_spill);
+    }
+
+    const bool has_dense_neighbors =
+        group.has_overlapping_entries(entry_island_words * sizeof(uint32_t));
+    const bool has_stranded_entry =
+        std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
+          const size_t candidate_index = plan.partition.index_by_candidate.at(candidate);
+          const uint64_t default_entry =
+              access_island_begin + candidate_index * access_slot_words * sizeof(uint32_t);
+          return !compute_sopp_branch_simm16(candidate->anchor(), default_entry);
+        });
+    const bool explicit_anchors_fit = consan_arch_has_selectable_vgpr_bank(arch) ||
+                                      group.every_site_has_size(2u * sizeof(uint32_t));
+    const bool singleton_has_direct_island =
+        group.candidates.size() == 1u &&
+        local_entry_islands->has_reachable(group.candidates.front()->anchor(), entry_island_words);
+    const bool has_spill_backed_access =
+        is_record_replay &&
+        std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
+          const ConSanCandidateResourcePlan *candidate_resource =
+              resource_plan_for_candidate(result, *candidate);
+          return candidate_resource != nullptr &&
+                 candidate_resource->source == ConSanRegisterAllocationSource::SpillRequired;
+        });
+    const bool prefer_dense_neighbors =
+        consan_arch_has_selectable_vgpr_bank(arch) || has_spill_backed_access;
+    if (!explicit_anchors_fit || singleton_has_direct_island ||
+        (!(prefer_dense_neighbors && has_dense_neighbors) && !has_stranded_entry)) {
+      continue;
+    }
+
+    const std::vector<uint64_t> anchors = group.anchors();
+    const uint64_t dispatcher =
+        access_island_begin + group.first_candidate_index * access_slot_words * sizeof(uint32_t);
+    auto island = local_entry_islands->claim_reachable_from_all(anchors, entry_island_words);
+    if (island && relay_ownership != nullptr) {
+      relay_ownership->retire_range(*island,
+                                    static_cast<uint64_t>(entry_island_words) * sizeof(uint32_t));
+    }
+    if (!island && group_resource != nullptr) {
+      const bool owner_is_kernel = group.owner.kind == ConSanProgramContainerKind::Kernel;
+      const ConSanKernelInfo *kernel =
+          owner_is_kernel ? result.program_inventory.find_kernel_by_name(group.owner.name)
+                          : nullptr;
+      const ConSanFunctionInfo *function =
+          !owner_is_kernel ? result.program_inventory.find_function_by_name(group.owner.name)
+                           : nullptr;
+      const bool has_owner_range =
+          (kernel != nullptr && (!is_record_replay || kernel->has_text_range) &&
+           kernel->code_size != 0u) ||
+          (function != nullptr && function->code_size != 0u);
+      if (has_owner_range) {
+        const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
+            group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
+        const size_t host_word_count = static_cast<size_t>(entry_island_words) + 1u;
+        const uint64_t owner_begin =
+            owner_is_kernel ? kernel->entry_text_offset : function->entry_text_offset;
+        const uint64_t owner_end =
+            owner_begin + (owner_is_kernel ? kernel->code_size : function->code_size);
+        std::vector<std::pair<uint16_t, uint16_t>> bootstrap_key;
+        bootstrap_key.reserve(host_bootstrap_ranges.size());
+        for (const MoiSgprRange &range : host_bootstrap_ranges)
+          bootstrap_key.emplace_back(range.base, range.width);
+        DenseHostCandidateCacheKey cache_key{group.owner.kind, group.owner.name, host_word_count,
+                                             group_resource->owner_descriptor_file_offsets,
+                                             std::move(bootstrap_key)};
+        auto cached_candidates = dense_host_candidate_cache.find(cache_key);
+        if (cached_candidates == dense_host_candidate_cache.end()) {
+          MoiDenseOwnerLivenessProof owner_proof = resource_state.prepare_dense_liveness_for_owners(
+              group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
+          const auto &owner_candidates = plan.partition.candidates_by_owner.at(group.owner);
+          const consan_detail::MoiOccupiedTextRanges occupied_owner_sites =
+              owner_is_kernel
+                  ? collect_moi_dense_owner_occupied_ranges(*kernel, owner_candidates)
+                  : collect_moi_dense_owner_occupied_ranges(*function, owner_candidates);
+          std::vector<std::pair<uint64_t, uint64_t>> ordering_ranges;
+          if (is_record_replay) {
+            ordering_ranges.reserve(result.program_inventory.sync().sync_sequences.size());
+            for (const ConSanSyncSequence &sequence :
+                 result.program_inventory.sync().sync_sequences) {
+              if (sequence.kind != ConSanSyncSequenceKind::OrdinaryMemory ||
+                  sequence.in_kernel != owner_is_kernel ||
+                  sequence.container_name != group.owner.name ||
+                  !consan_sync_confidence_meets(sequence.confidence,
+                                                ConSanSemanticConfidence::Conservative) ||
+                  !consan_sync_confidence_meets(sequence.memory_role_confidence,
+                                                ConSanSemanticConfidence::Conservative) ||
+                  sequence.memory_role == ConSanSyncMemoryRole::Unknown ||
+                  sequence.memory_role == ConSanSyncMemoryRole::None ||
+                  sequence.end_text_offset <= sequence.begin_text_offset) {
+                continue;
+              }
+              ordering_ranges.emplace_back(sequence.begin_text_offset, sequence.end_text_offset);
+            }
+          }
+          const consan_detail::MoiOccupiedTextRanges occupied_ordering_sequences(
+              std::move(ordering_ranges));
+          std::vector<uint64_t> host_candidates = collect_moi_dense_relay_host_candidates(
+              resource_state,
+              {
+                  .owner_begin = owner_begin,
+                  .owner_end = owner_end,
+                  .host_word_count = host_word_count,
+                  .anchors = anchors,
+                  .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+                  .owner_proof = owner_proof,
+                  .bootstrap_ranges = host_bootstrap_ranges,
+              },
+              [&](uint64_t begin, uint64_t end) {
+                return occupied_owner_sites.overlaps(begin, end) ||
+                       (is_record_replay && (occupied_accesses.overlaps(begin, end) ||
+                                             occupied_ordering_sequences.overlaps(begin, end)));
+              });
+          cached_candidates =
+              dense_host_candidate_cache.emplace(std::move(cache_key), std::move(host_candidates))
+                  .first;
+        }
+        auto best_host = select_moi_dense_relay_host(resource_state, original_text, host_word_count,
+                                                     anchors, cached_candidates->second,
+                                                     owner_begin, claimed_dense_host_ranges);
+        if (best_host) {
+          claimed_dense_host_ranges.emplace_back(
+              best_host->host_offset, best_host->host_offset + host_word_count * sizeof(uint32_t));
+          island = best_host->host_offset + sizeof(uint32_t);
+          plan.entry_hosts.emplace(dispatcher,
+                                   MoiDenseEntryHost{
+                                       .host_offset = best_host->host_offset,
+                                       .displaced_words = std::move(best_host->displaced_words),
+                                   });
+        }
+      }
+    }
+    if (!island)
+      continue;
+    for (const ConSanMoiCandidate *candidate : group.candidates) {
+      plan.entry_islands.emplace(candidate, *island);
+      plan.dispatchers.emplace(candidate, dispatcher);
+    }
+  }
+  return plan;
 }
 
 [[nodiscard]] RegisterSet
