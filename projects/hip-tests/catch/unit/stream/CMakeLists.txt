@@ -24,6 +24,7 @@ set(TEST_SRC
     hipStreamLegacy_compiler_options.cc
     hipStreamGetId.cc
     hipStreamSetGetAttributes.cc
+    hipSharedQueueAnyOrderOverlap.cc
     hipStreamAttachMemAsync.cc
     # TODO renable it TheRock is not finding it
     hipStreamCopyAttributes.cc

@@ -59,13 +59,13 @@ uint32_t config_u32(const std::unordered_map<std::string, std::string> &cfg, con
 }
 
 uint32_t default_sgprs_per_wf(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
     return 128;
   return 112;
 }
 
 uint32_t default_vgprs_per_wf(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250)
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return 1024;
   return 256;
 }
@@ -480,11 +480,39 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
     auto *par = static_cast<simdojo::CompositeComponent *>(cp->parent());
     if (!par)
       continue;
-    std::vector<simdojo::Component *> sub;
-    par->collect_components(sub);
-    for (auto *s : sub) {
-      if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(s))
+
+    // Preserve the physical SE/CU hierarchy when flattening the XCD's CUs into
+    // the command processor. gfx12 CWSR records identify scratch with a shader
+    // engine plus a per-SE scoreboard slot, so a flat CU ordinal is not enough.
+    uint32_t shader_engine_id = 0;
+    bool found_shader_engine = false;
+    for (auto &child : par->children()) {
+      auto *se = dynamic_cast<amdgpu::ShaderEngine *>(child.get());
+      if (!se)
+        continue;
+      found_shader_engine = true;
+      uint32_t cu_index = 0;
+      for (auto &se_child : se->children()) {
+        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(se_child.get());
+        if (!cu)
+          continue;
+        cu->set_shader_engine_location(shader_engine_id, cu_index++);
         cp->add_compute_unit(cu);
+      }
+      ++shader_engine_id;
+    }
+
+    // Keep custom topologies with CUs directly below the XCD working. They
+    // form one shader engine and retain their child order as scoreboard order.
+    if (!found_shader_engine) {
+      uint32_t cu_index = 0;
+      for (auto &child : par->children()) {
+        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
+        if (!cu)
+          continue;
+        cu->set_shader_engine_location(0, cu_index++);
+        cp->add_compute_unit(cu);
+      }
     }
   }
 }
@@ -714,8 +742,8 @@ rj_code_arch_t parse_arch(const std::string &arch_str) {
     return ROCJITSU_CODE_ARCH_RDNA3_5;
   if (arch_str == "rdna4")
     return ROCJITSU_CODE_ARCH_RDNA4;
-  if (arch_str == "gfx1250")
-    return ROCJITSU_CODE_ARCH_GFX1250;
+  if (arch_str == "cdna5")
+    return ROCJITSU_CODE_ARCH_CDNA5;
   if (arch_str == "rv32i")
     return ROCJITSU_CODE_ARCH_RV32I;
   if (arch_str == "rv64i")
@@ -743,8 +771,8 @@ const char *arch_to_string(rj_code_arch_t arch) {
     return "rdna3_5";
   case ROCJITSU_CODE_ARCH_RDNA4:
     return "rdna4";
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return "gfx1250";
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return "cdna5";
   case ROCJITSU_CODE_ARCH_RV32I:
     return "rv32i";
   case ROCJITSU_CODE_ARCH_RV64I:
