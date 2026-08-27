@@ -1209,8 +1209,19 @@ TEST_F(UBR_MultiSegment, Generic)
  */
  TEST_F(UBR_MultiSegment, Symmetric_Lsa)
  {
-     if (!validateTestPrerequisites(/*min_processes=*/2)) {
-         GTEST_SKIP() << "Requires 2+ ranks";
+     if (!validateTestPrerequisites(
+             /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+             /*require_power_of_two=*/kNoPowerOfTwoRequired,
+             /*min_nodes=*/1, /*max_nodes=*/1)) {
+         GTEST_SKIP() << "Requires 2+ ranks on exactly one node";
+     }
+     const char* ceAllReduce = std::getenv("RCCL_CE_ALLREDUCE");
+     if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {
+         GTEST_SKIP() << "CE receive-offset regression requires RCCL_CE_ALLREDUCE=1";
+     }
+     const char* ctaPolicy = std::getenv("NCCL_CTA_POLICY");
+     if (ctaPolicy == nullptr || std::atoi(ctaPolicy) != 2) {
+         GTEST_SKIP() << "CE receive-offset regression requires NCCL_CTA_POLICY=2 (ZERO)";
      }
      ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
  
@@ -1281,8 +1292,11 @@ TEST_F(UBR_MultiSegment, Generic)
  */
 TEST_F(UBR_MultiSegment, Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult)
 {
-    if (!validateTestPrerequisites(/*min_processes=*/2)) {
-        GTEST_SKIP() << "Requires 2+ ranks";
+    if (!validateTestPrerequisites(
+            /*min_processes=*/2, /*max_processes=*/kNoProcessLimit,
+            /*require_power_of_two=*/kNoPowerOfTwoRequired,
+            /*min_nodes=*/1, /*max_nodes=*/1)) {
+        GTEST_SKIP() << "Requires 2+ ranks on exactly one node";
     }
     const char* ceAllReduce = std::getenv("RCCL_CE_ALLREDUCE");
     if (ceAllReduce == nullptr || std::atoi(ceAllReduce) != 1) {

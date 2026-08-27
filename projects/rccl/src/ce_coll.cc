@@ -1719,7 +1719,15 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
   if (recvWin == nullptr) {
     NCCLCHECKGOTO(ncclDevrFindWindow(comm, recvbuff, &recvWin), ret, fail);
   }
-  fastPath = (recvWin != nullptr) && (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC);
+  if (recvWin != nullptr && (recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+    const uintptr_t winStart = (uintptr_t)recvWin->userPtr;
+    const uintptr_t recvStart = (uintptr_t)recvbuff;
+    // A pointer-only window lookup is insufficient: Phase 3 writes the complete
+    // receive range through peer mappings. Fall back to the temporary CE window
+    // unless [recvbuff, recvbuff + totalBytes) is contained in recvWin.
+    fastPath =
+      recvStart >= winStart && totalBytes <= recvWin->size && recvStart - winStart <= recvWin->size - totalBytes;
+  }
   collArgs.recvWin = recvWin;
 
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
