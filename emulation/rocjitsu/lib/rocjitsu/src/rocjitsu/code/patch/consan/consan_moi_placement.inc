@@ -1462,8 +1462,11 @@ apply_moi_transient_sgpr_assignment(MoiOptions &options, const ConSanMoiOperatin
 capture_moi_operating_point(const MoiOptions &options,
                             const ConSanMoiOperatingPoint &owner_assignments) {
   ConSanMoiOperatingPoint point = owner_assignments;
-  static_cast<ConSanMoiResolvedState &>(point) =
-      static_cast<const ConSanMoiResolvedState &>(options);
+  auto owner_persistent_vgprs = std::move(point.owner_persistent_vgprs);
+  auto owner_transient_sgprs = std::move(point.owner_transient_sgprs);
+  point = static_cast<const ConSanMoiOperatingPoint &>(options);
+  point.owner_persistent_vgprs = std::move(owner_persistent_vgprs);
+  point.owner_transient_sgprs = std::move(owner_transient_sgprs);
   return point;
 }
 
@@ -1472,8 +1475,7 @@ capture_moi_operating_point(const MoiOptions &options,
 /// untouched; only state that placement selected is rolled back.
 void restore_moi_operating_point(MoiOptions &options, ConSanTransformArtifacts &result,
                                  const ConSanMoiOperatingPoint &point) {
-  static_cast<ConSanMoiResolvedState &>(options) =
-      static_cast<const ConSanMoiResolvedState &>(point);
+  static_cast<ConSanMoiOperatingPoint &>(options) = point;
   result.moi_operating_point = point;
 }
 

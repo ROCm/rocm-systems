@@ -729,9 +729,8 @@ struct TransformPolicy {
 /// The inherited request, debug-override, mutation, runtime-fact, binding, and
 /// transform-policy subobjects are the sole representations of input state.
 /// Placement and emission must not add selected registers, storage, routes, or
-/// retry markers to this value; MOI attempt-local state lives in
-/// `ConSanMoiResolvedState`, while an accepted result lives in
-/// `ConSanMoiOperatingPoint`.
+/// retry markers to this value; both an in-progress MOI attempt and an accepted
+/// result represent those decisions with `ConSanMoiOperatingPoint`.
 struct ConSanOptions : ConSanRequest,
                        ConSanDebugOverrides,
                        MutationRequest,
@@ -752,16 +751,16 @@ struct ConSanOptions : ConSanRequest,
         TransformPolicy(transform_policy) {}
 };
 
-/// Attempt- or site-local MOI representation selected while lowering.
+/// Authoritative resource and persistent-state selection for one MOI attempt.
 ///
-/// This value is intentionally separate from `ConSanOptions`: none of its
-/// fields are caller configuration. A code-object attempt refines these fields
-/// while searching for a valid operating point, and a site-local copy may bind
-/// one owner-component assignment without changing either the caller input or
-/// the accepted code-object-wide allocation. Stage 2 progressively replaces
-/// these compatibility fields with typed variants in `ConSanMoiOperatingPoint`
-/// and narrow per-patch plans.
-struct ConSanMoiResolvedState {
+/// None of this value is caller configuration. Placement refines a complete
+/// attempt while searching; retry checkpoints and the accepted transform copy
+/// the same type. Code-object-wide choices live alongside owner-component
+/// assignments so equality, rollback, emission, and validation cannot observe
+/// independently assembled subsets of the accepted allocation. Site-local
+/// lowering may copy the operating point and bind one owner assignment without
+/// changing the accepted code-object-wide value.
+struct ConSanMoiOperatingPoint {
   /// First SGPR in the code-object-wide EXEC/VCC/SCC save window accepted by
   /// placement. This is seeded from the corresponding caller override when
   /// present, but thereafter records the selected lowering state rather than
@@ -851,25 +850,6 @@ struct ConSanMoiResolvedState {
   /// not stable after arbitrary guest code.
   std::optional<uint16_t> moi_workgroup_key_vgpr;
 
-  bool operator==(const ConSanMoiResolvedState &) const = default;
-};
-
-/// Authoritative accepted resource and state selection for one MOI transform.
-///
-/// An operating point is the complete combination of allocations,
-/// representation choices, and persistence proofs accepted after admission,
-/// requirement collection, and placement succeed. The inherited resolved
-/// state records code-object-wide choices, while the members declared here
-/// record assignments that can differ among independent owner components.
-/// Those facts are input to several emitted patches, not properties that can
-/// be reconstructed from any single patch record. Placement builds this value
-/// incrementally; emission and final validation consume the same accepted
-/// value. It contains no rejected search candidates or retry-control flags.
-///
-/// `ConSanMoiResolvedState` remains as a named base only while legacy emitters
-/// consume its individual fields. Stage 2 removes that compatibility surface
-/// one representation at a time without creating a second published result.
-struct ConSanMoiOperatingPoint : ConSanMoiResolvedState {
   /// Per-owner persistent vector tuples selected when one code-object-wide
   /// tuple cannot satisfy every owner's ordinary-VGPR boundary.
   std::vector<ConSanMoiPersistentVgprAssignment> owner_persistent_vgprs;
@@ -881,12 +861,12 @@ struct ConSanMoiOperatingPoint : ConSanMoiResolvedState {
 
 /// Transitional aggregate used only by MOI planning and legacy emitters.
 ///
-/// It combines immutable caller input with one independently copyable resolved
-/// state. Keeping the types separate makes every remaining broad emitter
+/// It combines immutable caller input with one independently copyable operating
+/// point. Keeping the types separate makes every remaining broad emitter
 /// dependency visible and prevents non-MOI code from acquiring placement
-/// output. Stage 3 removes this aggregate from emitters after Stage 2 moves the
-/// accepted state into `ConSanMoiOperatingPoint` and per-patch plans.
-struct MoiOptions : ConSanOptions, ConSanMoiResolvedState {
+/// output. Stage 3 removes this aggregate from emitters in favor of the input,
+/// accepted operating point, and narrow per-patch plans.
+struct MoiOptions : ConSanOptions, ConSanMoiOperatingPoint {
   MoiOptions() = default;
   /// Start a fresh MOI attempt from caller input. The implicit conversion is
   /// intentional at the compatibility boundary: production callers carry no

@@ -36,7 +36,7 @@ auto make_physical_alias_test_canonicalizer(std::vector<std::string> &errors,
       expected_candidate_count);
 }
 
-TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
+TEST(ConSan, MoiOperatingPointEqualityCoversOwnerAssignments) {
   ConSanMoiTransientSgprAssignment owner_state;
   owner_state.descriptor_file_offset = 64u;
   owner_state.exec_save_sgpr = 8u;
@@ -73,8 +73,8 @@ TEST(ConSan, MoiOperatingPointEqualityCoversEveryAcceptedSelection) {
   EXPECT_NE(changed, allocation);
 }
 
-TEST(ConSan, MoiResolvedStateEqualityCoversEveryCompatibilitySelection) {
-  const ConSanMoiResolvedState state{
+TEST(ConSan, MoiOperatingPointEqualityCoversEveryCodeObjectWideSelection) {
+  const ConSanMoiOperatingPoint state{
       .moi_exec_save_sgpr = 2u,
       .moi_owner_sgpr = 3u,
       .moi_owner_vgpr = 4u,
@@ -109,13 +109,15 @@ TEST(ConSan, MoiResolvedStateEqualityCoversEveryCompatibilitySelection) {
       .moi_record_replay_workgroup_vgprs = {.x = 26u, .y = 27u, .z = 28u},
       .moi_record_replay_workgroup_private_offsets = {.x = 32u, .y = 36u, .z = 40u},
       .moi_workgroup_key_vgpr = 29u,
+      .owner_persistent_vgprs = {},
+      .owner_transient_sgprs = {},
   };
 
-  EXPECT_EQ(ConSanMoiResolvedState{}, ConSanMoiResolvedState{});
-  EXPECT_EQ(state, ConSanMoiResolvedState(state));
+  EXPECT_EQ(ConSanMoiOperatingPoint{}, ConSanMoiOperatingPoint{});
+  EXPECT_EQ(state, ConSanMoiOperatingPoint(state));
 
   auto expect_field_participates = [&](auto mutate) {
-    ConSanMoiResolvedState changed = state;
+    ConSanMoiOperatingPoint changed = state;
     mutate(changed);
     EXPECT_NE(changed, state);
   };
