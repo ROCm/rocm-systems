@@ -53,7 +53,7 @@ public:
     : CmdBuilder(_table){};
 
     // The uint32_t override below hides the base's other BuildCopyRegDataPacket
-    // overloads, re-expose them (-Woverloaded-virtual).
+    // overloads, re-expose them
     using CmdBuilder::BuildCopyRegDataPacket;
 
     static constexpr bool IsPrivilegedConfigReg(uint32_t addr)
