@@ -1740,3 +1740,523 @@ TEST_F(RasClientMicrotestGetStatus, GetNcclStatus_FflushFails_ReportsPerrorAndRe
   EXPECT_TRUE(LogHas(log, "fflush stdout: No space left on device\n")) << log;
   EXPECT_FALSE(LogHas(log, "fwrite to stdout failed!"));
 }
+
+
+
+// ===========================================================================
+// connectToNCCL -- address resolution and the connect walk
+// (src/ras/client.cc:165-218, plus the fail: cleanup at 293-296)
+//
+// Every test here ends the unit at a `goto fail` arm, so nothing below line 218
+// runs with anything but its default seam. The tests whose connect succeeds get
+// there by leaving the read script empty: the handshake read returns 0 (EOF),
+// which is the one handshake exit that cannot loop back to `retry:`.
+// ===========================================================================
+
+namespace {
+
+// Not "localhost"/"28028": using the defaults here would make an assertion on
+// the stored host/port pass even if connectToNCCL never read them.
+constexpr const char kOtherHost[] = "rasnode7";
+constexpr const char kOtherPort[] = "31337";
+
+// The default getaddrinfo hands back entry i as 127.0.0.(1+i):(28028+i).
+constexpr int kEntryPort0 = 28028;
+constexpr int kEntryPort1 = 28029;
+
+// One socket(2) call as connectToNCCL issued it.
+struct SocketCall {
+  int family;
+  int socktype;
+  int protocol;
+};
+
+// One connect(2) call: which fd, and which addrinfo entry it was aimed at.
+struct ConnectCall {
+  int fd;
+  int port;
+  uint32_t addr;
+  socklen_t addrlen;
+};
+
+// One setsockopt(2) call, with the timeval it carried.
+struct SockoptCall {
+  int fd;
+  int level;
+  int optname;
+  long sec;
+  long usec;
+};
+
+// Hands out a distinct fd per socket() call and records the sequence. A hook
+// cannot read its own ScopedHook's .calls (CTAD forbids it), and per-entry fds
+// are what make "which addrinfo entry got closed" assertable.
+class FdSequence {
+ public:
+  explicit FdSequence(int base) : base_(base) {}
+  int operator()() {
+    issued.push_back(base_ + static_cast<int>(issued.size()));
+    return issued.back();
+  }
+  std::vector<int> issued;
+
+ private:
+  int base_;
+};
+
+int PortOf(const struct sockaddr* sa) {
+  return ntohs(reinterpret_cast<const struct sockaddr_in*>(sa)->sin_port);
+}
+
+uint32_t AddrOf(const struct sockaddr* sa) {
+  return ntohl(reinterpret_cast<const struct sockaddr_in*>(sa)->sin_addr.s_addr);
+}
+
+std::string ConnectingLine(const char* host, const char* svc, int err) {
+  return std::string("Connecting to ") + host + ":" + svc + ": " + strerror(err) + "\n";
+}
+
+constexpr const char kFailedHeader[] = "Failed to connect to the NCCL RAS service!\n";
+constexpr const char kArgsAdvice[] = "the host/port arguments are correct and match NCCL_RAS_ADDR.\n";
+constexpr const char kLocalAdvice[] = "the RAS client was started on a node where the NCCL job is running.\n";
+
+// The one handshake outcome reachable from a successful connect that cannot
+// reach the `timeout:` label, whose `goto retry` would re-enter the walk.
+constexpr const char kHandshakeEof[] = "NCCL unexpectedly closed the connection\n";
+
+}  // namespace
+
+// Arm: getaddrinfo returns non-zero. hostName/port/gai_strerror(ret) reach the
+// message, and fail: has nothing to clean up because addrInfo is still null.
+TEST_F(RasClientMicrotest, ConnectToNccl_GetaddrinfoFails_ReportsResolveErrorAndLeavesNothingToClean) {
+  hostName = kOtherHost;
+  port = kOtherPort;
+  g_getaddrinfoResult = EAI_NONAME;
+
+  int gaiCode = 0;
+  ScopedHook gai(g_gaiStrerror, [&gaiCode](int code) {
+    gaiCode = code;
+    return "scripted resolver failure";
+  });
+  ScopedHook sockHook(g_socket, [](int, int, int) { return 77; });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_TRUE(LogHas(log, "Resolving rasnode7:31337: scripted resolver failure\n")) << log;
+  EXPECT_EQ(1, gai.calls);
+  EXPECT_EQ(EAI_NONAME, gaiCode);
+  EXPECT_EQ(0, sockHook.calls);
+  EXPECT_EQ(0, g_freeaddrinfoCalls);
+  EXPECT_TRUE(g_closedFds.empty());
+  EXPECT_EQ(-1, sock);
+  EXPECT_FALSE(LogHas(log, kFailedHeader)) << log;
+}
+
+// Arm: the two `hints` stores plus the (hostName, port) pair handed to
+// getaddrinfo -- a resolver fake that ignores them makes those stores invisible.
+TEST_F(RasClientMicrotest, ConnectToNccl_ResolvesConfiguredEndpoint_PassesUnspecStreamHints) {
+  hostName = kOtherHost;
+  port = kOtherPort;
+
+  std::string node, service;
+  int family = -1, socktype = -1;
+  // Returns non-zero without touching *res, so addrInfo stays null and the walk never starts.
+  ScopedHook resolve(g_getaddrinfo,
+                     [&](const char* n, const char* s, const struct addrinfo* hints, struct addrinfo**) {
+                       node = n ? n : "<null>";
+                       service = s ? s : "<null>";
+                       family = hints->ai_family;
+                       socktype = hints->ai_socktype;
+                       return EAI_AGAIN;
+                     });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, resolve.calls);
+  EXPECT_EQ(kOtherHost, node);
+  EXPECT_EQ(kOtherPort, service);
+  EXPECT_EQ(AF_UNSPEC, family);
+  EXPECT_EQ(SOCK_STREAM, socktype);
+  EXPECT_TRUE(LogHas(log, "Resolving rasnode7:31337: ")) << log;
+}
+
+// Arm: socket() == -1 -> perror("socket") + `continue`. The skipped entry must
+// never be connected to and never closed -- both are what `continue` buys.
+TEST_F(RasClientMicrotest, ConnectToNccl_SocketFailsOnFirstEntry_SkipsToNextAddrinfo) {
+  g_addrinfoCount = 3;
+
+  std::vector<int> connectPorts;
+  int socketAttempts = 0;
+  ScopedHook sockHook(g_socket, [&socketAttempts](int, int, int) -> int {
+    if (socketAttempts++ == 0) {
+      errno = EAFNOSUPPORT;
+      return -1;
+    }
+    return 101;
+  });
+  ScopedHook connectHook(g_connect, [&](int, const struct sockaddr* sa, socklen_t) -> int {
+    connectPorts.push_back(PortOf(sa));
+    if (PortOf(sa) == kEntryPort1) return 0;
+    errno = ECONNREFUSED;
+    return -1;
+  });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(2, sockHook.calls);
+  EXPECT_EQ(101, sock);
+  ASSERT_EQ(1u, connectPorts.size());
+  EXPECT_EQ(kEntryPort1, connectPorts[0]);
+  EXPECT_EQ(std::vector<int>({101}), g_closedFds);
+  EXPECT_EQ(1, g_freeaddrinfoCalls);
+  EXPECT_TRUE(LogHas(log, (std::string("socket: ") + strerror(EAFNOSUPPORT) + "\n").c_str())) << log;
+  EXPECT_TRUE(LogHas(log, kHandshakeEof)) << log;
+  EXPECT_FALSE(LogHas(log, ConnectingLine("127.0.0.1", "28028", ECONNREFUSED).c_str())) << log;
+}
+
+// Arm: the first entry's connect fails and the *middle* entry's succeeds ->
+// `break` with sock set. Pins the per-entry socket()/connect() arguments so a
+// walk that always takes the first or the last entry cannot pass.
+TEST_F(RasClientMicrotest, ConnectToNccl_MiddleEntryAccepts_BreaksWithThatEntrysSocket) {
+  g_addrinfoCount = 3;
+
+  std::vector<SocketCall> socketCalls;
+  std::vector<ConnectCall> connectCalls;
+  ScopedHook sockHook(g_socket, [&](int fam, int type, int proto) {
+    socketCalls.push_back(SocketCall{fam, type, proto});
+    return 200 + static_cast<int>(socketCalls.size()) - 1;
+  });
+  ScopedHook connectHook(g_connect, [&](int fd, const struct sockaddr* sa, socklen_t len) -> int {
+    connectCalls.push_back(ConnectCall{fd, PortOf(sa), AddrOf(sa), len});
+    if (PortOf(sa) == kEntryPort1) return 0;
+    errno = ECONNREFUSED;
+    return -1;
+  });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);  // the handshake EOF, not the walk, is what fails here
+  EXPECT_EQ(201, sock);
+  ASSERT_EQ(2u, socketCalls.size());
+  for (const SocketCall& c : socketCalls) {
+    EXPECT_EQ(AF_INET, c.family);
+    EXPECT_EQ(SOCK_STREAM, c.socktype);
+    EXPECT_EQ(IPPROTO_TCP, c.protocol);
+  }
+  ASSERT_EQ(2u, connectCalls.size());
+  EXPECT_EQ(200, connectCalls[0].fd);
+  EXPECT_EQ(kEntryPort0, connectCalls[0].port);
+  EXPECT_EQ(0x7f000001u, connectCalls[0].addr);
+  EXPECT_EQ(sizeof(struct sockaddr_in), connectCalls[0].addrlen);
+  EXPECT_EQ(201, connectCalls[1].fd);
+  EXPECT_EQ(kEntryPort1, connectCalls[1].port);
+  EXPECT_EQ(0x7f000002u, connectCalls[1].addr);
+  EXPECT_EQ(std::vector<int>({200, 201}), g_closedFds);
+  EXPECT_EQ(1, g_freeaddrinfoCalls);
+  EXPECT_TRUE(LogHas(log, ConnectingLine("127.0.0.1", "28028", ECONNREFUSED).c_str())) << log;
+  EXPECT_TRUE(LogHas(log, kHandshakeEof)) << log;
+  EXPECT_FALSE(LogHas(log, ConnectingLine("127.0.0.2", "28029", ECONNREFUSED).c_str())) << log;
+  EXPECT_FALSE(LogHas(log, kFailedHeader)) << log;
+}
+
+// Arm: every entry's connect fails -> sock == -1 after the walk, and the
+// ternary's false branch (both host and port at their defaults).
+TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnDefaultEndpoint_ReportsLocalNodeAdvice) {
+  g_addrinfoCount = 3;
+  g_connectResult = -1;
+  g_connectErrno = ECONNREFUSED;
+
+  FdSequence fds(300);
+  ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(-1, sock);
+  EXPECT_EQ(3, sockHook.calls);
+  EXPECT_EQ(std::vector<int>({300, 301, 302}), fds.issued);
+  EXPECT_EQ(std::vector<int>({300, 301, 302}), g_closedFds);
+  EXPECT_EQ(1, g_freeaddrinfoCalls);  // 2 would mean addrInfo was not nulled and fail: freed it again
+  EXPECT_TRUE(LogHas(log, ConnectingLine("127.0.0.1", "28028", ECONNREFUSED).c_str())) << log;
+  EXPECT_TRUE(LogHas(log, ConnectingLine("127.0.0.2", "28029", ECONNREFUSED).c_str())) << log;
+  EXPECT_TRUE(LogHas(log, ConnectingLine("127.0.0.3", "28030", ECONNREFUSED).c_str())) << log;
+  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
+  EXPECT_TRUE(LogHas(log, kLocalAdvice)) << log;
+  EXPECT_FALSE(LogHas(log, kArgsAdvice)) << log;
+  EXPECT_FALSE(LogHas(log, kHandshakeEof)) << log;
+}
+
+// Arm: the ternary's true branch reached via a non-default host alone. With
+// `&&` in place of `||` this falls to the localhost advice instead.
+TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnCustomHost_ReportsHostPortAdvice) {
+  hostName = kOtherHost;
+  g_addrinfoCount = 3;
+  g_connectResult = -1;
+
+  FdSequence fds(310);
+  ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(-1, sock);
+  EXPECT_EQ(std::vector<int>({310, 311, 312}), fds.issued);
+  EXPECT_EQ(std::vector<int>({310, 311, 312}), g_closedFds);
+  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
+  EXPECT_TRUE(LogHas(log, kArgsAdvice)) << log;
+  EXPECT_FALSE(LogHas(log, kLocalAdvice)) << log;
+}
+
+// Arm: the ternary's true branch reached via a non-default port alone, with
+// hostName left at "localhost" -- the other half of the `||`.
+TEST_F(RasClientMicrotest, ConnectToNccl_AllEntriesRefusedOnCustomPort_ReportsHostPortAdvice) {
+  port = kOtherPort;
+  g_addrinfoCount = 3;
+  g_connectResult = -1;
+
+  FdSequence fds(320);
+  ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(-1, sock);
+  EXPECT_STREQ("localhost", hostName);
+  EXPECT_EQ(std::vector<int>({320, 321, 322}), fds.issued);
+  EXPECT_EQ(std::vector<int>({320, 321, 322}), g_closedFds);
+  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
+  EXPECT_TRUE(LogHas(log, kArgsAdvice)) << log;
+  EXPECT_FALSE(LogHas(log, kLocalAdvice)) << log;
+}
+
+// Arm: `if (timeout)` false. Zero disables the timeout, so neither socket
+// option is set -- but the walk still runs to completion.
+TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutZero_SkipsBothSocketTimeoutOptions) {
+  timeout = 0;
+  g_connectResult = -1;
+
+  ScopedHook sockHook(g_socket, [](int, int, int) { return 330; });
+  ScopedHook optHook(g_setsockopt, [](int, int, int, const void*, socklen_t) { return 0; });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(0, optHook.calls);
+  EXPECT_EQ(1, sockHook.calls);
+  EXPECT_EQ(std::vector<int>({330}), g_closedFds);
+  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
+}
+
+// Arm: `if (timeout)` true -> SO_SNDTIMEO then SO_RCVTIMEO, both carrying the
+// 1-second TIMEOUT_INCREMENT tv, on the fd socket() just returned.
+TEST_F(RasClientMicrotest, ConnectToNccl_TimeoutEnabled_SetsSendThenReceiveTimeoutToOneSecond) {
+  timeout = 5;
+  g_connectResult = -1;
+
+  std::vector<SockoptCall> opts;
+  ScopedHook sockHook(g_socket, [](int, int, int) { return 340; });
+  ScopedHook optHook(g_setsockopt, [&](int fd, int level, int optname, const void* val, socklen_t len) {
+    struct timeval tv = {-1, -1};
+    if (val && len >= static_cast<socklen_t>(sizeof(tv))) memcpy(&tv, val, sizeof(tv));
+    opts.push_back(SockoptCall{fd, level, optname, static_cast<long>(tv.tv_sec), static_cast<long>(tv.tv_usec)});
+    return 0;
+  });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  ASSERT_EQ(2u, opts.size());
+  EXPECT_EQ(SO_SNDTIMEO, opts[0].optname);
+  EXPECT_EQ(SO_RCVTIMEO, opts[1].optname);
+  for (const SockoptCall& o : opts) {
+    EXPECT_EQ(340, o.fd);
+    EXPECT_EQ(SOL_SOCKET, o.level);
+    EXPECT_EQ(1L, o.sec);
+    EXPECT_EQ(0L, o.usec);
+  }
+  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
+}
+
+// Arm: the first setsockopt fails -> `||` short-circuits, so SO_RCVTIMEO is
+// never attempted, perror reports it, and the walk continues to connect.
+TEST_F(RasClientMicrotest, ConnectToNccl_SendTimeoutOptionFails_SkipsReceiveOptionAndStillConnects) {
+  timeout = 3;
+
+  ScopedHook sockHook(g_socket, [](int, int, int) { return 350; });
+  ScopedHook optHook(g_setsockopt, [](int, int, int, const void*, socklen_t) {
+    errno = ENOPROTOOPT;
+    return -1;
+  });
+  ScopedHook connectHook(g_connect, [](int, const struct sockaddr*, socklen_t) { return 0; });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, optHook.calls);
+  EXPECT_EQ(1, connectHook.calls);
+  EXPECT_EQ(350, sock);
+  EXPECT_EQ(std::vector<int>({350}), g_closedFds);
+  EXPECT_TRUE(LogHas(log, (std::string("setsockopt: ") + strerror(ENOPROTOOPT) + "\n").c_str())) << log;
+  EXPECT_TRUE(LogHas(log, kHandshakeEof)) << log;
+  EXPECT_FALSE(LogHas(log, kFailedHeader)) << log;
+}
+
+// Arm: only the second setsockopt fails -> both calls happen and the single
+// shared perror still fires. Non-fatal: connect is still attempted.
+TEST_F(RasClientMicrotest, ConnectToNccl_ReceiveTimeoutOptionFails_ReportsAfterBothCallsAndContinues) {
+  timeout = 3;
+
+  ScopedHook sockHook(g_socket, [](int, int, int) { return 360; });
+  ScopedHook optHook(g_setsockopt, [](int, int, int optname, const void*, socklen_t) -> int {
+    if (optname == SO_RCVTIMEO) {
+      errno = ENOPROTOOPT;
+      return -1;
+    }
+    return 0;
+  });
+  ScopedHook connectHook(g_connect, [](int, const struct sockaddr*, socklen_t) {
+    errno = ECONNREFUSED;
+    return -1;
+  });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(2, optHook.calls);
+  EXPECT_EQ(1, connectHook.calls);
+  EXPECT_EQ(std::vector<int>({360}), g_closedFds);
+  EXPECT_TRUE(LogHas(log, (std::string("setsockopt: ") + strerror(ENOPROTOOPT) + "\n").c_str())) << log;
+  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
+}
+
+// Arm: the getnameinfo success path -- NI_NUMERICHOST|NI_NUMERICSERV over the
+// failed entry's own sockaddr, and both output buffers reach the message.
+TEST_F(RasClientMicrotest, ConnectToNccl_ConnectFails_FormatsTheNumericNameOfTheFailedAddress) {
+  g_connectResult = -1;
+
+  int flags = 0;
+  socklen_t salen = 0;
+  int queriedPort = 0;
+  ScopedHook nameHook(g_getnameinfo, [&](const struct sockaddr* sa, socklen_t len, char* host, socklen_t hostlen,
+                                         char* serv, socklen_t servlen, int f) {
+    flags = f;
+    salen = len;
+    queriedPort = PortOf(sa);
+    snprintf(host, hostlen, "%s", "resolved.host");
+    snprintf(serv, servlen, "%s", "5150");
+    return 0;
+  });
+  ScopedHook sockHook(g_socket, [](int, int, int) { return 370; });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, nameHook.calls);
+  EXPECT_EQ(NI_NUMERICHOST | NI_NUMERICSERV, flags);
+  EXPECT_EQ(sizeof(struct sockaddr_in), salen);
+  EXPECT_EQ(kEntryPort0, queriedPort);
+  EXPECT_TRUE(LogHas(log, ConnectingLine("resolved.host", "5150", ECONNREFUSED).c_str())) << log;
+}
+
+// Arm: getnameinfo fails -> the strcpy fallback puts the *configured* host and
+// port in the message, discarding whatever getnameinfo left in the buffers.
+TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoFails_FallsBackToConfiguredHostAndPort) {
+  hostName = kOtherHost;
+  port = kOtherPort;
+  g_addrinfoCount = 3;
+  g_connectResult = -1;
+
+  FdSequence fds(380);
+  ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
+  // Writes a marker first: if the fallback is dropped, the marker is what prints.
+  ScopedHook nameHook(g_getnameinfo, [](const struct sockaddr*, socklen_t, char* host, socklen_t hostlen, char* serv,
+                                        socklen_t servlen, int) {
+    snprintf(host, hostlen, "%s", "STALE_HOST");
+    snprintf(serv, servlen, "%s", "9999");
+    return EAI_FAMILY;
+  });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(3, nameHook.calls);
+  EXPECT_TRUE(LogHas(log, ConnectingLine(kOtherHost, kOtherPort, ECONNREFUSED).c_str())) << log;
+  EXPECT_FALSE(LogHas(log, "STALE_HOST")) << log;
+  EXPECT_TRUE(LogHas(log, kArgsAdvice)) << log;
+}
+
+// Arm: `err = errno` is captured before getnameinfo runs, so a getnameinfo that
+// clobbers errno cannot change which failure strerror reports.
+TEST_F(RasClientMicrotest, ConnectToNccl_GetnameinfoClobbersErrno_MessageKeepsTheConnectError) {
+  g_connectResult = -1;
+  g_connectErrno = EHOSTUNREACH;
+
+  ScopedHook sockHook(g_socket, [](int, int, int) { return 390; });
+  ScopedHook nameHook(g_getnameinfo, [](const struct sockaddr*, socklen_t, char* host, socklen_t hostlen, char* serv,
+                                        socklen_t servlen, int) {
+    snprintf(host, hostlen, "%s", "10.0.0.5");
+    snprintf(serv, servlen, "%s", "5151");
+    errno = EPERM;
+    return 0;
+  });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_TRUE(LogHas(log, ConnectingLine("10.0.0.5", "5151", EHOSTUNREACH).c_str())) << log;
+  EXPECT_FALSE(LogHas(log, ConnectingLine("10.0.0.5", "5151", EPERM).c_str())) << log;
+}
+
+// Arm: freeaddrinfo receives the list *head*, not the exhausted walk cursor,
+// exactly once. Overriding the free seam means this hook owns the teardown of
+// what the default getaddrinfo calloc'd.
+TEST_F(RasClientMicrotest, ConnectToNccl_WalkExhausted_FreesTheHeadOfTheResolvedListOnce) {
+  g_addrinfoCount = 3;
+  g_connectResult = -1;
+
+  int freedHeadPort = -1;
+  bool freedNull = false;
+  FdSequence fds(400);
+  ScopedHook sockHook(g_socket, [&fds](int, int, int) { return fds(); });
+  ScopedHook freeHook(g_freeaddrinfo, [&](struct addrinfo* ai) {
+    if (!ai) {
+      freedNull = true;
+      return;
+    }
+    if (freedHeadPort == -1) freedHeadPort = PortOf(ai->ai_addr);
+    while (ai) {
+      struct addrinfo* next = ai->ai_next;
+      free(ai->ai_addr);
+      free(ai);
+      ai = next;
+    }
+  });
+
+  int ret = -1;
+  const std::string log = CaptureLog([&ret]() { ret = connectToNCCL(); });
+
+  EXPECT_EQ(1, ret);
+  EXPECT_EQ(1, freeHook.calls);
+  EXPECT_FALSE(freedNull);
+  EXPECT_EQ(kEntryPort0, freedHeadPort);
+  EXPECT_EQ(std::vector<int>({400, 401, 402}), fds.issued);
+  EXPECT_EQ(std::vector<int>({400, 401, 402}), g_closedFds);
+  EXPECT_TRUE(LogHas(log, kFailedHeader)) << log;
+}
