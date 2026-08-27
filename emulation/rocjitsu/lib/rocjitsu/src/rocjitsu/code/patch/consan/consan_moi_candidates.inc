@@ -173,6 +173,19 @@ record_replay_entry_workgroup_capture_is_unambiguous(const ConSanOptions &option
   return record_replay_entry_workgroup_capture_count(options) <= 1u;
 }
 
+/// Project the scalar-persistent ABI consumed by an emitted MOI mechanism.
+/// This is patch metadata, not a second owner of register selection: lowering
+/// continues to select registers in ConSanOptions and records the selection on
+/// each emitted consumer or initializer that depends on it.
+[[nodiscard]] ConSanMoiPersistentSgprState moi_persistent_sgpr_state(const ConSanOptions &options) {
+  return {
+      .owner = options.moi_persistent_owner_sgpr,
+      .epoch = options.moi_persistent_epoch_sgpr,
+      .workgroup_key = options.moi_persistent_workgroup_key_sgpr,
+      .record_replay_workgroup = options.moi_record_replay_workgroup_sgprs,
+  };
+}
+
 [[nodiscard]] constexpr uint16_t ttmp_scalar_operand(uint16_t ttmp) {
   return static_cast<uint16_t>(kScalarOperandTtmpBase + ttmp);
 }

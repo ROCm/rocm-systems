@@ -476,6 +476,24 @@ consan_program_container_ref(const ConSanFunctionInfo &function) {
   };
 }
 
+/// Exact ordinary-SGPR ABI used by an emitted MOI entry prologue to retain
+/// state across arbitrary guest instructions. These registers belong to the
+/// prologue and every access or synchronization probe owned by the same
+/// kernel; recording them on the prologue makes the emitted mechanism
+/// self-describing without retaining a transform-wide copy of lowering state.
+struct ConSanMoiPersistentSgprState {
+  /// Resident-wave or workitem owner identity retained for every probe.
+  std::optional<uint16_t> owner;
+  /// Current synchronization epoch paired with the persistent owner.
+  std::optional<uint16_t> epoch;
+  /// Compact workgroup identity used by InlineShadow when that engine does
+  /// not require the exact coordinate tuple.
+  std::optional<uint16_t> workgroup_key;
+  /// Exact x/y/z and optional gfx1250 cluster coordinates retained by
+  /// Record/Replay and Sampled instrumentation.
+  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup;
+};
+
 struct ConSanPatchInfo {
   ConSanPatchPhase phase = ConSanPatchPhase::Instrumentation;
   ConSanPatchKind kind = ConSanPatchKind::InlineNopRewrite;
@@ -580,6 +598,10 @@ struct ConSanPatchInfo {
   std::optional<uint16_t> persistent_epoch_vgpr;
   std::optional<uint16_t> persistent_workgroup_key_vgpr;
   ConSanMoiPersistentWorkgroupRegisters persistent_record_replay_workgroup_vgprs;
+  /// Scalar-persistent state initialized by this entry prologue. Access and
+  /// synchronization patches consume this exact ABI; other patch kinds leave
+  /// the aggregate empty.
+  ConSanMoiPersistentSgprState persistent_sgpr_state;
   /// Entry-local VGPR whose lanes preserve a runtime-selected transient SGPR
   /// window while persistent vector state is initialized. The register is
   /// dead again before any displaced guest instruction executes.

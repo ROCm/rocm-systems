@@ -117,6 +117,21 @@ testing::AssertionResult consan_patch_succeeded(const ConSanTransformArtifacts &
   return testing::AssertionFailure() << testing::PrintToString(result.errors);
 }
 
+/// Return the scalar-persistent ABI recorded by the first emitted MOI consumer
+/// or initializer. Persistent scalar selection is code-object-wide today, so
+/// every populated patch has the same state. An object without such a patch
+/// returns an empty value instead of exposing lowering scratch state.
+[[nodiscard]] ConSanMoiPersistentSgprState
+test_moi_persistent_sgpr_state(const ConSanTransformArtifacts &result) {
+  const auto consumer = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
+    const ConSanMoiPersistentSgprState &state = patch.persistent_sgpr_state;
+    return state.owner || state.epoch || state.workgroup_key ||
+           !state.record_replay_workgroup.empty();
+  });
+  return consumer == result.patches.end() ? ConSanMoiPersistentSgprState{}
+                                          : consumer->persistent_sgpr_state;
+}
+
 [[nodiscard]] constexpr bool is_consan_access_intent(ConSanProbeIntentKind kind) {
   return kind == ConSanProbeIntentKind::RedundantAccessObservation ||
          kind == ConSanProbeIntentKind::AccessRecord ||

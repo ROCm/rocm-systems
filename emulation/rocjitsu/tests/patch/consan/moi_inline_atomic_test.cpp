@@ -4229,8 +4229,10 @@ TEST(ConSanMoi, InlineAtomicScalarPersistentAcquireGuardsEpochAdvanceAndPersist)
   ASSERT_GE(acquire_plan->scratch_vgpr_count, 4u);
   const uint16_t materialized_epoch =
       static_cast<uint16_t>(*acquire_patch->scratch_vgpr + acquire_plan->scratch_vgpr_count - 3u);
-  EXPECT_EQ(result.resolved_moi_persistent_owner_sgpr, options.moi_persistent_owner_sgpr);
-  EXPECT_EQ(result.resolved_moi_persistent_epoch_sgpr, options.moi_persistent_epoch_sgpr);
+  EXPECT_EQ(test_moi_persistent_sgpr_state(result).owner, options.moi_persistent_owner_sgpr);
+  EXPECT_EQ(test_moi_persistent_sgpr_state(result).epoch, options.moi_persistent_epoch_sgpr);
+  EXPECT_TRUE(validate_consan_modified_elf(bytes, result).empty())
+      << "scalar-persistent atomic validation must derive owner state from the emitted prologue";
   AmdGpuCodeObject patched(result.replacement.data(), result.replacement.size());
   ASSERT_TRUE(patched.is_valid());
   const std::vector<uint32_t> acquire_words = text_words_at_offset(

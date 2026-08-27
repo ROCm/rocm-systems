@@ -3703,7 +3703,7 @@ validate_inline_release_transaction_semantics(const AmdGpuCodeObject &replacemen
         scratch, version_cas_value, version_cas_value, /*return_old_value=*/true, /*scope=*/2,
         arch);
     uint16_t owner_vgpr = 0;
-    if (patch.persistent_epoch_private_offset || result.resolved_moi_persistent_owner_sgpr) {
+    if (patch.persistent_epoch_private_offset || patch.persistent_sgpr_state.owner) {
       const auto resource_plan = std::ranges::find_if(result.resource_plans, [&](const auto &plan) {
         return plan.site_kind == ConSanResourceSiteKind::Atomic &&
                plan.text_offset == patch.anchor_offset && plan.scratch_vgpr == patch.scratch_vgpr;
@@ -4066,13 +4066,9 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
             patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue ||
             patch.kind == ConSanPatchKind::KernelEntryMoiPrivateEpochPrologue;
         if (patch.kind == ConSanPatchKind::KernelEntryMoiOwnerEpochPrologue) {
-          const auto owner_vgpr = patch.persistent_owner_vgpr ? patch.persistent_owner_vgpr
-                                                              : result.resolved_moi_owner_vgpr;
-          const auto epoch_vgpr = patch.persistent_epoch_vgpr ? patch.persistent_epoch_vgpr
-                                                              : result.resolved_moi_epoch_vgpr;
-          const auto workgroup_key_vgpr = patch.persistent_workgroup_key_vgpr
-                                              ? patch.persistent_workgroup_key_vgpr
-                                              : result.resolved_moi_workgroup_key_vgpr;
+          const auto owner_vgpr = patch.persistent_owner_vgpr;
+          const auto epoch_vgpr = patch.persistent_epoch_vgpr;
+          const auto workgroup_key_vgpr = patch.persistent_workgroup_key_vgpr;
           if (owner_vgpr) {
             requirement.required_vgpr_count = std::max<uint16_t>(
                 requirement.required_vgpr_count, static_cast<uint16_t>(*owner_vgpr + 1u));
@@ -4091,9 +4087,7 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                                    static_cast<uint16_t>(*patch.entry_scalar_backup_vgpr + 1u));
           }
           const ConSanMoiPersistentWorkgroupRegisters &workgroup_vgprs =
-              patch.persistent_record_replay_workgroup_vgprs.complete()
-                  ? patch.persistent_record_replay_workgroup_vgprs
-                  : result.resolved_moi_record_replay_workgroup_vgprs;
+              patch.persistent_record_replay_workgroup_vgprs;
           if (workgroup_vgprs.complete()) {
             for (const std::optional<uint16_t> reg :
                  {workgroup_vgprs.x, workgroup_vgprs.y, workgroup_vgprs.z,
@@ -4102,33 +4096,6 @@ validate_resource_and_metadata_deltas(const AmdGpuCodeObject &original,
                 continue;
               requirement.required_vgpr_count = std::max<uint16_t>(
                   requirement.required_vgpr_count, static_cast<uint16_t>(*reg + 1u));
-            }
-          }
-          if (result.resolved_moi_persistent_owner_sgpr) {
-            requirement.required_sgpr_count = std::max<uint16_t>(
-                requirement.required_sgpr_count,
-                static_cast<uint16_t>(*result.resolved_moi_persistent_owner_sgpr + 1u));
-          }
-          if (result.resolved_moi_persistent_epoch_sgpr) {
-            requirement.required_sgpr_count = std::max<uint16_t>(
-                requirement.required_sgpr_count,
-                static_cast<uint16_t>(*result.resolved_moi_persistent_epoch_sgpr + 1u));
-          }
-          if (result.resolved_moi_persistent_workgroup_key_sgpr) {
-            requirement.required_sgpr_count = std::max<uint16_t>(
-                requirement.required_sgpr_count,
-                static_cast<uint16_t>(*result.resolved_moi_persistent_workgroup_key_sgpr + 1u));
-          }
-          if (result.resolved_moi_record_replay_workgroup_sgprs.complete()) {
-            for (const std::optional<uint16_t> reg :
-                 {result.resolved_moi_record_replay_workgroup_sgprs.x,
-                  result.resolved_moi_record_replay_workgroup_sgprs.y,
-                  result.resolved_moi_record_replay_workgroup_sgprs.z,
-                  result.resolved_moi_record_replay_workgroup_sgprs.cluster_workgroup_id}) {
-              if (!reg)
-                continue;
-              requirement.required_sgpr_count = std::max<uint16_t>(
-                  requirement.required_sgpr_count, static_cast<uint16_t>(*reg + 1u));
             }
           }
         }

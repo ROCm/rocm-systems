@@ -2401,6 +2401,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
     std::optional<MoiEntryScalarBackup> entry_scalar_backup;
     bool has_kernarg_preload = false;
+    uint16_t required_sgpr_count = 0;
   };
   std::vector<PlannedOwnerEpochPrologue> target_kernels;
   target_kernels.reserve(result.program_inventory.kernels().size());
@@ -2704,7 +2705,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                               workgroup_shadow, workgroup_sources, entry_scalar_backup,
                               has_kernarg_preload});
   }
-  for (const PlannedOwnerEpochPrologue &item : target_kernels) {
+  for (PlannedOwnerEpochPrologue &item : target_kernels) {
     const ConSanOptions &kernel_options = item.persistent_options;
     uint32_t required_vgpr_count =
         moi_owner_epoch_prologue_required_vgpr_count(kernel_options, item.workgroup_shadow, arch);
@@ -2747,6 +2748,7 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
                                               required_sgpr_count, arch, result.errors)) {
       return;
     }
+    item.required_sgpr_count = static_cast<uint16_t>(required_sgpr_count);
   }
 
   std::vector<uint8_t> new_text(old_text.begin(), old_text.end());
@@ -3155,6 +3157,8 @@ void try_apply_owner_epoch_prologue_patch(std::span<const uint8_t> bytes,
     info.persistent_workgroup_key_vgpr = kernel_options.moi_workgroup_key_vgpr;
     info.persistent_record_replay_workgroup_vgprs =
         kernel_options.moi_record_replay_workgroup_vgprs;
+    info.persistent_sgpr_state = moi_persistent_sgpr_state(kernel_options);
+    info.required_sgpr_count = item.required_sgpr_count;
     if (item.entry_scalar_backup) {
       info.entry_scalar_backup_vgpr = item.entry_scalar_backup->vgpr;
       info.entry_scalar_backup_sgpr_base = item.entry_scalar_backup->sgpr_base;

@@ -501,10 +501,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   result.resolved_moi_workgroup_key_vgpr.reset();
   result.resolved_moi_record_replay_workgroup_vgprs = {};
   result.resolved_moi_persistent_vgpr_assignments.clear();
-  result.resolved_moi_persistent_owner_sgpr.reset();
-  result.resolved_moi_persistent_epoch_sgpr.reset();
-  result.resolved_moi_persistent_workgroup_key_sgpr.reset();
-  result.resolved_moi_record_replay_workgroup_sgprs = {};
   result.resolved_moi_exec_save_sgpr.reset();
   result.resolved_moi_transient_sgpr_assignments.clear();
   result.resolved_moi_dispatch_id_sgpr.reset();
@@ -798,18 +794,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
   if (result.resolved_moi_record_replay_workgroup_vgprs.empty()) {
     result.resolved_moi_record_replay_workgroup_vgprs =
         effective_options.moi_record_replay_workgroup_vgprs;
-  }
-  if (!result.resolved_moi_persistent_owner_sgpr)
-    result.resolved_moi_persistent_owner_sgpr = effective_options.moi_persistent_owner_sgpr;
-  if (!result.resolved_moi_persistent_epoch_sgpr)
-    result.resolved_moi_persistent_epoch_sgpr = effective_options.moi_persistent_epoch_sgpr;
-  if (!result.resolved_moi_persistent_workgroup_key_sgpr) {
-    result.resolved_moi_persistent_workgroup_key_sgpr =
-        effective_options.moi_persistent_workgroup_key_sgpr;
-  }
-  if (result.resolved_moi_record_replay_workgroup_sgprs.empty()) {
-    result.resolved_moi_record_replay_workgroup_sgprs =
-        effective_options.moi_record_replay_workgroup_sgprs;
   }
   if (!result.resolved_moi_exec_save_sgpr)
     result.resolved_moi_exec_save_sgpr = effective_options.moi_exec_save_sgpr;

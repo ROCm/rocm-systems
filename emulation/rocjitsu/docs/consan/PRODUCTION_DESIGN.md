@@ -5645,6 +5645,33 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CI: make scalar-persistent state an emitted patch contract
+
+- **The prologue owns its ABI:** Every MOI owner/epoch entry prologue now
+  records the exact persistent owner, epoch, optional compact workgroup key,
+  and exact Record/Replay workgroup-coordinate SGPRs that it initializes. The
+  same patch records the complete scalar allocation high-water mark already
+  used to grow its owning kernel descriptor.
+- **No transform-wide scalar mirror:** Placement no longer publishes four
+  copies of its selected scalar state into `ConSanResult`, the main lowerer no
+  longer resets or backfills those copies, and final validation consumes only
+  the emitted prologue contract. Atomic transaction validation likewise uses
+  the access patch's private-state marker or its owning prologue's scalar ABI
+  instead of consulting mutable lowering state.
+- **Tests inspect durable behavior:** The existing scalar-placement matrix now
+  derives its assertions from emitted prologue metadata. This preserves exact
+  coverage of automatic and explicit selection, collision avoidance, CDNA and
+  RDNA placement, exact workgroup tuples, and emitted instruction operands
+  while no longer entrenching a temporary result representation.
+- **Deletion accounting:** Implementation files add 46 and delete 71 physical
+  lines, a net deletion of 25. Four `ConSanResult` fields and all of their
+  publication plumbing are gone; production references to the compatibility
+  type fall from 85 to 79.
+- **Checked-in gate:** All 1,530 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

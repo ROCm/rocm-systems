@@ -1059,9 +1059,9 @@ TEST(ConSanMoi, Cdna4InlineShadowUsesScalarEpochForFullOrdinaryVgprBank) {
       << "warnings=" << testing::PrintToString(result.warnings)
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
-  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
-  ASSERT_TRUE(result.resolved_moi_persistent_epoch_sgpr);
-  ASSERT_TRUE(result.resolved_moi_persistent_workgroup_key_sgpr);
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner);
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).epoch);
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).workgroup_key);
 
   const auto access = std::ranges::find_if(result.patches, [](const ConSanPatchInfo &patch) {
     return patch.kind == ConSanPatchKind::InlineMoiExactShadowStore ||
@@ -4970,8 +4970,8 @@ TEST(ConSanMoi, Cdna4InlineScalarPersistencePlansEntryScratchForEveryComponent) 
   ASSERT_TRUE(result.modified()) << "warnings=" << testing::PrintToString(result.warnings)
                                  << " errors=" << testing::PrintToString(result.errors);
   EXPECT_TRUE(result.resolved_moi_persistent_vgpr_assignments.empty());
-  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
-  EXPECT_GE(*result.resolved_moi_persistent_owner_sgpr, 40u);
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner);
+  EXPECT_GE(*test_moi_persistent_sgpr_state(result).owner, 40u);
   // The full-bank owner drives the code-object-wide scalar choice but its
   // forced-spill access is filtered during the rebuilt resource plan.  The
   // other component still emits and receives its scalar entry prologue.
@@ -6164,7 +6164,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPackedTokenOwnerPreservesClobberedLoadAddress) 
       << " errors=" << testing::PrintToString(result.errors);
   ASSERT_TRUE(result.modified()) << testing::PrintToString(result.warnings);
   EXPECT_FALSE(result.resolved_moi_owner_vgpr);
-  ASSERT_TRUE(result.resolved_moi_persistent_owner_sgpr);
+  ASSERT_TRUE(test_moi_persistent_sgpr_state(result).owner);
   const auto plan = std::ranges::find(result.resource_plans, ConSanResourceSiteKind::Access,
                                       &ConSanCandidateResourcePlan::site_kind);
   ASSERT_NE(plan, result.resource_plans.end());
@@ -6183,7 +6183,7 @@ TEST(ConSanMoi, Cdna4InlineShadowPackedTokenOwnerPreservesClobberedLoadAddress) 
   const uint32_t save_address = build_v_mov_b32_e32(
       saved_load_address, vector_source_vgpr(/*vsrc=*/0u), ROCJITSU_CODE_ARCH_CDNA4);
   const uint32_t redundant_owner_materialization =
-      build_v_mov_b32_e32(redundant_consumer_owner, *result.resolved_moi_persistent_owner_sgpr,
+      build_v_mov_b32_e32(redundant_consumer_owner, *test_moi_persistent_sgpr_state(result).owner,
                           ROCJITSU_CODE_ARCH_CDNA4);
   const auto index_saved_address = instrumentation::build_v_lshrrev_b32(
       static_cast<uint16_t>(*options.scratch_vgpr + 4u),
