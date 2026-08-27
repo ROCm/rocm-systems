@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/plugins/data_hazard/adapter.h"
 
+#include "detail/waitcnt_decode.h"
+
 #include <algorithm>
 #include <charconv>
 #include <system_error>
@@ -79,6 +81,30 @@ uint32_t parse_waitcnt_field(std::string_view text, std::string_view field, uint
   uint32_t value = fallback;
   const auto result = std::from_chars(text.data() + begin, text.data() + end, value);
   return result.ec == std::errc{} ? value : fallback;
+}
+
+constexpr std::string_view kDscntField = "dscnt(";
+
+/// The count pair a combined `s_wait_*cnt_dscnt` expresses. An assembler
+/// listing names both fields, but the emulator's own decoder prints the bare
+/// immediate the hardware encodes, which packs the memory counter above dscnt.
+/// Read whole, that immediate is neither count: it leaves the memory counter
+/// too large to drain anything and dscnt at zero, draining everything.
+WaitInfo decode_paired_wait(WaitKind kind, std::string_view text, std::string_view memory_field) {
+  WaitInfo wait;
+  wait.kind = kind;
+
+  if (text.find(memory_field) != std::string_view::npos ||
+      text.find(kDscntField) != std::string_view::npos) {
+    wait.count = parse_waitcnt_field(text, memory_field, 0);
+    wait.paired_count = parse_waitcnt_field(text, kDscntField, 0);
+    return wait;
+  }
+
+  const auto fields = data_hazard_waitcnt::decode_split_waitcnt(first_decimal(text));
+  wait.count = fields.primary;
+  wait.paired_count = fields.dscnt;
+  return wait;
 }
 
 ResourceAccessEvent make_base_resource_event(const InstructionDescriptor &instruction,
@@ -185,13 +211,9 @@ WaitInfo make_wait_info(WaitKind kind, std::string_view operand_text) {
     wait.paired_count = parse_waitcnt_field(operand_text, "lgkmcnt(", 0);
     break;
   case WaitKind::WaitLoadcntDscnt:
-    wait.count = parse_waitcnt_field(operand_text, "loadcnt(", first_decimal(operand_text));
-    wait.paired_count = parse_waitcnt_field(operand_text, "dscnt(", 0);
-    break;
+    return decode_paired_wait(kind, operand_text, "loadcnt(");
   case WaitKind::WaitStorecntDscnt:
-    wait.count = parse_waitcnt_field(operand_text, "storecnt(", first_decimal(operand_text));
-    wait.paired_count = parse_waitcnt_field(operand_text, "dscnt(", 0);
-    break;
+    return decode_paired_wait(kind, operand_text, "storecnt(");
   default:
     wait.count = first_decimal(operand_text);
     break;

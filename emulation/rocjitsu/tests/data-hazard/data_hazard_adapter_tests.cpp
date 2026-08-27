@@ -2006,6 +2006,30 @@ TEST(DataHazardAdapterTest, ReadsWaitCountsFromTheDisassembledOperand) {
   EXPECT_EQ(single.paired_count, 0u);
 }
 
+// The emulator's decoder prints a combined wait as the bare immediate
+// (`s_wait_loadcnt_dscnt 259`), which packs the memory counter above dscnt.
+// Taken whole it is neither count, and the wait then drains the wrong queue.
+TEST(DataHazardAdapterTest, SplitsTheBareImmediateOfACombinedWait) {
+  const dh::WaitInfo load = dh::make_wait_info(dh::WaitKind::WaitLoadcntDscnt, "259");
+  EXPECT_EQ(load.count, 1u);        // loadcnt(1)
+  EXPECT_EQ(load.paired_count, 3u); // dscnt(3)
+
+  const dh::WaitInfo store = dh::make_wait_info(dh::WaitKind::WaitStorecntDscnt, "513");
+  EXPECT_EQ(store.count, 2u);        // storecnt(2)
+  EXPECT_EQ(store.paired_count, 1u); // dscnt(1)
+
+  // A count that names only dscnt still leaves the memory counter at zero.
+  const dh::WaitInfo ds_only = dh::make_wait_info(dh::WaitKind::WaitLoadcntDscnt, "5");
+  EXPECT_EQ(ds_only.count, 0u);
+  EXPECT_EQ(ds_only.paired_count, 5u);
+
+  const WaitAction action = dh::make_wait_action(load);
+  ASSERT_NE(find_counter(action, WaitCntType::VMEM), nullptr);
+  ASSERT_NE(find_counter(action, WaitCntType::LDS), nullptr);
+  EXPECT_EQ(find_counter(action, WaitCntType::VMEM)->keep_count, 1u);
+  EXPECT_EQ(find_counter(action, WaitCntType::LDS)->keep_count, 3u);
+}
+
 // The RDNA families count lgkmcnt in six bits where CDNA uses four. A count
 // above fifteen has to reach the engine as written: shortened, it would drain
 // operations the wait never named and hide the hazards behind them.
