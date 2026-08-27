@@ -364,7 +364,7 @@ TransformResult TransformResult::publish_optional(
     const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-    std::optional<ConSanResult> supplied_mechanism) {
+    std::optional<ConSanTransformArtifacts> supplied_artifacts) {
   TransformResult result;
   result.code_object = make_consan_code_object_id(code_object_bytes);
   initialize_stage_records(result);
@@ -397,16 +397,15 @@ TransformResult TransformResult::publish_optional(
     return result;
   }
 
-  ConSanResult lowering;
-  if (supplied_mechanism) {
-    lowering = std::move(*supplied_mechanism);
+  ConSanTransformArtifacts lowering;
+  if (supplied_artifacts) {
+    lowering = std::move(*supplied_artifacts);
   } else {
     const ConSanOptions lowering_options(request, transform_policy, debug, mutation, capabilities,
                                          resources);
     lowering = try_patch_consan(code_object_bytes, lowering_options);
   }
-  static_cast<ConSanTransformArtifacts &>(result) =
-      std::move(static_cast<ConSanTransformArtifacts &>(lowering));
+  static_cast<ConSanTransformArtifacts &>(result) = std::move(lowering);
   if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
     result.dispatch_requirements = build_dispatch_requirements(
         result.program_inventory, result.coverage_ledger, result.patches);

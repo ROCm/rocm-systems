@@ -5202,6 +5202,34 @@ analysis completed.
   physical matrix remains reserved for the final gate. E2E validation remains
   outside this work.
 
+### Slice 5BS: keep raw working state out of the hook test boundary
+
+- **Artifacts are the publication input:** `TransformResult`'s private
+  publication seam now accepts only `ConSanTransformArtifacts`. A completed
+  lowerer value converts to that base value before publication; private
+  candidates, resolved registers, warning checkpoints, and the historical
+  `modified` bit cannot cross the boundary accidentally.
+- **Hook tests exercise the production contract:** The HSA transform override,
+  its queued/live-fault fixtures, and all helper builders now use shared static
+  artifacts. Its two direct transformation assertions enter
+  `transform_consan`, and the hook test no longer includes the raw-lowering
+  header. A stale `moi_candidates` fixture was deleted because runtime report
+  planning consumes the typed observation/coverage contract instead.
+- **Narrow test privilege:** `TransformResultTestAccess` can publish synthetic
+  static artifacts through the real stage and binding validation, but it can
+  no longer accept `ConSanResult`. This preserves focused hook lifecycle tests
+  without creating a test-only raw-mechanism bypass.
+- **Deletion accounting:** Implementation files add six and delete seven
+  physical lines, a net deletion of one. Tests add 100 and delete 114 lines, a
+  net deletion of fourteen; most changed lines are the fixture type cutover.
+  No fallback or second representation is retained.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  physical gate for this test/control-plane tranche; the complete serialized
+  physical matrix remains reserved for the final gate. E2E validation remains
+  outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

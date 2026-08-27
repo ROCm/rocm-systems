@@ -306,12 +306,11 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   ASSERT_TRUE(coverage.set_lowering_outcome({0u}, ConSanLoweringOutcomeKind::Instrumented));
   ASSERT_TRUE(coverage.set_lowering_outcome({1u}, ConSanLoweringOutcomeKind::Instrumented));
 
-  ConSanResult mechanism;
+  ConSanTransformArtifacts mechanism;
   mechanism.program_inventory = inventory;
   mechanism.observation_plan = plan;
   mechanism.coverage_ledger = coverage;
   mechanism.outcome = ConSanTransformOutcome::ModifiedValid;
-  mechanism.modified = true;
   mechanism.replacement = {0x7f, 'E', 'L', 'F'};
   mechanism.fault_sites.emplace_back().identity = "published-fault-site";
   mechanism.barrier_move_destinations.emplace_back().identity = "published-destination";

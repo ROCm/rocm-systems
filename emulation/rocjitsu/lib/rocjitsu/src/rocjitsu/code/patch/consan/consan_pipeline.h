@@ -294,7 +294,7 @@ private:
                    const TransformPolicy &transform_policy, const RuntimePolicy &runtime_policy,
                    const ConSanDebugOverrides &debug, const MutationRequest &mutation,
                    const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
-                   std::optional<ConSanResult> mechanism_result);
+                   std::optional<ConSanTransformArtifacts> lowering_artifacts);
 
   /// Provenance marker set only by the pristine MOI inventory entry point.
   ///
