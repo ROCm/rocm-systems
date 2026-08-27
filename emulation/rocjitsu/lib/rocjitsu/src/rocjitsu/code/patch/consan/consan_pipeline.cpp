@@ -343,20 +343,12 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
     const ConSanDebugOverrides &debug, const MutationRequest &mutation,
     const RuntimeCapabilities &capabilities, const BoundRuntimeResources &resources,
     TransformResult inventory) {
-  const ConSanOptions options(request, transform_policy, debug, mutation, capabilities, resources);
   ConSanOptions inventory_options(request, transform_policy, debug, MutationRequest{}, capabilities,
                                   BoundRuntimeResources{});
   inventory_options.qualify_extended_barrier_pairs =
       inventory.moi_retry_preserves_extended_barrier_pairs_;
   const ConSanMoiInventoryRetryConfig retry{
-      .report =
-          {
-              .buffer_address = options.moi_report_buffer_address,
-              .buffer_size = options.moi_report_buffer_size,
-              .layout = options.moi_report_layout,
-              .generation = options.moi_report_generation,
-              .dispatch_id = options.moi_report_dispatch_id,
-          },
+      .resources = resources,
       .fault = mutation,
   };
   ConSanResult retry_inventory;

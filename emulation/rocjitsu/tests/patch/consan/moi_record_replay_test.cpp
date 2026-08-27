@@ -472,16 +472,13 @@ TEST(ConSanMoi, ReportBufferRetryMatchesFreshRecordReplayTransform) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   const ConSanResult fresh = try_patch_consan(bytes, options);
-  const ConSanMoiReportRetryConfig report{
-      .buffer_address = options.moi_report_buffer_address,
-      .buffer_size = options.moi_report_buffer_size,
-      .layout = options.moi_report_layout,
-      .generation = options.moi_report_generation,
-      .dispatch_id = options.moi_report_dispatch_id,
-  };
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options,
-      ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt}, bytes);
+      ConSanMoiInventoryRetryConfig{
+          .resources = static_cast<const BoundRuntimeResources &>(options),
+          .fault = std::nullopt,
+      },
+      bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -523,16 +520,13 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   options.moi_report_buffer_size = report_plan.required_bytes;
   options.moi_report_layout = *layout_override;
   const ConSanResult fresh = try_patch_consan(bytes, options);
-  const ConSanMoiReportRetryConfig report{
-      .buffer_address = options.moi_report_buffer_address,
-      .buffer_size = options.moi_report_buffer_size,
-      .layout = options.moi_report_layout,
-      .generation = options.moi_report_generation,
-      .dispatch_id = options.moi_report_dispatch_id,
-  };
   const ConSanResult retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options,
-      ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt}, bytes);
+      ConSanMoiInventoryRetryConfig{
+          .resources = static_cast<const BoundRuntimeResources &>(options),
+          .fault = std::nullopt,
+      },
+      bytes);
 
   ASSERT_TRUE(consan_patch_succeeded(fresh)) << testing::PrintToString(fresh.errors);
   ASSERT_TRUE(consan_patch_succeeded(retried)) << testing::PrintToString(retried.errors);
@@ -565,14 +559,14 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   const ConSanResult pristine = try_patch_consan(bytes, inventory_options);
   ASSERT_TRUE(pristine.errors.empty()) << testing::PrintToString(pristine.errors);
   ASSERT_FALSE(pristine.modified);
-  ConSanMoiReportRetryConfig report;
-  report.buffer_address = 0x123456780000ull;
-  report.buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
+  BoundRuntimeResources resources;
+  resources.moi_report_buffer_address = 0x123456780000ull;
+  resources.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   const auto expect_invalid = [&](ConSanResult inventory, std::span<const uint8_t> retry_bytes,
                                   std::string_view expected_error) {
     const ConSanResult result = retry_patch_consan_moi_from_inventory(
         std::move(inventory), inventory_options,
-        ConSanMoiInventoryRetryConfig{.report = report, .fault = std::nullopt}, retry_bytes);
+        ConSanMoiInventoryRetryConfig{.resources = resources, .fault = std::nullopt}, retry_bytes);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
     EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {
       return error.find(expected_error) != std::string::npos;

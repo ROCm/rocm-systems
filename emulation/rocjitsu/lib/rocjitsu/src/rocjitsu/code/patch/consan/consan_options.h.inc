@@ -875,20 +875,9 @@ struct ConSanOptions : ConSanRequest,
          (options.moi_engine == ConSanMoiEngine::Sampled && options.moi_track_barriers);
 }
 
-/// Runtime report-buffer state that may change after an immutable MOI semantic
-/// inventory has been built. Retry does not accept another full ConSanOptions
-/// object, so parser, CFG, ownership, and admission semantics cannot drift
-/// between the inventory and lowering phases.
-struct ConSanMoiReportRetryConfig {
-  std::optional<uint64_t> buffer_address;
-  uint64_t buffer_size = 0;
-  std::optional<ConSanMoiReportLayoutOverride> layout;
-  uint64_t generation = 0;
-  uint64_t dispatch_id = 0;
-};
-
 struct ConSanMoiInventoryRetryConfig {
-  ConSanMoiReportRetryConfig report;
+  /// Complete typed runtime binding selected after address-free inventory.
+  BoundRuntimeResources resources;
   /// Complete typed mutation selected after the pristine inventory pass. A
   /// disengaged value and a value with no fault mutation both select the
   /// report-only retry path.

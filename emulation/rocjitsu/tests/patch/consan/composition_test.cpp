@@ -35,14 +35,7 @@ namespace {
 [[nodiscard]] ConSanMoiInventoryRetryConfig moi_inventory_retry_config(const ConSanOptions &options,
                                                                        bool bind_fault = true) {
   return {
-      .report =
-          {
-              .buffer_address = options.moi_report_buffer_address,
-              .buffer_size = options.moi_report_buffer_size,
-              .layout = options.moi_report_layout,
-              .generation = options.moi_report_generation,
-              .dispatch_id = options.moi_report_dispatch_id,
-          },
+      .resources = static_cast<const BoundRuntimeResources &>(options),
       .fault =
           bind_fault ? std::optional{static_cast<const MutationRequest &>(options)} : std::nullopt,
   };
@@ -570,14 +563,7 @@ TEST(ConSanMoi, PristineAutoReportInventoryCoversLiveBarrierMoveComposition) {
       << testing::PrintToString(live.errors) << testing::PrintToString(live.warnings);
   ASSERT_EQ(live.mutation.fault.applied, 1u);
   const ConSanMoiInventoryRetryConfig retry{
-      .report =
-          {
-              .buffer_address = live_options.moi_report_buffer_address,
-              .buffer_size = live_options.moi_report_buffer_size,
-              .layout = live_options.moi_report_layout,
-              .generation = live_options.moi_report_generation,
-              .dispatch_id = live_options.moi_report_dispatch_id,
-          },
+      .resources = static_cast<const BoundRuntimeResources &>(live_options),
       .fault = static_cast<const MutationRequest &>(live_options),
   };
   const ConSanResult retried =

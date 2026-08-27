@@ -4964,6 +4964,32 @@ analysis completed.
   the latest physical-gfx950 gate, with all 593 tests passing; E2E validation
   remains outside this work.
 
+### Slice 5BJ: delete the partial report-binding retry projection
+
+- **One runtime binding through retry:** `ConSanMoiInventoryRetryConfig` now
+  carries the production `BoundRuntimeResources` value directly. The deleted
+  `ConSanMoiReportRetryConfig` copied only five MOI fields under shorter names,
+  omitted the binding lifetime and SuperCollider address, and required retry
+  to project those fields back into the lowerer one at a time.
+- **No partial reconstruction:** The typed pipeline passes its already-
+  validated binding unchanged, retry assigns the complete binding subobject,
+  and mechanism tests construct the same typed value. Existing retry
+  equivalence tests cover ordinary Record/Replay access inventory, explicit
+  synchronization layout, live late mutation, and malformed or mutable
+  inventory; the construction-contract tests separately cover every binding
+  member and value semantics.
+- **Deletion accounting:** Production adds four and deletes twenty-seven
+  physical lines, a net deletion of twenty-three. Tests add sixteen and delete
+  thirty-six lines, a net deletion of twenty. No production or test source
+  names the deleted report-retry type or its projection members.
+- **Checked-in gate:** All fifteen focused retry, resource-binding, and options-
+  construction tests pass. The host gate passes all 1,512 runnable tests with
+  the two expected benchmark-object skips; all 172 HSA-hook and hook-lifecycle
+  tests pass; and all 2,908 simulator-device tests across `gfx942`, `gfx950`,
+  `gfx1100`, `gfx1201`, and `gfx1250` pass in 75.24 seconds. Slice 5BF remains
+  the latest physical-gfx950 gate, with all 593 tests passing; E2E validation
+  remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

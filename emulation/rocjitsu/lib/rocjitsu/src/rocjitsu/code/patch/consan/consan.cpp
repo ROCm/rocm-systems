@@ -333,11 +333,7 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
       return finalize_consan_result(std::move(inventory), code_object_bytes);
     }
 
-    options.moi_report_buffer_address = retry.report.buffer_address;
-    options.moi_report_buffer_size = retry.report.buffer_size;
-    options.moi_report_layout = retry.report.layout;
-    options.moi_report_generation = retry.report.generation;
-    options.moi_report_dispatch_id = retry.report.dispatch_id;
+    static_cast<BoundRuntimeResources &>(options) = retry.resources;
     const bool has_late_fault = retry.fault && retry.fault->has_fault_mutation();
     if (has_late_fault && retry.fault->fault_dry_run) {
       inventory.errors.emplace_back(
