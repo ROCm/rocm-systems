@@ -156,3 +156,39 @@ TEST(DevrWindowPredicates, IsMultiSegment_MultipleSegments_ReturnsTrue) {
   win.memory = &memory;
   EXPECT_TRUE(ncclDevrWindowIsMultiSegment(&win));
 }
+
+
+// ---------------------------------------------------------------------------
+
+// ncclDevrWindowHasSysmemSegment: same shape, ending in globalHasSysmemSegment.
+
+// Branch: win == nullptr.
+TEST(DevrWindowPredicates, HasSysmemSegment_NullWindow_ReturnsFalse) {
+  struct ncclDevrWindow* win{};
+  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(win));
+}
+
+// Branch: win->memory == nullptr.
+TEST(DevrWindowPredicates, HasSysmemSegment_NullMemory_ReturnsFalse) {
+  struct ncclDevrWindow win{};
+  win.memory = nullptr;
+  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(&win));
+}
+
+// Branch: no rank has a sysmem segment.
+TEST(DevrWindowPredicates, HasSysmemSegment_NoSysmemSegment_ReturnsFalse) {
+  struct ncclDevrWindow win{};
+  struct ncclDevrMemory memory{};
+  memory.globalHasSysmemSegment = false;
+  win.memory = &memory;
+  EXPECT_FALSE(ncclDevrWindowHasSysmemSegment(&win));
+}
+
+// All conditions pass.
+TEST(DevrWindowPredicates, HasSysmemSegment_HasSysmemSegment_ReturnsTrue) {
+  struct ncclDevrWindow win{};
+  struct ncclDevrMemory memory{};
+  memory.globalHasSysmemSegment = true;
+  win.memory = &memory;
+  EXPECT_TRUE(ncclDevrWindowHasSysmemSegment(&win));
+}
