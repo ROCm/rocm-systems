@@ -241,6 +241,26 @@ bool consan_detail::append_restore_moi_scc_from_route_key(
   return true;
 }
 
+bool consan_detail::append_moi_device_cache_refresh(std::vector<uint32_t> &words,
+                                                    const ConSanTargetProfile &target) {
+  std::optional<std::array<uint32_t, 2>> invalidate;
+  switch (target.encoding_family) {
+  case ConSanEncodingFamily::Gfx9Cdna3:
+    invalidate = build_cdna3_buffer_inv_sc1(target.arch);
+    break;
+  case ConSanEncodingFamily::Gfx9Cdna4:
+    invalidate = build_cdna4_buffer_inv_sc1(target.arch);
+    break;
+  case ConSanEncodingFamily::Gfx11:
+  case ConSanEncodingFamily::Gfx12:
+    return true;
+  }
+  if (!invalidate)
+    return false;
+  words.insert(words.end(), invalidate->begin(), invalidate->end());
+  return true;
+}
+
 bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
                                                   uint64_t field_address, uint32_t stride_bytes,
                                                   uint16_t address_vgpr, uint16_t slot_vgpr,

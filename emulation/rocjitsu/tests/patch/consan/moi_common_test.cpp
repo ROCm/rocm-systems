@@ -170,6 +170,32 @@ TEST(ConSanMoi, EncodedRouteSccRestoreRejectsInvalidRegisterTransactionally) {
   EXPECT_EQ(words, prefix);
 }
 
+TEST(ConSanMoi, DeviceCacheRefreshUsesOnlyQualifiedTargetSequences) {
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    std::vector<uint32_t> words;
+    ASSERT_TRUE(consan_detail::append_moi_device_cache_refresh(words, target));
+    switch (target.encoding_family) {
+    case ConSanEncodingFamily::Gfx9Cdna3: {
+      const auto expected = build_cdna3_buffer_inv_sc1(target.arch);
+      ASSERT_TRUE(expected);
+      EXPECT_EQ(words, std::vector<uint32_t>(expected->begin(), expected->end()));
+      break;
+    }
+    case ConSanEncodingFamily::Gfx9Cdna4: {
+      const auto expected = build_cdna4_buffer_inv_sc1(target.arch);
+      ASSERT_TRUE(expected);
+      EXPECT_EQ(words, std::vector<uint32_t>(expected->begin(), expected->end()));
+      break;
+    }
+    case ConSanEncodingFamily::Gfx11:
+    case ConSanEncodingFamily::Gfx12:
+      EXPECT_TRUE(words.empty());
+      break;
+    }
+  }
+}
+
 [[nodiscard]] constexpr bool sgpr_ranges_overlap(uint16_t base, uint16_t width, uint16_t other_base,
                                                  uint16_t other_width) {
   return base < static_cast<uint32_t>(other_base) + other_width &&

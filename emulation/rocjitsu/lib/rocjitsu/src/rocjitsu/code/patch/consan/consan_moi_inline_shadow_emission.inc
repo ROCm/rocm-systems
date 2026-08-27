@@ -1310,13 +1310,9 @@
     // coherent device-scope value directly into the next retry rather than
     // discarding it and beginning with another potentially stale flat load.
     restore_slot_address();
-    if (consan_uses_gfx9_cdna_encoding(arch)) {
-      const auto invalidate = arch == ROCJITSU_CODE_ARCH_CDNA3 ? build_cdna3_buffer_inv_sc1(arch)
-                                                               : build_cdna4_buffer_inv_sc1(arch);
-      if (!invalidate)
-        return false;
-      words.insert(words.end(), invalidate->begin(), invalidate->end());
-    }
+    const ConSanTargetProfile *target = consan_target_profile(arch);
+    if (target == nullptr || !consan_detail::append_moi_device_cache_refresh(words, *target))
+      return false;
     if (!append_add_literal_field(words, address_lo_vgpr,
                                   offsetof(ConSanMoiInlineExactShadowSlot, version), tmp_vgpr,
                                   arch) ||

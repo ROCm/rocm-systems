@@ -205,6 +205,16 @@ struct MoiEncodedSccRestoreRequest {
                                                          const MoiEncodedSccRestoreRequest &request,
                                                          const ConSanTargetProfile &target);
 
+/// Append the target's device-scope cache refresh before retrying a contended
+/// global publication.
+///
+/// Qualified gfx9 CDNA targets require an explicit buffer invalidate sequence;
+/// targets whose coherent atomic-load path needs no extra instruction succeed
+/// without appending words. Encoding failure returns false without partial
+/// output.
+[[nodiscard]] bool append_moi_device_cache_refresh(std::vector<uint32_t> &words,
+                                                   const ConSanTargetProfile &target);
+
 /// Canonical set of occupied half-open ranges in pristine executable text.
 ///
 /// Dense relay placement must reject original instructions already owned by
