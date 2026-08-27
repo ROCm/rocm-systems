@@ -2718,7 +2718,7 @@ template <typename PlannedPatch>
                             : static_cast<uint16_t>(base + 5u);
     call_return_sgpr = spill_backed ? *group_options.moi_record_replay_call_return_sgpr
                                     : static_cast<uint16_t>(base + 6u);
-    explicit_key = arch != ROCJITSU_CODE_ARCH_CDNA5;
+    explicit_key = !consan_arch_has_s_call_i64(arch);
     collapsed_spill_router = spill_backed && *call_return_sgpr == pc_sgpr &&
                              (!explicit_key || collapse_spill_router_for_explicit_key);
     island_capacity_words = moi_record_replay_entry_island_words(spill_backed);
@@ -2804,7 +2804,7 @@ template <typename PlannedPatch>
                                                                 *target);
   };
   if (entry_host != entry_hosts.end()) {
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (consan_arch_has_s_call_i64(arch)) {
       if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                         entry_host->second.host_offset + sizeof(uint32_t), pc_sgpr,
                                         call_match_sgpr, arch)) {
@@ -2847,7 +2847,7 @@ template <typename PlannedPatch>
   for (size_t route = 0; route < group.size(); ++route) {
     const PlannedPatch &planned = *group[route];
     const ConSanMoiCandidate &candidate = *planned.candidate;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (consan_arch_has_s_call_i64(arch)) {
       if (!append_moi_call_return_match(dispatcher_words, dispatcher_offset,
                                         candidate.anchor() + sizeof(uint32_t), pc_sgpr,
                                         call_match_sgpr, arch)) {

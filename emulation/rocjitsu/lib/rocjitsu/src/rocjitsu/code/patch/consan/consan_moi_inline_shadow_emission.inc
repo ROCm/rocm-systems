@@ -3296,7 +3296,7 @@ build_moi_borrowed_record_replay_entry(uint64_t island_text_offset, uint64_t bod
   const int64_t delta =
       static_cast<int64_t>(caller_return_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5))
+                               /*prefer_literal64=*/consan_arch_has_s_call_i64(arch)))
     return false;
   const auto compare = instrumentation::build_s_cmp_eq_u32(call_return_sgpr, pc_sgpr, arch);
   if (!compare)

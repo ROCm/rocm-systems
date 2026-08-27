@@ -377,7 +377,7 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   const int64_t delta =
       static_cast<int64_t>(original_entry_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, long_return_pc_sgpr, delta, /*minimum_words=*/0u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5)) {
+                               /*prefer_literal64=*/consan_arch_has_s_call_i64(arch))) {
     errors.emplace_back("ConSan MOI " + std::string(prologue_name) +
                         " could not encode its long return");
     return false;
@@ -414,7 +414,7 @@ append_record_replay_workgroup_capture(std::vector<uint32_t> &words,
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5))
+                               /*prefer_literal64=*/consan_arch_has_s_call_i64(arch)))
     return false;
   const auto restore_scc =
       instrumentation::build_s_cmp_lg_u32(saved_scc_sgpr, scalar_positive_inline_u32(0), arch);
@@ -489,7 +489,7 @@ build_moi_borrowed_record_replay_entry(uint64_t island_text_offset, uint64_t bod
   const int64_t delta =
       static_cast<int64_t>(target_text_offset) - static_cast<int64_t>(pc_after_getpc);
   if (!append_pc_delta_builder(words, arch, pc_sgpr, delta, /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5)) {
+                               /*prefer_literal64=*/consan_arch_has_s_call_i64(arch))) {
     return false;
   }
   const auto restore_scc =
@@ -620,7 +620,7 @@ emit_moi_local_indirect_entry_island(std::vector<uint8_t> &text, uint64_t island
                                static_cast<int64_t>(cave_text_offset) -
                                    static_cast<int64_t>(pc_after_getpc),
                                /*minimum_words=*/3u,
-                               /*prefer_literal64=*/arch == ROCJITSU_CODE_ARCH_CDNA5)) {
+                               /*prefer_literal64=*/consan_arch_has_s_call_i64(arch))) {
     errors.emplace_back(std::string(context) + " could not encode its indirect entry island");
     return false;
   }
