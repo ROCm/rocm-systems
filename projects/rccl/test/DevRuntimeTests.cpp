@@ -272,3 +272,34 @@ TEST_F(ComputeLsaSizeTest, SingleRank_ReturnsOne) {
   SetTopology({0});
   EXPECT_EQ(computeLsaSize(comm), 1);
 }
+
+
+// ---------------------------------------------------------------------------
+// ncclDevrIsOneLsaTeam: computeLsaSize(comm) == comm->nRanks. No conditional of
+// its own, and computeLsaSize is covered above, so these pin only the compare.
+// The fixture uses the cached path to hand it a chosen lsaSize.
+
+class DevrIsOneLsaTeamTest : public ::testing::Test {
+protected:
+  std::unique_ptr<ncclComm> commStorage;
+  ncclComm* comm = nullptr;
+
+  void SetUp() override {
+    commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    comm = commStorage.get();
+    comm->nRanks = 8;
+    comm->devrState.bigSize = 1 << 20;  // take computeLsaSize's cached path
+  }
+};
+
+// lsaSize == nRanks: a single team spans the comm.
+TEST_F(DevrIsOneLsaTeamTest, LsaSizeEqualsNRanks_ReturnsTrue) {
+  comm->devrState.lsaSize = 8;
+  EXPECT_TRUE(ncclDevrIsOneLsaTeam(comm));
+}
+
+// lsaSize < nRanks: the comm holds more than one team.
+TEST_F(DevrIsOneLsaTeamTest, LsaSizeBelowNRanks_ReturnsFalse) {
+  comm->devrState.lsaSize = 4;
+  EXPECT_FALSE(ncclDevrIsOneLsaTeam(comm));
+}
