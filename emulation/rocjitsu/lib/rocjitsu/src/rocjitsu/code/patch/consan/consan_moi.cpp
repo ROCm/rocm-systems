@@ -442,6 +442,38 @@ private:
   std::unordered_map<std::string_view, const ConSanSyncSequence *> sequences_by_event_identity_;
 };
 
+/// Resolve one normalized atomic site to the MOI ordering event qualified by
+/// the shared synchronization inventory. Unknown, ambiguous, insufficiently
+/// confident, and sequentially-consistent roles remain unsupported rather
+/// than being guessed independently by access and synchronization lowerers.
+[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
+atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
+                           bool in_kernel, const ConSanAtomicSite &site) {
+  const ConSanSyncEvent *event =
+      sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
+  if (event == nullptr)
+    return std::nullopt;
+  const ConSanSyncSequence *sequence = sync_index.sequence(event->identity);
+  if (sequence == nullptr ||
+      !consan_sync_confidence_meets(sequence->memory_role_confidence,
+                                    ConSanSemanticConfidence::Conservative)) {
+    return std::nullopt;
+  }
+  switch (sequence->memory_role) {
+  case ConSanSyncMemoryRole::Release:
+    return ConSanMoiAtomicEventKind::Release;
+  case ConSanSyncMemoryRole::Acquire:
+    return ConSanMoiAtomicEventKind::Acquire;
+  case ConSanSyncMemoryRole::AcquireRelease:
+    return ConSanMoiAtomicEventKind::AcquireRelease;
+  case ConSanSyncMemoryRole::Unknown:
+  case ConSanSyncMemoryRole::None:
+  case ConSanSyncMemoryRole::SequentiallyConsistent:
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] std::span<const uint8_t> active_moi_bytes(std::span<const uint8_t> original,
                                                         const ConSanTransformArtifacts &result) {
   return result.modified() ? std::span<const uint8_t>(result.replacement) : original;
@@ -608,21 +640,10 @@ ConSanTransformArtifacts try_patch_consan_moi(ConSanTransformArtifacts result,
        (supported_barrier_members > kCompactRecordReplayBarrierMemberLimit ||
         has_stranded_record_replay_barrier));
   const MoiSyncInventoryIndex sync_index(result);
-  const auto has_operational_atomic = [&](const auto &container, bool in_kernel) {
-    return std::ranges::any_of(container.atomic_sites, [&](const ConSanAtomicSite &site) {
-      return atomic_event_kind_for_site(sync_index, container.name, in_kernel, site).has_value();
-    });
-  };
   std::vector<AtomicRecordCandidate> operational_ordinary_atomics;
   append_ordered_ordinary_atomic_candidates(result, sync_index, operational_ordinary_atomics);
   const bool has_operational_atomic_or_fence =
-      std::ranges::any_of(
-          result.program_inventory.kernels(),
-          [&](const ConSanKernelInfo &kernel) { return has_operational_atomic(kernel, true); }) ||
-      std::ranges::any_of(result.program_inventory.functions(),
-                          [&](const ConSanFunctionInfo &function) {
-                            return has_operational_atomic(function, false);
-                          }) ||
+      !collect_moi_ordering_atomic_offsets(result, effective_options.moi_track_atomics).empty() ||
       !operational_ordinary_atomics.empty() ||
       std::ranges::any_of(result.program_inventory.sync().moi_fence_candidates,
                           &ConSanMoiFenceCandidate::eligible);

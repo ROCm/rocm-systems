@@ -213,6 +213,14 @@ events and the unique sequence containing an event. Absence and ambiguous
 sequence membership fail closed. Engines do not rebuild those joins through a
 raw lowering result or maintain engine-local lookup helpers.
 
+MOI's atomic-role lookup is adjacent to that immutable synchronization index
+and is shared by orchestration, access placement, and synchronization
+lowering. `collect_moi_ordering_atomic_offsets` derives the one physical-site
+set whose relocated ordinary-access bodies must remain reachable to a later
+ordering pass. Record/Replay and Sampled no longer qualify or enumerate this
+same semantic set independently; disabling atomic tracking produces no such
+placement constraint.
+
 Every consumer that recovers control flow from that inventory also uses
 `ConSanCfgBuildInputs`. This structural contract derives one sorted, unique set
 of block leaders, one kernel-entry ownership boundary set, and one bounded

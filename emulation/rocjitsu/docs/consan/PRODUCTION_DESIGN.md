@@ -6359,6 +6359,35 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DG: qualify ordering-atomic placement once
+
+- **One semantic lookup:** `atomic_event_kind_for_site` now lives beside the
+  immutable MOI synchronization index instead of inside a later native
+  synchronization emitter. It remains the fail-closed mapping from qualified
+  inventory roles to release, acquire, or acquire-release evidence.
+  `collect_moi_ordering_atomic_offsets` then derives one physical offset set
+  for ordering-aware access placement.
+- **Three consumers:** MOI orchestration uses the set to decide whether native
+  atomic/fence lowering is relevant. Record/Replay and Sampled use the same set
+  to place dual-role ordinary-access bodies after ordinary candidates, keeping
+  the later ordering wrapper within branch reach. Their duplicate kernel and
+  function scans and forward declarations are deleted; disabled atomic
+  tracking adds no placement constraint.
+- **Contract coverage:** Fifty focused host tests spanning qualified and
+  rejected atomic roles, aliases, dual-role access/ordering sites, disabled
+  forms, far routes, spills, and native transactions pass before the broader
+  gate. Existing paired atomic/device contracts exercise both engines across
+  every applicable target; this factoring introduces no new public type or
+  behavior to test separately.
+- **Accounting:** Across the five affected implementation files, physical
+  lines fall from 15,056 to 15,041, nonblank lines from 14,550 to 14,536, and
+  estimated comment-excluded code lines from 13,357 to 13,334. The slice adds
+  61 and deletes 76 physical implementation lines, a net deletion of 15.
+- **Checked-in gate:** The complete build, all 1,531 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

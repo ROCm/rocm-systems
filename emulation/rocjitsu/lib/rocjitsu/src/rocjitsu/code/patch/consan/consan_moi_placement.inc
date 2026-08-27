@@ -1,3 +1,27 @@
+/// Return the physical offsets whose ordinary-access bodies must be placed
+/// after ordinary candidates so a later ordering pass can still wrap their
+/// relocated guest instruction within SOPP reach. Record/Replay and Sampled
+/// use the same qualified synchronization inventory; disabled atomic tracking
+/// deliberately produces no placement constraint.
+[[nodiscard]] std::unordered_set<uint64_t>
+collect_moi_ordering_atomic_offsets(const ConSanTransformArtifacts &result, bool track_atomics) {
+  std::unordered_set<uint64_t> offsets;
+  if (!track_atomics)
+    return offsets;
+  const MoiSyncInventoryIndex sync_index(result);
+  const auto append_container = [&](const auto &container, bool in_kernel) {
+    for (const ConSanAtomicSite &site : container.atomic_sites) {
+      if (atomic_event_kind_for_site(sync_index, container.name, in_kernel, site))
+        offsets.insert(site.text_offset);
+    }
+  };
+  for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
+    append_container(kernel, true);
+  for (const ConSanFunctionInfo &function : result.program_inventory.functions())
+    append_container(function, false);
+  return offsets;
+}
+
 struct MoiLocalNopIsland {
   uint64_t text_offset = 0;
   bool claimed = false;

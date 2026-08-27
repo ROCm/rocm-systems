@@ -1,7 +1,3 @@
-[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
-                           bool in_kernel, const ConSanAtomicSite &site);
-
 [[nodiscard]] uint64_t sampled_reserved_barrier_island_count(const ConSanTransformArtifacts &result,
                                                              const ConSanOptions &options) {
   if (!options.moi_track_barriers)
@@ -143,20 +139,8 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
   // Sampled atomic metadata wraps the relocated guest instruction in a
   // second text-growth pass. Keep dual-role access/ordering sites at the tail
   // so their one-word nested anchors remain branch-reachable in large images.
-  const MoiSyncInventoryIndex sync_index(result);
-  std::unordered_set<uint64_t> ordering_atomic_offsets;
-  if (options.moi_track_atomics) {
-    const auto append_ordering_offsets = [&](const auto &container, bool in_kernel) {
-      for (const ConSanAtomicSite &site : container.atomic_sites) {
-        if (atomic_event_kind_for_site(sync_index, container.name, in_kernel, site))
-          ordering_atomic_offsets.insert(site.text_offset);
-      }
-    };
-    for (const ConSanKernelInfo &kernel : result.program_inventory.kernels())
-      append_ordering_offsets(kernel, true);
-    for (const ConSanFunctionInfo &function : result.program_inventory.functions())
-      append_ordering_offsets(function, false);
-  }
+  const std::unordered_set<uint64_t> ordering_atomic_offsets =
+      collect_moi_ordering_atomic_offsets(result, options.moi_track_atomics);
   std::stable_partition(candidates.begin(), candidates.end(), [&](const auto *candidate) {
     return !ordering_atomic_offsets.contains(candidate->anchor());
   });

@@ -571,34 +571,6 @@ ordinary_atomic_candidate_is_covered_by_eligible_fence(const ConSanTransformArti
   return normalized;
 }
 
-[[nodiscard]] std::optional<ConSanMoiAtomicEventKind>
-atomic_event_kind_for_site(const MoiSyncInventoryIndex &sync_index, std::string_view container_name,
-                           bool in_kernel, const ConSanAtomicSite &site) {
-  const ConSanSyncEvent *event =
-      sync_index.event(ConSanSyncEventKind::Atomic, container_name, in_kernel, site.text_offset);
-  if (event == nullptr)
-    return std::nullopt;
-  const ConSanSyncSequence *sequence = sync_index.sequence(event->identity);
-  if (sequence == nullptr ||
-      !consan_sync_confidence_meets(sequence->memory_role_confidence,
-                                    ConSanSemanticConfidence::Conservative)) {
-    return std::nullopt;
-  }
-  switch (sequence->memory_role) {
-  case ConSanSyncMemoryRole::Release:
-    return ConSanMoiAtomicEventKind::Release;
-  case ConSanSyncMemoryRole::Acquire:
-    return ConSanMoiAtomicEventKind::Acquire;
-  case ConSanSyncMemoryRole::AcquireRelease:
-    return ConSanMoiAtomicEventKind::AcquireRelease;
-  case ConSanSyncMemoryRole::Unknown:
-  case ConSanSyncMemoryRole::None:
-  case ConSanSyncMemoryRole::SequentiallyConsistent:
-    return std::nullopt;
-  }
-  return std::nullopt;
-}
-
 [[nodiscard]] std::optional<uint64_t>
 atomic_scalar_clause_for_site(const MoiSyncInventoryIndex &sync_index,
                               std::string_view container_name, bool in_kernel,

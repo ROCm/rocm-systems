@@ -555,6 +555,12 @@ authority. Reservation, scan, and final-validation code consume the same
 payload-word offset array; the three copied field inventories are deleted, and
 the existing focused ABI layout test pins every included word.
 
+MOI atomic-role qualification and access-placement ordering now have one
+inventory authority as well. The synchronization index owns the role lookup,
+and `collect_moi_ordering_atomic_offsets` supplies orchestration,
+Record/Replay, and Sampled from that result. The two engine-local kernel and
+function scans and their duplicate forward declarations are gone.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named
