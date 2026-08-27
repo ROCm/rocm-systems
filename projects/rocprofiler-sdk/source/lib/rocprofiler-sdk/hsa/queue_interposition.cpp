@@ -1713,6 +1713,16 @@ interposition_fini()
     // disable active interception
     s_intercept_active.store(false, std::memory_order_release);
 
+    // A fork child that never exec'd still runs this at exit, and everything below
+    // it is unsafe there: the registry wlock and the signal pool's lock may have
+    // been held by a thread that did not survive the fork, so acquiring them hangs
+    // the child, and destroying inherited HSA signals reaches into a runtime the
+    // child does not own. The child abandoned all of this state (D6) and is on its
+    // way out, so skip it -- the same treatment interposition_sync() and
+    // submit_inline_async() already give the fork generation. The atomic stores
+    // above are kept: they are safe and make the child's interception inert.
+    if(internal_threading::fork_stale()) return;
+
     // wait for any in-flight signal handlers to complete and clean up the signal pool
     interposition_sync();
 
