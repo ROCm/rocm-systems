@@ -45,6 +45,28 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
+# The guest's MODE.FP_ROUND is executed by setting the host's rounding mode --
+# fp_mode.h wraps each architectural operation in a ScopedFenv and lets the
+# hardware round. A compiler may assume the default rounding mode unless told
+# otherwise, and every compiler tried moves the arithmetic across the fesetround
+# call without this: v_fmac_f64 of 1.0 * 2^-53 + 1.0 under MODE.FP_ROUND=+inf
+# returned 1.0 where the guest should see 1.0 + 1ulp, and every directed mode
+# silently gave the round-to-nearest answer. Measured wrong without the flag and
+# right with it on GCC 13.4, clang 14, clang 15 and AMD clang 22 -- this is not
+# one compiler's quirk, and it is not avoided by building with amdclang.
+#
+# The standard spelling is `#pragma STDC FENV_ACCESS ON`; GCC does not implement
+# it, so the flag is what is portable between the two. It only forbids
+# optimisations that assume a rounding mode, so it cannot make arithmetic less
+# correct. It has to be global because fp_mode.h is header-only and inlines into
+# every ISA translation unit.
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+    OR CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+)
+    add_compile_options(-frounding-math)
+endif()
+
 find_package(Threads REQUIRED)
 
 # GCC 14+ emits false-positive -Wuninitialized on reinterpret_cast<uint32_t*>

@@ -211,4 +211,71 @@ TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExact
   }
 }
 
+/// @brief Both paths against the architecturally correct result, not against
+///        each other.
+///
+/// @details The tests above compare the scalar and SIMD paths. That catches a
+/// divergence but not a shared mistake, and it names whichever path it is given
+/// as the reference: when MODE.FP_ROUND stopped reaching the arithmetic, the
+/// scalar path returned the round-to-nearest answer under every mode and the
+/// failure read as "the two disagree" rather than "one is wrong".
+///
+/// These expectations are computed from the ISA definition rather than from the
+/// model. Both operands are chosen so the result lands on a rounding boundary,
+/// where the mode is the only thing that decides the answer:
+///
+///   a) 1.0 * 2^-53 + 1.0 is an exact tie, half an ulp above 1.0. Nearest
+///      rounds to even and keeps 1.0; +inf must step up one ulp; -inf and zero
+///      keep 1.0.
+///   b) 1.125 * 2^-53 + 1.25 lands 0.5625 ulp above 1.25. Nearest is past the
+///      halfway point and steps up, as does +inf; -inf and zero truncate.
+TEST(Vop2FmaF64SimdCorrectness, DirectedRoundingMatchesTheIsaNotTheOtherPath) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarGuard guard;
+
+  constexpr uint64_t kOne = 0x3FF0000000000000ULL;
+  constexpr uint64_t kOneAndAnEighth = 0x3FF2000000000000ULL;
+  constexpr uint64_t kOneAndAQuarter = 0x3FF4000000000000ULL;
+  constexpr uint64_t kTwoPowMinus53 = 0x3CA0000000000000ULL;
+
+  struct Case {
+    const char *what;
+    uint64_t src0;
+    uint64_t src1;
+    uint64_t accumulator;
+    // Indexed by MODE.FP_ROUND: 0 nearest-even, 1 +inf, 2 -inf, 3 zero.
+    std::array<uint64_t, 4> expected;
+  };
+
+  const Case cases[] = {
+      {"exact tie half an ulp above 1.0", kOne, kTwoPowMinus53, kOne, {kOne, kOne + 1, kOne, kOne}},
+      {"0.5625 ulp above 1.25",
+       kOneAndAnEighth,
+       kTwoPowMinus53,
+       kOneAndAQuarter,
+       {kOneAndAQuarter + 1, kOneAndAQuarter + 1, kOneAndAQuarter, kOneAndAQuarter}},
+  };
+
+  for (const Case &test_case : cases) {
+    RawInputs inputs{};
+    for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+      inputs[lane] = {test_case.src0, test_case.src1, test_case.accumulator};
+
+    for (uint32_t round = 0; round < 4; ++round) {
+      // Denorm mode is irrelevant here; nothing in these cases is subnormal.
+      const uint32_t mode = (round << 2) | (3u << 6);
+      const uint64_t want = test_case.expected[round];
+      const RunResult scalar = run_fmac(true, ~uint64_t{0}, mode, false, &inputs);
+      const RunResult simd = run_fmac(false, ~uint64_t{0}, mode, false, &inputs);
+      for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
+        EXPECT_EQ(scalar.output[lane], want)
+            << "scalar, " << test_case.what << ", round=" << round << ", lane=" << lane;
+        EXPECT_EQ(simd.output[lane], want)
+            << "simd, " << test_case.what << ", round=" << round << ", lane=" << lane;
+      }
+    }
+  }
+}
+
 } // namespace
