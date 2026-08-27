@@ -588,6 +588,10 @@ class TestCliBase(unittest.TestCase):
         # Removes cmds that are invalid
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
+            if "--memory-partition" in cmd:
+                # An ASIC which may support some modes, but not others - thus invalid
+                # is an acceptable response
+                cond = [*ok, amdsmi.AmdSmiStatus.INVAL]
             while self.openCurlyBrace in cmd:
                 items = cmd.split()
                 # Find gpu index. No --gpu, "all" or a bdf all target every device.
@@ -704,6 +708,9 @@ class TestCliBase(unittest.TestCase):
                     if value is None:
                         cmd = ""
                     else:
+                        # The sweep writes MAX before MIN, and that write can narrow the
+                        # range, so a value probed from the snapshot may no longer fit.
+                        cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
                         cmd = cmd.replace(nameStr, f"{clk_type} {bound} {value}", 1)
                 elif "clk_level" in nameStr:
                     clk_type = CLK_LEVEL_TYPES[nameStr]
