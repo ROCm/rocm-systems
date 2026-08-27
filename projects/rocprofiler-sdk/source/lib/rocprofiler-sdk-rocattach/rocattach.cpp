@@ -22,6 +22,7 @@
 
 #include "ptrace_session.hpp"
 
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -30,6 +31,7 @@
 #include <rocprofiler-sdk-rocattach/defines.h>
 #include <rocprofiler-sdk-rocattach/rocattach.h>
 #include <rocprofiler-sdk-rocattach/types.h>
+#include <rocprofiler-sdk/version.h>
 
 #include <fstream>
 #include <map>
@@ -310,9 +312,10 @@ setup(int pid)
     // ROCPROF_ATTACH_TOOL_LIBRARY override in a secure-execution context (setuid/setgid,
     // file capabilities, etc.), so an unprivileged user cannot cause a privileged attach
     // helper to inject an arbitrary library.
-    constexpr auto default_tool_lib_path = std::string_view{"librocprofiler-sdk-tool.so.1"};
-    auto           tool_lib_path_env     = std::string{default_tool_lib_path};
-    auto           tool_lib_path_override =
+    constexpr auto default_tool_lib_path = std::string_view{
+        "librocprofiler-sdk-tool.so." ROCPROFILER_STRINGIZE(ROCPROFILER_SDK_SOVERSION)};
+    auto tool_lib_path_env = std::string{default_tool_lib_path};
+    auto tool_lib_path_override =
         rocprofiler::common::get_env_optional("ROCPROF_ATTACH_TOOL_LIBRARY");
     if(rocprofiler::common::is_at_secure())
     {

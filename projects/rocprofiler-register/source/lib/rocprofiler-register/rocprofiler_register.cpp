@@ -150,6 +150,7 @@ static_assert(sizeof(bitset_t) ==
                   sizeof(rocprofiler_register_library_indentifier_t::handle),
               "bitset should be same at uint64_t");
 
+// rocprofiler-register is independently versioned and explicitly supports SDK ABI 1.
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so.1";
 constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
 constexpr auto rocprofiler_attach_lib_name         = "librocprofiler-sdk-attach.so.1";
