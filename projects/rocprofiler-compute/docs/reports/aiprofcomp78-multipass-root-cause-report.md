@@ -117,5 +117,5 @@ ls mat_exp/0/perfmon/pmc_perf*.yaml | wc -l
 
 ## References
 
-- Design: [Problem statement](../design/metric-counter-correction-problem-statement.md)
+- Design docs: branch `users/feizheng10/metric-correction-design` (PR #10655)
 - Fix PR: #10717
