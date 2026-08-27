@@ -1938,6 +1938,17 @@ TEST_F(InitMicrotest, InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset
   EXPECT_FALSE(c.get()->hasMloPart);
 }
 
+// mloPart=1 is the lowest partition index for fake HIP functions (fn 1-7).
+// Verify the boundary: mloPart=1 must trigger hasMloPart.
+TEST_F(InitMicrotest, InitTransportsRank_MloPart1_SetsHasMloPart) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[3].mloPart = 1;
+  InstallPeerInfoAllGather(c, specs);
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_TRUE(c.get()->hasMloPart);
+}
+
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
 // function-locals first read at :2347-2363, ~700 lines past the terminator. They execute (so they count
 // as covered) but nothing here can observe them, and deleting any of the four leaves the suite green.

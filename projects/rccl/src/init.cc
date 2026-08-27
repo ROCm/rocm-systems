@@ -1097,12 +1097,18 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
       deviceClass[0] = '\0';
       if (int64ToBusId(info->busId, busIdStr) == ncclSuccess) {
         (void)ncclOsGetPciDeviceClassByBusId(busIdStr, deviceClass, sizeof(deviceClass));
-        int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
-                    strncmp(deviceClass, "0x03", 4) == 0;
-        if (fn == 0) {
-          if (isGpu) info->mloPart = 0;
-        } else if (!isGpu) {
-          info->mloPart = fn;
+        // Only set mloPart for fake HIP functions (fn > 0 that aren't GPUs in
+        // sysfs). fn=0 GPUs keep mloPart as NCCL_TOPO_UNDEF — we can't
+        // distinguish non-partitioned GPUs from CPX partition 0, and setting
+        // mloPart=0 would disable GIN and NET GDR on non-partitioned systems.
+        // If lookup failed (deviceClass empty), leave mloPart undefined to
+        // avoid misclassifying a real GPU at fn>0 as a partition.
+        if (fn > 0 && deviceClass[0] != '\0') {
+          int isGpu = strncmp(deviceClass, PCI_ACCELERATOR_CLASS, strlen(PCI_ACCELERATOR_CLASS)) == 0 ||
+                      strncmp(deviceClass, "0x03", 4) == 0;
+          if (!isGpu) {
+            info->mloPart = fn;
+          }
         }
       }
     }
@@ -1506,7 +1512,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     if (comm->peerInfo[i].hostHash != comm->peerInfo[rank].hostHash) nNodes++;
     if (!comm->peerInfo[i].cuMemSupport) comm->cuMemSupport = 0;
-    if (comm->peerInfo[i].mloPart != -1) comm->hasMloPart = true;
+    if (comm->peerInfo[i].mloPart != NCCL_TOPO_UNDEF) comm->hasMloPart = true;
     for (int j = 0; j < i; j++) {
       // NVML device is agnostic to MloPart being used. With MloPart, each partition has a different GPU UUID.
       comm->hasMultiRankNvml = (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
