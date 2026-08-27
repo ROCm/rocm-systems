@@ -327,8 +327,14 @@ owns its evidence-specific relay width, scalar ABI, and decision to use a dense
 route. `MoiOccupiedTextRanges` gives access and barrier placement one canonical
 half-open range set, so every engine excludes access, barrier, fence, atomic,
 and previously patched guest instructions with the same overlap semantics.
-Target policy is therefore explicit at the caller while owner partitioning and
-relocation safety are target-independent shared mechanism.
+`claim_moi_dense_owner_relay_host` additionally owns kernel/function lookup,
+owner-local liveness proof, relocation decoding, and cross-group host
+reservation for Sampled and Inline Shadow. Target policy is therefore explicit
+at the caller while owner partitioning and relocation safety are
+target-independent shared mechanism. Record/Replay uses the same partition and
+range contracts but retains a specialized cached host search because it must
+also exclude qualified multi-instruction ordering sequences in very large
+generated objects.
 
 Most of this mechanism is currently reached through `lower_consan` inside
 `TransformResult` construction. That implementation is the sole place allowed

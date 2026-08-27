@@ -7139,6 +7139,24 @@ TEST(ConSanMoi, Cdna4SampledDenseRelayDoesNotConsumeAccessInLaterGroup) {
   };
   EXPECT_TRUE(std::ranges::none_of(result.patches, host_overlaps_access))
       << testing::PrintToString(result.patches);
+  std::vector<const ConSanPatchInfo *> relocated_hosts;
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind == ConSanPatchKind::TrampolineMoiIndirectBranchIsland &&
+        patch.original_size != 0u) {
+      relocated_hosts.push_back(&patch);
+    }
+  }
+  ASSERT_GE(relocated_hosts.size(), 2u) << testing::PrintToString(result.patches);
+  for (size_t first = 0; first < relocated_hosts.size(); ++first) {
+    for (size_t second = first + 1u; second < relocated_hosts.size(); ++second) {
+      const ConSanPatchInfo &lhs = *relocated_hosts[first];
+      const ConSanPatchInfo &rhs = *relocated_hosts[second];
+      EXPECT_TRUE(lhs.anchor_offset + lhs.original_size <= rhs.anchor_offset ||
+                  rhs.anchor_offset + rhs.original_size <= lhs.anchor_offset)
+          << "first=" << first << " second=" << second << ' '
+          << testing::PrintToString(result.patches);
+    }
+  }
 }
 
 TEST(ConSanMoi, Cdna4SampledSpillBackedDenseRouterPreservesExplicitKey) {

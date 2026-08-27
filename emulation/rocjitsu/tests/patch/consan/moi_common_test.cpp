@@ -3228,6 +3228,11 @@ TEST(ConSanMoi, DenseCandidatePartitionSeparatesOwnerCapacityAndBranchReach) {
   EXPECT_EQ(capacity_two.groups[0].candidates,
             (std::vector<const ConSanMoiCandidate *>{&candidates[3], &candidates[4]}));
   EXPECT_EQ(capacity_two.groups[0].first_candidate_index, 3u);
+  EXPECT_EQ(capacity_two.groups[0].anchors(), (std::vector<uint64_t>{20u, 40u}));
+  EXPECT_TRUE(capacity_two.groups[0].has_overlapping_entries(24u));
+  EXPECT_FALSE(capacity_two.groups[0].has_overlapping_entries(20u));
+  EXPECT_TRUE(capacity_two.groups[0].every_site_has_size(sizeof(uint32_t)));
+  EXPECT_FALSE(capacity_two.groups[0].every_site_has_size(2u * sizeof(uint32_t)));
   ASSERT_EQ(capacity_two.groups[1].candidates.size(), 1u);
   EXPECT_EQ(capacity_two.groups[1].candidates.front(), &candidates[0]);
   EXPECT_EQ(capacity_two.groups[1].first_candidate_index, 0u);

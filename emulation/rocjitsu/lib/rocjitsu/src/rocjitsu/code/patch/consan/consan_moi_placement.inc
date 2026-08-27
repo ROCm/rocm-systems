@@ -2787,6 +2787,61 @@ find_moi_dense_relay_host(const MoiResourcePlanningState &resource_state,
                                      candidates, search.owner_begin, claimed_host_ranges);
 }
 
+/// Find and reserve one liveness-safe relay host within a dense candidate
+/// group's exact kernel or helper owner.
+///
+/// The shared mechanism protects every access and synchronization site in the
+/// owner and prevents two independently planned groups from claiming the same
+/// original instructions. Engine-specific callers retain control of whether a
+/// host is needed, its word count, and the scalar bootstrap ABI.
+[[nodiscard]] std::optional<MoiDenseRelayHost> claim_moi_dense_owner_relay_host(
+    const ConSanResult &result, const consan_detail::MoiDenseCandidatePartition &partition,
+    const consan_detail::MoiDenseCandidateGroup &group, const ConSanOptions &options,
+    const ConSanOptions &group_options, rj_code_arch_t arch,
+    MoiResourcePlanningState &resource_state, std::span<const uint8_t> original_text,
+    const ConSanCandidateResourcePlan &group_resource, size_t host_word_count,
+    std::span<const uint64_t> anchors,
+    std::vector<std::pair<uint64_t, uint64_t>> &claimed_host_ranges) {
+  const std::vector<MoiSgprRange> bootstrap_ranges = moi_relocatable_host_scalar_ranges(
+      group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
+  MoiDenseOwnerLivenessProof owner_proof = resource_state.prepare_dense_liveness_for_owners(
+      group_resource.owner_descriptor_file_offsets, bootstrap_ranges);
+  const auto find_in = [&](const auto &container) {
+    const auto occupied = collect_moi_dense_owner_occupied_ranges(
+        container, partition.candidates_by_owner.at(group.owner));
+    return find_moi_dense_relay_host(
+        resource_state, original_text,
+        {
+            .owner_begin = container.entry_text_offset,
+            .owner_end = container.entry_text_offset + container.code_size,
+            .host_word_count = host_word_count,
+            .anchors = anchors,
+            .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
+            .owner_proof = owner_proof,
+            .bootstrap_ranges = bootstrap_ranges,
+        },
+        [&](uint64_t begin, uint64_t end) { return occupied.overlaps(begin, end); },
+        claimed_host_ranges);
+  };
+
+  std::optional<MoiDenseRelayHost> host;
+  if (group.owner.kind == ConSanProgramContainerKind::Kernel) {
+    const ConSanKernelInfo *kernel = result.program_inventory.find_kernel_by_name(group.owner.name);
+    if (kernel != nullptr)
+      host = find_in(*kernel);
+  } else {
+    const ConSanFunctionInfo *function =
+        result.program_inventory.find_function_by_name(group.owner.name);
+    if (function != nullptr)
+      host = find_in(*function);
+  }
+  if (host) {
+    claimed_host_ranges.emplace_back(host->host_offset,
+                                     host->host_offset + host_word_count * sizeof(uint32_t));
+  }
+  return host;
+}
+
 [[nodiscard]] RegisterSet
 dynamic_frame_save_registers_for_site(const MoiResourcePlanningState &state, uint64_t text_offset) {
   if (const auto cached = state.dynamic_frame_saves_by_site.find(text_offset);

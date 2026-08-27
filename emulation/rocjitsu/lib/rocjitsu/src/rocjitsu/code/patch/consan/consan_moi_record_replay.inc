@@ -254,12 +254,8 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       }
       const uint32_t group_entry_island_words = moi_record_replay_entry_island_words(
           group_options.automatic_moi_record_replay_sgpr_spill);
-      bool has_dense_neighbors = false;
-      for (size_t index = 1; index < group.candidates.size(); ++index) {
-        has_dense_neighbors |=
-            group.candidates[index]->anchor() <
-            group.candidates[index - 1u]->anchor() + group_entry_island_words * sizeof(uint32_t);
-      }
+      const bool has_dense_neighbors =
+          group.has_overlapping_entries(group_entry_island_words * sizeof(uint32_t));
       const bool has_stranded_entry =
           std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
             const size_t candidate_index = candidate_indices.at(candidate);
@@ -268,10 +264,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             return !compute_sopp_branch_simm16(candidate->anchor(), default_entry);
           });
       const bool explicit_anchors_fit =
-          arch == ROCJITSU_CODE_ARCH_CDNA5 ||
-          std::ranges::all_of(group.candidates, [](const ConSanMoiCandidate *candidate) {
-            return candidate->size() >= 2u * sizeof(uint32_t);
-          });
+          arch == ROCJITSU_CODE_ARCH_CDNA5 || group.every_site_has_size(2u * sizeof(uint32_t));
       const bool singleton_has_direct_island =
           group.candidates.size() == 1u &&
           local_entry_islands->has_reachable(group.candidates.front()->anchor(),
@@ -294,10 +287,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       if (!explicit_anchors_fit || singleton_has_direct_island ||
           (!(prefer_dense_neighbors && has_dense_neighbors) && !has_stranded_entry))
         continue;
-      std::vector<uint64_t> anchors;
-      anchors.reserve(group.candidates.size());
-      for (const ConSanMoiCandidate *candidate : group.candidates)
-        anchors.push_back(candidate->anchor());
+      const std::vector<uint64_t> anchors = group.anchors();
       const uint64_t dispatcher =
           access_island_begin + group.first_candidate_index * access_slot_words * sizeof(uint32_t);
       auto island =

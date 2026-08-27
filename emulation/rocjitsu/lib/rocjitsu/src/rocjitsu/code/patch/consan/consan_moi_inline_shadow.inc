@@ -286,7 +286,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       use_indirect_appended && local_entry_islands) {
     std::vector<std::pair<uint64_t, uint64_t>> claimed_dense_host_ranges;
     for (const auto &group : dense_candidates.groups) {
-      const bool owner_is_kernel = group.owner.kind == ConSanProgramContainerKind::Kernel;
       const ConSanCandidateResourcePlan *group_resource =
           group.candidates.empty() ? nullptr
                                    : resource_plan_for_candidate(result, *group.candidates.front());
@@ -296,12 +295,8 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                                                   group_resource->owner_descriptor_file_offsets);
       if (!moi_inline_dense_router_scalar_abi(group_options, arch))
         continue;
-      bool has_dense_neighbors = false;
-      for (size_t index = 1; index < group.candidates.size(); ++index) {
-        has_dense_neighbors |=
-            group.candidates[index]->anchor() <
-            group.candidates[index - 1u]->anchor() + kIndirectIslandWords * sizeof(uint32_t);
-      }
+      const bool has_dense_neighbors =
+          group.has_overlapping_entries(kIndirectIslandWords * sizeof(uint32_t));
       const bool has_stranded_entry =
           std::ranges::any_of(group.candidates, [&](const ConSanMoiCandidate *candidate) {
             const size_t candidate_index = candidate_indices.at(candidate);
@@ -310,10 +305,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             return !compute_sopp_branch_simm16(candidate->anchor(), default_entry);
           });
       const bool explicit_anchors_fit =
-          arch == ROCJITSU_CODE_ARCH_CDNA5 ||
-          std::ranges::all_of(group.candidates, [](const ConSanMoiCandidate *candidate) {
-            return candidate->size() >= 2u * sizeof(uint32_t);
-          });
+          arch == ROCJITSU_CODE_ARCH_CDNA5 || group.every_site_has_size(2u * sizeof(uint32_t));
       const bool singleton_has_direct_island =
           group.candidates.size() == 1u &&
           local_entry_islands->has_reachable(group.candidates.front()->anchor(),
@@ -324,57 +316,18 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       if (!explicit_anchors_fit || singleton_has_direct_island ||
           (!(arch == ROCJITSU_CODE_ARCH_CDNA5 && has_dense_neighbors) && !has_stranded_entry))
         continue;
-      std::vector<uint64_t> anchors;
-      anchors.reserve(group.candidates.size());
-      for (const ConSanMoiCandidate *candidate : group.candidates)
-        anchors.push_back(candidate->anchor());
+      const std::vector<uint64_t> anchors = group.anchors();
       const uint64_t dispatcher =
           access_island_begin + group.first_candidate_index * access_relay_words * sizeof(uint32_t);
       auto island = local_entry_islands->claim_reachable_from_all(anchors);
       if (island)
         retire_branch_relay_range(*island, kIndirectIslandWords);
       if (!island && group_resource != nullptr) {
-        const std::vector<MoiSgprRange> host_bootstrap_ranges = moi_relocatable_host_scalar_ranges(
-            group_options, MoiRelocatableHostScalarState::AccessRouter, arch);
-        MoiDenseOwnerLivenessProof host_owner_proof =
-            resource_state.prepare_dense_liveness_for_owners(
-                group_resource->owner_descriptor_file_offsets, host_bootstrap_ranges);
         constexpr size_t kHostWords = kIndirectIslandWords + 1u;
-        const auto find_container_host = [&](const auto &container) {
-          // A container can be split into several relay groups. A host for one
-          // group must not consume an access anchor owned by another group.
-          const auto occupied = collect_moi_dense_owner_occupied_ranges(
-              container, dense_candidates.candidates_by_owner.at(group.owner));
-
-          return find_moi_dense_relay_host(
-              resource_state, original_text,
-              {
-                  .owner_begin = container.entry_text_offset,
-                  .owner_end = container.entry_text_offset + container.code_size,
-                  .host_word_count = kHostWords,
-                  .anchors = anchors,
-                  .preapplied_reserved_ranges = options.preapplied_reserved_ranges,
-                  .owner_proof = host_owner_proof,
-                  .bootstrap_ranges = host_bootstrap_ranges,
-              },
-              [&](uint64_t begin, uint64_t end) { return occupied.overlaps(begin, end); },
-              claimed_dense_host_ranges);
-        };
-        std::optional<MoiDenseRelayHost> best_host;
-        if (owner_is_kernel) {
-          const ConSanKernelInfo *kernel =
-              result.program_inventory.find_kernel_by_name(group.owner.name);
-          if (kernel != nullptr)
-            best_host = find_container_host(*kernel);
-        } else {
-          const ConSanFunctionInfo *function =
-              result.program_inventory.find_function_by_name(group.owner.name);
-          if (function != nullptr)
-            best_host = find_container_host(*function);
-        }
+        auto best_host = claim_moi_dense_owner_relay_host(
+            result, dense_candidates, group, options, group_options, arch, resource_state,
+            original_text, *group_resource, kHostWords, anchors, claimed_dense_host_ranges);
         if (best_host) {
-          claimed_dense_host_ranges.emplace_back(
-              best_host->host_offset, best_host->host_offset + kHostWords * sizeof(uint32_t));
           island = best_host->host_offset + sizeof(uint32_t);
           dense_entry_hosts.emplace(dispatcher,
                                     MoiDenseEntryHost{

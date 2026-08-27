@@ -151,6 +151,33 @@ struct MoiDenseCandidateGroup {
   MoiDenseRouteOwner owner;
   std::vector<const ConSanMoiCandidate *> candidates;
   size_t first_candidate_index = 0;
+
+  /// Return the original-text anchors in their canonical group order.
+  [[nodiscard]] std::vector<uint64_t> anchors() const {
+    std::vector<uint64_t> result;
+    result.reserve(candidates.size());
+    for (const ConSanMoiCandidate *candidate : candidates)
+      result.push_back(candidate->anchor());
+    return result;
+  }
+
+  /// Return whether adjacent sites are too close to own independent entry
+  /// regions of `entry_bytes` each.
+  [[nodiscard]] bool has_overlapping_entries(uint64_t entry_bytes) const {
+    for (size_t index = 1; index < candidates.size(); ++index) {
+      if (candidates[index]->anchor() < candidates[index - 1u]->anchor() + entry_bytes)
+        return true;
+    }
+    return false;
+  }
+
+  /// Return whether every guest instruction provides at least `minimum_bytes`
+  /// of explicit anchor storage for a keyed dense route.
+  [[nodiscard]] bool every_site_has_size(uint32_t minimum_bytes) const {
+    return std::ranges::all_of(candidates, [&](const ConSanMoiCandidate *candidate) {
+      return candidate->size() >= minimum_bytes;
+    });
+  }
 };
 
 /// Shared, immutable partition of access candidates used by dense route

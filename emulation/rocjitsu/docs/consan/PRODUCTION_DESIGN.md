@@ -5430,6 +5430,34 @@ analysis completed.
   physical-gfx950 smoke remains the periodic physical gate; E2E validation
   remains outside this work.
 
+### Slice 5CA: make dense relay hosts one shared claim
+
+- **One host-claim mechanism:** Sampled and Inline Shadow now call
+  `claim_moi_dense_owner_relay_host` for typed kernel/function resolution,
+  owner-local access/synchronization exclusion, scalar-bootstrap liveness
+  proof, relocation decoding, and reservation. Their engine code retains only
+  the policy that decides whether a group needs a host and the evidence ABI
+  that determines its size.
+- **No cross-group alias:** Every successful relocated host is inserted into
+  one claim set before the next group is searched. This closes Sampled's prior
+  opportunity to reuse the same original instructions for two capacity-split
+  groups and makes its ownership rule match Inline Shadow and Record/Replay.
+  The existing 65-access CDNA4 test now requires at least two relocated hosts,
+  proves they do not consume any access anchor, and proves their ranges are
+  pairwise disjoint.
+- **Type-owned topology facts:** `MoiDenseCandidateGroup` now owns anchor
+  projection, neighboring-entry overlap, and minimum explicit-anchor size.
+  Focused unit assertions cover those operations; all three access engines
+  consume them instead of repeating the loops.
+- **Deletion accounting:** Implementation files add 101 and delete 118
+  physical lines, a net deletion of seventeen. Tests add twenty-three lines.
+  Neither old engine-local host search survives behind a wrapper.
+- **Checked-in gate:** All 1,528 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in
+  approximately 67 seconds. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
