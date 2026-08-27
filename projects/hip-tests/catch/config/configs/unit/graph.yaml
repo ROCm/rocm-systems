@@ -1408,7 +1408,7 @@ graph:
     <<: *level_2
     tags: [exec]
     # ROCM-22772: Temporarily disabled until multi-device graph is added
-    disabled: [amd_windows. amd_linux]
+    disabled: [amd_windows, amd_linux]
   Unit_hipGraphCrossDeviceLaunch_ExplicitNodes:
     <<: *level_2
     tags: [exec]
