@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 #include <unordered_map>
+#include <vector>
 
 #include "TestBed.hpp"
 #include "common/ErrCode.hpp"
@@ -448,6 +449,130 @@ TEST(Alloc, SideStreamKeySeparatesPriorities)
     EXPECT_EQ(streams.at(ncclSideStreamKey{busId, -1}), 1);
     EXPECT_EQ(streams.at(ncclSideStreamKey{busId, 0}), 2);
 }
+
+#if ROCM_VERSION >= 70000
+// ---------------------------------------------------------------------------
+// Side-stream pool under the cuMem/VMM allocator (NCCL_CUMEM_ENABLE=1).
+//
+// With cuMem enabled every device allocation goes through ncclCuMemAlloc, whose
+// ROCM-20370 residue scrub must reuse the pooled side stream while a scope is
+// active (instead of creating/destroying a private stream per allocation) and
+// must not disturb the pool's contents or refcount. These tests drive the real
+// VMM path directly; they are skipped where cuMem is unavailable at runtime.
+// ---------------------------------------------------------------------------
+
+// A cuMem allocation issued inside an active scope reuses the pooled stream
+// (leaves it intact, not churned), returns zeroed memory, and the stream is
+// still destroyed on scope exit so nothing lingers into the collective phase.
+TEST(Alloc, CuMemAllocReusesPooledSideStream)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CuMemAllocReusesPooledSideStream",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            if(!ncclCuMemEnable())
+            {
+                GTEST_SKIP() << "cuMem/VMM not enabled or unsupported in this environment";
+            }
+
+            constexpr int    dev  = 0;
+            constexpr size_t size = 8192;
+
+            hipStream_t pooled = nullptr;
+            {
+                ncclSideStreamScope scope(dev);
+                ASSERT_EQ(getSideStream(&pooled), ncclSuccess);
+                ASSERT_NE(pooled, nullptr) << "Scope must pool a side stream";
+
+                for(int allocIdx = 0; allocIdx < 2; ++allocIdx)
+                {
+                    // Real VMM allocation while the scope is held: the internal zero
+                    // must run on the pooled stream, leaving the pool untouched.
+                    // handlep is optional; pass nullptr so no CU* handle type is named.
+                    void* ptr = nullptr;
+                    ASSERT_EQ(
+                        ncclCuMemAlloc(&ptr, /*handlep=*/nullptr, ncclCuMemHandleType, size, /*manager=*/nullptr),
+                        ncclSuccess
+                    );
+                    ASSERT_NE(ptr, nullptr);
+
+                    hipStream_t afterAlloc = nullptr;
+                    ASSERT_EQ(getSideStream(&afterAlloc), ncclSuccess);
+                    EXPECT_EQ(afterAlloc, pooled)
+                        << "cuMem alloc " << allocIdx
+                        << " must reuse (not churn/replace) the pooled side stream";
+
+                    // Buffer must come back zeroed (calloc semantics preserved even
+                    // though the redundant caller-side memset was removed).
+                    std::vector<unsigned char> host(size, 0xAB);
+                    ASSERT_EQ(hipMemcpy(host.data(), ptr, size, hipMemcpyDeviceToHost), hipSuccess);
+                    for(size_t i = 0; i < size; ++i)
+                    {
+                        ASSERT_EQ(host[i], 0u) << "cuMem buffer not zeroed at offset " << i;
+                    }
+
+                    ASSERT_EQ(ncclCuMemFree(ptr, /*manager=*/nullptr), ncclSuccess);
+                }
+            }
+
+            // Scope exited: the pooled stream must be destroyed, HW queue freed.
+            hipStream_t afterScope = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&afterScope), ncclSuccess);
+            EXPECT_EQ(afterScope, nullptr)
+                << "No side stream may survive a cuMem-path scope into the collective phase";
+        },
+        {{"NCCL_CUMEM_ENABLE", "1"}}
+    );
+}
+
+// With no active scope, a cuMem allocation falls back to a private stream and
+// must not create or leak an entry in the pool.
+TEST(Alloc, CuMemAllocNoScopeLeavesPoolEmpty)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "CuMemAllocNoScopeLeavesPoolEmpty",
+        []()
+        {
+            ASSERT_EQ(hipSetDevice(0), hipSuccess);
+            if(!ncclCuMemEnable())
+            {
+                GTEST_SKIP() << "cuMem/VMM not enabled or unsupported in this environment";
+            }
+
+            constexpr size_t size = 8192;
+
+            // No scope active: pool empty before.
+            hipStream_t before = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&before), ncclSuccess);
+            ASSERT_EQ(before, nullptr);
+
+            void* ptr = nullptr;
+            ASSERT_EQ(
+                ncclCuMemAlloc(&ptr, /*handlep=*/nullptr, ncclCuMemHandleType, size, /*manager=*/nullptr),
+                ncclSuccess
+            );
+            ASSERT_NE(ptr, nullptr);
+
+            // The fallback private stream must not have populated the pool.
+            hipStream_t after = reinterpret_cast<hipStream_t>(0xdeadbeef);
+            ASSERT_EQ(getSideStream(&after), ncclSuccess);
+            EXPECT_EQ(after, nullptr)
+                << "cuMem alloc without a scope must not create a pooled side stream";
+
+            std::vector<unsigned char> host(size, 0xAB);
+            ASSERT_EQ(hipMemcpy(host.data(), ptr, size, hipMemcpyDeviceToHost), hipSuccess);
+            for(size_t i = 0; i < size; ++i)
+            {
+                ASSERT_EQ(host[i], 0u) << "cuMem buffer not zeroed at offset " << i;
+            }
+
+            ASSERT_EQ(ncclCuMemFree(ptr, /*manager=*/nullptr), ncclSuccess);
+        },
+        {{"NCCL_CUMEM_ENABLE", "1"}}
+    );
+}
+#endif // ROCM_VERSION >= 70000
 
 // When the device supports multiple priorities, the pool creates and returns
 // separate streams for the same device at each priority.
