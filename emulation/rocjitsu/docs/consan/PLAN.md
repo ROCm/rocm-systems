@@ -439,7 +439,9 @@ Fault mutation now applies directly to its already-planned pristine inventory,
 including in fault/perturbation composition; the recursive second analysis and
 its mutable `faults_preapplied` guard are gone. Perturbation composition retains
 the pristine semantic view only while translating its selected plan across the
-mutation.
+mutation. Sampled spill-backed operand recovery is likewise owned by each
+planned access patch and passed directly to emission instead of being mirrored
+through global mutable lowerer options.
 The next high-payoff seam is the raw mutable-options lowerer and its duplicated
 per-engine planning state, not another result adapter.
 

@@ -2087,7 +2087,7 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     std::span<const uint8_t> bytes, const ConSanMoiCandidate &candidate,
     const ConSanAccessRange &access_range, const ConSanOptions &options, rj_code_arch_t arch,
     uint32_t record_index, std::span<const uint32_t> prior_record_indices,
-    uint32_t window_bank_count, bool relocate_instruction,
+    uint32_t window_bank_count, bool spill_backed_operand_recovery, bool relocate_instruction,
     uint32_t pending_acquire_owner_bank_count,
     std::optional<uint16_t> preserved_lds_byte_offset_vgpr, const VgprSpillSequence *spill,
     std::optional<uint16_t> spilled_lds_byte_offset_vgpr, size_t sampled_causal_windows_offset,
@@ -2113,10 +2113,9 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
   const bool dedicated_bank_vgpr = options.moi_runtime_sample_stride > 1 || window_bank_count > 1;
   const uint16_t base_scratch_count = static_cast<uint16_t>((options.moi_sampled_check ? 7u : 5u) +
                                                             (dedicated_bank_vgpr ? 1u : 0u));
-  const uint16_t scratch_count =
-      static_cast<uint16_t>((options.moi_sampled_spill_backed_operand_recovery
-                                 ? sampled_spill_backed_scratch_count(options, candidate, arch)
-                                 : direct_sampled_scratch_count(options, candidate, arch)));
+  const uint16_t scratch_count = static_cast<uint16_t>(
+      (spill_backed_operand_recovery ? sampled_spill_backed_scratch_count(options, candidate, arch)
+                                     : direct_sampled_scratch_count(options, candidate, arch)));
   const bool reserve_two_address_replay_scratch =
       arch == ROCJITSU_CODE_ARCH_CDNA5 &&
       two_address_native_lds_offset_scale(candidate.mnemonic).value_or(0u) > 8u;
@@ -2826,10 +2825,11 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     std::optional<uint32_t> prior_first_record_index, uint32_t prior_access_range_count,
     uint32_t window_bank_count, size_t sampled_causal_windows_offset,
     size_t sampled_watchpoints_offset, size_t sampled_pending_acquires_offset,
-    uint32_t pending_acquire_owner_bank_count, const VgprSpillSequence *spill,
-    std::optional<uint32_t> private_epoch_offset, std::optional<uint32_t> private_owner_offset,
-    std::optional<uint16_t> private_owner_shift, bool runtime_workgroup_gate_in_body,
-    std::vector<std::string> &errors, uint32_t *guest_instruction_offset = nullptr,
+    uint32_t pending_acquire_owner_bank_count, bool spill_backed_operand_recovery,
+    const VgprSpillSequence *spill, std::optional<uint32_t> private_epoch_offset,
+    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
+    bool runtime_workgroup_gate_in_body, std::vector<std::string> &errors,
+    uint32_t *guest_instruction_offset = nullptr,
     uint32_t *guest_instruction_word_count = nullptr) {
   const auto &access_ranges = candidate.ranges;
   if (access_ranges.empty()) {
@@ -2842,7 +2842,6 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
                                       candidate.gfx1250_vgpr_msb_mode.value_or(0u) != 0u;
   const bool capture_high_bank_address =
       moi_access_requires_gfx1250_high_bank_address_capture(candidate, arch);
-  const bool spill_backed_operand_recovery = options.moi_sampled_spill_backed_operand_recovery;
   if (spill_backed_operand_recovery &&
       (spill == nullptr ||
        !sampled_access_supports_spill_backed_operand_recovery(options, candidate, arch))) {
@@ -3006,10 +3005,11 @@ append_sampled_workgroup_residue(std::vector<uint32_t> &words, const ConSanOptio
     auto range_words = build_direct_sampled_watchpoint_range_words(
         bytes, candidate, access_ranges[range_index], options, arch,
         first_record_index + range_index * window_bank_count, prior_record_indices,
-        window_bank_count, range_index == 0u && !spill_backed_operand_recovery,
-        pending_acquire_owner_bank_count, preserved_lds_byte_offset_vgpr, spill,
-        spilled_lds_byte_offset_vgpr, sampled_causal_windows_offset, sampled_watchpoints_offset,
-        sampled_pending_acquires_offset, runtime_workgroup_gate_in_body, errors,
+        window_bank_count, spill_backed_operand_recovery,
+        range_index == 0u && !spill_backed_operand_recovery, pending_acquire_owner_bank_count,
+        preserved_lds_byte_offset_vgpr, spill, spilled_lds_byte_offset_vgpr,
+        sampled_causal_windows_offset, sampled_watchpoints_offset, sampled_pending_acquires_offset,
+        runtime_workgroup_gate_in_body, errors,
         range_index == 0u ? &range_guest_instruction_offset : nullptr,
         range_index == 0u ? &range_guest_instruction_word_count : nullptr);
     if (!range_words)

@@ -5877,6 +5877,25 @@ analysis completed.
   across `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250`. E2E
   validation remains outside this deletion work.
 
+### Slice 5CR: keep Sampled operand recovery patch-local
+
+- **One owner for a candidate decision:** Whether an overlapping Sampled LDS
+  address is recovered from the VGPR spill is selected while planning one
+  access and stored on its `PlannedSampledPatch`. Planning and both final
+  emission paths now pass that value directly to the Sampled watchpoint
+  builder.
+- **Completed deletion:** The code-object-wide
+  `moi_sampled_spill_backed_operand_recovery` mutable option, its planning
+  publication, and its two final-emission reconstructions are gone. The
+  builder can no longer consume a stale decision left by another candidate.
+- **Accounting:** Implementation files add 17 and delete 25 physical lines
+  after formatting, a net deletion of eight.
+- **Checked-in gate:** All 168 Sampled and spill-backed focused host tests pass,
+  including CDNA4 full-pressure address recovery and gfx1250 dense routing.
+  All 1,531 ConSan host tests, all 172 HSA-hook tests, and all 2,878 generated
+  simulator-device tests across the five supported targets also pass. E2E
+  validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

@@ -608,6 +608,14 @@ Paths below are relative to `emulation/rocjitsu/`.
 implementation is split. They are not invitations to add unrelated state to a
 global result or options type.
 
+Within that compatibility lowerer, decisions whose scope is one candidate must
+remain on its plan. For example, Sampled decides during access planning whether
+an overlapping LDS address will be recovered from the authoritative spill.
+That decision is stored on `PlannedSampledPatch` and passed directly to the
+Sampled emitter; it is not copied into code-object-wide `ConSanOptions` and
+rediscovered during final emission. The same ownership rule guides the
+remaining resource-state cleanup.
+
 ## Invariants and failure model
 
 The following rules hold across every component:
