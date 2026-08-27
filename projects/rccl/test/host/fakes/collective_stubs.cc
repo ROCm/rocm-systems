@@ -18,6 +18,7 @@
 
 #include "nccl.h"
 #include "comm.h"
+#include "mem_manager.h"
 #include "enqueue.h"
 #include "ce_coll.h"
 #include "rma/rma.h"
