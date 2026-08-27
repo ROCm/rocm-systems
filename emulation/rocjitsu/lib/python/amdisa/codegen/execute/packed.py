@@ -643,28 +643,34 @@ def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
 
     V_PK_LSHL_ADD_U64 has two 64-bit values in each 128-bit value/addend
     operand and two 32-bit shift counts in its 64-bit shift operand. VGPR U64
-    sources supply both elements, while SGPR and non-register U64 sources
-    broadcast the low 64 bits. Its public LLVM profile explicitly disables
-    clamp and source modifiers, so the body intentionally consumes neither
-    field. Public LLVM selection patterns and the public CDNA5 description
-    define shift counts only in the inclusive range 0..4. ``lshl_masked``
-    keeps the host operation defined if an unsupported runtime value reaches
-    the callback; that fallback is not an architectural claim for counts above
-    4.
+    sources supply both elements, while scalar-backed U64 sources broadcast the
+    low 64 bits. Its public LLVM profile explicitly disables clamp and source
+    modifiers, so the body intentionally consumes neither field. The currently
+    proven shift-count range is 0..4; execution fails closed before any
+    destination write if either count of any active lane is outside that range.
     """
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     return '\n'.join(
         [
             '  uint64_t exec = wf.exec();',
+            '  std::array<PkU64Pair, 64> results{};',
             '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
             '    if (!(exec & (1ULL << lane))) continue;',
             f'    const auto values = read_pk_u64_pair({s0}, wf, lane);',
             f'    const auto shifts = read_pk_u32_pair({s1}, wf, lane);',
             f'    const auto addends = read_pk_u64_pair({s2}, wf, lane);',
-            '    // Public semantics cover shift counts 0..4. The masked helper only avoids host undefined behavior for unsupported values.',
+            '    if (shifts.lo > 4u || shifts.hi > 4u) {',
+            '      wf.report_instruction_execution_error(',
+            '          amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
+            '      return;',
+            '    }',
             '    const uint64_t result_lo = amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo;',
             '    const uint64_t result_hi = amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi;',
-            f'    write_pk_u64_pair({d}, wf, lane, {{result_lo, result_hi}});',
+            '    results[lane] = {result_lo, result_hi};',
+            '  }',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    write_pk_u64_pair({d}, wf, lane, results[lane]);',
             '  }',
         ]
     )

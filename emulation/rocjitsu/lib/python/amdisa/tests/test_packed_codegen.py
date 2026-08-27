@@ -296,8 +296,6 @@ def test_pk_lshl_add_u64_operates_on_two_independent_64_bit_elements():
     assert 'const auto values = read_pk_u64_pair(src0, wf, lane);' in cpp
     assert 'const auto shifts = read_pk_u32_pair(src1, wf, lane);' in cpp
     assert 'const auto addends = read_pk_u64_pair(src2, wf, lane);' in cpp
-    assert 'Public semantics cover shift counts 0..4' in cpp
-    assert 'only avoids host undefined behavior for unsupported values' in cpp
     assert (
         'amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo'
         in cpp
@@ -308,9 +306,22 @@ def test_pk_lshl_add_u64_operates_on_two_independent_64_bit_elements():
     )
     assert 'lshl_masked(values.lo, shifts.lo)' not in cpp
     assert 'lshl_masked(values.hi, shifts.hi)' not in cpp
-    assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
+    assert 'results[lane] = {result_lo, result_hi};' in cpp
+    assert 'write_pk_u64_pair(vdst, wf, lane, results[lane]);' in cpp
     assert 'inst_.neg' not in cpp
     assert 'inst_.clamp' not in cpp
+
+
+def test_pk_lshl_add_u64_rejects_unproven_counts_before_any_write():
+    cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
+
+    reject = 'if (shifts.lo > 4u || shifts.hi > 4u)'
+    report = 'wf.report_instruction_execution_error('
+    write = 'write_pk_u64_pair(vdst, wf, lane, results[lane]);'
+    assert reject in cpp
+    assert report in cpp
+    assert write in cpp
+    assert cpp.index(reject) < cpp.index(report) < cpp.index(write)
 
 
 def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
