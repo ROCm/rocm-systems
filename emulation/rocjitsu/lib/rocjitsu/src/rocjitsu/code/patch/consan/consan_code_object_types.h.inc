@@ -416,10 +416,10 @@ struct ConSanAccessOperandFacts {
 /// Shared access-stage record, completed by `ProgramInventoryBuilder` after
 /// instruction decode and cross-function provenance relay.
 ///
-/// The forward declaration permits kernel and function analysis records to
-/// stage accesses without reviving separate LDS and FLAT representations. The
-/// complete type and its construction-state contract are declared by the
-/// program-inventory layer later in `consan.h`.
+/// The forward declaration lets decoder helpers append directly to the
+/// builder-owned inventory collection without reviving container-owned LDS or
+/// FLAT representations. The complete type and its construction-state
+/// contract are declared by the program-inventory layer later in `consan.h`.
 struct ConSanAccessInventorySite;
 
 /// Immutable original-program facts and decoded semantic inventory for one
@@ -452,10 +452,6 @@ struct ConSanKernelInfo {
   bool decoded = false;
   bool uses_gfx1250_cluster_workgroup_id = false;
   ConSanKernelStats stats;
-  /// Builder-only access records awaiting stable identity, attribution,
-  /// normalized ranges, and typed limitation completion. Consumers use the
-  /// completed `ProgramInventory::access_sites()` projection.
-  std::vector<ConSanAccessInventorySite> access_sites;
   std::vector<ConSanOrdinaryMemorySite> ordinary_memory_sites;
   std::vector<ConSanBarrierSite> barrier_sites;
   std::vector<ConSanFenceSite> fence_sites;

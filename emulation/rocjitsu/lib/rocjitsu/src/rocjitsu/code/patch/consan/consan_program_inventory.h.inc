@@ -377,9 +377,10 @@ private:
 /// analysis. `view()` may publish a const facade while construction continues
 /// so legacy consumers can read containers, but the builder must not escape
 /// the transform. Once it is destroyed, every surviving inventory reference
-/// is immutable. `publish_decoded_accesses` consumes builder-only container
-/// staging after analysis has enriched provenance and deterministically appends
-/// the completed normalized-access projection.
+/// is immutable. Decoder output is staged only in the builder-owned access
+/// collection with immediate container attribution. `publish_decoded_accesses`
+/// completes stable identity, ranges, and limitations in place before the
+/// immutable inventory becomes a stage output.
 class ProgramInventoryBuilder {
 public:
   /// Start a fresh inventory for one pristine code-object image.
@@ -437,28 +438,17 @@ public:
 
   void set_semantic_arch_required(bool required) { storage_->semantic_arch_required = required; }
 
-  /// Complete and consume access facts staged by decoded containers.
+  /// Complete access facts staged directly in builder-owned storage.
   ///
   /// Existing completed accesses are retained so a mutable inventory revision
   /// can append a newly analyzed container without reconstructing prior facts.
-  /// Repeated publication is idempotent. Kernel staging vectors are cleared
-  /// after consumption, while function records gain a valid code-object
-  /// identity and therefore no longer qualify as pending global staging.
+  /// Repeated publication is idempotent because a completed record has a valid
+  /// code-object identity and no longer qualifies as pending decode output.
   void publish_decoded_accesses(std::span<const uint8_t> code_object_bytes) {
-    std::vector<ConSanAccessInventorySite> staged_function_accesses;
-    std::erase_if(storage_->access_sites, [&](ConSanAccessInventorySite &access) {
-      if (access.physical_id.code_object.valid())
-        return false;
-      staged_function_accesses.push_back(std::move(access));
-      return true;
-    });
-    for (ConSanKernelInfo &kernel : storage_->kernels) {
-      append_container_accesses(kernel, code_object_bytes);
-      kernel.access_sites.clear();
+    for (ConSanAccessInventorySite &access : storage_->access_sites) {
+      if (!access.physical_id.code_object.valid())
+        access = complete_access_site(access.container, access, code_object_bytes);
     }
-    for (const ConSanAccessInventorySite &access : staged_function_accesses)
-      storage_->access_sites.push_back(
-          complete_access_site(access.container, access, code_object_bytes));
   }
 
   /// Transfer normalized accesses in a staged executable range to their
@@ -469,9 +459,9 @@ public:
   /// symbol range. Existing records can therefore have been decoded through
   /// an overlapping symbol, while instructions introduced by the trampoline
   /// do not occur in the pristine inventory at all. This operation resolves
-  /// both cases without mutating builder-only container staging vectors.
+  /// both cases without creating a second container-owned access collection.
   void reattribute_access_range(uint64_t begin, uint32_t size, const ConSanKernelInfo &owner,
-                                const ConSanKernelInfo &decoded_range,
+                                std::span<const ConSanAccessInventorySite> decoded_accesses,
                                 std::span<const uint8_t> code_object_bytes) {
     const uint64_t end = begin + size;
     const ConSanProgramContainerRef reference = consan_program_container_ref(owner);
@@ -480,7 +470,17 @@ public:
           access.physical_id.original_text_offset < end)
         access.container = reference;
     }
-    append_container_accesses(decoded_range, reference, code_object_bytes, true);
+    for (const ConSanAccessInventorySite &access : decoded_accesses) {
+      ConSanAccessInventorySite completed =
+          complete_access_site(reference, access, code_object_bytes);
+      const bool duplicate = std::ranges::any_of(storage_->access_sites, [&](const auto &existing) {
+        return existing.container == reference && existing.physical_id == completed.physical_id &&
+               (existing.origin == ConSanAccessOrigin::Flat) ==
+                   (completed.origin == ConSanAccessOrigin::Flat);
+      });
+      if (!duplicate)
+        storage_->access_sites.push_back(std::move(completed));
+    }
   }
 
 private:
@@ -677,32 +677,6 @@ private:
     }
     return {ConSanAccessAddressSpace::Unresolved, ConSanAccessProvenance::UnresolvedFlatPointer,
             ConSanSemanticConfidence::Unsupported};
-  }
-
-  template <typename Container>
-  void append_container_accesses(const Container &container,
-                                 std::span<const uint8_t> code_object_bytes) {
-    append_container_accesses(container, consan_program_container_ref(container), code_object_bytes,
-                              false);
-  }
-
-  template <typename Container>
-  void append_container_accesses(const Container &container,
-                                 const ConSanProgramContainerRef &reference,
-                                 std::span<const uint8_t> code_object_bytes, bool unique) {
-    storage_->access_sites.reserve(storage_->access_sites.size() + container.access_sites.size());
-    const auto append = [&](ConSanAccessInventorySite access) {
-      const bool duplicate =
-          unique && std::ranges::any_of(storage_->access_sites, [&](const auto &existing) {
-            return existing.container == reference && existing.physical_id == access.physical_id &&
-                   (existing.origin == ConSanAccessOrigin::Flat) ==
-                       (access.origin == ConSanAccessOrigin::Flat);
-          });
-      if (!duplicate)
-        storage_->access_sites.push_back(std::move(access));
-    };
-    for (const ConSanAccessInventorySite &site : container.access_sites)
-      append(complete_access_site(reference, site, code_object_bytes));
   }
 
   std::shared_ptr<ConSanProgramInventoryStorage> storage_;

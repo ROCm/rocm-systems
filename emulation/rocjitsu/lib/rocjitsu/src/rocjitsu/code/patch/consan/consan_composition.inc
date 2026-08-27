@@ -105,8 +105,10 @@ void reattribute_preapplied_code_ranges(std::span<const uint8_t> code_object_byt
     decoded_range.text_file_offset = kernel->text_file_offset;
     decoded_range.code_size = range.size;
     decoded_range.has_text_range = true;
-    decode_kernel_stats(code_object_bytes, decoder, arch, decoded_range, result.warnings);
-    inventory.reattribute_access_range(range.text_offset, range.size, *kernel, decoded_range,
+    std::vector<ConSanAccessInventorySite> decoded_accesses;
+    decode_kernel_stats(code_object_bytes, decoder, arch, decoded_range, decoded_accesses,
+                        result.warnings);
+    inventory.reattribute_access_range(range.text_offset, range.size, *kernel, decoded_accesses,
                                        code_object_bytes);
     append_unique_sites(decoded_range.ordinary_memory_sites, kernel->ordinary_memory_sites);
     append_unique_sites(decoded_range.barrier_sites, kernel->barrier_sites);
@@ -742,11 +744,19 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   }
 
   for (ConSanKernelInfo &kernel : inventory_builder.kernels()) {
-    decode_kernel_stats(code_object_bytes, *decoder, arch, kernel, result.warnings);
+    decode_kernel_stats(code_object_bytes, *decoder, arch, kernel, inventory_builder.access_sites(),
+                        result.warnings);
   }
+  std::vector<ConSanAccessInventorySite> function_accesses;
   for (ConSanFunctionInfo &function : inventory_builder.functions())
-    decode_function_stats(code_object_bytes, *decoder, arch, function,
-                          inventory_builder.access_sites(), result.warnings);
+    decode_function_stats(code_object_bytes, *decoder, arch, function, function_accesses,
+                          result.warnings);
+  const auto append_function_accesses = [&] {
+    inventory_builder.access_sites().insert(inventory_builder.access_sites().end(),
+                                            std::make_move_iterator(function_accesses.begin()),
+                                            std::make_move_iterator(function_accesses.end()));
+    function_accesses.clear();
+  };
   const bool has_decode_error =
       std::ranges::any_of(
           result.program_inventory.kernels(),
@@ -756,6 +766,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
                             return function.stats.decode_error_count != 0u;
                           });
   if (has_decode_error) {
+    append_function_accesses();
     publish_access_inventory();
     result.outcome = ConSanTransformOutcome::Unsupported;
     result.warnings.emplace_back(
@@ -764,7 +775,8 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
   }
   relay_flat_pointer_provenance_across_calls(
       code_object_bytes, *code_object, arch, inventory_builder.kernels(),
-      inventory_builder.functions(), inventory_builder.access_sites(), result.warnings);
+      inventory_builder.functions(), function_accesses, result.warnings);
+  append_function_accesses();
   publish_access_inventory();
   if (options.flavor == ConSanFlavor::SuperCollider && !options.fault_dry_run &&
       options.sc_perturb_kind == ConSanPerturbationKind::None) {

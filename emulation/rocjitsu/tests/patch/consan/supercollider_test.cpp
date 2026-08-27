@@ -3804,10 +3804,7 @@ TEST(ConSan, ProbeLdsCheckTrapModeComparesCdna4AccvgprB128Reads) {
     ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
     ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
     EXPECT_FALSE(result.program_inventory.access_sites().front().operands.destination_vgpr);
-    EXPECT_EQ(result.program_inventory.kernels()
-                  .front()
-                  .access_sites.front()
-                  .operands.destination_accvgpr,
+    EXPECT_EQ(result.program_inventory.access_sites().front().operands.destination_accvgpr,
               test_case.acc_base);
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());

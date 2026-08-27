@@ -5247,7 +5247,8 @@ rocjitsu::ConSanResult auto_report_inline_shadow_transform_result() {
   access.operands.address_vgpr = 0u;
   access.operands.data_vgpr = 1u;
   access.mnemonic = "ds_store_b32";
-  kernel.access_sites.push_back(std::move(access));
+  access.container = rocjitsu::consan_program_container_ref(kernel);
+  inventory.access_sites().push_back(std::move(access));
   inventory.kernels().push_back(std::move(kernel));
   inventory.publish_decoded_accesses(instruction_bytes);
   inventory.access_sites().front().execution_owner_descriptor_file_offsets = {

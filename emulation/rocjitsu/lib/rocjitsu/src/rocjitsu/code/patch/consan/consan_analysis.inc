@@ -1636,6 +1636,7 @@ void classify_instruction(const Instruction &inst, ConSanKernelStats &stats) {
 }
 
 void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
+                     std::vector<ConSanAccessInventorySite> &accesses,
                      uint64_t instruction_text_offset) {
   const std::string_view mnemonic = inst.mnemonic();
   if (!mnemonic.starts_with("ds_") || is_ds_register_lane_operation(mnemonic))
@@ -1664,13 +1665,15 @@ void record_lds_site(const Instruction &inst, ConSanKernelInfo &kernel,
     site.operands.second_data_vgpr = vgpr_index(inst.src_operand(2));
   }
   site.mnemonic = std::string(mnemonic);
-  kernel.access_sites.push_back(std::move(site));
+  site.container = consan_program_container_ref(kernel);
+  accesses.push_back(std::move(site));
 }
 
 [[nodiscard]] std::optional<ConSanLdsAccessKind>
 record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t> instruction_bytes,
-                                ConSanKernelInfo &kernel, uint64_t instruction_text_offset,
-                                rj_code_arch_t arch) {
+                                ConSanKernelInfo &kernel,
+                                std::vector<ConSanAccessInventorySite> &accesses,
+                                uint64_t instruction_text_offset, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
   const bool gfx1250_async_load =
       arch == ROCJITSU_CODE_ARCH_CDNA5 && mnemonic.starts_with("global_load_async_to_lds_b");
@@ -1700,8 +1703,9 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
     site.operands.address_vgpr = vgpr_index(inst.src_operand(gfx1250_async_load ? 0 : 1));
     site.supported_mvp = site.operands.address_vgpr.has_value();
     site.mnemonic = std::string(mnemonic);
-    kernel.access_sites.push_back(std::move(site));
-    return kernel.access_sites.back().kind;
+    site.container = consan_program_container_ref(kernel);
+    accesses.push_back(std::move(site));
+    return accesses.back().kind;
   }
 
   const bool is_supported_load =
@@ -1731,7 +1735,8 @@ record_direct_lds_transfer_site(const Instruction &inst, std::span<const uint8_t
   // The destination is M0 plus an implicit physical-lane slot: four bytes for
   // DWORD, sixteen for DWORDX3/DWORDX4. No address or payload VGPR is defined.
   site.mnemonic = std::string(mnemonic);
-  kernel.access_sites.push_back(std::move(site));
+  site.container = consan_program_container_ref(kernel);
+  accesses.push_back(std::move(site));
   return ConSanLdsAccessKind::Write;
 }
 
@@ -1898,8 +1903,9 @@ void record_fence_site(const Instruction &inst, ConSanKernelInfo &kernel,
 }
 
 void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker,
-                      ConSanKernelInfo &kernel, uint64_t instruction_text_offset,
-                      rj_code_arch_t arch, std::span<const uint8_t> instruction_bytes) {
+                      ConSanKernelInfo &kernel, std::vector<ConSanAccessInventorySite> &accesses,
+                      uint64_t instruction_text_offset, rj_code_arch_t arch,
+                      std::span<const uint8_t> instruction_bytes) {
   const std::string_view mnemonic = inst.mnemonic();
   if (!mnemonic.starts_with("flat_"))
     return;
@@ -2002,7 +2008,8 @@ void record_flat_site(const Instruction &inst, const FlatPointerTracker &tracker
   }
   count_flat_address_space_hint(kernel.stats, site.flat_address_space_hint);
   site.mnemonic = std::string(mnemonic);
-  kernel.access_sites.push_back(std::move(site));
+  site.container = consan_program_container_ref(kernel);
+  accesses.push_back(std::move(site));
 }
 
 [[nodiscard]] bool is_bounded_ordinary_memory_instruction(std::string_view mnemonic) {
@@ -2431,6 +2438,7 @@ void record_atomic_site(const Instruction &inst, const FlatPointerTracker &track
 
 void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &decoder,
                          rj_code_arch_t arch, ConSanKernelInfo &kernel,
+                         std::vector<ConSanAccessInventorySite> &accesses,
                          std::vector<std::string> &warnings,
                          const FlatPointerTracker *entry_tracker = nullptr,
                          const std::unordered_map<uint64_t, uint64_t> *call_targets = nullptr,
@@ -2551,14 +2559,15 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
     const std::span<const uint8_t> instruction_bytes =
         text.subspan(offset, static_cast<size_t>(inst_size));
     if (const auto direct_lds_kind = record_direct_lds_transfer_site(
-            *inst, instruction_bytes, kernel,
+            *inst, instruction_bytes, kernel, accesses,
             kernel.entry_text_offset + static_cast<uint64_t>(offset), arch)) {
       if (*direct_lds_kind == ConSanLdsAccessKind::Read)
         ++kernel.stats.lds_read_count;
       else if (*direct_lds_kind == ConSanLdsAccessKind::Write)
         ++kernel.stats.lds_write_count;
     }
-    record_lds_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
+    record_lds_site(*inst, kernel, accesses,
+                    kernel.entry_text_offset + static_cast<uint64_t>(offset));
     const std::span<const uint8_t> previous_instruction_bytes =
         previous_size == 0 ? std::span<const uint8_t>{}
                            : text.subspan(previous_offset, previous_size);
@@ -2567,7 +2576,7 @@ void decode_kernel_stats(std::span<const uint8_t> code_object_bytes, Decoder &de
                         kernel.entry_text_offset + static_cast<uint64_t>(previous_offset),
                         previous_instruction_bytes, arch);
     record_fence_site(*inst, kernel, kernel.entry_text_offset + static_cast<uint64_t>(offset));
-    record_flat_site(*inst, flat_pointer_tracker, kernel,
+    record_flat_site(*inst, flat_pointer_tracker, kernel, accesses,
                      kernel.entry_text_offset + static_cast<uint64_t>(offset), arch,
                      instruction_bytes);
     record_ordinary_memory_site(*inst, flat_pointer_tracker, kernel,
@@ -2598,8 +2607,9 @@ void decode_function_stats(
   range.code_size = function.code_size;
   range.has_text_range = true;
 
-  decode_kernel_stats(code_object_bytes, decoder, arch, range, warnings, entry_tracker,
-                      call_targets, call_states);
+  std::vector<ConSanAccessInventorySite> range_accesses;
+  decode_kernel_stats(code_object_bytes, decoder, arch, range, range_accesses, warnings,
+                      entry_tracker, call_targets, call_states);
 
   function.decoded = range.decoded;
   function.uses_gfx1250_cluster_workgroup_id = range.uses_gfx1250_cluster_workgroup_id;
@@ -2614,11 +2624,11 @@ void decode_function_stats(
   if (lds_load_api || lds_store_api) {
     const ConSanLdsAccessKind expected_kind =
         lds_load_api ? ConSanLdsAccessKind::Read : ConSanLdsAccessKind::Write;
-    const auto terminal = std::ranges::find_if(
-        range.access_sites.rbegin(), range.access_sites.rend(), [&](const auto &site) {
+    const auto terminal =
+        std::ranges::find_if(range_accesses.rbegin(), range_accesses.rend(), [&](const auto &site) {
           return site.origin == ConSanAccessOrigin::Flat && site.kind == expected_kind;
         });
-    if (terminal != range.access_sites.rend() &&
+    if (terminal != range_accesses.rend() &&
         (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown ||
          terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::MaybePrivate)) {
       if (terminal->flat_address_space_hint == ConSanFlatAddressSpaceHint::Unknown)
@@ -2633,10 +2643,10 @@ void decode_function_stats(
     }
   }
   const ConSanProgramContainerRef container = consan_program_container_ref(function);
-  for (ConSanAccessInventorySite &access : range.access_sites)
+  for (ConSanAccessInventorySite &access : range_accesses)
     access.container = container;
-  accesses.insert(accesses.end(), std::make_move_iterator(range.access_sites.begin()),
-                  std::make_move_iterator(range.access_sites.end()));
+  accesses.insert(accesses.end(), std::make_move_iterator(range_accesses.begin()),
+                  std::make_move_iterator(range_accesses.end()));
 }
 
 template <typename Container>
@@ -2812,14 +2822,15 @@ void relay_flat_pointer_provenance_across_calls(std::span<const uint8_t> code_ob
     std::vector<ConSanAccessInventorySite> pass_accesses;
     for (const ConSanKernelInfo &kernel : kernels) {
       ConSanKernelInfo decoded;
+      std::vector<ConSanAccessInventorySite> ignored_accesses;
       decoded.name = kernel.name;
       decoded.entry_text_offset = kernel.entry_text_offset;
       decoded.text_file_offset = kernel.text_file_offset;
       decoded.code_size = kernel.code_size;
       decoded.has_text_range = kernel.has_text_range;
       try {
-        decode_kernel_stats(code_object_bytes, *relay_decoder, arch, decoded, pass_warnings,
-                            nullptr, &call_targets, &call_states);
+        decode_kernel_stats(code_object_bytes, *relay_decoder, arch, decoded, ignored_accesses,
+                            pass_warnings, nullptr, &call_targets, &call_states);
       } catch (...) {
         functions = original_functions;
         accesses = original_accesses;

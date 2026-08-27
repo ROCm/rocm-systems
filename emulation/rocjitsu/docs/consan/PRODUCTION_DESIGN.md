@@ -4503,6 +4503,44 @@ analysis completed.
   5AC completed the periodic physical-gfx950 gate. E2E validation remains
   outside this work.
 
+### Slice 5AS: delete kernel-owned access staging
+
+- **One access owner:** `ConSanKernelInfo` no longer owns an access vector.
+  Kernel and function decode now construct `ConSanAccessInventorySite` records
+  directly in the builder-owned program inventory. Container attribution is
+  assigned when each record is created, so no later pass has to recover its
+  owner from the vector that happened to contain it.
+- **Single in-place publication pass:** Publishing the inventory now completes
+  the code-object identity of each still-unpublished access record in place.
+  Already-completed records are retained unchanged, making repeated publication
+  idempotent without removing, sorting, or reinserting records according to
+  temporary container ownership.
+- **Bounded temporary decode state:** Function call-provenance relay still needs
+  a function-local replacement vector while it computes an all-or-nothing
+  result. That vector is an algorithm-local transaction, not another stored
+  representation. Successful decode appends kernel records followed by
+  function records in the historical deterministic order; decode failure also
+  preserves the successfully decoded function prefix. Preapplied-range decode
+  similarly passes a local decoded span directly to unique inventory
+  reattribution.
+- **Contract coverage:** The real decoder, inventory, observation-policy,
+  evidence-requirement, pipeline, SuperCollider, and HSA-hook fixtures now stage
+  access facts through the sole builder-owned collection. Focused inventory
+  tests prove container attribution before publication, in-place identity
+  completion, idempotent publication, physical-alias canonicalization,
+  preapplied-range reattribution, deterministic order, and preservation of
+  already-published revisions.
+- **Deletion accounting:** Production changes add 78 and delete 85 physical
+  lines, a net deletion of seven lines. Tests add 81 and delete 65 lines while
+  replacing direct writes to the removed representation with its public
+  construction contract and strengthening state-transition coverage.
+- **Completed checked-in gate:** The host gate passes all 1,512 runnable tests
+  with the two expected benchmark-object skips; all 194 HSA-hook tests pass;
+  and all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 65.97 seconds. The periodic physical-gfx950
+  gate also passes all 593 tests in 435.17 seconds. E2E validation remains
+  outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

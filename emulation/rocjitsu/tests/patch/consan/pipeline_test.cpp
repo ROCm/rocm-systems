@@ -266,7 +266,8 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   shared_access.decoded_width_bits = 32u;
   shared_access.mnemonic = "ds_read_b32";
   shared_access.operands.address_vgpr = 0u;
-  kernel_a.access_sites.push_back(shared_access);
+  shared_access.container = consan_program_container_ref(kernel_a);
+  inventory_builder.access_sites().push_back(shared_access);
   inventory_builder.kernels().push_back(kernel_a);
   ConSanKernelInfo kernel_b;
   kernel_b.name = "kernel_b";
