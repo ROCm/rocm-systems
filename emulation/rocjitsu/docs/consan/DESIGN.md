@@ -345,6 +345,10 @@ to adapt typed inputs back to one fresh `ConSanOptions`, and it returns only
 `ConSanTransformArtifacts`. No library header exposes the private complete
 working result. The transform fuzzer and explicitly mechanism-level host tests
 declare that private entry locally while the lowerer is decomposed.
+The runtime-bound MOI retry likewise accepts and returns only
+`ConSanTransformArtifacts`; its private mutable working result is reconstructed
+inside the lowerer and cannot cross the production pipeline or retry-test
+boundary.
 
 ### Transformation result
 

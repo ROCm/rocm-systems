@@ -483,11 +483,6 @@ ConSanResult try_patch_consan_moi(ConSanResult result, const ConSanOptions &opti
                                   std::span<const uint8_t> code_object_bytes, rj_code_arch_t arch) {
   const major_image_ownership::ScopedOwner result_owner(
       major_image_ownership::OwnerKind::ResultImage, result.replacement);
-  if (result.moi_stage_warning_begin <= result.warnings.size())
-    result.warnings.resize(result.moi_stage_warning_begin);
-  else
-    result.errors.emplace_back("ConSan MOI inventory has an invalid warning boundary");
-
   ConSanOptions effective_options = options;
   if (effective_options.moi_owner_source == ConSanMoiOwnerSource::Automatic) {
     effective_options.moi_owner_source =

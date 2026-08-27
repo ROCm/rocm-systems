@@ -1284,7 +1284,6 @@ consan_moi_sampled_begin_causal_claim(std::span<ConSanMoiSampledCausalWindow> wi
 /// inventory produced for the same bytes and engine. This is used after a
 /// runtime-sized report buffer and, optionally, a live fault selection become
 /// available.
-[[nodiscard]] ConSanResult
-retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSanOptions inventory_options,
-                                      const ConSanMoiInventoryRetryConfig &retry,
-                                      std::span<const uint8_t> code_object_bytes);
+[[nodiscard]] ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
+    ConSanTransformArtifacts inventory, ConSanOptions inventory_options,
+    const ConSanMoiInventoryRetryConfig &retry, std::span<const uint8_t> code_object_bytes);

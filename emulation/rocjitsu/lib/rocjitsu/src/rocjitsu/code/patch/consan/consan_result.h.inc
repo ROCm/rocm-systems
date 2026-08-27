@@ -205,10 +205,6 @@ struct ConSanResult : ConSanTransformArtifacts {
   std::vector<ConSanPerturbationCandidate> perturbation_candidates;
   std::vector<ConSanPerturbationPlan> perturbation_plans;
   std::vector<ConSanMoiCandidate> moi_candidates;
-  /// Warning boundary immediately before MOI planning. A validated retry with
-  /// a runtime-allocated report buffer trims only the prior MOI-stage
-  /// diagnostics while retaining parser and semantic-analysis warnings.
-  size_t moi_stage_warning_begin = 0;
 };
 
 /// Whether a semantic claim is at least as strong as the weakest confidence a

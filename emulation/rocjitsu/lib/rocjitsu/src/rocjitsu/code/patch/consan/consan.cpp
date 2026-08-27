@@ -281,13 +281,15 @@ bool consan_supercollider_supports_access(const ConSanAccessInventorySite &acces
       arch);
 }
 
-ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSanOptions options,
-                                                   const ConSanMoiInventoryRetryConfig &retry,
-                                                   std::span<const uint8_t> code_object_bytes) {
+ConSanTransformArtifacts retry_patch_consan_moi_from_inventory(
+    ConSanTransformArtifacts inventory_artifacts, ConSanOptions options,
+    const ConSanMoiInventoryRetryConfig &retry, std::span<const uint8_t> code_object_bytes) {
   const major_image_ownership::ScopedOwner input_owner(major_image_ownership::OwnerKind::InputImage,
                                                        code_object_bytes.data(),
                                                        code_object_bytes.size());
   try {
+    ConSanResult inventory;
+    static_cast<ConSanTransformArtifacts &>(inventory) = std::move(inventory_artifacts);
     options.patched_image_growth_input_bytes = code_object_bytes.size();
     if (options.flavor != ConSanFlavor::Moi)
       inventory.errors.emplace_back("ConSan MOI inventory retry requires the MOI flavor");
@@ -310,8 +312,6 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
       inventory.errors.emplace_back(
           "ConSan MOI inventory retry requires an unmodified semantic inventory");
     }
-    if (inventory.moi_stage_warning_begin > inventory.warnings.size())
-      inventory.errors.emplace_back("ConSan MOI inventory retry has an invalid warning boundary");
     if (!inventory.errors.empty()) {
       inventory.outcome = ConSanTransformOutcome::Invalid;
       return finalize_consan_result(std::move(inventory), code_object_bytes);
@@ -334,6 +334,10 @@ ConSanResult retry_patch_consan_moi_from_inventory(ConSanResult inventory, ConSa
     }
 
     static_cast<BoundRuntimeResources &>(options) = retry.resources;
+    // The retry replaces diagnostics from the unbound sizing attempt. The
+    // immutable inventory, policy, and coverage records carry its semantic
+    // output without requiring warning provenance in private working state.
+    inventory.warnings.clear();
     const bool has_late_fault = retry.fault && retry.fault->has_fault_mutation();
     if (has_late_fault && retry.fault->fault_dry_run) {
       inventory.errors.emplace_back(

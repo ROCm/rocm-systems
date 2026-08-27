@@ -298,12 +298,11 @@ TransformResult retry_transform_consan_pristine_moi_inventory(
       .resources = resources,
       .fault = mutation,
   };
-  ConSanResult retry_inventory;
-  static_cast<ConSanTransformArtifacts &>(retry_inventory) =
+  ConSanTransformArtifacts retry_inventory =
       std::move(static_cast<ConSanTransformArtifacts &>(inventory));
   if (!inventory.moi_retry_inventory_available_)
     retry_inventory.errors.emplace_back("ConSan MOI retry requires a pristine inventory result");
-  ConSanResult retried = retry_patch_consan_moi_from_inventory(
+  ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
       std::move(retry_inventory), std::move(inventory_options), retry, code_object_bytes);
   return TransformResult::publish_optional(code_object_bytes, request, transform_policy,
                                            runtime_policy, debug, mutation, capabilities, resources,

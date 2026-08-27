@@ -472,7 +472,7 @@ TEST(ConSanMoi, ReportBufferRetryMatchesFreshRecordReplayTransform) {
   options.moi_report_buffer_address = 0x123456780000ull;
   options.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   const ConSanResult fresh = test_lower_consan(bytes, options);
-  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options,
       ConSanMoiInventoryRetryConfig{
           .resources = static_cast<const BoundRuntimeResources &>(options),
@@ -520,7 +520,7 @@ TEST(ConSanMoi, ReportBufferRetryHandlesRecordReplaySyncInventory) {
   options.moi_report_buffer_size = report_plan.required_bytes;
   options.moi_report_layout = *bound_layout;
   const ConSanResult fresh = test_lower_consan(bytes, options);
-  const ConSanResult retried = retry_patch_consan_moi_from_inventory(
+  const ConSanTransformArtifacts retried = retry_patch_consan_moi_from_inventory(
       std::move(inventory), inventory_options,
       ConSanMoiInventoryRetryConfig{
           .resources = static_cast<const BoundRuntimeResources &>(options),
@@ -564,7 +564,7 @@ TEST(ConSanMoi, ReportBufferRetryRejectsMismatchedOrMutableInventory) {
   resources.moi_report_buffer_size = consan_moi_report_buffer_min_bytes(2, 0, 0, 0);
   const auto expect_invalid = [&](ConSanResult inventory, std::span<const uint8_t> retry_bytes,
                                   std::string_view expected_error) {
-    const ConSanResult result = retry_patch_consan_moi_from_inventory(
+    const ConSanTransformArtifacts result = retry_patch_consan_moi_from_inventory(
         std::move(inventory), inventory_options,
         ConSanMoiInventoryRetryConfig{.resources = resources, .fault = std::nullopt}, retry_bytes);
     EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);

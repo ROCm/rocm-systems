@@ -5486,6 +5486,34 @@ analysis completed.
   `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
   periodic physical gate; E2E validation remains outside this work.
 
+### Slice 5CC: close the raw MOI retry boundary
+
+- **Typed ownership in both directions:** The runtime-bound MOI retry now
+  accepts and returns `ConSanTransformArtifacts`. Only its internal lowering
+  body reconstructs `ConSanResult`; the production pipeline and retry-focused
+  tests can no longer transport private candidates or resolved-register
+  mirrors across that boundary.
+- **Deleted false warning provenance:** The private
+  `moi_stage_warning_begin` field and its validation/reset paths are deleted.
+  The production projection had never transported that field into a retry, so
+  it could not preserve the distinction its comment claimed. Retry now
+  explicitly replaces all unbound-attempt diagnostics while immutable
+  inventory, policy, coverage, and mutation artifacts carry the semantic
+  result.
+- **Test boundary:** A compile-time assertion pins the retry's artifact-only
+  signature. Existing typed-pipeline, exact fresh-versus-retry image,
+  synchronization-inventory, late-fault, and malformed-inventory tests cover
+  the behavior. The optional external-object benchmark no longer reads the
+  private MOI candidate vector merely to print diagnostic counters.
+- **Deletion accounting:** Implementation files add fifteen and delete
+  twenty-three physical lines, a net deletion of eight. Tests add and delete
+  twenty-one lines. No compatibility overload retains the raw input or output
+  signature.
+- **Checked-in gate:** All 1,528 ConSan host tests and all 172 HSA-hook tests
+  pass. All 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. Slice 5BM's physical-gfx950 smoke remains the
+  periodic physical gate; E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

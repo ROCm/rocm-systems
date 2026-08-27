@@ -287,7 +287,7 @@ void reset_inventory_for_fault_planning(const ConSanOptions &options, ConSanResu
   // The mutation stage must observe the reused result exactly as if semantic
   // analysis and fault planning had run, without inheriting a MOI lowering
   // outcome or any mutation-stage state from the sizing pass.
-  result.warnings.resize(result.moi_stage_warning_begin);
+  result.warnings.clear();
   result.outcome = ConSanTransformOutcome::Unchanged;
   result.mutation.fault.requested = requested_fault_mutation_count(options);
   result.mutation.fault.planned = 0;
@@ -834,7 +834,6 @@ try_patch_consan_impl(std::span<const uint8_t> code_object_bytes, const ConSanOp
   }
 
   if (options.flavor == ConSanFlavor::Moi) {
-    result.moi_stage_warning_begin = result.warnings.size();
     // Incremental MOI passes reparse their current result. Release the
     // pristine inventory parser before entering them so its backing image,
     // section objects and names, and derived state cannot overlap every

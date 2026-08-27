@@ -81,8 +81,8 @@ inline constexpr uint32_t kRdna4Wave64AllVgprsGranulated = 63;
 /// production. This test helper deliberately cannot reconstruct requirements
 /// from emitted patches, resource assignments, or original object bytes.
 [[nodiscard]] ConSanMoiAutoReportInventory
-plan_test_moi_evidence_inventory(const ConSanResult &result, const ConSanOptions &options,
-                                 uint64_t caller_ceiling_bytes = 0) {
+plan_test_moi_evidence_inventory(const ConSanTransformArtifacts &result,
+                                 const ConSanOptions &options, uint64_t caller_ceiling_bytes = 0) {
   const std::optional<uint64_t> maximum_access_probe_count =
       options.max_patches_is_expert_limit ? std::optional<uint64_t>{options.max_patches}
                                           : std::nullopt;
@@ -111,7 +111,7 @@ plan_test_moi_evidence_inventory(const ConSanResult &result, const ConSanOptions
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
 namespace kd = rocr::llvm::amdhsa;
 
-testing::AssertionResult consan_patch_succeeded(const ConSanResult &result) {
+testing::AssertionResult consan_patch_succeeded(const ConSanTransformArtifacts &result) {
   if (result.errors.empty())
     return testing::AssertionSuccess();
   return testing::AssertionFailure() << testing::PrintToString(result.errors);
