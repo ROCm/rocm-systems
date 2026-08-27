@@ -1,5 +1,7 @@
 schema: spec-driven
 
+source: https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi
+
 context: |
   AMD SMI: C++ library (libamd_smi.so) plus Python bindings, CLI (amd-smi),
   Go shim, and Rust bindings. Sources live at projects/amdsmi in the

@@ -47,6 +47,7 @@ from .model import (
     Scenario,
     Site,
     slugify,
+    source_org,
 )
 
 E = html.escape
@@ -225,32 +226,88 @@ def delta_ledger(counts: Dict[str, int]) -> str:
     return f'<span class="ledger">{"".join(chips)}</span>' if chips else ""
 
 
-def tape(groups: Sequence[Sequence[bool]], done: int, total: int, cls: str = "") -> str:
-    """One cell per task, grouped by phase: the page's ruler, used to measure.
+#: The smallest cell that still reads as a cell: a 4px box -- 1px border, 2px
+#: interior, 1px border -- plus a 1.5px gap, so two neighbours do not merge
+#: their borders into one line. Measured against a 30-cell strip drawn at box
+#: widths 2/3/3.5/4/5/6/8px: below this a *hollow* cell collapses to a hairline
+#: and the tape reads as a solid smear with pale patches, which is exactly the
+#: lie being fixed. Seeing the unchecked cells is the whole point of cells.
+MIN_CELL_PITCH = 5.5
 
-    Filled is done, hollow is not, so it reads in greyscale and in print.
-    """
-    segs = [
-        f'<span class="seg" style="flex:{len(g)}">'
-        + "".join('<i class="on"></i>' if d else "<i></i>" for d in g)
+#: Width in px of each tape variant's cell track, measured in the browser on a
+#: 1280px page: the fluid masthead gauge, the fluid change bar, and the fixed
+#: 150px ``sm`` tape shared by the change index and the per-phase summary.
+TAPE_TRACK = {"wide": 600.0, "": 689.0, "sm": 113.0}
+
+
+def tape_max_cells(cls: str = "") -> int:
+    """How many cells this tape variant can draw and still be countable."""
+    return int(TAPE_TRACK.get(cls, TAPE_TRACK[""]) // MIN_CELL_PITCH)
+
+
+def _group_title(name: str, flags: Sequence[bool]) -> str:
+    return f"{name or 'ungrouped'} \u2014 {sum(1 for d in flags if d)}/{len(flags)} done"
+
+
+def _cells(groups: Sequence[Tuple[str, List[bool]]]) -> str:
+    """One cell per task: filled is done, hollow is not."""
+    return "".join(
+        f'<span class="seg" style="flex:{len(f)}" title="{E(_group_title(n, f))}">'
+        + "".join('<i class="on"></i>' if d else "<i></i>" for d in f)
         + "</span>"
-        for g in groups
-        if g
-    ]
-    if not segs:
+        for n, f in groups
+    )
+
+
+def _bars(groups: Sequence[Tuple[str, List[bool]]]) -> str:
+    """One proportional segment per group, filled in proportion to its progress.
+
+    Segment widths are ``flex:len(group)`` exactly as in :func:`_cells`, and the
+    fill is that group's completion, so the green covers ``done/total`` of the
+    track in both drawings and the two modes cannot disagree.
+    """
+    out = []
+    for n, f in groups:
+        pct = 100.0 * sum(1 for d in f if d) / len(f)
+        out.append(
+            f'<span class="seg" style="flex:{len(f)}" title="{E(_group_title(n, f))}">'
+            f'<i class="on" style="width:{pct:.4g}%"></i></span>'
+        )
+    return "".join(out)
+
+
+def tape(groups: Sequence[Tuple[str, Sequence[bool]]], done: int, total: int, cls: str = "") -> str:
+    """The page's ruler: how much of a change's work is done, by group.
+
+    One cell per task while cells stay distinguishable -- filled is done, hollow
+    is not, so it reads in greyscale and in print. Past :func:`tape_max_cells`
+    that drawing is a lie: the cells are narrower than their own borders and the
+    tape smears. There it becomes a proportional bar of one segment per group,
+    which answers the better question anyway -- not "which of 155 identical
+    ticks is unchecked" but "which phase is lagging".
+    """
+    kept = [(n, [bool(d) for d in f]) for n, f in groups if len(f)]
+    if not kept:
         return ""
+    cells = sum(len(f) for _, f in kept)
+    bar = cells > tape_max_cells(cls)
     pct = int(round(100 * done / total)) if total else 0
     return (
         f'<span class="prog {cls}">'
-        f'<span class="tape" role="img" aria-label="{done} of {total} tasks done, {pct}%">'
-        f"{''.join(segs)}</span>"
+        f'<span class="tape{" bar" if bar else ""}" role="img" '
+        f'aria-label="{done} of {total} tasks done, {pct}%">'
+        f"{_bars(kept) if bar else _cells(kept)}</span>"
         f'<span class="pnum"><b>{done}</b>/{total}</span></span>'
     )
 
 
 def change_tape(chg: Change, cls: str = "") -> str:
+    """A change's own tape, grouped by phase."""
     return tape(
-        [[t.done for t in p.tasks] for p in chg.phases], chg.task_done_count, chg.task_count, cls
+        [(p.name, [t.done for t in p.tasks]) for p in chg.phases],
+        chg.task_done_count,
+        chg.task_count,
+        cls,
     )
 
 
@@ -371,7 +428,7 @@ def render_tasks(chg: Change, A: Anchors, inline: Inline) -> str:
         )
         head = (
             f'<summary><span class="pn">{E(ph.name or "ungrouped")}</span>'
-            f"{tape([[t.done for t in ph.tasks]], ph.done_count, len(ph.tasks), 'sm')}"
+            f"{tape([(ph.name, [t.done for t in ph.tasks])], ph.done_count, len(ph.tasks), 'sm')}"
             "</summary>"
         )
         rows.append(
@@ -691,6 +748,8 @@ def render_project(
         )
         blocks.append("".join(render_change(c, inline, A, gmap, site) for c in changes))
 
+    blocks.append(render_provenance(project))
+
     numbers, gauges = render_stats(project, len(edges))
     main = (
         f'<header class="mast" id="{pre}top">'
@@ -751,6 +810,45 @@ def render_project(
     return "".join(rail), main
 
 
+# --------------------------------------------------------------------------
+# provenance
+# --------------------------------------------------------------------------
+
+#: The format these documents are written in, and the CLI that maintains them.
+OPENSPEC_URL = "https://github.com/Fission-AI/OpenSpec"
+
+#: The one piece of vocabulary this otherwise generic tool special-cases: a
+#: GitHub organisation whose bare slug is not how the organisation writes its
+#: own name. Any org not listed renders as its own segment, unchanged.
+ORG_LABEL = {"ROCm": "AMD ROCm"}
+
+
+def render_provenance(project: Project) -> str:
+    """Where these specs came from: the code, the format, the owner.
+
+    A provenance line, not a banner. Every part is derived -- from the corpus's
+    own ``source:`` key or from the git checkout around it -- so a corpus that
+    answers neither simply names the format and stops.
+    """
+    rows: List[str] = []
+
+    def item(label: str, value: str, href: str = "") -> None:
+        tag = f'<a class="pv" href="{E(href)}">' if href else '<span class="pv">'
+        rows.append(
+            f'<span class="pi"><span class="pl">{E(label)}</span>'
+            f"{tag}{E(value)}</{'a' if href else 'span'}></span>"
+        )
+
+    url = getattr(project, "source", "") or ""
+    if url:
+        item("source", re.sub(r"^https?://", "", url), url)
+    item("format", "OpenSpec", OPENSPEC_URL)
+    org = source_org(url)
+    if org:
+        item("maintained by", ORG_LABEL.get(org, org))
+    return f'<footer class="prov">{"".join(rows)}</footer>'
+
+
 def _kind_of(project: Project) -> str:
     """The openspec subdirectories this corpus actually has."""
     if project.capabilities and project.changes:
@@ -808,10 +906,12 @@ def render_stats(project: Project, n_edges: int) -> Tuple[str, str]:
         done = sum(c.task_done_count for c in changes)
         total = sum(c.task_count for c in changes)
         if total:
+            # the site's grouping is by change, not by phase: phase names repeat
+            # across changes and mean different things in each
             gauge(
                 "tasks",
                 tape(
-                    [[t.done for p in c.phases for t in p.tasks] for c in changes],
+                    [(c.cid, [t.done for p in c.phases for t in p.tasks]) for c in changes],
                     done,
                     total,
                     "wide",

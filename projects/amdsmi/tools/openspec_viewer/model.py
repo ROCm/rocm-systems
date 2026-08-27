@@ -147,6 +147,10 @@ class Project:
     capabilities: List[Capability]
     changes: List[Change]
     slug: str = ""
+    #: canonical https URL of the code these specs describe, or "" when the
+    #: corpus names none and sits in no git checkout. See :func:`parse_source`
+    #: and :func:`git_source` for the two derivations.
+    source: str = ""
 
     @property
     def requirement_count(self) -> int:
@@ -511,6 +515,150 @@ def parse_context(config: Path) -> str:
     return ""
 
 
+# --------------------------------------------------------------------------
+# provenance: the code these specs describe
+# --------------------------------------------------------------------------
+#
+# Two derivations, tried in order. A corpus may name its source outright in
+# config.yaml, which is the escape hatch for one kept outside any checkout of
+# the code it specifies; otherwise the surrounding git checkout is asked. A
+# corpus that answers neither has no source, and the page simply says less.
+
+
+def parse_source(config: Path) -> str:
+    """The optional ``source:`` URL in config.yaml, read without a yaml module.
+
+    A plain scalar at column zero, so an indented ``source:`` inside the
+    ``context:`` block scalar -- or a commented-out one -- is not mistaken for
+    the key itself.
+    """
+    if not config.is_file():
+        return ""
+    for line in config.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = re.match(r"^source:\s*(.*?)\s*$", line)
+        if m:
+            return m.group(1).strip("'\"")
+    return ""
+
+
+#: ``git@host:org/repo.git`` and ``https://host/org/repo(.git)`` alike
+RE_REMOTE = re.compile(r"^(?:ssh://)?(?:git@|https?://)([^/:]+)[:/]+(.+?)(?:\.git)?/*$")
+#: a linked worktree's ``.git`` is a file holding this
+RE_GITDIR = re.compile(r"^gitdir:\s*(.+?)\s*$", re.M)
+#: ``[remote "origin"]``, whatever spacing the file uses
+RE_ORIGIN = re.compile(r'^\[remote\s+"origin"\]')
+
+
+def git_source(root: Path) -> str:
+    """A ``/tree/<branch>/<project path>`` URL for the checkout ``root`` sits in.
+
+    Empty when there is no checkout above ``root``, or it has no ``origin``.
+    """
+    found = _git_dir(root)
+    if not found:
+        return ""
+    work, gitdir = found
+    base = _github_url(_git_origin(_git_common(gitdir) / "config"))
+    if not base:
+        return ""
+    branch = _git_branch(gitdir)
+    if not branch:
+        return base
+    # the project is the directory holding openspec/, not openspec/ itself
+    rel = _relative(root.parent, work)
+    return f"{base}/tree/{branch}" + (f"/{rel}" if rel else "")
+
+
+def source_org(url: str) -> str:
+    """The organisation segment of a source URL: ``https://host/ORG/repo/...``."""
+    m = re.match(r"^https?://[^/]+/([^/]+)", url)
+    return m.group(1) if m else ""
+
+
+def _git_dir(root: Path) -> Optional[Tuple[Path, Path]]:
+    """``(work tree root, .git directory)`` for the checkout containing ``root``.
+
+    Handles a linked worktree, where ``.git`` is a *file* holding
+    ``gitdir: <path>`` rather than the directory itself.
+    """
+    for work in [root] + list(root.parents):
+        dot = work / ".git"
+        try:
+            if dot.is_dir():
+                return work, dot
+            if dot.is_file():
+                m = RE_GITDIR.search(dot.read_text(encoding="utf-8", errors="replace"))
+                if m:
+                    linked = Path(m.group(1)).expanduser()
+                    if not linked.is_absolute():
+                        linked = work / linked
+                    if linked.is_dir():
+                        return work, linked
+        except OSError:
+            return None
+    return None
+
+
+def _git_common(gitdir: Path) -> Path:
+    """The shared .git directory: a worktree keeps config in the main one."""
+    common = gitdir / "commondir"
+    try:
+        if common.is_file():
+            rel = common.read_text(encoding="utf-8", errors="replace").strip()
+            if rel:
+                return (gitdir / rel).resolve() if not Path(rel).is_absolute() else Path(rel)
+    except OSError:
+        pass
+    return gitdir
+
+
+def _git_origin(config: Path) -> str:
+    """The ``origin`` remote's url out of a git config, parsed as plain ini."""
+    try:
+        if not config.is_file():
+            return ""
+        lines = config.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    in_origin = False
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("["):
+            in_origin = bool(RE_ORIGIN.match(line))
+        elif in_origin:
+            m = re.match(r"^url\s*=\s*(.+?)\s*$", line)
+            if m:
+                return m.group(1)
+    return ""
+
+
+def _git_branch(gitdir: Path) -> str:
+    """The checked-out branch, or the raw commit when HEAD is detached."""
+    try:
+        head = (gitdir / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    m = re.match(r"^ref:\s*refs/heads/(.+)$", head)
+    return m.group(1) if m else head
+
+
+def _github_url(remote: str) -> str:
+    """``git@github.com:ORG/REPO.git`` -> ``https://github.com/ORG/REPO``."""
+    m = RE_REMOTE.match(remote.strip())
+    if not m or "/" not in m.group(2):
+        return ""
+    return "https://{}/{}".format(m.group(1), m.group(2))
+
+
+def _relative(path: Path, base: Path) -> str:
+    """``path`` below ``base`` as a posix string, or "" when it is not below."""
+    try:
+        rel = path.resolve().relative_to(base.resolve())
+    except ValueError:
+        return ""
+    return "" if str(rel) == "." else rel.as_posix()
+
+
 def project_slug(root: Path) -> str:
     """Stable id for a project: the name of the directory holding openspec/.
 
@@ -541,6 +689,7 @@ def load_project(root: Path) -> Project:
         capabilities=caps,
         changes=changes,
         slug=project_slug(root),
+        source=parse_source(root / "config.yaml") or git_source(root),
     )
     _tag_project(project, project.slug)
     _uniquify([project])

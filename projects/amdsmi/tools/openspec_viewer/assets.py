@@ -524,6 +524,17 @@ tbody tr:nth-child(even){background:var(--raise)}
 .prog.wide{min-width:220px}
 .prog.wide .tape{height:13px;gap:7px}
 .prog.wide .pnum{font-size:12px}
+/* too many tasks to draw one countable cell each: one proportional segment per
+   group instead, filled by that group's progress. Segment widths are the same
+   flex ratios the cells use, so the green still covers done/total of the
+   track and the two drawings agree. The outline is an inset shadow rather than
+   a border, so it costs no layout width: a fill of 100% then reaches both
+   edges exactly as a filled cell does, and the green covers done/total of the
+   track to the pixel. */
+.tape.bar .seg{display:block;overflow:hidden;min-width:2px;border-radius:1px;
+  box-shadow:inset 0 0 0 1px var(--tick)}
+.tape.bar .seg i{display:block;border:0;border-radius:1px 0 0 1px;height:100%;
+  min-width:0}
 
 /* ---- change ---- */
 .chg{margin:0 0 40px;padding-top:16px}
@@ -622,6 +633,18 @@ h5.dh:first-child{margin-top:0}
 .owner:hover{text-decoration:underline}
 .dspec-head .anchor{margin-left:auto}
 
+/* ---- provenance: a line, not a banner ---- */
+.prov{display:flex;flex-wrap:wrap;align-items:baseline;gap:7px 30px;
+  margin:54px 0 0;padding-top:14px;border-top:1px solid var(--line-2);
+  font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.prov .pi{display:flex;align-items:baseline;gap:9px;min-width:0}
+.prov .pl{font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--faint);white-space:nowrap}
+.prov .pv{color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.prov a.pv{text-decoration:none;border-bottom:1px solid var(--line)}
+.prov a.pv:hover{color:var(--fg);border-bottom-color:var(--dim)}
+
 /* ---- search ---- */
 mark.hl{background:var(--mark);color:var(--mark-fg);border-radius:2px;padding:0 1px}
 .hide{display:none!important}
@@ -685,6 +708,10 @@ body.searching .oview,body.searching .chg-lead,body.searching .drule{display:non
   .doc .dsum{display:none}
   .tape i{border-color:#666}
   .tape i.on{background:#000;border-color:#000}
+  /* a shadow may not print; the bar's track needs a real border on paper */
+  .tape.bar .seg{box-shadow:none;border:1px solid #666}
+  .prov{color:#333}
+  .prov a.pv{border-bottom:none}
   .dl,.delta{border:1px solid #000!important;background:none!important;color:#000!important}
 }
 """
