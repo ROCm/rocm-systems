@@ -8,29 +8,12 @@
   return true;
 }
 
-struct ConSanMoiDispatchIdCapture {
-  std::optional<uint16_t> sgpr;
-  std::optional<uint16_t> vgpr;
-
-  [[nodiscard]] bool present() const { return sgpr || vgpr; }
-  [[nodiscard]] bool unambiguous() const {
-    return static_cast<bool>(sgpr) != static_cast<bool>(vgpr);
-  }
-};
-
-struct MoiEntryScalarBackup {
-  uint16_t vgpr = 0;
-  uint16_t sgpr_base = 0;
-  uint16_t sgpr_count = 0;
-};
-
 [[nodiscard]] bool append_moi_entry_scalar_backup(std::vector<uint32_t> &words,
                                                   const MoiEntryScalarBackup &backup, bool restore,
                                                   rj_code_arch_t arch,
                                                   std::vector<std::string> &errors) {
-  if (!consan_is_capability_arch(arch) || backup.vgpr >= kMaxVgprs || backup.sgpr_count == 0u ||
-      backup.sgpr_count > 64u ||
-      static_cast<uint32_t>(backup.sgpr_base) + backup.sgpr_count > moi_ordinary_sgpr_limit(arch)) {
+  if (!consan_is_capability_arch(arch) ||
+      !backup.is_well_formed(kMaxVgprs, moi_ordinary_sgpr_limit(arch))) {
     errors.emplace_back("ConSan MOI entry scalar backup has an invalid register layout");
     return false;
   }
@@ -1033,24 +1016,72 @@ runtime_selection_workgroup_sources(ConSanMoiPersistentWorkgroupRegisters scalar
   return true;
 }
 
-[[nodiscard]] std::optional<std::vector<uint32_t>> build_owner_epoch_prologue_words(
-    uint64_t prologue_text_offset, uint64_t original_entry_text_offset, uint16_t owner_vgpr,
-    uint16_t epoch_vgpr, std::optional<uint16_t> workgroup_key_vgpr, uint16_t owner_shift_bits,
-    ConSanMoiOwnerSource owner_source, std::optional<uint16_t> owner_sgpr, bool one_based_owner_ids,
-    std::optional<uint16_t> persistent_owner_sgpr, std::optional<uint16_t> persistent_epoch_sgpr,
-    std::optional<uint16_t> persistent_workgroup_key_sgpr,
-    ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_sgprs,
-    ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs,
-    std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan,
-    ConSanMoiDispatchIdCapture dispatch_capture,
-    std::optional<ConSanMoiWorkgroupSource> runtime_workgroup_selection_source,
-    std::optional<uint16_t> return_pc_sgpr, uint32_t runtime_sample_stride,
-    uint32_t runtime_sample_offset, uint64_t runtime_report_dispatch_id,
-    std::optional<MoiEntryScalarBackup> entry_scalar_backup,
-    std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow, bool has_quad_zero_tuple,
-    std::optional<ConSanMoiWorkgroupSources> workgroup_sources,
-    std::span<const uint32_t> displaced_entry_words, rj_code_arch_t arch,
-    std::vector<std::string> &errors) {
+/// Complete semantic input to one owner/epoch entry-initialization body.
+///
+/// Placement resolves this record once per kernel. It names the persistent
+/// destinations, the exact owner and workgroup sources, optional dispatch and
+/// scalar-preservation plans, runtime-selection policy, and workgroup-shadow
+/// layout. It deliberately excludes body and return addresses plus displaced
+/// guest words: those vary between the primary, kernarg-preload secondary, and
+/// overflow bodies while all initialization meaning remains identical.
+///
+/// Keeping these values together prevents paired entry bodies from silently
+/// diverging and keeps the emitter from consulting `MoiOptions` or rereading a
+/// descriptor after planning has fixed the kernel ABI.
+struct MoiOwnerEpochPrologueEmissionPlan {
+  uint16_t owner_vgpr = 0;
+  uint16_t epoch_vgpr = 0;
+  std::optional<uint16_t> workgroup_key_vgpr;
+  uint16_t owner_shift_bits = 0;
+  ConSanMoiOwnerSource owner_source = ConSanMoiOwnerSource::Automatic;
+  std::optional<uint16_t> owner_sgpr;
+  bool one_based_owner_ids = false;
+  ConSanMoiPersistentSgprState persistent_sgprs;
+  ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs;
+  std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
+  ConSanMoiDispatchIdCapture dispatch_capture;
+  std::optional<ConSanMoiWorkgroupSource> runtime_workgroup_selection_source;
+  std::optional<uint16_t> return_pc_sgpr;
+  uint32_t runtime_sample_stride = 1u;
+  uint32_t runtime_sample_offset = 0u;
+  uint64_t runtime_report_dispatch_id = 0u;
+  std::optional<MoiEntryScalarBackup> entry_scalar_backup;
+  std::optional<ConSanMoiWorkgroupShadowLayout> workgroup_shadow;
+  bool has_quad_zero_tuple = false;
+  std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
+};
+
+[[nodiscard]] std::optional<std::vector<uint32_t>>
+build_owner_epoch_prologue_words(uint64_t prologue_text_offset, uint64_t original_entry_text_offset,
+                                 const MoiOwnerEpochPrologueEmissionPlan &plan,
+                                 std::span<const uint32_t> displaced_entry_words,
+                                 rj_code_arch_t arch, std::vector<std::string> &errors) {
+  const uint16_t owner_vgpr = plan.owner_vgpr;
+  const uint16_t epoch_vgpr = plan.epoch_vgpr;
+  const std::optional<uint16_t> workgroup_key_vgpr = plan.workgroup_key_vgpr;
+  const uint16_t owner_shift_bits = plan.owner_shift_bits;
+  const ConSanMoiOwnerSource owner_source = plan.owner_source;
+  const std::optional<uint16_t> owner_sgpr = plan.owner_sgpr;
+  const bool one_based_owner_ids = plan.one_based_owner_ids;
+  const std::optional<uint16_t> persistent_owner_sgpr = plan.persistent_sgprs.owner;
+  const std::optional<uint16_t> persistent_epoch_sgpr = plan.persistent_sgprs.epoch;
+  const std::optional<uint16_t> persistent_workgroup_key_sgpr = plan.persistent_sgprs.workgroup_key;
+  const ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_sgprs =
+      plan.persistent_sgprs.record_replay_workgroup;
+  const ConSanMoiPersistentWorkgroupRegisters record_replay_workgroup_vgprs =
+      plan.record_replay_workgroup_vgprs;
+  const std::optional<ConSanMoiDispatchIdPreloadPlan> &dispatch_plan = plan.dispatch_plan;
+  const ConSanMoiDispatchIdCapture dispatch_capture = plan.dispatch_capture;
+  const std::optional<ConSanMoiWorkgroupSource> &runtime_workgroup_selection_source =
+      plan.runtime_workgroup_selection_source;
+  const std::optional<uint16_t> return_pc_sgpr = plan.return_pc_sgpr;
+  const uint32_t runtime_sample_stride = plan.runtime_sample_stride;
+  const uint32_t runtime_sample_offset = plan.runtime_sample_offset;
+  const uint64_t runtime_report_dispatch_id = plan.runtime_report_dispatch_id;
+  const std::optional<MoiEntryScalarBackup> &entry_scalar_backup = plan.entry_scalar_backup;
+  const std::optional<ConSanMoiWorkgroupShadowLayout> &workgroup_shadow = plan.workgroup_shadow;
+  const bool has_quad_zero_tuple = plan.has_quad_zero_tuple;
+  const std::optional<ConSanMoiWorkgroupSources> &workgroup_sources = plan.workgroup_sources;
   std::vector<uint32_t> words;
   words.reserve(48u + (entry_scalar_backup
                            ? static_cast<size_t>(entry_scalar_backup->sgpr_count) * 4u + 1u
@@ -2410,6 +2441,12 @@ void try_apply_owner_epoch_prologue_patch(
       options.moi_owner_source == ConSanMoiOwnerSource::HwId
           ? static_cast<uint32_t>(*options.moi_owner_sgpr) + 1u
           : 0u;
+  /// Per-kernel transaction fixed before any descriptor or text mutation.
+  ///
+  /// Descriptor-derived entry facts, resolved persistent registers, and
+  /// preservation/layout choices travel together into emission. The mutable
+  /// patching loop may choose among entry routes, but cannot reinterpret the
+  /// kernel ABI or change the initialization contract.
   struct PlannedOwnerEpochPrologue {
     ConSanKernelInfo kernel;
     MoiOptions persistent_options;
@@ -2418,6 +2455,7 @@ void try_apply_owner_epoch_prologue_patch(
     std::optional<ConSanMoiWorkgroupSources> workgroup_sources;
     std::optional<MoiEntryScalarBackup> entry_scalar_backup;
     bool has_kernarg_preload = false;
+    uint16_t owner_shift_bits = 0;
     uint16_t required_sgpr_count = 0;
   };
   std::vector<PlannedOwnerEpochPrologue> target_kernels;
@@ -2516,6 +2554,7 @@ void try_apply_owner_epoch_prologue_patch(
       return;
     }
     const KD &descriptor = *descriptor_value;
+    const uint16_t owner_shift_bits = kernel_wavefront_size(arch, descriptor) == 32u ? 5u : 6u;
     std::optional<ConSanMoiDispatchIdPreloadPlan> dispatch_plan;
     if (dispatch_capture.present()) {
       dispatch_plan = moi_descriptor_dispatch_id_preload_plan(descriptor, arch);
@@ -2716,9 +2755,17 @@ void try_apply_owner_epoch_prologue_patch(
           .sgpr_count = sgpr_count,
       };
     }
-    target_kernels.push_back({std::move(active), std::move(kernel_options), dispatch_plan,
-                              workgroup_shadow, workgroup_sources, entry_scalar_backup,
-                              has_kernarg_preload});
+    target_kernels.push_back(PlannedOwnerEpochPrologue{
+        .kernel = std::move(active),
+        .persistent_options = std::move(kernel_options),
+        .dispatch_plan = dispatch_plan,
+        .workgroup_shadow = workgroup_shadow,
+        .workgroup_sources = workgroup_sources,
+        .entry_scalar_backup = entry_scalar_backup,
+        .has_kernarg_preload = has_kernarg_preload,
+        .owner_shift_bits = owner_shift_bits,
+        .required_sgpr_count = 0u,
+    });
   }
   for (PlannedOwnerEpochPrologue &item : target_kernels) {
     const MoiOptions &kernel_options = item.persistent_options;
@@ -2786,6 +2833,30 @@ void try_apply_owner_epoch_prologue_patch(
       prologue_workgroup_shadow->visible_evidence_sgpr =
           inline_shadow_visible_evidence_sgpr(kernel_options);
     }
+    const MoiOwnerEpochPrologueEmissionPlan prologue_plan{
+        .owner_vgpr = *kernel_options.moi_owner_vgpr,
+        .epoch_vgpr = *kernel_options.moi_epoch_vgpr,
+        .workgroup_key_vgpr = kernel_options.moi_workgroup_key_vgpr,
+        .owner_shift_bits = item.owner_shift_bits,
+        .owner_source = kernel_options.moi_owner_source,
+        .owner_sgpr = kernel_options.moi_owner_sgpr,
+        .one_based_owner_ids = kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
+        .persistent_sgprs = kernel_options.moi_persistent_sgprs,
+        .record_replay_workgroup_vgprs = kernel_options.moi_record_replay_workgroup_vgprs,
+        .dispatch_plan = item.dispatch_plan,
+        .dispatch_capture = dispatch_capture,
+        .runtime_workgroup_selection_source =
+            moi_runtime_workgroup_selection_source(kernel_options, arch),
+        .return_pc_sgpr = kernel_options.moi_exec_save_sgpr,
+        .runtime_sample_stride = kernel_options.moi_runtime_sample_stride,
+        .runtime_sample_offset = kernel_options.moi_runtime_sample_offset,
+        .runtime_report_dispatch_id = kernel_options.moi_report_dispatch_id,
+        .entry_scalar_backup = item.entry_scalar_backup,
+        .workgroup_shadow = prologue_workgroup_shadow,
+        .has_quad_zero_tuple = options.automatic_moi_persistent_vgprs &&
+                               moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
+        .workgroup_sources = item.workgroup_sources,
+    };
 
     // Keep the hardware entry stable and displace its first instruction
     // through the same local-island mechanism used by ordinary long-range
@@ -2972,26 +3043,9 @@ void try_apply_owner_epoch_prologue_patch(
       if (prologue_return_relay)
         prologue_return_target = *prologue_return_relay;
     }
-    const std::optional<uint16_t> owner_shift = moi_descriptor_owner_shift(
-        active_bytes, kernel.descriptor_file_offset, arch, result.errors);
-    if (!owner_shift)
-      return;
-    auto words = build_owner_epoch_prologue_words(
-        prologue_text_offset, prologue_return_target, *kernel_options.moi_owner_vgpr,
-        *kernel_options.moi_epoch_vgpr, kernel_options.moi_workgroup_key_vgpr, *owner_shift,
-        kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
-        kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-        kernel_options.moi_persistent_sgprs.owner, kernel_options.moi_persistent_sgprs.epoch,
-        kernel_options.moi_persistent_sgprs.workgroup_key,
-        kernel_options.moi_persistent_sgprs.record_replay_workgroup,
-        kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
-        moi_runtime_workgroup_selection_source(kernel_options, arch),
-        kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
-        kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
-        item.entry_scalar_backup, prologue_workgroup_shadow,
-        options.automatic_moi_persistent_vgprs &&
-            moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
-        item.workgroup_sources, displaced_entry_words, arch, result.errors);
+    auto words =
+        build_owner_epoch_prologue_words(prologue_text_offset, prologue_return_target,
+                                         prologue_plan, displaced_entry_words, arch, result.errors);
     if (!words)
       return;
     if (prologue_return_relay) {
@@ -3067,20 +3121,7 @@ void try_apply_owner_epoch_prologue_patch(
           prologue_text_offset + words->size() * sizeof(uint32_t), kAmdhsaKernelEntryAlignment);
       auto secondary_words = build_owner_epoch_prologue_words(
           secondary_prologue_offset, kernel.entry_text_offset + kAmdhsaKernelEntryAlignment,
-          *kernel_options.moi_owner_vgpr, *kernel_options.moi_epoch_vgpr,
-          kernel_options.moi_workgroup_key_vgpr, *owner_shift, kernel_options.moi_owner_source,
-          kernel_options.moi_owner_sgpr, kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-          kernel_options.moi_persistent_sgprs.owner, kernel_options.moi_persistent_sgprs.epoch,
-          kernel_options.moi_persistent_sgprs.workgroup_key,
-          kernel_options.moi_persistent_sgprs.record_replay_workgroup,
-          kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
-          moi_runtime_workgroup_selection_source(kernel_options, arch),
-          kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
-          kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
-          item.entry_scalar_backup, prologue_workgroup_shadow,
-          options.automatic_moi_persistent_vgprs &&
-              moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
-          item.workgroup_sources, std::span<const uint32_t>{}, arch, result.errors);
+          prologue_plan, std::span<const uint32_t>{}, arch, result.errors);
       if (!secondary_words)
         return;
 
@@ -3098,43 +3139,16 @@ void try_apply_owner_epoch_prologue_patch(
         // state.
         constexpr uint64_t kPairedEntryWindow = 2u * kAmdhsaKernelEntryAlignment;
         const uint64_t primary_body_offset = prologue_text_offset + kPairedEntryWindow;
-        words = build_owner_epoch_prologue_words(
-            primary_body_offset, prologue_return_target, *kernel_options.moi_owner_vgpr,
-            *kernel_options.moi_epoch_vgpr, kernel_options.moi_workgroup_key_vgpr, *owner_shift,
-            kernel_options.moi_owner_source, kernel_options.moi_owner_sgpr,
-            kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-            kernel_options.moi_persistent_sgprs.owner, kernel_options.moi_persistent_sgprs.epoch,
-            kernel_options.moi_persistent_sgprs.workgroup_key,
-            kernel_options.moi_persistent_sgprs.record_replay_workgroup,
-            kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
-            moi_runtime_workgroup_selection_source(kernel_options, arch),
-            kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
-            kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
-            item.entry_scalar_backup, prologue_workgroup_shadow,
-            options.automatic_moi_persistent_vgprs &&
-                moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
-            item.workgroup_sources, displaced_entry_words, arch, result.errors);
+        words = build_owner_epoch_prologue_words(primary_body_offset, prologue_return_target,
+                                                 prologue_plan, displaced_entry_words, arch,
+                                                 result.errors);
         if (!words)
           return;
         const uint64_t secondary_body_offset =
             primary_body_offset + words->size() * sizeof(uint32_t);
         secondary_words = build_owner_epoch_prologue_words(
             secondary_body_offset, kernel.entry_text_offset + kAmdhsaKernelEntryAlignment,
-            *kernel_options.moi_owner_vgpr, *kernel_options.moi_epoch_vgpr,
-            kernel_options.moi_workgroup_key_vgpr, *owner_shift, kernel_options.moi_owner_source,
-            kernel_options.moi_owner_sgpr,
-            kernel_options.moi_engine == ConSanMoiEngine::InlineShadow,
-            kernel_options.moi_persistent_sgprs.owner, kernel_options.moi_persistent_sgprs.epoch,
-            kernel_options.moi_persistent_sgprs.workgroup_key,
-            kernel_options.moi_persistent_sgprs.record_replay_workgroup,
-            kernel_options.moi_record_replay_workgroup_vgprs, item.dispatch_plan, dispatch_capture,
-            moi_runtime_workgroup_selection_source(kernel_options, arch),
-            kernel_options.moi_exec_save_sgpr, kernel_options.moi_runtime_sample_stride,
-            kernel_options.moi_runtime_sample_offset, kernel_options.moi_report_dispatch_id,
-            item.entry_scalar_backup, prologue_workgroup_shadow,
-            options.automatic_moi_persistent_vgprs &&
-                moi_workgroup_shadow_preferred_zero_vgpr_count(*target) == 4u,
-            item.workgroup_sources, std::span<const uint32_t>{}, arch, result.errors);
+            prologue_plan, std::span<const uint32_t>{}, arch, result.errors);
         const auto primary_relay =
             compute_sopp_branch_simm16(prologue_text_offset, primary_body_offset);
         const auto secondary_relay = compute_sopp_branch_simm16(

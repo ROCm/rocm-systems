@@ -85,6 +85,46 @@ struct ConSanMoiWorkgroupSource {
 
 namespace consan_detail {
 
+/// Selects the one persistent representation that receives a dispatch ID at
+/// kernel entry.
+///
+/// The scalar and vector forms are alternatives, never simultaneous. An
+/// empty value means the current prologue does not capture dispatch identity.
+/// Keeping this choice typed prevents entry initialization from silently
+/// writing two independently configured representations of the same ID.
+struct ConSanMoiDispatchIdCapture {
+  std::optional<uint16_t> sgpr;
+  std::optional<uint16_t> vgpr;
+
+  [[nodiscard]] bool present() const { return sgpr || vgpr; }
+  [[nodiscard]] bool unambiguous() const {
+    return static_cast<bool>(sgpr) != static_cast<bool>(vgpr);
+  }
+
+  bool operator==(const ConSanMoiDispatchIdCapture &) const = default;
+};
+
+/// Register window copied into one entry-local VGPR while a prologue borrows
+/// scalar ABI state.
+///
+/// `vgpr` is the wave-local carrier. `sgpr_base` and `sgpr_count` name the
+/// contiguous scalar window transferred through its lanes. The same plan is
+/// consumed for save and restore, preventing the two halves of preservation
+/// from drifting. Limits are supplied explicitly because they are resolved
+/// target facts rather than properties of this target-independent record.
+struct MoiEntryScalarBackup {
+  uint16_t vgpr = 0;
+  uint16_t sgpr_base = 0;
+  uint16_t sgpr_count = 0;
+
+  [[nodiscard]] bool is_well_formed(uint16_t vgpr_limit, uint16_t sgpr_limit) const {
+    return vgpr < vgpr_limit && sgpr_count != 0u && sgpr_count <= 64u &&
+           static_cast<uint32_t>(sgpr_base) + sgpr_count <= sgpr_limit;
+  }
+
+  bool operator==(const MoiEntryScalarBackup &) const = default;
+};
+
 /// Resolved persistent-register inputs consumed while deriving one compact
 /// workgroup key.
 ///

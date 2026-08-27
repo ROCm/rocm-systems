@@ -466,6 +466,38 @@ TEST(ConSanMoi, WorkgroupKeyRegisterPlanRequiresOneUnambiguousExecutionPlan) {
   EXPECT_FALSE(ambiguous.is_well_formed());
 }
 
+TEST(ConSanMoi, DispatchCaptureRequiresExactlyOnePersistentRepresentation) {
+  using consan_detail::ConSanMoiDispatchIdCapture;
+  const ConSanMoiDispatchIdCapture absent{};
+  const ConSanMoiDispatchIdCapture scalar{.sgpr = 40u, .vgpr = std::nullopt};
+  const ConSanMoiDispatchIdCapture vector{.sgpr = std::nullopt, .vgpr = 20u};
+  const ConSanMoiDispatchIdCapture ambiguous{.sgpr = 40u, .vgpr = 20u};
+  EXPECT_FALSE(absent.present());
+  EXPECT_FALSE(absent.unambiguous());
+  EXPECT_TRUE(scalar.present());
+  EXPECT_TRUE(scalar.unambiguous());
+  EXPECT_TRUE(vector.present());
+  EXPECT_TRUE(vector.unambiguous());
+  EXPECT_TRUE(ambiguous.present());
+  EXPECT_FALSE(ambiguous.unambiguous());
+}
+
+TEST(ConSanMoi, EntryScalarBackupValidatesCarrierAndScalarWindow) {
+  using consan_detail::MoiEntryScalarBackup;
+  constexpr uint16_t kVgprLimit = 256u;
+  constexpr uint16_t kSgprLimit = 106u;
+  EXPECT_TRUE((MoiEntryScalarBackup{.vgpr = 255u, .sgpr_base = 42u, .sgpr_count = 64u})
+                  .is_well_formed(kVgprLimit, kSgprLimit));
+  EXPECT_FALSE((MoiEntryScalarBackup{.vgpr = 256u, .sgpr_base = 42u, .sgpr_count = 1u})
+                   .is_well_formed(kVgprLimit, kSgprLimit));
+  EXPECT_FALSE((MoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 42u, .sgpr_count = 0u})
+                   .is_well_formed(kVgprLimit, kSgprLimit));
+  EXPECT_FALSE((MoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 0u, .sgpr_count = 65u})
+                   .is_well_formed(kVgprLimit, kSgprLimit));
+  EXPECT_FALSE((MoiEntryScalarBackup{.vgpr = 20u, .sgpr_base = 43u, .sgpr_count = 64u})
+                   .is_well_formed(kVgprLimit, kSgprLimit));
+}
+
 [[nodiscard]] constexpr bool sgpr_ranges_overlap(uint16_t base, uint16_t width, uint16_t other_base,
                                                  uint16_t other_width) {
   return base < static_cast<uint32_t>(other_base) + other_width &&
