@@ -1140,6 +1140,63 @@ TEST(MfmaExecTest, ResolveAccAccVgpr) {
   EXPECT_EQ(result, 100u + amdgpu::ACC_VGPR_OFFSET + 2u);
 }
 
+TEST(MfmaExecTest, ScalarF32ReadsEachMatrixOperandOnce) {
+  constexpr uint32_t wf_size = 64;
+  constexpr uint32_t M = 16, N = 16, K = 4, B = 2;
+  constexpr uint32_t sgprs_per_wf = 106, vgprs_per_wf = 256;
+  constexpr uint32_t source_a = 0, source_b = 16, accumulator = 32, destination = 48;
+  constexpr uint32_t source_a_regs = (M * K * B + wf_size - 1) / wf_size;
+  constexpr uint32_t source_b_regs = (N * K * B + wf_size - 1) / wf_size;
+  constexpr uint32_t destination_regs = (M * N * B + wf_size - 1) / wf_size;
+
+  amdgpu::GpuMemory gpu_mem("mfma_scalar_snapshot_mem");
+  amdgpu::L2Cache l2("mfma_scalar_snapshot_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = sgprs_per_wf;
+  config.vgprs_per_wf = vgprs_per_wf;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("mfma_scalar_snapshot_cu", config, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, sgprs_per_wf, vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), wf_size);
+  const uint32_t vb = wf->vgpr_alloc().base;
+
+  for (uint32_t reg = 0; reg < source_a_regs; ++reg)
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      cu->write_vgpr(vb + source_a + reg, lane, std::bit_cast<uint32_t>(1.0f));
+  for (uint32_t reg = 0; reg < source_b_regs; ++reg)
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      cu->write_vgpr(vb + source_b + reg, lane, std::bit_cast<uint32_t>(2.0f));
+  for (uint32_t reg = 0; reg < destination_regs; ++reg)
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      cu->write_vgpr(vb + accumulator + reg, lane, std::bit_cast<uint32_t>(3.0f));
+
+  size_t source_a_reads = 0;
+  size_t source_b_reads = 0;
+  auto extract_a = [&](auto &source_cu, uint32_t base, const amdgpu::InputLoc &loc) {
+    ++source_a_reads;
+    return amdgpu::extract_f32(source_cu, base, loc);
+  };
+  auto extract_b = [&](auto &source_cu, uint32_t base, const amdgpu::InputLoc &loc) {
+    ++source_b_reads;
+    return amdgpu::extract_f32(source_cu, base, loc);
+  };
+
+  ForceScalarGuard force_scalar(/*force_scalar=*/true);
+  amdgpu::exec_f32(*cu, M, N, K, B, /*in_bits=*/32, vb + destination, vb + source_a, vb + source_b,
+                   vb + accumulator, extract_a, extract_b, amdgpu::ACC_FROM_VGPR,
+                   /*cbsz=*/1, /*abid=*/0, /*blgp=*/1);
+
+  EXPECT_EQ(source_a_reads, static_cast<size_t>(M) * K * B);
+  EXPECT_EQ(source_b_reads, static_cast<size_t>(N) * K * B);
+  for (uint32_t reg = 0; reg < destination_regs; ++reg)
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      EXPECT_FLOAT_EQ(std::bit_cast<float>(cu->read_vgpr(vb + destination + reg, lane)), 11.0f);
+}
+
 // ---------------------------------------------------------------------------
 // L2 cache tests
 // ---------------------------------------------------------------------------
