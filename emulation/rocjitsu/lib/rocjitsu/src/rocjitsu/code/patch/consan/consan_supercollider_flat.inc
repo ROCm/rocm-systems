@@ -699,8 +699,7 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
                                                      KernelBlockScope(owner_context->scope.blocks)))
                 .first;
       }
-      const auto allocated_vgprs =
-          read_descriptor_vgpr_allocation_count(original_bytes, owner, arch);
+      const auto descriptor = read_kernel_descriptor(original_bytes, owner);
       const Instruction *owner_site_inst =
           owner_context == nullptr
               ? nullptr
@@ -709,25 +708,22 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
       if (owner_kernel == kernels_by_descriptor.end() ||
           owner_kernel->second->preflight_action == ConSanPreflightAction::Blocked ||
           owner_context == nullptr || owner_context->liveness == nullptr ||
-          owner_site_inst != site_inst || refs == max_refs_by_descriptor.end() ||
-          !allocated_vgprs || owner > original_bytes.size() ||
-          sizeof(KD) > original_bytes.size() - owner) {
+          owner_site_inst != site_inst || refs == max_refs_by_descriptor.end() || !descriptor) {
         complete_context = false;
         break;
       }
       owner_liveness.push_back(owner_context->liveness.get());
 
-      KD descriptor{};
-      std::memcpy(&descriptor, original_bytes.data() + owner, sizeof(descriptor));
-      const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor, arch);
+      const uint16_t allocated_vgprs = descriptor_vgpr_allocation_count(*descriptor, arch);
+      const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(*descriptor, arch);
       common_allocated_vgpr_count = common_allocated_vgpr_count
-                                        ? std::min(*common_allocated_vgpr_count, *allocated_vgprs)
-                                        : *allocated_vgprs;
+                                        ? std::min(*common_allocated_vgpr_count, allocated_vgprs)
+                                        : allocated_vgprs;
       common_allocated_sgpr_count = common_allocated_sgpr_count
                                         ? std::min(*common_allocated_sgpr_count, allocated_sgprs)
                                         : allocated_sgprs;
       max_owner_private_segment_size =
-          std::max(max_owner_private_segment_size, descriptor.private_segment_fixed_size);
+          std::max(max_owner_private_segment_size, descriptor->private_segment_fixed_size);
       if (refs->second.vgpr)
         max_owner_vgpr_ref = max_owner_vgpr_ref ? std::max(*max_owner_vgpr_ref, *refs->second.vgpr)
                                                 : *refs->second.vgpr;
@@ -1745,17 +1741,19 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {
       const std::span<const uint8_t> image = patcher.image_bytes();
-      if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
+      auto descriptor = read_kernel_descriptor(image, descriptor_offset);
+      if (!descriptor) {
         result.errors.emplace_back("ConSan flat check/trap spill descriptor exceeds ELF bytes");
         return;
       }
-      std::array<uint8_t, sizeof(KD)> descriptor{};
-      std::memcpy(descriptor.data(), image.data() + descriptor_offset, descriptor.size());
-      const SpillDescriptorUpdate update =
-          update_kernel_descriptor_for_spills(descriptor, 0, required_private_bytes);
+      const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
+          {reinterpret_cast<uint8_t *>(&*descriptor), sizeof(*descriptor)}, 0,
+          required_private_bytes);
       if ((update != SpillDescriptorUpdate::Updated &&
            update != SpillDescriptorUpdate::Unchanged) ||
-          !patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
+          !patcher.patch_kernel_descriptor(
+              descriptor_offset,
+              {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
         result.errors.emplace_back(
             "ConSan flat check/trap could not grow its private spill descriptor");
         return;
@@ -1850,21 +1848,18 @@ void try_apply_flat_check_trap_patch(const AmdGpuCodeObject &code_object, rj_cod
             "ConSan flat check/trap proof could not resolve SGPR descriptor owner");
         return;
       }
-      if (*active_descriptor_offset > patched_bytes.size() ||
-          sizeof(KD) > patched_bytes.size() - *active_descriptor_offset) {
+      auto descriptor = read_kernel_descriptor(patched_bytes, *active_descriptor_offset);
+      if (!descriptor) {
         result.errors.emplace_back(
             "ConSan flat check/trap proof SGPR descriptor exceeds ELF bytes");
         return;
       }
-      KD descriptor{};
-      std::memcpy(&descriptor, patched_bytes.data() + *active_descriptor_offset,
-                  sizeof(descriptor));
-      if (!grow_descriptor_sgpr_allocation(descriptor, required_count, arch)) {
+      if (!grow_descriptor_sgpr_allocation(*descriptor, required_count, arch)) {
         result.errors.emplace_back("ConSan flat check/trap proof could not grow SGPR allocation");
         return;
       }
-      std::memcpy(patched_bytes.data() + *active_descriptor_offset, &descriptor,
-                  sizeof(descriptor));
+      if (!write_kernel_descriptor(patched_bytes, *active_descriptor_offset, *descriptor))
+        return;
     }
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {

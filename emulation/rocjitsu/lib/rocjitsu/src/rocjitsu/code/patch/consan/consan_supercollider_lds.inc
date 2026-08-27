@@ -143,8 +143,10 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       if (restrict_to_preflight_candidates &&
           kernel.preflight_action != ConSanPreflightAction::Candidate)
         continue;
-      if (!kernel.has_text_range || kernel.descriptor_file_offset > original_bytes.size() ||
-          sizeof(KD) > original_bytes.size() - kernel.descriptor_file_offset)
+      if (!kernel.has_text_range)
+        continue;
+      const auto descriptor = read_kernel_descriptor(original_bytes, kernel.descriptor_file_offset);
+      if (!descriptor)
         continue;
       auto scope =
           build_kernel_cfg_scope(blocks, block_index,
@@ -153,14 +155,11 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                  cfg.kernel_entries, pristine_text);
       if (!scope)
         continue;
-      KD descriptor{};
-      std::memcpy(&descriptor, original_bytes.data() + kernel.descriptor_file_offset,
-                  sizeof(descriptor));
       reservoir_owner_contexts.push_back(
           {.descriptor_file_offset = kernel.descriptor_file_offset,
            .scope = std::move(*scope),
            .liveness = nullptr,
-           .wavefront_size = kernel_wavefront_size(arch, descriptor)});
+           .wavefront_size = kernel_wavefront_size(arch, *descriptor)});
       ScReservoirOwnerContext &context = reservoir_owner_contexts.back();
       context.liveness = std::make_unique<LivenessAnalysis>(KernelBlockScope(context.scope.blocks),
                                                             LivenessAnalysisOptions{},
@@ -723,9 +722,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
       const auto owner_kernel = kernels_by_descriptor.find(owner);
       const auto owner_context = std::ranges::find(
           reservoir_owner_contexts, owner, &ScReservoirOwnerContext::descriptor_file_offset);
-      const auto allocated_vgprs =
-          read_descriptor_ordinary_vgpr_allocation_count(original_bytes, owner, arch);
-      const auto unified_vgprs = read_descriptor_vgpr_allocation_count(original_bytes, owner, arch);
+      const auto descriptor = read_kernel_descriptor(original_bytes, owner);
       const Instruction *owner_site_inst =
           owner_context == reservoir_owner_contexts.end()
               ? nullptr
@@ -733,22 +730,20 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
                                                 site.physical_id.original_text_offset);
       if (owner_kernel == kernels_by_descriptor.end() ||
           owner_context == reservoir_owner_contexts.end() || owner_context->liveness == nullptr ||
-          context.instruction == nullptr || owner_site_inst != context.instruction ||
-          !allocated_vgprs || !unified_vgprs || owner > original_bytes.size() ||
-          sizeof(KD) > original_bytes.size() - owner ||
+          context.instruction == nullptr || owner_site_inst != context.instruction || !descriptor ||
           owner_kernel->second->preflight_action == ConSanPreflightAction::Blocked) {
         complete = false;
         break;
       }
       context.owner_contexts.push_back(&*owner_context);
-      KD descriptor{};
-      std::memcpy(&descriptor, original_bytes.data() + owner, sizeof(descriptor));
-      const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(descriptor, arch);
+      const uint16_t allocated_vgprs = descriptor_ordinary_vgpr_allocation_count(*descriptor, arch);
+      const uint16_t unified_vgprs = descriptor_vgpr_allocation_count(*descriptor, arch);
+      const uint16_t allocated_sgprs = descriptor_sgpr_allocation_count(*descriptor, arch);
       context.max_owner_private_segment_size =
-          std::max(context.max_owner_private_segment_size, descriptor.private_segment_fixed_size);
+          std::max(context.max_owner_private_segment_size, descriptor->private_segment_fixed_size);
       context.common_allocated_vgpr_count =
-          first_owner ? *allocated_vgprs
-                      : std::min(*context.common_allocated_vgpr_count, *allocated_vgprs);
+          first_owner ? allocated_vgprs
+                      : std::min(*context.common_allocated_vgpr_count, allocated_vgprs);
       context.common_allocated_sgpr_count =
           first_owner ? allocated_sgprs
                       : std::min(*context.common_allocated_sgpr_count, allocated_sgprs);
@@ -768,7 +763,7 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
           owner_kernel->second->uses_dynamic_stack.value_or(false);
       context.uses_dynamic_stack |= owner_uses_dynamic_stack;
       context.every_owner_uses_dynamic_stack &= owner_uses_dynamic_stack;
-      context.every_owner_can_grow_ordinary_vgprs &= *allocated_vgprs == *unified_vgprs;
+      context.every_owner_can_grow_ordinary_vgprs &= allocated_vgprs == unified_vgprs;
       first_owner = false;
     }
     if (!complete)
@@ -3718,18 +3713,20 @@ void try_apply_lds_load_check_trap_patch(const AmdGpuCodeObject &code_object, rj
     for (const auto &[descriptor_offset, required_private_bytes] :
          descriptor_private_requirements) {
       const std::span<const uint8_t> image = patcher.image_bytes();
-      if (descriptor_offset > image.size() || sizeof(KD) > image.size() - descriptor_offset) {
+      auto descriptor = read_kernel_descriptor(image, descriptor_offset);
+      if (!descriptor) {
         result.errors.emplace_back("ConSan LDS check/trap spill descriptor exceeds ELF bytes");
         result.patches.clear();
         return;
       }
-      std::array<uint8_t, sizeof(KD)> descriptor{};
-      std::memcpy(descriptor.data(), image.data() + descriptor_offset, descriptor.size());
-      const SpillDescriptorUpdate update =
-          update_kernel_descriptor_for_spills(descriptor, 0, required_private_bytes);
+      const SpillDescriptorUpdate update = update_kernel_descriptor_for_spills(
+          {reinterpret_cast<uint8_t *>(&*descriptor), sizeof(*descriptor)}, 0,
+          required_private_bytes);
       if ((update != SpillDescriptorUpdate::Updated &&
            update != SpillDescriptorUpdate::Unchanged) ||
-          !patcher.patch_kernel_descriptor(descriptor_offset, descriptor)) {
+          !patcher.patch_kernel_descriptor(
+              descriptor_offset,
+              {reinterpret_cast<const uint8_t *>(&*descriptor), sizeof(*descriptor)})) {
         result.errors.emplace_back("ConSan LDS check/trap could not grow its spill descriptor");
         result.patches.clear();
         return;
