@@ -20,9 +20,13 @@ extern std::function<ncclTeam_t(ncclComm_t)> g_ncclTeamLsa;
 extern std::function<void(void* dst, void const* src)> g_ncclDevCommCopyLsaData;
 
 // Default: reports the LSA team as spanning the whole communicator, so
-// deviceApiSupport survives the filter unless a test says otherwise.
+// deviceApiSupport survives the filter unless a test says otherwise. That
+// makes the filters' team-size comparison unconditionally true -- a test
+// targeting the mismatch arm must install its own hook. See devcomm_fakes.cc.
 ncclTeam_t DefaultNcclTeamLsa(ncclComm_t comm);
-// Default: the real memcpy of the LSA prefix, so copy shims move real bytes.
+// Default: a mirror of the production memcpy of the LSA prefix, so copy shims
+// move real bytes. Update in lockstep with src/dev_runtime.cc; see the note on
+// the definition in devcomm_fakes.cc.
 void DefaultNcclDevCommCopyLsaData(void* dst, void const* src);
 
 void ResetDevcommFakes();
