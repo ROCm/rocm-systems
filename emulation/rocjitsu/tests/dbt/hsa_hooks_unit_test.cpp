@@ -93,7 +93,7 @@ void install_consan_test_program_inventory(rocjitsu::ConSanResult &result, Confi
           ? rocjitsu::ProgramInventoryBuilder(result.program_inventory)
           : rocjitsu::ProgramInventoryBuilder(std::span<const uint8_t>{});
   configure(builder);
-  builder.rebuild_access_inventory({});
+  builder.publish_decoded_accesses({});
   result.program_inventory = builder.view();
 }
 
@@ -5249,7 +5249,7 @@ rocjitsu::ConSanResult auto_report_inline_shadow_transform_result() {
   access.mnemonic = "ds_store_b32";
   kernel.access_sites.push_back(std::move(access));
   inventory.kernels().push_back(std::move(kernel));
-  inventory.rebuild_access_inventory(instruction_bytes);
+  inventory.publish_decoded_accesses(instruction_bytes);
   inventory.access_sites().front().execution_owner_descriptor_file_offsets = {
       owner_descriptor_offset};
   result.program_inventory = inventory.view();

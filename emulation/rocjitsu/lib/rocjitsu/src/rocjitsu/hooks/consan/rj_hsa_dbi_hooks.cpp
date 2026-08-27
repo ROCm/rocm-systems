@@ -4605,13 +4605,6 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
       case rocjitsu::ConSanPreflightAction::NotRun:
         break;
       }
-      for (const rocjitsu::ConSanAccessInventorySite &site : kernel.access_sites) {
-        if (site.origin == rocjitsu::ConSanAccessOrigin::Flat) {
-          ++flat_site_count;
-        } else if (site.supported_mvp) {
-          ++supported_lds_site_count;
-        }
-      }
       flat_group_hint_count += kernel.stats.flat_group_hint_count;
       flat_private_hint_count += kernel.stats.flat_private_hint_count;
       flat_maybe_group_hint_count += kernel.stats.flat_maybe_group_hint_count;
@@ -4621,21 +4614,24 @@ hsa_status_t HSA_API rj_dbi_executable_load_agent_code_object(
     }
     for (const rocjitsu::ConSanFunctionInfo &function :
          transform_result.program_inventory.functions()) {
-      for (const rocjitsu::ConSanAccessInventorySite &site : function.access_sites) {
-        if (site.origin == rocjitsu::ConSanAccessOrigin::Flat) {
-          ++function_flat_site_count;
-        } else {
-          ++function_lds_site_count;
-        }
-        if (site.origin != rocjitsu::ConSanAccessOrigin::Flat && site.supported_mvp)
-          ++function_supported_lds_site_count;
-      }
       function_flat_group_hint_count += function.stats.flat_group_hint_count;
       function_flat_private_hint_count += function.stats.flat_private_hint_count;
       function_flat_maybe_group_hint_count += function.stats.flat_maybe_group_hint_count;
       function_flat_maybe_private_hint_count += function.stats.flat_maybe_private_hint_count;
       function_flat_global_hint_count += function.stats.flat_global_hint_count;
       function_flat_unknown_hint_count += function.stats.flat_unknown_hint_count;
+    }
+    for (const rocjitsu::ConSanAccessInventorySite &site :
+         transform_result.program_inventory.access_sites()) {
+      const bool function = site.container.kind == rocjitsu::ConSanProgramContainerKind::Function;
+      if (site.origin == rocjitsu::ConSanAccessOrigin::Flat) {
+        ++(function ? function_flat_site_count : flat_site_count);
+      } else {
+        if (function)
+          ++function_lds_site_count;
+        if (site.supported_mvp)
+          ++(function ? function_supported_lds_site_count : supported_lds_site_count);
+      }
     }
     log_message(
         kLogInfo,

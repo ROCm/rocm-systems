@@ -180,7 +180,7 @@ InlineEvidenceFixture make_inline_evidence_fixture(bool flat, bool dynamic_lds,
     kernel.access_sites.push_back(std::move(site));
   }
   builder.kernels().push_back(std::move(kernel));
-  builder.rebuild_access_inventory(bytes);
+  builder.publish_decoded_accesses(bytes);
   builder.access_sites().front().execution_owner_descriptor_file_offsets = {512};
 
   InlineEvidenceFixture fixture;

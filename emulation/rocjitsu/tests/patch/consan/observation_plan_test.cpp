@@ -80,7 +80,7 @@ ProgramInventory build_policy_inventory(AccessInventoryInput input) {
   builder.set_code_object_facts(true, 0, input.arch, input.target);
   builder.kernels() = std::move(input.kernels);
   builder.functions() = std::move(input.functions);
-  builder.rebuild_access_inventory(input.bytes);
+  builder.publish_decoded_accesses(input.bytes);
   return builder.view();
 }
 

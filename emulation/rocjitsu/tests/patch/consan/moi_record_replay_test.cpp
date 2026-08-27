@@ -69,7 +69,7 @@ TEST(ConSanMoi, RecordReplayEngineInventoriesCodeObjectWithoutModification) {
   EXPECT_EQ(kernel.preflight_action, ConSanPreflightAction::NotRun);
   EXPECT_EQ(kernel.stats.lds_read_count, 1u);
   EXPECT_EQ(kernel.stats.lds_write_count, 1u);
-  ASSERT_EQ(kernel.access_sites.size(), 2u);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   ASSERT_EQ(result.moi_candidates.size(), 2u);
   EXPECT_EQ(result.moi_candidates[0].origin, ConSanAccessOrigin::NativeLds);
   EXPECT_EQ(result.moi_candidates[0].kind, ConSanLdsAccessKind::Write);

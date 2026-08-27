@@ -714,7 +714,7 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
 
   result.program_inventory = inventory_builder.view();
   const auto publish_access_inventory = [&] {
-    inventory_builder.rebuild_access_inventory(code_object_bytes);
+    inventory_builder.publish_decoded_accesses(code_object_bytes);
     result.program_inventory = inventory_builder.view();
   };
 

@@ -1098,7 +1098,7 @@ TEST(ConSanMoi, InventoryIncludesLikelyGroupFlatSitesFromLocalFunctions) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.functions().size(), 1u);
-  ASSERT_EQ(result.program_inventory.functions().front().access_sites.size(), 1u);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 1u);
   ASSERT_EQ(result.moi_candidates.size(), 1u);
   const ConSanMoiCandidate &candidate = result.moi_candidates.front();
   EXPECT_EQ(candidate.origin, ConSanAccessOrigin::Flat);
@@ -1733,7 +1733,7 @@ TEST(ConSanMoi, InventorySkipsUnknownFlatSites) {
 
   ASSERT_TRUE(consan_patch_succeeded(result));
   ASSERT_EQ(result.program_inventory.kernels().size(), 1u);
-  ASSERT_EQ(result.program_inventory.kernels().front().access_sites.size(), 2u);
+  ASSERT_EQ(result.program_inventory.access_sites().size(), 2u);
   EXPECT_TRUE(result.moi_candidates.empty());
 
   EXPECT_EQ(std::ranges::count(result.observation_plan.site_decisions,

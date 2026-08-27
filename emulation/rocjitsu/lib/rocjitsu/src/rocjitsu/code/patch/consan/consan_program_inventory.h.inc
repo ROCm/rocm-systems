@@ -184,13 +184,13 @@ struct ConSanAccessRange {
 /// During builder-owned decode, `origin`, instruction facts, operands, and the
 /// original text offset are populated while code-object identity, container
 /// attribution, logical ranges, exclusions, and execution owners can remain
-/// incomplete. `ProgramInventoryBuilder::rebuild_access_inventory` completes
-/// those fields after bounded cross-function provenance relay. Every record
-/// reachable through immutable `ProgramInventory::access_sites()` is in that
-/// completed state. Aliasing symbol ranges can produce several completed
-/// records with the same `physical_id`; later policy canonicalizes them before
-/// placement. The record contains no selected engine, scratch-register or
-/// report address, patch kind, or lowering outcome.
+/// incomplete. `ProgramInventoryBuilder::publish_decoded_accesses` completes
+/// and consumes those records after bounded cross-function provenance relay.
+/// Every record reachable through immutable `ProgramInventory::access_sites()`
+/// is in that completed state. Aliasing symbol ranges can produce several
+/// completed records with the same `physical_id`; later policy canonicalizes
+/// them before placement. The record contains no selected engine,
+/// scratch-register or report address, patch kind, or lowering outcome.
 struct ConSanAccessInventorySite {
   PhysicalSiteId physical_id;
   ConSanProgramContainerRef container;
@@ -377,9 +377,9 @@ private:
 /// analysis. `view()` may publish a const facade while construction continues
 /// so legacy consumers can read containers, but the builder must not escape
 /// the transform. Once it is destroyed, every surviving inventory reference
-/// is immutable. `rebuild_access_inventory` is called after any analysis that
-/// enriches raw access or ownership facts and deterministically replaces only
-/// the derived normalized-access projection.
+/// is immutable. `publish_decoded_accesses` consumes builder-only container
+/// staging after analysis has enriched provenance and deterministically appends
+/// the completed normalized-access projection.
 class ProgramInventoryBuilder {
 public:
   /// Start a fresh inventory for one pristine code-object image.
@@ -437,16 +437,21 @@ public:
 
   void set_semantic_arch_required(bool required) { storage_->semantic_arch_required = required; }
 
-  /// Rebuild normalized access facts from the builder's current decoded
-  /// containers. Existing `ProgramInventory` views observe the replacement,
-  /// but no returned access reference may be retained across this builder-only
-  /// operation.
-  void rebuild_access_inventory(std::span<const uint8_t> code_object_bytes) {
-    storage_->access_sites.clear();
-    for (const ConSanKernelInfo &kernel : storage_->kernels)
+  /// Complete and consume access facts staged by decoded containers.
+  ///
+  /// Existing completed accesses are retained so a mutable inventory revision
+  /// can append a newly analyzed container without reconstructing prior facts.
+  /// Repeated publication is idempotent because each staging vector is cleared
+  /// immediately after its records are completed.
+  void publish_decoded_accesses(std::span<const uint8_t> code_object_bytes) {
+    for (ConSanKernelInfo &kernel : storage_->kernels) {
       append_container_accesses(kernel, code_object_bytes);
-    for (const ConSanFunctionInfo &function : storage_->functions)
+      kernel.access_sites.clear();
+    }
+    for (ConSanFunctionInfo &function : storage_->functions) {
       append_container_accesses(function, code_object_bytes);
+      function.access_sites.clear();
+    }
   }
 
   /// Transfer normalized accesses in a staged executable range to their
@@ -457,7 +462,7 @@ public:
   /// symbol range. Existing records can therefore have been decoded through
   /// an overlapping symbol, while instructions introduced by the trampoline
   /// do not occur in the pristine inventory at all. This operation resolves
-  /// both cases without mutating the legacy per-container access vectors.
+  /// both cases without mutating builder-only container staging vectors.
   void reattribute_access_range(uint64_t begin, uint32_t size, const ConSanKernelInfo &owner,
                                 const ConSanKernelInfo &decoded_range,
                                 std::span<const uint8_t> code_object_bytes) {

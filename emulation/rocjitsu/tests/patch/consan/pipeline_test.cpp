@@ -282,7 +282,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   kernel_c.code_size = 8u;
   kernel_c.has_text_range = true;
   inventory_builder.kernels().push_back(kernel_c);
-  inventory_builder.rebuild_access_inventory(bytes);
+  inventory_builder.publish_decoded_accesses(bytes);
   inventory_builder.access_sites().front().execution_owner_descriptor_file_offsets = {64u, 128u};
   ConSanSyncEvent barrier;
   barrier.semantic_id = {

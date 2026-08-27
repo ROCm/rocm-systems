@@ -4433,6 +4433,40 @@ analysis completed.
   seconds. Slice 5AC completed the periodic physical-gfx950 gate. E2E
   validation remains outside this work.
 
+### Slice 5AQ: consume decoded access staging at publication
+
+- **One published authority:** `ProgramInventory::access_sites()` is now the
+  only access collection that survives inventory construction. Kernel and
+  function access vectors are explicitly builder-only decode staging; the
+  publication boundary completes their code-object identity, container,
+  range, exclusion, and execution-owner facts, appends the completed records,
+  and clears the staging vectors.
+- **Incremental revisions remain sound:** Completed records are retained when
+  an immutable inventory is deep-copied into a new builder revision. A revision
+  can stage and publish a newly analyzed container without reconstructing
+  earlier records, and repeated publication is idempotent because consumed
+  staging cannot be appended twice.
+- **Consumers use the contract:** The HSA summary and post-transform tests no
+  longer inspect per-container staging. They consume the normalized published
+  inventory and use its typed container attribution when separating kernel and
+  function statistics.
+- **Contract coverage:** Inventory tests prove staging consumption, repeated
+  publication, preservation of an immutable source revision, append-only
+  publication in a derived revision, and completion of every access fact from
+  a real code object. Existing decoder, provenance, range, alias, policy, and
+  device tests now read the same published facts used by production.
+- **Deletion accounting:** Production changes add 37 and delete 36 physical
+  lines. The one-line physical increase is documentation and the explicit
+  consume operation, while the duplicate published state and all of its
+  consumer paths are gone. The remaining per-container vectors have only a
+  builder-staging lifetime; routing decode directly into a dedicated inventory
+  construction capability is the next boundary that can delete them entirely.
+- **Completed checked-in gate:** The host gate passes all 1,512 runnable tests
+  with the two expected benchmark-object skips; all 194 HSA-hook tests pass;
+  and all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 63.43 seconds. Slice 5AC completed the
+  periodic physical-gfx950 gate. E2E validation remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
