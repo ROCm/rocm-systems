@@ -822,8 +822,6 @@ void apply_fault_mutation_to_inventory(const AmdGpuCodeObject &code_object, rj_c
                                               synchronization_inventory);
     associate_ordinary_acquire_sync_sequences(sync_blocks, sync_events, arch,
                                               synchronization_inventory, result);
-    build_communication_address_recipes(*code_object, sync_blocks, sync_events, arch,
-                                        synchronization_inventory, result);
     build_moi_fence_candidate_inventory(synchronization_inventory);
     result.program_inventory = inventory_builder.view();
     build_perturbation_candidate_inventory(result);

@@ -222,8 +222,8 @@ struct ConSanAccessInventorySite {
 /// analysis.
 ///
 /// Events retain physical and typed semantic identities; sequences and
-/// lifecycle groups retain ordered member identities; communication recipes
-/// and fence candidates retain the bounded facts derived from those sequences.
+/// lifecycle groups retain ordered member identities, and fence candidates
+/// retain the bounded associations derived from those sequences.
 /// The view owns no storage and remains valid while its `ProgramInventory`
 /// owner is alive. Fault planning and engine policy may query this projection
 /// but cannot modify or rebuild sanitizer semantics through it.
@@ -231,7 +231,6 @@ struct SynchronizationInventoryView {
   std::span<const ConSanSyncEvent> sync_events;
   std::span<const ConSanSyncSequence> sync_sequences;
   std::span<const ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
-  std::span<const ConSanCommunicationAddressRecipe> communication_address_recipes;
   std::span<const ConSanMoiFenceCandidate> moi_fence_candidates;
 
   /// Resolve one typed event identity to its sole authoritative record. An
@@ -246,7 +245,7 @@ struct SynchronizationInventoryView {
   /// records of any kind.
   [[nodiscard]] bool empty() const {
     return sync_events.empty() && sync_sequences.empty() && barrier_lifecycle_groups.empty() &&
-           communication_address_recipes.empty() && moi_fence_candidates.empty();
+           moi_fence_candidates.empty();
   }
 };
 
@@ -262,7 +261,6 @@ struct SynchronizationInventoryBuildView {
   std::vector<ConSanSyncEvent> &sync_events;
   std::vector<ConSanSyncSequence> &sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> &barrier_lifecycle_groups;
-  std::vector<ConSanCommunicationAddressRecipe> &communication_address_recipes;
   std::vector<ConSanMoiFenceCandidate> &moi_fence_candidates;
 };
 
@@ -290,7 +288,6 @@ struct ConSanProgramInventoryStorage {
   std::vector<ConSanSyncEvent> sync_events;
   std::vector<ConSanSyncSequence> sync_sequences;
   std::vector<ConSanBarrierLifecycleGroup> barrier_lifecycle_groups;
-  std::vector<ConSanCommunicationAddressRecipe> communication_address_recipes;
   std::vector<ConSanMoiFenceCandidate> moi_fence_candidates;
 };
 
@@ -360,7 +357,6 @@ public:
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
-        .communication_address_recipes = storage_->communication_address_recipes,
         .moi_fence_candidates = storage_->moi_fence_candidates,
     };
   }
@@ -429,7 +425,6 @@ public:
         .sync_events = storage_->sync_events,
         .sync_sequences = storage_->sync_sequences,
         .barrier_lifecycle_groups = storage_->barrier_lifecycle_groups,
-        .communication_address_recipes = storage_->communication_address_recipes,
         .moi_fence_candidates = storage_->moi_fence_candidates,
     };
   }

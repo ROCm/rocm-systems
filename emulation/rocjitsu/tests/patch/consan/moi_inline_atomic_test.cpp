@@ -3543,13 +3543,6 @@ TEST(ConSanMoi, RecordReplayCapturesAliasedOrdinaryAcquireAddressBeforeGuestAcro
     const uint16_t materialized_address =
         static_cast<uint16_t>(*plan->scratch_vgpr + plan->scratch_vgpr_count - 2u);
 
-    const auto recipe = std::ranges::find_if(
-        result.program_inventory.sync().communication_address_recipes, [](const auto &candidate) {
-          return candidate.kind == ConSanCommunicationAddressKind::Ordinary;
-        });
-    ASSERT_NE(recipe, result.program_inventory.sync().communication_address_recipes.end());
-    EXPECT_EQ(recipe->support, ConSanCommunicationAddressSupport::AddressNotLiveAfterSequence);
-
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     ASSERT_TRUE(patched.is_valid());
     const std::vector<uint32_t> cave =

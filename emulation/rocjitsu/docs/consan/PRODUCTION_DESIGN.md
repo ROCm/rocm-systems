@@ -488,8 +488,8 @@ mutation transformation implementation. It currently owns all of the following:
    unreachable inferred ranges;
 4. when requested, build fault sites, synchronization events, synchronization
    sequences, barrier lifecycles, execution owners, ordinary release/acquire
-   associations, communication address recipes, fence candidates,
-   perturbation candidates, and fault annotations;
+   associations, fence candidates, perturbation candidates, and fault
+   annotations;
 5. dispatch either to the MOI pipeline or to SuperCollider lowering; and
 6. apply mutations, compose patch stages, validate the final ELF, and encode the
    install outcome in the same result object.
@@ -927,10 +927,8 @@ addition to a kernel's fixed LDS use.
 
 An **execution-owner proof** is the analysis evidence for attributing shared or
 called code to a kernel/owner domain. A **barrier lifecycle group** relates the
-events that initialize, arrive at, wait on, or reuse one logical barrier. A
-**communication-address recipe** is a symbolic description of how an ordinary-
-memory synchronization operation and the LDS communication it orders are
-associated. An **ordinary release/acquire association** relates a data
+events that initialize, arrive at, wait on, or reuse one logical barrier. An
+**ordinary release/acquire association** relates a data
 load/store and separate cache/fence instructions that together implement
 publication without one native ordered atomic. An **inventory exclusion** is a
 typed fact explaining why analysis could not classify an otherwise relevant
@@ -955,8 +953,8 @@ The inventory contains:
   and semantic confidence;
 - synchronization events and logical sequences, operation, scope, memory role,
   dynamic outcome requirements, and exact member identities;
-- execution-owner proofs, barrier lifecycle groups, communication-address
-  recipes, and ordinary release/acquire associations; and
+- execution-owner proofs, barrier lifecycle groups, and ordinary
+  release/acquire associations; and
 - typed inventory exclusions and analysis limitations.
 
 One instruction can yield several `SemanticSiteId`s by adding a domain and
@@ -2055,8 +2053,8 @@ simulated targets.
 
 **Implementation status:** complete. `ProgramInventory` now owns sync events,
 logical sequences, owner annotations, barrier lifecycles, ordinary
-release/acquire associations, communication-address recipes, and MOI fence
-candidates. Its `SynchronizationInventoryView` is an immutable query value;
+release/acquire associations, and MOI fence candidates. Its
+`SynchronizationInventoryView` is an immutable query value;
 `ConSanResult` neither inherits nor stores a second copy of those spans. Only
 semantic analysis receives `SynchronizationInventoryBuildView`, making every
 remaining write capability explicit in a producer signature.
@@ -4570,6 +4568,40 @@ analysis completed.
   with the two expected benchmark-object skips; all 194 HSA-hook tests pass;
   and all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
   `gfx1201`, and `gfx1250` pass in 84.78 seconds. Slice 5AS completed the
+  periodic physical-gfx950 gate. E2E validation remains outside this work.
+
+### Slice 5AU: delete the unconsumed communication-address recipe
+
+- **Dead projection removed:** `ConSanCommunicationAddressRecipe` and its two
+  private enums had no production consumer. Semantic analysis nevertheless
+  built one record per atomic or ordinary-memory sequence, and program
+  inventory stored and copied those records. Only tests read the result. The
+  type, storage, build capability, construction call, and all references are
+  deleted rather than preserving an aspirational interface beside the live
+  lowering path.
+- **Duplicate analysis removed:** Recipe construction separately recovered
+  communication operands, rebuilt a CFG liveness analysis, revalidated owner
+  descriptors, selected a post-sequence scratch pair, and encoded a second
+  support verdict. Actual Record/Replay fence lowering already derives its
+  address and resource plan at the correct insertion point, including the
+  pre-guest capture required when an ordinary acquire destroys its address.
+  Removing the recipe therefore deletes redundant work and eliminates the risk
+  that an unused verdict disagrees with the mechanism that executes.
+- **Behavioral contracts retained:** Tests still prove ordinary release/acquire
+  association, exact pre-guest capture and patch extent for destructive
+  acquire sequences, atomic and fence address publication, liveness/resource
+  rejection in the live planners, and paired correct/incorrect behavior on all
+  five targets. Three host tests that asserted only fields of the unreachable
+  recipe were deleted; mechanism-only recipe assertions embedded in otherwise
+  behavioral tests were removed without weakening their live outcomes.
+- **Deletion accounting:** Production changes add three and delete 316 physical
+  lines, a net deletion of 313 lines. Tests delete 132 lines and add none. The
+  inventory and design documentation now describe only synchronization facts
+  that a production consumer uses.
+- **Completed checked-in gate:** The host gate passes all 1,509 runnable tests
+  with the two expected benchmark-object skips; all 194 HSA-hook tests pass;
+  and all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass in 82.40 seconds. Slice 5AS completed the
   periodic physical-gfx950 gate. E2E validation remains outside this work.
 
 ### Slice 6: explicit pipeline and result cutover

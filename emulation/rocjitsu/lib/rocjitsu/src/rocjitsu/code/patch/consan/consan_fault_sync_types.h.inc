@@ -270,52 +270,6 @@ struct ConSanSyncSequence {
   std::vector<ConSanExecutionOwner> execution_owners;
 };
 
-enum class ConSanCommunicationAddressKind : uint8_t {
-  Atomic,
-  Ordinary,
-};
-
-/// Typed fail-closed outcome for a synchronization sequence's normalized
-/// communication address. A supported recipe proves that the complete source
-/// address remains live at the first instruction after the sequence and that
-/// one dead VGPR pair is available there for engine-specific materialization.
-enum class ConSanCommunicationAddressSupport : uint8_t {
-  Supported,
-  UnsupportedSequence,
-  AmbiguousCommunicationEvent,
-  UnsupportedAddressSource,
-  MissingAddressOperands,
-  InvalidStaticOffset,
-  MissingPostSequenceInstruction,
-  AddressNotLiveAfterSequence,
-  MissingOwners,
-  InvalidOwnerDescriptor,
-  NoPostSequenceScratchPair,
-  ScratchOutsideOwnerAllocation,
-};
-
-struct ConSanCommunicationAddressRecipe {
-  ConSanCommunicationAddressSupport support =
-      ConSanCommunicationAddressSupport::UnsupportedSequence;
-  ConSanCommunicationAddressKind kind = ConSanCommunicationAddressKind::Atomic;
-  std::string sequence_identity;
-  std::string communication_event_identity;
-  ConSanSyncAddressSource address_source = ConSanSyncAddressSource::Unknown;
-  uint64_t post_sequence_text_offset = 0;
-  uint16_t address_vgpr = 0;
-  uint16_t address_vgpr_count = 0;
-  std::optional<uint16_t> address_sgpr;
-  uint16_t address_sgpr_count = 0;
-  int64_t static_byte_offset = 0;
-  std::optional<uint16_t> scratch_vgpr;
-  uint16_t scratch_vgpr_count = 0;
-  std::vector<uint64_t> owner_descriptor_file_offsets;
-
-  [[nodiscard]] bool supported() const {
-    return support == ConSanCommunicationAddressSupport::Supported;
-  }
-};
-
 /// Analysis outcome for associating one cache/fence instruction with an
 /// address-bearing synchronization sequence.
 ///

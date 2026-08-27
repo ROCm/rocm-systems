@@ -4612,29 +4612,6 @@ TEST(ConSan, SyncSequencesInventoryUnmatchedBarrierComponentsWithoutPairing) {
             1u);
 }
 
-TEST(ConSan, CommunicationAddressRecipeSupportsAtomicReleaseAddress) {
-  ConSanOptions options = moi_options();
-  options.fault_dry_run = true;
-  const ConSanResult result =
-      try_patch_consan(make_rdna4_ordered_global_atomic_release_acquire_code_object(), options);
-
-  const auto recipe = std::ranges::find_if(
-      result.program_inventory.sync().communication_address_recipes,
-      [](const ConSanCommunicationAddressRecipe &candidate) {
-        return candidate.kind == ConSanCommunicationAddressKind::Atomic && candidate.supported();
-      });
-  ASSERT_NE(recipe, result.program_inventory.sync().communication_address_recipes.end());
-  EXPECT_EQ(recipe->address_source, ConSanSyncAddressSource::GlobalScalarVector);
-  EXPECT_EQ(recipe->address_vgpr, 2u);
-  EXPECT_EQ(recipe->address_vgpr_count, 1u);
-  ASSERT_TRUE(recipe->address_sgpr);
-  EXPECT_EQ(*recipe->address_sgpr, 4u);
-  EXPECT_EQ(recipe->address_sgpr_count, 2u);
-  EXPECT_EQ(recipe->static_byte_offset, 0);
-  ASSERT_TRUE(recipe->scratch_vgpr);
-  EXPECT_EQ(recipe->scratch_vgpr_count, 2u);
-}
-
 TEST(ConSan, FinalValidationRederivesStructuredExecDiamondProof) {
   const auto save_exec =
       build_s_and_saveexec_b64(/*sdst=*/30, /*ssrc0=*/106, ROCJITSU_CODE_ARCH_RDNA4);
