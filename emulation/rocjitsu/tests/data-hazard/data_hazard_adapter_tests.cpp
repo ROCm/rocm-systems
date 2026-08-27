@@ -443,6 +443,65 @@ TEST(DataHazardAdapterTest, ScratchStorePerLaneRouteEmitsActiveScratchWritesOnly
   EXPECT_FALSE(api.resources[2].is_read);
 }
 
+TEST(DataHazardAdapterTest, RouteWithNoActiveLanesAddressesNothing) {
+  RecordingSimulatorApi api;
+  dh::DataHazardAdapter adapter{api};
+  dh::InstructionView instruction;
+  dh::MemoryRouteView store;
+  ExecutionKey const wave{1, 0, 0, 0};
+
+  instruction.execution = wave;
+  instruction.instruction_id = 1;
+  instruction.pc = 0x100;
+  adapter.on_instruction(instruction);
+
+  // A buffer store whose every lane fell outside the resource. Address
+  // calculation left the rejected lanes at zero, so taking them would report
+  // writes to address zero that the wave never made.
+  store.instruction = instruction;
+  store.resource_kind = ResourceKind::GlobalMemory;
+  store.register_class = dh::RegisterClass::Vector;
+  store.register_base = 8;
+  store.per_lane_addresses = {0, 0, 0, 0};
+  store.size_bytes = 4;
+  store.is_store = true;
+  store.exec_mask = 0;
+  adapter.on_memory_route(store);
+
+  // The store still holds its counter slot, which is what a later wait drains.
+  ASSERT_EQ(api.resources.size(), 1u);
+  EXPECT_EQ(api.resources[0].hazards.memory_op_wait, WaitCntType::STORE);
+  EXPECT_FALSE(api.resources[0].is_write);
+  EXPECT_FALSE(api.resources[0].is_read);
+}
+
+TEST(DataHazardAdapterTest, RouteWithoutLanesKeepsItsSingleAddress) {
+  RecordingSimulatorApi api;
+  dh::DataHazardAdapter adapter{api};
+  dh::InstructionView instruction;
+  dh::MemoryRouteView write;
+  ExecutionKey const wave{1, 0, 0, 0};
+
+  instruction.execution = wave;
+  instruction.instruction_id = 1;
+  instruction.pc = 0x100;
+  adapter.on_instruction(instruction);
+
+  // A tensor transfer names no lanes at all; its LDS write still counts.
+  write.instruction = instruction;
+  write.local_address = 0x200;
+  write.local_size_bytes = 64;
+  write.writes_local_memory = true;
+  write.local_write_wait = WaitCntType::TENSOR;
+  write.is_tensor = true;
+  adapter.on_memory_route(write);
+
+  ASSERT_EQ(api.resources.size(), 1u);
+  EXPECT_EQ(api.resources[0].resource_kind, ResourceKind::LocalMemory);
+  EXPECT_EQ(api.resources[0].address, 0x200u);
+  EXPECT_TRUE(api.resources[0].is_write);
+}
+
 TEST(DataHazardAdapterTest, ReturningAtomicRouteEmitsMemoryRmwAndReturnEvents) {
   RecordingSimulatorApi api;
   dh::DataHazardAdapter adapter{api};

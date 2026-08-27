@@ -19,6 +19,7 @@
 #include <array>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -105,7 +106,11 @@ struct MemoryRouteView {
   /// later count them apart. Read from the decoded instruction rather than
   /// assumed, and ignored when the route is not a store.
   hazard_core::WaitCntType store_wait = hazard_core::WaitCntType::STORE;
-  uint64_t exec_mask = 0;
+  /// Lanes of the route that reach memory. A zero mask means none of them do,
+  /// as when EXEC is zero or every lane falls outside its buffer, and the route
+  /// then addresses nothing. Left empty by routes with no lane dimension, such
+  /// as scalar memory and tensor DMA, whose single address always counts.
+  std::optional<uint64_t> exec_mask;
 };
 
 /// @brief Translates rocJitsu-shaped views into ::hazard_core engine events.
