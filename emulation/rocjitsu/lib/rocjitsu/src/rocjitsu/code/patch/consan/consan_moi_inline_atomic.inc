@@ -830,9 +830,9 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
     const VgprSpillSequence *spill, const InlineSgprSpillSequence *scalar_spill,
     rj_code_arch_t arch, uint32_t record_index, uint32_t atomic_record_capacity,
     size_t atomic_records_offset, uint64_t cave_text_offset, uint64_t return_text_offset,
-    bool already_runtime_workgroup_gated, std::optional<uint32_t> private_owner_offset,
-    std::optional<uint16_t> private_owner_shift, uint32_t &guest_instruction_offset,
-    std::vector<std::string> &errors) {
+    bool already_runtime_workgroup_gated,
+    const std::optional<MoiRecordOwnerDerivationPlan> &derived_owner,
+    uint32_t &guest_instruction_offset, std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI atomic record patch requires RJ_CONSAN_TMP_VGPR");
     return std::nullopt;
@@ -862,10 +862,13 @@ void try_apply_inline_atomic_ordering_patch(std::span<const uint8_t> bytes,
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner) {
+    if (!derived_owner) {
+      errors.emplace_back("ConSan MOI atomic record patch requires a planned owner derivation");
+      return std::nullopt;
+    }
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 4u);
-    const auto owner = build_moi_record_owner_derivation(
-        bytes, candidate.kernel_descriptor_file_offset, private_owner_offset, private_owner_shift,
-        value_vgpr, arch, "atomic record patch", errors);
+    const auto owner = build_moi_record_owner_derivation(*derived_owner, value_vgpr, arch,
+                                                         "atomic record patch", errors);
     if (!owner)
       return std::nullopt;
     derived_owner_vgpr = owner->vgpr;

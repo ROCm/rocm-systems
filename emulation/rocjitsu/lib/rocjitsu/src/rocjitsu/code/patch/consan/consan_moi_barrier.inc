@@ -165,7 +165,7 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
     const InlineSgprSpillSequence *scalar_spill, rj_code_arch_t arch,
     uint32_t barrier_record_capacity, size_t barrier_records_offset, uint32_t original_barrier_word,
     uint64_t cave_text_offset, uint64_t return_text_offset,
-    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
+    const std::optional<MoiRecordOwnerDerivationPlan> &derived_owner,
     std::vector<std::string> &errors) {
   if (!options.scratch_vgpr) {
     errors.emplace_back("ConSan MOI barrier record patch requires RJ_CONSAN_TMP_VGPR");
@@ -191,10 +191,13 @@ void append_barrier_epoch_candidates(const ConSanFunctionInfo &function,
   std::optional<uint16_t> derived_owner_vgpr;
   std::vector<uint32_t> derived_owner_words;
   if (!options.moi_owner_vgpr && !options.moi_persistent_sgprs.owner) {
+    if (!derived_owner) {
+      errors.emplace_back("ConSan MOI barrier record patch requires a planned owner derivation");
+      return std::nullopt;
+    }
     const uint16_t value_vgpr = static_cast<uint16_t>(*options.scratch_vgpr + 5u);
-    const auto owner = build_moi_record_owner_derivation(
-        bytes, candidate.kernel_descriptor_file_offset, private_owner_offset, private_owner_shift,
-        value_vgpr, arch, "barrier record patch", errors);
+    const auto owner = build_moi_record_owner_derivation(*derived_owner, value_vgpr, arch,
+                                                         "barrier record patch", errors);
     if (!owner)
       return std::nullopt;
     derived_owner_vgpr = owner->vgpr;
@@ -1036,8 +1039,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
     std::vector<uint64_t> owner_descriptor_file_offsets;
     std::optional<uint16_t> scratch_vgpr;
     std::optional<uint32_t> private_epoch_offset;
-    std::optional<uint32_t> private_owner_offset;
-    std::optional<uint16_t> private_owner_shift;
+    std::optional<MoiRecordOwnerDerivationPlan> derived_owner;
     ConSanMoiPersistentWorkgroupPrivateOffsets private_record_replay_workgroup_offsets;
     std::optional<VgprSpillSequence> spill;
     std::optional<InlineSgprSpillSequence> scalar_spill;
@@ -1051,7 +1053,9 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
                                              const PlannedInlineEpochBarrier &planned) {
     info.scratch_vgpr = planned.scratch_vgpr;
     info.persistent_epoch_private_offset = planned.private_epoch_offset;
-    info.persistent_owner_private_offset = planned.private_owner_offset;
+    info.persistent_owner_private_offset =
+        planned.derived_owner ? planned.derived_owner->entry_workitem_x_private_offset
+                              : std::nullopt;
     info.persistent_record_replay_workgroup_private_offsets =
         planned.private_record_replay_workgroup_offsets;
     if (planned.persistent_private_state_end != 0u)
@@ -1124,12 +1128,16 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
               "ConSan MOI Record/Replay dense barrier lost its private owner-local assignment");
           continue;
         }
-        std::optional<uint16_t> private_owner_shift;
-        if (access_patch->persistent_owner_private_offset) {
-          private_owner_shift =
-              common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
-          if (!private_owner_shift)
+        std::optional<MoiRecordOwnerDerivationPlan> derived_owner;
+        if (!candidate_options.moi_owner_vgpr && !candidate_options.moi_persistent_sgprs.owner) {
+          const auto owner_shift =
+              common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
+          if (!owner_shift)
             continue;
+          derived_owner = MoiRecordOwnerDerivationPlan{
+              .entry_workitem_x_private_offset = access_patch->persistent_owner_private_offset,
+              .wave_size_shift = *owner_shift,
+          };
         }
         const uint32_t persistent_end = access_patch->persistent_private_state_end.value_or(0u);
         std::optional<VgprSpillSequence> spill;
@@ -1162,8 +1170,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
             .owner_descriptor_file_offsets = owners,
             .scratch_vgpr = resources->base,
             .private_epoch_offset = access_patch->persistent_epoch_private_offset,
-            .private_owner_offset = access_patch->persistent_owner_private_offset,
-            .private_owner_shift = private_owner_shift,
+            .derived_owner = derived_owner,
             .private_record_replay_workgroup_offsets =
                 access_patch->persistent_record_replay_workgroup_private_offsets,
             .spill = std::move(spill),
@@ -1197,8 +1204,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           .owner_descriptor_file_offsets = owners,
           .scratch_vgpr = access_patch->scratch_vgpr,
           .private_epoch_offset = access_patch->persistent_epoch_private_offset,
-          .private_owner_offset = std::nullopt,
-          .private_owner_shift = std::nullopt,
+          .derived_owner = std::nullopt,
           .private_record_replay_workgroup_offsets = {},
           .spill = std::move(spill),
           .scalar_spill = std::nullopt,
@@ -1318,8 +1324,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
         .owner_descriptor_file_offsets = std::move(owners),
         .scratch_vgpr = scratch_vgpr,
         .private_epoch_offset = std::nullopt,
-        .private_owner_offset = std::nullopt,
-        .private_owner_shift = std::nullopt,
+        .derived_owner = std::nullopt,
         .private_record_replay_workgroup_offsets = {},
         .spill = std::move(spill),
         .scalar_spill = std::move(scalar_spill),
@@ -1389,8 +1394,7 @@ void try_apply_inline_shadow_barrier_epoch_patch(std::span<const uint8_t> bytes,
           planned.spill ? &*planned.spill : nullptr,
           planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
           record_layout.barrier_record_capacity, record_layout.barrier_records_offset,
-          original_barrier_word, body_offset, return_offset, planned.private_owner_offset,
-          planned.private_owner_shift, result.errors);
+          original_barrier_word, body_offset, return_offset, planned.derived_owner, result.errors);
     }
     if (planned.private_epoch_offset && planned.scratch_vgpr && planned.spill) {
       return build_inline_shadow_private_epoch_barrier_cave_words(
@@ -2474,10 +2478,13 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
     }
     BarrierRecordCandidate planned_candidate = candidate;
     if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
-      planned_candidate.kernel_descriptor_file_offset =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
-      if (!planned_candidate.kernel_descriptor_file_offset)
+      if (resources->owner_descriptor_file_offsets.empty()) {
+        result.warnings.emplace_back(
+            "ConSan MOI barrier record patch requires an owning kernel descriptor");
         continue;
+      }
+      planned_candidate.kernel_descriptor_file_offset =
+          resources->owner_descriptor_file_offsets.front();
     }
     auto record_event = plan_moi_record_event(bytes, result, *resources, options, spill_managers,
                                               arch, "ConSan MOI barrier record patch");
@@ -2639,12 +2646,7 @@ void try_apply_record_replay_barrier_record_patch(std::span<const uint8_t> bytes
         active_bytes, candidate, candidate_options, planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch,
         layout.barrier_record_capacity, layout.barrier_records_offset, original_barrier_word,
-        cave_text_offset, cave_return_target,
-        planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
-                              : std::nullopt,
-        planned.private_owner ? std::optional<uint16_t>(planned.private_owner->shift)
-                              : std::nullopt,
-        result.errors);
+        cave_text_offset, cave_return_target, planned.derived_owner, result.errors);
     if (!cave_words)
       return;
     std::optional<MoiBorrowedRecordReplayEntry> borrowed_entry;

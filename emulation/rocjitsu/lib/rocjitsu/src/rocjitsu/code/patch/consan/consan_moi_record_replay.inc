@@ -589,7 +589,7 @@ void try_apply_first_light_access_record_patch(
       }
       if (private_layout && private_layout->owner_offset)
         private_owner_shift =
-            common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
+            common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
       if (!private_layout) {
         result.warnings.emplace_back(
             "ConSan MOI first-light probe could not build private epoch state");

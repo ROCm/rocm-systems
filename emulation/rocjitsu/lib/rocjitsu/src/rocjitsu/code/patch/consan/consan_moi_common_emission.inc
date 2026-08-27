@@ -27,9 +27,9 @@ struct MoiPrivateEpochLayout {
 }
 
 [[nodiscard]] std::optional<uint16_t>
-common_moi_private_owner_shift(std::span<const uint8_t> image,
-                               const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
-                               std::vector<std::string> &warnings) {
+common_moi_workitem_owner_shift(std::span<const uint8_t> image,
+                                const ResolvedMoiScratchPlan &resources, rj_code_arch_t arch,
+                                std::vector<std::string> &warnings) {
   std::optional<uint16_t> common_shift;
   for (uint64_t descriptor_offset : resources.owner_descriptor_file_offsets) {
     std::vector<std::string> errors;
@@ -49,84 +49,48 @@ common_moi_private_owner_shift(std::span<const uint8_t> image,
   return common_shift;
 }
 
-struct MoiPrivateRecordOwnerPlan {
-  uint32_t offset = 0;
-  uint16_t shift = 0;
-  uint32_t private_state_end = 0;
-};
-
 [[nodiscard]] bool moi_record_uses_private_owner(const MoiOptions &options) {
   return options.moi_init_owner_epoch && options.automatic_moi_private_epoch &&
          options.moi_owner_source == ConSanMoiOwnerSource::WorkitemId && !options.moi_owner_vgpr &&
          !options.moi_persistent_sgprs.owner;
 }
 
-[[nodiscard]] std::optional<MoiPrivateRecordOwnerPlan> resolve_moi_private_record_owner(
+[[nodiscard]] std::optional<MoiRecordOwnerDerivationPlan> resolve_moi_private_record_owner(
     std::span<const uint8_t> image, const ResolvedMoiScratchPlan &resources,
     const MoiPrivateEpochLayout &layout, rj_code_arch_t arch, std::vector<std::string> &warnings) {
   if (!layout.owner_offset) {
     warnings.emplace_back("ConSan MOI private owner requires an entry-captured owner slot");
     return std::nullopt;
   }
-  const auto common_shift = common_moi_private_owner_shift(image, resources, arch, warnings);
+  const auto common_shift = common_moi_workitem_owner_shift(image, resources, arch, warnings);
   if (!common_shift)
     return std::nullopt;
-  return MoiPrivateRecordOwnerPlan{.offset = *layout.owner_offset,
-                                   .shift = *common_shift,
-                                   .private_state_end = layout.ephemeral_base};
+  return MoiRecordOwnerDerivationPlan{.entry_workitem_x_private_offset = *layout.owner_offset,
+                                      .wave_size_shift = *common_shift};
 }
 
+/// Lowered owner value together with the exact target words that materialize
+/// it. Keeping the destination beside the words lets record-field emission
+/// remain agnostic about whether the source was live ABI state or a private
+/// entry capture.
 struct MoiRecordOwnerDerivation {
   uint16_t vgpr = 0;
   std::vector<uint32_t> words;
 };
 
-[[nodiscard]] std::optional<MoiRecordOwnerDerivation> build_moi_record_owner_derivation(
-    std::span<const uint8_t> bytes, std::optional<uint64_t> descriptor_file_offset,
-    std::optional<uint32_t> private_owner_offset, std::optional<uint16_t> private_owner_shift,
-    uint16_t value_vgpr, rj_code_arch_t arch, std::string_view consumer,
-    std::vector<std::string> &errors) {
-  if (private_owner_offset.has_value() != private_owner_shift.has_value()) {
-    errors.emplace_back("ConSan MOI " + std::string(consumer) +
-                        " has an incomplete private owner plan");
-    return std::nullopt;
-  }
-  std::optional<uint16_t> owner_shift = private_owner_shift;
-  if (!owner_shift) {
-    if (!descriptor_file_offset) {
-      errors.emplace_back("ConSan MOI " + std::string(consumer) +
-                          " requires an owning kernel descriptor");
-      return std::nullopt;
-    }
-    owner_shift = moi_descriptor_owner_shift(bytes, *descriptor_file_offset, arch, errors);
-    if (!owner_shift)
-      return std::nullopt;
-  }
-
+[[nodiscard]] std::optional<MoiRecordOwnerDerivation>
+build_moi_record_owner_derivation(const MoiRecordOwnerDerivationPlan &plan, uint16_t value_vgpr,
+                                  rj_code_arch_t arch, std::string_view consumer,
+                                  std::vector<std::string> &errors) {
   MoiRecordOwnerDerivation derivation{.vgpr = value_vgpr, .words = {}};
-  if (private_owner_offset) {
-    // Guest code may repurpose v0 after kernel entry, so reload the raw
-    // workitem ID captured by the private-state prologue before deriving the wave owner.
-    const auto owner_load =
-        instrumentation::build_private_load_b32(value_vgpr, *private_owner_offset, arch);
-    const auto owner_wait = instrumentation::build_s_wait_private_load0(arch);
-    if (!owner_load || !owner_wait) {
-      errors.emplace_back("ConSan MOI " + std::string(consumer) +
-                          " could not load its captured entry owner");
-      return std::nullopt;
-    }
-    derivation.words.insert(derivation.words.end(), owner_load->begin(), owner_load->end());
-    derivation.words.push_back(*owner_wait);
-  }
-  const uint16_t owner_source = private_owner_offset ? value_vgpr : kRdna4WorkitemIdX;
-  const auto owner_init = instrumentation::build_v_lshrrev_b32(
-      value_vgpr, scalar_positive_inline_u32(*owner_shift), owner_source, arch);
-  if (!owner_init) {
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  if (target == nullptr ||
+      !append_moi_record_owner_derivation(derivation.words,
+                                          {.plan = plan, .result_vgpr = value_vgpr}, *target)) {
     errors.emplace_back("ConSan MOI " + std::string(consumer) +
                         " could not encode owner derivation");
     return std::nullopt;
   }
-  derivation.words.push_back(*owner_init);
   return derivation;
 }
 

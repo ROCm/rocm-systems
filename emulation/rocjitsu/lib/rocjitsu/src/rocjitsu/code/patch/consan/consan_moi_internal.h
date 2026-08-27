@@ -276,6 +276,55 @@ append_moi_atomic_counter_increment(std::vector<uint32_t> &words,
                                     const MoiAtomicCounterIncrementRequest &request,
                                     const ConSanTargetProfile &target);
 
+/// Resolved source and wave geometry used to derive a Record/Replay owner.
+///
+/// Record/Replay identifies an owner by shifting the workitem-x identity by
+/// `wave_size_shift`, yielding the wave's index within its workgroup. When
+/// `entry_workitem_x_private_offset` is absent, lowering reads the live ABI
+/// workitem-x VGPR. When present, lowering reloads the value captured by the
+/// entry prologue; this is required when guest code may have overwritten the
+/// live ABI VGPR before the synchronization event.
+///
+/// This type is the planning-to-emission contract. In particular, it contains
+/// the already-resolved shift rather than a kernel-descriptor address, so
+/// emitters cannot reinterpret descriptor ABI state or choose a different
+/// wave geometry.
+struct MoiRecordOwnerDerivationPlan {
+  std::optional<uint32_t> entry_workitem_x_private_offset;
+  uint16_t wave_size_shift = 0;
+
+  /// A b32 logical shift admits values 0..31. Production wave sizes currently
+  /// resolve to shifts 5 or 6, but keeping the invariant instruction-shaped
+  /// avoids baking the present target set into the semantic contract.
+  [[nodiscard]] bool is_well_formed() const { return wave_size_shift < 32u; }
+
+  bool operator==(const MoiRecordOwnerDerivationPlan &) const = default;
+};
+
+/// Semantic request to materialize a planned Record/Replay owner in one VGPR.
+///
+/// `plan` fixes both the identity source and wave geometry. `result_vgpr` is a
+/// temporary selected by the event-specific resource plan. The request does
+/// not expose instruction encodings, wait counters, or target-family choices.
+struct MoiRecordOwnerDerivationRequest {
+  MoiRecordOwnerDerivationPlan plan;
+  uint16_t result_vgpr = 0;
+
+  [[nodiscard]] bool is_well_formed() const { return plan.is_well_formed() && result_vgpr < 256u; }
+
+  bool operator==(const MoiRecordOwnerDerivationRequest &) const = default;
+};
+
+/// Append the target sequence that derives one planned Record/Replay owner.
+///
+/// A private-state source is reloaded and waited for before the shift; a live
+/// source reads the ABI workitem-x value directly. Invalid requests or target
+/// encodings fail transactionally and leave `words` unchanged.
+[[nodiscard]] bool
+append_moi_record_owner_derivation(std::vector<uint32_t> &words,
+                                   const MoiRecordOwnerDerivationRequest &request,
+                                   const ConSanTargetProfile &target);
+
 /// Names the concrete store shape selected for one parallel workgroup-shadow
 /// clear loop.
 ///

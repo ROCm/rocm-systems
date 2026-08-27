@@ -143,10 +143,12 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
       continue;
     }
     if (!options.moi_owner_vgpr && !candidate.kernel_descriptor_file_offset) {
-      candidate.kernel_descriptor_file_offset =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
-      if (!candidate.kernel_descriptor_file_offset)
+      if (resources->owner_descriptor_file_offsets.empty()) {
+        result.warnings.emplace_back(
+            "ConSan MOI fence record patch requires an owning kernel descriptor");
         continue;
+      }
+      candidate.kernel_descriptor_file_offset = resources->owner_descriptor_file_offsets.front();
     }
     auto record_event =
         plan_moi_record_event(bytes, result, *resources, options, spill_managers, arch,
@@ -339,11 +341,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.fence_record_capacity, layout.fence_records_offset, cave_text_offset,
-        return_text_offset, std::nullopt, displaced_tail_words,
-        planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
-                              : std::nullopt,
-        planned.private_owner ? std::optional<uint16_t>(planned.private_owner->shift)
-                              : std::nullopt,
+        return_text_offset, std::nullopt, displaced_tail_words, planned.derived_owner,
         result.errors);
     if (!cave_words)
       return;
@@ -363,12 +361,7 @@ void try_apply_fence_record_patch(std::span<const uint8_t> bytes, const MoiOptio
             planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
             layout.fence_record_capacity, layout.fence_records_offset, cave_text_offset,
             return_text_offset, dense_call_return,
-            /*displaced_tail_words=*/{},
-            planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
-                                  : std::nullopt,
-            planned.private_owner ? std::optional<uint16_t>(planned.private_owner->shift)
-                                  : std::nullopt,
-            result.errors);
+            /*displaced_tail_words=*/{}, planned.derived_owner, result.errors);
         if (!cave_words)
           return;
       }

@@ -412,7 +412,7 @@ void try_apply_direct_sampled_watchpoint_patch(std::span<const uint8_t> bytes,
       }
       if (private_layout && private_layout->owner_offset)
         private_owner_shift =
-            common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
+            common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
       if (!private_layout || (private_layout->owner_offset && !private_owner_shift))
         continue;
     }

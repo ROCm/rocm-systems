@@ -150,10 +150,13 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
     }
     AtomicRecordCandidate planned_candidate = candidate;
     if (!options.moi_owner_vgpr && !planned_candidate.kernel_descriptor_file_offset) {
-      planned_candidate.kernel_descriptor_file_offset =
-          common_moi_record_owner_descriptor(bytes, *resources, arch, result.warnings);
-      if (!planned_candidate.kernel_descriptor_file_offset)
+      if (resources->owner_descriptor_file_offsets.empty()) {
+        result.warnings.emplace_back(
+            "ConSan MOI atomic record patch requires an owning kernel descriptor");
         continue;
+      }
+      planned_candidate.kernel_descriptor_file_offset =
+          resources->owner_descriptor_file_offsets.front();
     }
     auto record_event = plan_moi_record_event(bytes, result, *resources, options, spill_managers,
                                               arch, "ConSan MOI atomic record patch");
@@ -221,11 +224,7 @@ void try_apply_atomic_record_patch(std::span<const uint8_t> bytes, const MoiOpti
         planned.spill ? &*planned.spill : nullptr,
         planned.scalar_spill ? &*planned.scalar_spill : nullptr, arch, record_index,
         layout.atomic_record_capacity, layout.atomic_records_offset, cave_text_offset,
-        return_text_offset, composed_access_patch != result.patches.end(),
-        planned.private_owner ? std::optional<uint32_t>(planned.private_owner->offset)
-                              : std::nullopt,
-        planned.private_owner ? std::optional<uint16_t>(planned.private_owner->shift)
-                              : std::nullopt,
+        return_text_offset, composed_access_patch != result.patches.end(), planned.derived_owner,
         guest_instruction_offset, result.errors);
     if (!cave_words)
       return;

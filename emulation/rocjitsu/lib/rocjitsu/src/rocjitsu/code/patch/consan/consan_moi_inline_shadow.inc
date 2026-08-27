@@ -477,12 +477,12 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const MoiOpti
               direct_owner_shift_by_descriptor.try_emplace(*direct_descriptor, std::nullopt);
           if (inserted) {
             cached->second =
-                common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
+                common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
           }
           private_owner_shift = cached->second;
         } else {
           private_owner_shift =
-              common_moi_private_owner_shift(bytes, *resources, arch, result.warnings);
+              common_moi_workitem_owner_shift(bytes, *resources, arch, result.warnings);
         }
         if (!private_owner_shift)
           continue;

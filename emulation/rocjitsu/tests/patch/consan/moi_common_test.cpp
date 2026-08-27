@@ -281,6 +281,92 @@ TEST(ConSanMoi, AtomicCounterIncrementRejectsInvalidRegistersTransactionally) {
   rejects(/*result_vgpr=*/42u, /*address_vgpr=*/40u, &invalid_target);
 }
 
+TEST(ConSanMoi, RecordOwnerDerivationPlanDefinesLiveAndEntryCapturedSources) {
+  using consan_detail::MoiRecordOwnerDerivationPlan;
+  using consan_detail::MoiRecordOwnerDerivationRequest;
+  const MoiRecordOwnerDerivationPlan live{
+      .entry_workitem_x_private_offset = std::nullopt,
+      .wave_size_shift = 5u,
+  };
+  const MoiRecordOwnerDerivationPlan captured{
+      .entry_workitem_x_private_offset = 64u,
+      .wave_size_shift = 6u,
+  };
+  const MoiRecordOwnerDerivationPlan invalid_shift{
+      .entry_workitem_x_private_offset = std::nullopt,
+      .wave_size_shift = 32u,
+  };
+  EXPECT_TRUE(live.is_well_formed());
+  EXPECT_TRUE(captured.is_well_formed());
+  EXPECT_FALSE(invalid_shift.is_well_formed());
+  EXPECT_TRUE(
+      (MoiRecordOwnerDerivationRequest{.plan = live, .result_vgpr = 255u}).is_well_formed());
+  EXPECT_FALSE(
+      (MoiRecordOwnerDerivationRequest{.plan = live, .result_vgpr = 256u}).is_well_formed());
+}
+
+TEST(ConSanMoi, RecordOwnerDerivationLowersBothSourcesOnEveryTargetProfile) {
+  using consan_detail::MoiRecordOwnerDerivationPlan;
+  using consan_detail::MoiRecordOwnerDerivationRequest;
+  constexpr uint16_t kResultVgpr = 42u;
+  constexpr uint32_t kPrivateOffset = 64u;
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    for (const std::optional<uint32_t> private_offset :
+         {std::optional<uint32_t>{}, std::optional<uint32_t>{kPrivateOffset}}) {
+      const MoiRecordOwnerDerivationRequest request{
+          .plan =
+              MoiRecordOwnerDerivationPlan{
+                  .entry_workitem_x_private_offset = private_offset,
+                  .wave_size_shift = 6u,
+              },
+          .result_vgpr = kResultVgpr,
+      };
+      std::vector<uint32_t> expected;
+      if (private_offset) {
+        const auto load =
+            instrumentation::build_private_load_b32(kResultVgpr, *private_offset, target.arch);
+        const auto wait = instrumentation::build_s_wait_private_load0(target.arch);
+        ASSERT_TRUE(load && wait);
+        expected.insert(expected.end(), load->begin(), load->end());
+        expected.push_back(*wait);
+      }
+      const auto shift = instrumentation::build_v_lshrrev_b32(
+          kResultVgpr, scalar_positive_inline_u32(6u), private_offset ? kResultVgpr : uint16_t{0u},
+          target.arch);
+      ASSERT_TRUE(shift);
+      expected.push_back(*shift);
+
+      std::vector<uint32_t> words;
+      EXPECT_TRUE(consan_detail::append_moi_record_owner_derivation(words, request, target));
+      EXPECT_EQ(words, expected);
+    }
+  }
+}
+
+TEST(ConSanMoi, RecordOwnerDerivationRejectsInvalidRequestsTransactionally) {
+  const ConSanTargetProfile *target = consan_target_profile(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(target, nullptr);
+  const std::vector<uint32_t> prefix = {0x12345678u};
+  const auto rejects = [&](const consan_detail::MoiRecordOwnerDerivationRequest &request,
+                           const ConSanTargetProfile &request_target) {
+    std::vector<uint32_t> words = prefix;
+    EXPECT_FALSE(consan_detail::append_moi_record_owner_derivation(words, request, request_target));
+    EXPECT_EQ(words, prefix);
+  };
+  rejects({.plan = {.entry_workitem_x_private_offset = std::nullopt, .wave_size_shift = 32u},
+           .result_vgpr = 42u},
+          *target);
+  rejects({.plan = {.entry_workitem_x_private_offset = std::nullopt, .wave_size_shift = 6u},
+           .result_vgpr = 256u},
+          *target);
+  ConSanTargetProfile invalid_target = *target;
+  invalid_target.arch = ROCJITSU_CODE_ARCH_INVALID;
+  rejects({.plan = {.entry_workitem_x_private_offset = std::nullopt, .wave_size_shift = 6u},
+           .result_vgpr = 42u},
+          invalid_target);
+}
+
 TEST(ConSanMoi, WorkgroupShadowClearPlanCoversEveryTargetProfile) {
   for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(target.target));

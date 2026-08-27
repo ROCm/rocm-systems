@@ -309,6 +309,37 @@ bool consan_detail::append_moi_atomic_counter_increment(
   return true;
 }
 
+bool consan_detail::append_moi_record_owner_derivation(
+    std::vector<uint32_t> &words, const MoiRecordOwnerDerivationRequest &request,
+    const ConSanTargetProfile &target) {
+  if (!request.is_well_formed())
+    return false;
+
+  std::vector<uint32_t> emitted;
+  uint16_t owner_source_vgpr = 0u;
+  if (request.plan.entry_workitem_x_private_offset) {
+    const auto owner_load = instrumentation::build_private_load_b32(
+        request.result_vgpr, *request.plan.entry_workitem_x_private_offset, target.arch);
+    const auto owner_wait = instrumentation::build_s_wait_private_load0(target.arch);
+    if (!owner_load || !owner_wait)
+      return false;
+    emitted.insert(emitted.end(), owner_load->begin(), owner_load->end());
+    emitted.push_back(*owner_wait);
+    owner_source_vgpr = request.result_vgpr;
+  }
+
+  // The AMDGPU kernel ABI supplies workitem-id-x in v0 at entry. A planned
+  // private source captures that same value before guest code can repurpose it.
+  const auto owner_init = instrumentation::build_v_lshrrev_b32(
+      request.result_vgpr, scalar_positive_inline_u32(request.plan.wave_size_shift),
+      owner_source_vgpr, target.arch);
+  if (!owner_init)
+    return false;
+  emitted.push_back(*owner_init);
+  words.insert(words.end(), emitted.begin(), emitted.end());
+  return true;
+}
+
 bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
                                                   const MoiDynamicRecordAddressRequest &request,
                                                   const ConSanTargetProfile &target) {
@@ -406,12 +437,14 @@ uint16_t consan_detail::scalar_owner_tail_floor(const ScalarOwnerContextSummary 
 
 namespace {
 
+using consan_detail::append_moi_record_owner_derivation;
 using consan_detail::build_moi_relocated_guest_access_words;
 using consan_detail::is_single_range_native_lds_mnemonic;
 using consan_detail::is_supported_moi_flat_access_mnemonic;
 using consan_detail::moi_guest_access_relocation_requires_adjusted_address;
 using consan_detail::moi_workgroup_shadow_initialization_lanes;
 using consan_detail::moi_workgroup_shadow_preferred_zero_vgpr_count;
+using consan_detail::MoiRecordOwnerDerivationPlan;
 using consan_detail::MoiSpecialStateSgprs;
 using consan_detail::MoiWorkgroupKeyRegisterPlan;
 using consan_detail::MoiWorkgroupShadowClearStoreForm;
