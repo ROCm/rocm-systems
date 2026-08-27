@@ -215,6 +215,16 @@ struct MoiEncodedSccRestoreRequest {
 [[nodiscard]] bool append_moi_device_cache_refresh(std::vector<uint32_t> &words,
                                                    const ConSanTargetProfile &target);
 
+/// Append the waits required after a returning device-scope global atomic.
+///
+/// Every target waits for the returned load value. Targets with separately
+/// tracked global-store completion also wait for the memory-side effect; gfx9
+/// CDNA's unified VM counter needs only the first wait. The target profile owns
+/// that distinction. Encoding failure is transactional and leaves `words`
+/// unchanged.
+[[nodiscard]] bool append_moi_global_atomic_completion(std::vector<uint32_t> &words,
+                                                       const ConSanTargetProfile &target);
+
 /// Names the concrete store shape selected for one parallel workgroup-shadow
 /// clear loop.
 ///

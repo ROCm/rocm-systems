@@ -261,6 +261,23 @@ bool consan_detail::append_moi_device_cache_refresh(std::vector<uint32_t> &words
   return true;
 }
 
+bool consan_detail::append_moi_global_atomic_completion(std::vector<uint32_t> &words,
+                                                        const ConSanTargetProfile &target) {
+  const auto load = instrumentation::build_s_wait_global_load0(target.arch);
+  const bool needs_separate_store_wait =
+      target.encoding_family != ConSanEncodingFamily::Gfx9Cdna3 &&
+      target.encoding_family != ConSanEncodingFamily::Gfx9Cdna4;
+  const auto store = needs_separate_store_wait
+                         ? instrumentation::build_s_wait_global_store0(target.arch)
+                         : std::optional<uint32_t>{};
+  if (!load || (needs_separate_store_wait && !store))
+    return false;
+  words.push_back(*load);
+  if (store)
+    words.push_back(*store);
+  return true;
+}
+
 bool consan_detail::append_dynamic_record_address(std::vector<uint32_t> &words,
                                                   const MoiDynamicRecordAddressRequest &request,
                                                   const ConSanTargetProfile &target) {

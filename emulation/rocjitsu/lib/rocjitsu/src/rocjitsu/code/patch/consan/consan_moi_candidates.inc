@@ -53,29 +53,10 @@ inline constexpr uint32_t kGfx1250VectorFlatNoSaddr = static_cast<uint32_t>(cdna
   words.push_back(*wait);
   return true;
 }
-[[nodiscard]] bool append_moi_global_load_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
-  const auto wait = instrumentation::build_s_wait_global_load0(arch);
-  if (!wait)
-    return false;
-  words.push_back(*wait);
-  return true;
-}
-[[nodiscard]] bool append_moi_global_store_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
-  const auto wait = instrumentation::build_s_wait_global_store0(arch);
-  if (!wait)
-    return false;
-  words.push_back(*wait);
-  return true;
-}
 [[nodiscard]] bool append_moi_global_atomic_wait(std::vector<uint32_t> &words,
                                                  rj_code_arch_t arch) {
-  if (!append_moi_global_load_wait(words, arch))
-    return false;
-  // Returning global atomics have both a result dependency and a memory-side
-  // effect on gfx12. CDNA's unified VM counter drains both sides.
-  if (consan_uses_gfx9_cdna_encoding(arch))
-    return true;
-  return append_moi_global_store_wait(words, arch);
+  const ConSanTargetProfile *target = consan_target_profile(arch);
+  return target != nullptr && consan_detail::append_moi_global_atomic_completion(words, *target);
 }
 [[nodiscard]] bool append_moi_lds_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
   const auto wait = instrumentation::build_s_wait_lds0(arch);

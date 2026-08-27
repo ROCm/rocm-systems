@@ -196,6 +196,33 @@ TEST(ConSanMoi, DeviceCacheRefreshUsesOnlyQualifiedTargetSequences) {
   }
 }
 
+TEST(ConSanMoi, GlobalAtomicCompletionUsesEachTargetsCounterModel) {
+  for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
+    SCOPED_TRACE(rj_code_target_name(target.target));
+    const auto load = instrumentation::build_s_wait_global_load0(target.arch);
+    ASSERT_TRUE(load);
+    std::vector<uint32_t> expected = {*load};
+    if (target.encoding_family != ConSanEncodingFamily::Gfx9Cdna3 &&
+        target.encoding_family != ConSanEncodingFamily::Gfx9Cdna4) {
+      const auto store = instrumentation::build_s_wait_global_store0(target.arch);
+      ASSERT_TRUE(store);
+      expected.push_back(*store);
+    }
+    std::vector<uint32_t> words;
+    EXPECT_TRUE(consan_detail::append_moi_global_atomic_completion(words, target));
+    EXPECT_EQ(words, expected);
+  }
+}
+
+TEST(ConSanMoi, GlobalAtomicCompletionRejectsInvalidTargetTransactionally) {
+  ConSanTargetProfile target = kConSanTargetProfiles.front();
+  target.arch = ROCJITSU_CODE_ARCH_INVALID;
+  const std::vector<uint32_t> prefix = {0x12345678u};
+  std::vector<uint32_t> words = prefix;
+  EXPECT_FALSE(consan_detail::append_moi_global_atomic_completion(words, target));
+  EXPECT_EQ(words, prefix);
+}
+
 TEST(ConSanMoi, WorkgroupShadowClearPlanCoversEveryTargetProfile) {
   for (const ConSanTargetProfile &target : kConSanTargetProfiles) {
     SCOPED_TRACE(rj_code_target_name(target.target));
