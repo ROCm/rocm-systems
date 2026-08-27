@@ -124,6 +124,11 @@ struct EngineWaveSnapshot {
   size_t instruction_context_count = 0;
 };
 
+/// One report per racing instruction pair, per wave pair and address, for the
+/// life of the dispatch. The instructions are identified by PC because an
+/// instruction id is a per-execution ordinal: keying on ids would report every
+/// loop iteration, while keying on neither hides a second defect between waves
+/// that already raced somewhere else.
 struct EngineLdsRaceKey {
   EntityId dispatch_id;
   EntityId cluster_id;
@@ -131,11 +136,14 @@ struct EngineLdsRaceKey {
   uint32_t address;
   hazard_core::EntityId wave_a;
   hazard_core::EntityId wave_b;
+  uint64_t producer_pc;
+  uint64_t consumer_pc;
 
   bool operator==(const EngineLdsRaceKey &other) const noexcept {
     return dispatch_id == other.dispatch_id && cluster_id == other.cluster_id &&
            workgroup_id == other.workgroup_id && address == other.address &&
-           wave_a == other.wave_a && wave_b == other.wave_b;
+           wave_a == other.wave_a && wave_b == other.wave_b && producer_pc == other.producer_pc &&
+           consumer_pc == other.consumer_pc;
   }
 };
 
@@ -148,6 +156,8 @@ struct EngineLdsRaceKeyHash {
     hash_combine(seed, key.address);
     hash_combine(seed, key.wave_a);
     hash_combine(seed, key.wave_b);
+    hash_combine(seed, key.producer_pc);
+    hash_combine(seed, key.consumer_pc);
     return seed;
   }
 };

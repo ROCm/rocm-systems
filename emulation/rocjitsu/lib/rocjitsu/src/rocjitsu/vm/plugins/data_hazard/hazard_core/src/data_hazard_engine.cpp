@@ -1376,17 +1376,19 @@ void DataHazardEngine::check_lds_epoch_for_races(const EngineWorkgroupKey &key,
       const EntityId wave_lo = std::min(first.wave_id, second.wave_id);
       const EntityId wave_hi = std::max(first.wave_id, second.wave_id);
       const uint32_t overlap_addr = std::max(first.address, second.address);
-      {
-        const EngineLdsRaceKey race_key{key.dispatch_id, key.cluster_id, key.workgroup_id,
-                                        overlap_addr,    wave_lo,        wave_hi};
-        std::lock_guard<std::shared_mutex> lock(state_.mutex);
-        if (!state_.reported_lds_races.insert(race_key).second)
-          continue;
-      }
 
       const auto &writer = first.is_write ? first : second;
       const auto &other = first.is_write ? second : first;
       const char *other_action = other.is_write ? "writes" : "reads";
+
+      {
+        const EngineLdsRaceKey race_key{key.dispatch_id, key.cluster_id, key.workgroup_id,
+                                        overlap_addr,    wave_lo,        wave_hi,
+                                        writer.pc,       other.pc};
+        std::lock_guard<std::shared_mutex> lock(state_.mutex);
+        if (!state_.reported_lds_races.insert(race_key).second)
+          continue;
+      }
 
       std::ostringstream msg;
       msg << "LDS data race: Wave " << writer.wave_id << " writes LDS address 0x" << std::hex
