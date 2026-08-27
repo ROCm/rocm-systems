@@ -35,6 +35,15 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+// Portability shim: hipMemLocationTypeHost was added after ROCm 7.0.x. On older
+// headers the enum only defines Invalid/Device, so provide the CUDA-equivalent
+// value (CU_MEM_LOCATION_TYPE_HOST == 2) to keep this file compiling there. A
+// macro (not a constexpr) is used because the enum's declared value range is
+// [0,1], which makes a constexpr cast of 2 an invalid constant expression.
+#if !defined(ROCM_VERSION) || ROCM_VERSION < 70100
+#define hipMemLocationTypeHost (static_cast<hipMemLocationType>(2))
+#endif
+
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;

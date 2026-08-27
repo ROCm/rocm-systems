@@ -36,6 +36,7 @@ import ctypes.util
 import errno
 import glob
 import gzip
+import json
 import os
 import subprocess
 import sys
@@ -79,6 +80,10 @@ KFD_CAPABILITY_AIS = 0x40
 
 # Per-GPU topology directory the kernel's KFD driver publishes.
 KFD_TOPOLOGY_NODES = "/sys/class/kfd/kfd/topology/nodes"
+
+# amd-smi reports a virtual function's market name with a "VF" suffix (e.g.
+# "AMD Instinct MI300X VF"); see docs/troubleshooting/known-issues.rst.
+AMD_SMI = "amd-smi"
 
 
 def amdgpu_dkms_version():
@@ -399,6 +404,75 @@ def amdgpu_supports_ais():
     return False
 
 
+def sriov_vf_gpus():
+    """
+    Return a list of (bdf, market_name) for AMD GPUs that are SR-IOV virtual
+    functions (VFs), as reported by amd-smi.
+
+    hipFile's fastpath is only supported on GPU physical functions; on a VF it
+    falls back to the slower compatibility path. amd-smi names a VF with a "VF"
+    suffix (e.g. "AMD Instinct MI300X VF"), which is the authoritative signal --
+    it works inside SR-IOV guests where the physical function isn't visible in
+    sysfs. See docs/troubleshooting/known-issues.rst.
+
+    Returns [] when amd-smi is missing, exits non-zero, or emits output that
+    can't be parsed; VF status is treated as "not detected" rather than an error,
+    matching the tool's other best-effort probes.
+    """
+    try:
+        result = subprocess.run(
+            [AMD_SMI, "static", "--asic", "--bus", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return []
+
+    if result.returncode != 0:
+        return []
+
+    try:
+        data = json.loads(result.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+    vfs = []
+    for entry in data.get("gpu_data", []):
+        if not isinstance(entry, dict):
+            continue
+        asic = entry.get("asic") or {}
+        market = (asic.get("market_name") or "").strip()
+        normalized = market.upper()
+        if normalized != "VF" and not normalized.endswith(" VF"):
+            continue
+        bus = entry.get("bus") or {}
+        bdf = bus.get("bdf") or f"gpu {entry.get('gpu', '?')}"
+        vfs.append((bdf, market))
+
+    return vfs
+
+
+def print_sriov_warning(vf_gpus):
+    """
+    Print a warning to stderr when any SR-IOV virtual function GPU is present.
+
+    Written to stderr (not stdout) so it remains visible in quiet mode. Does
+    nothing when vf_gpus is empty.
+    """
+    if not vf_gpus:
+        return
+
+    devices = ", ".join(f"{bdf} ({name})" for bdf, name in vf_gpus)
+    print(
+        f"WARNING: SR-IOV virtual function GPU(s) detected: {devices}.\n"
+        "hipFile's fast path is not available on GPU virtual functions; "
+        "I/O will fall back to the slower compatibility path. The fast path "
+        "requires a GPU physical function (PF).",
+        file=sys.stderr,
+    )
+
+
 class Mount:  # pylint: disable=too-few-public-methods
     """A single parsed /proc/self/mountinfo entry."""
 
@@ -694,6 +768,7 @@ def main():
 
     hip_libraries = hip_runtime_supports_ais()
     volume_rows, volumes_ok = capable_volumes()
+    vf_gpus = sriov_vf_gpus()
 
     component_support = [
         ("Kernel P2PDMA support", kernel_supports_p2pdma()),
@@ -728,6 +803,10 @@ def main():
         print("AIS support in:")
         for name, supported in component_support:
             print(f"\t{name:<24}: {supported}")
+
+    # A VF is a performance caveat, not a missing component, so warn (always, even
+    # in quiet mode) without affecting the exit code.
+    print_sriov_warning(vf_gpus)
 
     return int(not all(supported for (_, supported) in component_support))
 

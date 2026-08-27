@@ -33,6 +33,10 @@
 #   GTEST_FILTER  gtest test filter (run phase)    (default: *  = all)
 #   LOG_FILE      timestamped console log (run)    (default: <script dir>/host_tests.log)
 #   XML_FILE      JUnit XML output (run)           (default: <script dir>/host_tests.xml)
+#   HOST_TEST_SHUFFLE  gtest ordering flag (run)   (default: --gtest_shuffle; set empty to disable
+#                                                   when bisecting a failure. Deliberately NOT named
+#                                                   GTEST_SHUFFLE: gtest owns that name and reads an
+#                                                   empty value as TRUE, so clearing it would shuffle)
 # Any args after the phase are forwarded to the test binary, e.g.:
 #   run_host_tests.sh run --gtest_filter='BitOps*' --gtest_repeat=5
 #
@@ -46,6 +50,11 @@ GPU_TARGETS="${GPU_TARGETS:-gfx942}"
 BUILD_TYPE="${BUILD_TYPE:-Debug}"
 BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
 GTEST_FILTER="${GTEST_FILTER:-*}"
+HOST_TEST_SHUFFLE="${HOST_TEST_SHUFFLE---gtest_shuffle}"  # `-` not `:-`: an explicit empty value disables it
+# Split into argv elements. Passing the value as one quoted word makes gtest treat a multi-word
+# setting as a single unknown flag: it prints its help, runs ZERO tests and exits 0 -- a silent green
+# that `|| rc=1` cannot see. An empty value yields an empty array, which still disables shuffling.
+read -ra HOST_TEST_SHUFFLE_ARGS <<< "$HOST_TEST_SHUFFLE"
 LOG_FILE="${LOG_FILE:-$SCRIPT_DIR/host_tests.log}"
 XML_FILE="${XML_FILE:-$SCRIPT_DIR/host_tests.xml}"
 JOBS="$(nproc 2>/dev/null || echo 4)"
@@ -121,10 +130,23 @@ do_host_tests() {
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
+    # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
+    # file-scope globals reset only in the fixture TearDown, and the older suites were audited to be
+    # order-independent too. gtest prints the seed, so a failure stays reproducible; clear
+    # HOST_TEST_SHUFFLE to run in declaration order while bisecting.
     "$BUILD_DIR/$name" \
       --gtest_filter="$GTEST_FILTER" \
       --gtest_output="xml:$xml" \
+      ${HOST_TEST_SHUFFLE_ARGS[@]+"${HOST_TEST_SHUFFLE_ARGS[@]}"} \
       --gtest_color=no "$@" 2>&1 | "${stamp[@]}" | tee -a "$LOG_FILE" || rc=1
+    # A binary that rejects its arguments prints usage, runs nothing and still exits 0, so the exit
+    # status alone cannot tell "all green" from "never started". The report is the second signal:
+    # gtest writes it before returning, and its absence means no suite ran at all.
+    if [ ! -f "$xml" ] || ! grep -q "<testsuites" "$xml"; then
+      echo "ERROR: $name wrote no test report ($xml) -- it likely rejected an argument" \
+        | tee -a "$LOG_FILE"
+      rc=1
+    fi
   done
   return "$rc"
 }

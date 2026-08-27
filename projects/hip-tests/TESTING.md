@@ -3,327 +3,224 @@ Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 SPDX-License-Identifier: MIT
 -->
 
-# hip-tests Testing Strategy
+# HIP Runtime Testing Strategy
 
-This document is the authoritative testing-strategy reference for the **hip-tests**
-component (the test suite for the HIP runtime and its compiler/loader surface):
-how it is validated, how test tiers are organized, and what engineers should
-consider when writing tests. It exists so that:
+This document describes how the HIP runtime test suite is validated today, which signals gate changes, and where the remaining gaps are. It follows the ROCm-wide testing strategy template and describes the current state rather than an aspirational target. A documented gap is one that can be discussed, prioritized, and closed.
 
-- Engineers stop guessing what tests to write, and PR approvals move faster.
-- Testing knowledge is documented and survives team changes.
-- Test gaps are visible before they become release blockers.
-- Fewer defects escape into integration and QA.
-- There is a single place to audit the quality posture of the component.
+## Component overview
 
-It is a living design/strategy document. It has two parts:
+hip-tests validates the public HIP API contract and observable runtime behavior for the HIP runtime, HIPRTC, compiler-facing paths used by runtime tests, and loader/module behavior. It is built against a ROCm/HIP installation and runs primarily on real AMD GPU hardware because the most important runtime behavior is only observable through a device, driver, and runtime stack.
 
-- **[Part A — Current status](#part-a--current-status)** describes the test tiers,
-  checks, and authoring rules in this component.
-- **[Part B — Planned direction](#part-b--planned-direction)** describes remaining
-  cleanup work: cross-tier de-duplication, additional explicit tiers, stronger
-  performance/system coverage, and CI cadence improvements.
+This document does not define testing strategy for ROCm math libraries, communication libraries, profiler internals, or application frameworks. Those components own their own testing strategy documents.
 
-Keep this document updated in the same PR as any change that alters the testing
-strategy (a new tier, a new cadence, a new required check).
+**Key architectural constraint that shapes testing:** HIP runtime behavior is mostly hardware- and driver-observable, so the highest-confidence tests are device-executed contract, functional, integration, and stress tests rather than CPU-only unit tests.
 
----
+## Development workflow
 
-## Scope and what "the component" is
+All tests are C++ built on Catch2 and discovered and run through CTest. Test executables are grouped by CMake `BUILD_*` options and by CTest labels generated from Catch2/YAML tags. Workload size is parameterized by level, selected at runtime with `HIP_TEST_LEVEL=level_N` or a Catch2 filter such as `[level_0]`.
 
-hip-tests validates the **public HIP API contract and behavior** exposed by the
-HIP runtime (`libamdhip64`), the HIP compiler front end, HIPRTC, and the
-module/library loader. It is built and run against a ROCm/HIP install and, on a
-portability path, against the NVIDIA HIP-over-CUDA backend. It does **not** test
-math libraries, communication libraries, or profiler internals — those components
-own their own suites.
-
-All tests are C++ built on **Catch2 v3.8.1** and discovered/run through **CTest**.
-Test executables are grouped by CMake `BUILD_*` options and CTest **labels**.
-
----
-
-# Part A — Current status
-
-## A.1 Test categories (today)
-
-The suite lives under `projects/hip-tests/catch/` and is organized into these
-groups, each gated by a CMake option and built into its own set of executables:
-
-| Group | Directory | CMake option (default) | Purpose |
-|---|---|---|---|
-| **Contract** | `catch/contract/` | `BUILD_CONTRACT_TESTS` (ON) | Public-API semantic contracts: small, portable, device-only invariants for each HIP API (invalid-input rejection, round-trips, accepted-or-unsupported outcomes). |
-| **Unit / functional** | `catch/unit/` | `BUILD_UNIT_TESTS` (ON) | Per-API and per-feature functional tests, ~50 feature areas (memory, stream, graph, module, texture, cooperative groups, p2p, RTC, virtual memory, etc.). |
-| **Performance** | `catch/performance/` | `BUILD_PERF_TESTS` (OFF) | API- and scenario-level performance/benchmark tests (memcpy, memset, kernel launch, streams, mempool, events). |
-| **Stress** | `catch/stress/` | `BUILD_STRESS_TESTS` (OFF) | Long-running / high-load soak tests. |
-| **Multi-process** | `catch/multiproc/` | (under `BUILD_UNIT_TESTS`, Linux/UNIX only) | Tests that fork/spawn multiple processes (IPC, multi-proc device sharing); not part of the Windows test set. |
-| **ABM / TypeQualifiers** | `catch/ABM/`, `catch/TypeQualifiers/` | (under `BUILD_UNIT_TESTS`) | Focused compile/behavior checks. |
-
-### A.1.1 Contract testing
-
-- **What is tested:** the small, portable semantic guarantee of each public HIP API:
-  successful round-trips, accepted-or-unsupported capability probes, invalid-input
-  rejection, sticky-error behavior, and backend/platform differences called out by
-  comments.
-- **Scale:** 603 cases across 118 API domains, covering ~98% of the public APIs
-  declared in `hip_runtime_api.h` (name-level). Every declared public API is either
-  covered by a contract test or listed with rationale in
-  `catch/contract/uncovered_apis.txt`.
-- **Tooling:** contract cases live in `catch/contract/`, use `HIP_TEST_CASE`, and
-  carry an `// @asserts: <API> - <invariant>` line directly above the case. The
-  generated inventory in `catch/TEST_PLAN.md` records the API and invariant for
-  each case and is regenerated by `catch/tools/gen_test_plan.py`.
-- **Naming:** contract cases use the structured convention
-  `<Tier>_<DomainPascal>_<Subject>_<Scenario>_<ExpectedOutcome>`, for example
-  `Contract_Memory_HipMalloc_NullOutPointer_ReturnsInvalidValue`.
-- **Coverage drift gate:** `.github/workflows/hip-contract-coverage.yml` runs the
-  pure-static coverage checker and the generated test-plan staleness check so new
-  public HIP APIs do not land without a contract test or an explicit allowlist
-  entry.
-- **Authoring reference:** `catch/contract/AUTHORING.md` is the how-to for the
-  contract tier (cleanup guard, image-gating, backend-difference comments,
-  sticky-error clearing, probe-first rule, and template).
-
-### A.1.2 Unit testing
-
-- **What is tested:** functional correctness of individual HIP APIs and features —
-  arguments accepted/rejected, values returned, observable side effects (data
-  movement, synchronization, graph/stream semantics). Coverage is broad and
-  organized by feature area under `catch/unit/<area>/`.
-- **Tooling:** Catch2 v3.8.1 (`TEST_CASE`/`SECTION`), the in-tree `HIP_CHECK`,
-  `HIP_ASSERT`, and helpers in `catch/include/`; kernels shared via the `KERNELS`
-  and `Main_Object` object libraries. Tests are discovered with
-  `catch_discover_tests` and run under CTest.
-- **Level parameterization:** test workload size is parameterized by **level**
-  (0–4). `projects/hip-tests/catch/README.md` is the canonical user-facing
-  reference for level semantics; `catch/config/configs/definitions.yaml` holds the
-  generated parameters. Levels are selected with string tags such as `level_0`
-  (for example, `HIP_TEST_LEVEL=level_0` or the Catch2 filter `[level_0]`), not
-  bare integers. `level_0` is quick/smoke, `level_2` is the standard/default
-  suite level, and some other levels are still reserved/provisional. See
-  [A.3](#a3-when-tests-run) for how CI uses levels today.
-- **Coverage expectation (today):** every public HIP API a change touches should
-  have at least one functional unit test exercising the changed behavior. The
-  Systems PR bot enforces that a code-changing PR includes an accompanying test
-  file (`test_*` / `*_test.*`).
-
-### A.1.3 Integration testing
-
-hip-tests **is** the integration layer for the HIP runtime: it is built against a
-full ROCm/HIP install and exercises the runtime, compiler, HIPRTC, and loader
-together on real hardware. Integration is covered along these axes today:
-
-- **Backend integration:** the suite builds and runs against the AMD ROCm/HIP
-  backend, and a portability subset builds against the NVIDIA HIP-over-CUDA
-  backend (`HIP_PLATFORM=nvidia`) — see `catch/unit/` graphics/RTC/vulkan interop
-  and the NVIDIA CI job.
-- **Cross-component interop:** `gl_interop`, `vulkan_interop`, and external-memory
-  / external-semaphore tests validate HIP against graphics and external producers
-  (these require a graphics/Vulkan environment and are gated accordingly).
-- **Multi-GPU / peer:** `p2p/`, cooperative multi-device, and multi-process tests
-  exercise device-to-device and cross-process behavior; they skip cleanly on
-  single-GPU hosts.
-- **Architecture matrix:** built and run in CI across the supported GPU
-  architecture set (CDNA and RDNA families) and both Linux and Windows. Some
-  groups and cases are platform- or capability-gated (for example UNIX-only
-  multi-process tests, graphics/Vulkan environment requirements, and selected
-  Windows-specific paths), so the matrix describes where the suite runs rather
-  than a guarantee that every individual case runs on every platform.
-
-### A.1.4 Performance testing
-
-- **What is tested:** throughput/latency of hot-path APIs and scenarios
-  (`catch/performance/api/` and `catch/performance/scenarios/`) — memcpy, memset,
-  kernel launch, stream, event, and mempool paths.
-- **Tooling:** the same Catch2/CTest harness. The per-level workload parameters in
-  `definitions.yaml` (memory sizes, iterations, warmups) are available to these
-  tests, selected at runtime via `HIP_TEST_LEVEL=level_N` (for example,
-  `HIP_TEST_LEVEL=level_0`) like the rest of the suite; CI does not auto-scale
-  the level per cadence (see [A.3](#a3-when-tests-run)). As above, the current
-  per-level values in `definitions.yaml` are still marked provisional.
-- **Baselines & thresholds:** performance tests are **not built by default**
-  (`BUILD_PERF_TESTS=OFF`) and are run on demand / on a dedicated cadence rather
-  than gating every PR. Regression baselining is done by the perf-tracking process
-  that consumes these tests; per-PR performance gating is **not** currently
-  enforced by this component's CI. *(This is an area Part B tightens.)*
-
-## A.2 How tests are built and run
-
-```bash
-# configure (from a ROCm/HIP install)
-cmake -S projects/hip-tests/catch -B <build> \
-      -DBUILD_UNIT_TESTS=ON \
-      -DBUILD_CONTRACT_TESTS=ON        # perf/stress are OFF by default
-
-# build the default target (unit and contract aggregates are part of ALL)
-cmake --build <build> -j
-
-# run by a generated Catch2 tag/label (example: a feature-area label)
-ctest --test-dir <build> -L memory --output-on-failure
-```
-
-Tests are labeled from their Catch2 tags (`ADD_TAGS_AS_LABELS`), so `ctest -L
-<label>` selects a feature area or tier when that tag exists (for example,
-`memory`, `stream`, or `contract`; labels are generated from YAML/Catch2 tags,
-not from directory names alone). Each `HIP_TEST_CASE`/`TEST_CASE` becomes one
-CTest entry (one process per case under `catch_discover_tests`). When running
-from the generated `catch_tests/` directory, the build copies `DartConfiguration.tcl`
-there so CTest settings such as the default timeout still apply.
-
-> **Build note:** Catch2 test executables are created `EXCLUDE_FROM_ALL` and are
-> pulled into the build only through their aggregate custom target. The unit
-> aggregate (`build_tests`) and contract aggregate (`contract_tests`) are declared
-> `ALL`, so both tiers build with the default target. A new test group must attach
-> to an `ALL` aggregate (or be added to one) or CI — which builds the default
-> target — will register the tests but never compile them, and CTest will report
-> them as `<Target>_NOT_BUILT`.
-
-## A.3 When tests run
-
-| Cadence | Trigger | Level used today | What runs |
-|---|---|---|---|
-| **Per PR** | `pull_request` (TheRock CI, `therock-ci.yml`) | `HIP_TEST_LEVEL` unset; listener infers each case's generated `[level_N]` tag (`level_2` is the standard/default suite level) | Build the ROCm packages + hip-tests, then run the unit suite (sharded) across the supported Linux and Windows architecture matrix. Plus lightweight policy/format checks (`hip-formatting`, `hip-validate-pr-description`, NVIDIA build). |
-| **Push to `develop` / release branches** | `push` (`therock-ci.yml`) | `HIP_TEST_LEVEL` unset; listener infers each case's generated `[level_N]` tag (`level_2` is the standard/default suite level) | Same build+test as per-PR, on the integration branch. |
-| **Nightly / multi-arch** | scheduled multi-arch CI | `HIP_TEST_LEVEL` unset unless the workflow explicitly overrides it; otherwise per-case `[level_N]` tags are inferred | Broader architecture coverage; longer-running suites. |
-| **On demand** | `workflow_dispatch` | caller/workflow-selected, otherwise `HIP_TEST_LEVEL` unset with per-case `[level_N]` inference | Multi-arch CI, WSL runtime checks, and perf/stress runs are invoked explicitly. |
-
-A **level** parameterization (0–4) exists in `definitions.yaml` and is selected
-at **runtime**. A caller can force a global level via `HIP_TEST_LEVEL` (using
-values such as `HIP_TEST_LEVEL=level_0`, not `HIP_TEST_LEVEL=0`) or a `[level_N]`
-Catch2 tag filter; otherwise the listener infers the level from each case's
-generated `[level_N]` tag. Untagged tests fall back to the framework defaults,
-and `level_2` is documented in `catch/README.md` as the standard/default suite
-level. The YAML documents an intended cadence mapping (level 0 for PR/emulation,
-level 1 for nightly), but **CI does not currently set a global level per cadence**
-— wiring that cadence dial to CI is a Part B item (see
-[B.2](#b2-planned-tightening-integration--performance--system)).
-
-## A.4 How to write tests (today)
-
-- **Location & naming:** put a test under `catch/unit/<feature-area>/`; name the
-  file so it is recognized as a test (`test_*` or `*_test.*` per the PR-bot rule),
-  and name each case `<Area>_<Behavior>` so intent is legible in CTest output.
-- **Structure:** one `TEST_CASE` per behavior; use `SECTION`s for variants. Use
-  `HIP_CHECK` for API calls that must succeed and assert the observable invariant
-  with `REQUIRE`. Clean up every resource you allocate.
-- **Level-aware workload trimming:** use `isQuickLevel()` (from
-  `hip_test_common.hh`) to reduce buffer sizes, iteration counts, or generated
-  parameter sets at `level_0` rather than skipping code paths entirely. Call
-  `isQuickLevel()` inside the test function, not in global/static initializers,
-  because the active level is detected at runtime. If the test uses randomized
-  inputs, use deterministic/reproducible seeds and log or allow overriding the
-  seed so failures can be replayed.
-- **Skips vs failures:** use `HIP_SKIP_TEST` for a genuine capability gap
-  (unsupported device/runtime path, too few GPUs, no image support) so the case
-  skips instead of failing. Never leave a test that crashes the process — guard
-  the unsafe call.
-- **Sticky errors:** any test that intentionally triggers a HIP error (negative
-  tests, invalid-argument paths, accepted-or-unsupported probes) must consume the
-  sticky thread-local error with `(void)hipGetLastError()` before returning, unless
-  the helper macro already does that. Otherwise the error can leak into later
-  cases in the same process and create cascading, misleading failures.
-- **Platform-specific behavior:** use explicit platform/capability guards for
-  paths that only work on a subset of hosts (for example `#if defined(_WIN32)` or
-  `#if !defined(_WIN32)`). Be especially careful with Windows/WSL differences:
-  tests that depend on cwd-relative fixture files (`.code`, `.txt`, generated
-  modules) should resolve paths through the existing test helpers rather than
-  assuming the process starts in the source directory, and tests that can trigger
-  WDDM/GPU-queue fatal errors may need a platform skip instead of relying on later
-  recovery.
-- **Device/process isolation:** clean up every resource you allocate. If a test can
-  leave the device in a permanent error state (for example after OOM or queue
-  failure paths), add cleanup that resets/reinitializes the device where safe
-  (e.g. `hipDeviceReset()` in a guarded cleanup path) or split/skip the test so it
-  cannot corrupt subsequent cases in the same executable.
-- **Sufficient coverage:** a change to a public API needs at least one test
-  covering the new/changed behavior, including at least one invalid-input path
-  where the API defines one. Register the test's build target and (where used) its
-  YAML config entry so it actually compiles and runs.
-- **References:** `projects/hip-tests/CONTRIBUTING.md` is the repo-wide
-  contribution guide; `projects/hip-tests/catch/README.md` documents the current
-  Catch2 harness mechanics (YAML tags, levels, macros). This file is the testing
-  strategy / tiering overview and should be updated when those lower-level docs
-  change behavior that affects test policy.
-
----
-
-# Part B — Planned direction
-
-This section is the **plan of record** for remaining hip-tests testing cleanup.
-The contract tier and coverage gate are part of the current strategy; the work
-below is about extending the same structure to the rest of the suite and tightening
-cadence/quality gates over time.
-
-## B.1 Progressive test-tier restructure
-
-The `catch/*` suite is being reorganized into a **progressive-complexity tier
-ladder**, where the **tier is the top-level directory** under `catch/`:
-
-```
-contract → unit → integration → system → performance → stress
-```
-
-Each tier is a distinct, independently-buildable group with its own CMake
-`BUILD_*` option and CTest label, ordered from cheapest/most-portable to
-most-expensive:
-
-| Tier | Question it answers | Cost / cadence |
+| You changed | Run this before pushing | Needs GPU |
 |---|---|---|
-| **contract** | Does each public API honor its small, portable, device-only semantic guarantee? | Cheapest; every PR |
-| **unit** | Is each API/feature functionally correct in depth? | Every PR (planned level 0), nightly (planned level 1) |
-| **integration** | Do components work together (interop, multi-GPU, loader + RTC + runtime)? | PR subset + nightly |
-| **system** | Do end-to-end flows work on a full stack/host? | Nightly / periodic |
-| **performance** | Are hot paths within throughput/latency baselines? | Periodic + regression gate |
-| **stress** | Does the runtime hold up under sustained load? | Periodic / release |
+| Public HIP API behavior | Contract tests for the touched API plus the related functional test label | Yes |
+| Functional behavior in a feature area | The matching `catch/unit/` feature-area CTest label or executable | Yes |
+| YAML tags, levels, or config generation | Config validation and a focused CTest label using the generated tags | Usually yes |
+| Build or test harness logic | Configure, build, and run a small representative label such as `contract` or the touched feature label | Usually yes |
+| Performance-sensitive runtime path | Relevant functional tests plus the matching performance scenario when available | Yes |
+| Documentation-only change | Markdown/link checks and review against the current test framework | No |
 
-**Why tiers:** they make the cost/coverage tradeoff explicit, let CI run the cheap
-high-signal tiers on every PR and defer expensive tiers, and — critically — let us
-**detect and remove redundant coverage across tiers** rather than testing the same
-guarantee three times. The room for additional tiers is intentional.
+## Testing strategy and layers
 
-### B.1.1 Cross-tier de-duplication
+The suite lives under `projects/hip-tests/catch/`. Each layer is gated by a CMake `BUILD_*` option and surfaced through CTest labels derived from Catch2/YAML tags via `catch_discover_tests(... ADD_TAGS_AS_LABELS ...)`.
 
-Every test case carries a machine-readable intent tag directly above it:
+| Layer | Location | Build status / cadence | Primary signal |
+|---|---|---|---|
+| Contract | `catch/contract/` | ON through `BUILD_CONTRACT_TESTS` | Small public-API invariants and coverage drift |
+| Unit / functional | `catch/unit/` plus related focused suites | ON through `BUILD_UNIT_TESTS` | Per-API and per-feature behavior |
+| Integration | Currently distributed across unit, interop, multi-GPU, multiprocess, RTC, loader, and graph areas | No separate top-level build option today; runs as a PR/nightly subset depending on platform and capability | Runtime interaction with the ROCm stack and real devices |
+| Performance | `catch/performance/` | OFF by default through `BUILD_PERF_TESTS` | Hot-path throughput and latency measurements |
+| Stress | `catch/stress/` | OFF by default through `BUILD_STRESS_TESTS` | Long-running and high-load behavior |
 
-```cpp
-// @asserts: <API> - <one-line portable invariant this case pins>
-HIP_TEST_CASE(Contract_Domain_Behavior) { ... }
-```
+### Contract testing
 
-A generator (`catch/tools/gen_test_plan.py`) compiles these into
-`catch/TEST_PLAN.md`, an inventory of *what each case asserts*, grouped by tier and
-domain. This is the tool reviewers and authors use to spot the same API being
-asserted in multiple tiers and decide where each guarantee belongs. The plan is
-regenerated from source and staleness-checked in CI, so it cannot drift. The
-generated inventory records whether each case has an `@asserts:` tag; stricter
-CI linting of the invariant format is planned so the human-readable text does not
-silently drift.
+Contract tests live in `catch/contract/` and are built ON by default through `BUILD_CONTRACT_TESTS`. Each case pins the small, portable, device-only semantic guarantee of a public HIP API: successful round-trips, accepted-or-unsupported capability probes, invalid-input rejection, and sticky-error behavior. Cases carry an `@asserts: API - invariant` annotation directly above the case. `catch/tools/gen_test_plan.py` compiles these annotations into `catch/TEST_PLAN.md`, an inventory of what each case asserts. Every declared public API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The repository-root coverage drift gate in `.github/workflows/hip-contract-coverage.yml` runs the static coverage checker and the generated test-plan staleness check so new public HIP APIs do not land without a contract test or an explicit allowlist entry.
 
-## B.2 Planned tightening (integration / performance / system)
+### Unit and functional testing
 
-As the tiers are formalized, the following are planned and will be documented here
-as they land:
+Unit and functional tests live under `catch/unit/` feature-area directories and are built ON by default through `BUILD_UNIT_TESTS`. They validate functional correctness of individual HIP APIs and features across many feature areas, including memory, stream, graph, module, texture, cooperative groups, peer-to-peer, RTC, and virtual memory: arguments accepted or rejected, values returned, and observable side effects such as data movement and synchronization. Tests use the in-tree `HIP_CHECK` and `HIP_ASSERT` helpers, are discovered with `catch_discover_tests`, and run under CTest as one process per case. Workload size is parameterized by level and selected at runtime with `HIP_TEST_LEVEL=level_N` or a Catch2 filter such as `[level_0]`; `catch/config/configs/definitions.yaml` holds the generated per-level parameters and `catch/README.md` is the canonical reference for level semantics.
 
-- **Integration tier:** promote the interop/multi-GPU/loader-combination tests out
-  of `unit/` into an explicit `integration/` tier with its own cadence, so
-  cross-component coverage is auditable separately from single-API unit coverage.
-- **Performance regression gate:** define per-scenario **baselines** and
-  **regression thresholds** and wire a periodic (and optionally per-PR-on-hot-paths)
-  gate, so performance regressions are caught automatically rather than by manual
-  baselining.
-- **System tier:** end-to-end, full-stack scenarios distinct from single-runtime
-  integration.
-- **Level cadence wiring:** connect the `HIP_TEST_LEVEL` dial to CI so PR/emulation
-  runs use level 0 and nightly/regression runs use level 1 (and higher levels feed
-  periodic sweeps), instead of the current runtime-only, unfiltered default.
+### Integration testing
 
----
+Integration coverage is currently distributed across the unit, interop, multi-GPU, multiprocess, RTC, loader, and graph areas rather than a separate top-level tier. It exercises the runtime, compiler-facing paths, HIPRTC, and loader together against a full ROCm/HIP install on real hardware: cross-component interop validated against graphics and external producers, multi-GPU and peer paths that skip cleanly on single-GPU hosts, and an architecture matrix spanning supported CDNA and RDNA families on Linux and Windows. Some groups and cases are platform- or capability-gated, so the matrix describes where the suite runs rather than guaranteeing every case runs on every platform.
 
-## Maintenance
+### Performance and benchmarking
 
-- Update this document in the same PR as any change to the testing strategy (a new
-  tier, cadence change, or new required check).
-- When you add a test tier or a CI gate, add its row to the tables above and note
-  its cadence in [A.3](#a3-when-tests-run) / [B.1](#b1-progressive-test-tier-restructure).
-- Keep Part A describing the current checked-in strategy and Part B describing
-  planned changes; move items from B to A as they land.
+Performance tests live in `catch/performance/` and are OFF by default through `BUILD_PERF_TESTS`. They measure throughput and latency of hot-path APIs and scenarios such as memcpy, memset, kernel launch, stream, event, and mempool paths on the same Catch2/CTest harness, reusing the per-level workload parameters in `definitions.yaml`. Because they are not built by default, they run on demand or on a dedicated cadence rather than gating every PR. Automated universal per-PR performance regression gating is not currently enforced by this component document; regression baselining is handled by the performance-tracking process that consumes these tests.
+
+### Stress and system-style validation
+
+Stress tests live in `catch/stress/` and are OFF by default through `BUILD_STRESS_TESTS`. They cover long-running and high-load soak behavior and are run on a periodic or release cadence rather than per PR. End-to-end, full-stack system-style scenarios are today expressed through the integration and stress areas rather than a distinct top-level system tier.
+
+## Pre-submit and CI gates
+
+### Validation gates and ownership
+
+| Signal | Classification | Blocks merge? | Notes |
+|---|---|---|---|
+| TheRock build and HIP runtime test jobs | Trusted gate | Yes, when required by the PR policy | Builds ROCm packages and runs the configured HIP test set. |
+| Contract API coverage drift check | Trusted gate | Yes | Requires new public APIs to have a contract test or an explicit allowlist rationale. |
+| Generated test-plan staleness check | Trusted gate | Yes | Keeps `catch/TEST_PLAN.md` synchronized with `@asserts:` annotations. |
+| Formatting and PR-description checks | Trusted gate | Yes, where configured | Maintains source and review hygiene. |
+| Performance and stress sweeps | Informational or scheduled gate, depending on workflow | Not universally on every PR | Used for longer-running validation and regression investigation. |
+| Flaky or quarantined cases | Unstable-flaky | No until fixed | Must have an owner, issue, and removal plan before becoming trusted signal. |
+
+### PR test classification
+
+When you change public HIP API behavior, run the contract tests for the touched API together with the related functional test label. When you change functional behavior in a feature area, run the matching `catch/unit/` feature-area CTest label or executable. Config, tag, or level changes should be validated with config validation plus a focused label using the generated tags. A code-changing PR is expected to include an accompanying test file, and a change to a public API needs at least one test covering the new or changed behavior, including at least one invalid-input path where the API defines one.
+
+### Flaky, disabled, and known-bug policy
+
+A flaky or quarantined case is treated as unstable signal: it does not block merge, but it must have an owner, a tracking issue, and a removal or fix plan before it can be promoted back to trusted signal. Use `HIP_SKIP_TEST` for a genuine capability gap such as an unsupported device or runtime path, too few GPUs, or no image support, so the case skips cleanly instead of failing. Never leave a test that crashes the process. Any test that intentionally triggers a HIP error must consume the sticky thread-local error with `(void)hipGetLastError()` before returning so it does not leak into later cases in the same process.
+
+Disabling a test case should be rare and explicit. It is appropriate when a test cannot execute on a platform or architecture because a required capability, OS facility, graphics environment, or runtime mode is absent; when a known product or infrastructure defect has a tracking issue; or when keeping the test enabled would crash the process and hide later signal. Prefer runtime capability checks plus `HIP_SKIP_TEST` for environment-dependent behavior, and use YAML `disabled:` entries only when a case should be hidden for a specific platform, architecture, sanitizer mode, or tracked known issue. Do not disable a test only to make CI green. Every disabled or quarantined case should record why it is disabled, where it is tracked, and what condition allows it to be re-enabled.
+
+## Coverage
+
+Contract coverage is tracked statically: every declared public HIP API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The inventory of what each case asserts is generated into `catch/TEST_PLAN.md` by `catch/tools/gen_test_plan.py` from the `@asserts:` annotations, and the repository-root `.github/workflows/hip-contract-coverage.yml` enforces both the coverage drift check and the test-plan staleness check. Functional coverage is organized per feature area under `catch/unit/`, with the expectation that every public HIP API a change touches has at least one functional test exercising the changed behavior. Device-side code coverage is not fully captured by host coverage tools.
+
+Code coverage and test coverage are different signals. Code coverage measures which host-side lines or branches executed. Test coverage measures which public API contracts, configurations, capabilities, and regression scenarios were intentionally validated. HIP runtime confidence depends heavily on test coverage across real hardware and runtime configurations, not only on line coverage.
+
+## Nightly validation
+
+Nightly and multi-arch runs extend the per-PR build-and-test flow across a broader architecture set and longer-running suites. Today, if `HIP_TEST_LEVEL` is unset, the listener infers the active level from the first generated `[level_N]` tag it sees, unless a scheduled or on-demand workflow explicitly overrides the level. The CI handling of levels is expected to change when the pending level-selection workflow update in ROCm/rocm-systems#8932 lands, so this section should be reviewed in the same PR or immediately after that merge. On-demand runs such as multi-arch sweeps, WSL runtime checks, and performance or stress runs are invoked explicitly rather than on every PR. CI level cadence is not yet fully wired to `HIP_TEST_LEVEL`.
+
+## Supported configurations
+
+| Configuration | Validation level | Notes |
+|---|---|---|
+| AMD GPU, Linux | Primary | Main device-executed runtime validation path. |
+| AMD GPU, Windows | Supported where CI/hardware is configured | Some tests are platform-gated when APIs or process semantics differ. |
+| AMD GPU, WSL | Supported subset | Tests that depend on Linux process or graphics behavior may be gated. |
+| Multi-GPU and peer paths | Capability-gated | Tests skip when hardware capability is not present. |
+| Graphics and external interop | Environment-gated | Requires graphics/Vulkan/OpenGL-capable hosts and drivers. |
+| SPIR-V build path | Specialized | Enabled with `-DENABLE_SPIRV=ON` where supported. |
+
+This table describes where the HIP runtime tests are validated. It is not a product support matrix and does not imply that every individual case runs on every listed configuration.
+
+## ASAN, TSAN, and sanitizer coverage
+
+AddressSanitizer builds are supported through `ENABLE_ADDRESS_SANITIZER` and through TheRock sanitizer settings such as `THEROCK_SANITIZER=ASAN` or `THEROCK_SANITIZER=HOST_ASAN`. Sanitizer builds can catch host-side memory errors in the test harness and runtime-facing code paths that execute on the host. Device-executed paths limit what host sanitizers observe, so sanitizer coverage of device-side behavior is inherently partial.
+
+ThreadSanitizer and other sanitizer coverage are not part of the default per-PR gate for this component today. When sanitizer coverage is used, document the build option, architecture, tier, and limitations in the workflow that enables it rather than treating the sanitizer result as a complete substitute for device-executed testing.
+
+## Choosing the right test type
+
+| Scenario | Test type to add |
+|---|---|
+| Pinning a small, portable, device-only guarantee of a public API, such as invalid-input rejection, round-trip behavior, or accepted-or-unsupported outcome | Contract test in `catch/contract/` with an `@asserts:` annotation |
+| Verifying in-depth functional behavior of an API or feature | Functional test under the relevant `catch/unit/` feature-area directory |
+| Exercising interaction between components, such as interop, multi-GPU, loader plus RTC plus runtime, or graph behavior | Integration-style test in the relevant feature area, gated on required capability or environment |
+| Measuring throughput or latency of a hot path | Performance scenario under `catch/performance/`, built only when `BUILD_PERF_TESTS=ON` |
+| Validating behavior under sustained load | Stress test under `catch/stress/`, built only when `BUILD_STRESS_TESTS=ON` |
+
+Use `isQuickLevel()` inside the test function to trim workload size at `level_0` rather than skipping code paths. Use deterministic seeds for randomized inputs, and clean up every resource the test allocates.
+
+## Known gaps summary
+
+| Gap | Regression risk | Impact | Mitigation today |
+|---|---|---|---|
+| Integration tests are still distributed across directories rather than a separate top-level tier | Medium | Cross-component coverage is harder to audit independently from single-API unit coverage | Existing interop, multi-GPU, multiprocess, RTC, loader, and graph tests continue to run in their current locations |
+| CI level cadence is not fully wired to `HIP_TEST_LEVEL` | Medium | PR and nightly runs do not consistently select different workload levels through one global dial | Per-case generated `[level_N]` tags and on-demand overrides still provide level control; review after ROCm/rocm-systems#8932 lands |
+| Level-based test parameters are defined but not broadly utilized today | Medium | Levels can select or label tests, but many cases do not yet scale workload sizes, iteration counts, or generated parameter sets based on the active level | Prefer adding level-aware parameter use when touching long-running tests; use `isQuickLevel()` and generated level parameters where practical |
+| No universal per-PR performance baseline gate | Medium | Throughput or latency regressions may be found after merge or by manual review | Performance tests exist and can run on demand or on a scheduled cadence |
+| Device-side code coverage is not fully captured by host coverage tools | Medium | A high host coverage number can still miss device-only behavior | Contract, functional, integration, and stress tests execute behavior on real devices |
+| Flaky and quarantined tracking should keep converging toward owner plus issue plus expiry | Medium | Suppressed failures can age into permanent blind spots | Treat flaky/quarantined cases as unstable signal until each has a tracking issue and removal plan |
+| Sanitizer coverage of device-side paths is inherently partial and is not part of the default per-PR gate | Low | Memory or race issues can escape sanitizer lanes | Use sanitizers as an additional signal, not a replacement for device-executed tests |
+
+## Why we test this way
+
+HIP runtime correctness is validated primarily through device-executed tests because the most important behavior depends on the interaction among public HIP APIs, the runtime, the driver, code-object loading, memory management, streams, graphs, and real GPU hardware. CPU-only unit tests are valuable where logic can be isolated, but they cannot fully validate API contracts that require a HIP context, a device allocation, queue execution, peer topology, images, external handles, or backend-specific runtime behavior.
+
+The current balance therefore emphasizes:
+
+- contract tests for small public-API invariants and coverage drift;
+- functional tests for deeper per-feature behavior;
+- integration-style tests for interop, multi-GPU, multiprocess, HIPRTC, module, loader, and graph scenarios;
+- periodic or on-demand performance and stress testing for costlier signals.
+
+Past regressions and validation gaps have shown that source inspection is not enough for HIP runtime behavior. Tests should probe the installed runtime and hardware path they claim to validate, gate unsupported capabilities explicitly, and preserve failure signal rather than hiding crashes or sticky error leaks.
+
+## Key quality concerns
+
+| Concern | Why it matters | How it is validated today |
+|---|---|---|
+| Public API compatibility | Applications depend on stable return codes, argument validation, and observable API behavior across releases. | Contract tests, functional tests, and coverage drift checks for public HIP APIs. |
+| Device-executed correctness | Many runtime defects only appear when commands execute on real GPU queues and memory. | Functional and integration tests that allocate memory, launch kernels, synchronize streams/graphs, and verify observable results. |
+| Cross-platform and backend behavior | HIP runs across Linux, Windows, WSL, AMD backends, and portability paths; behavior and availability can differ. | Platform/backend guards, explicit capability skips, backend-portability build coverage, Windows/Linux CI, and documented backend differences in tests. |
+| Multi-GPU, IPC, and interop behavior | Peer, IPC, graphics, and external-resource paths often depend on topology or external producers. | Capability-gated multi-GPU, IPC, multiprocess, graphics, and external-resource tests; unsupported paths are skipped or documented. |
+| Performance-sensitive paths | Runtime changes can regress memcpy, memset, stream, event, graph, launch, and memory-pool performance. | Performance tests and scheduled/manual performance review; universal per-PR performance gating is a known gap. |
+| Test signal integrity | Flaky, disabled, crashing, or poorly isolated tests can make CI results misleading. | Skip policy, sticky-error cleanup guidance, one process per case, YAML disabled entries for explicit cases, and known-gap tracking. |
+
+## Release validation
+
+Release validation extends the normal PR and nightly signals with broader hardware, OS, and configuration coverage. Before a release is considered validated for hip-tests, the relevant release branch should have:
+
+- passing required PR and branch CI gates for the HIP runtime test set;
+- successful nightly or multi-architecture validation across the supported AMD GPU architecture set configured for the release;
+- Windows and WSL coverage where those lanes are part of the release criteria;
+- review of known failing, flaky, disabled, or quarantined tests and their tracking issues;
+- performance-regression review for hot paths where benchmark data is available;
+- QA or release-owner sign-off according to the release process for the branch.
+
+This document does not replace release checklists or QA sign-off. It records which hip-tests signals contribute to release confidence and where gaps remain.
+
+## Dependencies and validation handoffs
+
+hip-tests depends on the ROCm/HIP install it is built against, the selected HIP backend, the GPU driver and hardware topology, CMake/Catch2 test discovery, generated YAML tags, HIPRTC, module/library loading support, and optional OS or graphics facilities for interop paths.
+
+Validation ownership changes hands at several boundaries:
+
+- TheRock or rocm-systems build workflows prove that packages and test binaries can be built for the selected configuration.
+- hip-tests owns runtime API, compiler-facing runtime test paths, HIPRTC, module/library loader, and harness behavior under `projects/hip-tests`.
+- External producers and environment setup, such as graphics contexts, Vulkan/OpenGL resources, Windows facilities, or multi-node infrastructure, are owned by the corresponding platform or integration workflows.
+- Performance baselines and regression triage are owned by the performance-tracking process that consumes `catch/performance/` results.
+
+When a test depends on a capability outside hip-tests ownership, it should probe for that capability and skip or document the unsupported path rather than failing ambiguously.
+
+## How this document will be used
+
+`TESTING.md` is a living strategy artifact. It is used for:
+
+- PR review discussions about what validation is expected;
+- regression analysis when a defect escapes existing tests;
+- release-readiness and known-gap review;
+- onboarding engineers and contributors to the hip-tests validation model;
+- planning CI, coverage, flaky-test, and automation improvements;
+- future automation or AI-assisted validation feedback.
+
+The value of this document depends on accuracy. If a workflow is manual, partial, or aspirational, it should be described that way rather than implied as an enforced gate.
+
+## For new contributors
+
+When adding or modifying HIP runtime behavior:
+
+1. Identify whether the behavior can be validated without GPU hardware. If yes, add or update the closest unit-style test. If no, add a device-executed contract, functional, integration, or performance test as appropriate.
+2. For public API changes, add or update a contract test for the small portable invariant and a functional test for the changed behavior.
+3. For bug fixes, add a regression test that would fail without the fix whenever practical.
+4. Use capability checks and `HIP_SKIP_TEST` for unsupported devices, platforms, or runtime paths.
+5. Clear sticky HIP errors after intentional negative checks.
+6. Run the focused label or executable for the area you changed, plus any relevant static config or coverage checks.
+7. Update this document when the testing strategy, gate ownership, supported configuration, or known-gap status changes.
+
+## Owners and review cadence
+
+Keep this document updated in the same PR as any change that alters the testing strategy, such as a new tier, a new cadence, or a new required check. When a test layer or CI gate is added, add its row to the tables above and note its cadence in the relevant section.
+
+Review this document when:
+
+- a major architecture or test-framework change lands;
+- a new test pattern, tier, or CI lane is introduced;
+- a significant regression escapes existing validation;
+- release validation assumptions change; or
+- a supported configuration changes in a way that affects test coverage.
+
+The lower-level references remain `CONTRIBUTING.md` for hip-tests contribution guidance, `catch/README.md` for the current Catch2 harness mechanics, and `catch/contract/AUTHORING.md` for the contract-tier how-to. Update this strategy document when those docs change behavior that affects test policy.

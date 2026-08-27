@@ -510,7 +510,7 @@ contract:
   Contract_FuncAttributes_HipFuncGetAttributes_NullAttr_IsRejected:
     <<: *level_0
     tags: [func_attributes]
-  Contract_FuncAttributes_HipFuncGetAttribute_s_MatchesScalarGetAttribute:
+  Contract_FuncAttributes_HipFuncGetAttribute_Scalar_MatchesScalarGetAttribute:
     <<: *level_0
     tags: [func_attributes]
   Contract_FuncAttributes_HipGetFuncBySymbol_Default_ResolvesInSourceKernel:
@@ -624,7 +624,7 @@ contract:
   Contract_GraphCapture_HipStreamEndCapture_BeginEndEmptyStream_ProducesGraph:
     <<: *level_0
     tags: [graph_capture]
-  Contract_GraphCapture_HipStreamBeginCapture_dMemcpy_RoundTripsBytes:
+  Contract_GraphCapture_HipStreamBeginCapture_Memcpy_RoundTripsBytes:
     <<: *level_0
     tags: [graph_capture]
   Contract_GraphCapture_HipStreamIsCapturing_Default_ReportsActiveDuringCapture:

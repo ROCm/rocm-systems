@@ -181,6 +181,7 @@ class BaseRunner(ABC):
         num_procs: int = 0,
         working_directory: Optional[Path] = None,
         no_base_env: bool = False,
+        python_version: Optional[str] = None,
     ):
         self.config = config
         self.target = target
@@ -198,14 +199,15 @@ class BaseRunner(ABC):
             ) from exc
         self.num_procs = num_procs
         self.working_directory = working_directory or config.rocprofsys_build_dir
+        self.python_version = python_version
         self.environment = TestEnvironment()
         self.environment.set_base_environment(
-            config, TestEnvKind.NONE if no_base_env else test_type
+            config, TestEnvKind.NONE if no_base_env else test_type, python_version
         )
         # LD_LIBRARY_PATH default on the test layer; the test's own env (applied
         # next) may override it (e.g. Julia adds extra lib dirs).
         self.environment.set_test_environment(
-            {"LD_LIBRARY_PATH": config.get_library_path()}
+            {"LD_LIBRARY_PATH": config.get_library_path(python_version)}
         )
         # LD_PRELOAD default (sanitizer builds prepend the asan runtime).
         preload = config.get_preload_path()
@@ -702,9 +704,15 @@ class PythonRunner(BaseRunner):
         standalone: bool = False,
         **kwargs,
     ):
-        super().__init__(config, TestEnvKind.PYTHON, target, output_dir, **kwargs)
+        super().__init__(
+            config,
+            TestEnvKind.PYTHON,
+            target,
+            output_dir,
+            python_version=python_version,
+            **kwargs,
+        )
 
-        self.python_version = python_version
         self.annotated = annotated
         self.standalone = standalone
         self.profile_args = profile_args or []

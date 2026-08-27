@@ -15,6 +15,7 @@
 #include "nccl_device.h"
 
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <cerrno>
 #include <cstdint>
@@ -23,6 +24,7 @@
 #include <hip/hip_runtime.h>
 #include <ios>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -131,6 +133,21 @@ ncclDevCommRequirements defaultGinReqs() {
   return r;
 }
 
+// Bounded stream drain: poll with a deadline so a device-side hang becomes a
+// reported timeout instead of an infinite hipStreamSynchronize. Returns the
+// final stream status so the caller can distinguish the three outcomes:
+//   hipSuccess       - stream completed cleanly
+//   hipErrorNotReady - deadline elapsed while the stream was still busy (hang)
+//   any other error  - a genuine device/launch error, propagated as-is
+hipError_t syncStreamWithinTimeout(hipStream_t stream, int seconds) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+  for (;;) {
+    hipError_t q = hipStreamQuery(stream);
+    if (q != hipErrorNotReady) return q;  // hipSuccess or a real error
+    if (std::chrono::steady_clock::now() >= deadline) return hipErrorNotReady;  // timed out
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+}
 // Multi-context trigger for the Tier-1 *_MultiContext tests. Returns the
 // requested context count N (>=2) parsed from NCCL_GIN_NCONTEXTS, clamped to
 // NCCL_GIN_MAX_CONTEXTS; returns 0 when the var is unset or <=1 so the caller
@@ -591,6 +608,246 @@ TEST_F(GinMPIDeviceTests, Put_CrossNode) {
     for (size_t i = kDstOff + kTransferBytes; i < kBufBytes; i++) {
       ASSERT_EQ(0u, hostResult[i])
           << "byte " << i << " after dstOff+xfer was unexpectedly written";
+    }
+  }
+}
+
+// Whole CTA cooperatively issues one gin.put via ncclCoopCta (every lane enters put()).
+__global__ void putCoopCtaProducerKernel(
+    ncclWindow_t srcWin, size_t srcOff,
+    ncclWindow_t dstWin, size_t dstOff,
+    size_t bytes, ncclGinSignal_t sigIdx, int peer,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  gin.put(ncclTeamWorld(devComm), peer,
+          dstWin, dstOff,
+          srcWin, srcOff,
+          bytes,
+          ncclGin_SignalInc{sigIdx},
+          ncclGin_None{},
+          ncclCoopCta());
+  gin.flush(ncclCoopCta());
+}
+
+// A cooperative whole-CTA gin.put must complete rather than deadlock: rank 0 puts a
+// payload + signal, rank 1 waits and verifies. A hang is caught by the bounded drain.
+TEST_F(GinMPIDeviceTests, Put_CoopCta_Regression) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  // Minimal geometry: single-slot full-buffer transfer, signal 0, peer rank 1.
+  constexpr size_t          kBufBytes      = 4 * 1024;
+  constexpr size_t          kTransferBytes = 4 * 1024;
+  constexpr ncclGinSignal_t kSigIdx        = 0;
+  constexpr int             kPeer          = 1;
+  // A full wavefront (>=64 on gfx9) so the coop group spans many lanes; this is
+  // what exercises the coop/thread_rank mismatch. 256 threads = several warps.
+  constexpr int             kThreadsPerCta = 256;
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  std::vector<uint8_t> hostSrc(kBufBytes, 0);
+  std::vector<uint8_t> hostDst(kBufBytes, 0);
+  for (size_t i = 0; i < kTransferBytes; i++) {
+    hostSrc[i] = static_cast<uint8_t>(0xC0 + (i & 0x3F));
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 0) {
+    putCoopCtaProducerKernel<<<1, kThreadsPerCta, 0, stream>>>(
+        srcWin, /*srcOff=*/0,
+        dstWin, /*dstOff=*/0,
+        kTransferBytes, kSigIdx, kPeer,
+        devComm);
+  } else {
+    putBasicConsumerKernel<<<1, kThreadsPerCta, 0, stream>>>(
+        kSigIdx, /*expectedSignalValue=*/1, devComm);
+  }
+
+  // Bounded drain: a hang never completes, so cap the wait and fail instead of blocking.
+  const hipError_t drainStatus = syncStreamWithinTimeout(stream, /*seconds=*/60);
+
+  // Surface the timeout on both ranks so neither is left waiting at the barrier.
+  int localTimedOut = (drainStatus == hipErrorNotReady) ? 1 : 0;
+  int anyTimedOut   = 0;
+  MPI_Allreduce(&localTimedOut, &anyTimedOut, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  ASSERT_EQ(0, anyTimedOut)
+      << "cooperative gin.put(ncclCoopCta) did not complete within the timeout "
+         "(missing coop->ncclCoopThread fix)";
+
+  // A genuine device/launch error must fail loudly rather than be treated as success.
+  ASSERT_EQ(hipSuccess, drainStatus)
+      << "stream drain reported a device error: " << hipGetErrorString(drainStatus);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 1) {
+    std::vector<uint8_t> hostResult(kBufBytes, 0);
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kTransferBytes; i++) {
+      ASSERT_EQ(hostSrc[i], hostResult[i]) << "byte " << i << " mismatched";
+    }
+  }
+}
+
+// Warp-span variant: same cooperative put through a multi-warp ncclCoopWarpSpan, whose
+// sync() is the AMD software named barrier. Unlike ncclCoopCta's convergent __syncthreads
+// it deadlocks under divergent participation without the coop->ncclCoopThread fix, giving
+// AMD coverage the whole-CTA test cannot.
+__global__ void putCoopWarpSpanProducerKernel(
+    ncclWindow_t srcWin, size_t srcOff,
+    ncclWindow_t dstWin, size_t dstOff,
+    size_t bytes, ncclGinSignal_t sigIdx, int peer,
+    struct ncclDevComm devComm) {
+  ncclCoopNamedBarrierInit();  // zero LDS barrier slots (all threads)
+  ncclGin gin{devComm, /*ginContext=*/0};
+  const int nWarps = blockDim.x / warpSize;  // >=2 warps -> software barrier active
+  gin.put(ncclTeamWorld(devComm), peer,
+          dstWin, dstOff,
+          srcWin, srcOff,
+          bytes,
+          ncclGin_SignalInc{sigIdx},
+          ncclGin_None{},
+          ncclCoopWarpSpan(/*warp0=*/0, nWarps, /*id=*/0));
+  gin.flush(ncclCoopCta());
+}
+
+// Warp-span flavor: with the fix this drains and verifies; without it lane 0 deadlocks
+// in the software barrier and the bounded drain turns the hang into a failure.
+TEST_F(GinMPIDeviceTests, Put_CoopWarpSpan_Regression_AMD) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  constexpr size_t          kBufBytes      = 4 * 1024;
+  constexpr size_t          kTransferBytes = 4 * 1024;
+  constexpr ncclGinSignal_t kSigIdx        = 0;
+  constexpr int             kPeer          = 1;
+  constexpr int             kThreadsPerCta = 256;  // 4 warps -> warp-span software barrier active
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  std::vector<uint8_t> hostSrc(kBufBytes, 0);
+  std::vector<uint8_t> hostDst(kBufBytes, 0);
+  for (size_t i = 0; i < kTransferBytes; i++) {
+    hostSrc[i] = static_cast<uint8_t>(0xC0 + (i & 0x3F));
+  }
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 0) {
+    putCoopWarpSpanProducerKernel<<<1, kThreadsPerCta, 0, stream>>>(
+        srcWin, /*srcOff=*/0,
+        dstWin, /*dstOff=*/0,
+        kTransferBytes, kSigIdx, kPeer,
+        devComm);
+  } else {
+    putBasicConsumerKernel<<<1, kThreadsPerCta, 0, stream>>>(
+        kSigIdx, /*expectedSignalValue=*/1, devComm);
+  }
+
+  const hipError_t drainStatus = syncStreamWithinTimeout(stream, /*seconds=*/60);
+
+  int localTimedOut = (drainStatus == hipErrorNotReady) ? 1 : 0;
+  int anyTimedOut   = 0;
+  MPI_Allreduce(&localTimedOut, &anyTimedOut, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  ASSERT_EQ(0, anyTimedOut)
+      << "cooperative gin.put(ncclCoopWarpSpan) did not complete within the timeout "
+         "(missing coop->ncclCoopThread fix)";
+
+  // A genuine device/launch error must fail loudly rather than be treated as success.
+  ASSERT_EQ(hipSuccess, drainStatus)
+      << "stream drain reported a device error: " << hipGetErrorString(drainStatus);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 1) {
+    std::vector<uint8_t> hostResult(kBufBytes, 0);
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(hostResult.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kTransferBytes; i++) {
+      ASSERT_EQ(hostSrc[i], hostResult[i]) << "byte " << i << " mismatched";
     }
   }
 }

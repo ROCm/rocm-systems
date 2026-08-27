@@ -285,6 +285,12 @@ every high-frequency callback, serializing it with the infrequent callbacks
 without a per-instruction scan of the plugin list. Plugins that protect their
 own shared state should retain the parallel default.
 
+SGPR owner resolution is skipped when no contained plugin observes SGPR reads.
+Plugins that do not consume `onAmdgpuReadSgpr` should override
+`observes_sgpr_reads()` to return `false`. The group samples this policy when
+each plugin is added. Its conservative default is `true`, so existing plugins
+continue receiving SGPR read callbacks unless they explicitly opt out.
+
 Pass the complete sink configuration to the group constructor and add plugins
 before publishing the group to simulation components. `add()` is not
 thread-safe, and the group must remain immutable while callbacks may dispatch
@@ -304,5 +310,7 @@ concurrently.
    high-frequency and infrequent callbacks. Override
    `requires_serial_hot_hooks()` when that state cannot be protected within the
    plugin.
-6. Enable it by adding `"myname": { ... }` to the `plugins` section of
+6. Override `observes_sgpr_reads()` to return `false` when the plugin does not
+   consume `onAmdgpuReadSgpr`.
+7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.

@@ -102,6 +102,7 @@ public:
         return false;
     p->slot_index_ = static_cast<uint32_t>(plugins_.size());
     serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
+    observes_sgpr_reads_ |= p->observes_sgpr_reads();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
@@ -120,6 +121,10 @@ public:
   /// Whether high-frequency callbacks are serialized for this group. Plugin
   /// policy is sampled when each plugin is added so hot dispatch stays O(1).
   bool requires_serial_hot_hooks() const { return serialize_hot_hooks_; }
+
+  /// Whether any contained plugin observes SGPR reads. Plugin policy is
+  /// sampled when each plugin is added so SGPR access stays O(1).
+  bool observes_sgpr_reads() const { return observes_sgpr_reads_; }
 
   // -- Lifecycle (non-virtual) --
   // The host calls these outside the simulation-callback interval: onInit()
@@ -293,6 +298,7 @@ private:
   // empty groups return before touching either the mutex or this counter.
   uint64_t callback_lock_acquisitions_ = 0;
   bool serialize_hot_hooks_ = false;
+  bool observes_sgpr_reads_ = false;
 
   /// Internal fanout over sinks whose lifetime is guaranteed by the owning
   /// group or SinkBundle. It is deliberately not part of the public sink API.

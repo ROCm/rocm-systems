@@ -50,7 +50,6 @@ profiling, how it supports performance analysis, and how to leverage its capabil
 
     * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
     * :doc:`Use the preset profiles <./how-to/using-preset-profiles>`
-    * :doc:`Use the ROCm Systems Profiler API <./how-to/using-rocprof-sys-api>`
 
   .. grid-item-card:: Conceptual
 

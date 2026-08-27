@@ -76,7 +76,6 @@ using perfetto_annotate_component_types = tim::mpl::available_t<type_list<
 //
 extern ROCPROFSYS_HIDDEN_API bool debug_push;
 extern ROCPROFSYS_HIDDEN_API bool debug_pop;
-extern ROCPROFSYS_HIDDEN_API bool debug_user;
 extern ROCPROFSYS_HIDDEN_API bool debug_mark;
 
 void

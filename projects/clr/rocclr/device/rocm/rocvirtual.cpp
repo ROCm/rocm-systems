@@ -200,6 +200,21 @@ static inline void logAqlDispatchPacket(const Device& dev, const hsa_queue_t* qu
           rptr, wptr));
 }
 
+// The preloaded kernargs are split across three arrays separated by the interleaved
+// header dwords, so map a logical dword index onto the right section.
+static inline uint32_t metadataPreloadDword(
+    const hsa_amd_metadata_kernel_dispatch_packet_t* meta, uint16_t dword_idx) {
+  constexpr uint16_t kSection0Dwords = sizeof(meta->kernarg_preload_0_14) / sizeof(uint32_t);
+  constexpr uint16_t kSection1Dwords = sizeof(meta->kernarg_preload_15_29) / sizeof(uint32_t);
+  if (dword_idx < kSection0Dwords) {
+    return meta->kernarg_preload_0_14[dword_idx];
+  }
+  if (dword_idx < kSection0Dwords + kSection1Dwords) {
+    return meta->kernarg_preload_15_29[dword_idx - kSection0Dwords];
+  }
+  return meta->kernarg_preload_30_31[dword_idx - kSection0Dwords - kSection1Dwords];
+}
+
 static inline void logAqlMetadataPacket(const Device& dev, const hsa_queue_t* queue,
                                         const hsa_amd_metadata_kernel_dispatch_packet_t* meta,
                                         uint64_t wptr, AqlLogSink sink = AqlLogSink::kLog) {
@@ -207,6 +222,22 @@ static inline void logAqlMetadataPacket(const Device& dev, const hsa_queue_t* qu
     return;
   }
   const auto& desc = meta->kernel_descriptor;
+
+  // Dump the kernargs the preloader actually embedded in the packet. Hang analysis
+  // can reach here with a corrupted descriptor, so clamp the length before indexing.
+  constexpr uint16_t kMaxPreloadDwords =
+      (sizeof(meta->kernarg_preload_0_14) + sizeof(meta->kernarg_preload_15_29) +
+       sizeof(meta->kernarg_preload_30_31)) / sizeof(uint32_t);
+  const uint16_t preloadDwords =
+      std::min<uint16_t>(desc.kernarg_preload.length, kMaxPreloadDwords);
+  char preloadBlob[kMaxPreloadDwords * 11 + 1];
+  size_t preloadOffset = 0;
+  for (uint16_t dword_idx = 0; dword_idx < preloadDwords; ++dword_idx) {
+    preloadOffset += snprintf(preloadBlob + preloadOffset, sizeof(preloadBlob) - preloadOffset,
+                              "%s0x%08x", (dword_idx == 0) ? "" : " ",
+                              metadataPreloadDword(meta, dword_idx));
+  }
+  preloadBlob[preloadOffset] = '\0';
 
   // Dump the launch descriptor as a raw dword blob (13 dwords / 52 bytes).
   constexpr size_t kNumLaunchDescriptorDwords =
@@ -224,13 +255,13 @@ static inline void logAqlMetadataPacket(const Device& dev, const hsa_queue_t* qu
           "header=[0x%x, 0x%x, 0x%x, 0x%x], event_id=0x%x, "
           "kernel_code_entry_byte_offset=0x%llx, compute_pgm_rsrc1=0x%x, compute_pgm_rsrc2=0x%x, "
           "compute_pgm_rsrc3=0x%x, kernel_code_properties=0x%x, "
-          "kernarg_preload=[length=%u, offset=%u], launch_descriptor=[%s]",
+          "kernarg_preload=[length=%u, offset=%u, dwords=[%s]], launch_descriptor=[%s]",
           queue, queue->base_address, queue->id, wptr,
           meta->header0, meta->header1, meta->header2, meta->header3, meta->event_id,
           static_cast<unsigned long long>(desc.kernel_code_entry_byte_offset),
           desc.compute_pgm_rsrc1, desc.compute_pgm_rsrc2, desc.compute_pgm_rsrc3,
           desc.kernel_code_properties, desc.kernarg_preload.length, desc.kernarg_preload.offset,
-          launchDescriptorBlob));
+          preloadBlob, launchDescriptorBlob));
 }
 
 static inline void logAqlDispatchPacketExtended(
@@ -1315,6 +1346,23 @@ static inline void packet_store_release(uint32_t* packet, uint16_t header, uint1
 
 // ================================================================================================
 std::string VirtualGPU::AnalyzeAqlQueue() const {
+  static constexpr char kBannerRule[] =
+      "****************************************************************************";
+
+  fprintf(stderr, "\n%s\n", kBannerRule);
+  fprintf(stderr, "*** GPU HANG ANALYSIS - VGPU(%p) Queue(%p)\n", this, gpu_queue_);
+  fprintf(stderr, "%s\n", kBannerRule);
+
+  // The body has several early exits; running it as a separate call keeps them from
+  // skipping the closing rule.
+  const std::string kernelName = AnalyzeAqlQueueBody();
+
+  fprintf(stderr, "%s\n\n", kBannerRule);
+  return kernelName;
+}
+
+// ================================================================================================
+std::string VirtualGPU::AnalyzeAqlQueueBody() const {
   std::string kernelName = "<not identified>";
   const uint32_t queueMask = gpu_queue_->size - 1;
   const uint64_t index = Hsa::queue_load_write_index_relaxed(gpu_queue_);
@@ -1362,7 +1410,6 @@ std::string VirtualGPU::AnalyzeAqlQueue() const {
 
   // Reuse the shared AQL packet formatters with the stderr sink so hang analysis
   // and the debug log print identical packet detail, including the metadata blob.
-  fprintf(stderr, "VGPU(%p) hang analysis:\n", this);
   if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
     auto* vendor_hdr = reinterpret_cast<const hsa_amd_vendor_packet_header_t*>(aql_loc);
     if (vendor_hdr->AmdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
@@ -4651,7 +4698,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
   ClPrint(amd::LOG_INFO, amd::LOG_KERN2, "ShaderName : %s", gpuKernel.getDemangledName().c_str());
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
-          "argSize = %zu, KernargSegmentByteSize = %zu, KernargSegmentAlignment = %zu",
+          "argSize = %u, KernargSegmentByteSize = %u, KernargSegmentAlignment = %u",
           std::min(gpuKernel.KernargSegmentByteSize(), signature.paramsSize()),
           gpuKernel.KernargSegmentByteSize(), gpuKernel.KernargSegmentAlignment());
 
@@ -5616,9 +5663,6 @@ uint32_t VirtualGPU::MetaDataPreloader::FillKernelDispatchMetadata(
       m->kernel_descriptor.kernarg_preload.length = kPreload_limit;
       preload_length = kPreload_limit;
     }
-    ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
-            "metadata prefetch: preload_length=%u, preload_offset=%u, preload_limit=%u",
-            preload_length, pending_preload_offset_, kPreload_limit);
 
     if (preload_length > 0) {
       const uint8_t* kernargs = reinterpret_cast<const uint8_t*>(aql->kernarg_address);

@@ -831,24 +831,13 @@ ncclResult_t ncclTopoAddCpu(struct ncclXmlNode* xmlCpu, struct ncclTopoSystem* s
   return ncclSuccess;
 }
 
-static bool ncclTopoXmlIsPrimaryGpuForDev(const struct ncclXmlNode* xmlGpu) {
-  // Only the first GPU entry (rank) for a given device (physical GPU) should contribute links.
-  for (int s = 0; s < xmlGpu->parent->nSubs; s++) {
-    const struct ncclXmlNode* sib = xmlGpu->parent->subs[s];
-    if (sib == xmlGpu) break;
-    if (strcmp(sib->name, "gpu") == 0) return false;
-  }
-  return true;
-}
-
 static ncclResult_t ncclTopoGetGpuDevNode(struct ncclXmlNode* xmlGpu, const char* busId, int systemId,
                                           struct ncclTopoSystem* system, struct ncclTopoNode** devNode) {
-  int mloPart, sm;
+  int mloPart;
   int64_t rawBusId;
   NCCLCHECK(busIdToInt64(busId, &rawBusId));
   NCCLCHECK(ncclTopoCheckMloPartBusId(rawBusId));
   NCCLCHECK(xmlGetAttrIntDefault(xmlGpu, "mlopart", &mloPart, NCCL_TOPO_UNDEF));
-  NCCLCHECK(xmlGetAttrInt(xmlGpu, "sm", &sm));
   int64_t devBusId =
     (mloPart != NCCL_TOPO_UNDEF && ncclParamTopoSplitMlopart()) ? NCCL_TOPO_MLOPART_BUSID(rawBusId, mloPart) : rawBusId;
   NCCLCHECK(ncclTopoGetNode(system, devNode, DEV, NCCL_TOPO_ID(systemId, devBusId)));
@@ -875,6 +864,29 @@ static ncclResult_t ncclTopoXmlIsPrimaryGpuForDev(struct ncclXmlNode* xmlGpu, bo
 }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+static ncclResult_t ncclTopoGetDevForPciBusId(struct ncclTopoSystem* system, int systemId, int64_t busId,
+                                              struct ncclTopoNode** devNode) {
+  *devNode = NULL;
+  NCCLCHECK(ncclTopoGetNode(system, devNode, DEV, NCCL_TOPO_ID(systemId, busId)));
+  if (*devNode) return ncclSuccess;
+  // HIP uses the function nibble as the partition index. Match an overlaid DEV
+  // on the same PCI domain:bus:device, regardless of its physical function.
+  int fn = (int)(busId & 0xf);
+  if (fn >= NCCL_TOPO_MLOPART_DEV_MAX) return ncclSuccess;
+  int64_t phys = busId & ~0xfLL;
+  for (int d = 0; d < system->nodes[DEV].count; d++) {
+    struct ncclTopoNode* candidate = system->nodes[DEV].nodes + d;
+    int64_t local = NCCL_TOPO_ID_LOCAL_ID(candidate->id);
+    if (NCCL_TOPO_ID_SYSTEM_ID(candidate->id) == systemId &&
+        (local & ~(NCCL_TOPO_MLOPART_MASK | 0xfLL)) == phys &&
+        (local & NCCL_TOPO_MLOPART_MASK) == NCCL_TOPO_MLOPART(fn)) {
+      *devNode = candidate;
+      break;
+    }
+  }
+  return ncclSuccess;
+}
+
 // RCCL: XGMI is the AMD analogue of NVLink. Upstream v2.30 introduced the generic DEV
 // (physical device) topology node, with GPU (rank) nodes hanging off their parent DEV node
 // via LINK_LOC. ncclTopoComputePaths()/search now assemble inter-GPU links as DEV->DEV hops
@@ -886,14 +898,19 @@ static ncclResult_t ncclTopoXmlIsPrimaryGpuForDev(struct ncclXmlNode* xmlGpu, bo
 ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* system, const char* parentBusId,
                              int systemId) {
   if (strcmp(node->name, "xgmi") == 0) {
-    if (!ncclTopoXmlIsPrimaryGpuForDev(node->parent)) return ncclSuccess;
     struct ncclTopoNode* devNode = NULL;
-    int64_t pBusId;
-    NCCLCHECK(busIdToInt64(parentBusId, &pBusId));
-    pBusId = NCCL_TOPO_ID(systemId, pBusId);
-    NCCLCHECK(ncclTopoGetNode(system, &devNode, DEV, pBusId));
+    if (node->parent && strcmp(node->parent->name, "gpu") == 0) {
+      bool isPrimary = false;
+      NCCLCHECK(ncclTopoXmlIsPrimaryGpuForDev(node->parent, &isPrimary));
+      if (!isPrimary) return ncclSuccess;
+      NCCLCHECK(ncclTopoGetGpuDevNode(node->parent, parentBusId, systemId, system, &devNode));
+    } else {
+      int64_t pBusId;
+      NCCLCHECK(busIdToInt64(parentBusId, &pBusId));
+      NCCLCHECK(ncclTopoGetNode(system, &devNode, DEV, NCCL_TOPO_ID(systemId, pBusId)));
+    }
     if (devNode == NULL) {
-      WARN("Add XGMI error : could not find DEV for GPU %lx\n", pBusId);
+      WARN("Add XGMI error : could not find DEV for GPU %s\n", parentBusId);
       return ncclInternalError;
     }
     int count;
@@ -909,7 +926,7 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
       NCCLCHECK(xmlGetAttrStr(node, "target", &target));
       int64_t busId;
       NCCLCHECK(busIdToInt64(target, &busId));
-      NCCLCHECK(ncclTopoGetNode(system, &remote, DEV, NCCL_TOPO_ID(systemId, busId)));
+      NCCLCHECK(ncclTopoGetDevForPciBusId(system, systemId, busId, &remote));
     } else if (targetType == CPU) {
       // XGMI connection to the local CPU
       NCCLCHECK(findLocalCpu(devNode, &remote, NULL));
@@ -1060,7 +1077,7 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
 
     if (nSibDevs > 1) {
       // Use a C2C bridge node to guarantee the total bw of the C2C link is shared between the devices.
-      // Note: pBusId is the dev busId; we have checked that the 2 last bits are 0 in ncclTopoAddGpuSub
+      // Note: pBusId is the dev busId; we have checked that the mlopart bits are 0 in ncclTopoAddGpuSub
       int64_t xc2cId = devNode->id & ~(int64_t)NCCL_TOPO_MLOPART_MASK;
       struct ncclTopoNode* xc2cNode = NULL;
       NCCLCHECK(ncclTopoGetNode(system, &xc2cNode, CXB, xc2cId));

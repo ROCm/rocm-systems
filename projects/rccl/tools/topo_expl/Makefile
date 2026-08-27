@@ -118,6 +118,9 @@ hipify:
 	cp -a ../../src/nccl.h.in include/rccl/rccl.h
 	cp -a ../../src/include/ hipify_rccl/
 	cp -a ../../src/graph/ hipify_rccl/
+	mkdir -p hipify_rccl/include
+	(cd ../../src && find algorithms -name '*.h' \
+	    -exec cp --parents -t ../tools/topo_expl/hipify_rccl/include/ {} +)
 	cp -a ../../src/device/*.h hipify_rccl/src/device/include
 	cp -a ../../src/device/network/unpack/*.h hipify_rccl/include/network/unpack
 	# src/include/sym_kernels.h includes "../device/symmetric/gin_scratch.h"

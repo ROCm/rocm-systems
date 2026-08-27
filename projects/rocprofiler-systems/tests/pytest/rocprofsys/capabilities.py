@@ -72,6 +72,46 @@ def get_amdgpu_version(
     return None
 
 
+def find_roctx_site_packages(
+    rocm_path: Optional[Path], python_version: str
+) -> Optional[Path]:
+    """Return the ROCm-provided roctx site-packages directory for a Python version.
+
+    rocprofiler-sdk builds and installs its ``roctx`` Python bindings
+    (``libpyroctx.<abi>.so``) per interpreter into a versioned directory under
+    the ROCm install tree, e.g. ``<rocm_path>/lib/python3.11/site-packages``.
+    Unlike rocprofsys's own bindings, these are not consolidated into a single
+    ABI-agnostic directory, so the correct versioned directory must be
+    resolved per Python version.
+
+    Args:
+        rocm_path: Path to the ROCm installation, or None.
+        python_version: Python version string, e.g. "3.11".
+
+    Returns:
+        Path to the site-packages directory containing the ``roctx`` package
+        for the given version, or None if not found.
+    """
+    if not rocm_path:
+        return None
+    candidates = (
+        rocm_path / lib_name / f"python{python_version}" / "site-packages" / "roctx"
+        for lib_name in ("lib", "lib64")
+    )
+    # The package directory alone isn't sufficient: some ROCm packaging variants
+    # ship the __init__.py without the compiled extension it imports
+    # (libpyroctx.<abi>.so), which would still raise on import.
+    return next(
+        (
+            roctx_dir.parent
+            for roctx_dir in candidates
+            if (roctx_dir / "__init__.py").is_file()
+            and any(roctx_dir.glob("libpyroctx.*"))
+        ),
+        None,
+    )
+
+
 @dataclass
 class SystemCapabilities:
     """
@@ -463,6 +503,71 @@ class SystemCapabilities:
             raise FileNotFoundError(
                 f"Python version '{version}' not found. Available: {', '.join(self.supported_python_versions)}"
             )
+
+    def roctx_site_packages(self, python_version: str) -> Optional[Path]:
+        """ROCm's roctx site-packages directory for ``python_version``, if usable.
+
+        See :func:`find_roctx_site_packages`.
+        """
+        return find_roctx_site_packages(self.rocm_path, python_version)
+
+    def python_lib_dir(self, python_version: str) -> Optional[Path]:
+        """Return the interpreter's own ``lib`` directory, or None if absent.
+
+        On some rocprofiler-sdk builds the compiled ``libpyroctx.<abi>.so``
+        extension resolves ``libpython<version>.so`` through the loader search
+        path rather than through an rpath/``$ORIGIN`` entry, so this directory
+        has to be on ``LD_LIBRARY_PATH`` for the import to succeed even though
+        every file is present on disk.
+        """
+        try:
+            python_executable = self.get_python_executable(python_version)
+        except FileNotFoundError:
+            return None
+        # Typical layout: <env_root>/bin/python3.X -> <env_root>/lib
+        lib_dir = python_executable.parent.parent / "lib"
+        return lib_dir if lib_dir.is_dir() else None
+
+    @persistent_cache("cap.roctx_available_for", method=True)
+    def roctx_available_for(self, python_version: str) -> bool:
+        """Return whether ROCm's roctx Python bindings are installed AND
+        importable for this version.
+
+        File presence alone isn't sufficient, so this invokes the target
+        interpreter with the same roctx site-packages and interpreter lib
+        directory that ``PythonRunner`` adds for the real test run. Only the
+        base environment differs - the probe extends this process's
+        environment, the runner extends its layered one - and the runner's
+        search paths are a superset, so a negative here is conservative.
+        """
+        site_packages = self.roctx_site_packages(python_version)
+        if site_packages is None:
+            return False
+        try:
+            python_executable = self.get_python_executable(python_version)
+        except FileNotFoundError:
+            return False
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join(
+            p for p in (env.get("PYTHONPATH", ""), str(site_packages)) if p
+        )
+        lib_dir = self.python_lib_dir(python_version)
+        if lib_dir is not None:
+            env["LD_LIBRARY_PATH"] = os.pathsep.join(
+                p for p in (env.get("LD_LIBRARY_PATH", ""), str(lib_dir)) if p
+            )
+        try:
+            result = subprocess.run(
+                [str(python_executable), "-c", "import roctx"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=env,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError):
+            return False
 
     # ---------------------------------------------------------------------------
 

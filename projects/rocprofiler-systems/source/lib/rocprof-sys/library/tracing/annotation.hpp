@@ -9,7 +9,7 @@
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
-#include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
+#include "rocprofiler-systems/annotation.h"  // in rocprof-sys-common-api
 #include <cstdint>
 
 #include <timemory/mpl/concepts.hpp>

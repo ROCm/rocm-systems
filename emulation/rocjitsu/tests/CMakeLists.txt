@@ -420,6 +420,7 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     xcd_distribution_test.cpp
+    xcd_fanout_kfd_test.cpp
     xcd_shard_test.cpp
     cdna5_architecture_test.cpp
     cdna5_cluster_test.cpp

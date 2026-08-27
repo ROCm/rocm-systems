@@ -3573,8 +3573,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     QueueExtras extras;
     extras.deviceMemRingBuf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
     extras.largestAqlBarrierBitSlot = std::make_shared<std::atomic<uint64_t>>(kInvalidAqlSlot);
-    hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
-                           &extras.metadataRingBuffer);
+    // Leaving the ring base null makes MetaDataPreloader::HasMetadataQueue() false,
+    // which is the single gate every metadata path already checks.
+    if (DEBUG_CLR_ENABLE_KDQ) {
+      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+                             &extras.metadataRingBuffer);
+    }
     if (DEBUG_CLR_DIRECT_DOORBELL) {
       uint64_t db_id = 0;
       if (hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
@@ -3917,8 +3921,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
             std::string kernelName = vgpu->AnalyzeAqlQueue();
             const char* kname = kernelName.c_str();
             ClPrint(amd::LOG_NONE, amd::LOG_ALWAYS,
-                    "Memory Fault Error [%sGPU index: %u, "
-                    "faulting addr: 0x%" PRIx64 ", kernel: %s]",
+                    "[%sGPU index: %u, faulting addr: 0x%" PRIx64 ", kernel: %s]",
                     host_tag.c_str(), roc_dev->index(),
                     event->memory_fault.virtual_address, kname);
           }

@@ -374,13 +374,7 @@ this file.
    :alt: Visualization of ROCm flow data in Perfetto
    :width: 800
 
-**Figure 4:** Visualization of ROCm API calls in Perfetto
-
-.. image:: ../data/rocprof-sys-user-api.png
-   :alt: Visualization of ROCm API calls in Perfetto
-   :width: 800
-
-**Figure 5:** Visualization of ROCm GPU metrics in Perfetto
+**Figure 4:** Visualization of ROCm GPU metrics in Perfetto
 
 .. image:: ../data/rocprof-sys-gpu-metrics.png
    :alt: Visualization of ROCm GPU metrics in Perfetto

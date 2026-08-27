@@ -20,6 +20,8 @@ public:
   explicit KernelLoggingPlugin(const char *config_json = nullptr);
   ~KernelLoggingPlugin() override;
 
+  bool observes_sgpr_reads() const override { return false; }
+
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        Wavefront &wf) override;

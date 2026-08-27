@@ -583,6 +583,8 @@ foreach(_variant "" "-uncached")
     # init_fakes.cc, so no SMI runtime is linked. The in-RCCL-build path inherits
     # this from RCCL_COMMON_COMPILE_DEFS instead.
     USE_AMDSMI
+    $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
+    $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
     INIT_CC_PATH="${RCCL_HIPIFY_DIR}/src/init.cc"
   )
   if(_variant STREQUAL "-uncached")
