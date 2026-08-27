@@ -7,6 +7,7 @@
 
 #include "common_cast.h"
 #include "p2p_resiliency_recovery_cast.h"
+#include "net_telemetry.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -355,12 +356,18 @@ const char* ibCastProviderName[] = {
 };
 
 ncclResult_t IbCastFinalizeDevices(void) {
-  netRefCount--;
+  // No telemetry flush here: netRefCount reaching 0 is not process exit, and
+  // the flush is one-shot. atexit(rcclTelemetryFlush) covers the process.
+  --netRefCount;
   return ncclSuccess;
 }
 
 extern int64_t IbCastArThreshold;
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
+  // Never NCCLCHECKed; telemetry reports its own failures. See net_telemetry.h.
+  if (rcclTelemetryInit() != 0) {
+    INFO(NCCL_NET, "NET/IB-CAST: telemetry was requested but could not start; continuing without it");
+  }
   ncclResult_t ret = ncclSuccess;
   if (netRefCount++) return ret;
   IbCastProfilerFunction = profFunction;
@@ -585,6 +592,13 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       }
       snprintf(line + strlen(line), sizeof(line) - strlen(line), "/%s", NCCL_IB_LLSTR(IbCastDevs[d].link));
 
+      // Register after the sort: the data path books counters under post-sort
+      // index d. Registration walks sysfs, so skip it when telemetry is off.
+      if (rcclTelemetryOn() && rcclTelemetryRegisterDevice(d, IbCastDevs[d].devName, "IB-CAST") < 0) {
+        INFO(NCCL_NET, "NET/IB-CAST: telemetry did not register device %s, its counters are not collected",
+             IbCastDevs[d].devName);
+      }
+
       // Add this plain physical device to the list of virtual devices (after sorting)
       int vDev;
       ncclNetVDeviceProps_t vProps = {0};
@@ -654,6 +668,7 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
                         ncclProfilerCallback_t profFunction) {
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
+  // Telemetry is initialized and reported by IbCastInitDevices below.
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
   NCCLCHECK(IbCastPortRecoveryThreadStart());
   NCCLCHECK(ncclCalloc(&netCommConfig, 1));

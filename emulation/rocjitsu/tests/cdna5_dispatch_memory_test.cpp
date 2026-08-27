@@ -365,13 +365,19 @@ TEST(Gfx1250SimulationTest, Ttmp8EncodesQueuePacketId) {
   step_until_xcd_halted(sim);
 
   ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
-  std::array<uint32_t, 2> queue_packet_ids{};
+  // Dispatch ids increase per packet but are not dense: each command processor
+  // mints them strided by the XCD count so ids from different XCDs cannot
+  // collide. Order the observations by id instead of indexing with it.
+  std::array<std::pair<uint32_t, uint32_t>, 2> by_dispatch{};
+  size_t i = 0;
   for (const auto &wf : sim.snapshot->snapshots()) {
     ASSERT_GE(wf.dispatch_id, 1u);
-    ASSERT_LE(wf.dispatch_id, 2u);
-    queue_packet_ids[wf.dispatch_id - 1] = wf.ttmp(8) & 0x1FFFFFFu;
+    by_dispatch[i++] = {wf.dispatch_id, wf.ttmp(8) & 0x1FFFFFFu};
   }
-  EXPECT_EQ(queue_packet_ids, (std::array<uint32_t, 2>{0, 1}));
+  std::sort(by_dispatch.begin(), by_dispatch.end());
+  ASSERT_LT(by_dispatch[0].first, by_dispatch[1].first);
+  EXPECT_EQ(by_dispatch[0].second, 0u);
+  EXPECT_EQ(by_dispatch[1].second, 1u);
 }
 
 TEST(Gfx1250SimulationTest, GlobalStoreWritesVisibleMemory) {
