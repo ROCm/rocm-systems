@@ -46,7 +46,7 @@ struct HipInteropDeviceMem {
     uint32_t pitch[3]; // Pitch of each plane
     uint32_t num_layers; // Number of layers making up the surface
 #ifdef _WIN32
-    HANDLE nt_handle; // NT handle from vaExportSurfaceHandle; must CloseHandle after HIP import
+    HANDLE nt_handle; // NT handle from ID3D12Device::CreateSharedHandle; must CloseHandle when no longer needed
 #endif
 };
 
