@@ -132,29 +132,21 @@ TEST(ConSanPipeline, StageRecordValidatesEnumsIdentityStatusAndContractPayload) 
   EXPECT_FALSE(malformed.well_formed());
 }
 
-TEST(ConSanPipeline, TransformIssueValidatesTypedAndDiagnosticPayloadAlternatives) {
-  ConSanTransformIssue contract{
-      .kind = ConSanTransformIssueKind::Contract,
-      .stage = ConSanPipelineStage::Configuration,
-      .contract_issue = ConSanContractIssue::MissingFlavor,
-      .detail = "missing-flavor",
+TEST(ConSanPipeline, TransformIssueValidatesCategoryStageAndDiagnostic) {
+  ConSanTransformIssue issue{
+      .kind = ConSanTransformIssueKind::LegacyLowering,
+      .stage = ConSanPipelineStage::LegacyLowering,
+      .detail = "lowering failed",
   };
-  EXPECT_TRUE(contract.well_formed());
+  EXPECT_TRUE(issue.well_formed());
 
-  ConSanTransformIssue malformed = contract;
-  malformed.contract_issue = ConSanContractIssue::None;
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = contract;
+  ConSanTransformIssue malformed = issue;
   malformed.detail.clear();
   EXPECT_FALSE(malformed.well_formed());
-  malformed = contract;
-  malformed.kind = ConSanTransformIssueKind::LegacyLowering;
-  EXPECT_FALSE(malformed.well_formed());
-  malformed.contract_issue = ConSanContractIssue::None;
-  EXPECT_TRUE(malformed.well_formed());
+  malformed = issue;
   malformed.stage = ConSanPipelineStage::Count;
   EXPECT_FALSE(malformed.well_formed());
-  malformed = contract;
+  malformed = issue;
   malformed.kind = ConSanTransformIssueKind::Count;
   EXPECT_FALSE(malformed.well_formed());
 }
@@ -432,18 +424,15 @@ TEST(ConSanPipeline, InvalidConfigurationStopsBeforeLegacyLoweringWithTypedIssue
                        ConSanDebugOverrides{}, complete_runtime_capabilities(), {});
 
   ASSERT_TRUE(result.well_formed());
-  EXPECT_EQ(result.configuration_issue, ConSanContractIssue::InvalidSampleStride);
+  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->contract_issue,
+            ConSanContractIssue::InvalidSampleStride);
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  ASSERT_EQ(result.issues.size(), 1u);
-  EXPECT_EQ(result.issues.front().kind, ConSanTransformIssueKind::Contract);
-  EXPECT_EQ(result.issues.front().stage, ConSanPipelineStage::Configuration);
-  EXPECT_EQ(result.issues.front().contract_issue, ConSanContractIssue::InvalidSampleStride);
+  EXPECT_TRUE(result.issues.empty());
   EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
             ConSanPipelineStageStatus::Invalid);
 
   EXPECT_TRUE(result.program_inventory.empty());
   EXPECT_FALSE(result.program_inventory.code_object_parsed());
-  EXPECT_EQ(result.issues.front().detail, "invalid-sample-stride");
 }
 
 TEST(ConSanPipeline, MissingRuntimeBackendStopsAtCapabilityBoundary) {
@@ -453,15 +442,15 @@ TEST(ConSanPipeline, MissingRuntimeBackendStopsAtCapabilityBoundary) {
       BoundRuntimeResources{});
 
   ASSERT_TRUE(result.well_formed());
-  EXPECT_EQ(result.configuration_issue, ConSanContractIssue::None);
+  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->contract_issue,
+            ConSanContractIssue::None);
   EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
             ConSanPipelineStageStatus::Completed);
   EXPECT_EQ(result.stage(ConSanPipelineStage::TargetAndRuntimeCapabilities)->status,
             ConSanPipelineStageStatus::Invalid);
   EXPECT_EQ(result.stage(ConSanPipelineStage::TargetAndRuntimeCapabilities)->contract_issue,
             ConSanContractIssue::MissingRuntimeBackend);
-  ASSERT_EQ(result.issues.size(), 1u);
-  EXPECT_EQ(result.issues.front().contract_issue, ConSanContractIssue::MissingRuntimeBackend);
+  EXPECT_TRUE(result.issues.empty());
 }
 
 TEST(ConSanPipeline, InvalidCodeObjectRetainsOneIdentityAcrossEveryStage) {
@@ -510,7 +499,6 @@ TEST(ConSanPipeline, RuntimeFailurePolicyDoesNotChangeStaticTransform) {
   EXPECT_EQ(open.coverage_ledger, closed.coverage_ledger);
   EXPECT_EQ(open.replacement, closed.replacement);
   EXPECT_EQ(open.outcome, closed.outcome);
-  EXPECT_EQ(open.configuration_issue, closed.configuration_issue);
   EXPECT_EQ(open.issues, closed.issues);
   EXPECT_EQ(open.warnings, closed.warnings);
   EXPECT_EQ(open.mutation, closed.mutation);
@@ -715,7 +703,7 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   malformed.stages[1].code_object = make_consan_code_object_id(std::array<uint8_t, 1>{9});
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
-  malformed.configuration_issue = ConSanContractIssue::MissingFlavor;
+  malformed.stages.front().contract_issue = ConSanContractIssue::MissingFlavor;
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
   malformed.stages.front().status = ConSanPipelineStageStatus::Invalid;

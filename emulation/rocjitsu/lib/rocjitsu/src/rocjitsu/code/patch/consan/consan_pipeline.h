@@ -159,14 +159,13 @@ struct ConSanPipelineStageRecord {
 
 /// Typed category for a static transform failure retained by `TransformResult`.
 ///
-/// Configuration and runtime-capability failures carry a
-/// `ConSanContractIssue`. Inventory, policy, evidence, legacy lowering, and
-/// final validation failures instead retain their owning pipeline stage and a
-/// diagnostic detail. This enum is intentionally about code-object rewriting;
-/// runtime race verdicts and device-evidence loss belong to `RunVerdict`, not
-/// here. `Count` is an invalid iteration sentinel.
+/// Typed configuration and runtime-capability failures are owned directly by
+/// their pipeline stage records. This separate enum classifies failures that
+/// retain diagnostic context from inventory, policy, evidence, lowering, or
+/// final validation. It is intentionally about code-object rewriting; runtime
+/// race verdicts and device-evidence loss belong to `RunVerdict`, not here.
+/// `Count` is an invalid iteration sentinel.
 enum class ConSanTransformIssueKind : uint8_t {
-  Contract,
   Inventory,
   ObservationPlan,
   EvidenceRequirements,
@@ -177,10 +176,12 @@ enum class ConSanTransformIssueKind : uint8_t {
 };
 
 /// Complete iterable set of static transform issue categories.
-inline constexpr std::array<ConSanTransformIssueKind, 7> kConSanTransformIssueKinds = {
-    ConSanTransformIssueKind::Contract,        ConSanTransformIssueKind::Inventory,
-    ConSanTransformIssueKind::ObservationPlan, ConSanTransformIssueKind::EvidenceRequirements,
-    ConSanTransformIssueKind::RuntimeBinding,  ConSanTransformIssueKind::LegacyLowering,
+inline constexpr std::array<ConSanTransformIssueKind, 6> kConSanTransformIssueKinds = {
+    ConSanTransformIssueKind::Inventory,
+    ConSanTransformIssueKind::ObservationPlan,
+    ConSanTransformIssueKind::EvidenceRequirements,
+    ConSanTransformIssueKind::RuntimeBinding,
+    ConSanTransformIssueKind::LegacyLowering,
     ConSanTransformIssueKind::FinalValidation,
 };
 
@@ -188,8 +189,6 @@ inline constexpr std::array<ConSanTransformIssueKind, 7> kConSanTransformIssueKi
 [[nodiscard]] constexpr std::string_view
 consan_transform_issue_kind_name(ConSanTransformIssueKind kind) {
   switch (kind) {
-  case ConSanTransformIssueKind::Contract:
-    return "contract";
   case ConSanTransformIssueKind::Inventory:
     return "inventory";
   case ConSanTransformIssueKind::ObservationPlan:
@@ -213,23 +212,19 @@ static_assert(kConSanTransformIssueKinds.size() ==
 
 /// One machine-readable static-transform failure with optional prose context.
 ///
-/// `stage` identifies the contract that owns the failure. A `Contract` issue
-/// must carry a non-`None` `contract_issue`; every other kind must leave that
-/// field `None` and provide nonempty detail. This prevents callers from parsing
-/// a message to identify configuration failures while still preserving exact
-/// diagnostics emitted by the compatibility lowerer.
+/// `stage` identifies the contract that owns the failure and `detail` preserves
+/// its diagnostic context. Configuration and capability failures do not use
+/// this type because their stage record owns the corresponding typed
+/// `ConSanContractIssue` directly.
 struct ConSanTransformIssue {
   /// Stable category consumed by control flow and tests.
   ConSanTransformIssueKind kind = ConSanTransformIssueKind::Count;
   /// Pipeline contract that owns this failure.
   ConSanPipelineStage stage = ConSanPipelineStage::Count;
-  /// Typed request/capability issue for `Contract`, otherwise `None`.
-  ConSanContractIssue contract_issue = ConSanContractIssue::None;
   /// Human-readable context that is never used to recover the category.
   std::string detail;
 
-  /// Return whether category, stage, typed payload, and diagnostic context
-  /// obey the issue contract.
+  /// Return whether category, stage, and diagnostic context are valid.
   [[nodiscard]] bool well_formed() const;
 
   bool operator==(const ConSanTransformIssue &) const = default;
@@ -325,8 +320,6 @@ public:
   std::vector<ConSanPipelineStageRecord> stages;
   /// Address-free engine-specific report/marker contract when applicable.
   std::optional<ConSanEvidenceRequirements> evidence_requirements;
-  /// First typed configuration failure, or `None` after valid configuration.
-  ConSanContractIssue configuration_issue = ConSanContractIssue::None;
   /// Machine-readable failures owned by static pipeline stages.
   std::vector<ConSanTransformIssue> issues;
   /// Runtime dispatch contract derived once from validated lowering and typed

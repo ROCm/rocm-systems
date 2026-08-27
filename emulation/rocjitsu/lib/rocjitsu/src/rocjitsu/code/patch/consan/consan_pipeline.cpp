@@ -92,16 +92,6 @@ ConSanPipelineStageRecord &stage_record(TransformResult &result, ConSanPipelineS
   return result.stages[static_cast<size_t>(stage)];
 }
 
-void add_contract_issue(TransformResult &result, ConSanPipelineStage stage,
-                        ConSanContractIssue issue) {
-  result.issues.push_back({
-      .kind = ConSanTransformIssueKind::Contract,
-      .stage = stage,
-      .contract_issue = issue,
-      .detail = std::string(consan_contract_issue_name(issue)),
-  });
-}
-
 [[nodiscard]] ConSanDispatchRequirements
 build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCoverageLedger &coverage,
                             std::span<const ConSanPatchInfo> patches) {
@@ -212,11 +202,7 @@ bool ConSanPipelineStageRecord::well_formed() const {
 }
 
 bool ConSanTransformIssue::well_formed() const {
-  if (!valid_issue_kind(kind) || !valid_stage(stage) || !valid_contract_issue(contract_issue))
-    return false;
-  if (kind == ConSanTransformIssueKind::Contract)
-    return contract_issue != ConSanContractIssue::None && !detail.empty();
-  return contract_issue == ConSanContractIssue::None && !detail.empty();
+  return valid_issue_kind(kind) && valid_stage(stage) && !detail.empty();
 }
 
 const ConSanPipelineStageRecord *TransformResult::stage(ConSanPipelineStage value) const {
@@ -228,7 +214,7 @@ const ConSanPipelineStageRecord *TransformResult::stage(ConSanPipelineStage valu
 
 bool TransformResult::well_formed() const {
   if (!code_object.valid() || stages.size() != kConSanPipelineStages.size() ||
-      !valid_contract_issue(configuration_issue) || !dispatch_requirements.well_formed()) {
+      !dispatch_requirements.well_formed()) {
     return false;
   }
   for (size_t index = 0; index < stages.size(); ++index) {
@@ -238,9 +224,8 @@ bool TransformResult::well_formed() const {
     }
   }
   const ConSanPipelineStageRecord *configuration = stage(ConSanPipelineStage::Configuration);
-  if (!configuration || configuration->contract_issue != configuration_issue ||
-      ((configuration_issue == ConSanContractIssue::None) !=
-       (configuration->status == ConSanPipelineStageStatus::Completed))) {
+  if (!configuration || ((configuration->contract_issue == ConSanContractIssue::None) !=
+                         (configuration->status == ConSanPipelineStageStatus::Completed))) {
     return false;
   }
   if (!program_inventory.empty() && program_inventory.code_object_id() != code_object)
@@ -395,13 +380,11 @@ TransformResult TransformResult::publish_optional(
 
   const ConSanContractIssue configuration_issue = validate_consan_configuration(
       request, transform_policy, runtime_policy, debug, mutation, resources);
-  result.configuration_issue = configuration_issue;
   ConSanPipelineStageRecord &configuration =
       stage_record(result, ConSanPipelineStage::Configuration);
   if (configuration_issue != ConSanContractIssue::None) {
     configuration.status = ConSanPipelineStageStatus::Invalid;
     configuration.contract_issue = configuration_issue;
-    add_contract_issue(result, ConSanPipelineStage::Configuration, configuration_issue);
     result.outcome = ConSanTransformOutcome::Invalid;
     stage_record(result, ConSanPipelineStage::FinalValidation).status =
         ConSanPipelineStageStatus::Invalid;
@@ -416,7 +399,6 @@ TransformResult TransformResult::publish_optional(
   if (backend_issue != ConSanContractIssue::None) {
     capability_stage.status = ConSanPipelineStageStatus::Invalid;
     capability_stage.contract_issue = backend_issue;
-    add_contract_issue(result, ConSanPipelineStage::TargetAndRuntimeCapabilities, backend_issue);
     result.outcome = ConSanTransformOutcome::Invalid;
     stage_record(result, ConSanPipelineStage::FinalValidation).status =
         ConSanPipelineStageStatus::Invalid;
@@ -424,28 +406,28 @@ TransformResult TransformResult::publish_optional(
     return result;
   }
 
-  ConSanResult legacy;
+  ConSanResult lowering;
   if (supplied_mechanism) {
-    legacy = std::move(*supplied_mechanism);
+    lowering = std::move(*supplied_mechanism);
   } else {
-    const ConSanOptions legacy_options(request, transform_policy, debug, mutation, capabilities,
-                                       resources);
-    legacy = try_patch_consan(code_object_bytes, legacy_options);
+    const ConSanOptions lowering_options(request, transform_policy, debug, mutation, capabilities,
+                                         resources);
+    lowering = try_patch_consan(code_object_bytes, lowering_options);
   }
   static_cast<ConSanTransformArtifacts &>(result) =
-      std::move(static_cast<ConSanTransformArtifacts &>(legacy));
+      std::move(static_cast<ConSanTransformArtifacts &>(lowering));
   if (result.outcome == ConSanTransformOutcome::ModifiedValid) {
     result.dispatch_requirements = build_dispatch_requirements(
         result.program_inventory, result.coverage_ledger, result.patches);
   }
-  for (std::string &error : legacy.errors) {
+  for (std::string &error : lowering.errors) {
     result.issues.push_back({
         .kind = ConSanTransformIssueKind::LegacyLowering,
         .stage = ConSanPipelineStage::LegacyLowering,
         .detail = std::move(error),
     });
   }
-  legacy.errors.clear();
+  lowering.errors.clear();
 
   const ConSanFlavor flavor = request.flavor.value_or(ConSanFlavor::None);
   if (flavor == ConSanFlavor::None) {
@@ -553,7 +535,6 @@ TransformResult TransformResult::publish_optional(
     } else {
       binding_stage.status = ConSanPipelineStageStatus::Unsupported;
       binding_stage.contract_issue = binding_issue;
-      add_contract_issue(result, ConSanPipelineStage::RuntimeBinding, binding_issue);
       result.outcome = ConSanTransformOutcome::Unsupported;
       result.replacement.clear();
       result.dispatch_requirements = {};

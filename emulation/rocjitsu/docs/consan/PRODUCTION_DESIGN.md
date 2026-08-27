@@ -5121,6 +5121,37 @@ analysis completed.
   remains reserved for the final gate. E2E validation remains outside this
   work.
 
+### Slice 5BP: give each typed failure one control-plane owner
+
+- **One owner for contract failures:** A configuration, target/runtime
+  capability, or runtime-binding failure now exists only as the typed
+  `contract_issue` of its owning `ConSanPipelineStageRecord`. The separate
+  `TransformResult::configuration_issue` copy and the duplicate `Contract`
+  entry in `ConSanTransformIssue` are deleted. Callers no longer have to prove
+  that three representations of the same failure agree.
+- **Diagnostic issues keep one narrower role:** `ConSanTransformIssue` now
+  retains contextual failures from inventory, observation planning, evidence
+  planning, runtime binding, compatibility lowering, and final validation.
+  Its invariant is simply a valid category, owning stage, and nonempty detail;
+  typed request/capability failures never require a caller to parse that
+  detail because the stage record already owns their enum value.
+- **Contract coverage:** Focused tests continue to reject every malformed
+  stage enum, status, identity, and typed contract payload. Configuration and
+  backend failures now assert the stage-owned enum and the absence of a
+  redundant diagnostic issue, while contextual issue tests cover every
+  remaining invariant.
+- **Deletion accounting:** Implementation files add 29 and delete 55 physical
+  lines, a net deletion of 26. Tests add sixteen and delete 28 lines, a net
+  deletion of twelve. This more than repays Slice 5BO's temporary fourteen-line
+  implementation increase.
+- **Checked-in gate:** All 1,524 ConSan host tests, all 172 HSA-hook tests, and
+  all 2,908 simulator-device tests across `gfx942`, `gfx950`, `gfx1100`,
+  `gfx1201`, and `gfx1250` pass. The simulator matrix completes in 73.34
+  seconds. Slice 5BM's 26-case physical-gfx950 cross-engine smoke remains the
+  physical gate for this control-plane-only tranche; the complete serialized
+  physical matrix remains reserved for the final gate. E2E validation remains
+  outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
