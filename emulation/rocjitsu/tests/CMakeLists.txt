@@ -2101,27 +2101,39 @@ if(HSA_RUNTIME64)
         endif()
 
         # Local helper: register one TEST_F case from hsa_dbi_nop_asm_test as a
-        # CTest entry. <group> is the part of the fixture name after
-        # "HsaDbiNopAsm" (Static or Hardware). Scoped here because it's only
-        # used by the calls immediately below.
+        # CTest entry. The gtest suite is HsaDbiNopAsm<arch><policy>, where
+        # <arch> names the target (Cdna2, ...) and <policy> is Static or
+        # Hardware. Scoped here because it's only used by the calls immediately
+        # below.
         #
         # SIM runs the same gtest case through the rocjitsu CLI against a
-        # simulated gfx90a instead of the host GPU. find_gfx90a_agent() matches
-        # on the HSA ISA name, so it binds to whichever agent the launcher
-        # supplies and the test source needs no backend knowledge. Only the
-        # CTest name encodes the backend; the gtest filter still names the
-        # <group> fixture, as with Cdna4ToCdna3SimulatedDispatchTest.
-        function(register_hsa_dbi_nop_asm_case group case)
-            cmake_parse_arguments(RJ_DBI "SIM" "TIMEOUT" "" ${ARGN})
-            set(name "HsaDbiNopAsm${group}.${case}")
+        # simulated agent instead of the host GPU, using CONFIG (defaults to the
+        # CDNA2 config). find_gpu_agent() matches on the HSA ISA name, so the
+        # fixture binds to whichever agent the launcher supplies and the test
+        # source needs no backend knowledge. Only the CTest name encodes the
+        # backend; the gtest filter still names the <arch><policy> fixture, as
+        # with Cdna4ToCdna3SimulatedDispatchTest.
+        function(register_hsa_dbi_nop_asm_case arch policy case)
+            cmake_parse_arguments(
+                RJ_DBI
+                "SIM"
+                "TIMEOUT;CONFIG;CONFIG_NAME"
+                ""
+                ${ARGN}
+            )
+            set(name "HsaDbiNopAsm${arch}${policy}.${case}")
+            if(NOT RJ_DBI_CONFIG)
+                set(RJ_DBI_CONFIG "${RJ_CDNA2_KMD_CONFIG}")
+                set(RJ_DBI_CONFIG_NAME "${RJ_CDNA2_KMD_CONFIG_NAME}")
+            endif()
             if(RJ_DBI_SIM)
-                set(_ctest_name "HsaDbiNopAsmSim.${case}")
+                set(_ctest_name "HsaDbiNopAsm${arch}Sim.${case}")
                 set(_command
                     ${CMAKE_COMMAND}
                     "-DTEST_EXECUTABLE=$<TARGET_FILE:hsa_dbi_nop_asm_test>"
                     "-DTEST_FILTER=${name}"
                     "-DTEST_LAUNCHER=${RJ_CLI}"
-                    "-DTEST_CONFIG=${RJ_CDNA2_KMD_CONFIG}"
+                    "-DTEST_CONFIG=${RJ_DBI_CONFIG}"
                     "-DFAIL_ON_SKIP=ON"
                     -P
                     "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
@@ -2131,7 +2143,7 @@ if(HSA_RUNTIME64)
                     "-DTEST_EXECUTABLE=bin/hsa_dbi_nop_asm_test"
                     "-DTEST_FILTER=${name}"
                     "-DTEST_LAUNCHER=\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                    "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA2_KMD_CONFIG_NAME}"
+                    "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${RJ_DBI_CONFIG_NAME}"
                     "-DFAIL_ON_SKIP=ON"
                     "-P"
                     "rj_run_filtered_gtest.cmake"
@@ -2157,25 +2169,30 @@ if(HSA_RUNTIME64)
             )
         endfunction()
 
+        # --- gfx90a / CDNA2 ---
+
         # Static-only test: no GPU needed, runs anywhere the binary is built.
-        register_hsa_dbi_nop_asm_case(Static PatchedElfActuallyContainsInstrumentation)
+        register_hsa_dbi_nop_asm_case(Cdna2 Static PatchedElfActuallyContainsInstrumentation)
 
         # The same three cases on the simulator. Registered unconditionally so
         # CI covers the DBI dispatch path without a CDNA2 host; the timeouts are
         # the hardware ones scaled for simulated execution.
         register_hsa_dbi_nop_asm_case(
+            Cdna2
             Hardware
             PatchedElfLoadsAndValidatesInHsaExecutable
             SIM
             TIMEOUT 300
         )
         register_hsa_dbi_nop_asm_case(
+            Cdna2
             Hardware
             PatchedKernelDispatchMatchesOriginal
             SIM
             TIMEOUT 300
         )
         register_hsa_dbi_nop_asm_case(
+            Cdna2
             Hardware
             TrampolineIsActuallyExecutedByGpu
             SIM
@@ -2186,9 +2203,23 @@ if(HSA_RUNTIME64)
             # Hardware-gated tests. The two that dispatch get an explicit
             # timeout; the load+validate one runs quickly enough for the
             # default.
-            register_hsa_dbi_nop_asm_case(Hardware PatchedElfLoadsAndValidatesInHsaExecutable)
-            register_hsa_dbi_nop_asm_case(Hardware PatchedKernelDispatchMatchesOriginal TIMEOUT 30)
-            register_hsa_dbi_nop_asm_case(Hardware TrampolineIsActuallyExecutedByGpu TIMEOUT 30)
+            register_hsa_dbi_nop_asm_case(
+                Cdna2
+                Hardware
+                PatchedElfLoadsAndValidatesInHsaExecutable
+            )
+            register_hsa_dbi_nop_asm_case(
+                Cdna2
+                Hardware
+                PatchedKernelDispatchMatchesOriginal
+                TIMEOUT 30
+            )
+            register_hsa_dbi_nop_asm_case(
+                Cdna2
+                Hardware
+                TrampolineIsActuallyExecutedByGpu
+                TIMEOUT 30
+            )
             message(STATUS "HSA DBI nop-asm test enabled (gfx90a detected)")
         else()
             message(
@@ -2208,7 +2239,7 @@ if(HSA_RUNTIME64)
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DTEST_EXECUTABLE=$<TARGET_FILE:hsa_dbi_nop_asm_test>"
-                "-DTEST_FILTER=HsaDbiNopAsmHardware.PatchedElfLoadsAndValidatesInHsaExecutable"
+                "-DTEST_FILTER=HsaDbiNopAsmCdna2Hardware.PatchedElfLoadsAndValidatesInHsaExecutable"
                 "-DTEST_LAUNCHER=${RJ_CLI}"
                 "-DTEST_CONFIG=${RJ_CDNA3_KMD_CONFIG}" -DFAIL_ON_SKIP=ON -P
                 "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
@@ -2269,19 +2300,29 @@ if(HSA_RUNTIME64)
 
             # Local helper: register one TEST_F case as a CTest entry, in both the
             # build tree and (under RJ_INSTALL_TESTS) the installed CTest tree.
-            # <group> is the part of the fixture name after "HsaDbiNopProbe".
-            # SIM behaves as in register_hsa_dbi_nop_asm_case above.
-            function(register_hsa_dbi_nop_probe_case group case)
-                cmake_parse_arguments(RJ_DBIP "SIM" "TIMEOUT" "" ${ARGN})
-                set(name "HsaDbiNopProbe${group}.${case}")
+            # The gtest suite is HsaDbiNopProbe<arch><policy>, as in
+            # register_hsa_dbi_nop_asm_case above; SIM and CONFIG behave the same.
+            function(register_hsa_dbi_nop_probe_case arch policy case)
+                cmake_parse_arguments(
+                    RJ_DBIP
+                    "SIM"
+                    "TIMEOUT;CONFIG;CONFIG_NAME"
+                    ""
+                    ${ARGN}
+                )
+                set(name "HsaDbiNopProbe${arch}${policy}.${case}")
+                if(NOT RJ_DBIP_CONFIG)
+                    set(RJ_DBIP_CONFIG "${RJ_CDNA2_KMD_CONFIG}")
+                    set(RJ_DBIP_CONFIG_NAME "${RJ_CDNA2_KMD_CONFIG_NAME}")
+                endif()
                 if(RJ_DBIP_SIM)
-                    set(_ctest_name "HsaDbiNopProbeSim.${case}")
+                    set(_ctest_name "HsaDbiNopProbe${arch}Sim.${case}")
                     set(_command
                         ${CMAKE_COMMAND}
                         "-DTEST_EXECUTABLE=$<TARGET_FILE:hsa_dbi_nop_probe_test>"
                         "-DTEST_FILTER=${name}"
                         "-DTEST_LAUNCHER=${RJ_CLI}"
-                        "-DTEST_CONFIG=${RJ_CDNA2_KMD_CONFIG}"
+                        "-DTEST_CONFIG=${RJ_DBIP_CONFIG}"
                         "-DFAIL_ON_SKIP=ON"
                         -P
                         "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
@@ -2291,7 +2332,7 @@ if(HSA_RUNTIME64)
                         "-DTEST_EXECUTABLE=bin/hsa_dbi_nop_probe_test"
                         "-DTEST_FILTER=${name}"
                         "-DTEST_LAUNCHER=\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                        "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${RJ_CDNA2_KMD_CONFIG_NAME}"
+                        "-DTEST_CONFIG=\${RJ_INSTALLED_CONFIG_DIR}/${RJ_DBIP_CONFIG_NAME}"
                         "-DFAIL_ON_SKIP=ON"
                         "-P"
                         "rj_run_filtered_gtest.cmake"
@@ -2317,8 +2358,11 @@ if(HSA_RUNTIME64)
                 )
             endfunction()
 
+            # --- gfx90a / CDNA2 ---
+
             # Static-only test: no GPU needed, runs anywhere the binary builds.
             register_hsa_dbi_nop_probe_case(
+                Cdna2
                 Static
                 PatchedElfContainsProbeCallInstrumentation
             )
@@ -2326,18 +2370,21 @@ if(HSA_RUNTIME64)
             # The same three cases on the simulator, registered unconditionally
             # so CI covers the probe-call dispatch path without a CDNA2 host.
             register_hsa_dbi_nop_probe_case(
+                Cdna2
                 Hardware
                 PatchedElfLoadsAndValidatesInHsaExecutable
                 SIM
                 TIMEOUT 300
             )
             register_hsa_dbi_nop_probe_case(
+                Cdna2
                 Hardware
                 PatchedKernelDispatchMatchesOriginal
                 SIM
                 TIMEOUT 300
             )
             register_hsa_dbi_nop_probe_case(
+                Cdna2
                 Hardware
                 ProbeBodyIsActuallyCalledByGpu
                 SIM
@@ -2346,6 +2393,7 @@ if(HSA_RUNTIME64)
 
             if(HAS_CDNA2_GPU)
                 register_hsa_dbi_nop_probe_case(
+                    Cdna2
                     Hardware
                     PatchedElfLoadsAndValidatesInHsaExecutable
                 )
@@ -2353,11 +2401,13 @@ if(HSA_RUNTIME64)
                 # GPU. They (temporarily) require the register-padded fixture
                 # kernel vector_add_probe, granting the s[30:31] link pair
                 register_hsa_dbi_nop_probe_case(
+                    Cdna2
                     Hardware
                     PatchedKernelDispatchMatchesOriginal
                     TIMEOUT 30
                 )
                 register_hsa_dbi_nop_probe_case(
+                    Cdna2
                     Hardware
                     ProbeBodyIsActuallyCalledByGpu
                     TIMEOUT 30
