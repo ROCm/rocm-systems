@@ -35,23 +35,14 @@ enum class ConSanPipelineStage : uint8_t {
   ObservationPlan,
   EvidenceRequirements,
   RuntimeBinding,
-  LegacyLowering,
-  FinalValidation,
-  Complete,
   Count,
 };
 
 /// Complete dependency-ordered set of ConSan transformation stages.
-inline constexpr std::array<ConSanPipelineStage, 9> kConSanPipelineStages = {
-    ConSanPipelineStage::Configuration,
-    ConSanPipelineStage::TargetAndRuntimeCapabilities,
-    ConSanPipelineStage::ProgramInventory,
-    ConSanPipelineStage::ObservationPlan,
-    ConSanPipelineStage::EvidenceRequirements,
-    ConSanPipelineStage::RuntimeBinding,
-    ConSanPipelineStage::LegacyLowering,
-    ConSanPipelineStage::FinalValidation,
-    ConSanPipelineStage::Complete,
+inline constexpr std::array<ConSanPipelineStage, 6> kConSanPipelineStages = {
+    ConSanPipelineStage::Configuration,        ConSanPipelineStage::TargetAndRuntimeCapabilities,
+    ConSanPipelineStage::ProgramInventory,     ConSanPipelineStage::ObservationPlan,
+    ConSanPipelineStage::EvidenceRequirements, ConSanPipelineStage::RuntimeBinding,
 };
 
 /// Return the stable diagnostic spelling of a pipeline stage. Sentinels and
@@ -70,12 +61,6 @@ inline constexpr std::array<ConSanPipelineStage, 9> kConSanPipelineStages = {
     return "evidence-requirements";
   case ConSanPipelineStage::RuntimeBinding:
     return "runtime-binding";
-  case ConSanPipelineStage::LegacyLowering:
-    return "legacy-lowering";
-  case ConSanPipelineStage::FinalValidation:
-    return "final-validation";
-  case ConSanPipelineStage::Complete:
-    return "complete";
   case ConSanPipelineStage::Count:
     break;
   }
@@ -132,29 +117,25 @@ consan_pipeline_stage_status_name(ConSanPipelineStageStatus status) {
 static_assert(kConSanPipelineStageStatuses.size() ==
               static_cast<size_t>(ConSanPipelineStageStatus::Count));
 
-/// Immutable status record for one pipeline contract and one pristine image.
+/// Status payload for one position in `TransformResult::stages`.
 ///
-/// Repeating the full collision-aware code-object identity on every record
-/// makes accidental stage composition across two images directly detectable.
-/// `contract_issue` is populated only when typed configuration or capability
-/// validation produced a `ConSanContractIssue`; other stage failures use the
-/// transform's structured issue list.
-struct ConSanPipelineStageRecord {
-  /// Contract whose result this record describes.
-  ConSanPipelineStage stage = ConSanPipelineStage::Count;
+/// The fixed array position owns the stage identity, and `TransformResult`
+/// owns the pristine code-object identity once for the complete transform.
+/// This value therefore carries only facts that can differ by contract.
+/// `contract_issue` is populated only when typed configuration, capability,
+/// or binding validation produced a `ConSanContractIssue`; other failures use
+/// the transform's structured issue list.
+struct ConSanPipelineStageState {
   /// Completion, deferral, exclusion, or failure state of the contract.
   ConSanPipelineStageStatus status = ConSanPipelineStageStatus::Invalid;
-  /// Pristine input identity that every stage in the transform must share.
-  ConSanCodeObjectId code_object;
   /// Narrow configuration/capability failure, or `None` for other outcomes.
   ConSanContractIssue contract_issue = ConSanContractIssue::None;
 
-  /// Return whether the record uses valid enum values and a coherent typed
-  /// contract issue. Pipeline order and cross-record identity are validated by
-  /// `TransformResult::well_formed()`.
-  [[nodiscard]] bool well_formed() const;
+  /// Return whether this payload is coherent for the stage selected by its
+  /// fixed array position.
+  [[nodiscard]] bool well_formed(ConSanPipelineStage stage) const;
 
-  bool operator==(const ConSanPipelineStageRecord &) const = default;
+  bool operator==(const ConSanPipelineStageState &) const = default;
 };
 
 /// Runtime dispatch facts required by the validated replacement of one kernel.
@@ -239,23 +220,26 @@ struct ConSanDispatchRequirements {
 /// or `transform_consan_with_mutation`.
 class TransformResult : public ConSanTransformArtifacts {
 public:
-  TransformResult() { outcome = ConSanTransformOutcome::Invalid; }
+  TransformResult() {
+    outcome = ConSanTransformOutcome::Invalid;
+    for (ConSanPipelineStageState &state : stages)
+      state.status = ConSanPipelineStageStatus::NotApplicable;
+  }
 
   /// Collision-aware identity of the pristine input image.
   ConSanCodeObjectId code_object;
-  /// Every pipeline contract exactly once in dependency order.
-  std::vector<ConSanPipelineStageRecord> stages;
+  /// Every pipeline contract exactly once, indexed by `ConSanPipelineStage`.
+  std::array<ConSanPipelineStageState, kConSanPipelineStages.size()> stages;
   /// Address-free engine-specific report/marker contract when applicable.
   std::optional<ConSanEvidenceRequirements> evidence_requirements;
   /// Runtime dispatch contract derived once from validated lowering and typed
   /// semantic coverage, then bound to executable symbols by the HSA adapter.
   ConSanDispatchRequirements dispatch_requirements;
 
-  /// Return the record for one stage, or null for an invalid stage or malformed
-  /// result that omitted it.
-  [[nodiscard]] const ConSanPipelineStageRecord *stage(ConSanPipelineStage value) const;
+  /// Return the state for one stage, or null when `value` is not a real stage.
+  [[nodiscard]] const ConSanPipelineStageState *stage(ConSanPipelineStage value) const;
 
-  /// Verify ordering, pristine identity, artifact relationships, status, and
+  /// Verify fixed-stage status, artifact relationships, result identity, and
   /// replacement-image invariants without consulting mutable global state.
   [[nodiscard]] bool well_formed() const;
 

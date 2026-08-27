@@ -87,40 +87,33 @@ TEST(ConSanPipeline, EnumInventoriesAreOrderedNamedUniqueAndRejectInvalidValues)
             "invalid-pipeline-stage-status");
 }
 
-TEST(ConSanPipeline, StageRecordValidatesEnumsIdentityStatusAndContractPayload) {
-  const ConSanCodeObjectId identity = make_consan_code_object_id(std::array<uint8_t, 3>{1, 2, 3});
-  ConSanPipelineStageRecord record{
-      .stage = ConSanPipelineStage::Configuration,
+TEST(ConSanPipeline, StageStateValidatesPositionStatusAndContractPayload) {
+  const ConSanPipelineStageState record{
       .status = ConSanPipelineStageStatus::Completed,
-      .code_object = identity,
   };
-  EXPECT_TRUE(record.well_formed());
+  EXPECT_TRUE(record.well_formed(ConSanPipelineStage::Configuration));
 
-  ConSanPipelineStageRecord malformed = record;
-  malformed.stage = ConSanPipelineStage::Count;
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = record;
+  ConSanPipelineStageState malformed = record;
   malformed.status = ConSanPipelineStageStatus::Count;
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = record;
-  malformed.code_object = {};
-  EXPECT_FALSE(malformed.well_formed());
+  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
+  EXPECT_FALSE(record.well_formed(ConSanPipelineStage::Count));
   malformed = record;
   malformed.contract_issue = ConSanContractIssue::MissingFlavor;
-  EXPECT_FALSE(malformed.well_formed());
+  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
   malformed.status = ConSanPipelineStageStatus::Invalid;
-  EXPECT_TRUE(malformed.well_formed());
-  malformed.stage = ConSanPipelineStage::ProgramInventory;
-  EXPECT_FALSE(malformed.well_formed());
+  EXPECT_TRUE(malformed.well_formed(ConSanPipelineStage::Configuration));
+  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::ProgramInventory));
   malformed = record;
   malformed.contract_issue = ConSanContractIssue::Count;
-  EXPECT_FALSE(malformed.well_formed());
+  EXPECT_FALSE(malformed.well_formed(ConSanPipelineStage::Configuration));
 }
 
 TEST(ConSanPipeline, DefaultResultAndInvalidStageLookupFailClosed) {
   const TransformResult result;
   EXPECT_FALSE(result.well_formed());
-  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration), nullptr);
+  ASSERT_NE(result.stage(ConSanPipelineStage::Configuration), nullptr);
+  EXPECT_EQ(result.stage(ConSanPipelineStage::Configuration)->status,
+            ConSanPipelineStageStatus::NotApplicable);
   EXPECT_EQ(result.stage(ConSanPipelineStage::Count), nullptr);
   EXPECT_EQ(result.stage(static_cast<ConSanPipelineStage>(255)), nullptr);
   EXPECT_EQ(result.install_action(/*fail_closed=*/false), ConSanInstallAction::LoadOriginal);
@@ -380,7 +373,7 @@ TEST(ConSanPipeline, PublicationJoinsTypedCoverageAndSegmentGrowthOncePerKernel)
   EXPECT_TRUE(published.dispatch_requirements.requires_packet_interception());
 }
 
-TEST(ConSanPipeline, InvalidConfigurationStopsBeforeLegacyLoweringWithTypedIssue) {
+TEST(ConSanPipeline, InvalidConfigurationStopsBeforeTargetLoweringWithTypedIssue) {
   ConSanRequest request = moi_request(ConSanMoiEngine::RecordReplay);
   request.moi_sample_stride = 0;
   constexpr std::array<uint8_t, 4> bytes = {0x7f, 'E', 'L', 'F'};
@@ -418,7 +411,7 @@ TEST(ConSanPipeline, MissingRuntimeBackendStopsAtCapabilityBoundary) {
   EXPECT_TRUE(result.errors.empty());
 }
 
-TEST(ConSanPipeline, InvalidCodeObjectRetainsOneIdentityAcrossEveryStage) {
+TEST(ConSanPipeline, InvalidCodeObjectRetainsOneResultIdentity) {
   constexpr std::array<uint8_t, 4> bytes = {0x7f, 'E', 'L', 'F'};
   TransformResult result = transform_consan(
       bytes, moi_request(ConSanMoiEngine::RecordReplay), TransformPolicy{},
@@ -426,14 +419,10 @@ TEST(ConSanPipeline, InvalidCodeObjectRetainsOneIdentityAcrossEveryStage) {
 
   ASSERT_TRUE(result.well_formed());
   EXPECT_EQ(result.outcome, ConSanTransformOutcome::Invalid);
-  EXPECT_TRUE(std::ranges::all_of(result.stages, [&](const ConSanPipelineStageRecord &stage) {
-    return stage.code_object == result.code_object;
-  }));
+  EXPECT_TRUE(result.code_object.valid());
   EXPECT_EQ(result.stage(ConSanPipelineStage::ProgramInventory)->status,
             ConSanPipelineStageStatus::Completed);
   EXPECT_EQ(result.stage(ConSanPipelineStage::ObservationPlan)->status,
-            ConSanPipelineStageStatus::Invalid);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
             ConSanPipelineStageStatus::Invalid);
   EXPECT_FALSE(result.errors.empty());
 }
@@ -659,15 +648,6 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   ASSERT_TRUE(good.well_formed()) << testing::PrintToString(good.errors);
 
   TransformResult malformed = good;
-  malformed.stages.pop_back();
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = good;
-  std::swap(malformed.stages[0], malformed.stages[1]);
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = good;
-  malformed.stages[1].code_object = make_consan_code_object_id(std::array<uint8_t, 1>{9});
-  EXPECT_FALSE(malformed.well_formed());
-  malformed = good;
   malformed.stages.front().contract_issue = ConSanContractIssue::MissingFlavor;
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
@@ -695,7 +675,7 @@ TEST(ConSanPipeline, ResultValidatorRejectsEveryOwnedCrossTypeInvariant) {
   malformed.replacement.push_back(1);
   EXPECT_FALSE(malformed.well_formed());
   malformed = good;
-  malformed.stages.back().status = ConSanPipelineStageStatus::Invalid;
+  malformed.stages.back().status = ConSanPipelineStageStatus::Count;
   EXPECT_FALSE(malformed.well_formed());
 }
 
@@ -975,11 +955,7 @@ TEST(ConSanPipeline, RuntimeDiscardClearsInstallableTypedArtifacts) {
   EXPECT_EQ(result.install_action(true), ConSanInstallAction::Reject);
   EXPECT_TRUE(result.patches.empty());
   EXPECT_EQ(result.warnings.back(), "runtime report allocation failed");
-  EXPECT_EQ(result.stage(ConSanPipelineStage::LegacyLowering)->status,
-            ConSanPipelineStageStatus::Unsupported);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::FinalValidation)->status,
-            ConSanPipelineStageStatus::NotApplicable);
-  EXPECT_EQ(result.stage(ConSanPipelineStage::Complete)->status,
+  EXPECT_EQ(result.stage(ConSanPipelineStage::RuntimeBinding)->status,
             ConSanPipelineStageStatus::Unsupported);
 }
 

@@ -535,9 +535,9 @@ global result or options type.
 
 The following rules hold across every component:
 
-- The pristine code-object identity is carried across inventory, observation,
-  coverage, stage records, and final mapping. Artifacts from different images
-  cannot be composed.
+- The pristine code-object identity is owned once by the transform result and
+  agrees with inventory, observation, coverage, and final mapping. Fixed stage
+  states do not repeat it. Artifacts from different images cannot be composed.
 - Policy never depends on selected registers, report addresses, or patch
   geometry. Lowering never silently changes applicability.
 - Unsupported instructions, ambiguous provenance, unqualified sequences,

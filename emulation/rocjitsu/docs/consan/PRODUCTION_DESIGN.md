@@ -1112,17 +1112,18 @@ than the current roughly 600-line result structure shared by every caller.
 A transform result is static: it says what happened while rewriting, not
 whether a conflict occurred during a later execution.
 
-The Slice-6 implementation records the following dependency order as
-`ConSanPipelineStage` values: configuration, target/runtime capabilities,
-program inventory, observation plan, evidence requirements, runtime binding,
-legacy lowering, final validation, and completion. Each stage records the same
-collision-aware pristine `ConSanCodeObjectId` and a typed status. `Deferred`
-means a valid address-free result awaits runtime binding; `NotApplicable`
-means the selected mode or result needs no value from that stage. Neither is
-silently presented as `Completed`. Request, capability, and binding failures
-live as the `ConSanContractIssue` of their owning stage, so control flow never
-parses diagnostic text. Lowering and final-validation diagnostics live once in
-the shared transform artifacts.
+The implementation records six independently meaningful contracts in a fixed
+`ConSanPipelineStage` array: configuration, target/runtime capabilities,
+program inventory, observation plan, evidence requirements, and runtime
+binding. The array position is the stage identity; `TransformResult` owns the
+collision-aware pristine `ConSanCodeObjectId` once. Lowering, final validation,
+and completion are not second copies of the result outcome. `Deferred` means a
+valid address-free result awaits runtime binding; `NotApplicable` means the
+selected mode or result needs no value from that stage. Neither is silently
+presented as `Completed`. Request, capability, and binding failures live as the
+`ConSanContractIssue` of their owning stage, so control flow never parses
+diagnostic text. Lowering and final-validation diagnostics live once in the
+shared transform artifacts.
 
 `TransformResult` owns immutable inventory, observation plan, coverage,
 replacement bytes, status, diagnostics, mutation detail, resource plans, and
@@ -5128,7 +5129,7 @@ analysis completed.
 
 - **One owner for contract failures:** A configuration, target/runtime
   capability, or runtime-binding failure now exists only as the typed
-  `contract_issue` of its owning `ConSanPipelineStageRecord`. The separate
+  `contract_issue` of its owning `ConSanPipelineStageState`. The separate
   `TransformResult::configuration_issue` copy and the duplicate `Contract`
   entry in `ConSanTransformIssue` are deleted. Callers no longer have to prove
   that three representations of the same failure agree.
@@ -5342,6 +5343,35 @@ analysis completed.
   seconds. Slice 5BM's physical-gfx950 smoke remains the periodic physical
   gate; the complete serialized physical matrix remains reserved for the final
   gate. E2E validation remains outside this work.
+
+### Slice 5BX: retain only independent pipeline contracts
+
+- **Six real contracts:** The pipeline retains configuration, target/runtime
+  capabilities, program inventory, observation plan, evidence requirements,
+  and runtime binding. The former `LegacyLowering`, `FinalValidation`, and
+  `Complete` entries merely repeated `TransformResult::outcome`; they are
+  deleted rather than renamed into permanent scaffolding.
+- **Fixed identity and ownership:** Stage state is a fixed array indexed by the
+  stage enum. Array position owns stage identity and `TransformResult` owns its
+  code-object identity once, eliminating the variable-length ordering and nine
+  repeated collision-aware identities. Invalid enum lookups still fail closed,
+  and each position independently validates its legal status and typed issue.
+- **Behavioral test correction:** Tests continue to cover every stage/status
+  enum, issue ownership, malformed status, deterministic publication, and all
+  cross-type result invariants. Tests that removed/reordered vector elements or
+  corrupted a copied per-stage code-object ID are deleted because those
+  malformed representations can no longer be constructed, not because the
+  invariant was weakened.
+- **Deletion accounting:** Implementation files add forty-two and delete
+  102 physical lines, a net deletion of sixty. Tests add eighteen
+  and delete forty-two lines, a net deletion of twenty-four. No compatibility
+  alias, synthetic terminal stage, or fallback vector representation remains.
+- **Checked-in gate:** The focused 25-test pipeline contract suite, all 1,524
+  ConSan host tests, all 172 HSA-hook tests, and all 2,908 simulator-device
+  tests across `gfx942`, `gfx950`, `gfx1100`, `gfx1201`, and `gfx1250` pass.
+  The simulator matrix completes in 68.56 seconds. Slice 5BM's physical-gfx950
+  smoke remains the periodic physical gate; E2E validation remains outside
+  this work.
 
 ### Slice 6: explicit pipeline and result cutover
 

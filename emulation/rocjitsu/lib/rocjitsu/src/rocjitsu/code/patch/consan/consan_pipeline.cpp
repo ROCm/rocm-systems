@@ -73,18 +73,7 @@ validate_evidence_binding(const ConSanEvidenceRequirements &requirements,
       requirements);
 }
 
-void initialize_stage_records(TransformResult &result) {
-  result.stages.reserve(kConSanPipelineStages.size());
-  for (ConSanPipelineStage stage : kConSanPipelineStages) {
-    result.stages.push_back({
-        .stage = stage,
-        .status = ConSanPipelineStageStatus::NotApplicable,
-        .code_object = result.code_object,
-    });
-  }
-}
-
-ConSanPipelineStageRecord &stage_record(TransformResult &result, ConSanPipelineStage stage) {
+ConSanPipelineStageState &stage_record(TransformResult &result, ConSanPipelineStage stage) {
   return result.stages[static_cast<size_t>(stage)];
 }
 
@@ -181,9 +170,8 @@ build_dispatch_requirements(const ProgramInventory &inventory, const ConSanCover
 
 } // namespace
 
-bool ConSanPipelineStageRecord::well_formed() const {
-  if (!valid_stage(stage) || !valid_stage_status(status) || !code_object.valid() ||
-      !valid_contract_issue(contract_issue)) {
+bool ConSanPipelineStageState::well_formed(ConSanPipelineStage stage) const {
+  if (!valid_stage(stage) || !valid_stage_status(status) || !valid_contract_issue(contract_issue)) {
     return false;
   }
   if (contract_issue == ConSanContractIssue::None)
@@ -197,25 +185,22 @@ bool ConSanPipelineStageRecord::well_formed() const {
          stage == ConSanPipelineStage::RuntimeBinding;
 }
 
-const ConSanPipelineStageRecord *TransformResult::stage(ConSanPipelineStage value) const {
+const ConSanPipelineStageState *TransformResult::stage(ConSanPipelineStage value) const {
   if (!valid_stage(value))
     return nullptr;
-  const auto found = std::ranges::find(stages, value, &ConSanPipelineStageRecord::stage);
-  return found == stages.end() ? nullptr : &*found;
+  return &stages[static_cast<size_t>(value)];
 }
 
 bool TransformResult::well_formed() const {
-  if (!code_object.valid() || stages.size() != kConSanPipelineStages.size() ||
-      !dispatch_requirements.well_formed()) {
+  if (!code_object.valid() || !dispatch_requirements.well_formed()) {
     return false;
   }
   for (size_t index = 0; index < stages.size(); ++index) {
-    if (stages[index].stage != kConSanPipelineStages[index] || !stages[index].well_formed() ||
-        stages[index].code_object != code_object) {
+    if (!stages[index].well_formed(kConSanPipelineStages[index])) {
       return false;
     }
   }
-  const ConSanPipelineStageRecord *configuration = stage(ConSanPipelineStage::Configuration);
+  const ConSanPipelineStageState *configuration = stage(ConSanPipelineStage::Configuration);
   if (!configuration || ((configuration->contract_issue == ConSanContractIssue::None) !=
                          (configuration->status == ConSanPipelineStageStatus::Completed))) {
     return false;
@@ -244,15 +229,7 @@ bool TransformResult::well_formed() const {
   default:
     return false;
   }
-  const ConSanPipelineStageRecord *complete = stage(ConSanPipelineStage::Complete);
-  const ConSanPipelineStageRecord *final_validation = stage(ConSanPipelineStage::FinalValidation);
-  if (!complete || complete->status != terminal_stage_status(outcome) || !final_validation)
-    return false;
-  if (outcome == ConSanTransformOutcome::ModifiedValid)
-    return final_validation->status == ConSanPipelineStageStatus::Completed;
-  if (outcome == ConSanTransformOutcome::Invalid)
-    return final_validation->status == ConSanPipelineStageStatus::Invalid;
-  return final_validation->status == ConSanPipelineStageStatus::NotApplicable;
+  return true;
 }
 
 ConSanInstallAction TransformResult::install_action(bool fail_closed) const {
@@ -282,11 +259,7 @@ void TransformResult::discard_replacement(std::string warning) {
   warnings.push_back(std::move(warning));
   moi_retry_inventory_available_ = false;
   moi_retry_preserves_extended_barrier_pairs_ = false;
-  stage_record(*this, ConSanPipelineStage::LegacyLowering).status =
-      ConSanPipelineStageStatus::Unsupported;
-  stage_record(*this, ConSanPipelineStage::FinalValidation).status =
-      ConSanPipelineStageStatus::NotApplicable;
-  stage_record(*this, ConSanPipelineStage::Complete).status =
+  stage_record(*this, ConSanPipelineStage::RuntimeBinding).status =
       ConSanPipelineStageStatus::Unsupported;
 }
 
@@ -366,33 +339,26 @@ TransformResult TransformResult::publish_optional(
     std::optional<ConSanTransformArtifacts> supplied_artifacts) {
   TransformResult result;
   result.code_object = make_consan_code_object_id(code_object_bytes);
-  initialize_stage_records(result);
 
   const ConSanContractIssue configuration_issue = validate_consan_configuration(
       request, transform_policy, runtime_policy, debug, mutation, resources);
-  ConSanPipelineStageRecord &configuration =
+  ConSanPipelineStageState &configuration =
       stage_record(result, ConSanPipelineStage::Configuration);
   if (configuration_issue != ConSanContractIssue::None) {
     configuration.status = ConSanPipelineStageStatus::Invalid;
     configuration.contract_issue = configuration_issue;
     result.outcome = ConSanTransformOutcome::Invalid;
-    stage_record(result, ConSanPipelineStage::FinalValidation).status =
-        ConSanPipelineStageStatus::Invalid;
-    stage_record(result, ConSanPipelineStage::Complete).status = ConSanPipelineStageStatus::Invalid;
     return result;
   }
   configuration.status = ConSanPipelineStageStatus::Completed;
 
-  ConSanPipelineStageRecord &capability_stage =
+  ConSanPipelineStageState &capability_stage =
       stage_record(result, ConSanPipelineStage::TargetAndRuntimeCapabilities);
   const ConSanContractIssue backend_issue = validate_runtime_capabilities(capabilities);
   if (backend_issue != ConSanContractIssue::None) {
     capability_stage.status = ConSanPipelineStageStatus::Invalid;
     capability_stage.contract_issue = backend_issue;
     result.outcome = ConSanTransformOutcome::Invalid;
-    stage_record(result, ConSanPipelineStage::FinalValidation).status =
-        ConSanPipelineStageStatus::Invalid;
-    stage_record(result, ConSanPipelineStage::Complete).status = ConSanPipelineStageStatus::Invalid;
     return result;
   }
 
@@ -420,7 +386,7 @@ TransformResult TransformResult::publish_optional(
     capability_stage.status = terminal_stage_status(result.outcome);
   }
 
-  ConSanPipelineStageRecord &inventory_stage =
+  ConSanPipelineStageState &inventory_stage =
       stage_record(result, ConSanPipelineStage::ProgramInventory);
   if (flavor == ConSanFlavor::None) {
     inventory_stage.status = ConSanPipelineStageStatus::NotApplicable;
@@ -433,7 +399,7 @@ TransformResult TransformResult::publish_optional(
       inventory_stage.status = ConSanPipelineStageStatus::Invalid;
   }
 
-  ConSanPipelineStageRecord &observation_stage =
+  ConSanPipelineStageState &observation_stage =
       stage_record(result, ConSanPipelineStage::ObservationPlan);
   if (flavor == ConSanFlavor::None) {
     observation_stage.status = ConSanPipelineStageStatus::NotApplicable;
@@ -477,7 +443,7 @@ TransformResult TransformResult::publish_optional(
     }
   }
 
-  ConSanPipelineStageRecord &evidence_stage =
+  ConSanPipelineStageState &evidence_stage =
       stage_record(result, ConSanPipelineStage::EvidenceRequirements);
   if (result.evidence_requirements &&
       consan_evidence_requirements_well_formed(*result.evidence_requirements)) {
@@ -490,7 +456,7 @@ TransformResult TransformResult::publish_optional(
     evidence_stage.status = ConSanPipelineStageStatus::Invalid;
   }
 
-  ConSanPipelineStageRecord &binding_stage =
+  ConSanPipelineStageState &binding_stage =
       stage_record(result, ConSanPipelineStage::RuntimeBinding);
   if (!result.evidence_requirements) {
     binding_stage.status = ConSanPipelineStageStatus::NotApplicable;
@@ -521,16 +487,6 @@ TransformResult TransformResult::publish_optional(
     }
   }
 
-  stage_record(result, ConSanPipelineStage::LegacyLowering).status =
-      terminal_stage_status(result.outcome);
-  stage_record(result, ConSanPipelineStage::FinalValidation).status =
-      result.outcome == ConSanTransformOutcome::ModifiedValid
-          ? ConSanPipelineStageStatus::Completed
-          : (result.outcome == ConSanTransformOutcome::Invalid
-                 ? ConSanPipelineStageStatus::Invalid
-                 : ConSanPipelineStageStatus::NotApplicable);
-  stage_record(result, ConSanPipelineStage::Complete).status =
-      terminal_stage_status(result.outcome);
   return result;
 }
 
