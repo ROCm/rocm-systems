@@ -56,6 +56,9 @@ if(
     AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"
 )
     add_compile_options(-Wno-uninitialized)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+        add_compile_options(-Wno-maybe-uninitialized -Wno-stringop-overflow)
+    endif()
 endif()
 
 # HSA/KFD headers (local copies from rocr-runtime).
