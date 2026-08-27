@@ -653,6 +653,19 @@ artificial getter tests. Their purpose is to give subsequent resource and
 emission cutovers one shared state boundary while deleting three independently
 evolving field lists.
 
+The access contracts also own their derived descriptor and patch facts.
+`note_moi_access_private_requirements` grows each owning kernel to the plan's
+fixed private extent. After successful placement, `note_moi_access_patch_info`
+publishes common scratch, owner, epoch, spill, dynamic-stack, and branch-route
+telemetry; `note_moi_replay_access_patch_info` adds the private workgroup tuple
+for Record/Replay and Sampled. The persistent private-state end is itself a
+plan fact, so Inline Shadow no longer reconstructs it from individual offsets
+at emission. `MoiPrivateEpochLayout` distinguishes that exact durable-state end
+from the possibly larger target-normalized base of temporary spill storage;
+padding is therefore never reported as persistent identity. Evidence indices,
+workgroup-shadow layout, borrowed-entry state, and relocated guest position
+remain with the relevant engine.
+
 Probe preservation now has a cross-engine resource boundary.
 `MoiPlannedProbeResources` is the placement-to-emission state shared by
 Record/Replay atomic, barrier, and fence records, Sampled atomic and barrier

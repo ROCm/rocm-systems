@@ -3445,6 +3445,7 @@ struct MoiPlannedAccessPatch {
   std::optional<uint32_t> private_epoch_offset;
   std::optional<uint32_t> private_owner_offset;
   std::optional<uint16_t> private_owner_shift;
+  uint32_t persistent_private_state_end = 0;
   uint32_t required_private_bytes = 0;
   uint32_t guest_instruction_word_count = 0;
 };
@@ -3460,7 +3461,6 @@ struct MoiPlannedReplayAccessPatch : MoiPlannedAccessPatch {
   uint64_t entry_island_word_count = 0;
   std::optional<uint16_t> gfx1250_vgpr_msb_mode;
   ConSanMoiPersistentWorkgroupPrivateOffsets private_workgroup_offsets;
-  uint32_t persistent_private_state_end = 0;
   uint32_t probe_guest_instruction_offset = 0;
   bool spill_overlaps_guest_operands = false;
   bool wrap_embedded_guest_vgpr_bank = false;
@@ -7065,6 +7065,58 @@ void note_dynamic_stack_private_requirement(ConSanPatchInfo &info, const VgprSpi
     return;
   info.dynamic_private_segment_addend =
       std::max(info.dynamic_private_segment_addend, spill->dynamic_frame_bytes);
+}
+
+/// Accumulate the fixed private-memory requirement owned by one planned MOI
+/// access body.
+///
+/// Access engines can attach different evidence to a body, but descriptor
+/// growth depends only on the common plan's kernel owners and maximum private
+/// extent. Keeping that rule here prevents admission loops from evolving
+/// engine-specific interpretations of the same allocation.
+void note_moi_access_private_requirements(MoiDescriptorPrivateRequirements &requirements,
+                                          const MoiPlannedAccessPatch &patch) {
+  if (patch.required_private_bytes == 0u)
+    return;
+  for (uint64_t descriptor_offset : patch.resources.owner_descriptor_file_offsets) {
+    auto [it, inserted] = requirements.emplace(descriptor_offset, patch.required_private_bytes);
+    if (!inserted)
+      it->second = std::max(it->second, patch.required_private_bytes);
+  }
+}
+
+/// Publish the mechanical resource and routing facts common to every emitted
+/// MOI access patch.
+///
+/// The engine still owns semantic kind, placement, evidence, and any private
+/// identity fields not present in the common access plan. This projection owns
+/// scratch and descriptor identity, common private epoch/owner state, fixed
+/// and dynamic spill extent, and the selected branch-only relay route.
+void note_moi_access_patch_info(ConSanPatchInfo &info, const MoiPlannedAccessPatch &patch) {
+  info.scratch_vgpr = patch.resources.base;
+  info.owner_descriptor_file_offsets = patch.resources.owner_descriptor_file_offsets;
+  info.persistent_epoch_private_offset = patch.private_epoch_offset;
+  info.persistent_owner_private_offset = patch.private_owner_offset;
+  if (patch.private_epoch_offset)
+    info.persistent_private_state_end = patch.persistent_private_state_end;
+  info.required_private_segment_size = patch.required_private_bytes;
+  info.branch_only_continuation = patch.branch_only_route.has_value();
+  if (patch.branch_only_route) {
+    info.branch_only_entry_relay_offsets = patch.branch_only_route->entry_relay_offsets;
+    info.branch_only_return_relay_offsets = patch.branch_only_route->return_relay_offsets;
+  }
+  if (patch.spill) {
+    info.spilled_vgpr_count = patch.spill->vgpr_count;
+    note_dynamic_stack_private_requirement(info, &*patch.spill);
+  }
+}
+
+/// Publish the extra private-workgroup and persistent-state facts carried by
+/// an access body that relocates and replays the guest instruction.
+void note_moi_replay_access_patch_info(ConSanPatchInfo &info,
+                                       const MoiPlannedReplayAccessPatch &patch) {
+  note_moi_access_patch_info(info, patch);
+  info.persistent_record_replay_workgroup_private_offsets = patch.private_workgroup_offsets;
 }
 
 void note_moi_lds_requirements(MoiDescriptorLdsRequirements &requirements,

@@ -1026,14 +1026,13 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
     planned.workgroup_sources = *workgroup_sources;
     planned.spill = spill;
     planned.scalar_spill = scalar_spill;
-    if (private_layout)
+    if (private_layout) {
       planned.private_epoch_offset = private_layout->epoch_offset;
-    if (private_layout)
       planned.private_owner_offset = private_layout->owner_offset;
-    if (private_layout)
       planned.private_workgroup_key_offset = private_layout->workgroup_key_offset;
-    if (private_layout)
       planned.private_dispatch_id_offset = private_layout->dispatch_id_offset;
+      planned.persistent_private_state_end = private_layout->persistent_state_end;
+    }
     planned.private_owner_shift = private_owner_shift;
     planned.workgroup_shadow = workgroup_shadow;
     planned.workgroup_shadow_compact_token = workgroup_shadow_compact_token;
@@ -1115,14 +1114,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
       note_moi_lds_requirements(lds_requirements, planned_patch.resources,
                                 *planned_patch.workgroup_shadow);
     }
-    if (planned_patch.required_private_bytes != 0) {
-      for (uint64_t descriptor_offset : planned_patch.resources.owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, planned_patch.required_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, planned_patch.required_private_bytes);
-      }
-    }
+    note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 
   const bool uses_appended_cave =
@@ -1243,31 +1235,9 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
                       ? ConSanPatchKind::TrampolineMoiExactShadowStore
                       : ConSanPatchKind::InlineMoiExactShadowStore;
       info.anchor_offset = candidate.anchor();
-      info.scratch_vgpr = planned_patch.resources.base;
-      info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
-      info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
-      info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+      note_moi_access_patch_info(info, planned_patch);
       info.persistent_workgroup_key_private_offset = planned_patch.private_workgroup_key_offset;
       info.persistent_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;
-      if (planned_patch.private_epoch_offset) {
-        uint32_t persistent_state_end =
-            *planned_patch.private_epoch_offset + SpillManager::kSlotBytes;
-        if (planned_patch.private_owner_offset)
-          persistent_state_end = std::max(
-              persistent_state_end, *planned_patch.private_owner_offset + SpillManager::kSlotBytes);
-        if (planned_patch.private_workgroup_key_offset)
-          persistent_state_end =
-              std::max(persistent_state_end,
-                       *planned_patch.private_workgroup_key_offset + SpillManager::kSlotBytes);
-        if (planned_patch.private_dispatch_id_offset)
-          persistent_state_end =
-              std::max(persistent_state_end,
-                       *planned_patch.private_dispatch_id_offset + 2u * SpillManager::kSlotBytes);
-        info.persistent_private_state_end = persistent_state_end;
-      }
-      info.required_private_segment_size = planned_patch.required_private_bytes;
-      note_dynamic_stack_private_requirement(info,
-                                             planned_patch.spill ? &*planned_patch.spill : nullptr);
       if (planned_patch.workgroup_shadow) {
         info.workgroup_shadow_base = planned_patch.workgroup_shadow->base;
         info.workgroup_shadow_size = planned_patch.workgroup_shadow->size;
@@ -1279,14 +1249,6 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
         info.workgroup_shadow_compact_token = planned_patch.workgroup_shadow_compact_token;
         info.required_group_segment_size =
             planned_patch.workgroup_shadow->required_group_segment_size;
-      }
-      if (planned_patch.spill)
-        info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
-      info.branch_only_continuation = planned_patch.branch_only_route.has_value();
-      if (planned_patch.branch_only_route) {
-        info.branch_only_entry_relay_offsets = planned_patch.branch_only_route->entry_relay_offsets;
-        info.branch_only_return_relay_offsets =
-            planned_patch.branch_only_route->return_relay_offsets;
       }
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
@@ -1695,11 +1657,7 @@ void try_apply_inline_shadow_patch(std::span<const uint8_t> bytes, const ConSanO
             info.anchor_offset = candidate.anchor();
             info.trampoline_offset = candidate.anchor() + candidate.size();
             info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-            info.scratch_vgpr = planned_patch.resources.base;
-            info.owner_descriptor_file_offsets =
-                planned_patch.resources.owner_descriptor_file_offsets;
-            info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
-            info.persistent_owner_private_offset = planned_patch.private_owner_offset;
+            note_moi_access_patch_info(info, planned_patch);
             info.persistent_workgroup_key_private_offset =
                 planned_patch.private_workgroup_key_offset;
             info.persistent_dispatch_id_private_offset = planned_patch.private_dispatch_id_offset;

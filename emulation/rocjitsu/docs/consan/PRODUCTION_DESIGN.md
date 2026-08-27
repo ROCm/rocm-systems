@@ -6153,6 +6153,49 @@ for nominal line-count reductions.
   supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
   E2E validation remains outside this deletion work.
 
+### Slice 5DA: derive access descriptor and telemetry facts once
+
+- **One descriptor rule:** `note_moi_access_private_requirements` grows every
+  owning kernel to the fixed private extent already computed by
+  `MoiPlannedAccessPatch`. Record/Replay, Sampled, and Inline Shadow no longer
+  carry independent maximum-offset loops.
+- **One emitted-patch projection:** `note_moi_access_patch_info` publishes
+  common scratch, descriptor owners, private epoch/owner state, fixed and
+  dynamic spill extent, and branch-only routing. The replay-plan overload adds
+  only the private workgroup tuple and is shared by Record/Replay and Sampled.
+- **Plan, not reconstruction:** Persistent private-state end moves from the
+  replay-only subtype into the common access plan. Inline Shadow records the
+  private layout's end during planning instead of rebuilding it from four
+  offsets in one emission path; dense and direct emission therefore publish
+  the same planned fact. `MoiPrivateEpochLayout` now names both the exact
+  durable-state end and the potentially larger target-normalized temporary
+  spill base. Three CDNA4 tests caught and now guard this distinction.
+- **Explicit non-responsibilities:** Engine evidence indices, sampling windows,
+  local workgroup-shadow layout, borrowed-entry state, relocated guest
+  position, and semantic patch kind remain with their owning emitters. No
+  placement or instrumentation policy moves into telemetry.
+- **Sharing and target boundary:** Both derivations are architecture-neutral.
+  Target-specific spill geometry and relay selection are inputs already fixed
+  on the plan, not branches in the common projection.
+- **Test policy:** Existing host tests inspect access patch identity, spill and
+  dynamic-stack metadata, private epoch/owner/workgroup state, branch-only
+  relays, descriptor growth, and final validation across all three engines and
+  five targets. The gfx1250 dense Inline Shadow relay test now forces private
+  epoch state and asserts that every emitted access publishes its planned
+  persistent and required private extents. This directly guards the dense-path
+  omission closed by the common projection; no private field-copy test is
+  added.
+- **Accounting:** Across the six affected implementation files, physical lines
+  fall from 20,027 to 19,976, nonblank lines from 19,444 to 19,390, and
+  estimated comment-excluded code lines from 18,251 to 18,171. The slice adds
+  78 and deletes 129 physical implementation lines, a net deletion of 51. No
+  compatibility path, target branch, public option, or alternate telemetry
+  representation is added.
+- **Checked-in gate:** The complete build, all 1,530 ConSan host tests, all 172
+  HSA-hook tests, all 2,878 generated simulator-device tests across the five
+  supported targets, and the 26-case physical-gfx950 cross-engine smoke pass.
+  E2E validation remains outside this deletion work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,

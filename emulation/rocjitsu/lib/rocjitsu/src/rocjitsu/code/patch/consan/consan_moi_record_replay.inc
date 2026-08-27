@@ -1393,14 +1393,7 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
       continue;
     note_moi_sgpr_requirements(scalar_requirements, planned_patch.resources, candidate_options,
                                arch);
-    if (planned_patch.required_private_bytes != 0u) {
-      for (uint64_t descriptor_offset : planned_patch.resources.owner_descriptor_file_offsets) {
-        auto [it, inserted] =
-            private_requirements.emplace(descriptor_offset, planned_patch.required_private_bytes);
-        if (!inserted)
-          it->second = std::max(it->second, planned_patch.required_private_bytes);
-      }
-    }
+    note_moi_access_private_requirements(private_requirements, planned_patch);
   }
 
   const bool uses_appended_cave =
@@ -1490,31 +1483,13 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
                       ? ConSanPatchKind::TrampolineMoiAccessRecordStore
                       : ConSanPatchKind::InlineMoiAccessRecordStore;
       info.anchor_offset = candidate.anchor();
-      info.scratch_vgpr = planned_patch.resources.base;
-      info.owner_descriptor_file_offsets = planned_patch.resources.owner_descriptor_file_offsets;
-      info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
-      info.persistent_owner_private_offset = planned_patch.private_owner_offset;
-      info.persistent_record_replay_workgroup_private_offsets =
-          planned_patch.private_workgroup_offsets;
-      if (planned_patch.private_epoch_offset)
-        info.persistent_private_state_end = planned_patch.persistent_private_state_end;
-      info.required_private_segment_size = planned_patch.required_private_bytes;
-      if (planned_patch.spill) {
-        info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
-        note_dynamic_stack_private_requirement(info, &*planned_patch.spill);
-      }
-      info.branch_only_continuation = planned_patch.branch_only_route.has_value();
+      note_moi_replay_access_patch_info(info, planned_patch);
       info.branch_only_borrowed_indirect_entry = planned_patch.borrowed_entry.has_value();
       if (planned_patch.borrowed_entry) {
         const MoiIndirectJumpSgprs jump_sgprs = *moi_indirect_jump_sgprs(candidate_options);
         info.indirect_pc_sgpr = jump_sgprs.pc_sgpr;
         info.indirect_saved_scc_sgpr = jump_sgprs.scc_save_sgpr;
         info.branch_only_borrowed_backup_vgpr = planned_patch.borrowed_entry->backup_vgpr;
-      }
-      if (planned_patch.branch_only_route) {
-        info.branch_only_entry_relay_offsets = planned_patch.branch_only_route->entry_relay_offsets;
-        info.branch_only_return_relay_offsets =
-            planned_patch.branch_only_route->return_relay_offsets;
       }
 
       if (planned_patch.placement.kind == DbiPatchPlacementKind::AppendedCave) {
@@ -1871,22 +1846,9 @@ void try_apply_first_light_access_record_patch(std::span<const uint8_t> bytes,
             info.anchor_offset = candidate.anchor();
             info.trampoline_offset = candidate.anchor() + candidate.size();
             info.original_size = static_cast<uint32_t>(planned_patch.placement.body_size);
-            info.scratch_vgpr = planned_patch.resources.base;
-            info.owner_descriptor_file_offsets =
-                planned_patch.resources.owner_descriptor_file_offsets;
-            info.persistent_epoch_private_offset = planned_patch.private_epoch_offset;
-            info.persistent_owner_private_offset = planned_patch.private_owner_offset;
-            info.persistent_record_replay_workgroup_private_offsets =
-                planned_patch.private_workgroup_offsets;
-            if (planned_patch.private_epoch_offset)
-              info.persistent_private_state_end = planned_patch.persistent_private_state_end;
-            info.required_private_segment_size = planned_patch.required_private_bytes;
+            note_moi_replay_access_patch_info(info, planned_patch);
             info.relocated_guest_instruction_offset =
                 candidate.anchor() + planned_patch.probe_guest_instruction_offset;
-            if (planned_patch.spill) {
-              info.spilled_vgpr_count = planned_patch.spill->vgpr_count;
-              note_dynamic_stack_private_requirement(info, &*planned_patch.spill);
-            }
             return info;
           },
           [](std::vector<uint8_t> &, ConSanTransformArtifacts &) { return true; }, result))

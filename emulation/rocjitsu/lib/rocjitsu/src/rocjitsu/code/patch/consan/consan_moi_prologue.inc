@@ -1962,6 +1962,7 @@ void try_apply_private_epoch_prologue_patch(const ConSanOptions &options, rj_cod
         .dispatch_id_offset = access_patch->persistent_dispatch_id_private_offset,
         .record_replay_workgroup_offsets =
             access_patch->persistent_record_replay_workgroup_private_offsets,
+        .persistent_state_end = persistent_end,
         .ephemeral_base = access_patch->persistent_private_state_end.value_or(persistent_end)};
 
     const auto private_limit = consan_address_free_private_limit(arch);

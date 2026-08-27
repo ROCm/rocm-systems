@@ -6308,13 +6308,12 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
 
   ConSanOptions options = moi_options(ConSanMoiEngine::InlineShadow);
   options.scratch_vgpr = 82;
-  options.moi_owner_vgpr = 80;
-  options.moi_epoch_vgpr = 81;
   options.moi_exec_save_sgpr = 60;
   options.moi_report_buffer_address = 0x100000000ull;
   options.moi_report_buffer_size = kInlineShadowFullLdsReportBufferSize;
   options.moi_track_barriers = false;
   options.moi_track_atomics = false;
+  options.test_force_private_epoch = true;
   options.max_patches = kAccessCount;
 
   const ConSanTransformArtifacts result = test_lower_consan(bytes, options);
@@ -6326,6 +6325,14 @@ TEST(ConSanMoi, Gfx1250DenseInlineShadowAccessesShareOneWordCallRelay) {
                                &ConSanPatchInfo::kind),
             kAccessCount)
       << testing::PrintToString(result.warnings);
+  for (const ConSanPatchInfo &patch : result.patches) {
+    if (patch.kind != ConSanPatchKind::TrampolineMoiExactShadowStore)
+      continue;
+    ASSERT_TRUE(patch.persistent_epoch_private_offset);
+    ASSERT_TRUE(patch.persistent_private_state_end);
+    EXPECT_GT(*patch.persistent_private_state_end, *patch.persistent_epoch_private_offset);
+    EXPECT_GE(patch.required_private_segment_size, *patch.persistent_private_state_end);
+  }
   EXPECT_EQ(std::ranges::count(result.patches, ConSanPatchKind::TrampolineMoiIndirectBranchIsland,
                                &ConSanPatchInfo::kind),
             2u); // One relocatable host plus one appended return-PC dispatcher.

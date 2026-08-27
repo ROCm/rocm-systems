@@ -500,6 +500,18 @@ patch identity, placement, coverage, and evidence remain caller-owned, and
 resource admission still performs no publication for a patch that later proves
 unreachable.
 
+The earlier shared access plan now likewise owns its descriptor and telemetry
+derivations. Record/Replay, Sampled, and Inline Shadow use one private-extent
+accumulator and one common emitted-patch projection; replaying engines add only
+their private workgroup state. Inline Shadow carries the persistent-state end
+from planning instead of recomputing it from offsets during emission. The
+private-layout type distinguishes this exact durable end from the
+target-normalized temporary spill base, avoiding a padding/identity conflation
+caught by the CDNA4 host matrix. The three descriptor loops and six
+resource/routing telemetry copies are deleted, while evidence, shadow layout,
+borrowed-entry state, and relocated guest position remain with their semantic
+owners.
+
 ### Deletion and design rules
 
 - Treat every old/new compatibility seam as temporary inventory with a named

@@ -1,9 +1,20 @@
+/// Address-free private-memory layout for owner-local persistent MOI identity.
+///
+/// The optional offsets describe durable values captured by a kernel-entry
+/// prologue and reloaded by probes. `persistent_state_end` is their exact
+/// exclusive end; `ephemeral_base` may be larger because target scratch
+/// operations require the following temporary spill zone to be normalized.
+/// Keeping both boundaries explicit prevents telemetry from reporting padding
+/// as durable state while still giving spill allocation its required base.
 struct MoiPrivateEpochLayout {
   uint32_t epoch_offset = 0;
   std::optional<uint32_t> owner_offset;
   std::optional<uint32_t> workgroup_key_offset;
   std::optional<uint32_t> dispatch_id_offset;
   ConSanMoiPersistentWorkgroupPrivateOffsets record_replay_workgroup_offsets;
+  /// First byte after durable identity state, before target-required padding.
+  uint32_t persistent_state_end = 0;
+  /// Normalized first byte available to temporary spill allocations.
   uint32_t ephemeral_base = 0;
 };
 
@@ -353,6 +364,7 @@ common_moi_record_owner_descriptor(std::span<const uint8_t> image,
           dispatch_id_offset ? std::optional<uint32_t>(static_cast<uint32_t>(*dispatch_id_offset))
                              : std::nullopt,
       .record_replay_workgroup_offsets = record_replay_workgroup_offsets,
+      .persistent_state_end = static_cast<uint32_t>(persistent_end),
       .ephemeral_base = *ephemeral_base};
 }
 
