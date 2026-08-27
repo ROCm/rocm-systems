@@ -530,6 +530,9 @@ rocDecStatus VaapiVideoDecoder::CopyToStagingBuffer(int pic_idx) {
                                          src_footprints, src_num_rows, src_row_sizes, &src_total);
 
     // Record copy commands: texture (tiled) → buffer (linear) for each subresource.
+    // This is a COPY-type queue/command list: D3D12 does not track resource states on
+    // copy queues (all resources are treated as COMMON), so no ResourceBarrier transitions
+    // to COPY_SOURCE/COPY_DEST are needed — and issuing them here would be invalid.
     d3d12_cmd_allocator_->Reset();
     d3d12_cmd_list_->Reset(d3d12_cmd_allocator_, nullptr);
 
