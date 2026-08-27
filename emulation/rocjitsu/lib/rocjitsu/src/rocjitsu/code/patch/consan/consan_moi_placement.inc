@@ -1986,11 +1986,9 @@ struct MoiResourcePlanningState {
     std::unordered_map<BasicBlock *, std::vector<const Instruction *>> liveness_queries_by_block;
     if (restrict_liveness_queries) {
       std::unordered_set<uint64_t> query_offsets;
-      query_offsets.reserve(
-          result.moi_candidates.size() + sync.sync_events.size() + result.resource_plans.size() +
-          result.observation_plan.probe_intents.size() + result.program_inventory.kernels().size());
-      for (const ConSanMoiCandidate &candidate : result.moi_candidates)
-        query_offsets.insert(candidate.text_offset);
+      query_offsets.reserve(sync.sync_events.size() + result.resource_plans.size() +
+                            result.observation_plan.probe_intents.size() +
+                            result.program_inventory.kernels().size());
       for (const ConSanSyncEvent &event : sync.sync_events)
         query_offsets.insert(event.text_offset);
       for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
@@ -4039,7 +4037,7 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
 
   std::unordered_map<uint64_t, RegisterSet> unavailable_by_owner;
   std::unordered_set<uint64_t> included_site_offsets;
-  included_site_offsets.reserve(result.moi_candidates.size() + result.resource_plans.size() +
+  included_site_offsets.reserve(result.resource_plans.size() +
                                 result.observation_plan.probe_intents.size() +
                                 result.program_inventory.kernels().size());
   const auto include_site = [&](uint64_t text_offset) {
@@ -4067,8 +4065,6 @@ configure_automatic_moi_transient_sgpr_assignments(ConSanOptions &options, ConSa
         unavailable |= dynamic_frame_save_registers_for_site(state, text_offset);
     }
   };
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates)
-    include_site(candidate.text_offset);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
     include_site(plan.text_offset);
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)
@@ -4893,7 +4889,7 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
   RegisterSet unavailable;
   bool saw_site = false;
   std::unordered_set<uint64_t> included_site_offsets;
-  included_site_offsets.reserve(result.moi_candidates.size() + result.resource_plans.size() +
+  included_site_offsets.reserve(result.resource_plans.size() +
                                 result.observation_plan.probe_intents.size() +
                                 result.program_inventory.kernels().size());
   const auto include_site = [&](uint64_t text_offset) {
@@ -4915,8 +4911,6 @@ configure_automatic_moi_exec_save_sgprs(ConSanOptions &options, ConSanResult &re
       saw_site = true;
     }
   };
-  for (const ConSanMoiCandidate &candidate : result.moi_candidates)
-    include_site(candidate.text_offset);
   for (const ConSanCandidateResourcePlan &plan : result.resource_plans)
     include_site(plan.text_offset);
   for (const ConSanProbeIntent &intent : result.observation_plan.probe_intents)

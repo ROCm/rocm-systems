@@ -3337,15 +3337,20 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       return count;
     };
     if (patch.workgroup_shadow_size != 0u) {
-      const auto candidate = std::ranges::find_if(result.moi_candidates, [&](const auto &item) {
-        return item.text_offset == patch.anchor_offset &&
-               (item.kind == ConSanLdsAccessKind::Read || item.kind == ConSanLdsAccessKind::Write ||
-                item.kind == ConSanLdsAccessKind::Atomic);
-      });
+      const auto intent = std::ranges::find_if(
+          result.observation_plan.probe_intents, [&](const ConSanProbeIntent &candidate) {
+            return candidate.kind == ConSanProbeIntentKind::ExactShadowAccess &&
+                   candidate.physical_site.original_text_offset == patch.anchor_offset;
+          });
+      const auto access =
+          intent == result.observation_plan.probe_intents.end()
+              ? result.program_inventory.access_sites().end()
+              : std::ranges::find(result.program_inventory.access_sites(), intent->physical_site,
+                                  &ConSanAccessInventorySite::physical_id);
       const uint32_t minimum_cell_count =
-          candidate == result.moi_candidates.end()
+          access == result.program_inventory.access_sites().end()
               ? 0u
-              : consan_moi_maximum_cell_count_for_unaligned_bytes(candidate->width_bits / 8u);
+              : consan_moi_maximum_cell_count_for_unaligned_bytes(access->decoded_width_bits / 8u);
       const size_t decoded_local_exchange_cell_count =
           patch.workgroup_shadow_compact
               ? decoded_local_exchange_b32_count + 2u * decoded_local_exchange_b64_count
@@ -3383,7 +3388,8 @@ validate_inline_exact_shadow_semantics(const AmdGpuCodeObject &replacement,
       if ((patch.workgroup_shadow_compact && !expected_local_exchange_b32) ||
           !expected_local_exchange_b64 || !expected_first_diagnostic_claim || decoded_legacy_swap ||
           decoded_cas_count != decoded_local_exchange_cell_count ||
-          decoded_local_exchange_count == 0u || candidate == result.moi_candidates.end() ||
+          decoded_local_exchange_count == 0u ||
+          access == result.program_inventory.access_sites().end() ||
           decoded_backward_local_loop_count < minimum_backward_loop_count ||
           decoded_nonbackward_local_loop ||
           (patch.workgroup_shadow_compact

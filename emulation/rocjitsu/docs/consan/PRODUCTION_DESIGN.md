@@ -4004,6 +4004,40 @@ analysis completed.
   attribution cutover preserves selected sites and emitted bytes. E2E
   validation remains outside this work.
 
+### Slice 5AC: validate and plan from admitted inventory identities
+
+- **Final validation follows the production contracts:** Inline Shadow's
+  workgroup-exact-shadow validator now resolves an admitted
+  `ExactShadowAccess` intent back to its immutable access-inventory site. It no
+  longer searches the temporary MOI lowering-candidate projection to recover
+  the decoded access width.
+- **One admitted-site source for liveness planning:** Exact-shadow candidate
+  offsets were inserted independently into three liveness/resource site sets
+  even though every such offset is already present in the observation plan's
+  admitted probe intents. The duplicate insertion loops and capacity
+  accounting are gone; synchronization events, resource plans, admitted
+  intents, and kernel entries remain the explicit site sources.
+- **Contract coverage:** Existing host contracts require MOI candidates to be
+  exactly the admitted access intents and exercise final exact-shadow
+  validation, including a deliberately corrupted publication. The paired
+  device suite exercises the resulting liveness, automatic transient-register,
+  and exact-shadow validation behavior across all five targets.
+- **Refactoring result:** Production source is size-neutral: 12 lines of
+  candidate-projection lookup and duplicate bookkeeping were removed and 12
+  lines of explicit intent-to-inventory resolution were added. This slice is a
+  dependency-direction cutover rather than a line-count win: final validation
+  and liveness site selection no longer depend on temporary access-candidate
+  telemetry, and no helper, compatibility accessor, or second identity record
+  was introduced.
+- **Completed checked-in gate:** The complete host gate passes 1,510 tests with
+  the two expected benchmark-object skips; all 194 HSA-hook tests pass; and all
+  2,878 simulator-device tests across the five supported targets pass in 79.19
+  seconds. In the physical-gfx950 sweep, 585 of 587 cases passed; the two
+  module-lifecycle launches that overlapped relinking the hook DSO failed to
+  load that tool, then both passed immediately from the stable build (3.73 and
+  3.72 seconds). All 587 physical cases are therefore qualified. E2E validation
+  remains outside this work.
+
 ### Slice 6: explicit pipeline and result cutover
 
 - **Completed boundary:** `transform_consan` now owns the ordinary typed entry,
