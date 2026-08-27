@@ -238,7 +238,18 @@ void DispatchDes::end() {
     const std::uint64_t resident = std::min(occupancy.waves, resident_waves_);
     const std::uint64_t per_wave_issue =
         occupancy.waves != 0 ? occupancy.issue_cycles / occupancy.waves : 0;
-    const std::uint64_t hidden = resident > 1 ? (resident - 1) * per_wave_issue : 0;
+    std::uint64_t hidden = resident > 1 ? (resident - 1) * per_wave_issue : 0;
+    // What the other resident wavefronts can cover, less whatever the barriers
+    // between them take away. Wavefronts held in lockstep by a barrier reach
+    // the same stall at the same cycle and cover nothing for each other.
+    if (tuning_.barrier_lockstep > 0.0 && occupancy.waves != 0) {
+      const double per_wave_barriers =
+          static_cast<double>(
+              occupancy.class_counts[static_cast<std::size_t>(InstClass::Barrier)]) /
+          static_cast<double>(occupancy.waves);
+      hidden = static_cast<std::uint64_t>(static_cast<double>(hidden) /
+                                          (1.0 + tuning_.barrier_lockstep * per_wave_barriers));
+    }
     // The wavefront's chain and the waiting inside it are scaled separately:
     // the chain is issue slots, which the machine parameters describe, and the
     // waiting is the memory system, whose exposure is calibrated.

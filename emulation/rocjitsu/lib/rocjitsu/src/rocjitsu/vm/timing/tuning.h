@@ -154,6 +154,20 @@ struct Tuning {
   /// cannot presently name. They are separated from the machine parameters
   /// deliberately: a reader has to be able to tell what is a property of the
   /// part from what is a number fitted to a corpus.
+  /// @brief How much a barrier per wavefront removes from what other resident
+  ///        wavefronts can hide.
+  ///
+  /// @details Hiding assumes the other resident wavefronts always have
+  /// independent work ready the instant this one stalls. A barrier is exactly
+  /// the instruction that makes that false: it puts the whole group in
+  /// lockstep, so nothing on the far side of one can cover a stall on the near
+  /// side. A software-pipelined matrix multiply staging tiles through the
+  /// local data share barriers hundreds of times per wavefront and has almost
+  /// no hiding available; the model was crediting it with all of it, and that
+  /// family read 0.62 of measured. Zero disables it, which is the old
+  /// behaviour.
+  double barrier_lockstep = 0.0;
+
   /// @brief Cycles a workgroup barrier costs a wavefront, beyond the spread
   ///        between the wavefronts the model can see.
   ///

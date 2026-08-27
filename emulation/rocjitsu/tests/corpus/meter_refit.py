@@ -345,6 +345,22 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
     resident = max(1.0, min(waves, float(dispatch["resident"])))
     rounds = math.ceil(waves / resident)
     hidden = (resident - 1.0) * (scaled / waves)
+    # Hiding assumes the other resident wavefronts always have independent work
+    # ready the instant this one stalls. A barrier is exactly the instruction
+    # that makes that false: it puts the whole group in lockstep, so nothing on
+    # the far side of one can cover a stall on the near side. A kernel with
+    # hundreds of barriers per wavefront -- any software-pipelined matrix
+    # multiply staging tiles through the local data share -- has almost no
+    # hiding available, and the model was crediting it with all of it.
+    lockstep = tuning.get("barrier_lockstep", 0.0)
+    if lockstep > 0.0:
+        share = float(dispatch["latency_waves"]) / max(1.0, float(dispatch["waves"]))
+        per_wave_barriers = (
+            dispatch["class_counts"].get("barrier", 0)
+            * share
+            / max(1.0, float(dispatch["latency_waves"]))
+        )
+        hidden /= 1.0 + lockstep * per_wave_barriers
     exposed = max(0.0, critical - hidden)
     overlap = max(1.0, min(resident, tuning.get("stall_overlap", 1.0)))
     exposed = max(exposed, stall / overlap)
@@ -355,6 +371,13 @@ def recompose(dispatch: dict[str, Any], tuning: dict[str, float]) -> float:
         rate = tuning.get("bandwidth_scale", 1.0) * tuning.get(f"level.{level}", 1.0)
         bandwidth = max(bandwidth, dispatch[f"{level}_cycles"] / rate)
 
+    # One handle on everything the dispatch's *work* costs, as against what its
+    # launch costs. The two are separately observable -- a kernel at the launch
+    # floor reads over and a kernel with real work in it reads under -- and no
+    # single existing knob moves them apart.
+    work = tuning.get("work_scale", 1.0)
+    issue *= work
+    bandwidth *= work
     placement = float(dispatch["placement"]) * tuning.get("placement_scale", 1.0)
     # Per-instruction issue cost is not independent of how many wavefronts are
     # resident. The model charges a unit's queue linearly in the work on it,

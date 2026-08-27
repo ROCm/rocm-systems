@@ -335,7 +335,8 @@ const FRONT_END_CYCLES: f64 = 1.0;
 /// so every one is neutral here and moves only under an overlay. They
 /// are named rather than folded into the parameters they scale so that a
 /// reader can tell the two apart.
-const COMPOSITION: [(&str, f64); 5] = [
+const COMPOSITION: [(&str, f64); 6] = [
+    ("barrier_lockstep", 0.0),
     ("issue_occupancy_exponent", 0.0),
     ("stall_exposed_fraction", 1.0),
     ("latency_exposure_scale", 1.0),
