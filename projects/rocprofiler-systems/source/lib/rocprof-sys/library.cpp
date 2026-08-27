@@ -943,11 +943,11 @@ rocprofsys_finalize_hidden(void)
 
         // Flush buffered traces in case of child process
 
-        LOG_DEBUG("Shutting down ROCm...");
-        rocprofiler_sdk::shutdown();
-
         LOG_DEBUG("Shutting down control session...");
         get_control_session()->shutdown();
+
+        LOG_DEBUG("Shutting down ROCm...");
+        rocprofiler_sdk::shutdown();
 
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
@@ -1059,6 +1059,9 @@ rocprofsys_finalize_hidden(void)
         process_sampler::shutdown();
     }
 
+    LOG_DEBUG("Shutting down control session...");
+    get_control_session()->shutdown();
+
     // -----------------------------------------------------------------------
     // Causal-profiling shutdown must happen BEFORE rocprofiler_sdk::shutdown().
     //
@@ -1090,9 +1093,6 @@ rocprofsys_finalize_hidden(void)
 
     LOG_DEBUG("Shutting down ROCm...");
     rocprofiler_sdk::shutdown();
-
-    LOG_DEBUG("Shutting down control session...");
-    get_control_session()->shutdown();
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();
